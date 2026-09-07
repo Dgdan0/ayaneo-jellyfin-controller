@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.PocketDSHub" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <!--
+          The platform focus highlight is a faint grey that is effectively
+          invisible on a 7" screen at arm's length. Every focusable view in this
+          app draws its own ring instead, via ui/Styler.
+        -->
+        <item name="android:defaultFocusHighlightEnabled">false</item>
+    </style>
+</resources>

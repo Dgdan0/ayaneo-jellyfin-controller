@@ -1,0 +1,8 @@
+# This project is LF-only. The sibling keyboard project is CRLF; keeping them
+# apart avoids a whole-file diff the first time either is opened on the other's
+# checkout settings.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.png binary
+*.apk binary

@@ -1,0 +1,32 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+build/
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+*.apk
+*.aab
+
+# Android SDK/emulator tooling we install locally (not vendored into the repo)
+/sdk/
+/tools/
+
+# Device screenshots from scripts/dev.sh shot
+shots/
+
+# Hub URL + bearer token for scripts/dev.sh seed. Never committed.
+scripts/dev.env
+
+# ---- hub (Go service) ----
+/hub/hub.exe
+/hub/hubctl.exe
+/hub/hub.secrets.yaml
+/hub/data/
+/hub/logs/
+
+# scripts/dev.sh keys off stashes the original accessibility list here
+/.dev-a11y-backup

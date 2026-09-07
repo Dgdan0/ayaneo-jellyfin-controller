@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- The device is a games handheld; declaring this stops the app being
+         filtered out of listings and documents what it is actually driven by. -->
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <!--
+      Required, not optional. From targetSdk 30 onwards other installed packages
+      are invisible unless declared here, and getLaunchIntentForPackage returns
+      null for an app that is plainly installed. The sibling project hit exactly
+      this with 1Password and the failure looks like "the app isn't installed".
+      The VIEW/video intent is for the external-player launcher that replaces
+      the Findroid hand-off later.
+    -->
+    <queries>
+        <package android:name="dev.jdtech.jellyfin" />
+        <package android:name="dev.jdtech.jellyfin.debug" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="video/*" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:theme="@style/Theme.PocketDSHub">
+
+        <!--
+          One Activity for the whole app. The gamepad pipeline (dispatchKeyEvent,
+          onGenericMotionEvent, the Choreographer ticker, dead-zone state, the
+          D-pad source latch) is per-window state that has to exist exactly once;
+          separate Activities would rebuild the ticker and re-latch the D-pad
+          source on every screen change.
+
+          uiMode is deliberately absent from configChanges: setDefaultNightMode
+          relies on the recreate to apply a theme change, and the sibling project
+          found that adding an explicit recreate() on top of it double-fires and
+          flickers. Display churn is frequent on this device; theme changes are not.
+        -->
+        <activity
+            android:name=".HubActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboard|keyboardHidden|navigation">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

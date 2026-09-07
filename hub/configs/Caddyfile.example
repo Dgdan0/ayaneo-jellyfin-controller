@@ -1,0 +1,41 @@
+# Caddy site block for the hub.
+#
+# Caddy is already running on this machine and already owns :443, so this is an
+# addition to the existing Caddyfile rather than a replacement.
+#
+# The DuckDNS module is NOT in a stock Caddy build. Get one that has it from
+# caddyserver.com/download with `dns.providers.duckdns` ticked -- the download
+# page builds it for you, so no xcaddy and no Go toolchain are needed.
+#
+# DNS-01 rather than HTTP-01 because DuckDNS is dynamic DNS: HTTP-01 breaks
+# every time the ISP changes your IP mid-renewal, and DNS-01 needs no port 80.
+
+myjellydan.duckdns.org {
+	tls {
+		dns duckdns {env.DUCKDNS_TOKEN}
+		# Checking propagation through the ISP's resolver is a common cause of
+		# renewals failing at 3am. Ask a public one instead.
+		resolvers 1.1.1.1
+	}
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+
+	# The hub serves nothing but /v1. Anything else is someone scanning, and a
+	# flat 404 is a cheaper answer than proxying it.
+	@notapi not path /v1/*
+	respond @notapi 404
+
+	reverse_proxy 127.0.0.1:8791 {
+		header_up X-Real-IP {remote_host}
+		# Not optional. Without it Caddy buffers, and the activity stream and any
+		# future SSE both stall behind it.
+		flush_interval -1
+	}
+}

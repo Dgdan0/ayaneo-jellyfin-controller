@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The sibling project's light accent, so the two apps read as a set. -->
+    <color name="ic_launcher_background">#0FADA0</color>
+</resources>

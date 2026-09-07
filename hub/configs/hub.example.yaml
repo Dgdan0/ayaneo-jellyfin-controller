@@ -1,0 +1,87 @@
+# Ayaneo hub -- example configuration.
+#
+# Copy to %ProgramData%\AyaneoHub\hub.yaml and edit. Credentials belong in the
+# environment or in a sibling hub.secrets.yaml, which is merged over this file
+# and is gitignored -- so this one stays diffable and safe to share.
+#
+# The hub refuses to start on a misconfiguration rather than starting in a
+# half-working state, and exits 78 so a service manager stops retrying. Run
+# `hub --check` to validate without starting.
+
+server:
+  # Loopback. Caddy terminates TLS and reaches the hub here; binding anywhere
+  # else is refused unless allow_public_bind is set AND a trusted proxy is
+  # declared, because the bearer token would otherwise cross the wire in clear.
+  listen: "127.0.0.1:8791"   # 8787 is Readarr's default; do not use it
+  public_url: "https://myjellydan.duckdns.org"
+  allow_public_bind: false
+  trust_proxy_cidrs: ["127.0.0.1/32"]
+  request_timeout: 20s
+  shutdown_grace: 10s
+
+auth:
+  # Generate with: hubctl token new --label pocketds
+  # Only the digest is stored, so a leaked config costs nothing.
+  tokens:
+    - label: "pocketds"
+      sha256: "PUT_THE_SHA256_FROM_HUBCTL_HERE"
+      scopes: ["read", "request", "control", "play"]
+
+  # Per device, so one busy handheld cannot starve another.
+  rate_limit:
+    rpm: 90
+    burst: 30
+
+  # Someone presenting wrong tokens is guessing. Stop answering them.
+  auth_failure_ban:
+    attempts: 5
+    window: 1m
+    ban: 15m
+
+services:
+  jellyfin:
+    enabled: true
+    base_url: "http://127.0.0.1:8096"
+    api_key: "${env:JELLYFIN_API_KEY}"
+    user_id: ""          # whose views and watch state to surface
+    timeout: 8s
+
+  jellyseerr:
+    enabled: true
+    base_url: "http://127.0.0.1:5055"
+    api_key: "${env:JELLYSEERR_API_KEY}"
+    # Without this, requests are attributed to admin user 1 rather than to you.
+    act_as_user_id: 1
+
+  radarr:
+    enabled: true
+    base_url: "http://127.0.0.1:7878"
+    api_key: "${env:RADARR_API_KEY}"
+    jellyseerr_service_id: 0
+
+  sonarr:
+    enabled: true
+    base_url: "http://127.0.0.1:8989"
+    api_key: "${env:SONARR_API_KEY}"
+    jellyseerr_service_id: 0
+
+  bazarr:
+    enabled: true
+    base_url: "http://127.0.0.1:6767"
+    api_key: "${env:BAZARR_API_KEY}"
+    # "" probes for it. Set only if Bazarr is behind a subfolder, because its
+    # base_url setting prefixes every route.
+    api_base_path: ""
+
+  qbittorrent:
+    enabled: true
+    base_url: "http://127.0.0.1:8080"
+    # Newer builds accept a bearer key (Web UI settings). Older ones need the
+    # login below instead -- either is accepted.
+    api_key: "${env:QBIT_API_KEY}"
+    username: "${env:QBIT_USER}"
+    password: "${env:QBIT_PASS}"
+
+log:
+  level: info
+  retain_days: 14

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+      No cleartext by default. Once the hub is behind Caddy the app talks HTTPS
+      to a real Let's Encrypt certificate, and ISRG Root X1 has been in Android's
+      system trust store since 7.1.1, so that needs no configuration at all.
+    -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!--
+      Loopback is the exception, and only loopback. During development the hub is
+      reached over `adb reverse tcp:8791 tcp:8791`, which makes it appear on the
+      device's own 127.0.0.1 — traffic that never leaves the handheld, so there
+      is no position from which to intercept it.
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+
+    <!--
+      Debug builds only, and never release: lets a proxy like mitmproxy read our
+      traffic while developing.
+    -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>
