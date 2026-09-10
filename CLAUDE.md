@@ -51,10 +51,11 @@ paths keep earlier files valid. The Pocket DS has no platform AC-3/E-AC-3 decode
 with AC-3 audio use a minimal arm64 build of the official Media3 1.4.1 FFmpeg extension. Keep its
 exact-source and LGPL material in `app/third_party/media3-ffmpeg` and `assets/licenses` with the AAR.
 
-The Offline manager coalesces a transfer's closely spaced state/progress/artwork notifications for
-180 ms, then preserves its selected row or scroll position. `OfflineRepository.setState` suppresses
-identical waiting/paused updates, which prevents a failed stream's retry loop from broadcasting a
-false visual refresh.
+The Offline manager updates live byte/speed labels and progress bars in place rather than replacing
+the queue tree. It coalesces a transfer's closely spaced state/progress/artwork notifications for
+180 ms and preserves the selected row or scroll position for a structural update.
+`OfflineRepository.setState` suppresses identical waiting/paused updates, so a failed stream's retry
+loop cannot broadcast a false visual refresh.
 
 Fresh installs from v0.1.1 onward expose both Hub address and masked bearer-token fields under
 Manage > Ayaneo Hub. Uninstalling removes these app-private values. The screen points Jump Desktop

@@ -66,6 +66,8 @@ class OfflineScreen(
     private var renderedSignature = ""
     private var receiverRegistered = false
     private var renderPosted = false
+    private val queueRows = mutableMapOf<String, QueueRowBinding>()
+    private val queueHeaders = mutableMapOf<String, QueueHeaderBinding>()
     private val changedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) = scheduleRender()
     }
@@ -209,13 +211,14 @@ class OfflineScreen(
     private fun render(force: Boolean = false) {
         if (!::content.isInitialized || overlay.isOpen) return
         val batches = repository.batches()
-        val completed = repository.completed()
+        val completed = if (mode == MODE_LIBRARY) repository.completed() else emptyList()
         val signature = if (mode == MODE_QUEUE) {
-            batches.flatMap { batch -> batch.jobs.map { row ->
-                "${batch.id}:${batch.paused}:${row.id}:${row.state}:${row.bytesDownloaded}:${row.speedBytesPerSecond}:${row.error}"
-            } }.joinToString("|")
+            queueStructureSignature(batches)
         } else completed.joinToString("|") { "${it.id}:${it.updatedAt}:${it.localPath}" }
-        if (!force && signature == renderedSignature) return
+        if (!force && signature == renderedSignature) {
+            if (mode == MODE_QUEUE) updateQueueProgress(batches)
+            return
+        }
         renderedSignature = signature
         val hadFocus = host.viewContext.let { (it as? android.app.Activity)?.currentFocus }
         val focusedTag = hadFocus?.tag
@@ -224,6 +227,8 @@ class OfflineScreen(
         if (focusedTag is TaggedCatalog) selectedId = focusedTag.value.key
         val previousScrollY = scroll.scrollY
         content.removeAllViews()
+        queueRows.clear()
+        queueHeaders.clear()
         queueTab.background = tabBackground(mode == MODE_QUEUE)
         libraryTab.background = tabBackground(mode == MODE_LIBRARY)
         if (mode == MODE_QUEUE) renderQueue(batches) else renderLibrary(completed, batches)
@@ -257,8 +262,7 @@ class OfflineScreen(
 
     private fun renderQueue(allBatches: List<OfflineBatch>) {
         val batches = allBatches.filter { it.jobs.any { job -> job.state != OfflineState.COMPLETE } }
-        val queued = batches.sumOf { it.jobs.count { job -> job.state != OfflineState.COMPLETE } }
-        summary.text = "$queued pending · ${fileSize(repository.availableBytes())} free · downloads run one at a time"
+        setQueueSummary(batches)
         if (batches.isEmpty()) {
             empty("No downloads are waiting. Use the download icon on a movie, episode, season, or series.")
             return
@@ -268,6 +272,29 @@ class OfflineScreen(
             batch.jobs.filter { it.state != OfflineState.COMPLETE }.forEach { content.addView(downloadRow(it)) }
         }
     }
+
+    /** Progress changes many times per second. Keep these existing views and update their values
+     * in place; replacing the whole tree here was the visible refresh during every download. */
+    private fun updateQueueProgress(allBatches: List<OfflineBatch>) {
+        val batches = allBatches.filter { it.jobs.any { job -> job.state != OfflineState.COMPLETE } }
+        setQueueSummary(batches)
+        batches.forEach { batch ->
+            queueHeaders[batch.id]?.bind(batch)
+            batch.jobs.filter { it.state != OfflineState.COMPLETE }.forEach { row ->
+                queueRows[row.id]?.bind(row)
+            }
+        }
+    }
+
+    private fun setQueueSummary(batches: List<OfflineBatch>) {
+        val queued = batches.sumOf { it.jobs.count { job -> job.state != OfflineState.COMPLETE } }
+        summary.text = "$queued pending \u00b7 ${fileSize(repository.availableBytes())} free \u00b7 downloads run one at a time"
+    }
+
+    private fun queueStructureSignature(batches: List<OfflineBatch>): String =
+        batches.flatMap { batch -> batch.jobs.map { row ->
+            "${batch.id}:${batch.paused}:${row.id}:${row.state}:${row.totalBytes}:${row.error}"
+        } }.joinToString("|")
 
     private fun renderLibrary(completed: List<OfflineDownload>, batches: List<OfflineBatch>) {
         val batchTitles = batches.associate { it.id to it.title }
@@ -355,15 +382,21 @@ class OfflineScreen(
         host.refreshHints()
     }
 
-    private fun batchHeader(batch: OfflineBatch): View = LinearLayout(host.viewContext).apply {
-        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-        background = Styler.cardBackground(context, colors, cornerDp = 11f)
-        setPadding(dp(12), dp(8), dp(12), dp(8)); tag = TaggedBatch(batch)
-        Styler.makeFocusable(this); descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-        addView(LinearLayout(context).apply {
+    private fun batchHeader(batch: OfflineBatch): View {
+        lateinit var detail: TextView
+        lateinit var control: TextView
+        val view = LinearLayout(host.viewContext).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = Styler.cardBackground(context, colors, cornerDp = 11f)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            tag = TaggedBatch(batch)
+            Styler.makeFocusable(this)
+            descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+            addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(context).apply { text = batch.title; textSize = 15f; setTextColor(colors.primaryText) })
-            addView(TextView(context).apply {
+            detail = TextView(context).apply {
                 val active = batch.jobs.firstOrNull { it.state == OfflineState.DOWNLOADING }
                 val transfer = active?.speedBytesPerSecond?.takeIf { it > 0 }?.let { speed ->
                     val remaining = batch.totalBytes - batch.downloadedBytes
@@ -371,21 +404,32 @@ class OfflineScreen(
                 }.orEmpty()
                 text = "${batch.completeCount}/${batch.jobs.size} complete · ${fileSize(batch.downloadedBytes)} / ${fileSize(batch.totalBytes)}$transfer"
                 textSize = 10f; setTextColor(colors.mutedText)
-            })
+            }
+            addView(detail)
         }, LinearLayout.LayoutParams(0, WRAP, 1f))
-        addView(TextView(context).apply {
+        control = TextView(context).apply {
             text = if (batch.paused) "▶" else "Ⅱ"; textSize = 18f; gravity = Gravity.CENTER; setTextColor(colors.accent)
-        }, LinearLayout.LayoutParams(dp(44), dp(40)))
+        }
+        addView(control, LinearLayout.LayoutParams(dp(44), dp(40)))
         layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(7); bottomMargin = dp(3) }
         decorate(this)
         activateOnTap {
             if (batch.paused) OfflineDownloadService.resumeBatch(context, batch.id)
             else OfflineDownloadService.pauseBatch(context, batch.id)
         }
+        }
+        QueueHeaderBinding(view, detail, control).also {
+            queueHeaders[batch.id] = it
+            it.bind(batch)
+        }
+        return view
     }
 
     private fun downloadRow(row: OfflineDownload): View {
         lateinit var image: ImageView
+        lateinit var state: TextView
+        lateinit var progress: ProgressBar
+        lateinit var percent: TextView
         val view = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(7), dp(6), dp(10), dp(6)); tag = TaggedDownload(row)
@@ -398,24 +442,24 @@ class OfflineScreen(
                 addView(TextView(context).apply {
                     text = episodeTitle(row); textSize = 14f; maxLines = 1; setTextColor(colors.primaryText)
                 })
-                addView(TextView(context).apply {
-                    text = stateText(row); textSize = 10f
-                    setTextColor(if (row.state == OfflineState.FAILED) colors.dangerText else colors.mutedText)
-                })
-                addView(ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
-                    max = 1_000; progress = (row.progress * 1_000).toInt()
-                    visibility = if (row.state == OfflineState.COMPLETE) View.GONE else View.VISIBLE
-                }, LinearLayout.LayoutParams(MATCH, dp(7)).apply { topMargin = dp(4) })
+                state = TextView(context).apply { textSize = 10f }
+                addView(state)
+                progress = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
+                    max = 1_000
+                }
+                addView(progress, LinearLayout.LayoutParams(MATCH, dp(7)).apply { topMargin = dp(4) })
             }, LinearLayout.LayoutParams(0, WRAP, 1f))
-            addView(TextView(context).apply {
-                text = if (row.state == OfflineState.COMPLETE) "✓" else "${(row.progress * 100).toInt()}%"
-                textSize = 13f; gravity = Gravity.CENTER; setTextColor(colors.accent)
-            }, LinearLayout.LayoutParams(dp(58), MATCH))
+            percent = TextView(context).apply { textSize = 13f; gravity = Gravity.CENTER; setTextColor(colors.accent) }
+            addView(percent, LinearLayout.LayoutParams(dp(58), MATCH))
             layoutParams = LinearLayout.LayoutParams(MATCH, dp(78)).apply { bottomMargin = dp(5); marginStart = dp(10) }
             decorate(this)
             activateOnTap {
                 if (row.state == OfflineState.COMPLETE) host.playItem(row.manifest.item.id) else showDownloadDetails(row)
             }
+        }
+        QueueRowBinding(view, state, progress, percent).also {
+            queueRows[row.id] = it
+            it.bind(row)
         }
         loadArtwork(image, row)
         return view
@@ -537,6 +581,40 @@ class OfflineScreen(
             if (child is ViewGroup) firstFocusable(child)?.let { return it }
         }
         return null
+    }
+
+    private inner class QueueHeaderBinding(
+        private val view: View,
+        private val detail: TextView,
+        private val control: TextView
+    ) {
+        fun bind(batch: OfflineBatch) {
+            view.tag = TaggedBatch(batch)
+            val active = batch.jobs.firstOrNull { it.state == OfflineState.DOWNLOADING }
+            val transfer = active?.speedBytesPerSecond?.takeIf { it > 0 }?.let { speed ->
+                val remaining = (batch.totalBytes - batch.downloadedBytes).coerceAtLeast(0L)
+                " \u00b7 ${fileSize(speed)}/s \u00b7 ${duration(remaining / speed)} left"
+            }.orEmpty()
+            detail.text = "${batch.completeCount}/${batch.jobs.size} complete \u00b7 " +
+                "${fileSize(batch.downloadedBytes)} / ${fileSize(batch.totalBytes)}$transfer"
+            control.text = if (batch.paused) "\u25b6" else "\u2161"
+        }
+    }
+
+    private inner class QueueRowBinding(
+        private val view: View,
+        private val state: TextView,
+        private val progress: ProgressBar,
+        private val percent: TextView
+    ) {
+        fun bind(row: OfflineDownload) {
+            view.tag = TaggedDownload(row)
+            state.text = stateText(row)
+            state.setTextColor(if (row.state == OfflineState.FAILED) colors.dangerText else colors.mutedText)
+            progress.progress = (row.progress * 1_000).toInt()
+            progress.visibility = if (row.state == OfflineState.COMPLETE) View.GONE else View.VISIBLE
+            percent.text = if (row.state == OfflineState.COMPLETE) "\u2713" else "${(row.progress * 100).toInt()}%"
+        }
     }
 
     private fun stateText(row: OfflineDownload): String = buildList {

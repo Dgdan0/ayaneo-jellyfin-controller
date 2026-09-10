@@ -61,10 +61,10 @@ Lanterns S01E04 was silent: its only audio stream is AC-3 5.1 and Pocket DS publ
 The APK now bundles the official Media3 1.4.1 FFmpeg extension as a minimal arm64 AC-3/E-AC-3 build;
 source revisions, LGPL notice and rebuild steps are checked in under `app/third_party/media3-ffmpeg`.
 
-**Offline refresh polish (v0.1.2):** transfer updates are coalesced for 180 ms and preserve the
-selected row or scroll position. Repeated checks that find an unchanged waiting/paused state no
-longer write SQLite or broadcast a false change, so a stalled transfer cannot make the manager
-appear to refresh continuously.
+**Offline refresh polish (v0.1.3):** byte and speed changes now update only their existing progress
+labels, bars and batch summaries; the queue is rebuilt only when its structure changes. Transfer
+updates are coalesced for 180 ms and preserve the selected row or scroll position. Repeated checks
+that find an unchanged waiting/paused state no longer write SQLite or broadcast a false change.
 
 **Connection recovery (v0.1.1):** A fresh install can enter both the Hub HTTPS address and bearer
 token under Manage > Ayaneo Hub. Android app data is the only place these values are stored, so an
