@@ -185,8 +185,16 @@ class OfflineRepository private constructor(context: Context) {
 
     @Synchronized
     fun setState(id: String, state: OfflineState, error: String = "") {
+        val safeError = error.take(300)
+        val existing = download(id) ?: return
+        // A waiting download is checked again by the service. Do not rewrite the
+        // same state on every check: it churns SQLite, broadcasts a fake change,
+        // and used to make the Offline manager look as though it was refreshing.
+        if (existing.state == state && existing.error == safeError &&
+            (state == OfflineState.DOWNLOADING || existing.speedBytesPerSecond == 0L)
+        ) return
         db.writableDatabase.update("downloads", ContentValues().apply {
-            put("state", state.wire); put("error", error.take(300)); put("updated_at", System.currentTimeMillis())
+            put("state", state.wire); put("error", safeError); put("updated_at", System.currentTimeMillis())
             if (state != OfflineState.DOWNLOADING) put("speed_bps", 0L)
         }, "id=?", arrayOf(id))
         changed()

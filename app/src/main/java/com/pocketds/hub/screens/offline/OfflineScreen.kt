@@ -58,14 +58,16 @@ class OfflineScreen(
     private lateinit var queueTab: TextView
     private lateinit var libraryTab: TextView
     private lateinit var summary: TextView
+    private lateinit var scroll: ScrollView
     private lateinit var content: LinearLayout
     private lateinit var overlay: ChoiceOverlay
     private var mode = MODE_LIBRARY
     private var selectedId = ""
     private var renderedSignature = ""
     private var receiverRegistered = false
+    private var renderPosted = false
     private val changedReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) = render()
+        override fun onReceive(context: Context?, intent: Intent?) = scheduleRender()
     }
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
@@ -90,9 +92,10 @@ class OfflineScreen(
             }
             addView(summary)
             content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-            addView(ScrollView(context).apply {
+            scroll = ScrollView(context).apply {
                 isFocusable = false; clipToPadding = false; setPadding(0, 0, 0, dp(80)); addView(content)
-            }, LinearLayout.LayoutParams(MATCH, 0, 1f))
+            }
+            addView(scroll, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }
         root.addView(page, FrameLayout.LayoutParams(MATCH, MATCH))
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
@@ -118,6 +121,7 @@ class OfflineScreen(
         ) OfflineDownloadService.start(host.viewContext)
     }
     override fun onHide() {
+        cancelScheduledRender()
         if (receiverRegistered) {
             host.viewContext.unregisterReceiver(changedReceiver)
             receiverRegistered = false
@@ -125,6 +129,7 @@ class OfflineScreen(
         if (::overlay.isInitialized) overlay.dismiss()
     }
     override fun onDestroyView() {
+        cancelScheduledRender()
         if (receiverRegistered) {
             host.viewContext.unregisterReceiver(changedReceiver)
             receiverRegistered = false
@@ -217,15 +222,37 @@ class OfflineScreen(
         if (focusedTag is TaggedDownload) selectedId = focusedTag.value.id
         if (focusedTag is TaggedBatch) selectedId = focusedTag.value.id
         if (focusedTag is TaggedCatalog) selectedId = focusedTag.value.key
+        val previousScrollY = scroll.scrollY
         content.removeAllViews()
         queueTab.background = tabBackground(mode == MODE_QUEUE)
         libraryTab.background = tabBackground(mode == MODE_LIBRARY)
         if (mode == MODE_QUEUE) renderQueue(batches) else renderLibrary(completed, batches)
-        if (hadFocus != null &&
-            (focusedTag is TaggedDownload || focusedTag is TaggedBatch || focusedTag is TaggedCatalog)
-        ) {
-            content.post { findTagged(content, selectedId)?.requestFocus() }
+        content.post {
+            val restoredFocus = if (hadFocus != null &&
+                (focusedTag is TaggedDownload || focusedTag is TaggedBatch || focusedTag is TaggedCatalog)
+            ) findTagged(content, selectedId)?.requestFocus() == true else false
+            if (!restoredFocus) {
+                scroll.scrollTo(0, previousScrollY.coerceAtMost((content.height - scroll.height).coerceAtLeast(0)))
+            }
         }
+    }
+
+    /** Collapse one transfer's burst of state, progress, and artwork updates into one redraw. */
+    private fun scheduleRender() {
+        if (!::content.isInitialized || renderPosted) return
+        renderPosted = true
+        content.postDelayed(renderRunnable, UPDATE_COALESCE_MS)
+    }
+
+    private val renderRunnable = Runnable {
+        renderPosted = false
+        render()
+    }
+
+    private fun cancelScheduledRender() {
+        if (!::content.isInitialized) return
+        content.removeCallbacks(renderRunnable)
+        renderPosted = false
     }
 
     private fun renderQueue(allBatches: List<OfflineBatch>) {
@@ -568,6 +595,7 @@ class OfflineScreen(
     private data class TaggedBatch(val value: OfflineBatch)
     private data class TaggedCatalog(val value: OfflineCatalogEntry)
     private companion object {
+        const val UPDATE_COALESCE_MS = 180L
         const val MODE_QUEUE = 0
         const val MODE_LIBRARY = 1
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
