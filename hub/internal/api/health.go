@@ -19,13 +19,14 @@ import (
 
 // ServiceHealth is one backing service, as the hub currently sees it.
 type ServiceHealth struct {
-	Name      string    `json:"name"`
-	State     string    `json:"state"` // up | down | misconfigured | disabled
-	LatencyMS int64     `json:"latencyMs,omitempty"`
-	Version   string    `json:"version,omitempty"`
-	Notes     []string  `json:"notes,omitempty"`
-	LastError string    `json:"lastError,omitempty"`
-	CheckedAt time.Time `json:"checkedAt"`
+	Name         string    `json:"name"`
+	State        string    `json:"state"` // up | down | misconfigured | disabled
+	DashboardURL string    `json:"dashboardUrl,omitempty"`
+	LatencyMS    int64     `json:"latencyMs,omitempty"`
+	Version      string    `json:"version,omitempty"`
+	Notes        []string  `json:"notes,omitempty"`
+	LastError    string    `json:"lastError,omitempty"`
+	CheckedAt    time.Time `json:"checkedAt"`
 }
 
 type HubHealth struct {
@@ -141,6 +142,7 @@ func (p *Prober) ProbeAll(ctx context.Context) []ServiceHealth {
 func (p *Prober) probe(ctx context.Context, name string) ServiceHealth {
 	health := ServiceHealth{Name: name, CheckedAt: time.Now().UTC()}
 	svc := p.cfg.Services[name]
+	health.DashboardURL = serviceDashboardURL(svc)
 
 	if !svc.Enabled {
 		health.State = "disabled"
@@ -215,6 +217,26 @@ func (p *Prober) probe(ctx context.Context, name string) ServiceHealth {
 		health.Version = strings.TrimSpace(string(body))
 	}
 	return health
+}
+
+// serviceDashboardURL exposes only a browser address. Authentication material,
+// query strings and fragments never belong in the health document. WebURL is
+// already validated; BaseURL still gets parsed defensively because this helper
+// is also used directly by unit tests.
+func serviceDashboardURL(svc config.ServiceConfig) string {
+	raw := strings.TrimSpace(svc.WebURL)
+	if raw == "" {
+		raw = strings.TrimSpace(svc.BaseURL)
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return ""
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	return strings.TrimRight(parsed.String(), "/")
 }
 
 func (p *Prober) get(

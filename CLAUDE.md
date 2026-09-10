@@ -19,27 +19,60 @@ The full plan lives at `~/.claude/plans/hey-claude-i-know-shiny-boole.md`.
 | Phase | State |
 |---|---|
 | **A0** app skeleton + input probe | **Done**, verified on the hardware |
-| **A1** input + navigation | **Done** (137 tests). Shell drivable on the device |
+| **A1** input + navigation | **Done.** Collapsible left rail plus L1/R1, compact controller hints and reliable focus; shell drivable on the device |
 | **A2** networking spine | **Done.** HubClient, models, retry, failure mapping |
 | **A3** search screen | **Done.** Real posters and availability on the device |
 | **H0** hub skeleton + auth | **Done.** Running, serving six service states |
 | **H1** Jellyseerr adapter | **Done.** search, detail + pipeline, requests, image proxy |
-| **H3** downloads | **Done.** qBittorrent + Radarr + Sonarr adapters, `/v1/activity`, stop/start/delete/queue-remove |
-| **A5** downloads screen | **Done.** Live list, action menu, confirmations. Verified against the real stack |
-| **H4a** request options + interactive search | **Done.** `/v1/requests/options`, `/v1/media/{key}/releases`, `/v1/media/{key}/grab` |
-| **A6a** request dialog + release picker | **Done.** Quality, folder, seasons; 100-release picker with rejection reasons |
+| **H3** downloads | **Done.** qBittorrent + Radarr + Sonarr adapters, `/v1/activity`, pack grouping, stop/start/delete/queue-remove |
+| **A5** downloads screen | **Done.** One row per client transfer, episode-pack counts, action menu and confirmations. Verified against the real stack |
+| **H4a** request options + interactive search | **Done.** `/v1/requests/options`, visual `/release-targets`, season/episode `/releases`, scoped `/grab` |
+| **A6a** request dialog + release picker | **Done.** Quality, folder, visual season and aired-episode targets; 100-release picker with rejection reasons |
 | **H5** discover rows | **Done.** `/v1/discover` returns four rows in one call (99ms), `/v1/discover/{row}?page=` pages each |
 | **A7** Discover as poster rows | **Done.** Findroid shape, endless rows, search switches to a dense grid |
-| **H2** Jellyfin adapter + index | **Done.** `/v1/home`, `/v1/library`, `/v1/library/{id}/items`, `/v1/img/jf/*`, provider-id index |
-| A4 Library screen | next — the hub side is ready |
+| **H2** Jellyfin adapter + index | **Done.** Home, Library, item/season/episode reads, image proxy, provider-id index |
+| **A4** Library screen | **Done.** Square folder art, server-side sorting, adaptive seven/six-column paging, search/Favourites, watched/favourite actions and rich Jellyfin-native details, seasons and episodes |
+| **A8** Home screen | **Done.** Selectable Jellyfin user; landscape episode/movie Continue/Next cards with season context; title-level Recently Added; progress and focus restoration |
+| **H6 / A9** native playback | **Done.** Session-bound Jellyfin range/HLS/subtitle gateway plus full-screen Media3 playback, resume/start-over, tracks, versions, quality, progress events and next episode; verified on hardware |
+| **A10** Manage health | **Done.** Official project logos, live state/version/latency/uptime, explicit vertical focus, dashboard launching, and Jellyfin library scanning |
+| **H7 / A12** notifications | **Done.** `/v1/notifications` combines Sonarr, Radarr and Bazarr history with current health warnings; stable IDs and local seen state drive per-service and rail unread badges, focus-to-seen, and mark-all-seen |
+| **A13** settings + themes | **Done.** Follow-system/light/dark appearance, theme-specific service assets, notification history limits, playback seek distance and controller test |
+| **H8 / A14** offline downloads | **Done.** Durable scoped Hub grants, range-resumable original files, series/season picker, persistent foreground queue, grouped manager, local-first playback and per-user deferred progress sync; live device path verified |
+
+The 2026-09-08 Findroid 1.1.0 hardware audit, screenshot index, side-by-side feature matrix,
+and recommended next milestones are in `FINDROID_COMPARISON.md`.
+
+Offline opens on the durable downloaded catalog, grouped as one alphabetized poster per movie or
+series across all libraries. A local series screen derives its season and episode rows only from
+completed files. The manager is a secondary tab, and repository broadcasts replaced its former
+750 ms polling rebuild. Offline Settings enumerates app-private roots returned by
+`getExternalFilesDirs`: the chosen internal/SD location is used only for new jobs and stored absolute
+paths keep earlier files valid. The Pocket DS has no platform AC-3/E-AC-3 decoder, so Original MKVs
+with AC-3 audio use a minimal arm64 build of the official Media3 1.4.1 FFmpeg extension. Keep its
+exact-source and LGPL material in `app/third_party/media3-ffmpeg` and `assets/licenses` with the AAR.
 
 ## Reaching the hub from the handheld
 
-The hub binds loopback only, so the device cannot see it over the LAN. During development
-that is solved with **`adb reverse tcp:8791 tcp:8791`**, which makes the hub appear on the
-device's own 127.0.0.1 — traffic that never leaves the handheld, so nothing is exposed and no
-config changes. `network_security_config.xml` permits cleartext for 127.0.0.1 and localhost
-only; everything else is HTTPS-or-nothing.
+The preferred address is now **`https://ayaneo-media-pc.tail737e96.ts.net`**. Pocket DS and the
+media PC are members of the same tailnet, and Tailscale Serve proxies this private HTTPS origin to
+the loopback-only Hub on `127.0.0.1:8791`. Dashboard listeners on ports 8920, 5055, 7878, 8989,
+6767, and 8080 are also tailnet-only; `services.<name>.web_url` contains those HTTPS addresses.
+The private live endpoint returns `200 ok`, and all dashboard listeners answer. ADB updated the
+Pocket DS app base while preserving its token; users, Home, Library, activity, health, and artwork
+return 200. The Jellyfin Manage card reaches its tailnet sign-in page without a certificate warning.
+
+The previous `https://myjellydan.duckdns.org:55886` route remains a public fallback: the Sagemcom
+router forwards WAN TCP 55886 to `10.100.102.8:443`, where Caddy proxies `/v1/*` to the Hub. Do not
+remove that rule until the Tailscale route passes a full phone-hotspot test. Selecting Ayaneo Hub in
+Manage preserves the bearer token, and the row remains available when health cannot load. Reserve
+`10.100.102.8` for Wi-Fi MAC `04-EC-D8-46-3C-EB` while the fallback exists.
+
+During development, **`adb reverse tcp:8791 tcp:8791`** can make the hub appear on the
+device's own 127.0.0.1. It is an ephemeral fallback: every device or wireless-ADB reconnect
+can discard the mapping. Do not seed a normal installed build with the loopback URL and then
+interpret a FireDaemon Running state as end-to-end health. `network_security_config.xml`
+permits cleartext for 127.0.0.1 and localhost only; everything else is HTTPS-or-nothing.
+`scripts/dev.sh tunnel` reconnects wireless ADB and restores development mappings.
 
 `scripts/dev.sh seed` pushes the URL and token in as intent extras. **`onNewIntent` must
 handle it too**: launchMode is `singleTask`, so a second `am start` on a running app never
@@ -123,7 +156,7 @@ All six services run on **localhost** — this PC is the media server.
 
 | Service | Finding |
 |---|---|
-| Jellyfin | **10.11.8** — newer than the 10.10.x the plan assumed, so re-check `/Users/{userId}/Items` before relying on it in H2. **Forces HTTPS**: `http://…:8096` returns `307 → https://…:8920` with a self-signed cert, so configure it as `https://127.0.0.1:8920` with `insecure_skip_verify: true`. Its `/System/Info` embeds every plugin's full changelog and runs to hundreds of KB — read caps must allow for that (a "Jellyfin Enhanced" plugin is installed) |
+| Jellyfin | **10.11.8** with four enabled profiles: Adirimo, Dgdan, Hadas and Horim. **Forces HTTPS**: `http://…:8096` returns `307 → https://…:8920` with a self-signed cert, so configure it as `https://127.0.0.1:8920` with `insecure_skip_verify: true`. Its `/System/Info` embeds every plugin's full changelog and runs to hundreds of KB — read caps must allow for that (a "Jellyfin Enhanced" plugin is installed) |
 | Jellyseerr | **2.7.3**. Its `/api/v1/status` needs no credential, so it is a free liveness probe |
 | qBittorrent | **v5.0.4** — so it is the `torrents/start` / `torrents/stop` vocabulary with `stoppedUP`/`stoppedDL` states, **not** `pause`/`resume`. That was an open unknown; it is settled |
 | Bazarr | **1.6.0**. `/api/system/ping` is unauthenticated. Its status nests the version under `data.bazarr_version`, unlike the *arr apps |
@@ -175,7 +208,7 @@ everything over a real network.
 | `blocked` / `deleted` | Blocked / Deleted | red | |
 
 Discover rows use a **150dp** poster in a **104dp** card; the search grid uses 150dp across
-7 columns. Derived, not guessed: the usable area is 853x456dp, and after the tab bar, hint bar,
+7 columns. Derived, not guessed: the usable area is 853x456dp, and after the navigation rail, hint bar,
 search field and status line there are ~340dp left, so a row has to fit inside ~200dp for the
 next one to peek below it.
 
@@ -238,9 +271,18 @@ nearest corner on release, so both input paths get what suits them from one piec
 `state/FloatingWindow` is pure and tested — clamping, the 16:9 shape, what "down" means when you
 are already at the bottom.
 
+The floating shell has one compact 48dp toolbar above a true 16:9 WebView viewport. It uses
+rounded corners, a shadow, and an accent outline only while trailer control mode is active.
+Fullscreen, open-in-YouTube, and close remain real toolbar controls with accessible labels. The
+window stays 12dp inside the content area, clear of the navigation rail and bottom hint bar; size and corner
+changes animate for 180ms without replacing or reloading the WebView. Title dragging begins only
+after touch slop, excludes the toolbar controls, clamps to the content area, and snaps to the
+nearest corner. The duplicate instruction footer was removed because the app hint bar already
+shows the gamepad controls.
+
 **An explicit control mode, not a focus target.** The window lives in the chrome layer, outside
 the content that the focus guard confines movement to, and letting directional search cross that
-boundary is exactly the class of bug that had the selection escaping into the tab bar. Opening a
+boundary is exactly the class of bug that had the selection escaping into app chrome. Opening a
 trailer takes control (D-pad moves, Ⓐ fullscreen, Ⓨ size, Ⓑ close, Ⓧ back to the app); **Start**
 takes control again later.
 
@@ -269,6 +311,10 @@ featurettes are deliberately not offered, because a button labelled "Trailer" th
 costume-design interview is worse than no button. Measured: Gran Torino has one, The Mentalist
 has nothing but behind-the-scenes clips. Launched with a plain `ACTION_VIEW`, so a browser is a
 fine fallback when the YouTube app is absent.
+
+The toolbar's **Open in YouTube** action is also the path to system PiP: start playback in
+YouTube, then leave YouTube. The installed YouTube app has PiP allowed on this device. Android
+does not let this app force another app's Activity into PiP or choose that PiP window's size.
 
 **`focusOnShow` is true here now, and the buttons claim focus once the detail lands.** It was
 false because the only focusable thing used to be the cast row, below the fold — focusing it
@@ -302,6 +348,16 @@ source said it would.
 
 - **Torrents are indexed by all three hashes** (`hash`, `infohash_v1`, `infohash_v2`), because
   a v2 or hybrid torrent has two and which one an *arr recorded depends on how it was added.
+- **Sonarr queue rows sharing one `downloadId` are one transfer.** A series pack can produce
+  one queue row per episode (23 live rows for The Mentalist all named the same 40.8 GB torrent).
+  `/v1/activity` folds those back into one series row, reports the episode count, and uses the
+  `qbit:{hash}` identity accepted by Start/Stop/Delete while retaining the Sonarr queue metadata.
+  Control choices use a separate `clientStage`, so an import-stuck row still switches from Stop
+  to Start when its qBittorrent job is stopped.
+- **Detail pipeline transfer state comes from the live join.** Jellyseerr's tracker can remain
+  on Grab after qBittorrent is already moving bytes. Media detail matches activity by the
+  Radarr/Sonarr id, or TMDB/TVDB for titles added outside Jellyseerr, and the app polls every
+  four seconds while a pipeline stage is active.
 - **qBittorrent is v5.0.4 / API 2.11.2** here, detected at startup by reading the major
   version rather than sniffing state names — which only tell you about the torrents that
   happen to exist. Live states seen: `stoppedUP`, `stalledDL`, `missingFiles`, `uploading`;
@@ -386,7 +442,7 @@ actually change:
 | Trending | 30m | Changes on TMDB's schedule, not ours |
 | Library page | 60s | |
 | Watched state / resume | 15s | Changes when *you* watch something |
-| **Downloads** | **3s, never stale** | A torrent list from two minutes ago is not out of date, it is wrong — it shows finished downloads as running. Showing nothing is better, because nothing does not mislead |
+| **Transfers** | **3s, never stale** | A torrent list from two minutes ago is not out of date, it is wrong — it shows finished downloads as running. Showing nothing is better, because nothing does not mislead |
 | Images | 30 days | A TMDB poster path is immutable; the path changes when the image does |
 
 **The subtlety that makes naive caching wrong**: Jellyseerr returns stable TMDB metadata and
@@ -408,8 +464,10 @@ read-only token must never be served a response computed for one that can reques
   service name, a missing `base_url` or key. Every message names the setting and the fix.
 - Stores only the **SHA-256** of each token; `Verify` is constant-time and does not stop at
   the first match, since returning early leaks their order.
-- Rate limit keyed on the **token label**, not the IP, so one busy device cannot starve
-  another behind the same NAT.
+- The interactive API rate limit is keyed on the **token label**, not the IP, so one busy
+  device cannot starve another behind the same NAT. Authenticated, session-owned playback
+  routes have a separate 3600 rpm / 240 burst transport budget; HLS segments, byte ranges,
+  subtitles and progress events therefore cannot consume the 90 rpm / 30 burst screen budget.
 - Auth failures ban the source, and hammering through a ban **extends** it rather than
   resetting the clock. `X-Forwarded-For` is honoured only from a declared trusted proxy —
   taking it from anyone lets a guesser spoof a fresh source per attempt.
@@ -436,7 +494,7 @@ Re-running `collect-secrets.ps1` on an already-locked file cannot re-apply the A
 elevation, so it now detects that the permissions are already correct and leaves them alone
 rather than failing.
 
-A1 ends where it was meant to: five sections, grid and list navigation, focus ring, tab bar,
+A1 ends where it was meant to: six sections, grid and list navigation, focus ring, collapsible side rail,
 hint bar and status strip, all driven by gamepad or trackpad, with **no network code at all**.
 A2 swaps `PlaceholderScreen`'s adapter for real data behind `HubApi`/`FakeHubApi`.
 
@@ -619,7 +677,54 @@ with it removed via `dev.sh keys off`. **The two runs were identical.**
 - Haptics are forwarded to the rumble motors: `CLOCK_TICK` = 10 ms pulse, `KEYBOARD_TAP` =
   50 ms at 86 %. So "light" is the clock tick, contrary to the constant names.
 
-## Planned, not yet built
+## Feature notes and future work
+
+### Library, as built
+
+`GET /v1/library` supplies the server folders in Jellyfin's order. The selector renders three
+large bounded square cards across, which remain inside the content area even with the rail expanded.
+An explicit collection image wins; otherwise each card uses a title
+poster selected deterministically from that folder for the media PC's current local day. On this Jellyfin
+10.11.8 install, generated view collages live under `metadata/library`, while the explicit Marvel
+images are `folder.jpg` / `folder.webp` under the configured library root; `/Items/{id}/Images`
+provides that distinction.
+
+Opening a folder uses `GET /v1/library/{viewId}/items?page=&sort=&order=` in 60-item pages. The
+poster grid derives its span count from the measured content width: seven columns with the compact
+rail, six with the expanded rail, and fewer only on a smaller window. Y opens a parameter menu (name, release date, date added,
+year, parental rating, community/critic rating, runtime, last played) followed by ascending/descending.
+Sorting happens in Jellyfin so every page shares the same order. Library cards suppress the redundant
+Partial/In library badges while retaining watch progress and showing watched, favourite and unwatched-count
+badges. The Library root also exposes Jellyfin search and a paged Favourites destination. The screen
+retains loaded pages and focused position on its section
+stack; requests stop while hidden and an interrupted page becomes retryable when the screen
+returns.
+
+Details use Jellyfin item IDs directly, so an absent TMDB provider ID cannot block browsing:
+
+- `GET /v1/library/items/{itemId}` returns a movie, series, season, or episode with artwork,
+  overview, original title, runtime/ratings, certification, studios, people, normalized media
+  versions/tracks, parent IDs, and configured-user watch/favourite state.
+- `GET /v1/library/series/{seriesId}/seasons` returns Jellyfin's seasons, including Specials when
+  present.
+- `GET /v1/library/series/{seriesId}/episodes?seasonId=…&page=…` returns available episodes in
+  60-item pages with episode numbering, thumbnails, runtime, and progress.
+- `GET /v1/library/search?q=…&page=…` and `GET /v1/library/favorites?page=…` provide the
+  selected user's paged collection views.
+- `POST /v1/library/items/{itemId}/state` changes exactly one watched or favourite value,
+  then returns the freshly read Jellyfin item; the app updates optimistically and rolls back on failure.
+
+Series details also render the selected user's Resume/Next/Start episode as a landscape progress
+card. Seasons are a horizontal poster strip using Jellyfin's season artwork, and a selected season
+opens a horizontal episode strip with 16:9 stills and watched/resume progress. Focusable Library
+cards activate on the first pointer tap as well as with A; pointer swipes still scroll either strip.
+Y on a focused season, or from inside its episode strip, opens the manual release-target screen when
+the series has a TMDB provider id. The screen keeps the season poster visible and offers the whole
+season plus each episode that has aired; choosing an episode performs a Sonarr `episodeId` search.
+
+The adapter shapes were checked against Jellyfin 10.11.8 on this machine. In particular,
+`/Shows/{id}/Episodes` accepts the season ID and needs `isMissing=false` so an API-key caller does
+not receive virtual missing episodes.
 
 ### Discover, as built
 
@@ -628,7 +733,7 @@ concurrently, measured at 99ms for all four. Trending now / Popular films / Popu
 Coming soon. Each row pages when focus gets within 6 cards of its end, so a row is effectively
 endless (upstream reports 58,798 pages of popular films).
 
-Card geometry is measured, not guessed: the usable area is 853x456dp, and after the tab bar,
+Card geometry is measured, not guessed: the usable area is 853x456dp, and after the navigation rail,
 hint bar, search field and status line there are ~340dp left. A row therefore has to fit inside
 ~170dp for two to be visible at once, which is the Findroid look. `ROW_POSTER_DP = 118`,
 `ROW_CARD_DP = 82`; the search grid gets `GRID_POSTER_DP = 138` across 8 columns since it has no
@@ -645,6 +750,16 @@ back in 7ms, so the job is already finished when the next scroll event arrives w
 object the strip holds has not been re-bound yet — page 2 was fetched twice, 48ms apart.
 `requestedPages` tracks the high-water mark instead.
 
+**Manual series searches have two distinct scopes.** Sonarr's `seriesId + seasonNumber` release
+query is a broad season search and can return both packs and individual episodes in one flat list.
+For an episode, first read `/api/v3/episode?seriesId=&seasonNumber=` and then search
+`/api/v3/release?episodeId=` with Sonarr's canonical episode id. On this installed Sonarr, Last Seen
+season 1 returned six episode records on 2026-09-09, two of which had aired; episode id 9998 returned
+ten S01E01 releases. The Hub sends only season/episode numbers to the app, resolves the id again for
+search/grab, and scope-blocks a full-season or multi-episode result when one episode was selected.
+Artwork comes from Jellyseerr's `/api/v1/tv/{tmdbId}/season/{season}` response so season posters and
+episode `stillPath` values can use the existing authenticated TMDB image proxy.
+
 ### Focus, and why the framework cannot be trusted with it
 
 Three separate escapes had to be closed before a row of posters behaved. All three looked like
@@ -653,7 +768,7 @@ Three separate escapes had to be closed before a row of posters behaved. All thr
 - **`LinearLayoutManager.onFocusSearchFailed` scrolls while hunting for a candidate.** That
   scroll detaches the card holding focus, and Android then hands focus to the first focusable
   view in the window. Running along the trending row silently dumped the selection on the
-  *Discover tab* — no move was ever accepted, the selection simply fell sideways out of the row.
+  *Discover chrome* — no move was ever accepted, the selection simply fell sideways out of the row.
   `ui/StripNav` therefore moves left/right **by adapter position**, never by focus search: the
   next card either exists and takes focus, or it does not and nothing happens. That "nothing
   happens" is the behaviour you want while the next page loads.
@@ -667,9 +782,9 @@ Three separate escapes had to be closed before a row of posters behaved. All thr
   `HubActivity` now consumes DPAD keys itself — except in a text field, where left and right
   move the caret.
 
-**The tab bar is deliberately not focusable**, like the hint-bar chips: sections switch with
-L1/R1 or a tap, so a tab never needs gamepad focus, and keeping it out of focus search closes
-the whole "orphaned focus lands on the first tab" class of bug.
+**The side rail is deliberately not focusable**, like the hint-bar chips: sections switch with
+L1/R1 or a tap, and Start/app-mark tap toggles its 68dp/190dp collapsed/expanded width. Keeping it
+out of focus search closes the whole "orphaned focus lands in navigation" class of bug.
 
 **`hints()` reads the focused item, so it has to be recomputed after focus lands** — in
 `moveFocus`, in `showCurrent`'s post, and in each adapter's own focus settling. And that
@@ -694,14 +809,33 @@ The Infuse/Jellyfin shape. Deliberately ordered by how soon you'd act on the row
 1. **Favourites** — Jellyfin `/Items?filters=IsFavorite&recursive=true`. Things you keep
    coming back to belong above things the server guessed at.
 2. **Continue watching** — part-watched items. `/Items?filters=IsResumable`, carrying
-   `positionSeconds` / `runtimeSeconds` so the card can draw a progress bar.
+   `positionSeconds` / `runtimeSeconds` so the card can draw a progress bar. It keeps the
+   first, most recent unfinished episode per series.
 3. **Next up** — you finished an episode and the next one exists. Jellyfin has a purpose-built
    endpoint for exactly this, `/Shows/NextUp?userId=`; do **not** try to derive it from watch
-   state, it handles specials, gaps and season boundaries.
-4. **Recently added** — `/Items/Latest?userId=`.
+   state, it handles specials, gaps and season boundaries. A series is removed from this row
+   while it has an item in Continue watching; finishing that episode makes it eligible again.
+4. **Recently added** — `/Items/Latest?userId=&includeItemTypes=Movie,Episode&groupItems=true`.
+   Episodes are promoted to their parent series and duplicate series are collapsed while keeping
+   Jellyfin's recency order. Asking this endpoint for `Movie,Series` dropped episode-heavy results;
+   the live Dgdan row contained one card before the fix and 19 after it.
 
-All four are already the shape of the hub's `GET /v1/home`, which returns them in one request
-so the handheld makes one round trip per screen rather than four. Favourites is the addition.
+All four are rendered by the first app section from one `GET /v1/home` request, so the
+handheld makes one round trip per screen rather than four. Empty rows are hidden. The screen
+keeps its loaded rows and focused Jellyfin item across detail navigation and section switches,
+and retains successful old rows when a refresh is partial. Verified on the Pocket DS with
+three live rows and per-item watch progress.
+
+Continue Watching and Next Up use 16:9 cards for the concrete playable movie or episode. Episodes
+carry their own still, series title, and `SxxEyy · episode title`; completed items have no progress
+line. Recently Added represents new movies and the parent series of new episodes, and A opens their
+detail screen. A on Continue/Next plays or resumes the concrete item and X opens its details.
+
+Home shows the active Jellyfin profile in its heading. **Y / Users** opens the profile picker;
+the selection persists on the handheld and is sent as `X-Jellyfin-User`. The hub varies and
+keys Home and Library caches by that id. Changing profile recreates the section stacks so rows,
+detail progress and loaded Library pages cannot retain the previous user's state. With no
+device choice, the configured server default remains the fallback (Dgdan here).
 
 ### A richer request flow — built
 
@@ -733,33 +867,78 @@ with size, seeders, quality, indexer and rejection reasons, and grab a specific 
 queries every indexer so it takes **tens of seconds**, and grabbing is
 `POST /api/v3/release` with the chosen release's `guid`. Needs the Radarr/Sonarr adapters.
 
+A season-specific search can include a rejected multi-season pack. Sonarr explicitly reported
+`Multi-season releases are not supported` for The Mentalist result that downloaded 149 files
+across Seasons 1–7 from a Season 1 search. Such a result is now `scopeBlocked`: the app explains
+the mismatch and the hub refuses the grab even from an older app. Ordinary manual overrides,
+such as a quality-profile rejection, remain available.
+
 **3. A download manager** — pause, resume, delete, remove-and-blocklist, re-search. This is
 H3, and the same adapters unlock interactive search.
 
-### Playback — deliberately deferred
+### Native playback
 
-The app cannot play video, and **that is a decision, not an oversight**. The original plan was
-to hand off to Findroid; that turned out to be impossible (no deep link, so Play would dump
-you on Findroid's home screen to find the episode yourself), and the handheld has no other
-player installed.
+The original Findroid handoff is impossible because its player Activity is not exported. The
+replacement is implemented as a full-screen Media3 player whose stream and Jellyfin session
+are prepared through the hub, keeping the Jellyfin API key off the handheld. `HubActivity`
+stays the single UI Activity; `PlaybackService` owns ExoPlayer and a MediaSession while
+`PlayerScreen` supplies the controller-first overlay.
 
-The call: build a player only if it can be genuinely good, which means researching what the
-best ones actually do before writing any of it. Not a stopgap.
+Movies, episodes and series open their Jellyfin detail page from Home, Library and season rows.
+Their compact action row is icon-only, apart from the time displayed beside a resumable Play
+symbol; accessibility labels and the hint bar retain the action names. Series details resolve
+the selected user's resumable, next, or first episode. Playback options expose
+media version, audio, subtitles and Original/40/20/10/5/2 Mbps quality. The hub owns byte-range
+streaming, HLS manifest rewriting, external subtitle extraction, ordered Jellyfin events,
+session ownership and 30-minute abandoned-session cleanup.
 
-Research targets when that phase starts: **Infuse**, **mpv / mpv-android**, **VLC**,
-**Findroid**, **Jellyfin Media Player**, **Just Player**, **Kodi**. Features worth stealing:
-thumbnail scrub preview, mid-playback audio/subtitle switching and external subtitle loading,
-subtitle styling and delay sync, audio delay, playback speed, skip intro/credits from chapter
-markers, auto-play next with countdown, cross-device resume, HDR tone mapping, hardware decode
-with software fallback, PiP, aspect/zoom modes, audio normalisation.
+The player overlay has a compact title/action strip with box-free, dark-outlined Audio, CC,
+Quality, PiP and Close symbols. Its bottom timeline uses Play/Pause, a configurable 5/10/15/30-second seek step
+(10 seconds by default), and available Previous/Next episode actions. A tap outside a control
+toggles the overlay. Android system Back, including the Pocket DS edge gesture, exits playback
+immediately and restores the originating Library/Home focus; physical B retains the layered
+sheet/hide/exit behavior. Native Android PiP keeps the same MediaSession playback running;
+dismissing the PiP window stops playback, closes the hub session and removes the task.
+Double-tapping either video side applies the configured short seek. A horizontal drag scrubs
+with destination time, delta and a small preview anchored over the matching timeline point;
+dragging the timeline shows the destination time and frame without a delta. The timeline thumb
+moves with either gesture. D-pad/stick left and right traverse the focused controls and only seek
+when the timeline itself has focus. Vertical drags change brightness on the left half and media
+volume on the right, with compact percentage bars. The CC sheet opens a live timing bar from 60
+seconds earlier through 60 seconds later. SRT/WebVTT is fetched and parsed once into a local cue
+timeline, so 0.1-second slider/D-pad changes redraw immediately without rebuilding the video or
+subtitle source; L2/R2 changes by one second. The compact panel exposes controller-focusable Reset
+and Done actions. It stores the correction on the device per Jellyfin user and series, or per movie,
+so another profile is unaffected. Session URLs remain private to the app.
 
-Casting to a TV via Jellyfin's `/Sessions` API belongs in the same phase.
+Hardware validation on Android 13 exercised H.264 HLS playback, E-AC-3/AC-3 to AAC conversion,
+external SRT delivery, pause/resume, a 10-second jump, background pause/return, clean exit and
+origin focus restoration. Jellyfin 10.11.8 returns hyphenated UUIDs inside transcode URLs even
+when item APIs use compact IDs; HLS validation canonicalizes both forms. It also puts `ApiKey`
+in those URLs, so credentials are stripped case-insensitively before any opaque URL reaches the
+app and upstream requests use the adapter's private header.
 
-Nothing is blocked by this. `PlaybackLauncher` is already an interface and `PlayableRef`
-already carries `streamUrl` and `startPositionMs`, so whatever gets built plugs in without
-disturbing callers.
+Playback exit also refreshes Home, item details, series play targets and the selected loaded
+episode without discarding their focus or paging state. A two-minute checkpoint stored per
+Jellyfin user bridges the short interval before Jellyfin publishes the final stopped position;
+it is used only for valid Resume requests and never for Start over. A live Pocket DS check moved
+Drake & Josh S2E8 from Play to `Resume · 2:16` immediately after Back, then reopened beyond that
+position instead of using the earlier server value.
 
-### Theme packs
+The delivered first release and later player milestones are recorded in `PLAYER_PLAN.md`.
+The trickplay gateway and preview UI are delivered. The live server returned no generated
+trickplay data across 15 sampled Home items, so the session-bound preview endpoint now extracts
+five-second-bucket JPEG frames with the Jellyfin server's ffmpeg without exposing media paths.
+Chapters, media-segment skipping, subtitle appearance, speed/aspect modes and PiP remote
+actions/automatic entry remain later work. Offline playback and its queue/catalog/storage/sync
+contract are delivered and recorded in `OFFLINE_DOWNLOAD_PLAN.md`. mpv/libass remains optional if hardware testing
+finds a format Media3 plus Jellyfin transcoding cannot handle well.
+
+### Later custom theme packs
+
+Follow-system, Light and Dark modes are implemented, including Android night
+resource variants for every service logo used by Manage and Notifications.
+The later work here is user-defined palette packs:
 
 Settings picks a **pack of two or three seed colours** rather than a fixed light/dark pair:
 accent, background, and an optional contrast colour for when white is wrong on that
@@ -787,7 +966,8 @@ project as a trackpad + keyboard, so pointer and text input are first-class, not
 | Back | `BUTTON_B`, `KEYCODE_BACK` | tap the Back chip in the hint bar |
 | Primary action | `BUTTON_X` | tap its hint-bar chip |
 | Secondary action | `BUTTON_Y` | long-press the card, or Right Click |
-| Switch section | `L1` / `R1` | tap a tab |
+| Switch section | `L1` / `R1` | tap a rail item |
+| Expand/collapse navigation | `Start` | tap the app mark |
 | Page | `L2` / `R2` | two-finger scroll / fling |
 | Text entry | focus a field, press `A` | tap the field |
 
@@ -826,7 +1006,8 @@ Design consequences:
 - **Focus settling must run even when nothing was focused before.** Restoring focus only when
   there was a previous id meant that on first load — an empty list — no row was ever focused by
   us and the hint bar was never recomputed.
-- **Clearing focus hands it to the first focusable in the window** — which is the first tab.
+- **Clearing focus hands it to the first focusable in the window.** The rail is deliberately
+  nonfocusable so this cannot strand the selection in top-level navigation.
   Expect focus to be *somewhere* after a clear, not nowhere.
 - **Neither form of `requestFocus` gives traversal order inside a ScrollView.** It overrides
   `onRequestFocusInDescendants` to prefer whatever is nearest the current scroll position. A
@@ -845,16 +1026,17 @@ Design consequences:
   an app that is plainly installed.
 - **`IntArray` is not `Iterable`** — it has `map` but not `mapNotNull`. Use `.asIterable()`.
 - **Findroid cannot be deep-linked.** Verified against its manifest: `PlayerActivity` is not
-  exported and `MainActivity` declares only `MAIN`/`LAUNCHER`. Play opens its home screen and
-  the UI says so. `PlaybackLauncher` is an interface so the better options stay cheap to add.
+  exported and `MainActivity` declares only `MAIN`/`LAUNCHER`. The implemented replacement is
+  Media3 in this app, with playback prepared and proxied by the hub.
 
 ---
 
 ## Hub notes (for when it starts)
 
 - **Jellyfin has no provider-id query.** Only `hasTmdbId` etc. as *booleans*;
-  `AnyProviderIdEquals` is Emby-only. The hub must maintain its own SQLite index of
-  ProviderIds by sweeping `/Items?fields=ProviderIds`. Weakest link in the join.
+  `AnyProviderIdEquals` is Emby-only. The hub maintains an in-memory ProviderIds index by
+  sweeping `/Items?fields=ProviderIds`; the measured 250-item sweep is too small to justify
+  SQLite.
 - **Bazarr's API is `/api`**, not `/api/v2`. Auth header is `X-API-KEY` (uppercase KEY).
   `/api/system/ping` is unauthenticated. Its `base_url` subfolder setting prefixes everything,
   so probe the path at startup.
@@ -866,5 +1048,23 @@ Design consequences:
 - **Do not codegen from Jellyfin's published OpenAPI spec** — it reports 12.0.0, where
   `/Users/{userId}/Items` and the HLS paths no longer exist. Use the server's own
   `/api-docs/openapi.json`, and prefer `/Items?userId=`.
-- **Docker Desktop on Windows does not start without a logged-in user.** The hub runs as a
-  native Windows service.
+- **Docker Desktop on Windows does not start without a logged-in user.** The hub runs as the
+  Automatic (Delayed Start) FireDaemon service `AyaneoHub` under LocalSystem. Its deployed
+  binary is `C:\Program Files\AyaneoHub\hub.exe`; config and logs stay under
+  `C:\ProgramData\AyaneoHub`. The checked-in definition and idempotent administrator installer
+  are `hub/deploy/windows/AyaneoHub.firedaemon.xml` and `install-firedaemon.ps1`.
+- **Manage dashboard links come from `services.<name>.web_url`.** The deployed values use the
+  `ayaneo-media-pc.tail737e96.ts.net` Tailscale Serve hostname and standard service ports. When
+  `web_url` is empty, the Hub falls back to a credential-free copy of `base_url`, which is usually
+  loopback and therefore wrong on the handheld. Keep Funnel disabled; these dashboards are for
+  authenticated tailnet devices only.
+- **Jellyfin library refresh is a narrow Hub action.** `POST /v1/manage/jellyfin/scan` requires the
+  existing `control` scope and invokes Jellyfin's asynchronous `/Library/Refresh`. The app exposes
+  it as a visible action on the Jellyfin Manage row and as X. The Hub clears affected response
+  caches immediately and sweeps its provider-id index again 10, 30 and 60 seconds after the scan
+  starts, so newly imported episodes can correct Discover availability without giving the APK an
+  administrator API key.
+- **Search and Discover enrich cached Jellyseerr results at render time.** A provider-index match
+  replaces delayed `processing` with `available` for a movie or `partially_available` for a series,
+  attaches the Jellyfin item id, and recomputes scoped actions. A live download remains visible as
+  `downloading`. This was verified against Last Seen after its first episode was imported.

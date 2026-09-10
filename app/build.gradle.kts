@@ -61,6 +61,15 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("androidx.media3:media3-session:1.4.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.4.1")
+    // Pocket DS firmware has no platform AC-3/E-AC-3 decoder. This arm64-only
+    // Media3 extension keeps Original offline files playable without converting
+    // or discarding their audio tracks.
+    implementation(files("libs/media3-decoder-ffmpeg-1.4.1-ac3-arm64.aar"))
     // Posters come from the hub, so they need the same bearer token, the same
     // TLS trust and the same connection pool as the API. Coil takes an
     // OkHttpClient in one line; Glide would need an extra artifact and an

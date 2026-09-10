@@ -35,6 +35,7 @@ type SeasonOption struct {
 	Name         string `json:"name"`
 	EpisodeCount int    `json:"episodeCount"`
 	Year         int    `json:"year,omitempty"`
+	Image        string `json:"image,omitempty"`
 }
 
 type RequestOptions struct {
@@ -148,6 +149,7 @@ func (s *Server) handleRequestOptions(w http.ResponseWriter, r *http.Request) {
 					Name:         season.Name,
 					EpisodeCount: season.EpisodeCount,
 					Year:         yearOf(season.AirDate),
+					Image:        tmdbImage("w342", season.PosterPath),
 				})
 			}
 		}

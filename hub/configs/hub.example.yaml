@@ -18,6 +18,9 @@ server:
   trust_proxy_cidrs: ["127.0.0.1/32"]
   request_timeout: 20s
   shutdown_grace: 10s
+  # Durable download grants and offline watch-progress receipts. Relative paths
+  # live beside hub.yaml, which is ideal for the FireDaemon installation.
+  offline_registry: "offline-grants.json"
 
 auth:
   # Generate with: hubctl token new --label pocketds
@@ -25,7 +28,7 @@ auth:
   tokens:
     - label: "pocketds"
       sha256: "PUT_THE_SHA256_FROM_HUBCTL_HERE"
-      scopes: ["read", "request", "control", "play"]
+      scopes: ["read", "request", "control", "play", "download"]
 
   # Per device, so one busy handheld cannot starve another.
   rate_limit:
@@ -42,6 +45,9 @@ services:
   jellyfin:
     enabled: true
     base_url: "http://127.0.0.1:8096"
+    # Optional address opened by Manage on the handheld. Use this when base_url
+    # is loopback, a Docker hostname, or otherwise visible only to the hub.
+    web_url: "https://jellyfin.example.com"
     api_key: "${env:JELLYFIN_API_KEY}"
     user_id: ""          # whose views and watch state to surface
     timeout: 8s
@@ -49,6 +55,7 @@ services:
   jellyseerr:
     enabled: true
     base_url: "http://127.0.0.1:5055"
+    web_url: ""
     api_key: "${env:JELLYSEERR_API_KEY}"
     # Without this, requests are attributed to admin user 1 rather than to you.
     act_as_user_id: 1
@@ -56,18 +63,21 @@ services:
   radarr:
     enabled: true
     base_url: "http://127.0.0.1:7878"
+    web_url: ""
     api_key: "${env:RADARR_API_KEY}"
     jellyseerr_service_id: 0
 
   sonarr:
     enabled: true
     base_url: "http://127.0.0.1:8989"
+    web_url: ""
     api_key: "${env:SONARR_API_KEY}"
     jellyseerr_service_id: 0
 
   bazarr:
     enabled: true
     base_url: "http://127.0.0.1:6767"
+    web_url: ""
     api_key: "${env:BAZARR_API_KEY}"
     # "" probes for it. Set only if Bazarr is behind a subfolder, because its
     # base_url setting prefixes every route.
@@ -76,6 +86,7 @@ services:
   qbittorrent:
     enabled: true
     base_url: "http://127.0.0.1:8080"
+    web_url: ""
     # Newer builds accept a bearer key (Web UI settings). Older ones need the
     # login below instead -- either is accepted.
     api_key: "${env:QBIT_API_KEY}"

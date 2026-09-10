@@ -25,6 +25,90 @@ object HubEndpoints {
 
     fun health(base: String): HubRequest = HubRequest(join(base, "/v1/health"))
 
+    fun scanJellyfinLibrary(base: String): HubRequest =
+        HubRequest(join(base, "/v1/manage/jellyfin/scan"), method = "POST")
+
+    fun users(base: String): HubRequest = HubRequest(join(base, "/v1/users"))
+
+    fun home(base: String): HubRequest = HubRequest(join(base, "/v1/home"))
+
+    fun library(base: String): HubRequest = HubRequest(join(base, "/v1/library"))
+
+    fun libraryItems(
+        base: String,
+        viewId: String,
+        page: Int = 1,
+        sort: String = "name",
+        order: String = "asc"
+    ): HubRequest {
+        val query = buildList {
+            if (sort != "name") add("sort=" + encode(sort))
+            if (order != "asc") add("order=" + encode(order))
+            if (page > 1) add("page=$page")
+        }
+        return HubRequest(
+            join(base, "/v1/library/" + encode(viewId) + "/items") +
+                if (query.isEmpty()) "" else "?" + query.joinToString("&")
+        )
+    }
+
+    fun libraryItem(base: String, itemId: String): HubRequest =
+        HubRequest(join(base, "/v1/library/items/" + encode(itemId)))
+
+    fun librarySeasons(base: String, seriesId: String): HubRequest =
+        HubRequest(join(base, "/v1/library/series/" + encode(seriesId) + "/seasons"))
+
+    fun libraryEpisodes(
+        base: String,
+        seriesId: String,
+        seasonId: String,
+        page: Int = 1
+    ): HubRequest = HubRequest(
+        join(base, "/v1/library/series/" + encode(seriesId) + "/episodes") +
+            "?seasonId=" + encode(seasonId) + if (page > 1) "&page=$page" else ""
+    )
+
+    fun librarySearch(base: String, query: String, page: Int = 1): HubRequest =
+        HubRequest(
+            join(base, "/v1/library/search") + "?q=" + encode(query) +
+                if (page > 1) "&page=$page" else ""
+        )
+
+    fun libraryFavorites(base: String, page: Int = 1): HubRequest =
+        HubRequest(join(base, "/v1/library/favorites") + if (page > 1) "?page=$page" else "")
+
+    fun libraryState(base: String, itemId: String): HubRequest =
+        HubRequest(join(base, "/v1/library/items/" + encode(itemId) + "/state"), method = "POST")
+
+    fun seriesPlayTarget(base: String, seriesId: String): HubRequest =
+        HubRequest(join(base, "/v1/library/series/" + encode(seriesId) + "/play-target"))
+
+    fun preparePlayback(base: String, itemId: String): HubRequest =
+        HubRequest(join(base, "/v1/playback/items/" + encode(itemId) + "/prepare"), method = "POST")
+
+    fun selectPlayback(base: String, sessionId: String): HubRequest =
+        HubRequest(join(base, "/v1/playback/sessions/" + encode(sessionId) + "/select"), method = "POST")
+
+    fun playbackEvent(base: String, sessionId: String): HubRequest =
+        HubRequest(join(base, "/v1/playback/sessions/" + encode(sessionId) + "/events"), method = "POST")
+
+    fun deletePlayback(base: String, sessionId: String): HubRequest =
+        HubRequest(join(base, "/v1/playback/sessions/" + encode(sessionId)), method = "DELETE")
+
+    fun offlineSelection(base: String, seriesId: String): HubRequest =
+        HubRequest(join(base, "/v1/offline/series/" + encode(seriesId) + "/selection"))
+
+    fun prepareOffline(base: String): HubRequest =
+        HubRequest(join(base, "/v1/offline/prepare"), method = "POST")
+
+    fun renewOffline(base: String, grantId: String): HubRequest =
+        HubRequest(join(base, "/v1/offline/grants/" + encode(grantId) + "/renew"), method = "POST")
+
+    fun syncOfflineProgress(base: String): HubRequest =
+        HubRequest(join(base, "/v1/offline/progress/sync"), method = "POST")
+
+    fun playbackResource(base: String, hubPath: String): String = join(base, hubPath)
+
     fun search(base: String, query: String, page: Int = 1): HubRequest {
         val params = buildString {
             append("q=").append(encode(query))
@@ -55,10 +139,18 @@ object HubEndpoints {
      * Interactive search. Slow by nature -- it asks every indexer -- which is
      * why the app gives it a screen of its own rather than a spinner in a menu.
      */
-    fun releases(base: String, key: String, season: Int = 0): HubRequest =
+    fun releases(base: String, key: String, season: Int = 0, episode: Int = 0): HubRequest =
         HubRequest(
             join(base, "/v1/media/" + encode(key) + "/releases") +
-                if (season > 0) "?season=$season" else ""
+                buildString {
+                    if (season > 0 || episode > 0) append("?season=$season")
+                    if (episode > 0) append("&episode=$episode")
+                }
+        )
+
+    fun releaseTargets(base: String, key: String, season: Int): HubRequest =
+        HubRequest(
+            join(base, "/v1/media/" + encode(key) + "/release-targets") + "?season=$season"
         )
 
     fun grab(base: String, key: String): HubRequest =
@@ -66,6 +158,14 @@ object HubEndpoints {
 
     fun activity(base: String, includeFinished: Boolean = false): HubRequest =
         HubRequest(join(base, "/v1/activity") + if (includeFinished) "?all=true" else "")
+
+    fun notifications(
+        base: String,
+        limits: com.pocketds.hub.settings.NotificationLimits = com.pocketds.hub.settings.NotificationLimits()
+    ): HubRequest = HubRequest(
+        join(base, "/v1/notifications") +
+            "?sonarrLimit=${limits.sonarr}&radarrLimit=${limits.radarr}&bazarrLimit=${limits.bazarr}"
+    )
 
     /**
      * Start or stop a transfer.

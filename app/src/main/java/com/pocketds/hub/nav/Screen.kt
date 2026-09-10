@@ -5,6 +5,8 @@ import android.view.View
 import android.view.ViewGroup
 import com.pocketds.hub.input.HorizontalMode
 import com.pocketds.hub.input.PadAction
+import com.pocketds.hub.model.PlaybackPrepareResponse
+import com.pocketds.hub.model.LibraryItem
 
 /**
  * One screen in the app.
@@ -33,6 +35,9 @@ interface Screen : StackScreen {
      *   genuinely handle differently.
      */
     fun onPad(action: PadAction): Boolean = false
+
+    /** Android's system Back action, including the Pocket DS edge-swipe gesture. */
+    fun onSystemBack(): Boolean = false
 
     /**
      * Put focus where this screen wants it to start.
@@ -68,6 +73,15 @@ interface Screen : StackScreen {
      */
     val horizontalMode: HorizontalMode get() = HorizontalMode.CONFINED
 
+    /** Full-screen media owns the whole display and hides the normal app chrome. */
+    val immersive: Boolean get() = false
+
+    /** Called before onHide when Android backgrounds the whole Activity. */
+    fun onAppBackgrounded() = Unit
+
+    /** Hide player chrome while Android renders this activity as a PiP window. */
+    fun onPictureInPictureModeChanged(active: Boolean) = Unit
+
     /**
      * Raw events, before the router turns them into intents.
      *
@@ -96,6 +110,8 @@ interface ScreenHost {
     fun push(screen: Screen)
     fun back(): Boolean
     fun switchSection(delta: Int)
+    /** Persist a Jellyfin profile and rebuild user-scoped screens and caches. */
+    fun selectJellyfinUser(id: String, name: String)
     /** A transient message in the status strip, not a system Toast. */
     fun notify(message: String)
     /** Redraw the hint bar, after the contextual actions change. */
@@ -111,6 +127,13 @@ interface ScreenHost {
      * @param watchUrl the full URL, for handing off to the YouTube app.
      */
     fun openTrailer(key: String, watchUrl: String, title: String)
+
+    fun playItem(itemId: String, startMode: String = "resume")
+    fun openPlaybackOptions(itemId: String, startMode: String = "resume")
+    fun playPrepared(plan: PlaybackPrepareResponse)
+    /** Queue a movie/episode, or open the series/season episode picker. */
+    fun downloadItem(item: LibraryItem, seasonId: String = "")
+    fun enterPictureInPicture(source: View): Boolean
 }
 
 /**

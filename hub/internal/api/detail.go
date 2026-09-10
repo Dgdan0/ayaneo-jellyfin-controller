@@ -197,6 +197,132 @@ func buildPipeline(info *jellyseerr.MediaInfo, mediaType string) Pipeline {
 	}
 }
 
+// refinePipelineWithActivity replaces Jellyseerr's delayed transfer snapshot
+// with the live *arr/qBittorrent join when both refer to the same monitored
+// movie or series. It deliberately leaves library availability with Jellyseerr
+// and Jellyfin; the activity services only know about the journey there.
+func refinePipelineWithActivity(
+	p Pipeline, mediaType string, externalServiceID int, ids MediaID, items []ActivityItem,
+) Pipeline {
+	service := "radarr"
+	if mediaType == "series" {
+		service = "sonarr"
+	}
+	var match *ActivityItem
+	for i := range items {
+		item := &items[i]
+		if item.Arr == nil || item.Arr.Service != service {
+			continue
+		}
+		id := item.Arr.MovieID
+		if mediaType == "series" {
+			id = item.Arr.SeriesID
+		}
+		idMatches := externalServiceID > 0 && id == externalServiceID
+		providerMatches := mediaType == "series" && ids.Tvdb > 0 && item.Arr.TvdbID == ids.Tvdb
+		providerMatches = providerMatches ||
+			(mediaType == "movie" && ids.Tmdb > 0 && item.Arr.TmdbID == ids.Tmdb)
+		if !idMatches && !providerMatches {
+			continue
+		}
+		if match == nil || stageRank(item.Stage) < stageRank(match.Stage) {
+			match = item
+		}
+	}
+	if match == nil {
+		return p
+	}
+
+	request := pipelineStage(&p, "request")
+	grab := pipelineStage(&p, "grab")
+	download := pipelineStage(&p, "download")
+	imported := pipelineStage(&p, "import")
+	if request != nil {
+		request.State = StageDone
+	}
+	if grab != nil {
+		grab.State = StageDone
+		grab.Detail = match.Title
+	}
+	if download == nil || imported == nil {
+		return p
+	}
+
+	download.Source = "download client"
+	download.Progress = match.Progress
+	detail := activityPipelineDetail(*match)
+	switch match.Stage {
+	case ActDownloading, ActQueued:
+		download.State = StageActive
+		download.Detail = detail
+		imported.State = StagePending
+		p.Summary = strings.Title(match.Stage) + " — " + detail
+	case ActStopped:
+		download.State = StageStuck
+		download.Detail = detail
+		imported.State = StagePending
+		p.Summary = "Download stopped — " + detail
+	case ActImporting:
+		download.State = StageDone
+		download.Progress = 1
+		download.Detail = "100%"
+		imported.State = StageActive
+		imported.Detail = activityProblem(*match)
+		p.Summary = "Importing into the library"
+	case ActStuck:
+		if match.Progress >= .999 {
+			download.State = StageDone
+			download.Progress = 1
+			imported.State = StageStuck
+			imported.Detail = activityProblem(*match)
+			p.Summary = "Import stuck"
+		} else {
+			download.State = StageStuck
+			download.Detail = activityProblem(*match)
+			imported.State = StagePending
+			p.Summary = "Download stuck"
+		}
+	case ActSeeding, ActDone:
+		download.State = StageDone
+		download.Progress = 1
+		download.Detail = "100%"
+	}
+	return p
+}
+
+func pipelineStage(p *Pipeline, id string) *Stage {
+	for i := range p.Stages {
+		if p.Stages[i].ID == id {
+			return &p.Stages[i]
+		}
+	}
+	return nil
+}
+
+func activityPipelineDetail(item ActivityItem) string {
+	parts := make([]string, 0, 2)
+	if item.Progress > 0 {
+		parts = append(parts, fmt.Sprintf("%.0f%%", item.Progress*100))
+	}
+	if item.SpeedBps > 0 {
+		parts = append(parts, fmt.Sprintf("%.1f MB/s", float64(item.SpeedBps)/1_000_000))
+	}
+	if len(parts) == 0 {
+		return strings.Title(item.Stage)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func activityProblem(item ActivityItem) string {
+	if item.Arr != nil && item.Arr.Problem != "" {
+		return item.Arr.Problem
+	}
+	if len(item.Warnings) > 0 {
+		return item.Warnings[0]
+	}
+	return activityPipelineDetail(item)
+}
+
 func describeTransfer(d jellyseerr.DownloadingItem) string {
 	parts := make([]string, 0, 3)
 	if p := d.Progress(); p >= 0 {

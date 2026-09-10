@@ -33,6 +33,23 @@ class HubEndpointsTest {
     }
 
     @Test
+    fun `home is one top-level request`() {
+        assertEquals("$base/v1/home", HubEndpoints.home(base).url)
+    }
+
+    @Test
+    fun `jellyfin scan is a scoped mutation`() {
+        val request = HubEndpoints.scanJellyfinLibrary(base)
+        assertEquals("$base/v1/manage/jellyfin/scan", request.url)
+        assertEquals("POST", request.method)
+    }
+
+    @Test
+    fun `users is one authenticated top-level request`() {
+        assertEquals("$base/v1/users", HubEndpoints.users(base).url)
+    }
+
+    @Test
     fun `spaces are percent-encoded, not turned into plus`() {
         // URLEncoder would produce '+', which is correct for a form body and
         // wrong here -- the hub reads the query value literally.
@@ -74,6 +91,13 @@ class HubEndpointsTest {
     }
 
     @Test
+    fun `an https address keeps its public custom port`() {
+        val publicBase = "https://myjellydan.duckdns.org:55886"
+        assertEquals(publicBase, HubEndpoints.normaliseBase("$publicBase/"))
+        assertEquals("$publicBase/v1/health", HubEndpoints.health(publicBase).url)
+    }
+
+    @Test
     fun `whitespace and trailing slashes are trimmed`() {
         assertEquals("http://host:1", HubEndpoints.normaliseBase("  host:1/  "))
     }
@@ -92,9 +116,134 @@ class HubEndpointsTest {
     }
 
     @Test
+    fun `library urls preserve opaque jellyfin ids`() {
+        val id = "0123456789abcdef0123456789abcdef"
+        assertEquals("$base/v1/library", HubEndpoints.library(base).url)
+        assertEquals("$base/v1/library/$id/items", HubEndpoints.libraryItems(base, id).url)
+        assertEquals("$base/v1/library/$id/items?page=3", HubEndpoints.libraryItems(base, id, 3).url)
+        assertEquals("$base/v1/library/items/$id", HubEndpoints.libraryItem(base, id).url)
+        assertEquals("$base/v1/library/series/$id/seasons", HubEndpoints.librarySeasons(base, id).url)
+    }
+
+    @Test
+    fun `library sort and direction are explicit when changed`() {
+        val id = "0123456789abcdef0123456789abcdef"
+        assertEquals(
+            "$base/v1/library/$id/items?sort=rating&order=desc&page=3",
+            HubEndpoints.libraryItems(base, id, 3, "rating", "desc").url
+        )
+        assertEquals(
+            "$base/v1/library/$id/items?order=desc",
+            HubEndpoints.libraryItems(base, id, 1, "name", "desc").url
+        )
+    }
+
+    @Test
+    fun `episode url names the season and later page`() {
+        val series = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        val season = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        assertEquals(
+            "$base/v1/library/series/$series/episodes?seasonId=$season&page=2",
+            HubEndpoints.libraryEpisodes(base, series, season, 2).url
+        )
+    }
+
+    @Test
+    fun `release urls distinguish a season from one episode`() {
+        val key = "tmdb:series:258230"
+        assertEquals(
+            "$base/v1/media/tmdb%3Aseries%3A258230/release-targets?season=1",
+            HubEndpoints.releaseTargets(base, key, 1).url
+        )
+        assertEquals(
+            "$base/v1/media/tmdb%3Aseries%3A258230/releases?season=1",
+            HubEndpoints.releases(base, key, 1).url
+        )
+        assertEquals(
+            "$base/v1/media/tmdb%3Aseries%3A258230/releases?season=1&episode=2",
+            HubEndpoints.releases(base, key, 1, 2).url
+        )
+    }
+
+    @Test
+    fun `library search favourites and state use their dedicated routes`() {
+        val item = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        assertEquals(
+            "$base/v1/library/search?q=star%20wars",
+            HubEndpoints.librarySearch(base, "star wars").url
+        )
+        assertEquals(
+            "$base/v1/library/search?q=star%20wars&page=2",
+            HubEndpoints.librarySearch(base, "star wars", 2).url
+        )
+        assertEquals("$base/v1/library/favorites", HubEndpoints.libraryFavorites(base).url)
+        assertEquals("$base/v1/library/favorites?page=4", HubEndpoints.libraryFavorites(base, 4).url)
+        val state = HubEndpoints.libraryState(base, item)
+        assertEquals("$base/v1/library/items/$item/state", state.url)
+        assertEquals("POST", state.method)
+    }
+
+    @Test
+    fun `playback urls preserve opaque item and session ids`() {
+        val item = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        val session = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        assertEquals(
+            "$base/v1/library/series/$item/play-target",
+            HubEndpoints.seriesPlayTarget(base, item).url
+        )
+        assertEquals(
+            "$base/v1/playback/items/$item/prepare",
+            HubEndpoints.preparePlayback(base, item).url
+        )
+        assertEquals(
+            "$base/v1/playback/sessions/$session/select",
+            HubEndpoints.selectPlayback(base, session).url
+        )
+        assertEquals(
+            "$base/v1/playback/sessions/$session/events",
+            HubEndpoints.playbackEvent(base, session).url
+        )
+        assertEquals(
+            "$base/v1/playback/sessions/$session",
+            HubEndpoints.deletePlayback(base, session).url
+        )
+        assertEquals(
+            "$base/v1/playback/sessions/$session/stream",
+            HubEndpoints.playbackResource(base, "/v1/playback/sessions/$session/stream")
+        )
+    }
+
+    @Test
+    fun `offline urls keep series and grant capabilities in path segments`() {
+        val series = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        val grant = "grant:one"
+        assertEquals(
+            "$base/v1/offline/series/$series/selection",
+            HubEndpoints.offlineSelection(base, series).url
+        )
+        assertEquals("$base/v1/offline/prepare", HubEndpoints.prepareOffline(base).url)
+        assertEquals("POST", HubEndpoints.prepareOffline(base).method)
+        assertEquals(
+            "$base/v1/offline/grants/grant%3Aone/renew",
+            HubEndpoints.renewOffline(base, grant).url
+        )
+        assertEquals("$base/v1/offline/progress/sync", HubEndpoints.syncOfflineProgress(base).url)
+    }
+
+    @Test
     fun `activity asks for running items only by default`() {
         val request = HubEndpoints.activity("http://hub:8791")
         assertEquals("http://hub:8791/v1/activity", request.url)
+        assertEquals("GET", request.method)
+    }
+
+    @Test
+    fun `notifications use their own read-only feed`() {
+        val request = HubEndpoints.notifications("http://hub:8791/")
+        assertEquals(
+            "http://hub:8791/v1/notifications?sonarrLimit=60&radarrLimit=20&bazarrLimit=40",
+            request.url
+        )
         assertEquals("GET", request.method)
     }
 

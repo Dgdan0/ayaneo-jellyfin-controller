@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"ayaneohub/internal/auth"
@@ -30,6 +31,14 @@ func TokenFrom(ctx context.Context) auth.Token {
 }
 
 type middleware func(http.Handler) http.Handler
+
+const (
+	// Media3 legitimately opens several ranges/segments and subtitle requests at
+	// once. Giving those session-owned routes their own budget prevents normal
+	// playback from consuming the much smaller interactive API allowance.
+	playbackTransportRPM   = 3600
+	playbackTransportBurst = 240
+)
 
 func chain(h http.Handler, ms ...middleware) http.Handler {
 	for i := len(ms) - 1; i >= 0; i-- {
@@ -180,7 +189,11 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		}
 		s.bans.Succeed(ip)
 
-		if !s.limiter.Allow(token.Label, now) {
+		limiter := s.limiter
+		if usesTransportRateLimit(r) {
+			limiter = s.playbackLimiter
+		}
+		if limiter == nil || !limiter.Allow(token.Label, now) {
 			writeError(w, r, http.StatusTooManyRequests, Error{
 				Code:              CodeRateLimited,
 				Message:           "slow down",
@@ -192,6 +205,11 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxToken, token)))
 	})
+}
+
+func usesTransportRateLimit(r *http.Request) bool {
+	return strings.HasPrefix(r.URL.Path, "/v1/playback/sessions/") ||
+		strings.HasPrefix(r.URL.Path, "/v1/offline/grants/")
 }
 
 // timeoutFor bounds a handler by the server-wide request budget, so one slow

@@ -106,6 +106,79 @@ func TestPipelineForSomethingDownloading(t *testing.T) {
 	}
 }
 
+func TestLiveActivityMovesAStaleGrabPipelineToDownloading(t *testing.T) {
+	seriesID := 42
+	info := &jellyseerr.MediaInfo{
+		Status: jellyseerr.StatusProcessing, ExternalServiceID: &seriesID,
+	}
+	base := buildPipeline(info, "series")
+	if stageByID(base, "grab").State != StageActive {
+		t.Fatal("test setup should begin with Jellyseerr still searching")
+	}
+	got := refinePipelineWithActivity(base, "series", seriesID, MediaID{}, []ActivityItem{{
+		Title: "The.Mentalist.S01-S08", Stage: ActDownloading, Progress: .37,
+		SpeedBps: 2_500_000,
+		Arr:      &ArrRef{Service: "sonarr", SeriesID: seriesID},
+	}})
+	if stageByID(got, "grab").State != StageDone {
+		t.Fatal("a live client transfer proves the grab completed")
+	}
+	download := stageByID(got, "download")
+	if download.State != StageActive || download.Progress != .37 {
+		t.Fatalf("download stage = %+v", download)
+	}
+	if got.Summary != "Downloading — 37% · 2.5 MB/s" {
+		t.Fatalf("Summary = %q", got.Summary)
+	}
+}
+
+func TestLiveCompletedTransferShowsImportInsteadOfGrab(t *testing.T) {
+	seriesID := 42
+	info := &jellyseerr.MediaInfo{
+		Status: jellyseerr.StatusProcessing, ExternalServiceID: &seriesID,
+	}
+	got := refinePipelineWithActivity(buildPipeline(info, "series"), "series", seriesID, MediaID{}, []ActivityItem{{
+		Stage: ActImporting, Progress: 1,
+		Arr: &ArrRef{Service: "sonarr", SeriesID: seriesID},
+	}})
+	if stageByID(got, "download").State != StageDone ||
+		stageByID(got, "import").State != StageActive {
+		t.Fatalf("pipeline = %+v", got)
+	}
+	if got.Summary != "Importing into the library" {
+		t.Fatalf("Summary = %q", got.Summary)
+	}
+}
+
+func TestActivityForAnotherSeriesDoesNotChangePipeline(t *testing.T) {
+	seriesID := 42
+	info := &jellyseerr.MediaInfo{
+		Status: jellyseerr.StatusProcessing, ExternalServiceID: &seriesID,
+	}
+	base := buildPipeline(info, "series")
+	got := refinePipelineWithActivity(base, "series", seriesID, MediaID{}, []ActivityItem{{
+		Stage: ActDownloading,
+		Arr:   &ArrRef{Service: "sonarr", SeriesID: 99},
+	}})
+	if stageByID(got, "grab").State != StageActive {
+		t.Fatalf("unrelated activity changed the pipeline: %+v", got)
+	}
+}
+
+func TestPipelineCanMatchSeriesAddedOutsideJellyseerrByTVDB(t *testing.T) {
+	info := &jellyseerr.MediaInfo{Status: jellyseerr.StatusProcessing}
+	got := refinePipelineWithActivity(
+		buildPipeline(info, "series"), "series", 0, MediaID{Tvdb: 82459},
+		[]ActivityItem{{
+			Stage: ActDownloading, Progress: .5,
+			Arr: &ArrRef{Service: "sonarr", SeriesID: 42, TvdbID: 82459},
+		}},
+	)
+	if stageByID(got, "download").State != StageActive {
+		t.Fatalf("TVDB fallback did not match the live Sonarr row: %+v", got)
+	}
+}
+
 func TestPipelineForSomethingAvailable(t *testing.T) {
 	info := &jellyseerr.MediaInfo{
 		Status:          jellyseerr.StatusAvailable,
@@ -130,6 +203,31 @@ func TestPipelineForAPartialSeries(t *testing.T) {
 	}
 	if p.Summary != "Some episodes available" {
 		t.Errorf("Summary = %q", p.Summary)
+	}
+}
+
+func TestJellyfinPresenceCorrectsDelayedAvailability(t *testing.T) {
+	series := refinePipelineWithLibrary(
+		buildPipeline(&jellyseerr.MediaInfo{Status: jellyseerr.StatusProcessing}, "series"),
+		"series",
+	)
+	if stageByID(series, "library").State != StageActive || series.Summary != "Some episodes available" {
+		t.Fatalf("series pipeline = %+v", series)
+	}
+
+	movie := refinePipelineWithLibrary(buildPipeline(nil, "movie"), "movie")
+	if stageByID(movie, "library").State != StageDone || movie.Summary != "In your library" {
+		t.Fatalf("movie pipeline = %+v", movie)
+	}
+
+	downloading := buildPipeline(&jellyseerr.MediaInfo{
+		Status:         jellyseerr.StatusProcessing,
+		DownloadStatus: []jellyseerr.DownloadingItem{{Size: 100, SizeLeft: 50}},
+	}, "series")
+	wantSummary := downloading.Summary
+	downloading = refinePipelineWithLibrary(downloading, "series")
+	if downloading.Summary != wantSummary {
+		t.Fatalf("active download summary changed from %q to %q", wantSummary, downloading.Summary)
 	}
 }
 

@@ -45,10 +45,11 @@ object Styler {
     fun cardBackground(
         context: Context,
         colors: PocketColors,
-        cornerDp: Float = 10f
+        cornerDp: Float = 10f,
+        baseFill: Int = colors.cardSurface
     ): StateListDrawable {
         val corner = dp(context, cornerDp)
-        val dark = KeyPressTint.isDarkSurface(colors.cardSurface)
+        val dark = KeyPressTint.isDarkSurface(baseFill)
 
         fun face(fill: Int, strokeWidth: Int = 0, strokeColor: Int = 0) =
             GradientDrawable().apply {
@@ -61,13 +62,13 @@ object Styler {
         return StateListDrawable().apply {
             addState(
                 intArrayOf(android.R.attr.state_pressed),
-                face(KeyPressTint.pressed(colors.cardSurface, dark))
+                face(KeyPressTint.pressed(baseFill, dark))
             )
             addState(
                 intArrayOf(android.R.attr.state_focused),
                 face(colors.focusFill, dp(context, 3f).toInt(), colors.focusRing)
             )
-            addState(intArrayOf(), face(colors.cardSurface))
+            addState(intArrayOf(), face(baseFill))
         }
     }
 

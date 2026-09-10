@@ -183,6 +183,34 @@ func (c *Client) SeasonReleases(ctx context.Context, seriesID, season int) ([]Re
 	})
 }
 
+// Episodes returns Sonarr's canonical episode records for one season. Release
+// searches use the returned id rather than guessing scope from a release name.
+func (c *Client) Episodes(ctx context.Context, seriesID, season int) ([]Episode, error) {
+	if c.kind != Sonarr {
+		return nil, fmt.Errorf("Episodes is Sonarr-only, called on %s", c.kind)
+	}
+	var out []Episode
+	query := url.Values{
+		"seriesId":      {strconv.Itoa(seriesID)},
+		"seasonNumber":  {strconv.Itoa(season)},
+		"includeImages": {"false"},
+	}
+	if err := c.base.GetJSON(ctx, "/api/v3/episode", query, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// EpisodeReleases searches for one Sonarr episode. Sonarr may still return a
+// season pack that contains it; the API layer labels those as outside the
+// selected scope before the app can grab one accidentally.
+func (c *Client) EpisodeReleases(ctx context.Context, episodeID int) ([]Release, error) {
+	if c.kind != Sonarr {
+		return nil, fmt.Errorf("EpisodeReleases is Sonarr-only, called on %s", c.kind)
+	}
+	return c.Releases(ctx, url.Values{"episodeId": {strconv.Itoa(episodeID)}})
+}
+
 // Grab hands one release back for download.
 //
 // Only the guid and indexer id are sent: both *arrs look the release up in the

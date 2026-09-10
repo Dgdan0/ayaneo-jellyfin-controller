@@ -39,6 +39,7 @@ class PosterCardView(
     private val subtitle: TextView
     private val progressBar: android.view.View
     private val compactCard: Boolean
+    private var boundProgress = 0.0
 
     init {
         orientation = VERTICAL
@@ -88,6 +89,9 @@ class PosterCardView(
         }
         posterWrap.addView(progressBar)
         addView(posterWrap, LayoutParams(MATCH, WRAP))
+        poster.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updateProgressWidth()
+        }
 
         title = TextView(context).apply {
             textSize = if (compact) 11f else 13f
@@ -110,25 +114,54 @@ class PosterCardView(
         compactCard = compact
     }
 
-    fun bind(hit: SearchHit, imageLoader: ImageLoader, imageUrl: (String) -> String) {
+    fun bind(hit: SearchHit, imageLoader: ImageLoader, imageUrl: (String) -> String) =
+        bind(hit, imageLoader, imageUrl, showAvailability = true)
+
+    fun bind(
+        hit: SearchHit,
+        imageLoader: ImageLoader,
+        imageUrl: (String) -> String,
+        showAvailability: Boolean
+    ) {
         title.text = hit.media.title
         subtitle.text = hit.subtitle
         if (compactCard) subtitle.visibility = GONE
 
         val availability = Availability.fromWire(hit.availability)
-        if (availability.label.isEmpty()) {
-            badge.visibility = GONE
-        } else {
+        val libraryBadge = when {
+            hit.played -> "✓"
+            hit.unplayedCount > 0 -> hit.unplayedCount.toString()
+            hit.favorite -> "★"
+            else -> ""
+        }
+        if (!showAvailability && libraryBadge.isNotEmpty()) {
+            badge.visibility = VISIBLE
+            badge.text = libraryBadge
+            badge.background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(
+                    if (hit.played) this@PosterCardView.colors.badgeAvailable
+                    else this@PosterCardView.colors.accent
+                )
+            }
+            badge.minWidth = Styler.dpInt(context, 24f)
+            badge.gravity = Gravity.CENTER
+        } else if (showAvailability && availability.label.isNotEmpty()) {
             badge.visibility = VISIBLE
             badge.text = availability.label
             badge.setBackgroundColor(badgeColour(availability))
+        } else {
+            badge.visibility = GONE
         }
 
-        if (hit.progress > 0.0) {
+        boundProgress = if (hit.played) 0.0 else hit.progress.coerceIn(0.0, 1.0)
+        if (boundProgress > 0.0) {
             progressBar.visibility = VISIBLE
-            (progressBar.layoutParams as FrameLayout.LayoutParams).width =
-                (poster.width * hit.progress).toInt().coerceAtLeast(Styler.dpInt(context, 2f))
-            progressBar.requestLayout()
+            updateProgressWidth()
+            // RecyclerView normally binds before the poster has a measured
+            // width. Recompute after layout so 50% is really half the poster,
+            // rather than the old two-pixel fallback.
+            poster.post(::updateProgressWidth)
         } else {
             progressBar.visibility = GONE
         }
@@ -145,6 +178,17 @@ class PosterCardView(
                     .bitmapConfig(Bitmap.Config.RGB_565)
                     .build()
             )
+        }
+    }
+
+    private fun updateProgressWidth() {
+        if (boundProgress <= 0.0 || poster.width <= 0) return
+        val params = progressBar.layoutParams as FrameLayout.LayoutParams
+        val next = (poster.width * boundProgress).toInt()
+            .coerceAtLeast(Styler.dpInt(context, 2f))
+        if (params.width != next) {
+            params.width = next
+            progressBar.layoutParams = params
         }
     }
 

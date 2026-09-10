@@ -12,6 +12,7 @@
 #                               accessibility service. This is the A/B test for
 #                               "is something eating our face buttons?"
 #   scripts/dev.sh seed         push hub URL + token from scripts/dev.env
+#   scripts/dev.sh tunnel       reconnect ADB and restore the hub reverse tunnel
 #   scripts/dev.sh log          follow our own trace lines only
 #   scripts/dev.sh log-all      follow everything except known vendor spam
 #   scripts/dev.sh trace        one-shot: the last 40 of our trace lines
@@ -42,11 +43,15 @@ A11Y_BACKUP="$ROOT/.dev-a11y-backup"
 resolve_device() {
   if [[ -n "${POCKETDS_DEVICE:-}" ]]; then echo "$POCKETDS_DEVICE"; return; fi
   local found
-  found="$("$ADB" devices | awk '/_adb-tls-connect|^emulator|:[0-9]+\tdevice/ {print $1}' | head -1)"
+  # Wireless mDNS serials may contain spaces (for example a duplicate "(2)"
+  # suffix). ADB separates the serial and state with a tab, so preserve the
+  # complete serial instead of taking the first whitespace-delimited word.
+  found="$("$ADB" devices | tr -d '\r' | awk -F '\t' '$2 == "device" {print $1; exit}')"
   if [[ -z "$found" ]]; then
-    "$ADB" mdns services 2>/dev/null | awk '/_adb-tls-connect/ {print $1}' | head -1 \
-      | while read -r name; do "$ADB" connect "$name" >/dev/null 2>&1 || true; done
-    found="$("$ADB" devices | awk '/_adb-tls-connect|:[0-9]+\tdevice/ {print $1}' | head -1)"
+    "$ADB" mdns services 2>/dev/null | tr -d '\r' \
+      | awk -F '\t' '$2 == "_adb-tls-connect._tcp" {print $3; exit}' \
+      | while read -r endpoint; do "$ADB" connect "$endpoint" >/dev/null 2>&1 || true; done
+    found="$("$ADB" devices | tr -d '\r' | awk -F '\t' '$2 == "device" {print $1; exit}')"
   fi
   if [[ -z "$found" ]]; then
     echo "no device found. Turn on Settings > Developer options > Wireless debugging" >&2
@@ -56,6 +61,14 @@ resolve_device() {
 }
 DEVICE="$(resolve_device)"
 adbx() { "$ADB" -s "$DEVICE" "$@"; }
+ensure_hub_tunnel() {
+  # Manage opens these loopback web dashboards in the device browser. Reversing
+  # them beside the hub port keeps that working after wireless ADB reconnects.
+  local port
+  for port in 8791 8096 8920 5055 7878 8989 6767 8080; do
+    adbx reverse "tcp:$port" "tcp:$port" >/dev/null
+  done
+}
 
 # The vendor's screencap wants the display's uniqueId, not the 0/2 index the
 # rest of the framework uses. Top screen is the default, so it needs no flag.
@@ -87,6 +100,7 @@ case "${1:-deploy}" in
     # manager and reports the activity does not exist.
     sleep 1
     echo "== launch =="
+    ensure_hub_tunnel
     adbx shell am start -n "$ACTIVITY" >/dev/null
     sleep 1
     "$0" state
@@ -167,10 +181,16 @@ case "${1:-deploy}" in
     fi
     # shellcheck disable=SC1090
     source "$ENV_FILE"
+    ensure_hub_tunnel
     adbx shell am start -n "$ACTIVITY" \
       -e hub_url "${HUB_URL:?set HUB_URL in scripts/dev.env}" \
       -e hub_token "${HUB_TOKEN:?set HUB_TOKEN in scripts/dev.env}" >/dev/null
     echo "seeded ${HUB_URL}"
+    ;;
+
+  tunnel)
+    ensure_hub_tunnel
+    echo "hub and service tunnels ready on 8791, 8096, 8920, 5055, 7878, 8989, 6767 and 8080"
     ;;
 
   log)
@@ -209,6 +229,7 @@ case "${1:-deploy}" in
     ;;
 
   state)
+    ensure_hub_tunnel
     echo "device   : $DEVICE"
     echo "resumed  : $(adbx shell dumpsys activity activities \
       | grep -m1 topResumedActivity | tr -d '\r' | sed 's/^ *//')"

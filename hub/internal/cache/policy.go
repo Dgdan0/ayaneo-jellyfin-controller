@@ -57,6 +57,11 @@ var (
 
 	// Service health, for the same reason.
 	Health = Spec{Fresh: 10 * time.Second, Stale: 0, IfError: 0}
+
+	// Recent service events and current service warnings. A short fresh window
+	// collapses the rail badge and open-screen poll into one upstream fetch;
+	// stale-if-error keeps the previous timeline visible during a brief outage.
+	Notifications = Spec{Fresh: 15 * time.Second, Stale: 45 * time.Second, IfError: 10 * time.Minute}
 )
 
 // Images are handled separately and much more aggressively.

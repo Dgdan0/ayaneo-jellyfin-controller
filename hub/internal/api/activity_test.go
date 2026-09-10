@@ -42,7 +42,7 @@ func TestTheArrToTorrentJoinIsCaseInsensitive(t *testing.T) {
 	}}}
 
 	out := buildActivity(sources(torrents, queues), false, []string{control})
-	item := itemByID(out, "sonarr:queue:7")
+	item := itemByID(out, "qbit:abc123def456")
 	if item == nil {
 		t.Fatal("the queue row vanished")
 	}
@@ -77,7 +77,7 @@ func TestHybridTorrentsMatchOnEitherInfohash(t *testing.T) {
 	}}
 	queues := map[string][]arr.QueueRecord{"radarr": {{ID: 1, DownloadID: "V1HASH"}}}
 	out := buildActivity(sources(torrents, queues), false, nil)
-	if itemByID(out, "radarr:queue:1").MatchConfidence != "exact" {
+	if itemByID(out, "qbit:v2hash").MatchConfidence != "exact" {
 		t.Fatal("a v1 infohash should have matched")
 	}
 }
@@ -149,12 +149,41 @@ func TestAnArrWarningMakesTheRowStuckEvenAtFullProgress(t *testing.T) {
 		}},
 	}}}
 	out := buildActivity(sources(torrents, queues), false, nil)
-	item := itemByID(out, "sonarr:queue:9")
+	item := itemByID(out, "qbit:aaa")
 	if item.Stage != ActStuck {
 		t.Fatalf("Stage = %q -- 100%% downloaded but not importable is stuck", item.Stage)
 	}
 	if item.Arr.Problem == "" {
 		t.Fatal("the reason must be carried through, not just the state")
+	}
+}
+
+func TestEpisodeRowsSharingOneTorrentBecomeOneSeriesPack(t *testing.T) {
+	torrents := []qbittorrent.Torrent{{
+		Hash: "packhash", Name: "The.Mentalist.S01-S08", State: "downloading",
+		Progress: .4, Size: 40_000, AmountLeft: 24_000,
+	}}
+	series := &arr.Series{Title: "The Mentalist"}
+	queues := map[string][]arr.QueueRecord{"sonarr": {
+		{ID: 11, DownloadID: "PACKHASH", Title: "The.Mentalist.S01-S08", Series: series,
+			Episode: &arr.Episode{SeasonNumber: 1, EpisodeNumber: 1}},
+		{ID: 12, DownloadID: "PACKHASH", Title: "The.Mentalist.S01-S08", Series: series,
+			Episode: &arr.Episode{SeasonNumber: 1, EpisodeNumber: 2}},
+	}}
+
+	out := buildActivity(sources(torrents, queues), false, []string{control})
+	if len(out.Items) != 1 {
+		t.Fatalf("got %d rows for one torrent, want one", len(out.Items))
+	}
+	item := out.Items[0]
+	if item.ID != "qbit:packhash" {
+		t.Fatalf("ID = %q, want the controllable qBittorrent id", item.ID)
+	}
+	if item.MediaTitle != "The Mentalist" || item.QueueItems != 2 {
+		t.Fatalf("pack metadata = %+v", item)
+	}
+	if !contains(item.Actions, "stop") {
+		t.Fatalf("Actions = %v, want stop", item.Actions)
 	}
 }
 
@@ -254,6 +283,24 @@ func TestAStoppedTorrentOffersStartNotStop(t *testing.T) {
 	actions := out.Items[0].Actions
 	if !contains(actions, "start") || contains(actions, "stop") {
 		t.Fatalf("Actions = %v", actions)
+	}
+}
+
+func TestStoppedTorrentWithAnImportErrorStillOffersStart(t *testing.T) {
+	torrents := []qbittorrent.Torrent{{
+		Hash: "aaaaaaaaaaaaaaaaaaaa", Name: "Pack", State: "stoppedUP", Progress: 1,
+	}}
+	queues := map[string][]arr.QueueRecord{"sonarr": {{
+		ID: 9, DownloadID: "AAAAAAAAAAAAAAAAAAAA", Status: "completed",
+		TrackedDownloadStatus: "warning", TrackedDownloadState: "importPending",
+	}}}
+	out := buildActivity(sources(torrents, queues), false, []string{control})
+	item := out.Items[0]
+	if item.Stage != ActStuck || item.ClientStage != ActStopped {
+		t.Fatalf("stages = displayed %q, client %q", item.Stage, item.ClientStage)
+	}
+	if !contains(item.Actions, "start") || contains(item.Actions, "stop") {
+		t.Fatalf("Actions = %v", item.Actions)
 	}
 }
 

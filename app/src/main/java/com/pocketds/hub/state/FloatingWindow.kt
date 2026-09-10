@@ -26,10 +26,10 @@ data class WindowBounds(val left: Int, val top: Int, val width: Int, val height:
  * nearest corner on release, so both input paths get the behaviour that suits
  * them and there is only one piece of state.
  *
- * Pure, so the awkward parts — clamping to the parent, keeping a 16:9 shape,
- * what "down" means when you are already at the bottom — are tested on the JVM
- * rather than discovered by nudging a real window into a corner it cannot
- * escape.
+ * Pure, so the awkward parts — clamping to the safe content area, keeping the
+ * video viewport at 16:9 while the toolbar sits above it, and what "down"
+ * means at the bottom — are tested on the JVM rather than discovered by
+ * nudging a real window into a corner it cannot escape.
  */
 class FloatingWindow(
     /** Widths as a percentage of the parent, smallest first. */
@@ -50,27 +50,46 @@ class FloatingWindow(
      *   a video letterboxes itself and a border around black is just a smaller
      *   picture.
      */
-    fun bounds(parentWidth: Int, parentHeight: Int, marginPx: Int): WindowBounds {
+    fun bounds(
+        parentWidth: Int,
+        parentHeight: Int,
+        marginPx: Int,
+        chromeHeightPx: Int = 0,
+        safeLeftPx: Int = 0,
+        safeTopPx: Int = 0,
+        safeRightPx: Int = 0,
+        safeBottomPx: Int = 0
+    ): WindowBounds {
         if (parentWidth <= 0 || parentHeight <= 0) return WindowBounds(0, 0, 0, 0)
         if (fullscreen) return WindowBounds(0, 0, parentWidth, parentHeight)
 
         val percent = widthPercents[sizeStep.coerceIn(0, widthPercents.lastIndex)]
-        var width = parentWidth * percent / 100
-        var height = width * 9 / 16
+        val availableWidth = (parentWidth - safeLeftPx - safeRightPx).coerceAtLeast(1)
+        val availableHeight = (parentHeight - safeTopPx - safeBottomPx).coerceAtLeast(1)
+        // A tiny host may not have room for two full margins. Reduce them
+        // symmetrically so the returned rectangle still stays inside its safe
+        // area rather than making a negative maximum size.
+        val marginX = marginPx.coerceAtMost((availableWidth - 1) / 2)
+        val marginY = marginPx.coerceAtMost((availableHeight - 1) / 2)
+        val maxWidth = (availableWidth - marginX * 2).coerceAtLeast(1)
+        val maxHeight = (availableHeight - marginY * 2).coerceAtLeast(1)
+        var width = (availableWidth * percent / 100).coerceIn(1, maxWidth)
+        var videoHeight = (width * 9 / 16).coerceAtLeast(1)
+        var height = videoHeight + chromeHeightPx
 
         // A 16:9 window can be too tall for a short parent long before it is too
         // wide -- this screen is 853x456dp, so the height is the binding
         // constraint at the larger sizes.
-        val maxHeight = parentHeight - marginPx * 2
-        if (height > maxHeight && maxHeight > 0) {
+        if (height > maxHeight) {
+            videoHeight = (maxHeight - chromeHeightPx).coerceAtLeast(1)
+            width = (videoHeight * 16 / 9).coerceIn(1, maxWidth)
             height = maxHeight
-            width = height * 16 / 9
         }
-        width = width.coerceAtMost(parentWidth - marginPx * 2).coerceAtLeast(1)
-        height = height.coerceAtLeast(1)
 
-        val left = if (corner.isLeft) marginPx else parentWidth - width - marginPx
-        val top = if (corner.isTop) marginPx else parentHeight - height - marginPx
+        val left = if (corner.isLeft) safeLeftPx + marginX
+            else parentWidth - safeRightPx - width - marginX
+        val top = if (corner.isTop) safeTopPx + marginY
+            else parentHeight - safeBottomPx - height - marginY
         return WindowBounds(left.coerceAtLeast(0), top.coerceAtLeast(0), width, height)
     }
 
@@ -107,10 +126,19 @@ class FloatingWindow(
     }
 
     /** Snap to whichever corner a dragged position is nearest. */
-    fun snapTo(centerX: Int, centerY: Int, parentWidth: Int, parentHeight: Int): Boolean {
+    fun snapTo(
+        centerX: Int,
+        centerY: Int,
+        parentWidth: Int,
+        parentHeight: Int,
+        safeLeftPx: Int = 0,
+        safeTopPx: Int = 0,
+        safeRightPx: Int = 0,
+        safeBottomPx: Int = 0
+    ): Boolean {
         if (fullscreen || parentWidth <= 0 || parentHeight <= 0) return false
-        val left = centerX < parentWidth / 2
-        val top = centerY < parentHeight / 2
+        val left = centerX < safeLeftPx + (parentWidth - safeLeftPx - safeRightPx) / 2
+        val top = centerY < safeTopPx + (parentHeight - safeTopPx - safeBottomPx) / 2
         val next = when {
             top && left -> Corner.TOP_LEFT
             top -> Corner.TOP_RIGHT

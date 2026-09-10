@@ -77,6 +77,7 @@ type Base struct {
 	name    string
 	baseURL *url.URL
 	client  *http.Client
+	stream  *http.Client
 	auth    Authenticator
 	timeout time.Duration
 	headers map[string]string
@@ -126,8 +127,28 @@ func New(opts Options) (*Base, error) {
 		headers: opts.Headers,
 		maxBody: maxBody,
 		client:  clientFor(opts.InsecureSkipVerify, timeout),
-		log:     slog.With("service", opts.Name),
+		// A streaming response can legitimately remain open for hours. The
+		// request context supplied by the handler is its lifetime; applying the
+		// adapter's short JSON timeout here would cut every movie off after a few
+		// seconds.
+		stream: clientFor(opts.InsecureSkipVerify, 0),
+		log:    slog.With("service", opts.Name),
 	}, nil
+}
+
+// WithHeaders returns a shallow copy that adds request headers without
+// changing the shared transport. Jellyfin playback uses this for its
+// MediaBrowser device identity, while the API key remains owned by auth.
+func (b *Base) WithHeaders(headers map[string]string) *Base {
+	copied := *b
+	copied.headers = make(map[string]string, len(b.headers)+len(headers))
+	for name, value := range b.headers {
+		copied.headers[name] = value
+	}
+	for name, value := range headers {
+		copied.headers[name] = value
+	}
+	return &copied
 }
 
 func (b *Base) Name() string { return b.name }
@@ -155,6 +176,41 @@ func (b *Base) GetJSON(ctx context.Context, path string, query url.Values, out a
 
 func (b *Base) PostJSON(ctx context.Context, path string, body, out any) error {
 	return b.do(ctx, http.MethodPost, path, nil, body, out)
+}
+
+// Open starts an authenticated upstream request and leaves the response body
+// open for the caller to stream. It deliberately has no adapter timeout: the
+// caller's context owns the transfer. The caller must close the body.
+func (b *Base) Open(
+	ctx context.Context, method, path string, query url.Values, headers http.Header,
+) (*http.Response, error) {
+	target := *b.baseURL
+	target.Path = strings.TrimRight(b.baseURL.Path, "/") + "/" + strings.TrimLeft(path, "/")
+	if query != nil {
+		target.RawQuery = encodeQuery(query)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target.String(), nil)
+	if err != nil {
+		return nil, &Error{Service: b.name, Kind: KindUnclassified, Err: err}
+	}
+	for name, value := range b.headers {
+		req.Header.Set(name, value)
+	}
+	for name, values := range headers {
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
+	}
+	if b.auth != nil {
+		if err := b.auth.Apply(req); err != nil {
+			return nil, &Error{Service: b.name, Kind: KindAuth, Err: err}
+		}
+	}
+	resp, err := b.stream.Do(req)
+	if err != nil {
+		return nil, &Error{Service: b.name, Kind: kindForTransport(err), Err: err}
+	}
+	return resp, nil
 }
 
 func (b *Base) do(

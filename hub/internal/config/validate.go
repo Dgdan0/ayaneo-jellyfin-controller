@@ -207,6 +207,24 @@ func (c *Config) validateServices() error {
 				Fix:     "one of: " + strings.Join(KnownServices, ", "),
 			}
 		}
+		if svc.WebURL != "" {
+			parsed, err := url.Parse(svc.WebURL)
+			if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+				return &Error{
+					Path:    "services." + name + ".web_url",
+					Problem: fmt.Sprintf("%q is not an absolute http(s) URL", svc.WebURL),
+					Fix:     "set the address that opens from the handheld browser, including http:// or https://",
+				}
+			}
+			if parsed.User != nil {
+				return &Error{
+					Path:    "services." + name + ".web_url",
+					Problem: "must not contain a username or password",
+					Fix:     "use the service login page and let the browser store its own session",
+				}
+			}
+		}
+
 		if !svc.Enabled {
 			continue
 		}

@@ -14,9 +14,9 @@ import (
 
 // handleSearch is the app's entry point for "I want to watch X".
 //
-// Backed entirely by Jellyseerr, which annotates every result with its own
-// mediaInfo -- so "you already have this" and "this is 63% downloaded" come back
-// in the same round trip as the search itself. No other adapter is involved.
+// Jellyseerr supplies discovery metadata and its request state. The in-memory
+// Jellyfin title index then corrects delayed library availability without an
+// extra upstream round trip.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	if query == "" {
@@ -74,7 +74,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if result.MediaType != "movie" && result.MediaType != "tv" {
 			continue
 		}
-		out.Results = append(out.Results, hitFrom(result, scopes, imagePrefix))
+		hit := hitFrom(result, scopes, imagePrefix)
+		out.Results = append(out.Results, s.enrichHitWithLibrary(hit, scopes))
 	}
 
 	// Reordered, not filtered. TMDB ranks on popularity-weighted relevance,

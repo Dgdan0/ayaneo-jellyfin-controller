@@ -1,12 +1,16 @@
 package com.pocketds.hub.ui
 
 import android.annotation.SuppressLint
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Rect
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.FrameLayout
@@ -39,6 +43,8 @@ class FloatingPlayerView(
     private val colors: PocketColors,
     private val onClose: () -> Unit,
     private val onOpenExternally: (String) -> Unit,
+    /** Bounds of the content layer, relative to this view's parent. */
+    private val safeArea: () -> Rect,
     /** Called whenever position or size changed, so the hint bar can relabel. */
     private val onChanged: () -> Unit
 ) : FrameLayout(context) {
@@ -46,8 +52,9 @@ class FloatingPlayerView(
     val window = FloatingWindow()
 
     private val web: WebView
+    private val shell: LinearLayout
+    private val shellBackground: android.graphics.drawable.GradientDrawable
     private val titleView: TextView
-    private val hintView: TextView
     private val loading: TextView
     private var videoUrl: String = ""
     private var videoKey: String = ""
@@ -55,41 +62,42 @@ class FloatingPlayerView(
 
     /** Drag state, in parent coordinates. */
     private var dragging = false
+    private var dragCandidate = false
     private var dragStartX = 0f
     private var dragStartY = 0f
     private var dragOffsetX = 0f
     private var dragOffsetY = 0f
     private var draggedLeft = 0
     private var draggedTop = 0
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private var boundsAnimator: ValueAnimator? = null
 
     init {
         visibility = View.GONE
-        // Above every screen, and above the hint bar it partially overlaps.
-        elevation = Styler.dp(context, 16f)
+        // Above every screen; floating geometry keeps it inside the content.
+        elevation = Styler.dp(context, 18f)
 
-        val frame = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            // Qualified: GradientDrawable has a `colors` property of its own.
-            background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = Styler.dp(context, 10f)
-                setColor(Color.BLACK)
-                setStroke(
-                    Styler.dpInt(context, 2f),
-                    this@FloatingPlayerView.colors.focusRing
-                )
-            }
-            clipToOutline = true
+        shellBackground = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = Styler.dp(context, 12f)
+            setColor(Color.BLACK)
+            setStroke(Styler.dpInt(context, 1f), Color.TRANSPARENT)
         }
-        addView(frame, LayoutParams(MATCH, MATCH))
+        shell = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = shellBackground
+            clipToOutline = true
+            outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+            elevation = Styler.dp(context, 12f)
+        }
+        addView(shell, LayoutParams(MATCH, MATCH))
 
         val bar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(colors.stripBackground)
-            val h = Styler.dpInt(context, 8f)
-            setPadding(h, h / 2, h / 2, h / 2)
+            setPadding(Styler.dpInt(context, 10f), 0, Styler.dpInt(context, 2f), 0)
         }
-        frame.addView(bar, LinearLayout.LayoutParams(MATCH, WRAP))
+        shell.addView(bar, LinearLayout.LayoutParams(MATCH, toolbarHeight()))
 
         titleView = TextView(context).apply {
             textSize = 11f
@@ -102,9 +110,9 @@ class FloatingPlayerView(
         // Real controls for a pointer, labelled for everyone. The gamepad drives
         // the same actions through PadAction, so there is one implementation of
         // each and no touch-only parallel UI.
-        bar.addView(chip("⤢") { toggleFullscreen() })
-        bar.addView(chip("↗") { if (videoUrl.isNotEmpty()) onOpenExternally(videoUrl) })
-        bar.addView(chip("✕") { onClose() })
+        bar.addView(chip("⛶", "Toggle fullscreen") { toggleFullscreen() })
+        bar.addView(chip("↗", "Open in YouTube") { if (videoUrl.isNotEmpty()) onOpenExternally(videoUrl) })
+        bar.addView(chip("×", "Close trailer") { onClose() })
 
         web = WebView(context).apply {
             setBackgroundColor(Color.BLACK)
@@ -164,16 +172,7 @@ class FloatingPlayerView(
             gravity = Gravity.CENTER
         }
         stack.addView(loading, LayoutParams(MATCH, MATCH))
-        frame.addView(stack, LinearLayout.LayoutParams(MATCH, 0, 1f))
-
-        hintView = TextView(context).apply {
-            textSize = 9f
-            setTextColor(colors.mutedText)
-            setBackgroundColor(colors.stripBackground)
-            gravity = Gravity.CENTER
-            setPadding(0, Styler.dpInt(context, 2f), 0, Styler.dpInt(context, 2f))
-        }
-        frame.addView(hintView, LinearLayout.LayoutParams(MATCH, WRAP))
+        shell.addView(stack, LinearLayout.LayoutParams(MATCH, 0, 1f))
     }
 
     val isOpen: Boolean get() = visibility == View.VISIBLE
@@ -201,7 +200,7 @@ class FloatingPlayerView(
             "utf-8",
             null
         )
-        applyBounds()
+        applyBounds(animate = false)
     }
 
     /**
@@ -318,7 +317,7 @@ class FloatingPlayerView(
             is com.pocketds.hub.input.PadAction.Step -> {
                 val moved = window.nudge(action.direction)
                 if (moved) {
-                    applyBounds()
+                    applyBounds(animate = true)
                     onChanged()
                 }
                 // Consumed either way: while the trailer has control, a
@@ -341,7 +340,7 @@ class FloatingPlayerView(
                 if (!window.cycleSize(1)) {
                     while (window.cycleSize(-1)) Unit
                 }
-                applyBounds()
+                applyBounds(animate = true)
                 onChanged()
                 true
             }
@@ -351,30 +350,62 @@ class FloatingPlayerView(
 
     fun toggleFullscreen() {
         window.toggleFullscreen()
-        applyBounds()
+        applyBounds(animate = true)
         onChanged()
     }
 
-    fun setControlHint(text: String) {
-        hintView.text = text
-        hintView.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+    fun setControlMode(active: Boolean) {
+        shellBackground.setStroke(
+            Styler.dpInt(context, if (active) 2f else 1f),
+            if (active) colors.focusRing else Color.TRANSPARENT
+        )
+        shell.background = shellBackground
     }
 
     /** Re-read the geometry. Call after the parent resizes. */
-    fun applyBounds() {
+    fun applyBounds(animate: Boolean = false) {
         val parent = parent as? ViewGroup ?: return
         if (parent.width == 0) {
-            post { applyBounds() }
+            post { applyBounds(animate) }
             return
         }
         val margin = Styler.dpInt(context, 12f)
-        val bounds = window.bounds(parent.width, parent.height, margin)
+        val safe = safeArea().takeIf { it.width() > 0 && it.height() > 0 }
+            ?: Rect(0, 0, parent.width, parent.height)
+        val target = window.bounds(
+            parent.width, parent.height, margin, toolbarHeight(),
+            safeLeftPx = safe.left,
+            safeTopPx = safe.top,
+            safeRightPx = parent.width - safe.right,
+            safeBottomPx = parent.height - safe.bottom
+        )
+        val current = com.pocketds.hub.state.WindowBounds(left, top, width, height)
+        boundsAnimator?.cancel()
+        if (!animate || current.width <= 0 || current.height <= 0) {
+            setBounds(target)
+            return
+        }
+        boundsAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 180L
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { animation ->
+                val f = animation.animatedFraction
+                setBounds(com.pocketds.hub.state.WindowBounds(
+                    lerp(current.left, target.left, f),
+                    lerp(current.top, target.top, f),
+                    lerp(current.width, target.width, f),
+                    lerp(current.height, target.height, f)
+                ))
+            }
+            start()
+        }
+    }
+
+    private fun setBounds(bounds: com.pocketds.hub.state.WindowBounds) {
         layoutParams = (layoutParams as? LayoutParams ?: LayoutParams(0, 0)).apply {
-            width = bounds.width
-            height = bounds.height
+            width = bounds.width; height = bounds.height
             gravity = Gravity.TOP or Gravity.START
-            leftMargin = bounds.left
-            topMargin = bounds.top
+            leftMargin = bounds.left; topMargin = bounds.top
         }
         requestLayout()
     }
@@ -382,24 +413,27 @@ class FloatingPlayerView(
     /**
      * Free dragging for a pointer, snapping to the nearest corner on release.
      *
-     * Intercepted rather than handled on a child so a drag that starts anywhere
-     * on the window works, including over the WebView -- which would otherwise
-     * swallow the gesture as a tap on the video.
+     * The shell claims a gesture only in the non-button part of the title bar.
+     * It owns that gesture from DOWN so Android keeps delivering events, but no
+     * movement begins until the pointer crosses touch slop.
      */
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         if (window.fullscreen) return false
-        // Only the title bar starts a drag. Dragging from the video would make
-        // the player's own controls unusable.
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            val barHeight = Styler.dp(context, 28f)
-            if (event.y <= barHeight) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                // Leave the three toolbar controls to receive ordinary taps.
+                dragCandidate = event.y <= toolbarHeight() && event.x < width - controlWidth() * 3
                 dragStartX = event.rawX
                 dragStartY = event.rawY
                 dragOffsetX = 0f
                 dragOffsetY = 0f
                 draggedLeft = left
                 draggedTop = top
-                dragging = true
+                dragging = false
+                // The title has no click action. Claiming its DOWN is required
+                // to receive the later MOVE; returning false here ends delivery
+                // before touch slop can ever be crossed.
+                return dragCandidate
             }
         }
         return false
@@ -407,44 +441,74 @@ class FloatingPlayerView(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (!dragging) return super.onTouchEvent(event)
+        if (window.fullscreen || !dragCandidate) return super.onTouchEvent(event)
         val parent = parent as? ViewGroup ?: return false
         when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> return true
             MotionEvent.ACTION_MOVE -> {
+                if (!dragging &&
+                    kotlin.math.abs(event.rawX - dragStartX) <= touchSlop &&
+                    kotlin.math.abs(event.rawY - dragStartY) <= touchSlop
+                ) return true
+                if (!dragging) {
+                    dragging = true
+                    parent.requestDisallowInterceptTouchEvent(true)
+                }
                 dragOffsetX = event.rawX - dragStartX
                 dragOffsetY = event.rawY - dragStartY
-                translationX = dragOffsetX
-                translationY = dragOffsetY
+                val safe = safeArea().takeIf { it.width() > 0 && it.height() > 0 }
+                    ?: Rect(0, 0, parent.width, parent.height)
+                val margin = Styler.dpInt(context, 12f)
+                val wantedLeft = (draggedLeft + dragOffsetX).toInt()
+                    .coerceIn(safe.left + margin, (safe.right - width - margin).coerceAtLeast(safe.left + margin))
+                val wantedTop = (draggedTop + dragOffsetY).toInt()
+                    .coerceIn(safe.top + margin, (safe.bottom - height - margin).coerceAtLeast(safe.top + margin))
+                translationX = (wantedLeft - draggedLeft).toFloat()
+                translationY = (wantedTop - draggedTop).toFloat()
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val moved = dragging
                 dragging = false
-                val centerX = (draggedLeft + dragOffsetX + width / 2).toInt()
-                val centerY = (draggedTop + dragOffsetY + height / 2).toInt()
+                dragCandidate = false
+                if (!moved) return true
+                val centerX = (draggedLeft + translationX + width / 2).toInt()
+                val centerY = (draggedTop + translationY + height / 2).toInt()
                 translationX = 0f
                 translationY = 0f
-                if (window.snapTo(centerX, centerY, parent.width, parent.height)) {
-                    applyBounds()
-                    onChanged()
-                }
+                val safe = safeArea().takeIf { it.width() > 0 && it.height() > 0 }
+                    ?: Rect(0, 0, parent.width, parent.height)
+                window.snapTo(
+                    centerX, centerY, parent.width, parent.height,
+                    safe.left, safe.top, parent.width - safe.right, parent.height - safe.bottom
+                )
+                applyBounds(animate = true)
+                onChanged()
                 return true
             }
         }
         return true
     }
 
-    private fun chip(glyph: String, onTap: () -> Unit): View = TextView(context).apply {
+    private fun chip(glyph: String, description: String, onTap: () -> Unit): View = TextView(context).apply {
         text = glyph
-        textSize = 13f
+        textSize = 17f
         setTextColor(colors.primaryText)
-        val h = Styler.dpInt(context, 8f)
-        setPadding(h, h / 2, h, h / 2)
+        gravity = Gravity.CENTER
+        contentDescription = description
+        minWidth = controlWidth()
+        minHeight = toolbarHeight()
         isClickable = true
         // Not focusable, like the hint-bar chips: the physical buttons are the
         // gamepad path, and a focus stop on a picture of a button is a maze.
         isFocusable = false
         setOnClickListener { onTap() }
     }
+
+    private fun toolbarHeight() = Styler.dpInt(context, 48f)
+    private fun controlWidth() = Styler.dpInt(context, 48f)
+    private fun lerp(from: Int, to: Int, fraction: Float): Int =
+        (from + (to - from) * fraction).toInt()
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT

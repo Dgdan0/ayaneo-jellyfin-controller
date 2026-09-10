@@ -10,14 +10,36 @@ import com.pocketds.hub.model.DiscoverResponse
 import com.pocketds.hub.model.GrabBody
 import com.pocketds.hub.model.GrabResponse
 import com.pocketds.hub.model.ReleasesResponse
+import com.pocketds.hub.model.ReleaseTargetsResponse
 import com.pocketds.hub.model.RequestOptions
 import com.pocketds.hub.model.CreateRequestResponse
 import com.pocketds.hub.model.HealthResponse
+import com.pocketds.hub.model.HomeResponse
 import com.pocketds.hub.model.HubErrorBody
 import com.pocketds.hub.model.MediaDetail
+import com.pocketds.hub.model.NotificationsResponse
 import com.pocketds.hub.model.PersonResponse
 import com.pocketds.hub.model.SearchResponse
+import com.pocketds.hub.model.LibraryResponse
+import com.pocketds.hub.model.LibraryItemsResponse
+import com.pocketds.hub.model.LibraryItemResponse
+import com.pocketds.hub.model.LibrarySeasonsResponse
+import com.pocketds.hub.model.LibraryEpisodesResponse
+import com.pocketds.hub.model.LibraryStateRequest
+import com.pocketds.hub.model.UsersResponse
+import com.pocketds.hub.model.PlaybackEventBody
+import com.pocketds.hub.model.PlaybackPrepareBody
+import com.pocketds.hub.model.PlaybackPrepareResponse
+import com.pocketds.hub.model.PlaybackSelectBody
+import com.pocketds.hub.model.SeriesPlayTargetResponse
+import com.pocketds.hub.model.OfflineManifest
+import com.pocketds.hub.model.OfflinePrepareBody
+import com.pocketds.hub.model.OfflinePrepareResponse
+import com.pocketds.hub.model.OfflineProgressSyncBody
+import com.pocketds.hub.model.OfflineProgressSyncResponse
+import com.pocketds.hub.model.OfflineSelectionResponse
 import com.pocketds.hub.settings.HubSettings
+import com.pocketds.hub.settings.NotificationLimits
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -30,6 +52,7 @@ import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -45,6 +68,49 @@ import kotlin.coroutines.resumeWithException
  */
 interface HubApi {
     suspend fun health(): HubResult<HealthResponse>
+    suspend fun scanJellyfinLibrary(): HubResult<ActionAck>
+    suspend fun users(): HubResult<UsersResponse>
+    suspend fun home(): HubResult<HomeResponse>
+    suspend fun library(): HubResult<LibraryResponse>
+    suspend fun libraryItems(
+        viewId: String,
+        page: Int = 1,
+        sort: String = "name",
+        order: String = "asc"
+    ): HubResult<LibraryItemsResponse>
+    suspend fun libraryItem(itemId: String): HubResult<LibraryItemResponse>
+    suspend fun librarySeasons(seriesId: String): HubResult<LibrarySeasonsResponse>
+    suspend fun libraryEpisodes(
+        seriesId: String,
+        seasonId: String,
+        page: Int = 1
+    ): HubResult<LibraryEpisodesResponse>
+    suspend fun librarySearch(query: String, page: Int = 1): HubResult<LibraryItemsResponse>
+    suspend fun libraryFavorites(page: Int = 1): HubResult<LibraryItemsResponse>
+    suspend fun updateLibraryState(
+        itemId: String,
+        state: LibraryStateRequest
+    ): HubResult<LibraryItemResponse>
+    suspend fun seriesPlayTarget(seriesId: String): HubResult<SeriesPlayTargetResponse>
+    suspend fun preparePlayback(
+        itemId: String,
+        body: PlaybackPrepareBody
+    ): HubResult<PlaybackPrepareResponse>
+    suspend fun selectPlayback(
+        sessionId: String,
+        body: PlaybackSelectBody,
+        userId: String = ""
+    ): HubResult<PlaybackPrepareResponse>
+    suspend fun playbackEvent(
+        sessionId: String,
+        body: PlaybackEventBody,
+        userId: String = ""
+    ): HubResult<ActionAck>
+    suspend fun deletePlayback(sessionId: String, userId: String = ""): HubResult<ActionAck>
+    suspend fun offlineSelection(seriesId: String): HubResult<OfflineSelectionResponse>
+    suspend fun prepareOffline(body: OfflinePrepareBody): HubResult<OfflinePrepareResponse>
+    suspend fun renewOffline(grantId: String): HubResult<OfflineManifest>
+    suspend fun syncOfflineProgress(body: OfflineProgressSyncBody): HubResult<OfflineProgressSyncResponse>
     suspend fun search(query: String, page: Int = 1): HubResult<SearchResponse>
     suspend fun mediaDetail(key: String): HubResult<MediaDetail>
     suspend fun person(id: Int, sort: String = "release"): HubResult<PersonResponse>
@@ -58,9 +124,16 @@ interface HubApi {
     suspend fun discover(): HubResult<DiscoverResponse>
     suspend fun discoverRow(row: String, page: Int): HubResult<DiscoverResponse>
     suspend fun requestOptions(key: String): HubResult<RequestOptions>
-    suspend fun releases(key: String, season: Int = 0): HubResult<ReleasesResponse>
-    suspend fun grab(key: String, releaseId: String, season: Int = 0): HubResult<GrabResponse>
+    suspend fun releaseTargets(key: String, season: Int): HubResult<ReleaseTargetsResponse>
+    suspend fun releases(key: String, season: Int = 0, episode: Int = 0): HubResult<ReleasesResponse>
+    suspend fun grab(
+        key: String,
+        releaseId: String,
+        season: Int = 0,
+        episode: Int = 0
+    ): HubResult<GrabResponse>
     suspend fun activity(includeFinished: Boolean = false): HubResult<ActivityResponse>
+    suspend fun notifications(limits: NotificationLimits = NotificationLimits()): HubResult<NotificationsResponse>
     suspend fun downloadAction(id: String, action: String): HubResult<ActionAck>
     suspend fun deleteDownload(id: String, deleteFiles: Boolean): HubResult<ActionAck>
     suspend fun removeFromQueue(
@@ -72,6 +145,11 @@ interface HubApi {
     ): HubResult<ActionAck>
     /** Absolute URL for an image path the hub returned. */
     fun imageUrl(hubPath: String): String
+    /** Absolute URL for a session-bound stream or subtitle returned by the hub. */
+    fun playbackUrl(hubPath: String): String
+    /** The bytes of a small session-bound playback resource such as a text subtitle. */
+    suspend fun playbackBytes(hubPath: String): HubResult<ByteArray> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Playback resource loading is unavailable")
 }
 
 /**
@@ -110,6 +188,13 @@ class HubClient(private val context: Context) : HubApi {
             } else {
                 chain.request().newBuilder()
                     .header("Authorization", "Bearer $token")
+                    .apply {
+                        HubSettings.userId(context).takeIf {
+                            it.isNotEmpty() && chain.request().header(JELLYFIN_USER_HEADER) == null
+                        }?.let {
+                            header(JELLYFIN_USER_HEADER, it)
+                        }
+                    }
                     .build()
             }
             val started = System.currentTimeMillis()
@@ -140,6 +225,17 @@ class HubClient(private val context: Context) : HubApi {
         .callTimeout(180, TimeUnit.SECONDS)
         .build()
 
+    private val offlineHttp: OkHttpClient = api.newBuilder()
+        .dispatcher(Dispatcher().apply {
+            maxRequests = 2
+            maxRequestsPerHost = 2
+        })
+        .cache(null)
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(0, TimeUnit.MILLISECONDS)
+        .build()
+
     /** Shares the pool, owns its own dispatcher, and skips the JSON cache. */
     val imageHttp: OkHttpClient = api.newBuilder()
         .dispatcher(Dispatcher().apply { maxRequestsPerHost = 8 })
@@ -161,8 +257,195 @@ class HubClient(private val context: Context) : HubApi {
     override fun imageUrl(hubPath: String): String =
         if (hubPath.isEmpty()) "" else HubEndpoints.image(base(), hubPath)
 
+    override fun playbackUrl(hubPath: String): String =
+        if (hubPath.isEmpty()) "" else HubEndpoints.playbackResource(base(), hubPath)
+
+    override suspend fun playbackBytes(hubPath: String): HubResult<ByteArray> {
+        if (base().isEmpty() || hubPath.isEmpty()) {
+            return HubResult.Failed(FailureKind.UNAUTHORIZED, "No playback resource configured")
+        }
+        return try {
+            withContext(Dispatchers.IO) {
+                api.newCall(
+                    Request.Builder()
+                        .url(playbackUrl(hubPath))
+                        .cacheControl(noStore)
+                        .build()
+                ).await().use { response ->
+                    if (!response.isSuccessful) {
+                        val body = response.body?.string().orEmpty()
+                        val kind = HubFailures.classify(null, response.code)
+                        return@withContext HubResult.Failed(
+                            kind,
+                            hubMessage(body) ?: "Subtitle file could not be loaded"
+                        )
+                    }
+                    val body = response.body
+                        ?: return@withContext HubResult.Failed(
+                            FailureKind.BAD_RESPONSE,
+                            "The subtitle file was empty"
+                        )
+                    if (body.contentLength() > MAX_PLAYBACK_TEXT_BYTES) {
+                        return@withContext HubResult.Failed(
+                            FailureKind.BAD_RESPONSE,
+                            "The subtitle file is too large"
+                        )
+                    }
+                    val output = ByteArrayOutputStream()
+                    body.byteStream().use { input ->
+                        val chunk = ByteArray(8 * 1024)
+                        while (true) {
+                            val count = input.read(chunk)
+                            if (count < 0) break
+                            if (output.size() + count > MAX_PLAYBACK_TEXT_BYTES) {
+                                return@withContext HubResult.Failed(
+                                    FailureKind.BAD_RESPONSE,
+                                    "The subtitle file is too large"
+                                )
+                            }
+                            output.write(chunk, 0, count)
+                        }
+                    }
+                    HubResult.Ok(output.toByteArray())
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            DebugLog.log("net", "subtitle bytes failed ${e.javaClass.name}: ${e.message?.take(160)}")
+            val kind = HubFailures.classify(e.javaClass.name, null)
+            HubResult.Failed(kind, "Subtitle file could not be loaded")
+        }
+    }
+
     override suspend fun health(): HubResult<HealthResponse> =
         get(HubEndpoints.health(base())) { json.decodeFromString<HealthResponse>(it) }
+
+    override suspend fun scanJellyfinLibrary(): HubResult<ActionAck> =
+        mutate(HubEndpoints.scanJellyfinLibrary(base()))
+
+    override suspend fun users(): HubResult<UsersResponse> =
+        get(HubEndpoints.users(base()), noCache = true) { json.decodeFromString<UsersResponse>(it) }
+
+    override suspend fun home(): HubResult<HomeResponse> =
+        get(HubEndpoints.home(base()), noCache = true) { json.decodeFromString<HomeResponse>(it) }
+
+    override suspend fun library(): HubResult<LibraryResponse> =
+        get(HubEndpoints.library(base())) { json.decodeFromString<LibraryResponse>(it) }
+
+    override suspend fun libraryItems(
+        viewId: String,
+        page: Int,
+        sort: String,
+        order: String
+    ): HubResult<LibraryItemsResponse> =
+        get(HubEndpoints.libraryItems(base(), viewId, page, sort, order)) {
+            json.decodeFromString<LibraryItemsResponse>(it)
+        }
+
+    override suspend fun libraryItem(itemId: String): HubResult<LibraryItemResponse> =
+        get(HubEndpoints.libraryItem(base(), itemId), noCache = true) {
+            json.decodeFromString<LibraryItemResponse>(it)
+        }
+
+    override suspend fun librarySeasons(seriesId: String): HubResult<LibrarySeasonsResponse> =
+        get(HubEndpoints.librarySeasons(base(), seriesId), noCache = true) {
+            json.decodeFromString<LibrarySeasonsResponse>(it)
+        }
+
+    override suspend fun libraryEpisodes(
+        seriesId: String,
+        seasonId: String,
+        page: Int
+    ): HubResult<LibraryEpisodesResponse> =
+        get(HubEndpoints.libraryEpisodes(base(), seriesId, seasonId, page), noCache = true) {
+            json.decodeFromString<LibraryEpisodesResponse>(it)
+        }
+
+    override suspend fun librarySearch(query: String, page: Int): HubResult<LibraryItemsResponse> =
+        get(HubEndpoints.librarySearch(base(), query, page), noCache = true) {
+            json.decodeFromString<LibraryItemsResponse>(it)
+        }
+
+    override suspend fun libraryFavorites(page: Int): HubResult<LibraryItemsResponse> =
+        get(HubEndpoints.libraryFavorites(base(), page), noCache = true) {
+            json.decodeFromString<LibraryItemsResponse>(it)
+        }
+
+    override suspend fun updateLibraryState(
+        itemId: String,
+        state: LibraryStateRequest
+    ): HubResult<LibraryItemResponse> = postOnce(
+        HubEndpoints.libraryState(base(), itemId),
+        json.encodeToString(LibraryStateRequest.serializer(), state)
+    ) { json.decodeFromString<LibraryItemResponse>(it) }
+
+    override suspend fun seriesPlayTarget(seriesId: String): HubResult<SeriesPlayTargetResponse> =
+        get(HubEndpoints.seriesPlayTarget(base(), seriesId), noCache = true) {
+            json.decodeFromString<SeriesPlayTargetResponse>(it)
+        }
+
+    override suspend fun preparePlayback(
+        itemId: String,
+        body: PlaybackPrepareBody
+    ): HubResult<PlaybackPrepareResponse> = postOnce(
+        HubEndpoints.preparePlayback(base(), itemId),
+        json.encodeToString(PlaybackPrepareBody.serializer(), body)
+    ) { json.decodeFromString<PlaybackPrepareResponse>(it) }
+
+    override suspend fun selectPlayback(
+        sessionId: String,
+        body: PlaybackSelectBody,
+        userId: String
+    ): HubResult<PlaybackPrepareResponse> = postOnce(
+        HubEndpoints.selectPlayback(base(), sessionId),
+        json.encodeToString(PlaybackSelectBody.serializer(), body),
+        userId = userId
+    ) { json.decodeFromString<PlaybackPrepareResponse>(it) }
+
+    override suspend fun playbackEvent(
+        sessionId: String,
+        body: PlaybackEventBody,
+        userId: String
+    ): HubResult<ActionAck> = postOnce(
+        HubEndpoints.playbackEvent(base(), sessionId),
+        json.encodeToString(PlaybackEventBody.serializer(), body),
+        userId = userId
+    ) { json.decodeFromString<ActionAck>(it) }
+
+    override suspend fun deletePlayback(sessionId: String, userId: String): HubResult<ActionAck> =
+        mutate(HubEndpoints.deletePlayback(base(), sessionId), userId)
+
+    override suspend fun offlineSelection(seriesId: String): HubResult<OfflineSelectionResponse> =
+        get(HubEndpoints.offlineSelection(base(), seriesId), noCache = true) {
+            json.decodeFromString<OfflineSelectionResponse>(it)
+        }
+
+    override suspend fun prepareOffline(body: OfflinePrepareBody): HubResult<OfflinePrepareResponse> =
+        postOnce(
+            HubEndpoints.prepareOffline(base()),
+            json.encodeToString(OfflinePrepareBody.serializer(), body)
+        ) { json.decodeFromString<OfflinePrepareResponse>(it) }
+
+    override suspend fun renewOffline(grantId: String): HubResult<OfflineManifest> = postOnce(
+        HubEndpoints.renewOffline(base(), grantId), "{}"
+    ) { json.decodeFromString<OfflineManifest>(it) }
+
+    override suspend fun syncOfflineProgress(
+        body: OfflineProgressSyncBody
+    ): HubResult<OfflineProgressSyncResponse> = postOnce(
+        HubEndpoints.syncOfflineProgress(base()),
+        json.encodeToString(OfflineProgressSyncBody.serializer(), body)
+    ) { json.decodeFromString<OfflineProgressSyncResponse>(it) }
+
+    /** A long-running, uncached client for resumable media transfers. */
+    fun offlineDownloadCall(hubPath: String, downloadedBytes: Long): Call {
+        val builder = Request.Builder()
+            .url(playbackUrl(hubPath))
+            .cacheControl(noStore)
+        if (downloadedBytes > 0) builder.header("Range", "bytes=$downloadedBytes-")
+        return offlineHttp.newCall(builder.build())
+    }
 
     override suspend fun search(query: String, page: Int): HubResult<SearchResponse> =
         get(HubEndpoints.search(base(), query, page)) {
@@ -188,6 +471,11 @@ class HubClient(private val context: Context) : HubApi {
             json.decodeFromString<ActivityResponse>(it)
         }
 
+    override suspend fun notifications(limits: NotificationLimits): HubResult<NotificationsResponse> =
+        get(HubEndpoints.notifications(base(), limits), noCache = true) {
+            json.decodeFromString<NotificationsResponse>(it)
+        }
+
     override suspend fun downloadAction(id: String, action: String): HubResult<ActionAck> =
         mutate(HubEndpoints.downloadAction(base(), id, action))
 
@@ -211,13 +499,15 @@ class HubClient(private val context: Context) : HubApi {
      * not mean the delete did not happen, and a retried "remove and blocklist"
      * that actually succeeded the first time would blocklist a second release.
      */
-    private suspend fun mutate(request: HubRequest): HubResult<ActionAck> {
+    private suspend fun mutate(request: HubRequest, userId: String = ""): HubResult<ActionAck> {
         if (base().isEmpty()) {
             return HubResult.Failed(FailureKind.UNAUTHORIZED, "No hub configured")
         }
         return try {
             withContext(Dispatchers.IO) {
-                val builder = Request.Builder().url(request.url).cacheControl(noStore)
+                val builder = Request.Builder().url(request.url).cacheControl(noStore).apply {
+                    if (userId.isNotEmpty()) header(JELLYFIN_USER_HEADER, userId)
+                }
                 when (request.method) {
                     "POST" -> builder.post(EMPTY_BODY)
                     "DELETE" -> builder.delete()
@@ -268,8 +558,13 @@ class HubClient(private val context: Context) : HubApi {
      * seconds rather than milliseconds. Measured against the real stack at 3.8s
      * with one indexer, and it scales with however many are configured.
      */
-    override suspend fun releases(key: String, season: Int): HubResult<ReleasesResponse> =
-        get(HubEndpoints.releases(base(), key, season), noCache = true, slow = true) {
+    override suspend fun releaseTargets(key: String, season: Int): HubResult<ReleaseTargetsResponse> =
+        get(HubEndpoints.releaseTargets(base(), key, season), noCache = true) {
+            json.decodeFromString<ReleaseTargetsResponse>(it)
+        }
+
+    override suspend fun releases(key: String, season: Int, episode: Int): HubResult<ReleasesResponse> =
+        get(HubEndpoints.releases(base(), key, season, episode), noCache = true, slow = true) {
             json.decodeFromString<ReleasesResponse>(it)
         }
 
@@ -281,10 +576,11 @@ class HubClient(private val context: Context) : HubApi {
     override suspend fun grab(
         key: String,
         releaseId: String,
-        season: Int
+        season: Int,
+        episode: Int
     ): HubResult<GrabResponse> = postOnce(
         HubEndpoints.grab(base(), key),
-        json.encodeToString(GrabBody.serializer(), GrabBody(releaseId, season)),
+        json.encodeToString(GrabBody.serializer(), GrabBody(releaseId, season, episode)),
         slow = true
     ) { json.decodeFromString<GrabResponse>(it) }
 
@@ -348,6 +644,7 @@ class HubClient(private val context: Context) : HubApi {
         request: HubRequest,
         payload: String,
         slow: Boolean = false,
+        userId: String = "",
         decode: (String) -> T
     ): HubResult<T> {
         if (base().isEmpty()) {
@@ -360,6 +657,7 @@ class HubClient(private val context: Context) : HubApi {
                     Request.Builder()
                         .url(request.url)
                         .cacheControl(noStore)
+                        .apply { if (userId.isNotEmpty()) header(JELLYFIN_USER_HEADER, userId) }
                         .post(payload.toRequestBody(jsonMedia))
                         .build()
                 )
@@ -461,6 +759,8 @@ class HubClient(private val context: Context) : HubApi {
 
 /** A POST with no body still needs one; OkHttp will not send a null. */
 private val EMPTY_BODY = ByteArray(0).toRequestBody(null, 0, 0)
+private const val JELLYFIN_USER_HEADER = "X-Jellyfin-User"
+private const val MAX_PLAYBACK_TEXT_BYTES = 8 * 1024 * 1024
 
 /**
  * Bridges OkHttp to coroutines.

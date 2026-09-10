@@ -54,7 +54,7 @@ class DownloadsScreen(
     private val ringVisible: () -> Boolean
 ) : Screen {
 
-    override val title: String = "Downloads"
+    override val title: String = "Transfers"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 

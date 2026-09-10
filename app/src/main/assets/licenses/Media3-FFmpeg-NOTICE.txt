@@ -1,0 +1,10 @@
+This application includes the AndroidX Media3 FFmpeg decoder module, version
+1.4.1, from the Android Open Source Project under the Apache License 2.0.
+
+Its bundled FFmpeg 6.0 libraries were configured without GPL or nonfree
+components and with the AC-3 and E-AC-3 audio decoders. FFmpeg is licensed
+under the GNU Lesser General Public License, version 2.1 or later. The complete
+license text is in FFmpeg-LGPL-2.1.txt in this directory.
+
+Exact source commits and reproducible build instructions are recorded in
+app/third_party/media3-ffmpeg/README.md in the project source.

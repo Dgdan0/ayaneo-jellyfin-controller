@@ -21,12 +21,35 @@ object HubSettings {
 
     private const val KEY_URL = "hub_url"
     private const val KEY_TOKEN = "hub_token"
+    private const val KEY_USER_ID = "jellyfin_user_id"
+    private const val KEY_USER_NAME = "jellyfin_user_name"
+    private const val KEY_NAV_EXPANDED = "navigation_expanded"
 
     fun baseUrl(context: Context): String =
         Prefs.of(context).getString(KEY_URL, "").orEmpty()
 
     fun token(context: Context): String =
         Prefs.of(context).getString(KEY_TOKEN, "").orEmpty()
+
+    fun userId(context: Context): String =
+        Prefs.of(context).getString(KEY_USER_ID, "").orEmpty()
+
+    fun userName(context: Context): String =
+        Prefs.of(context).getString(KEY_USER_NAME, "").orEmpty()
+
+    fun selectUser(context: Context, id: String, name: String) {
+        Prefs.of(context).edit()
+            .putString(KEY_USER_ID, id.trim())
+            .putString(KEY_USER_NAME, name.trim())
+            .apply()
+    }
+
+    fun navigationExpanded(context: Context): Boolean =
+        Prefs.of(context).getBoolean(KEY_NAV_EXPANDED, false)
+
+    fun setNavigationExpanded(context: Context, expanded: Boolean) {
+        Prefs.of(context).edit().putBoolean(KEY_NAV_EXPANDED, expanded).apply()
+    }
 
     val isConfigured: (Context) -> Boolean = { baseUrl(it).isNotEmpty() && token(it).isNotEmpty() }
 
@@ -39,6 +62,9 @@ object HubSettings {
 
     /** Clears both. Offered in Settings so a lost device can be cut off locally. */
     fun forget(context: Context) {
-        Prefs.of(context).edit().remove(KEY_URL).remove(KEY_TOKEN).apply()
+        Prefs.of(context).edit()
+            .remove(KEY_URL).remove(KEY_TOKEN)
+            .remove(KEY_USER_ID).remove(KEY_USER_NAME)
+            .apply()
     }
 }

@@ -33,9 +33,11 @@ import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -78,6 +80,8 @@ class MediaDetailScreen(
 
     private var host: ScreenHost? = null
     private var detail: MediaDetail? = null
+    private var visible = false
+    private var refreshJob: Job? = null
     private lateinit var form: FormOverlay
     private lateinit var picker: ChoiceOverlay
     private lateinit var flow: RequestFlow
@@ -258,9 +262,15 @@ class MediaDetailScreen(
         return frame
     }
 
-    override fun onShow() = load()
+    override fun onShow() {
+        visible = true
+        load()
+    }
 
     override fun onHide() {
+        visible = false
+        refreshJob?.cancel()
+        refreshJob = null
         if (form.isOpen) form.dismiss()
         if (picker.isOpen) picker.dismiss()
         host?.refreshHints()
@@ -392,7 +402,10 @@ class MediaDetailScreen(
 
         status.setTextColor(colors.mutedText)
         status.text = buildString {
-            append(d.availability)
+            val availability = Availability.fromWire(d.availability)
+            append(availability.label.ifEmpty {
+                if (availability == Availability.NOT_IN_LIBRARY) "Not in library" else "Status unavailable"
+            })
             if (d.cache.hit) append(" · cached ").append(d.cache.ageSeconds).append("s ago")
             if (d.partial.isNotEmpty()) {
                 append(" · degraded: ").append(d.partial.joinToString(", ") { it.service })
@@ -403,6 +416,17 @@ class MediaDetailScreen(
         loadImage(d.media.poster, poster)
 
         host?.refreshHints()
+        schedulePipelineRefresh(d)
+    }
+
+    private fun schedulePipelineRefresh(d: MediaDetail) {
+        refreshJob?.cancel()
+        refreshJob = null
+        if (!visible || d.pipeline.stages.none { it.state == "active" }) return
+        refreshJob = scope.launch {
+            delay(4_000)
+            if (visible) load()
+        }
     }
 
     private fun loadImage(hubPath: String, into: ImageView) {
@@ -602,33 +626,17 @@ class MediaDetailScreen(
             pushReleases(0)
             return
         }
-        // Sonarr has no "search the whole series" call -- a season number is
-        // required -- so the choice has to be made here rather than guessed.
-        picker.show(
-            title = "Which season?",
-            subtitle = d.media.title,
-            choices = seasons.map { season ->
-                ChoiceOverlay.Choice(
-                    id = season.number.toString(),
-                    label = season.name.ifEmpty { "Season " + season.number },
-                    detail = season.episodeCount.toString() + " episodes" +
-                        if (season.year > 0) " · " + season.year else ""
-                )
-            },
-            // Never Specials, which is season 0 and sorts first.
-            startIndex = seasons.indexOfFirst { it.number > 0 }.coerceAtLeast(0),
-            onCancel = { host?.refreshHints() }
-        ) { picked ->
-            host?.refreshHints()
-            pushReleases(picked.toIntOrNull() ?: 0)
-        }
-        host?.refreshHints()
+        host?.push(
+            SeasonReleasePickerScreen(
+                api, mediaKey, d.media.title, seasons, d.media.poster, ringVisible
+            )
+        )
     }
 
     private fun pushReleases(season: Int) {
         host?.push(
             ReleasesScreen(
-                api, mediaKey, detail?.media?.title ?: fallbackTitle, season, ringVisible
+                api, mediaKey, detail?.media?.title ?: fallbackTitle, season, 0, ringVisible
             )
         )
     }

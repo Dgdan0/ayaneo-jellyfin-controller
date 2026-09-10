@@ -192,6 +192,27 @@ func TestRefusesABaseURLWithoutAScheme(t *testing.T) {
 	wantError(t, c, "absolute http(s) URL")
 }
 
+func TestValidatesOptionalWebURL(t *testing.T) {
+	c := base()
+	c.Services["radarr"] = ServiceConfig{
+		Enabled: true, BaseURL: "http://127.0.0.1:7878", WebURL: "radarr.local:7878", APIKey: "k",
+	}
+	wantError(t, c, "web_url")
+
+	c.Services["radarr"] = ServiceConfig{
+		Enabled: true, BaseURL: "http://127.0.0.1:7878", WebURL: "https://radarr.example.test", APIKey: "k",
+	}
+	wantOK(t, c)
+}
+
+func TestWebURLRefusesEmbeddedCredentials(t *testing.T) {
+	c := base()
+	c.Services["radarr"] = ServiceConfig{
+		Enabled: true, BaseURL: "http://127.0.0.1:7878", WebURL: "https://user:secret@radarr.example.test", APIKey: "k",
+	}
+	wantError(t, c, "username or password")
+}
+
 func TestRefusesAnEnabledServiceWithNoKey(t *testing.T) {
 	c := base()
 	c.Services["sonarr"] = ServiceConfig{Enabled: true, BaseURL: "http://127.0.0.1:8989"}

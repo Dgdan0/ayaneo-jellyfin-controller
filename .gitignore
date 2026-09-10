@@ -10,6 +10,7 @@ build/
 local.properties
 *.apk
 *.aab
+/.tmp/
 
 # Android SDK/emulator tooling we install locally (not vendored into the repo)
 /sdk/

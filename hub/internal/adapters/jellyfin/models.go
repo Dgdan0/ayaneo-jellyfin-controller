@@ -31,6 +31,7 @@ type UserData struct {
 	PlayCount             int     `json:"PlayCount"`
 	Played                bool    `json:"Played"`
 	IsFavorite            bool    `json:"IsFavorite"`
+	UnplayedItemCount     int     `json:"UnplayedItemCount"`
 	LastPlayedDate        string  `json:"LastPlayedDate"`
 }
 
@@ -40,32 +41,63 @@ type Item struct {
 	Name string `json:"Name"`
 	Type string `json:"Type"`
 
-	ProductionYear  int          `json:"ProductionYear"`
-	RunTimeTicks    int64        `json:"RunTimeTicks"`
-	Overview        string       `json:"Overview"`
-	ProviderIds     *ProviderIds `json:"ProviderIds"`
-	CommunityRating float64      `json:"CommunityRating"`
-	OfficialRating  string       `json:"OfficialRating"`
-	PremiereDate    string       `json:"PremiereDate"`
+	ProductionYear  int           `json:"ProductionYear"`
+	RunTimeTicks    int64         `json:"RunTimeTicks"`
+	Overview        string        `json:"Overview"`
+	OriginalTitle   string        `json:"OriginalTitle"`
+	ProviderIds     *ProviderIds  `json:"ProviderIds"`
+	CommunityRating float64       `json:"CommunityRating"`
+	CriticRating    float64       `json:"CriticRating"`
+	OfficialRating  string        `json:"OfficialRating"`
+	PremiereDate    string        `json:"PremiereDate"`
+	Genres          []string      `json:"Genres"`
+	Studios         []Studio      `json:"Studios"`
+	People          []Person      `json:"People"`
+	MediaSources    []MediaSource `json:"MediaSources"`
 
 	// Present on an episode. Jellyfin calls the season number
 	// ParentIndexNumber, which is not a name anyone guesses.
 	SeriesName        string `json:"SeriesName"`
 	SeriesID          string `json:"SeriesId"`
+	SeasonID          string `json:"SeasonId"`
+	ParentID          string `json:"ParentId"`
 	ParentIndexNumber int    `json:"ParentIndexNumber"`
 	IndexNumber       int    `json:"IndexNumber"`
 
 	// Image tags. An episode's own Primary image is a screenshot from that
 	// episode, which is often a wall or a dark corridor -- SeriesPrimaryImageTag
 	// is the show's poster and is what a "continue watching" card wants.
-	ImageTags             map[string]string `json:"ImageTags"`
-	SeriesPrimaryImageTag string            `json:"SeriesPrimaryImageTag"`
-	BackdropImageTags     []string          `json:"BackdropImageTags"`
+	ImageTags             map[string]string                   `json:"ImageTags"`
+	SeriesPrimaryImageTag string                              `json:"SeriesPrimaryImageTag"`
+	BackdropImageTags     []string                            `json:"BackdropImageTags"`
+	Trickplay             map[string]map[string]TrickplayInfo `json:"Trickplay"`
 
 	UserData *UserData `json:"UserData"`
 
 	// Only on a library view: "movies", "tvshows", "music"...
 	CollectionType string `json:"CollectionType"`
+}
+
+type Studio struct {
+	Name string `json:"Name"`
+}
+
+type Person struct {
+	ID              string `json:"Id"`
+	Name            string `json:"Name"`
+	Role            string `json:"Role"`
+	Type            string `json:"Type"`
+	PrimaryImageTag string `json:"PrimaryImageTag"`
+}
+
+// TrickplayInfo describes one Jellyfin JPEG sprite-sheet resolution.
+type TrickplayInfo struct {
+	Width          int   `json:"Width"`
+	Height         int   `json:"Height"`
+	TileWidth      int   `json:"TileWidth"`
+	TileHeight     int   `json:"TileHeight"`
+	ThumbnailCount int   `json:"ThumbnailCount"`
+	Interval       int64 `json:"Interval"`
 }
 
 // ItemsPage is the shape of a paged query. Note that /Items/Latest answers a
@@ -76,6 +108,16 @@ type ItemsPage struct {
 	StartIndex       int    `json:"StartIndex"`
 }
 
+// ImageInfo is Jellyfin's description of one item's stored image. Library
+// folders use this to distinguish generated collage art under metadata/library
+// from an explicit folder.jpg or folder.webp placed with the collection.
+type ImageInfo struct {
+	ImageType string `json:"ImageType"`
+	Path      string `json:"Path"`
+	Width     int    `json:"Width"`
+	Height    int    `json:"Height"`
+}
+
 type SystemInfo struct {
 	Version    string `json:"Version"`
 	ServerName string `json:"ServerName"`
@@ -83,8 +125,142 @@ type SystemInfo struct {
 }
 
 type User struct {
-	ID   string `json:"Id"`
-	Name string `json:"Name"`
+	ID     string `json:"Id"`
+	Name   string `json:"Name"`
+	Policy struct {
+		IsDisabled bool `json:"IsDisabled"`
+	} `json:"Policy"`
+}
+
+// PlaybackInfo is Jellyfin's negotiated answer for one device profile.
+// Paths in this model never leave the hub; the API layer replaces them with
+// session-bound proxy URLs.
+type PlaybackInfo struct {
+	MediaSources  []MediaSource `json:"MediaSources"`
+	PlaySessionID string        `json:"PlaySessionId"`
+	ErrorCode     string        `json:"ErrorCode"`
+}
+
+type MediaSource struct {
+	ID                         string        `json:"Id"`
+	Name                       string        `json:"Name"`
+	Path                       string        `json:"Path"`
+	Container                  string        `json:"Container"`
+	Size                       int64         `json:"Size"`
+	Bitrate                    int           `json:"Bitrate"`
+	RunTimeTicks               int64         `json:"RunTimeTicks"`
+	SupportsDirectPlay         bool          `json:"SupportsDirectPlay"`
+	SupportsDirectStream       bool          `json:"SupportsDirectStream"`
+	SupportsTranscoding        bool          `json:"SupportsTranscoding"`
+	DirectStreamURL            string        `json:"DirectStreamUrl"`
+	TranscodingURL             string        `json:"TranscodingUrl"`
+	TranscodingContainer       string        `json:"TranscodingContainer"`
+	TranscodingSubProtocol     string        `json:"TranscodingSubProtocol"`
+	TranscodeReasons           []string      `json:"TranscodeReasons"`
+	DefaultAudioStreamIndex    *int          `json:"DefaultAudioStreamIndex"`
+	DefaultSubtitleStreamIndex *int          `json:"DefaultSubtitleStreamIndex"`
+	MediaStreams               []MediaStream `json:"MediaStreams"`
+}
+
+type MediaStream struct {
+	Index                  int     `json:"Index"`
+	Type                   string  `json:"Type"`
+	Codec                  string  `json:"Codec"`
+	Profile                string  `json:"Profile"`
+	Language               string  `json:"Language"`
+	Title                  string  `json:"Title"`
+	DisplayTitle           string  `json:"DisplayTitle"`
+	ChannelLayout          string  `json:"ChannelLayout"`
+	Channels               int     `json:"Channels"`
+	Bitrate                int     `json:"BitRate"`
+	Width                  int     `json:"Width"`
+	Height                 int     `json:"Height"`
+	AverageFrameRate       float64 `json:"AverageFrameRate"`
+	VideoRange             string  `json:"VideoRange"`
+	VideoRangeType         string  `json:"VideoRangeType"`
+	IsDefault              bool    `json:"IsDefault"`
+	IsForced               bool    `json:"IsForced"`
+	IsHearingImpaired      bool    `json:"IsHearingImpaired"`
+	IsExternal             bool    `json:"IsExternal"`
+	IsTextSubtitleStream   bool    `json:"IsTextSubtitleStream"`
+	SupportsExternalStream bool    `json:"SupportsExternalStream"`
+	DeliveryMethod         string  `json:"DeliveryMethod"`
+	DeliveryURL            string  `json:"DeliveryUrl"`
+}
+
+type PlaybackInfoRequest struct {
+	UserID               string        `json:"UserId"`
+	StartTimeTicks       int64         `json:"StartTimeTicks,omitempty"`
+	AudioStreamIndex     *int          `json:"AudioStreamIndex,omitempty"`
+	SubtitleStreamIndex  *int          `json:"SubtitleStreamIndex,omitempty"`
+	MediaSourceID        string        `json:"MediaSourceId,omitempty"`
+	MaxStreamingBitrate  *int          `json:"MaxStreamingBitrate,omitempty"`
+	DeviceProfile        DeviceProfile `json:"DeviceProfile"`
+	EnableDirectPlay     bool          `json:"EnableDirectPlay"`
+	EnableDirectStream   bool          `json:"EnableDirectStream"`
+	EnableTranscoding    bool          `json:"EnableTranscoding"`
+	AllowVideoStreamCopy bool          `json:"AllowVideoStreamCopy"`
+	AllowAudioStreamCopy bool          `json:"AllowAudioStreamCopy"`
+}
+
+type DeviceProfile struct {
+	Name                string               `json:"Name"`
+	MaxStreamingBitrate int                  `json:"MaxStreamingBitrate"`
+	MaxStaticBitrate    int                  `json:"MaxStaticBitrate"`
+	DirectPlayProfiles  []DirectPlayProfile  `json:"DirectPlayProfiles"`
+	TranscodingProfiles []TranscodingProfile `json:"TranscodingProfiles"`
+	CodecProfiles       []CodecProfile       `json:"CodecProfiles"`
+	SubtitleProfiles    []SubtitleProfile    `json:"SubtitleProfiles"`
+}
+
+type DirectPlayProfile struct {
+	Container  string `json:"Container"`
+	AudioCodec string `json:"AudioCodec,omitempty"`
+	VideoCodec string `json:"VideoCodec,omitempty"`
+	Type       string `json:"Type"`
+}
+
+type TranscodingProfile struct {
+	Container                 string `json:"Container"`
+	Type                      string `json:"Type"`
+	VideoCodec                string `json:"VideoCodec"`
+	AudioCodec                string `json:"AudioCodec"`
+	Protocol                  string `json:"Protocol"`
+	Context                   string `json:"Context"`
+	MaxAudioChannels          string `json:"MaxAudioChannels,omitempty"`
+	MinSegments               int    `json:"MinSegments"`
+	SegmentLength             int    `json:"SegmentLength"`
+	BreakOnNonKeyFrames       bool   `json:"BreakOnNonKeyFrames"`
+	EnableSubtitlesInManifest bool   `json:"EnableSubtitlesInManifest"`
+}
+
+// CodecProfile is kept intentionally small for the first player release. The
+// runtime decoder list narrows direct-play codec names; unsupported profile or
+// level combinations still fall through to Jellyfin's transcode plan.
+type CodecProfile struct {
+	Type       string `json:"Type"`
+	Codec      string `json:"Codec,omitempty"`
+	Conditions []any  `json:"Conditions"`
+}
+
+type SubtitleProfile struct {
+	Format string `json:"Format"`
+	Method string `json:"Method"`
+}
+
+type PlaybackEvent struct {
+	ItemID              string `json:"ItemId"`
+	MediaSourceID       string `json:"MediaSourceId,omitempty"`
+	PlaySessionID       string `json:"PlaySessionId,omitempty"`
+	PositionTicks       int64  `json:"PositionTicks"`
+	IsPaused            bool   `json:"IsPaused"`
+	IsMuted             bool   `json:"IsMuted"`
+	VolumeLevel         int    `json:"VolumeLevel"`
+	AudioStreamIndex    *int   `json:"AudioStreamIndex,omitempty"`
+	SubtitleStreamIndex *int   `json:"SubtitleStreamIndex,omitempty"`
+	PlayMethod          string `json:"PlayMethod"`
+	CanSeek             bool   `json:"CanSeek"`
+	EventName           string `json:"EventName,omitempty"`
 }
 
 // RuntimeSeconds converts out of ticks.

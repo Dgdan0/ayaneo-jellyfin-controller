@@ -46,6 +46,9 @@ data class SearchHit(
     val rating: Double = 0.0,
     @SerialName("jellyfinItemId") val jellyfinItemId: String = "",
     val progress: Double = 0.0,
+    val played: Boolean = false,
+    val favorite: Boolean = false,
+    val unplayedCount: Int = 0,
     val eta: String = "",
     @SerialName("requestId") val requestId: Int = 0,
     /** Computed by the hub from availability and this token's scopes. */
@@ -85,8 +88,10 @@ data class SearchResponse(
 data class ServiceHealth(
     val name: String = "",
     val state: String = "",
+    val dashboardUrl: String = "",
     val latencyMs: Long = 0,
     val version: String = "",
+    val notes: List<String> = emptyList(),
     val lastError: String = ""
 )
 

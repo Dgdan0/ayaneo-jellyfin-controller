@@ -2,6 +2,7 @@ package com.pocketds.hub.nav
 
 import android.content.Context
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -41,31 +42,42 @@ class HintBarView(context: Context, private val colors: PocketColors) : LinearLa
     }
 
     fun setHints(hints: List<ButtonHint>) {
-        removeAllViews()
-        hints.forEach { addView(chip(it)) }
+        // Keep existing chips in place. On this device, removing and re-adding
+        // every child from a focus callback can leave the bar empty for the
+        // rest of that layout pass. Updating the small stable row also avoids
+        // allocating views on every D-pad move.
+        while (childCount > hints.size) removeViewAt(childCount - 1)
+        hints.forEachIndexed { index, hint ->
+            val view = if (index < childCount) getChildAt(index) as TextView
+            else chip().also(::addView)
+            bind(view, hint)
+        }
+        requestLayout()
+        invalidate()
     }
 
-    private fun chip(hint: ButtonHint): TextView = TextView(context).apply {
+    private fun chip(): TextView = TextView(context).apply {
         // Glyphs rather than drawables, following the sibling project: an icon
         // set for every button on every screen is a lot of assets to keep
         // consistent, and these read fine at this size.
-        text = "${hint.glyph}  ${hint.label}"
         textSize = 13f
         isAllCaps = false
-        setTextColor(if (hint.enabled) colors.primaryText else colors.mutedText)
         background = Styler.chipBackground(context, colors)
         val padH = Styler.dpInt(context, 12f)
         val padV = Styler.dpInt(context, 7f)
         setPadding(padH, padV, padH, padV)
-
-        isClickable = hint.enabled
         isFocusable = false
-        alpha = if (hint.enabled) 1f else 0.5f
-        if (hint.enabled) setOnClickListener { onAction?.invoke(hint.action) }
-
         layoutParams = LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { rightMargin = Styler.dpInt(context, 8f) }
+    }
+
+    private fun bind(view: TextView, hint: ButtonHint) = with(view) {
+        text = "${hint.glyph}  ${hint.label}"
+        setTextColor(if (hint.enabled) colors.primaryText else colors.mutedText)
+        isClickable = hint.enabled
+        alpha = if (hint.enabled) 1f else 0.5f
+        setOnClickListener(if (hint.enabled) View.OnClickListener { onAction?.invoke(hint.action) } else null)
     }
 }

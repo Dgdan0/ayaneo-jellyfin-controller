@@ -42,7 +42,9 @@ data class PocketColors(
     /** Stale-cache / degraded-service strip. */
     val warningStrip: Int,
     val warningStripText: Int,
-    val dangerText: Int
+    val dangerText: Int,
+    /** Quiet inner tint for notification cards that have not been focused yet. */
+    val unreadSurface: Int
 )
 
 object Theme {
@@ -62,9 +64,10 @@ object Theme {
         badgePartial = 0xFF5B1E96.toInt(),
         badgePending = 0xFFC98A1B.toInt(),
         badgeFailed = 0xFFC5372C.toInt(),
-        warningStrip = 0xFFF6E2C0.toInt(),
-        warningStripText = 0xFF5A4212.toInt(),
-        dangerText = 0xFFC5372C.toInt()
+        warningStrip = 0xFFD7F1EE.toInt(),
+        warningStripText = 0xFF134E4A.toInt(),
+        dangerText = 0xFFC5372C.toInt(),
+        unreadSurface = 0xFFFFE5E2.toInt()
     )
 
     private val DARK = PocketColors(
@@ -83,9 +86,10 @@ object Theme {
         badgePartial = 0xFF7B34C4.toInt(),
         badgePending = 0xFFE0AE4A.toInt(),
         badgeFailed = 0xFFE0685C.toInt(),
-        warningStrip = 0xFF3D3117.toInt(),
-        warningStripText = 0xFFF3DCA8.toInt(),
-        dangerText = 0xFFE0685C.toInt()
+        warningStrip = 0xFF123C38.toInt(),
+        warningStripText = 0xFFA7F3E8.toInt(),
+        dangerText = 0xFFE0685C.toInt(),
+        unreadSurface = 0xFF422628.toInt()
     )
 
     fun colors(context: Context): PocketColors = if (isDark(context)) DARK else LIGHT

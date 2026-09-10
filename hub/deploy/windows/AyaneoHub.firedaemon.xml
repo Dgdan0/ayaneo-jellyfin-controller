@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<Service fd:version="7.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:fd="http://xml.firedaemon.com">
+	<Identification name="AyaneoHub" displayName="Ayaneo Jellyfin Hub" useDefaultPrefix="true" description="Local API and playback gateway for the Pocket DS Jellyfin controller" startUpMode="3" programType="1"/>
+	<Categorizing groupTag="Self_Hosting"/>
+	<Program executable="C:\Program Files\AyaneoHub\hub.exe" workingDir="C:\Program Files\AyaneoHub" argumentsSpec="--config &quot;C:\ProgramData\AyaneoHub\hub.yaml&quot;"/>
+	<Options>
+		<Process processorGroup="unspecified" affinity="0" priority="0"/>
+		<JobType>0</JobType>
+		<ConsoleApp>true</ConsoleApp>
+		<CtrlC>true</CtrlC>
+		<InteractWithDesktop>false</InteractWithDesktop>
+		<ShowWindow>1</ShowWindow>
+		<PreShutdown>false</PreShutdown>
+		<AppendLogs>true</AppendLogs>
+		<EventLogging>true</EventLogging>
+	</Options>
+	<LifeCycle startupTime="50" uponExit="7" uponFlap="2" flapCount="3" uponFail="0" failCount="1" uponHang="0" hangPeriod="3" shutdownType="2" shutdownDelay="15000"/>
+	<Dependencies/>
+	<Logon accountName="LocalSystem" runLike="0"/>
+	<RedirectIO>
+		<Stdout>C:\ProgramData\AyaneoHub\hub.log</Stdout>
+		<Stderr>ToStdout</Stderr>
+	</RedirectIO>
+	<Debug level="0"/>
+	<Environment/>
+	<Scheduling launchDelaySeconds="0">
+		<fds:schedules xmlns:fds="http://xml.firedaemon.com/scheduling/v3"/>
+	</Scheduling>
+	<Preconditions/>
+	<EventPrograms/>
+	<DlgResponder>
+		<Enabled>false</Enabled>
+		<CloseAll>false</CloseAll>
+		<CheckFrequency>5000</CheckFrequency>
+		<IgnoreUnknowns>false</IgnoreUnknowns>
+		<Responses/>
+	</DlgResponder>
+	<Recovery>
+		<FirstFailure>0</FirstFailure>
+		<SecondFailure>0</SecondFailure>
+		<SubSequent>0</SubSequent>
+		<ResetFailCountAfter>0</ResetFailCountAfter>
+		<RestartServiceDelay>60000</RestartServiceDelay>
+		<RestartComputerDelay>60000</RestartComputerDelay>
+		<AppendFailCount>false</AppendFailCount>
+		<EnableActionsForStopWithErrors>false</EnableActionsForStopWithErrors>
+		<SendMsg>false</SendMsg>
+	</Recovery>
+</Service>

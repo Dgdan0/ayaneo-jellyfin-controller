@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"ayaneohub/internal/adapters/jellyseerr"
+	"ayaneohub/internal/index"
 )
 
 func TestMediaKeyUsesTmdbAsTheSpine(t *testing.T) {
@@ -144,6 +145,40 @@ func TestHitPosterPointsAtTheHubNotTmdb(t *testing.T) {
 	}
 	if hit.Subtitle != "2021 · Movie" {
 		t.Errorf("Subtitle = %q", hit.Subtitle)
+	}
+}
+
+func TestJellyfinIndexCorrectsStaleSearchAndDiscoverCards(t *testing.T) {
+	server := &Server{index: index.New()}
+	server.index.Rebuild([]index.Source{{
+		ItemID: "jellyfin-series", Name: "Last Seen", JellyfinType: "Series", Tmdb: "258230",
+	}})
+	scopes := []string{"read", "play"}
+	raw := hitFrom(jellyseerr.Result{
+		ID: 258230, MediaType: "tv", Name: "Last Seen",
+		MediaInfo: &jellyseerr.MediaInfo{Status: jellyseerr.StatusProcessing},
+	}, scopes, imagePrefix)
+	got := server.enrichHitWithLibrary(raw, scopes)
+	if got.Availability != AvailPartiallyAvailable || got.JellyfinItemID != "jellyfin-series" {
+		t.Fatalf("enriched hit = %+v", got)
+	}
+	if !contains(got.Actions, "play") {
+		t.Fatalf("partially available title should be playable: %v", got.Actions)
+	}
+}
+
+func TestLibraryEnrichmentPreservesAnActiveDownload(t *testing.T) {
+	server := &Server{index: index.New()}
+	server.index.Rebuild([]index.Source{{
+		ItemID: "jellyfin-series", Name: "Show", JellyfinType: "Series", Tmdb: "42",
+	}})
+	raw := SearchHit{
+		Media:        MediaRef{Type: "series", IDs: MediaID{Tmdb: 42}},
+		Availability: AvailDownloading,
+	}
+	got := server.enrichHitWithLibrary(raw, []string{"read", "play"})
+	if got.Availability != AvailDownloading || got.JellyfinItemID == "" {
+		t.Fatalf("active download was hidden: %+v", got)
 	}
 }
 

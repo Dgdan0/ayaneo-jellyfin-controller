@@ -153,7 +153,11 @@ class DownloadRowView(
     }
 
     private fun statsLine(item: ActivityItem): String = buildString {
+        if (item.queueItems > 1) {
+            append(item.queueItems).append(" episodes")
+        }
         if (item.sizeBytes > 0) {
+            if (isNotEmpty()) append(" · ")
             if (item.remainingBytes in 1 until item.sizeBytes) {
                 append(Fmt.bytes(item.sizeBytes - item.remainingBytes)).append(" of ")
             }

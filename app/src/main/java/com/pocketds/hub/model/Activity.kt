@@ -16,6 +16,8 @@ data class ArrRef(
     val queueId: Int = 0,
     val movieId: Int = 0,
     val seriesId: Int = 0,
+    val tmdbId: Int = 0,
+    val tvdbId: Int = 0,
     val trackedDownloadState: String = "",
     val trackedDownloadStatus: String = "",
     /** The *arr's own words for what is wrong. Passed through verbatim. */
@@ -39,12 +41,15 @@ data class ActivityItem(
     val peers: Int = 0,
     val protocol: String = "",
     val client: String = "",
+    val clientStage: String = "",
     val category: String = "",
     val indexer: String = "",
     val arr: ArrRef? = null,
     val torrentHash: String = "",
     val matchConfidence: String = "none",
     val warnings: List<String> = emptyList(),
+    /** Number of Sonarr episode rows represented by this one client transfer. */
+    val queueItems: Int = 0,
     /** Computed by the hub from this token's scopes. Never inferred here. */
     val actions: List<String> = emptyList()
 ) {

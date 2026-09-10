@@ -59,6 +59,9 @@ type SearchHit struct {
 	Rating       float64  `json:"rating,omitempty"`
 	// Present when the title is already in the library.
 	JellyfinItemID string `json:"jellyfinItemId,omitempty"`
+	Played         bool   `json:"played"`
+	Favorite       bool   `json:"favorite"`
+	UnplayedCount  int    `json:"unplayedCount,omitempty"`
 	// Populated while something is actually transferring.
 	Progress  float64 `json:"progress,omitempty"`
 	ETA       string  `json:"eta,omitempty"`
@@ -99,6 +102,13 @@ type SearchResponse struct {
 // Sonarr is TVDB-native.
 func mediaKey(mediaType string, tmdbID int) string {
 	return fmt.Sprintf("tmdb:%s:%d", normaliseType(mediaType), tmdbID)
+}
+
+func tmdbImage(size, path string) string {
+	if path == "" {
+		return ""
+	}
+	return imagePrefix + "/" + size + path
 }
 
 // normaliseType maps Jellyseerr's "tv" onto the word the rest of the API uses.
@@ -207,5 +217,30 @@ func hitFrom(r jellyseerr.Result, scopes []string, imageBase string) SearchHit {
 	}
 
 	hit.Actions = actionsFor(availability, scopes)
+	return hit
+}
+
+// enrichHitWithLibrary corrects Jellyseerr's delayed title state at render
+// time. Search and Discover cache the raw upstream response, so a fresh
+// Jellyfin index sweep can fix even a cached card without another TMDB call.
+func (s *Server) enrichHitWithLibrary(hit SearchHit, scopes []string) SearchHit {
+	key := MediaKey{Source: "tmdb", Type: hit.Media.Type, ID: hit.Media.IDs.Tmdb}
+	entry, present := s.libraryEntry(key, hit.Media.IDs.Tvdb, hit.Media.IDs.Imdb)
+	if !present {
+		return hit
+	}
+	hit.JellyfinItemID = entry.ItemID
+	switch hit.Media.Type {
+	case "movie":
+		hit.Availability = AvailAvailable
+	case "series":
+		// The title index proves that at least one episode exists, but cannot
+		// claim that every requested season is complete. Keep a live download
+		// visible while later episodes are still arriving.
+		if hit.Availability != AvailAvailable && hit.Availability != AvailDownloading {
+			hit.Availability = AvailPartiallyAvailable
+		}
+	}
+	hit.Actions = actionsFor(hit.Availability, scopes)
 	return hit
 }

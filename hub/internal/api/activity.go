@@ -31,6 +31,8 @@ type ArrRef struct {
 	QueueID               int    `json:"queueId,omitempty"`
 	MovieID               int    `json:"movieId,omitempty"`
 	SeriesID              int    `json:"seriesId,omitempty"`
+	TmdbID                int    `json:"tmdbId,omitempty"`
+	TvdbID                int    `json:"tvdbId,omitempty"`
 	TrackedDownloadState  string `json:"trackedDownloadState,omitempty"`
 	TrackedDownloadStatus string `json:"trackedDownloadStatus,omitempty"`
 	Problem               string `json:"problem,omitempty"`
@@ -55,8 +57,12 @@ type ActivityItem struct {
 	Peers    int    `json:"peers,omitempty"`
 	Protocol string `json:"protocol,omitempty"`
 	Client   string `json:"client,omitempty"`
-	Category string `json:"category,omitempty"`
-	Indexer  string `json:"indexer,omitempty"`
+	// ClientStage stays independent from the combined displayed stage. Sonarr
+	// can make a completed transfer "stuck" at import time, but qBittorrent may
+	// still be stopped and therefore needs a Start action.
+	ClientStage string `json:"clientStage,omitempty"`
+	Category    string `json:"category,omitempty"`
+	Indexer     string `json:"indexer,omitempty"`
 
 	Arr         *ArrRef `json:"arr,omitempty"`
 	TorrentHash string  `json:"torrentHash,omitempty"`
@@ -65,6 +71,10 @@ type ActivityItem struct {
 	MatchConfidence string   `json:"matchConfidence"`
 	Warnings        []string `json:"warnings,omitempty"`
 	Actions         []string `json:"actions"`
+	// QueueItems is greater than one when Sonarr expanded one season or series
+	// pack into an episode row for every file. The transfer is still one thing
+	// in qBittorrent, so the API and app keep it as one controllable row.
+	QueueItems int `json:"queueItems,omitempty"`
 }
 
 type ActivitySummary struct {
@@ -205,8 +215,9 @@ func buildActivity(sources *activitySources, showAll bool, scopes []string) Acti
 
 	// *arr queue rows first: they know what a transfer is actually *for*.
 	for service, records := range sources.queues {
-		for _, record := range records {
-			item := itemFromQueue(service, record, byHash, canControl)
+		for _, group := range groupQueueRecords(records) {
+			item := itemFromQueue(service, group[0], byHash, canControl)
+			mergeQueueGroup(service, group, &item, canControl)
 			if item.TorrentHash != "" {
 				claimed[item.TorrentHash] = true
 			}
@@ -293,6 +304,12 @@ func itemFromQueue(
 		SizeBytes:      int64(record.Size),
 		RemainingBytes: int64(record.SizeLeft),
 	}
+	if record.Movie != nil {
+		item.Arr.TmdbID = record.Movie.TmdbID
+	}
+	if record.Series != nil {
+		item.Arr.TvdbID = record.Series.TvdbID
+	}
 	if record.Size > 0 {
 		item.Progress = (record.Size - record.SizeLeft) / record.Size
 	}
@@ -307,6 +324,10 @@ func itemFromQueue(
 	case torrent != nil:
 		item.MatchConfidence = "exact"
 		item.TorrentHash = strings.ToLower(torrent.Hash)
+		// Control endpoints accept the download client's identity. A matched
+		// *arr queue id is useful metadata, but it cannot start or stop a
+		// qBittorrent transfer.
+		item.ID = "qbit:" + item.TorrentHash
 		item.Progress = torrent.Progress
 		item.SizeBytes = torrent.Size
 		item.RemainingBytes = torrent.AmountLeft
@@ -316,7 +337,11 @@ func itemFromQueue(
 		item.Seeds = torrent.Seeds
 		item.Peers = torrent.Leechers
 		item.Category = torrent.Category
-		item.Stage = stageForTorrent(torrent)
+		item.ClientStage = stageForTorrent(torrent)
+		item.Stage = item.ClientStage
+		if torrent.IsFinished() && stageForArr(record) == ActImporting {
+			item.Stage = ActImporting
+		}
 
 	case record.DownloadID == "":
 		// The phantom-row bug. Not dropped, because a stuck row is precisely
@@ -347,6 +372,60 @@ func itemFromQueue(
 	return item
 }
 
+// groupQueueRecords folds Sonarr's per-episode queue rows back into the one
+// download-client job they describe. Records without a download id remain
+// independent because there is no safe evidence that they belong together.
+func groupQueueRecords(records []arr.QueueRecord) [][]arr.QueueRecord {
+	groups := make([][]arr.QueueRecord, 0, len(records))
+	positions := make(map[string]int, len(records))
+	for _, record := range records {
+		key := "queue:" + itoa(record.ID)
+		if record.DownloadID != "" {
+			key = "download:" + strings.ToLower(record.DownloadID)
+		}
+		if at, ok := positions[key]; ok {
+			groups[at] = append(groups[at], record)
+			continue
+		}
+		positions[key] = len(groups)
+		groups = append(groups, []arr.QueueRecord{record})
+	}
+	return groups
+}
+
+func mergeQueueGroup(
+	service string, records []arr.QueueRecord, item *ActivityItem, canControl bool,
+) {
+	if len(records) <= 1 {
+		return
+	}
+	item.QueueItems = len(records)
+	if item.TorrentHash == "" && records[0].DownloadID != "" {
+		item.ID = service + ":download:" + strings.ToLower(records[0].DownloadID)
+	}
+	if series := records[0].Series; series != nil && series.Title != "" {
+		item.MediaTitle = series.Title
+	}
+
+	importing := false
+	for _, record := range records {
+		if stageForArr(record) == ActImporting {
+			importing = true
+		}
+		if !record.IsStuck() {
+			continue
+		}
+		item.Stage = ActStuck
+		if item.Arr != nil && item.Arr.Problem == "" {
+			item.Arr.Problem = record.Problem()
+		}
+	}
+	if item.Stage != ActStuck && item.Progress >= 1 && importing {
+		item.Stage = ActImporting
+	}
+	item.Actions = actionsForActivity(*item, canControl)
+}
+
 func itemFromTorrent(t *qbittorrent.Torrent, canControl bool) ActivityItem {
 	item := ActivityItem{
 		ID:              "qbit:" + strings.ToLower(t.Hash),
@@ -363,6 +442,7 @@ func itemFromTorrent(t *qbittorrent.Torrent, canControl bool) ActivityItem {
 		Category:        t.Category,
 		Protocol:        "torrent",
 		Client:          "qBittorrent",
+		ClientStage:     stageForTorrent(t),
 		TorrentHash:     strings.ToLower(t.Hash),
 		MatchConfidence: "none",
 	}
@@ -419,7 +499,7 @@ func actionsForActivity(item ActivityItem, canControl bool) []string {
 	}
 	actions := make([]string, 0, 4)
 	if item.TorrentHash != "" {
-		if item.Stage == ActStopped {
+		if item.ClientStage == ActStopped {
 			actions = append(actions, "start")
 		} else {
 			actions = append(actions, "stop")

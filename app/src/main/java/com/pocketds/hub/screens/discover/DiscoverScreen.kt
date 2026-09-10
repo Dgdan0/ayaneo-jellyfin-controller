@@ -647,7 +647,7 @@ class DiscoverScreen(
             addView(label)
 
             strip = RecyclerView(context).apply {
-                layoutManager = LinearLayoutManager(context, HORIZONTAL, false)
+                layoutManager = LinearLayoutManager(context, RecyclerView.HORIZONTAL, false)
                 adapter = stripAdapter
                 // ScrollView-family views are focusable by default and become
                 // invisible focus stops. A RecyclerView is not, but its focus

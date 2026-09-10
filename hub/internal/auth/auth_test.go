@@ -70,7 +70,7 @@ func TestScopesComeFromTheToken(t *testing.T) {
 func TestATokenWithNoScopesGetsThemAll(t *testing.T) {
 	s := NewStore([]config.TokenConfig{{Label: "x", SHA256: config.HashToken(pocketToken)}})
 	tok, _ := s.Verify(pocketToken)
-	for _, scope := range []string{"read", "request", "control", "play"} {
+	for _, scope := range []string{"read", "request", "control", "play", "download"} {
 		if !tok.HasScope(scope) {
 			t.Errorf("missing default scope %q", scope)
 		}

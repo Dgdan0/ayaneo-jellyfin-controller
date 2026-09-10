@@ -114,9 +114,16 @@ type Series struct {
 
 type Episode struct {
 	ID            int    `json:"id"`
+	SeriesID      int    `json:"seriesId"`
 	SeasonNumber  int    `json:"seasonNumber"`
 	EpisodeNumber int    `json:"episodeNumber"`
 	Title         string `json:"title"`
+	Overview      string `json:"overview"`
+	AirDate       string `json:"airDate"`
+	AirDateUTC    string `json:"airDateUtc"`
+	Runtime       int    `json:"runtime"`
+	Monitored     bool   `json:"monitored"`
+	HasFile       bool   `json:"hasFile"`
 }
 
 type queuePage struct {
@@ -219,6 +226,86 @@ func (c *Client) Status(ctx context.Context) (*SystemStatus, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+type Quality struct {
+	Quality struct {
+		Name       string `json:"name"`
+		Source     string `json:"source"`
+		Resolution int    `json:"resolution"`
+	} `json:"quality"`
+}
+
+// HistoryRecord is the common subset of Sonarr and Radarr history resources.
+// Their event data is intentionally loose, so only strings useful for a human
+// summary are retained.
+type HistoryRecord struct {
+	ID          int               `json:"id"`
+	MovieID     int               `json:"movieId"`
+	SeriesID    int               `json:"seriesId"`
+	EpisodeID   int               `json:"episodeId"`
+	SourceTitle string            `json:"sourceTitle"`
+	Date        string            `json:"date"`
+	DownloadID  string            `json:"downloadId"`
+	EventType   string            `json:"eventType"`
+	Data        map[string]string `json:"data"`
+	Quality     Quality           `json:"quality"`
+	Movie       *Movie            `json:"movie"`
+	Series      *Series           `json:"series"`
+	Episode     *Episode          `json:"episode"`
+}
+
+type historyPage struct {
+	Page         int             `json:"page"`
+	PageSize     int             `json:"pageSize"`
+	TotalRecords int             `json:"totalRecords"`
+	Records      []HistoryRecord `json:"records"`
+}
+
+// History returns newest events first and asks the service to embed display
+// metadata. Without those include flags, a notification would contain only an
+// internal movie or episode id and the raw release name.
+func (c *Client) History(ctx context.Context, limit int) ([]HistoryRecord, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	values := url.Values{}
+	values.Set("page", "1")
+	values.Set("pageSize", strconv.Itoa(limit))
+	values.Set("sortKey", "date")
+	values.Set("sortDirection", "descending")
+	if c.kind == Radarr {
+		values.Set("includeMovie", "true")
+	} else {
+		values.Set("includeSeries", "true")
+		values.Set("includeEpisode", "true")
+	}
+	var page historyPage
+	if err := c.base.GetJSON(ctx, "/api/v3/history", values, &page); err != nil {
+		return nil, err
+	}
+	if page.Records == nil {
+		page.Records = []HistoryRecord{}
+	}
+	return page.Records, nil
+}
+
+type HealthCheck struct {
+	Source  string `json:"source"`
+	Type    string `json:"type"`
+	Message string `json:"message"`
+	WikiURL string `json:"wikiUrl"`
+}
+
+func (c *Client) Health(ctx context.Context) ([]HealthCheck, error) {
+	var checks []HealthCheck
+	if err := c.base.GetJSON(ctx, "/api/v3/health", nil, &checks); err != nil {
+		return nil, err
+	}
+	if checks == nil {
+		checks = []HealthCheck{}
+	}
+	return checks, nil
 }
 
 // RemoveFromQueue drops a queue row.

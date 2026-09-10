@@ -139,6 +139,14 @@ func (s *Server) itemToHit(item jellyfin.Item) SearchHit {
 		Progress:       item.Progress(),
 		Actions:        []string{"detail"},
 	}
+	if item.UserData != nil {
+		hit.Played = item.UserData.Played
+		hit.Favorite = item.UserData.IsFavorite
+		hit.UnplayedCount = item.UserData.UnplayedItemCount
+		if hit.Played {
+			hit.Progress = 0
+		}
+	}
 	if tmdb := item.Tmdb(); tmdb != "" {
 		hit.Media.Key = "tmdb:" + hit.Media.Type + ":" + tmdb
 		if n, err := strconv.Atoi(tmdb); err == nil {
@@ -148,17 +156,28 @@ func (s *Server) itemToHit(item jellyfin.Item) SearchHit {
 	if tag := item.PosterTag(); tag != "" {
 		hit.Media.Poster = jellyfinImagePrefix + "/" + item.PosterItemID() + "/Primary?tag=" + tag
 	}
+	// Home's Continue Watching and Next Up rows use landscape cards. An
+	// episode's own Primary image is its still, while movies and series use a
+	// real backdrop when Jellyfin has one. Poster remains the fallback.
+	if item.Type == "Episode" && item.ImageTags != nil && item.ImageTags["Primary"] != "" {
+		hit.Media.Backdrop = jellyfinImagePrefix + "/" + item.ID +
+			"/Primary?tag=" + item.ImageTags["Primary"]
+	} else if len(item.BackdropImageTags) > 0 && item.BackdropImageTags[0] != "" {
+		hit.Media.Backdrop = jellyfinImagePrefix + "/" + item.ID +
+			"/Backdrop?tag=" + item.BackdropImageTags[0]
+	}
 	return hit
 }
 
-// mediaTypeFor maps an item to the hub's two-word vocabulary.
-//
-// An episode reports as its series, because that is what its card shows and
-// what tapping it should open.
+// mediaTypeFor keeps concrete playable items distinct from title-level series.
+// Home can therefore play episodes directly while Recently Added opens a
+// movie or series detail screen.
 func mediaTypeFor(item jellyfin.Item) string {
 	switch item.Type {
 	case "Movie":
 		return "movie"
+	case "Episode":
+		return "episode"
 	default:
 		return "series"
 	}

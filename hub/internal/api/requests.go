@@ -88,6 +88,7 @@ func (s *Server) handleMediaDetail(w http.ResponseWriter, r *http.Request) {
 			Name:         season.Name,
 			EpisodeCount: season.EpisodeCount,
 			Year:         yearOf(season.AirDate),
+			Image:        tmdbImage("w342", season.PosterPath),
 		})
 	}
 	if info := detail.MediaInfo; info != nil {
@@ -106,7 +107,78 @@ func (s *Server) handleMediaDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Jellyseerr can lag behind a completed import. The Hub's Jellyfin index is
+	// the authoritative answer to "can I browse this now?". A present movie is
+	// available; a present series is at least partially available because the
+	// title-level index cannot claim that every requested season is complete.
+	if entry, present := s.libraryEntry(
+		key, out.Media.IDs.Tvdb, out.Media.IDs.Imdb,
+	); present {
+		out.JellyfinItemID = entry.ItemID
+		if key.Type == "movie" {
+			out.Availability = AvailAvailable
+		} else if key.Type == "series" && out.Availability != AvailAvailable &&
+			out.Availability != AvailDownloading {
+			out.Availability = AvailPartiallyAvailable
+		}
+		out.Pipeline = refinePipelineWithLibrary(out.Pipeline, key.Type)
+		out.Actions = actionsFor(out.Availability, scopes)
+	}
+
+	// Jellyseerr's downloadStatus is a delayed copy of the *arr queue. Join the
+	// live queue/client snapshot by the *arr id when Jellyseerr has it, or by
+	// TMDB/TVDB when the title was originally added outside Jellyseerr.
+	externalServiceID := 0
+	if info := detail.MediaInfo; info != nil && info.ExternalServiceID != nil {
+		externalServiceID = *info.ExternalServiceID
+	}
+	if externalServiceID > 0 || out.Media.IDs.Tmdb > 0 || out.Media.IDs.Tvdb > 0 {
+		sources, _, activityErr := cache.Fetch(ctx, s.cache, "activity", cache.Downloads,
+			func(ctx context.Context) (*activitySources, error) {
+				return s.gatherActivity(ctx), nil
+			})
+		if activityErr == nil && sources != nil {
+			activity := buildActivity(sources, true, nil)
+			out.Pipeline = refinePipelineWithActivity(
+				out.Pipeline, key.Type, externalServiceID, out.Media.IDs, activity.Items,
+			)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, out)
+}
+
+// refinePipelineWithLibrary corrects Jellyseerr's delayed availability from
+// the Hub's live Jellyfin title index. It intentionally leaves an active
+// download/import summary intact: having one episode available and another in
+// flight are both useful facts.
+func refinePipelineWithLibrary(p Pipeline, mediaType string) Pipeline {
+	library := pipelineStage(&p, "library")
+	if library != nil {
+		if mediaType == "movie" {
+			library.State = StageDone
+			library.Detail = "ready to play"
+		} else if library.State != StageDone {
+			library.State = StageActive
+			library.Detail = "some episodes available"
+		}
+	}
+	busy := false
+	for _, stage := range p.Stages {
+		if (stage.ID == "download" || stage.ID == "import") &&
+			(stage.State == StageActive || stage.State == StageStuck || stage.State == StageFailed) {
+			busy = true
+			break
+		}
+	}
+	if !busy {
+		if mediaType == "movie" {
+			p.Summary = "In your library"
+		} else {
+			p.Summary = "Some episodes available"
+		}
+	}
+	return p
 }
 
 type createRequestBody struct {

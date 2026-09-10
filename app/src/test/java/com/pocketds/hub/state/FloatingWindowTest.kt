@@ -33,6 +33,80 @@ class FloatingWindowTest {
     }
 
     @Test
+    fun `toolbar is outside the sixteen by nine video viewport`() {
+        val chrome = 80
+        val bounds = FloatingWindow().bounds(parentW, parentH, margin, chrome)
+        val expectedVideoHeight = bounds.width * 9 / 16
+        assertTrue(
+            "got ${bounds.width}x${bounds.height} with $chrome chrome",
+            Math.abs((bounds.height - chrome) - expectedVideoHeight) <= 1
+        )
+    }
+
+    @Test
+    fun `safe top and bottom keep floating window out of app chrome`() {
+        val safeTop = 140
+        val safeBottom = 100
+        val window = FloatingWindow()
+        window.nudge(com.pocketds.hub.input.Direction.UP)
+        var bounds = window.bounds(parentW, parentH, margin, 80, safeTopPx = safeTop, safeBottomPx = safeBottom)
+        assertTrue(bounds.top >= safeTop + margin)
+        window.nudge(com.pocketds.hub.input.Direction.DOWN)
+        bounds = window.bounds(parentW, parentH, margin, 80, safeTopPx = safeTop, safeBottomPx = safeBottom)
+        assertTrue(bounds.bottom <= parentH - safeBottom - margin)
+    }
+
+    @Test
+    fun `fullscreen ignores safe insets and preserves floating choice`() {
+        val window = FloatingWindow()
+        window.nudge(com.pocketds.hub.input.Direction.LEFT)
+        window.cycleSize(1)
+        val corner = window.corner
+        val size = window.sizeStep
+        window.toggleFullscreen()
+        assertEquals(WindowBounds(0, 0, parentW, parentH), window.bounds(parentW, parentH, margin, 80, safeTopPx = 100))
+        window.toggleFullscreen()
+        assertEquals(corner, window.corner)
+        assertEquals(size, window.sizeStep)
+    }
+
+    @Test
+    fun `tiny safe area still returns positive contained geometry`() {
+        val bounds = FloatingWindow().bounds(
+            parentWidth = 240,
+            parentHeight = 180,
+            marginPx = 12,
+            chromeHeightPx = 40,
+            safeTopPx = 30,
+            safeBottomPx = 30
+        )
+        assertTrue(bounds.width > 0)
+        assertTrue(bounds.height > 0)
+        assertTrue(bounds.left >= 0)
+        assertTrue(bounds.top >= 30)
+        assertTrue(bounds.right <= 240)
+        assertTrue(bounds.bottom <= 150)
+    }
+
+    @Test
+    fun `safe area smaller than two margins is still contained`() {
+        val bounds = FloatingWindow().bounds(
+            parentWidth = 80,
+            parentHeight = 70,
+            marginPx = 24,
+            chromeHeightPx = 40,
+            safeLeftPx = 30,
+            safeTopPx = 20,
+            safeRightPx = 30,
+            safeBottomPx = 20
+        )
+        assertTrue(bounds.left >= 30)
+        assertTrue(bounds.top >= 20)
+        assertTrue(bounds.right <= 50)
+        assertTrue(bounds.bottom <= 50)
+    }
+
+    @Test
     fun `bounds stay inside the parent at every size and corner`() {
         for (corner in Corner.entries) {
             val window = FloatingWindow()

@@ -210,6 +210,40 @@ type DetailSeason struct {
 	Name         string `json:"name"`
 	EpisodeCount int    `json:"episodeCount"`
 	AirDate      string `json:"airDate"`
+	PosterPath   string `json:"posterPath"`
+}
+
+// SeasonDetail is TMDB season metadata as Jellyseerr exposes it. It supplies
+// the portrait season art and landscape episode stills used by the release
+// target picker; Sonarr remains the authority for searchable episode ids.
+type SeasonDetail struct {
+	ID           int             `json:"id"`
+	Name         string          `json:"name"`
+	Overview     string          `json:"overview"`
+	AirDate      string          `json:"airDate"`
+	PosterPath   string          `json:"posterPath"`
+	SeasonNumber int             `json:"seasonNumber"`
+	Episodes     []SeasonEpisode `json:"episodes"`
+}
+
+type SeasonEpisode struct {
+	ID            int     `json:"id"`
+	Name          string  `json:"name"`
+	Overview      string  `json:"overview"`
+	AirDate       string  `json:"airDate"`
+	StillPath     string  `json:"stillPath"`
+	SeasonNumber  int     `json:"seasonNumber"`
+	EpisodeNumber int     `json:"episodeNumber"`
+	VoteAverage   float64 `json:"voteAverage"`
+}
+
+func (c *Client) SeasonDetail(ctx context.Context, tmdbID, season int) (*SeasonDetail, error) {
+	out := &SeasonDetail{}
+	path := fmt.Sprintf("/api/v1/tv/%d/season/%d", tmdbID, season)
+	if err := c.base.GetJSON(ctx, path, nil, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // Seasons2 is the season list. Named around the Seasons field on api.MediaDetail

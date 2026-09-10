@@ -33,7 +33,8 @@ data class SeasonOption(
     val number: Int = 0,
     val name: String = "",
     val episodeCount: Int = 0,
-    val year: Int = 0
+    val year: Int = 0,
+    val image: String = ""
 )
 
 @Serializable
@@ -80,6 +81,8 @@ data class Release(
     val freeleech: Boolean = false,
     val score: Int = 0,
     val rejected: Boolean = false,
+    /** True when grabbing would include media outside the selected season or episode. */
+    val scopeBlocked: Boolean = false,
     /** The *arr's own sentences, verbatim. Never paraphrased. */
     val rejections: List<String> = emptyList()
 )
@@ -90,6 +93,7 @@ data class ReleasesResponse(
     val title: String = "",
     val service: String = "",
     val season: Int = 0,
+    val episode: Int = 0,
     val releases: List<Release> = emptyList(),
     val accepted: Int = 0,
     val partial: List<PartialFailure> = emptyList(),
@@ -99,7 +103,33 @@ data class ReleasesResponse(
 @Serializable
 data class GrabBody(
     val releaseId: String,
-    val season: Int = 0
+    val season: Int = 0,
+    val episode: Int = 0
+)
+
+@Serializable
+data class ReleaseEpisodeTarget(
+    val season: Int = 0,
+    val episode: Int = 0,
+    val title: String = "",
+    val overview: String = "",
+    val airDate: String = "",
+    val runtimeMinutes: Int = 0,
+    val image: String = "",
+    val hasFile: Boolean = false,
+    val monitored: Boolean = false
+)
+
+@Serializable
+data class ReleaseTargetsResponse(
+    val key: String = "",
+    val title: String = "",
+    val season: Int = 0,
+    val seasonTitle: String = "",
+    val seasonImage: String = "",
+    val episodes: List<ReleaseEpisodeTarget> = emptyList(),
+    val partial: List<PartialFailure> = emptyList(),
+    val cache: CacheInfo = CacheInfo()
 )
 
 @Serializable
@@ -129,6 +159,28 @@ data class DiscoverRow(
 @Serializable
 data class DiscoverResponse(
     val rows: List<DiscoverRow> = emptyList(),
+    val partial: List<PartialFailure> = emptyList(),
+    val cache: CacheInfo = CacheInfo()
+)
+
+/** Personal Jellyfin rows returned together by GET /v1/home. */
+@Serializable
+data class HomeResponse(
+    val rows: List<DiscoverRow> = emptyList(),
+    val partial: List<PartialFailure> = emptyList(),
+    val cache: CacheInfo = CacheInfo()
+)
+
+@Serializable
+data class JellyfinUser(
+    val id: String = "",
+    val name: String = "",
+    val selected: Boolean = false
+)
+
+@Serializable
+data class UsersResponse(
+    val users: List<JellyfinUser> = emptyList(),
     val partial: List<PartialFailure> = emptyList(),
     val cache: CacheInfo = CacheInfo()
 )

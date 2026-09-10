@@ -59,6 +59,10 @@ type Release struct {
 	// no explanation -- which is exactly the state the user was already in.
 	Rejected   bool     `json:"rejected"`
 	Rejections []string `json:"rejections,omitempty"`
+	// ScopeBlocked means the release contains seasons outside the one the user
+	// selected. Unlike a quality-profile rejection, overriding this would change
+	// what was requested and can download hundreds of unexpected episodes.
+	ScopeBlocked bool `json:"scopeBlocked,omitempty"`
 }
 
 type ReleasesResponse struct {
@@ -66,10 +70,171 @@ type ReleasesResponse struct {
 	Title    string    `json:"title"`
 	Service  string    `json:"service"`
 	Season   int       `json:"season,omitempty"`
+	Episode  int       `json:"episode,omitempty"`
 	Releases []Release `json:"releases"`
 	Accepted int       `json:"accepted"`
 	Partial  []Partial `json:"partial"`
 	Cache    CacheInfo `json:"cache"`
+}
+
+// ReleaseEpisodeTarget is an aired Sonarr episode joined to TMDB artwork.
+// Sonarr's numeric episode id stays inside the hub; clients select a stable
+// season/episode number and the hub resolves the current id at search time.
+type ReleaseEpisodeTarget struct {
+	Season         int    `json:"season"`
+	Episode        int    `json:"episode"`
+	Title          string `json:"title"`
+	Overview       string `json:"overview,omitempty"`
+	AirDate        string `json:"airDate,omitempty"`
+	RuntimeMinutes int    `json:"runtimeMinutes,omitempty"`
+	Image          string `json:"image,omitempty"`
+	HasFile        bool   `json:"hasFile"`
+	Monitored      bool   `json:"monitored"`
+}
+
+type ReleaseTargetsResponse struct {
+	Key         string                 `json:"key"`
+	Title       string                 `json:"title"`
+	Season      int                    `json:"season"`
+	SeasonTitle string                 `json:"seasonTitle"`
+	SeasonImage string                 `json:"seasonImage,omitempty"`
+	Episodes    []ReleaseEpisodeTarget `json:"episodes"`
+	Partial     []Partial              `json:"partial"`
+	Cache       CacheInfo              `json:"cache"`
+}
+
+// handleReleaseTargets exposes the meaningful scopes before an interactive
+// search: the whole season and each episode that has actually aired. Upcoming
+// entries remain out of the list until their Sonarr airDateUtc has passed.
+func (s *Server) handleReleaseTargets(w http.ResponseWriter, r *http.Request) {
+	key, err := ParseMediaKey(r.PathValue("key"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: err.Error()})
+		return
+	}
+	if key.Type != "series" {
+		writeError(w, r, http.StatusBadRequest, Error{
+			Code: CodeInvalidRequest, Message: "release targets are only available for series",
+		})
+		return
+	}
+	season, err := requiredSeason(r)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: err.Error()})
+		return
+	}
+
+	ctx, cancel := timeoutFor(r, s.cfg.Server.RequestTimeout.OrDefault(20*time.Second))
+	defer cancel()
+	target, err := s.resolveArrTarget(ctx, key, season)
+	if err != nil {
+		writeTargetError(w, r, err)
+		return
+	}
+	episodes, meta, err := cache.Fetch(ctx, s.cache, target.targetCacheKey(), cache.Availability,
+		func(ctx context.Context) ([]arr.Episode, error) {
+			return target.client.Episodes(ctx, target.id, target.season)
+		})
+	if err != nil {
+		writeUpstreamError(w, r, target.service, err)
+		return
+	}
+
+	out := ReleaseTargetsResponse{
+		Key: key.String(), Title: target.title, Season: season,
+		SeasonTitle: seasonName(season), Episodes: []ReleaseEpisodeTarget{},
+		Partial: []Partial{}, Cache: cacheInfoFrom(meta),
+	}
+	stills := map[int]string{}
+	overviews := map[int]string{}
+	if s.jellyseerr != nil {
+		seasonDetail, _, detailErr := cache.Fetch(ctx, s.cache,
+			"release-target-art:"+key.String()+":s"+strconv.Itoa(season), cache.Metadata,
+			func(ctx context.Context) (*jellyseerr.SeasonDetail, error) {
+				return s.jellyseerr.SeasonDetail(ctx, key.ID, season)
+			})
+		if detailErr != nil {
+			out.Partial = append(out.Partial, Partial{
+				Service: "jellyseerr", Reason: "artwork_unavailable",
+				Affects: []string{"season artwork", "episode artwork"},
+				Message: "Episode artwork is temporarily unavailable",
+			})
+		} else if seasonDetail != nil {
+			out.SeasonTitle = firstNonEmpty(seasonDetail.Name, out.SeasonTitle)
+			out.SeasonImage = tmdbImage("w342", seasonDetail.PosterPath)
+			for _, episode := range seasonDetail.Episodes {
+				stills[episode.EpisodeNumber] = tmdbImage("w500", episode.StillPath)
+				overviews[episode.EpisodeNumber] = episode.Overview
+			}
+		}
+	}
+
+	now := time.Now()
+	for _, episode := range episodes {
+		if !episodeHasAired(episode, now) {
+			continue
+		}
+		overview := overviews[episode.EpisodeNumber]
+		if overview == "" {
+			overview = episode.Overview
+		}
+		out.Episodes = append(out.Episodes, ReleaseEpisodeTarget{
+			Season: episode.SeasonNumber, Episode: episode.EpisodeNumber,
+			Title: episode.Title, Overview: overview, AirDate: episode.AirDate,
+			RuntimeMinutes: episode.Runtime, Image: stills[episode.EpisodeNumber],
+			HasFile: episode.HasFile, Monitored: episode.Monitored,
+		})
+	}
+	sort.SliceStable(out.Episodes, func(i, j int) bool {
+		return out.Episodes[i].Episode < out.Episodes[j].Episode
+	})
+	writeJSON(w, http.StatusOK, out)
+}
+
+func requiredSeason(r *http.Request) (int, error) {
+	raw := r.URL.Query().Get("season")
+	if raw == "" {
+		return 0, &fieldError{"season is required"}
+	}
+	season, err := strconv.Atoi(raw)
+	if err != nil || season < 0 {
+		return 0, &fieldError{"season must be a whole number"}
+	}
+	return season, nil
+}
+
+type fieldError struct{ message string }
+
+func (e *fieldError) Error() string { return e.message }
+
+func seasonName(season int) string {
+	if season == 0 {
+		return "Specials"
+	}
+	return "Season " + strconv.Itoa(season)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func episodeHasAired(episode arr.Episode, now time.Time) bool {
+	if episode.AirDateUTC != "" {
+		if aired, err := time.Parse(time.RFC3339, episode.AirDateUTC); err == nil {
+			return !aired.After(now)
+		}
+	}
+	if episode.AirDate != "" {
+		if aired, err := time.Parse("2006-01-02", episode.AirDate); err == nil {
+			return !aired.After(now)
+		}
+	}
+	return episode.HasFile
 }
 
 // handleReleases runs an interactive search.
@@ -95,6 +260,11 @@ func (s *Server) handleReleases(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	episode, err := optionalEpisode(r.URL.Query().Get("episode"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: err.Error()})
+		return
+	}
 
 	// An interactive search is genuinely slow, so it gets its own generous
 	// budget rather than the default request timeout.
@@ -106,14 +276,13 @@ func (s *Server) handleReleases(w http.ResponseWriter, r *http.Request) {
 		writeTargetError(w, r, err)
 		return
 	}
+	if err := target.selectEpisode(ctx, episode); err != nil {
+		writeTargetError(w, r, err)
+		return
+	}
 
 	releases, meta, err := cache.Fetch(ctx, s.cache, target.cacheKey(), cache.Releases,
-		func(ctx context.Context) ([]arr.Release, error) {
-			if target.isMovie {
-				return target.client.MovieReleases(ctx, target.id)
-			}
-			return target.client.SeasonReleases(ctx, target.id, target.season)
-		})
+		func(ctx context.Context) ([]arr.Release, error) { return target.search(ctx) })
 	if err != nil {
 		writeUpstreamError(w, r, target.service, err)
 		return
@@ -124,13 +293,15 @@ func (s *Server) handleReleases(w http.ResponseWriter, r *http.Request) {
 		Title:    target.title,
 		Service:  target.service,
 		Season:   season,
+		Episode:  episode,
 		Releases: make([]Release, 0, len(releases)),
 		Partial:  []Partial{},
 		Cache:    cacheInfoFrom(meta),
 	}
 	for i := range releases {
-		out.Releases = append(out.Releases, publicRelease(&releases[i]))
-		if !releases[i].Rejected {
+		blocked := releaseOutsideTarget(&releases[i], target)
+		out.Releases = append(out.Releases, publicRelease(&releases[i], blocked))
+		if !releases[i].Rejected && !blocked {
 			out.Accepted++
 		}
 	}
@@ -139,7 +310,7 @@ func (s *Server) handleReleases(w http.ResponseWriter, r *http.Request) {
 }
 
 // publicRelease strips everything that must not leave the hub.
-func publicRelease(src *arr.Release) Release {
+func publicRelease(src *arr.Release, scopeBlocked bool) Release {
 	return Release{
 		ID:           releaseID(src),
 		Title:        src.Title,
@@ -155,6 +326,7 @@ func publicRelease(src *arr.Release) Release {
 		Freeleech:    src.Freeleech(),
 		Score:        src.CustomFormatScore,
 		Rejected:     src.Rejected,
+		ScopeBlocked: scopeBlocked,
 		// Verbatim. "Quality for release in queue already meets cutoff" is a
 		// sentence that tells you exactly what to do; any paraphrase of it
 		// would tell you less.
@@ -192,6 +364,7 @@ func sortReleases(list []Release) {
 type grabBody struct {
 	ReleaseID string `json:"releaseId"`
 	Season    int    `json:"season,omitempty"`
+	Episode   int    `json:"episode,omitempty"`
 }
 
 // handleGrab sends one chosen release for download.
@@ -227,18 +400,17 @@ func (s *Server) handleGrab(w http.ResponseWriter, r *http.Request) {
 		writeTargetError(w, r, err)
 		return
 	}
+	if err := target.selectEpisode(ctx, body.Episode); err != nil {
+		writeTargetError(w, r, err)
+		return
+	}
 
 	// Re-reads the cached search, and re-runs it if that has expired -- which
 	// is not merely convenient. The *arr resolves a grab against *its* copy of
 	// the same search, so an id from a stale search would not resolve there
 	// either; searching again refreshes both sides at once.
 	releases, _, err := cache.Fetch(ctx, s.cache, target.cacheKey(), cache.Releases,
-		func(ctx context.Context) ([]arr.Release, error) {
-			if target.isMovie {
-				return target.client.MovieReleases(ctx, target.id)
-			}
-			return target.client.SeasonReleases(ctx, target.id, target.season)
-		})
+		func(ctx context.Context) ([]arr.Release, error) { return target.search(ctx) })
 	if err != nil {
 		writeUpstreamError(w, r, target.service, err)
 		return
@@ -256,6 +428,20 @@ func (s *Server) handleGrab(w http.ResponseWriter, r *http.Request) {
 			Code:    "release_gone",
 			Service: target.service,
 			Message: "That release is no longer in the search results — search again",
+		})
+		return
+	}
+	if key.Type == "series" && releaseOutsideTarget(chosen, target) {
+		message := "That release contains multiple seasons; choose a release limited to Season " +
+			strconv.Itoa(target.season)
+		if target.episode > 0 {
+			message = "That release contains episodes beyond " + episodeCode(target.season, target.episode) +
+				"; choose a release for only that episode"
+		}
+		writeError(w, r, http.StatusConflict, Error{
+			Code:    "release_scope_mismatch",
+			Service: target.service,
+			Message: message,
 		})
 		return
 	}
@@ -278,22 +464,119 @@ func (s *Server) handleGrab(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func releaseScopeBlocked(release *arr.Release) bool {
+	for _, reason := range release.Rejections {
+		if strings.Contains(strings.ToLower(reason), "multi-season") {
+			return true
+		}
+	}
+	return false
+}
+
+func releaseOutsideTarget(release *arr.Release, target *arrTarget) bool {
+	if releaseScopeBlocked(release) {
+		return true
+	}
+	if target == nil || target.episode == 0 {
+		return false
+	}
+	if release.FullSeason || (release.SeasonNum > 0 && release.SeasonNum != target.season) {
+		return true
+	}
+	for _, number := range release.EpisodeNos {
+		if number != target.episode {
+			return true
+		}
+	}
+	return false
+}
+
+func optionalEpisode(raw string) (int, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	episode, err := strconv.Atoi(raw)
+	if err != nil || episode < 1 {
+		return 0, &fieldError{"episode must be a positive whole number"}
+	}
+	return episode, nil
+}
+
+func episodeCode(season, episode int) string {
+	return "S" + padNumber(season) + "E" + padNumber(episode)
+}
+
+func padNumber(number int) string {
+	value := strconv.Itoa(number)
+	if len(value) < 2 {
+		return "0" + value
+	}
+	return value
+}
+
 // arrTarget is the *arr item an interactive search runs against.
 type arrTarget struct {
-	client  *arr.Client
-	service string
-	id      int
-	isMovie bool
-	season  int
-	title   string
-	key     string
+	client    *arr.Client
+	service   string
+	id        int
+	isMovie   bool
+	season    int
+	episode   int
+	episodeID int
+	title     string
+	key       string
 }
 
 func (t arrTarget) cacheKey() string {
 	if t.isMovie {
 		return "releases:" + t.key
 	}
-	return "releases:" + t.key + ":s" + strconv.Itoa(t.season)
+	key := "releases:" + t.key + ":s" + strconv.Itoa(t.season)
+	if t.episode > 0 {
+		key += ":e" + strconv.Itoa(t.episode)
+	}
+	return key
+}
+
+func (t arrTarget) targetCacheKey() string {
+	return "release-targets:" + t.key + ":s" + strconv.Itoa(t.season)
+}
+
+func (t *arrTarget) selectEpisode(ctx context.Context, episode int) error {
+	if episode == 0 {
+		return nil
+	}
+	if t.isMovie {
+		return &fieldError{"episode is only valid for a series"}
+	}
+	episodes, err := t.client.Episodes(ctx, t.id, t.season)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range episodes {
+		if candidate.EpisodeNumber == episode {
+			t.episode = episode
+			t.episodeID = candidate.ID
+			return nil
+		}
+	}
+	return &episodeNotFoundError{season: t.season, episode: episode}
+}
+
+func (t *arrTarget) search(ctx context.Context) ([]arr.Release, error) {
+	if t.isMovie {
+		return t.client.MovieReleases(ctx, t.id)
+	}
+	if t.episodeID > 0 {
+		return t.client.EpisodeReleases(ctx, t.episodeID)
+	}
+	return t.client.SeasonReleases(ctx, t.id, t.season)
+}
+
+type episodeNotFoundError struct{ season, episode int }
+
+func (e *episodeNotFoundError) Error() string {
+	return episodeCode(e.season, e.episode) + " is not available in Sonarr"
 }
 
 // notInArrError means the title exists but the *arr has never heard of it,
@@ -381,6 +664,12 @@ func writeTargetError(w http.ResponseWriter, r *http.Request, err error) {
 	case *notConfiguredError:
 		writeError(w, r, http.StatusServiceUnavailable, Error{
 			Code: CodeUpstreamDown, Service: typed.service, Message: typed.Error(),
+		})
+	case *fieldError:
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: typed.Error()})
+	case *episodeNotFoundError:
+		writeError(w, r, http.StatusNotFound, Error{
+			Code: CodeNotFound, Service: "sonarr", Message: typed.Error(),
 		})
 	default:
 		writeUpstreamError(w, r, "arr", err)

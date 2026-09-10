@@ -47,6 +47,7 @@ class ReleasesScreen(
     private val mediaKey: String,
     private val mediaTitle: String,
     private val season: Int,
+    private val episode: Int,
     private val ringVisible: () -> Boolean
 ) : Screen {
 
@@ -192,7 +193,7 @@ class ReleasesScreen(
         searchJob?.cancel()
         searchJob = scope.launch {
             val started = System.currentTimeMillis()
-            when (val result = api.releases(mediaKey, season)) {
+            when (val result = api.releases(mediaKey, season, episode)) {
                 is HubResult.Ok -> {
                     val body = result.value
                     all = body.releases
@@ -229,6 +230,21 @@ class ReleasesScreen(
     }
 
     private fun confirmGrab(release: Release) {
+        if (release.scopeBlocked) {
+            val selectedScope = if (episode > 0) {
+                "S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')}"
+            } else {
+                "Season $season"
+            }
+            overlay.show(
+                title = "More than $selectedScope",
+                subtitle = "This release contains media outside the target you selected.",
+                choices = listOf(ChoiceOverlay.Choice("cancel", "Choose another release")),
+                onCancel = { host?.refreshHints() }
+            ) { host?.refreshHints() }
+            host?.refreshHints()
+            return
+        }
         val warning = if (release.rejected) {
             release.rejections.firstOrNull().orEmpty()
         } else {
@@ -271,7 +287,7 @@ class ReleasesScreen(
         status.setTextColor(colors.mutedText)
         status.text = "Sending to the download client…"
         scope.launch {
-            when (val result = api.grab(mediaKey, release.id, season)) {
+            when (val result = api.grab(mediaKey, release.id, season, episode)) {
                 is HubResult.Ok -> {
                     DebugLog.log("net", "grabbed ${release.id}")
                     status.setTextColor(colors.badgeAvailable)

@@ -115,7 +115,8 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 			if result.MediaType == "person" {
 				continue
 			}
-			items = append(items, hitFrom(result, scopes, imagePrefix))
+			hit := hitFrom(result, scopes, imagePrefix)
+			items = append(items, s.enrichHitWithLibrary(hit, scopes))
 		}
 		if len(items) == 0 {
 			continue
@@ -207,7 +208,8 @@ func (s *Server) handleDiscoverRow(w http.ResponseWriter, r *http.Request) {
 		if result.MediaType == "person" {
 			continue
 		}
-		items = append(items, hitFrom(result, scopes, imagePrefix))
+		hit := hitFrom(result, scopes, imagePrefix)
+		items = append(items, s.enrichHitWithLibrary(hit, scopes))
 	}
 
 	writeJSON(w, http.StatusOK, DiscoverResponse{

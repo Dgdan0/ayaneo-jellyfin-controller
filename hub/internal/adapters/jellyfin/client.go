@@ -52,6 +52,13 @@ func New(cfg config.ServiceConfig) (*Client, error) {
 // problem rather than a runtime one, and the caller says so.
 func (c *Client) UserID() string { return c.userID }
 
+// ForUser shares the authenticated transport while changing whose views and
+// watch state user-scoped calls request. Clients are immutable after creation,
+// so the shallow copy is safe for concurrent handlers.
+func (c *Client) ForUser(userID string) *Client {
+	return &Client{base: c.base, userID: userID}
+}
+
 func (c *Client) Info(ctx context.Context) (*SystemInfo, error) {
 	out := &SystemInfo{}
 	if err := c.base.GetJSON(ctx, "/System/Info", nil, out); err != nil {
@@ -140,6 +147,116 @@ func (c *Client) Items(ctx context.Context, q ItemsQuery) (*ItemsPage, error) {
 	return out, nil
 }
 
+// Item returns one library object with user state. Jellyfin exposes this under
+// /Items/{id}; using the configured user keeps played/progress fields aligned
+// with Home and the rest of Library.
+func (c *Client) Item(ctx context.Context, itemID string) (*Item, error) {
+	if err := c.requireUser(); err != nil {
+		return nil, err
+	}
+	out := &Item{}
+	query := url.Values{
+		"userId": {c.userID},
+		"fields": {"Overview,ProviderIds,Genres,Trickplay,OriginalTitle,Studios,People,MediaSources"},
+	}
+	if err := c.base.GetJSON(ctx, "/Items/"+itemID, query, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SetPlayed and SetFavorite use Jellyfin's idempotent user-item endpoints.
+// They carry no body; the selected user is part of the path and the API key is
+// still applied by the shared authenticated transport.
+func (c *Client) SetPlayed(ctx context.Context, itemID string, played bool) error {
+	if err := c.requireUser(); err != nil {
+		return err
+	}
+	path := "/Users/" + c.userID + "/PlayedItems/" + itemID
+	if played {
+		return c.base.PostJSON(ctx, path, nil, nil)
+	}
+	return c.base.Delete(ctx, path, nil)
+}
+
+func (c *Client) SetFavorite(ctx context.Context, itemID string, favorite bool) error {
+	if err := c.requireUser(); err != nil {
+		return err
+	}
+	path := "/Users/" + c.userID + "/FavoriteItems/" + itemID
+	if favorite {
+		return c.base.PostJSON(ctx, path, nil, nil)
+	}
+	return c.base.Delete(ctx, path, nil)
+}
+
+// RefreshLibrary starts Jellyfin's normal "Scan Media Library" task. Jellyfin
+// accepts the request and performs the scan asynchronously, so there is no
+// response body to decode and callers should describe the operation as
+// started rather than completed.
+func (c *Client) RefreshLibrary(ctx context.Context) error {
+	return c.base.PostJSON(ctx, "/Library/Refresh", nil, nil)
+}
+
+// Images reports where Jellyfin sourced an item's artwork. A library view's
+// BaseItemDto always has a Primary tag, including for an automatically
+// generated collage, so the tag alone cannot identify user-provided art.
+func (c *Client) Images(ctx context.Context, itemID string) ([]ImageInfo, error) {
+	if err := c.requireUser(); err != nil {
+		return nil, err
+	}
+	var out []ImageInfo
+	if err := c.base.GetJSON(ctx, "/Items/"+itemID+"/Images", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Seasons keeps Jellyfin's own ordering, including season zero (Specials).
+func (c *Client) Seasons(ctx context.Context, seriesID string) (*ItemsPage, error) {
+	if err := c.requireUser(); err != nil {
+		return nil, err
+	}
+	out := &ItemsPage{}
+	query := url.Values{
+		"userId": {c.userID},
+		"fields": {"Overview,ProviderIds,Genres"},
+	}
+	if err := c.base.GetJSON(ctx, "/Shows/"+seriesID+"/Seasons", query, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Episodes returns one season in Jellyfin's episode order.
+func (c *Client) Episodes(
+	ctx context.Context, seriesID, seasonID string, limit, startIndex int,
+) (*ItemsPage, error) {
+	if err := c.requireUser(); err != nil {
+		return nil, err
+	}
+	out := &ItemsPage{}
+	query := url.Values{
+		"userId":   {c.userID},
+		"seasonId": {seasonID},
+		// API-key callers otherwise receive virtual missing episodes too. Those
+		// belong in Manage, not in a list of things available to watch.
+		"isMissing": {"false"},
+		"fields":    {"Overview,ProviderIds,Genres"},
+		"sortBy":    {"SortName"},
+	}
+	if limit > 0 {
+		query.Set("limit", strconv.Itoa(limit))
+	}
+	if startIndex > 0 {
+		query.Set("startIndex", strconv.Itoa(startIndex))
+	}
+	if err := c.base.GetJSON(ctx, "/Shows/"+seriesID+"/Episodes", query, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Sweep reads the whole library, for the provider-id index.
 //
 // One request rather than paging: 250 items came back in 362ms here. The limit
@@ -161,6 +278,7 @@ func (c *Client) Resume(ctx context.Context, limit int) (*ItemsPage, error) {
 	return c.Items(ctx, ItemsQuery{
 		Recursive: true,
 		Filters:   "IsResumable",
+		Types:     "Movie,Episode",
 		SortBy:    "DatePlayed",
 		SortOrder: "Descending",
 		Fields:    "ProviderIds",
@@ -217,6 +335,12 @@ func (c *Client) Latest(ctx context.Context, limit int) ([]Item, error) {
 	query := url.Values{
 		"userId": {c.userID},
 		"fields": {"ProviderIds"},
+		// Jellyfin's latest-media endpoint is made from playable media. Asking
+		// it for Series drops newly added episodes instead of returning their
+		// parent shows, which left Home with only the occasional movie. The API
+		// layer promotes each episode to its series card.
+		"includeItemTypes": {"Movie,Episode"},
+		"groupItems":       {"true"},
 	}
 	if limit > 0 {
 		query.Set("limit", strconv.Itoa(limit))

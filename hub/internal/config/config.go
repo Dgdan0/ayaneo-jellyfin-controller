@@ -54,6 +54,9 @@ type ServerConfig struct {
 	TrustProxyCIDRs []string `yaml:"trust_proxy_cidrs"`
 	RequestTimeout  Duration `yaml:"request_timeout"`
 	ShutdownGrace   Duration `yaml:"shutdown_grace"`
+	// OfflineRegistry persists short-lived download grants and progress-sync
+	// receipts. Relative paths are resolved beside the main config file.
+	OfflineRegistry string `yaml:"offline_registry"`
 }
 
 type AuthConfig struct {
@@ -89,7 +92,12 @@ type BanConfig struct {
 type ServiceConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	BaseURL string `yaml:"base_url"`
-	APIKey  Secret `yaml:"api_key"`
+	// WebURL is the address a handheld browser can open. It is deliberately
+	// separate from BaseURL: the hub often reaches a service over loopback or a
+	// container-only hostname while the browser needs a LAN or HTTPS address.
+	// When empty, the health response falls back to a sanitized BaseURL.
+	WebURL string `yaml:"web_url"`
+	APIKey Secret `yaml:"api_key"`
 	// qBittorrent's fallback when the build has no bearer-key support.
 	Username string   `yaml:"username"`
 	Password Secret   `yaml:"password"`
@@ -171,6 +179,11 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.applyDefaults()
+	if cfg.Server.OfflineRegistry == "" {
+		cfg.Server.OfflineRegistry = filepath.Join(filepath.Dir(path), "offline-grants.json")
+	} else if !filepath.IsAbs(cfg.Server.OfflineRegistry) {
+		cfg.Server.OfflineRegistry = filepath.Join(filepath.Dir(path), cfg.Server.OfflineRegistry)
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

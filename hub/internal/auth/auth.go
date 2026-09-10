@@ -50,7 +50,7 @@ func NewStore(tokens []config.TokenConfig) *Store {
 		}
 		scopes := t.Scopes
 		if len(scopes) == 0 {
-			scopes = []string{"read", "request", "control", "play"}
+			scopes = []string{"read", "request", "control", "play", "download"}
 		}
 		s.entries = append(s.entries, entry{label: t.Label, digest: digest, scopes: scopes})
 	}

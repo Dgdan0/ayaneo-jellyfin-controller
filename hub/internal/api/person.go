@@ -193,11 +193,8 @@ func (s *Server) filmographyFrom(
 		// have this", because a library item whose metadata was never scraped is
 		// genuinely unknown rather than genuinely absent.
 		hit.Availability = "unknown"
-		if key, err := ParseMediaKey(hit.Media.Key); err == nil {
-			if _, inLibrary := s.libraryEntry(key, 0, ""); inLibrary {
-				hit.Availability = AvailAvailable
-			}
-		}
+		hit.Actions = actionsFor(hit.Availability, scopes)
+		hit = s.enrichHitWithLibrary(hit, scopes)
 		hit.Actions = []string{"detail"}
 		if c.Character != "" {
 			hit.Subtitle = hit.Subtitle + " · " + c.Character

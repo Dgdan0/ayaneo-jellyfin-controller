@@ -11,8 +11,6 @@ import androidx.dynamicanimation.animation.SpringForce
  * much:
  *
  *  * the accent ring, which lives in the background drawable's `state_focused`
- *  * **dimming everything else** rather than brightening the one thing, which is
- *    more readable and costs one property
  *  * a small scale-up, so the selection has physical presence
  *  * a haptic tick per step, gated so a held stick does not buzz continuously
  *
@@ -23,7 +21,6 @@ import androidx.dynamicanimation.animation.SpringForce
 object FocusDecorator {
 
     private const val FOCUSED_SCALE = 1.08f
-    private const val UNFOCUSED_ALPHA = 0.72f
     private const val TAG_SCALE_X = -0x7ffffff1
     private const val TAG_SCALE_Y = -0x7ffffff2
 
@@ -33,10 +30,11 @@ object FocusDecorator {
      *   chasing it is noise.
      */
     fun attach(view: View, ringVisible: () -> Boolean, scale: Boolean = true) {
-        view.alpha = UNFOCUSED_ALPHA
+        // Keep artwork fully opaque. Fading the whole card blends posters into
+        // the page background and makes them look grey in the light theme.
+        view.alpha = 1f
         view.setOnFocusChangeListener { v, hasFocus ->
             val decorate = hasFocus && ringVisible()
-            v.alpha = if (decorate) 1f else UNFOCUSED_ALPHA
             val target = if (decorate && scale) FOCUSED_SCALE else 1f
             spring(v, TAG_SCALE_X, SpringAnimation.SCALE_X).animateToFinalPosition(target)
             spring(v, TAG_SCALE_Y, SpringAnimation.SCALE_Y).animateToFinalPosition(target)
@@ -48,7 +46,6 @@ object FocusDecorator {
     /** Re-run the decoration after the input mode flips, without a focus change. */
     fun refresh(view: View, ringVisible: Boolean) {
         val decorate = view.hasFocus() && ringVisible
-        view.alpha = if (decorate) 1f else UNFOCUSED_ALPHA
         spring(view, TAG_SCALE_X, SpringAnimation.SCALE_X)
             .animateToFinalPosition(if (decorate) FOCUSED_SCALE else 1f)
         spring(view, TAG_SCALE_Y, SpringAnimation.SCALE_Y)

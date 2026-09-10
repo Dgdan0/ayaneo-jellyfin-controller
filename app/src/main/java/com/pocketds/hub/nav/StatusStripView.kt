@@ -4,7 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
-import android.widget.TextView
+import androidx.appcompat.widget.AppCompatTextView
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 
@@ -20,10 +20,15 @@ import com.pocketds.hub.ui.Styler
  * minutes ago". Being explicit about staleness is the whole difference between a
  * useful offline mode and a confusing one.
  */
-class StatusStripView(context: Context, private val colors: PocketColors) : TextView(context) {
+class StatusStripView(context: Context, private val colors: PocketColors) : AppCompatTextView(context) {
 
     private val handler = Handler(Looper.getMainLooper())
-    private val hide = Runnable { visibility = GONE }
+    private var messageVisible = false
+    private var chromeVisible = true
+    private val hide = Runnable {
+        messageVisible = false
+        syncVisibility()
+    }
 
     init {
         textSize = 12f
@@ -40,7 +45,8 @@ class StatusStripView(context: Context, private val colors: PocketColors) : Text
     fun flash(message: String, millis: Long = 2_500L) {
         handler.removeCallbacks(hide)
         text = message
-        visibility = VISIBLE
+        messageVisible = message.isNotEmpty()
+        syncVisibility()
         handler.postDelayed(hide, millis)
     }
 
@@ -48,11 +54,24 @@ class StatusStripView(context: Context, private val colors: PocketColors) : Text
     fun hold(message: String) {
         handler.removeCallbacks(hide)
         text = message
-        visibility = VISIBLE
+        messageVisible = message.isNotEmpty()
+        syncVisibility()
     }
 
     fun clear() {
         handler.removeCallbacks(hide)
-        visibility = GONE
+        messageVisible = false
+        text = ""
+        syncVisibility()
+    }
+
+    /** Immersive playback hides the chrome without turning an empty strip back on afterward. */
+    fun setChromeVisible(visible: Boolean) {
+        chromeVisible = visible
+        syncVisibility()
+    }
+
+    private fun syncVisibility() {
+        visibility = if (chromeVisible && messageVisible) VISIBLE else GONE
     }
 }
