@@ -18,6 +18,7 @@ import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubEndpoints
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.settings.HubSettings
+import com.pocketds.hub.state.HubConnectionValidation
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
@@ -30,7 +31,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
-/** Lets the owner change the public hub address without ADB or retyping its token. */
+/** Lets the owner restore or change both connection values without ADB. */
 class HubConnectionScreen(
     private val api: HubApi,
     private val ringVisible: () -> Boolean
@@ -42,6 +43,7 @@ class HubConnectionScreen(
     private lateinit var host: ScreenHost
     private lateinit var colors: PocketColors
     private lateinit var address: EditText
+    private lateinit var token: EditText
     private lateinit var save: TextView
     private lateinit var status: TextView
     private var testJob: Job? = null
@@ -72,8 +74,10 @@ class HubConnectionScreen(
         })
 
         card.addView(TextView(host.viewContext).apply {
-            text = "Use the complete HTTPS address, including a custom port when required. " +
-                "The existing access token is kept."
+            text = "Use the complete HTTPS address and its access token. Both are stored only " +
+                "inside this app, so uninstalling clears them. With Jump Desktop, open " +
+                "D:\\Projects\\Ayaneo Jellyfin Controler\\scripts\\dev.env on the media PC " +
+                "and copy the value after HUB_TOKEN=."
             textSize = 13f
             setTextColor(colors.mutedText)
             setPadding(0, dp(5), 0, dp(16))
@@ -86,11 +90,42 @@ class HubConnectionScreen(
             setHintTextColor(colors.mutedText)
             hint = "https://example.duckdns.org:55886"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            imeOptions = EditorInfo.IME_ACTION_NEXT
+            isSingleLine = true
+            setSelectAllOnFocus(false)
+            setPadding(dp(15), dp(13), dp(15), dp(13))
+            background = fieldBackground()
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_NEXT) {
+                    token.requestFocus()
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+        card.addView(address, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
+
+        card.addView(TextView(host.viewContext).apply {
+            text = "Hub API key / access token"
+            textSize = 12f
+            setTextColor(colors.mutedText)
+            setPadding(0, dp(12), 0, dp(5))
+        })
+
+        token = EditText(host.viewContext).apply {
+            setText(HubSettings.token(context))
+            textSize = 16f
+            setTextColor(colors.primaryText)
+            setHintTextColor(colors.mutedText)
+            hint = "Paste the HUB_TOKEN value"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             imeOptions = EditorInfo.IME_ACTION_DONE
             isSingleLine = true
             setSelectAllOnFocus(false)
             setPadding(dp(15), dp(13), dp(15), dp(13))
             background = fieldBackground()
+            contentDescription = "Hub API key or access token"
             setOnEditorActionListener { _, actionId, _ ->
                 if (actionId == EditorInfo.IME_ACTION_DONE) {
                     testAndSave()
@@ -100,7 +135,7 @@ class HubConnectionScreen(
                 }
             }
         }
-        card.addView(address, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
+        card.addView(token, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
 
         save = TextView(host.viewContext).apply {
             text = "Save and test"
@@ -135,6 +170,7 @@ class HubConnectionScreen(
 
     override fun onShow() {
         address.setText(HubSettings.baseUrl(host.viewContext))
+        token.setText(HubSettings.token(host.viewContext))
     }
 
     override fun onHide() {
@@ -147,7 +183,8 @@ class HubConnectionScreen(
         scope.cancel()
     }
 
-    override fun requestInitialFocus(): Boolean = address.requestFocus()
+    override fun requestInitialFocus(): Boolean =
+        if (HubSettings.token(host.viewContext).isEmpty()) token.requestFocus() else address.requestFocus()
 
     override fun hints(): List<ButtonHint> = listOf(
         ButtonHint.activate("Edit / save"),
@@ -157,14 +194,17 @@ class HubConnectionScreen(
     private fun testAndSave() {
         if (testJob?.isActive == true) return
         val normalized = HubEndpoints.normaliseBase(address.text.toString())
-        if (!isAllowedAddress(normalized)) {
+        val enteredToken = token.text.toString().trim()
+        val validationError = HubConnectionValidation.error(normalized, enteredToken)
+        if (validationError != null) {
             status.setTextColor(colors.dangerText)
-            status.text = "Enter a complete HTTPS address"
-            address.requestFocus()
+            status.text = validationError
+            if (validationError.contains("token", ignoreCase = true)) token.requestFocus()
+            else address.requestFocus()
             return
         }
 
-        HubSettings.save(host.viewContext, normalized, HubSettings.token(host.viewContext))
+        HubSettings.save(host.viewContext, normalized, enteredToken)
         address.setText(normalized)
         address.setSelection(normalized.length)
         status.setTextColor(colors.mutedText)
@@ -186,11 +226,6 @@ class HubConnectionScreen(
             save.isEnabled = true
             testJob = null
         }
-    }
-
-    private fun isAllowedAddress(value: String): Boolean {
-        if (value.startsWith("https://") && value.length > "https://".length) return true
-        return value.startsWith("http://127.0.0.1") || value.startsWith("http://localhost")
     }
 
     private fun fieldBackground() = GradientDrawable().apply {

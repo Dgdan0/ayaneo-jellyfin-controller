@@ -51,6 +51,13 @@ paths keep earlier files valid. The Pocket DS has no platform AC-3/E-AC-3 decode
 with AC-3 audio use a minimal arm64 build of the official Media3 1.4.1 FFmpeg extension. Keep its
 exact-source and LGPL material in `app/third_party/media3-ffmpeg` and `assets/licenses` with the AAR.
 
+Fresh installs from v0.1.1 onward expose both Hub address and masked bearer-token fields under
+Manage > Ayaneo Hub. Uninstalling removes these app-private values. The screen points Jump Desktop
+users to the gitignored `scripts/dev.env`; no token is embedded in the APK. `HubClient` rejects
+missing credentials locally and remembers a token that received 401/403 for the process lifetime,
+so screen refreshes cannot turn one typo into the Hub's 15-minute source ban. Editing the token
+re-enables one connection test.
+
 ## Reaching the hub from the handheld
 
 The preferred address is now **`https://ayaneo-media-pc.tail737e96.ts.net`**. Pocket DS and the

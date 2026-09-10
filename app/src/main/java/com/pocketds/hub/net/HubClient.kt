@@ -164,6 +164,8 @@ interface HubApi {
  */
 class HubClient(private val context: Context) : HubApi {
 
+    @Volatile private var rejectedToken = ""
+
     private val json = Json {
         // The hub will grow fields; an old APK must not crash on them.
         ignoreUnknownKeys = true
@@ -199,6 +201,15 @@ class HubClient(private val context: Context) : HubApi {
             }
             val started = System.currentTimeMillis()
             val response = chain.proceed(request)
+            if ((response.code == 401 || response.code == 403) && token.isNotEmpty()) {
+                // One rejected credential is enough. Holding it in memory stops
+                // refreshes and screen polling from turning a typo into the
+                // Hub's 15-minute source ban. Editing the token re-enables one
+                // test request because the new value no longer matches.
+                rejectedToken = token
+            } else if (response.isSuccessful && rejectedToken == token) {
+                rejectedToken = ""
+            }
             // The Authorization header is deliberately never logged: a typo'd
             // real token would then sit in the trace in clear text.
             DebugLog.log(
@@ -254,6 +265,26 @@ class HubClient(private val context: Context) : HubApi {
 
     private fun base(): String = HubSettings.baseUrl(context)
 
+    private fun connectionFailure(): HubResult.Failed? {
+        if (base().isEmpty()) {
+            return HubResult.Failed(FailureKind.UNAUTHORIZED, "No Hub address is configured")
+        }
+        val token = HubSettings.token(context)
+        if (token.isEmpty()) {
+            return HubResult.Failed(
+                FailureKind.UNAUTHORIZED,
+                "No Hub access token — open Manage > Ayaneo Hub"
+            )
+        }
+        if (token == rejectedToken) {
+            return HubResult.Failed(
+                FailureKind.UNAUTHORIZED,
+                "This token was rejected — edit it in Manage > Ayaneo Hub"
+            )
+        }
+        return null
+    }
+
     override fun imageUrl(hubPath: String): String =
         if (hubPath.isEmpty()) "" else HubEndpoints.image(base(), hubPath)
 
@@ -261,7 +292,8 @@ class HubClient(private val context: Context) : HubApi {
         if (hubPath.isEmpty()) "" else HubEndpoints.playbackResource(base(), hubPath)
 
     override suspend fun playbackBytes(hubPath: String): HubResult<ByteArray> {
-        if (base().isEmpty() || hubPath.isEmpty()) {
+        connectionFailure()?.let { return it }
+        if (hubPath.isEmpty()) {
             return HubResult.Failed(FailureKind.UNAUTHORIZED, "No playback resource configured")
         }
         return try {
@@ -500,9 +532,7 @@ class HubClient(private val context: Context) : HubApi {
      * that actually succeeded the first time would blocklist a second release.
      */
     private suspend fun mutate(request: HubRequest, userId: String = ""): HubResult<ActionAck> {
-        if (base().isEmpty()) {
-            return HubResult.Failed(FailureKind.UNAUTHORIZED, "No hub configured")
-        }
+        connectionFailure()?.let { return it }
         return try {
             withContext(Dispatchers.IO) {
                 val builder = Request.Builder().url(request.url).cacheControl(noStore).apply {
@@ -591,9 +621,7 @@ class HubClient(private val context: Context) : HubApi {
         serverId: Int?,
         seasons: kotlinx.serialization.json.JsonElement?
     ): HubResult<CreateRequestResponse> {
-        if (base().isEmpty()) {
-            return HubResult.Failed(FailureKind.UNAUTHORIZED, "No hub configured")
-        }
+        connectionFailure()?.let { return it }
         val payload = json.encodeToString(
             CreateRequestBody.serializer(),
             CreateRequestBody(key, seasons, profileId, rootFolder, serverId)
@@ -647,9 +675,7 @@ class HubClient(private val context: Context) : HubApi {
         userId: String = "",
         decode: (String) -> T
     ): HubResult<T> {
-        if (base().isEmpty()) {
-            return HubResult.Failed(FailureKind.UNAUTHORIZED, "No hub configured")
-        }
+        connectionFailure()?.let { return it }
         return try {
             withContext(Dispatchers.IO) {
                 val client = if (slow) slowApi else api
@@ -694,9 +720,7 @@ class HubClient(private val context: Context) : HubApi {
         slow: Boolean = false,
         decode: (String) -> T
     ): HubResult<T> {
-        if (base().isEmpty()) {
-            return HubResult.Failed(FailureKind.UNAUTHORIZED, "No hub configured")
-        }
+        connectionFailure()?.let { return it }
 
         var attempt = 1
         while (true) {

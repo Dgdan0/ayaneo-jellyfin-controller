@@ -61,6 +61,13 @@ Lanterns S01E04 was silent: its only audio stream is AC-3 5.1 and Pocket DS publ
 The APK now bundles the official Media3 1.4.1 FFmpeg extension as a minimal arm64 AC-3/E-AC-3 build;
 source revisions, LGPL notice and rebuild steps are checked in under `app/third_party/media3-ffmpeg`.
 
+**Connection recovery (v0.1.1):** A fresh install can enter both the Hub HTTPS address and bearer
+token under Manage > Ayaneo Hub. Android app data is the only place these values are stored, so an
+uninstall clears both. The screen points the owner to the gitignored `scripts/dev.env` file when
+using Jump Desktop. The client refuses empty or incomplete credentials locally and stops issuing
+requests after a token receives 401/403, preventing refreshes from tripping the Hub's 15-minute
+authentication ban. Changing the token allows a new connection test.
+
 **Deployment note (2026-09-08):** the latest working tree and APK include unified Y search,
 controller focus traversal, timeline-anchored seek previews, gesture percentage bars, bare top
 controls, and stop-on-PiP-dismiss. A localhost live probe extracted the expected frame from The
