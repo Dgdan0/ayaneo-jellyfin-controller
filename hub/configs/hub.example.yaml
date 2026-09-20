@@ -21,6 +21,8 @@ server:
   # Durable download grants and offline watch-progress receipts. Relative paths
   # live beside hub.yaml, which is ideal for the FireDaemon installation.
   offline_registry: "offline-grants.json"
+  # Stable work IDs and source bindings for the reading catalog.
+  reading_catalog: "reading-catalog.json"
 
 auth:
   # Generate with: hubctl token new --label pocketds
@@ -91,6 +93,23 @@ services:
     base_url: "http://127.0.0.1:3000"
     web_url: ""
     api_key: "${env:BOOKKEEPRR_API_KEY}"
+
+  # Read-only comic, manga and visual-book catalog. Generate a revocable auth
+  # key in Kavita's user settings; the Hub sends it only as X-Api-Key.
+  kavita:
+    enabled: false
+    base_url: "http://127.0.0.1:5000"
+    web_url: ""
+    api_key: "${env:KAVITA_API_KEY}"
+
+  # Ebook, audiobook and synchronized read-along catalog. Storyteller's token
+  # endpoint issues a renewable bearer token from this dedicated account.
+  storyteller:
+    enabled: false
+    base_url: "http://127.0.0.1:8001"
+    web_url: ""
+    username: "pocketds"
+    password: "${env:STORYTELLER_PASSWORD}"
 
   sonarr:
     enabled: true

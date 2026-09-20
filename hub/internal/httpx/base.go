@@ -171,11 +171,19 @@ func (b *Base) WithTimeout(d time.Duration) *Base {
 // timeout. A 401 or 403 gets exactly one re-auth attempt, which is what makes
 // qBittorrent's expiring cookie session invisible to callers.
 func (b *Base) GetJSON(ctx context.Context, path string, query url.Values, out any) error {
-	return b.do(ctx, http.MethodGet, path, query, nil, out)
+	_, err := b.do(ctx, http.MethodGet, path, query, nil, out)
+	return err
 }
 
 func (b *Base) PostJSON(ctx context.Context, path string, body, out any) error {
-	return b.do(ctx, http.MethodPost, path, nil, body, out)
+	_, err := b.do(ctx, http.MethodPost, path, nil, body, out)
+	return err
+}
+
+// PostJSONHeaders is PostJSON plus a copy of the successful response headers.
+// Kavita carries pagination in a response header rather than its JSON body.
+func (b *Base) PostJSONHeaders(ctx context.Context, path string, query url.Values, body, out any) (http.Header, error) {
+	return b.do(ctx, http.MethodPost, path, query, body, out)
 }
 
 // Open starts an authenticated upstream request and leaves the response body
@@ -215,13 +223,13 @@ func (b *Base) Open(
 
 func (b *Base) do(
 	ctx context.Context, method, path string, query url.Values, body, out any,
-) error {
+) (http.Header, error) {
 	ctx, cancel := context.WithTimeout(ctx, b.timeout)
 	defer cancel()
 
 	resp, err := b.send(ctx, method, path, query, body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -232,7 +240,7 @@ func (b *Base) do(
 				resp.Body.Close()
 				resp, err = b.send(ctx, method, path, query, body)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				defer resp.Body.Close()
 			}
@@ -247,22 +255,22 @@ func (b *Base) do(
 		if len(snippet) > 0 {
 			e.Err = fmt.Errorf("%s", strings.TrimSpace(string(snippet)))
 		}
-		return e
+		return nil, e
 	}
 
 	if out == nil {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, b.maxBody))
-		return nil
+		return resp.Header.Clone(), nil
 	}
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, b.maxBody))
 	if err != nil {
-		return &Error{Service: b.name, Kind: KindDecode, Err: err}
+		return nil, &Error{Service: b.name, Kind: KindDecode, Err: err}
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return &Error{Service: b.name, Kind: KindDecode, Err: err}
+		return nil, &Error{Service: b.name, Kind: KindDecode, Err: err}
 	}
-	return nil
+	return resp.Header.Clone(), nil
 }
 
 // encodeQuery is url.Values.Encode with spaces as %20 rather than +.

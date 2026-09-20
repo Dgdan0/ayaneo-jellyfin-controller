@@ -49,7 +49,8 @@ type probeSpec struct {
 	authQuery    string
 	versionField string
 	// unauthenticated liveness check tried first, if the service has one
-	pingPath string
+	pingPath     string
+	livenessOnly bool
 }
 
 var probes = map[string]probeSpec{
@@ -88,6 +89,12 @@ var probes = map[string]probeSpec{
 	},
 	"bookkeeprr": {
 		path: "/api/health", versionField: "version",
+	},
+	"kavita": {
+		path: "/api/health", livenessOnly: true,
+	},
+	"storyteller": {
+		path: "/api/v2/auth/providers", livenessOnly: true,
 	},
 }
 
@@ -214,6 +221,9 @@ func (p *Prober) probe(ctx context.Context, name string) ServiceHealth {
 	}
 
 	health.State = "up"
+	if spec.livenessOnly {
+		return health
+	}
 	if spec.versionField != "" {
 		health.Version = extractString(body, spec.versionField)
 		if health.Version == "" {

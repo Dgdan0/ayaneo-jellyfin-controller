@@ -202,6 +202,30 @@ func TestAcceptsBookKeeprrAndSuggestsItsDefaultPort(t *testing.T) {
 	}
 }
 
+func TestAcceptsReadingCatalogServicesAndTheirCredentialStyles(t *testing.T) {
+	kavita := base()
+	kavita.Services["kavita"] = ServiceConfig{
+		Enabled: true, BaseURL: "http://127.0.0.1:5000", APIKey: "auth-key",
+	}
+	wantOK(t, kavita)
+	if got := defaultPort("kavita"); got != "5000" {
+		t.Fatalf("defaultPort(kavita) = %q", got)
+	}
+
+	storyteller := base()
+	storyteller.Services["storyteller"] = ServiceConfig{
+		Enabled: true, BaseURL: "http://127.0.0.1:8001", Username: "reader", Password: "secret",
+	}
+	wantOK(t, storyteller)
+	if got := defaultPort("storyteller"); got != "8001" {
+		t.Fatalf("defaultPort(storyteller) = %q", got)
+	}
+
+	missingLogin := base()
+	missingLogin.Services["storyteller"] = ServiceConfig{Enabled: true, BaseURL: "http://127.0.0.1:8001"}
+	wantError(t, missingLogin, "username and password")
+}
+
 func TestRefusesAnEnabledServiceWithNoBaseURL(t *testing.T) {
 	c := base()
 	c.Services["radarr"] = ServiceConfig{Enabled: true, APIKey: "k"}

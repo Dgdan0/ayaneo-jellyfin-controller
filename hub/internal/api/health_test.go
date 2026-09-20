@@ -48,3 +48,19 @@ func TestBookKeeprrUsesItsUnauthenticatedHealthEndpoint(t *testing.T) {
 		t.Fatalf("probe for bookkeeprr = %+v", spec)
 	}
 }
+
+func TestReadingServicesUseUnauthenticatedLivenessEndpoints(t *testing.T) {
+	cases := map[string]string{
+		"kavita":      "/api/health",
+		"storyteller": "/api/v2/auth/providers",
+	}
+	for name, path := range cases {
+		spec, ok := probes[name]
+		if !ok {
+			t.Fatalf("no probe for %s", name)
+		}
+		if spec.path != path || spec.authHeader != "" || spec.authQuery != "" {
+			t.Fatalf("probe for %s = %+v", name, spec)
+		}
+	}
+}

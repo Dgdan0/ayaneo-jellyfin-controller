@@ -272,6 +272,15 @@ func (c *Config) validateServices() error {
 			}
 			continue
 		}
+		if name == "storyteller" {
+			if strings.TrimSpace(svc.Username) == "" || !svc.Password.IsSet() {
+				return &Error{
+					Path: path, Problem: "needs username and password for its renewable bearer token",
+					Fix: "set username and use ${env:STORYTELLER_PASSWORD} for password",
+				}
+			}
+			continue
+		}
 		if !svc.APIKey.IsSet() {
 			return &Error{
 				Path:    path + ".api_key",
@@ -316,6 +325,10 @@ func defaultPort(service string) string {
 		return "8080"
 	case "bookkeeprr":
 		return "3000"
+	case "kavita":
+		return "5000"
+	case "storyteller":
+		return "8001"
 	}
 	return "8080"
 }

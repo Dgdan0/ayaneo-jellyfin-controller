@@ -532,12 +532,17 @@ decision. See `deploy/reading/M3_ACQUISITION_EVIDENCE.md`.
   endpoints, image/resource proxies, authentication, cache, and cancellation.
 - Gate: adapter contract and API tests green against recorded fixtures.
 
-Status on 2026-09-20: the first green slice is complete and pushed. It adds
-BookKeeprr configuration/health, bearer-authenticated browse/category/search,
-the `reading` token scope, normalized five-type discovery models, partial
-failure handling, caching, and opaque registered cover proxying. Catalog
-libraries, canonical work details/editions, lists, reader resources, and
-progress remain in later M4 slices.
+Status on 2026-09-20: two green slices are complete. The first adds BookKeeprr
+configuration/health, bearer-authenticated browse/category/search, the
+`reading` token scope, normalized five-type discovery models, partial failure
+handling, caching, and opaque registered cover proxying. The second adds
+read-only Kavita and Storyteller adapters, renewable Storyteller bearer tokens,
+normalized libraries and paged work browsing, canonical persistent Hub work
+IDs, work details, available editions, reading progress, hierarchy/continue
+data, and authenticated cover proxies. It passed the full Go suite and a live
+lab run across three Kavita libraries and the Storyteller catalog. Lists,
+reader manifests/resources, progress writes/reconciliation, and catalog search
+remain in later M4 slices.
 
 ### M5 — Pocket DS browsing
 

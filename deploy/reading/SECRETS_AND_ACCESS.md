@@ -72,6 +72,22 @@ service address and enable flag belong in `hub.yaml`; tokens that call the
 reading endpoints need the `reading` scope. This key does not grant the Hub
 BookKeeprr's administrator-only acquisition controls.
 
+The normalized reading catalog has two additional server-side credentials:
+
+- `services.kavita.api_key` is a revocable Kavita authentication key. Create it
+  for a dedicated read-only account where possible and store it only in
+  `hub.secrets.yaml`. The Hub sends it to Kavita as `X-Api-Key`.
+- `services.storyteller.username` and `services.storyteller.password` identify
+  a dedicated Storyteller account. The Hub exchanges them at Storyteller's
+  token endpoint, keeps the short-lived bearer token in memory, and renews it
+  when needed. Put the password only in `hub.secrets.yaml` or the referenced
+  environment variable.
+
+`C:\ProgramData\AyaneoHub\reading-catalog.json` stores opaque Hub work IDs and
+source record bindings. It contains no service passwords, API keys, raw media
+URLs, or filesystem paths. Back it up with other Hub application state so work
+IDs remain stable across service restarts and future catalog migrations.
+
 ## Network boundary
 
 The qualification containers bind only to loopback. Current Tailscale Serve

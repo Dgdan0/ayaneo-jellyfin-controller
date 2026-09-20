@@ -13,11 +13,14 @@ import (
 	"ayaneohub/internal/adapters/bookkeeprr"
 	"ayaneohub/internal/adapters/jellyfin"
 	"ayaneohub/internal/adapters/jellyseerr"
+	"ayaneohub/internal/adapters/kavita"
 	"ayaneohub/internal/adapters/qbittorrent"
+	"ayaneohub/internal/adapters/storyteller"
 	"ayaneohub/internal/auth"
 	"ayaneohub/internal/cache"
 	"ayaneohub/internal/config"
 	"ayaneohub/internal/index"
+	readingdomain "ayaneohub/internal/reading"
 )
 
 // Version is stamped at build time with -ldflags.
@@ -40,6 +43,8 @@ type Server struct {
 	jellyfin    *jellyfin.Client
 	bazarr      *bazarr.Client
 	bookkeeprr  *bookkeeprr.Client
+	kavita      *kavita.Client
+	storyteller *storyteller.Client
 	arrs        map[string]*arr.Client
 
 	// The provider-id index, because Jellyfin has no provider-id query. A map
@@ -47,9 +52,10 @@ type Server struct {
 	// takes 362ms here. See internal/index.
 	index *index.Index
 
-	cache   *cache.Store
-	images  *imageProxy
-	offline *offlineStore
+	cache          *cache.Store
+	images         *imageProxy
+	offline        *offlineStore
+	readingCatalog *readingdomain.CatalogStore
 
 	playbackMu       sync.Mutex
 	playbackSessions map[string]*playbackSession
@@ -75,6 +81,7 @@ func NewServer(cfg *config.Config) *Server {
 		index:            index.New(),
 		images:           newImageProxy(),
 		offline:          newOfflineStore(cfg.Server.OfflineRegistry),
+		readingCatalog:   readingdomain.NewCatalogStore(cfg.Server.ReadingCatalog),
 		playbackSessions: make(map[string]*playbackSession),
 		playbackTTL:      30 * time.Minute,
 		previewFrame:     extractPreviewFrame,
@@ -153,6 +160,22 @@ func NewServer(cfg *config.Config) *Server {
 			s.bookkeeprr = client
 		}
 	}
+	if svc, ok := cfg.Services["kavita"]; ok && svc.Enabled {
+		client, err := kavita.New(svc)
+		if err != nil {
+			slog.Error("kavita adapter unavailable", "error", err)
+		} else {
+			s.kavita = client
+		}
+	}
+	if svc, ok := cfg.Services["storyteller"]; ok && svc.Enabled {
+		client, err := storyteller.New(svc)
+		if err != nil {
+			slog.Error("storyteller adapter unavailable", "error", err)
+		} else {
+			s.storyteller = client
+		}
+	}
 	return s
 }
 
@@ -206,6 +229,11 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/discover", s.handleReadingDiscover)
 	authed.HandleFunc("GET /v1/reading/discover/{row}", s.handleReadingDiscoverRow)
 	authed.HandleFunc("GET /v1/reading/search", s.handleReadingSearch)
+	authed.HandleFunc("GET /v1/reading/libraries", s.handleReadingLibraries)
+	authed.HandleFunc("GET /v1/reading/libraries/{libraryId}/items", s.handleReadingLibraryItems)
+	authed.HandleFunc("GET /v1/reading/works/{workId}", s.handleReadingWork)
+	authed.HandleFunc("GET /v1/img/reading/kavita/{seriesId}", s.handleKavitaReadingImage)
+	authed.HandleFunc("GET /v1/img/reading/storyteller/{bookId}", s.handleStorytellerReadingImage)
 	authed.HandleFunc("GET /v1/img/reading/{token}", s.handleReadingImage)
 	authed.HandleFunc("GET /v1/media/{key}", s.handleMediaDetail)
 	authed.HandleFunc("GET /v1/requests/options", s.handleRequestOptions)

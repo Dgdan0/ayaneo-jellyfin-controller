@@ -161,3 +161,31 @@ func TestDeepMerge(t *testing.T) {
 		t.Error("top-level merge is wrong")
 	}
 }
+
+func TestReadingCatalogPathDefaultsAndResolvesBesideConfig(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Replace(mainYAML, "%s", HashToken(goodToken), 1)
+	body = strings.Replace(body, `    base_url: "http://127.0.0.1:7878"`,
+		"    base_url: \"http://127.0.0.1:7878\"\n    api_key: \"k\"", 1)
+	body = strings.Replace(body, `    base_url: "http://127.0.0.1:8989"`,
+		"    base_url: \"http://127.0.0.1:8989\"\n    api_key: \"k\"", 1)
+	path := writeFile(t, dir, "hub.yaml", body)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load default: %v", err)
+	}
+	if want := filepath.Join(dir, "reading-catalog.json"); cfg.Server.ReadingCatalog != want {
+		t.Fatalf("default reading catalog = %q, want %q", cfg.Server.ReadingCatalog, want)
+	}
+
+	body = strings.Replace(body, "server:\n", "server:\n  reading_catalog: state/catalog.json\n", 1)
+	path = writeFile(t, dir, "hub.yaml", body)
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load relative: %v", err)
+	}
+	if want := filepath.Join(dir, "state", "catalog.json"); cfg.Server.ReadingCatalog != want {
+		t.Fatalf("relative reading catalog = %q, want %q", cfg.Server.ReadingCatalog, want)
+	}
+}

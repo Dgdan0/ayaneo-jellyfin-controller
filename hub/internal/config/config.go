@@ -57,6 +57,9 @@ type ServerConfig struct {
 	// OfflineRegistry persists short-lived download grants and progress-sync
 	// receipts. Relative paths are resolved beside the main config file.
 	OfflineRegistry string `yaml:"offline_registry"`
+	// ReadingCatalog persists stable Hub work IDs and their source bindings.
+	// Relative paths are resolved beside the main config file.
+	ReadingCatalog string `yaml:"reading_catalog"`
 }
 
 type AuthConfig struct {
@@ -131,7 +134,7 @@ type LogConfig struct {
 // config is a typo, and a silently ignored typo in a base_url is a service that
 // mysteriously never works.
 var KnownServices = []string{
-	"jellyfin", "jellyseerr", "prowlarr", "radarr", "sonarr", "readarr", "bazarr", "qbittorrent", "bookkeeprr",
+	"jellyfin", "jellyseerr", "prowlarr", "radarr", "sonarr", "readarr", "bazarr", "qbittorrent", "bookkeeprr", "kavita", "storyteller",
 }
 
 var envPattern = regexp.MustCompile(`\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}`)
@@ -183,6 +186,11 @@ func Load(path string) (*Config, error) {
 		cfg.Server.OfflineRegistry = filepath.Join(filepath.Dir(path), "offline-grants.json")
 	} else if !filepath.IsAbs(cfg.Server.OfflineRegistry) {
 		cfg.Server.OfflineRegistry = filepath.Join(filepath.Dir(path), cfg.Server.OfflineRegistry)
+	}
+	if cfg.Server.ReadingCatalog == "" {
+		cfg.Server.ReadingCatalog = filepath.Join(filepath.Dir(path), "reading-catalog.json")
+	} else if !filepath.IsAbs(cfg.Server.ReadingCatalog) {
+		cfg.Server.ReadingCatalog = filepath.Join(filepath.Dir(path), cfg.Server.ReadingCatalog)
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
