@@ -190,6 +190,18 @@ func TestAcceptsManageOnlyArrServices(t *testing.T) {
 	}
 }
 
+func TestAcceptsBookKeeprrAndSuggestsItsDefaultPort(t *testing.T) {
+	c := base()
+	c.Services["bookkeeprr"] = ServiceConfig{
+		Enabled: true, BaseURL: "http://127.0.0.1:3000", APIKey: "key",
+	}
+	wantOK(t, c)
+
+	if got := defaultPort("bookkeeprr"); got != "3000" {
+		t.Fatalf("defaultPort(bookkeeprr) = %q", got)
+	}
+}
+
 func TestRefusesAnEnabledServiceWithNoBaseURL(t *testing.T) {
 	c := base()
 	c.Services["radarr"] = ServiceConfig{Enabled: true, APIKey: "k"}

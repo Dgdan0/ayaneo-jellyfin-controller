@@ -66,6 +66,12 @@ The Android application must receive only its Hub URL and scoped Hub bearer
 token. Kavita, Storyteller, bookkeeprr, qBittorrent, indexer, and Jellyfin
 administrator secrets stay on the Ayaneo Media PC.
 
+The Hub's read-only BookKeeprr discovery adapter uses a revocable personal API
+key from `hub.secrets.yaml` under `services.bookkeeprr.api_key`. The matching
+service address and enable flag belong in `hub.yaml`; tokens that call the
+reading endpoints need the `reading` scope. This key does not grant the Hub
+BookKeeprr's administrator-only acquisition controls.
+
 ## Network boundary
 
 The qualification containers bind only to loopback. Current Tailscale Serve

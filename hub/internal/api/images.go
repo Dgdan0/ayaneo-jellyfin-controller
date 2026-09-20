@@ -1,8 +1,11 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +40,12 @@ type imageProxy struct {
 	entries  map[string]*cachedImage
 	order    []string
 	maxItems int
+	// Reading providers return full cover URLs. The app receives only this
+	// opaque, registered token, which keeps the endpoint from becoming an open
+	// URL proxy and keeps provider addresses out of the client contract.
+	readingCovers map[string]string
+	readingOrder  []string
+	maxCovers     int
 }
 
 type cachedImage struct {
@@ -47,10 +56,104 @@ type cachedImage struct {
 
 func newImageProxy() *imageProxy {
 	return &imageProxy{
-		client:   &http.Client{Timeout: 15 * time.Second},
-		entries:  map[string]*cachedImage{},
-		maxItems: 400,
+		client: &http.Client{
+			Timeout: 15 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 5 || !safeReadingCoverURL(req.URL.String()) {
+					return http.ErrUseLastResponse
+				}
+				return nil
+			},
+		},
+		entries:       map[string]*cachedImage{},
+		maxItems:      400,
+		readingCovers: map[string]string{},
+		maxCovers:     2000,
 	}
+}
+
+func safeReadingCoverURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil
+}
+
+func (p *imageProxy) registerReadingCover(raw string) string {
+	if !safeReadingCoverURL(raw) {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(raw))
+	token := hex.EncodeToString(digest[:16])
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, exists := p.readingCovers[token]; !exists {
+		p.readingOrder = append(p.readingOrder, token)
+	}
+	p.readingCovers[token] = raw
+	for len(p.readingOrder) > p.maxCovers {
+		oldest := p.readingOrder[0]
+		p.readingOrder = p.readingOrder[1:]
+		delete(p.readingCovers, oldest)
+	}
+	return token
+}
+
+func (p *imageProxy) readingCover(token string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.readingCovers[token]
+}
+
+// handleReadingImage serves only cover URLs registered while normalizing a
+// BookKeeprr response. A caller cannot supply an arbitrary destination URL.
+func (s *Server) handleReadingImage(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	if len(token) != 32 {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "bad reading image token"})
+		return
+	}
+	if _, err := hex.DecodeString(token); err != nil {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "bad reading image token"})
+		return
+	}
+	key := "reading/" + token
+	if img := s.images.get(key); img != nil {
+		s.writeImage(w, img, true)
+		return
+	}
+	raw := s.images.readingCover(token)
+	if raw == "" {
+		writeError(w, r, http.StatusNotFound, Error{Code: CodeNotFound, Message: "no such reading cover"})
+		return
+	}
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodGet, raw, nil)
+	if err != nil {
+		writeError(w, r, http.StatusBadGateway, Error{Code: CodeUpstreamDown, Service: "bookkeeprr", Message: "could not fetch the cover"})
+		return
+	}
+	request.Header.Set("Accept", "image/*")
+	resp, err := s.images.client.Do(request)
+	if err != nil {
+		writeError(w, r, http.StatusBadGateway, Error{Code: CodeUpstreamDown, Service: "bookkeeprr", Message: "could not fetch the cover", Retryable: true})
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		writeError(w, r, http.StatusNotFound, Error{Code: CodeNotFound, Message: "no such reading cover"})
+		return
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		writeError(w, r, http.StatusBadGateway, Error{Code: CodeUpstreamDown, Service: "bookkeeprr", Message: "cover provider returned non-image data"})
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		writeError(w, r, http.StatusBadGateway, Error{Code: CodeUpstreamDown, Service: "bookkeeprr", Message: "cover download failed"})
+		return
+	}
+	img := &cachedImage{body: body, contentType: contentType, fetchedAt: time.Now()}
+	s.images.put(key, img)
+	s.writeImage(w, img, false)
 }
 
 // handleTmdbImage serves /v1/img/tmdb/{size}/{file}.

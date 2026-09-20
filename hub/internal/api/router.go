@@ -10,6 +10,7 @@ import (
 
 	"ayaneohub/internal/adapters/arr"
 	"ayaneohub/internal/adapters/bazarr"
+	"ayaneohub/internal/adapters/bookkeeprr"
 	"ayaneohub/internal/adapters/jellyfin"
 	"ayaneohub/internal/adapters/jellyseerr"
 	"ayaneohub/internal/adapters/qbittorrent"
@@ -38,6 +39,7 @@ type Server struct {
 	qbittorrent *qbittorrent.Client
 	jellyfin    *jellyfin.Client
 	bazarr      *bazarr.Client
+	bookkeeprr  *bookkeeprr.Client
 	arrs        map[string]*arr.Client
 
 	// The provider-id index, because Jellyfin has no provider-id query. A map
@@ -143,6 +145,14 @@ func NewServer(cfg *config.Config) *Server {
 			s.bazarr = client
 		}
 	}
+	if svc, ok := cfg.Services["bookkeeprr"]; ok && svc.Enabled {
+		client, err := bookkeeprr.New(svc)
+		if err != nil {
+			slog.Error("bookkeeprr adapter unavailable", "error", err)
+		} else {
+			s.bookkeeprr = client
+		}
+	}
 	return s
 }
 
@@ -193,6 +203,10 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/img/jf/{itemId}/{imageType}", s.handleJellyfinImage)
 	authed.HandleFunc("GET /v1/discover", s.handleDiscover)
 	authed.HandleFunc("GET /v1/discover/{row}", s.handleDiscoverRow)
+	authed.HandleFunc("GET /v1/reading/discover", s.handleReadingDiscover)
+	authed.HandleFunc("GET /v1/reading/discover/{row}", s.handleReadingDiscoverRow)
+	authed.HandleFunc("GET /v1/reading/search", s.handleReadingSearch)
+	authed.HandleFunc("GET /v1/img/reading/{token}", s.handleReadingImage)
 	authed.HandleFunc("GET /v1/media/{key}", s.handleMediaDetail)
 	authed.HandleFunc("GET /v1/requests/options", s.handleRequestOptions)
 	authed.HandleFunc("POST /v1/requests", s.handleCreateRequest)

@@ -38,3 +38,13 @@ func TestProwlarrAndReadarrUseTheirSystemStatusEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestBookKeeprrUsesItsUnauthenticatedHealthEndpoint(t *testing.T) {
+	spec, ok := probes["bookkeeprr"]
+	if !ok {
+		t.Fatal("no probe for bookkeeprr")
+	}
+	if spec.path != "/api/health" || spec.authHeader != "" || spec.authQuery != "" {
+		t.Fatalf("probe for bookkeeprr = %+v", spec)
+	}
+}

@@ -28,7 +28,7 @@ auth:
   tokens:
     - label: "pocketds"
       sha256: "PUT_THE_SHA256_FROM_HUBCTL_HERE"
-      scopes: ["read", "request", "control", "play", "download"]
+      scopes: ["read", "request", "control", "play", "download", "reading"]
 
   # Per device, so one busy handheld cannot starve another.
   rate_limit:
@@ -82,6 +82,15 @@ services:
     base_url: "http://127.0.0.1:8787"
     web_url: ""
     api_key: "${env:READARR_API_KEY}"
+
+  # Unified discovery for ebooks, audiobooks, comics, manga and light novels.
+  # The Hub uses a revocable personal BookKeeprr key and exposes only its own
+  # normalized read-only contract to the handheld.
+  bookkeeprr:
+    enabled: false
+    base_url: "http://127.0.0.1:3000"
+    web_url: ""
+    api_key: "${env:BOOKKEEPRR_API_KEY}"
 
   sonarr:
     enabled: true

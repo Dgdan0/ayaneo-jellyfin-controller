@@ -314,6 +314,8 @@ func defaultPort(service string) string {
 		return "6767"
 	case "qbittorrent":
 		return "8080"
+	case "bookkeeprr":
+		return "3000"
 	}
 	return "8080"
 }

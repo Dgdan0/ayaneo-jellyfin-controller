@@ -86,6 +86,9 @@ var probes = map[string]probeSpec{
 		// unauthenticated, which is enough to tell "reachable" from "down".
 		path: "/api/v2/app/version",
 	},
+	"bookkeeprr": {
+		path: "/api/health", versionField: "version",
+	},
 }
 
 // Prober checks every configured service concurrently.
