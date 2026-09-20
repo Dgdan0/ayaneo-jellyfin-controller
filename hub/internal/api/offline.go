@@ -520,6 +520,15 @@ func (s *Server) handleOfflineProgressSync(w http.ResponseWriter, r *http.Reques
 			writeUpstreamError(w, r, "jellyfin", err)
 			return
 		}
+		// Jellyfin normally derives watched state from a stopped event. Marking a
+		// completed offline item explicitly also preserves that state for short
+		// episodes and servers with a stricter watched threshold.
+		if event.Completed {
+			if err := playbackClient.SetPlayed(ctx, event.ItemID, true); err != nil {
+				writeUpstreamError(w, r, "jellyfin", err)
+				return
+			}
+		}
 		if err := s.offline.markSynced(receipt, time.Now().UnixMilli()); err != nil {
 			writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "could not persist sync receipt"})
 			return

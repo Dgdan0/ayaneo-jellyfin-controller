@@ -28,6 +28,7 @@ type offlineUpstream struct {
 	server         *httptest.Server
 	mu             sync.Mutex
 	stopped        int
+	played         int
 	lastPlayedDate string
 }
 
@@ -96,8 +97,31 @@ func (u *offlineUpstream) serve(w http.ResponseWriter, r *http.Request) {
 		u.stopped++
 		u.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
+	case r.Method == http.MethodPost && r.URL.Path == "/Users/"+playbackUserID+"/PlayedItems/"+offlineItemID:
+		u.mu.Lock()
+		u.played++
+		u.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+func TestOfflineCompletedProgressMarksJellyfinItemWatched(t *testing.T) {
+	upstream := newOfflineUpstream(t)
+	defer upstream.close()
+	server := NewServer(offlineConfig(upstream.server.URL, filepath.Join(t.TempDir(), "registry.json")))
+	body := `{"events":[{"clientEventKey":"complete-1","itemId":"` + offlineItemID + `",` +
+		`"positionMillis":2400000,"durationMillis":2400000,"completed":true,"occurredAt":` +
+		strconv.FormatInt(time.Now().UnixMilli(), 10) + `}]}`
+	response := playbackRequest(server.Handler(), http.MethodPost, "/v1/offline/progress/sync", body, playbackUserID)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"applied"`) {
+		t.Fatalf("completed sync = %d %s", response.Code, response.Body.String())
+	}
+	upstream.mu.Lock()
+	defer upstream.mu.Unlock()
+	if upstream.stopped != 1 || upstream.played != 1 {
+		t.Fatalf("offline completion sent stopped=%d played=%d", upstream.stopped, upstream.played)
 	}
 }
 

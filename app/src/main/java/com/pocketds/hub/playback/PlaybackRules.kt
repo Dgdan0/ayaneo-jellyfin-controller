@@ -27,6 +27,10 @@ object PlaybackRules {
     fun clampSeek(position: Long, duration: Long): Long =
         position.coerceIn(0, duration.coerceAtLeast(0))
 
+    /** A player teardown must never be confused with naturally reaching the end. */
+    fun reachedNaturalEnd(positionMillis: Long, durationMillis: Long): Boolean =
+        durationMillis > 0 && positionMillis >= durationMillis - 1_000L
+
     /** A full-width swipe scans a useful window without making short swipes too coarse. */
     fun scrubTarget(startMillis: Long, dragFraction: Float, durationMillis: Long): Long {
         if (durationMillis <= 0) return 0

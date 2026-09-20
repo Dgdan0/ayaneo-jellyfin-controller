@@ -123,6 +123,15 @@ class OfflineDownloadService : Service() {
         while (scope.isActive) {
             val row = repository.nextQueued()
             if (row == null) {
+                val retryAt = repository.nextRetryAt()
+                if (retryAt != null) {
+                    val waitMillis = (retryAt - System.currentTimeMillis()).coerceAtLeast(1_000L)
+                    getSystemService(NotificationManager::class.java).notify(
+                        NOTIFICATION_ID, notification("Waiting to retry a download", 0, 0, true)
+                    )
+                    delay(waitMillis.coerceAtMost(RECHECK_DELAY_MS))
+                    continue
+                }
                 if (repository.outbox().isNotEmpty() && !networkAvailable()) {
                     getSystemService(NotificationManager::class.java).notify(
                         NOTIFICATION_ID, notification("Waiting to sync watch progress", 0, 0, true)
@@ -156,7 +165,9 @@ class OfflineDownloadService : Service() {
                 )
                 val failed = repository.download(row.id)?.state == OfflineState.FAILED
                 updateNotification(row, if (failed) "Needs attention" else "Waiting to retry")
-                if (!failed) delay(RECHECK_DELAY_MS)
+                // A transient network error must not block every later item in
+                // a series. recordFailure schedules this item for a resumable
+                // retry, so the next loop can advance the queue immediately.
             } finally {
                 activeId = null
             }

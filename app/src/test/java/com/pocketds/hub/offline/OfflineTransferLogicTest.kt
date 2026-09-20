@@ -5,6 +5,12 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class OfflineTransferLogicTest {
+    @Test fun retryBackoffIsShortFirstAndBoundedLater() {
+        assertEquals(5_000L, OfflineRetryPolicy.delayMillis(1))
+        assertEquals(45_000L, OfflineRetryPolicy.delayMillis(3))
+        assertEquals(300_000L, OfflineRetryPolicy.delayMillis(50))
+    }
+
     @Test fun partialContentAppendsToAPartialFile() {
         assertEquals(TransferWriteMode.APPEND, transferWriteMode(400, 1_000, 206))
     }

@@ -24,6 +24,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.pocketds.hub.HubActivity
 import com.pocketds.hub.debug.DebugLog
+import com.pocketds.hub.model.OfflineProgressSyncBody
 import com.pocketds.hub.model.PlaybackEventBody
 import com.pocketds.hub.model.PlaybackPrepareResponse
 import com.pocketds.hub.net.HubClient
@@ -31,9 +32,11 @@ import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.settings.HubSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -54,6 +57,7 @@ class PlaybackService : MediaSessionService() {
     private var sequence = 0L
     private var started = false
     private var ended = false
+    private var stopping = false
     private var stopAfterCleanup = false
     private var lastProgressAt = 0L
     private var pinnedUserId = ""
@@ -61,6 +65,9 @@ class PlaybackService : MediaSessionService() {
     private var subtitleOffsetMillis = 0L
     private var audioGateGeneration = 0L
     private var audioGateScheduled = false
+    private val offlineSyncLock = Any()
+    private var offlineSyncJob: Job? = null
+    private var offlineSyncRequested = false
     private val progressHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val progressTick = object : Runnable {
         override fun run() {
@@ -159,6 +166,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun load(next: PlaybackPrepareResponse, autoPlay: Boolean, subtitleOffset: Long) {
+        stopping = false
         val previous = plan
         val sameSession = previous?.sessionId == next.sessionId
         if (previous != null && !sameSession) {
@@ -265,9 +273,12 @@ class PlaybackService : MediaSessionService() {
         override fun onPlaybackStateChanged(playbackState: Int) {
             val current = plan ?: return
             if (playbackState == Player.STATE_READY) openAudioGate(current)
-            if (playbackState == Player.STATE_ENDED && !ended) {
-                ended = true
-                enqueueEvent(current, "stopped", false, current.durationMillis)
+            if (playbackState == Player.STATE_ENDED && !ended && !stopping) {
+                val position = player.currentPosition.coerceAtLeast(0)
+                if (PlaybackRules.reachedNaturalEnd(position, current.durationMillis)) {
+                    ended = true
+                    enqueueEvent(current, "stopped", false, current.durationMillis)
+                }
             }
         }
 
@@ -353,7 +364,12 @@ class PlaybackService : MediaSessionService() {
                 ended || value.durationMillis > 0 && position >= value.durationMillis - 30_000L
             )
             serviceScope.launch {
+                DebugLog.log(
+                    "offline",
+                    "${value.item.id} $type at ${position}ms/${value.durationMillis}ms completed=$completed"
+                )
                 offline.rememberPlayback(value.item.id, position, value.durationMillis, completed)
+                requestOfflineProgressSync()
             }
             return
         }
@@ -384,6 +400,9 @@ class PlaybackService : MediaSessionService() {
                 current.durationMillis
             )
         }
+        // clearMediaItems can cause Media3 to dispatch a terminal state during
+        // shutdown. It is an explicit exit, not a completed episode.
+        stopping = true
         audioGateGeneration++
         audioGateScheduled = false
         player.volume = 0f
@@ -402,9 +421,18 @@ class PlaybackService : MediaSessionService() {
     private suspend fun process(operation: Operation) {
         when (operation) {
             is Operation.Event -> {
-                val result = api.playbackEvent(operation.sessionId, operation.body, operation.userId)
-                if (result is com.pocketds.hub.net.HubResult.Failed) {
-                    DebugLog.log("player", "event ${operation.body.type} failed: ${result.message}")
+                var lastFailure: com.pocketds.hub.net.HubResult.Failed? = null
+                for (attempt in 0 until 3) {
+                    when (val result = api.playbackEvent(operation.sessionId, operation.body, operation.userId)) {
+                        is com.pocketds.hub.net.HubResult.Ok -> return
+                        is com.pocketds.hub.net.HubResult.Failed -> {
+                            lastFailure = result
+                            if (attempt < 2) delay(PLAYBACK_EVENT_RETRY_DELAYS[attempt])
+                        }
+                    }
+                }
+                lastFailure?.let {
+                    DebugLog.log("player", "event ${operation.body.type} failed after retry: ${it.message}")
                 }
             }
             is Operation.Delete -> {
@@ -413,6 +441,48 @@ class PlaybackService : MediaSessionService() {
                     DebugLog.log("player", "session close failed: ${result.message}")
                 }
                 if (stopAfterCleanup && plan == null) stopSelf()
+            }
+        }
+    }
+
+    /**
+     * Flushes the durable offline outbox while the player is alive. The queue
+     * remains in SQLite when there is no connection and is retried later by the
+     * download service on app launch, so watching without a network is safe.
+     */
+    private fun requestOfflineProgressSync() {
+        synchronized(offlineSyncLock) {
+            offlineSyncRequested = true
+            if (offlineSyncJob?.isActive == true) return
+            offlineSyncJob = serviceScope.launch {
+                while (true) {
+                    synchronized(offlineSyncLock) { offlineSyncRequested = false }
+                    while (true) {
+                        val events = offline.outbox()
+                        if (events.isEmpty()) break
+                        when (val result = api.syncOfflineProgress(OfflineProgressSyncBody(events))) {
+                            is com.pocketds.hub.net.HubResult.Ok -> {
+                                val keys = result.value.results.map { it.clientEventKey }
+                                if (keys.isEmpty()) {
+                                    DebugLog.log("offline", "progress sync returned no receipts")
+                                    break
+                                }
+                                offline.removeOutbox(keys)
+                            }
+                            is com.pocketds.hub.net.HubResult.Failed -> {
+                                DebugLog.log("offline", "progress sync deferred: ${result.message}")
+                                break
+                            }
+                        }
+                    }
+                    val repeat = synchronized(offlineSyncLock) {
+                        if (offlineSyncRequested) true else {
+                            offlineSyncJob = null
+                            false
+                        }
+                    }
+                    if (!repeat) return@launch
+                }
             }
         }
     }
@@ -457,6 +527,7 @@ class PlaybackService : MediaSessionService() {
         private const val PROGRESS_INTERVAL_MS = 10_000L
         private const val AUDIO_START_GATE_MS = 250L
         private const val MAX_SUBTITLE_OFFSET_MS = 10 * 60 * 1_000L
+        private val PLAYBACK_EVENT_RETRY_DELAYS = longArrayOf(1_000L, 3_000L)
         @Volatile private var publishedPlan: PlaybackPrepareResponse? = null
 
         fun currentPlan(): PlaybackPrepareResponse? = publishedPlan

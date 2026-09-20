@@ -28,6 +28,13 @@ class PlaybackRulesTest {
     }
 
     @Test
+    fun `only a real final position counts as natural completion`() {
+        assertEquals(false, PlaybackRules.reachedNaturalEnd(180_000, 3_188_000))
+        assertEquals(false, PlaybackRules.reachedNaturalEnd(3_186_999, 3_188_000))
+        assertEquals(true, PlaybackRules.reachedNaturalEnd(3_187_000, 3_188_000))
+    }
+
+    @Test
     fun `horizontal scrub is proportional and clamped`() {
         assertEquals(1_200_000L, PlaybackRules.scrubTarget(600_000, 0.5f, 4_200_000))
         assertEquals(0L, PlaybackRules.scrubTarget(10_000, -1f, 4_200_000))

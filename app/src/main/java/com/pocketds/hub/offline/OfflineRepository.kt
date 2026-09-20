@@ -11,6 +11,7 @@ import com.pocketds.hub.model.OfflineProgressEvent
 import com.pocketds.hub.model.PlaybackItem
 import com.pocketds.hub.model.PlaybackPrepareResponse
 import com.pocketds.hub.model.PlaybackSource
+import com.pocketds.hub.playback.PlaybackRules
 import com.pocketds.hub.settings.HubSettings
 import com.pocketds.hub.settings.OfflineSettings
 import kotlinx.serialization.encodeToString
@@ -50,7 +51,8 @@ data class OfflineDownload(
     val attempts: Int,
     val speedBytesPerSecond: Long,
     val sortOrder: Int,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val retryAt: Long = 0L
 ) {
     val progress: Float get() = if (totalBytes <= 0) 0f else
         (bytesDownloaded.toDouble() / totalBytes.toDouble()).coerceIn(0.0, 1.0).toFloat()
@@ -146,14 +148,25 @@ class OfflineRepository private constructor(context: Context) {
         queryDownloads("user_id=? AND item_id=?", arrayOf(userId, itemId), "updated_at DESC", "1").firstOrNull()
 
     @Synchronized
-    fun nextQueued(): OfflineDownload? {
+    fun nextQueued(now: Long = System.currentTimeMillis()): OfflineDownload? {
         val userId = HubSettings.userId(app)
         return queryDownloads(
-            "d.user_id=? AND d.state IN (?,?) AND b.paused=0",
-            arrayOf(userId, OfflineState.QUEUED.wire, OfflineState.WAITING.wire),
+            "d.user_id=? AND (d.state=? OR (d.state=? AND d.retry_at<=?)) AND b.paused=0",
+            arrayOf(userId, OfflineState.QUEUED.wire, OfflineState.WAITING.wire, now.toString()),
             "b.created_at ASC,d.sort_order ASC", "1", joined = true
         ).firstOrNull()
     }
+
+    /** Earliest backoff deadline for the active user's unpaused queue. */
+    @Synchronized
+    fun nextRetryAt(now: Long = System.currentTimeMillis()): Long? =
+        db.readableDatabase.rawQuery(
+            "SELECT MIN(d.retry_at) FROM downloads d JOIN batches b ON b.id=d.batch_id " +
+                "WHERE d.user_id=? AND d.state=? AND b.paused=0 AND d.retry_at>?",
+            arrayOf(HubSettings.userId(app), OfflineState.WAITING.wire, now.toString())
+        ).use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
+        }
 
     @Synchronized
     fun download(id: String): OfflineDownload? =
@@ -169,6 +182,7 @@ class OfflineRepository private constructor(context: Context) {
         db.writableDatabase.update("downloads", ContentValues().apply {
             put("bytes_downloaded", bytes); put("state", state.wire); put("error", "")
             put("speed_bps", speedBytesPerSecond.coerceAtLeast(0L))
+            put("retry_at", 0L)
             put("updated_at", System.currentTimeMillis())
         }, "id=?", arrayOf(id))
         changed()
@@ -196,6 +210,7 @@ class OfflineRepository private constructor(context: Context) {
         db.writableDatabase.update("downloads", ContentValues().apply {
             put("state", state.wire); put("error", safeError); put("updated_at", System.currentTimeMillis())
             if (state != OfflineState.DOWNLOADING) put("speed_bps", 0L)
+            if (state != OfflineState.WAITING) put("retry_at", 0L)
         }, "id=?", arrayOf(id))
         changed()
     }
@@ -209,7 +224,8 @@ class OfflineRepository private constructor(context: Context) {
         }
         db.writableDatabase.update("downloads", ContentValues().apply {
             put("state", OfflineState.COMPLETE.wire); put("bytes_downloaded", row.totalBytes)
-            put("speed_bps", 0L); put("error", ""); put("updated_at", System.currentTimeMillis())
+            put("speed_bps", 0L); put("error", ""); put("retry_at", 0L)
+            put("updated_at", System.currentTimeMillis())
         }, "id=?", arrayOf(id))
         changed()
     }
@@ -219,10 +235,10 @@ class OfflineRepository private constructor(context: Context) {
         db.writableDatabase.update("batches", ContentValues().apply { put("paused", if (paused) 1 else 0) },
             "id=?", arrayOf(batchId))
         if (paused) db.writableDatabase.execSQL(
-            "UPDATE downloads SET state=? WHERE batch_id=? AND state IN (?,?)",
+            "UPDATE downloads SET state=?, retry_at=0 WHERE batch_id=? AND state IN (?,?)",
             arrayOf(OfflineState.PAUSED.wire, batchId, OfflineState.QUEUED.wire, OfflineState.WAITING.wire)
         ) else db.writableDatabase.execSQL(
-            "UPDATE downloads SET state=? WHERE batch_id=? AND state=?",
+            "UPDATE downloads SET state=?, retry_at=0 WHERE batch_id=? AND state=?",
             arrayOf(OfflineState.QUEUED.wire, batchId, OfflineState.PAUSED.wire)
         )
         changed()
@@ -230,14 +246,22 @@ class OfflineRepository private constructor(context: Context) {
 
     @Synchronized
     fun setItemPaused(id: String, paused: Boolean) {
-        setState(id, if (paused) OfflineState.PAUSED else OfflineState.QUEUED)
+        if (paused) {
+            setState(id, OfflineState.PAUSED)
+            return
+        }
+        db.writableDatabase.update("downloads", ContentValues().apply {
+            put("state", OfflineState.QUEUED.wire); put("retry_at", 0L); put("error", "")
+            put("speed_bps", 0L); put("updated_at", System.currentTimeMillis())
+        }, "id=?", arrayOf(id))
+        changed()
     }
 
     @Synchronized
     fun retry(id: String) {
         db.writableDatabase.update("downloads", ContentValues().apply {
             put("state", OfflineState.QUEUED.wire); put("attempts", 0); put("error", "")
-            put("speed_bps", 0L)
+            put("speed_bps", 0L); put("retry_at", 0L)
             put("updated_at", System.currentTimeMillis())
         }, "id=?", arrayOf(id))
         changed()
@@ -247,10 +271,12 @@ class OfflineRepository private constructor(context: Context) {
     fun recordFailure(id: String, message: String, maxRetries: Int) {
         val row = download(id) ?: return
         val attempts = row.attempts + 1
+        val failed = attempts > maxRetries
         db.writableDatabase.update("downloads", ContentValues().apply {
             put("attempts", attempts)
-            put("state", if (attempts > maxRetries) OfflineState.FAILED.wire else OfflineState.WAITING.wire)
+            put("state", if (failed) OfflineState.FAILED.wire else OfflineState.WAITING.wire)
             put("speed_bps", 0L)
+            put("retry_at", if (failed) 0L else System.currentTimeMillis() + OfflineRetryPolicy.delayMillis(attempts))
             put("error", message.take(300)); put("updated_at", System.currentTimeMillis())
         }, "id=?", arrayOf(id))
         changed()
@@ -323,7 +349,9 @@ class OfflineRepository private constructor(context: Context) {
         }
         val duration = (item.runtimeSeconds * 1_000L).coerceAtLeast(progress?.second ?: 0L)
         val remembered = progress?.first ?: item.positionSeconds * 1_000L
-        val position = if (startMode == "restart") 0L else remembered
+        // A completed item retains its final local position for sync, but must
+        // never reopen at its last frame. Match the normal playback resume rule.
+        val position = if (startMode == "restart") 0L else PlaybackRules.resumePosition(remembered, duration)
         val audio = source.tracks.filter { it.type.equals("Audio", true) }
         val subtitles = embeddedSubtitles + externalSubtitles
         val siblings = if (item.seriesId.isNotEmpty()) completed()
@@ -421,7 +449,7 @@ class OfflineRepository private constructor(context: Context) {
         val alias = if (joined) "d." else ""
         val table = if (joined) "downloads d JOIN batches b ON b.id=d.batch_id" else "downloads"
         val columns = listOf("id", "batch_id", "user_id", "manifest_json", "state", "bytes_downloaded",
-            "total_bytes", "local_path", "error", "attempts", "speed_bps", "sort_order", "updated_at")
+            "total_bytes", "local_path", "error", "attempts", "speed_bps", "sort_order", "updated_at", "retry_at")
             .joinToString(",") { alias + it }
         val rows = mutableListOf<OfflineDownload>()
         db.readableDatabase.query(table, columns.split(',').toTypedArray(), where, args, null, null, order, limit)
@@ -434,7 +462,7 @@ class OfflineRepository private constructor(context: Context) {
         JSON.decodeFromString(string("manifest_json")),
         OfflineState.entries.firstOrNull { it.wire == string("state") } ?: OfflineState.FAILED,
         long("bytes_downloaded"), long("total_bytes"), string("local_path"), string("error"), int("attempts"),
-        long("speed_bps"), int("sort_order"), long("updated_at")
+        long("speed_bps"), int("sort_order"), long("updated_at"), long("retry_at")
     )
 
     private fun verifyCompletedFile(row: OfflineDownload): Boolean {
@@ -486,10 +514,10 @@ class OfflineRepository private constructor(context: Context) {
     }
 }
 
-private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "offline.db", null, 2) {
+private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "offline.db", null, 3) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE batches(id TEXT PRIMARY KEY,title TEXT NOT NULL,series_id TEXT NOT NULL,user_id TEXT NOT NULL,paused INTEGER NOT NULL,created_at INTEGER NOT NULL)")
-        db.execSQL("CREATE TABLE downloads(id TEXT PRIMARY KEY,batch_id TEXT NOT NULL,user_id TEXT NOT NULL,item_id TEXT NOT NULL,source_id TEXT NOT NULL,manifest_json TEXT NOT NULL,state TEXT NOT NULL,bytes_downloaded INTEGER NOT NULL,total_bytes INTEGER NOT NULL,local_path TEXT NOT NULL,error TEXT NOT NULL,attempts INTEGER NOT NULL,speed_bps INTEGER NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,updated_at INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE downloads(id TEXT PRIMARY KEY,batch_id TEXT NOT NULL,user_id TEXT NOT NULL,item_id TEXT NOT NULL,source_id TEXT NOT NULL,manifest_json TEXT NOT NULL,state TEXT NOT NULL,bytes_downloaded INTEGER NOT NULL,total_bytes INTEGER NOT NULL,local_path TEXT NOT NULL,error TEXT NOT NULL,attempts INTEGER NOT NULL,speed_bps INTEGER NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,updated_at INTEGER NOT NULL,retry_at INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE UNIQUE INDEX downloads_media ON downloads(user_id,item_id,source_id)")
         db.execSQL("CREATE INDEX downloads_queue ON downloads(user_id,state,sort_order)")
         db.execSQL("CREATE TABLE progress(item_id TEXT NOT NULL,user_id TEXT NOT NULL,position_ms INTEGER NOT NULL,duration_ms INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(item_id,user_id))")
@@ -498,6 +526,9 @@ private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "off
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE downloads ADD COLUMN speed_bps INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion < 3) {
+            db.execSQL("ALTER TABLE downloads ADD COLUMN retry_at INTEGER NOT NULL DEFAULT 0")
         }
     }
 }

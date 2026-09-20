@@ -1276,20 +1276,20 @@ class PlayerScreen(
             setTypeface(typeface, Typeface.BOLD)
         }
         addView(titleView, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginEnd = dp(10) })
-        audioButton = control(PlayerControlIcon.AUDIO, "Choose audio track", bare = true) { showAudioSheet() }
+        audioButton = control(PlayerControlIcon.AUDIO, "Choose audio track") { showAudioSheet() }
         addView(audioButton)
-        subtitleButton = control(PlayerControlIcon.SUBTITLES, "Choose subtitles", bare = true) { showSubtitleSheet() }
+        subtitleButton = control(PlayerControlIcon.SUBTITLES, "Choose subtitles") { showSubtitleSheet() }
         addView(subtitleButton)
         optionsButton = control(
-            PlayerControlIcon.OPTIONS, "Quality, version and stream information", bare = true
+            PlayerControlIcon.OPTIONS, "Quality, version and stream information"
         ) { showPlaybackSheet() }
         addView(optionsButton)
-        pipButton = control(PlayerControlIcon.PICTURE_IN_PICTURE, "Open picture in picture", bare = true) {
+        pipButton = control(PlayerControlIcon.PICTURE_IN_PICTURE, "Open picture in picture") {
             setControls(false)
             if (!host.enterPictureInPicture(playerView)) showControls()
         }
         addView(pipButton)
-        closeButton = control(PlayerControlIcon.CLOSE, "Close playback", prominent = true, bare = true) {
+        closeButton = control(PlayerControlIcon.CLOSE, "Close playback") {
             host.back()
         }
         addView(closeButton)
@@ -1354,7 +1354,7 @@ class PlayerScreen(
                 seekBy(-configuredSeekMillis())
             }
             addView(rewindButton)
-            playButton = control(PlayerControlIcon.PLAY, "Play", prominent = true) { togglePlay() }
+            playButton = control(PlayerControlIcon.PLAY, "Play") { togglePlay() }
             addView(playButton)
             forwardButton = control(PlayerControlIcon.FORWARD, "Jump forward $seekSeconds seconds") {
                 seekBy(configuredSeekMillis())
@@ -1442,16 +1442,16 @@ class PlayerScreen(
     private fun control(
         icon: PlayerControlIcon,
         description: String,
-        prominent: Boolean = false,
-        bare: Boolean = false,
         action: () -> Unit
     ) =
         PlayerIconButton(host.viewContext, icon).apply {
             contentDescription = description
-            background = if (bare) playerBareButtonBackground() else playerButtonBackground(prominent)
+            // Player controls sit directly on the video. A focused control gets
+            // a thin, high-contrast ring but never becomes an opaque blue tile.
+            background = playerBareButtonBackground()
             Styler.makeFocusable(this)
-            minimumWidth = dp(48)
-            minimumHeight = dp(44)
+            minimumWidth = dp(46)
+            minimumHeight = dp(42)
             activateOnTap(action)
             setOnFocusChangeListener { _, focused -> if (focused) showControls() }
             layoutParams = LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(7) }
@@ -1466,27 +1466,10 @@ class PlayerScreen(
         return StateListDrawable().apply {
             addState(
                 intArrayOf(android.R.attr.state_focused),
-                face(Color.TRANSPARENT, dp(2), colors.focusRing)
+                face(Color.argb(80, 0, 0, 0), dp(2), colors.focusRing)
             )
             addState(intArrayOf(android.R.attr.state_pressed), face(Color.argb(75, 0, 0, 0)))
             addState(intArrayOf(), face(Color.TRANSPARENT))
-        }
-    }
-
-    private fun playerButtonBackground(prominent: Boolean): StateListDrawable {
-        fun face(fill: Int, strokeWidth: Int = 0, strokeColor: Int = 0) = GradientDrawable().apply {
-            cornerRadius = Styler.dp(host.viewContext, 12f)
-            setColor(fill)
-            if (strokeWidth > 0) setStroke(strokeWidth, strokeColor)
-        }
-        val base = if (prominent) colors.accent else Color.argb(205, 36, 38, 46)
-        return StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_pressed), face(Color.argb(255, 24, 25, 31)))
-            addState(
-                intArrayOf(android.R.attr.state_focused),
-                face(if (prominent) colors.accent else Color.argb(245, 50, 53, 64), dp(3), colors.focusRing)
-            )
-            addState(intArrayOf(), face(base, dp(1), Color.argb(100, 255, 255, 255)))
         }
     }
 
