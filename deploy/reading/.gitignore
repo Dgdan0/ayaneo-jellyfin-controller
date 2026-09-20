@@ -2,6 +2,8 @@
 lab-data/
 lab-media/
 lab-derived/
+lab-acquisition/
+lab-acquisition-source/
 lab-secrets/
 lab-backups/
 migration.local.yml

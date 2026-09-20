@@ -1,8 +1,8 @@
 # Reading platform lab
 
 This Compose project is an isolated qualification environment for Kavita,
-Storyteller, and bookkeeprr. It must not point at production media during M0 or
-M1.
+Storyteller, bookkeeprr, and a dedicated qBittorrent client. It must not point
+at production media during qualification.
 
 See [SECRETS_AND_ACCESS.md](SECRETS_AND_ACCESS.md) before changing accounts,
 tokens, or remote-access routes. Bootstrap files are not the authority for a
@@ -13,13 +13,19 @@ Automated qualification is recorded in
 are tracked in
 [M1B_EXTERNAL_CLIENT_EVIDENCE.md](M1B_EXTERNAL_CLIENT_EVIDENCE.md). The M2
 scanner implementation and its remaining production gate are recorded in
-[M2_MIGRATION_EVIDENCE.md](M2_MIGRATION_EVIDENCE.md).
+[M2_MIGRATION_EVIDENCE.md](M2_MIGRATION_EVIDENCE.md). The isolated acquisition
+proof and its remaining Hub design gate are recorded in
+[M3_ACQUISITION_EVIDENCE.md](M3_ACQUISITION_EVIDENCE.md).
 
 ## Safety model
 
 - Every published port binds to loopback.
 - Kavita and Storyteller see fixture media read-only.
-- bookkeeprr is the only container with a writable fixture-media mount.
+- bookkeeprr and its dedicated qBittorrent backend share only the writable
+  `READING_ACQUISITION_ROOT`; neither can see the reader fixture media.
+- The internal `qbittorrent` compatibility proxy rewrites BookKeeprr 1.1.1's
+  qBittorrent 4 pause/resume route names to qBittorrent 5 stop/start. It has no
+  published host port. The backend Web UI remains loopback-only.
 - Secrets are file-backed and ignored by Git.
 - Images are pinned to the immutable digests qualified by the M1A lab.
 - All persistent data stays below this directory unless `.env` explicitly
@@ -38,17 +44,35 @@ scanner implementation and its remaining production gate are recorded in
    Set-Location hub
    go run ./cmd/reading-fixtures -out ../deploy/reading/lab-media
    ```
-5. Validate the expanded Compose model before starting anything:
+5. Acquisition qualification can generate a tracker-free, single-file torrent
+   from any synthetic fixture:
+
+   ```powershell
+   Set-Location hub
+   go run ./cmd/reading-acquisition-fixture `
+     -payload ../deploy/reading/lab-acquisition-source/book.epub `
+     -out ../deploy/reading/lab-acquisition-source/book.torrent `
+     -url http://host.docker.internal:18081/book.epub
+   ```
+
+   The URL is an HTTP web seed. Use a local disposable server only; do not put
+   credentials in it.
+6. Validate the expanded Compose model before starting anything:
 
    ```powershell
    docker-compose --env-file .env config
    ```
 
-6. Start the lab only after the configuration contains no production paths:
+7. Start the lab only after the configuration contains no production paths:
 
    ```powershell
    docker-compose --env-file .env up -d
    ```
+
+BookKeeprr must target Docker host `qbittorrent` and port `18080`; that name is
+the internal compatibility proxy. The qBittorrent Web UI remains available to
+the host at `127.0.0.1:${QBITTORRENT_WEBUI_PORT}`. Credentials belong in each
+service's ignored persistent configuration and never in Compose.
 
 Kavita libraries must enable embedded metadata parsing while leaving external
 metadata matching disabled. EPUB files are otherwise skipped because Kavita

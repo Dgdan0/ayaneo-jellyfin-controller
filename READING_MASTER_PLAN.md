@@ -520,6 +520,12 @@ stable release follows hardware acceptance.
 - Gate: fixture acquisitions import correctly; failures never touch existing
   media; cancel/retry works.
 
+Status on 2026-09-20: the isolated service slice proves category routing,
+byte-identical import, and idempotent cancel. The Hub adapter has deliberately
+not started. BookKeeprr 1.1.1 has qBittorrent 5 control-name, personal-key
+authorization, and retry-contract gaps that require a joint Hub integration
+decision. See `deploy/reading/M3_ACQUISITION_EVIDENCE.md`.
+
 ### M4 — Hub reading catalog
 
 - Add configuration, adapters, normalized domain, browse/detail/search/list

@@ -56,11 +56,49 @@ services:
       BOOKKEEPRR_LOG_LEVEL: info
     volumes:
       - "${READING_LAB_DATA_ROOT}/bookkeeprr:/config"
-      - "${READING_MEDIA_ROOT}:/media:rw"
+      - "${READING_ACQUISITION_ROOT}:/media:rw"
     networks:
       - reading
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  qbittorrent:
+    image: ${QBITTORRENT_COMPAT_IMAGE:?Set QBITTORRENT_COMPAT_IMAGE to a tested version or digest}
+    restart: unless-stopped
+    depends_on:
+      - qbittorrent-backend
+    volumes:
+      - "./qbt5-compat.Caddyfile:/etc/caddy/Caddyfile:ro"
+    networks:
+      - reading
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  qbittorrent-backend:
+    image: ${QBITTORRENT_IMAGE:?Set QBITTORRENT_IMAGE to a tested version or digest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${QBITTORRENT_WEBUI_PORT:-18080}:${QBITTORRENT_WEBUI_PORT:-18080}"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: ${TZ:-Etc/UTC}
+      WEBUI_PORT: ${QBITTORRENT_WEBUI_PORT:-18080}
+    volumes:
+      - "${READING_LAB_DATA_ROOT}/qbittorrent:/config"
+      - "${READING_ACQUISITION_ROOT}:/media:rw"
+    networks:
+      - reading
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${QBITTORRENT_WEBUI_PORT:-18080}/"]
       interval: 30s
       timeout: 5s
       retries: 5

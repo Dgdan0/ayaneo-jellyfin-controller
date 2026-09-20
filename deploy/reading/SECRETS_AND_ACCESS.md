@@ -17,6 +17,10 @@ The M1 lab stores bootstrap material under
 | `storyteller-init-response.txt` | Captured response from initial Storyteller setup. Treat it as secret bootstrap evidence. | Remove it after the lab no longer needs bootstrap evidence. Account changes happen in Storyteller, not in this file. |
 | `m1b-secondary-credentials.json` | Generated Kavita secondary account used only for progress-isolation checks. | Reset or delete it in Kavita after M1B. Updating this file alone does not change the account. |
 | `m1b-storyteller-secondary-credentials.json` | Generated Storyteller secondary account used only for progress-isolation checks. | Reset or delete it in Storyteller after M1B. Updating this file alone does not change the account. |
+| `bookkeeprr-admin-credentials.json` | Local record of the isolated BookKeeprr administrator created for M3 qualification. | Change the password in BookKeeprr first, then update or remove this record. |
+| `bookkeeprr-qbittorrent.json` | Credentials for the dedicated lab qBittorrent Web UI. | Change the qBittorrent password and BookKeeprr connection setting together, then update or remove this record. |
+| `bookkeeprr-api-key.json` | Revocable personal BookKeeprr API key used for qualification. | Revoke it under the BookKeeprr account settings, then remove the file. The pinned release cannot use this key for its admin download controls; see the M3 evidence. |
+| `bookkeeprr-qualification-state.json` | Non-secret IDs and fixture hashes used to correlate the qualification run. It remains in the ignored secrets directory so one run cannot leak state into another. | Remove it when resetting the acquisition lab. |
 
 The service databases are the authority after first-run setup:
 
@@ -26,15 +30,15 @@ The service databases are the authority after first-run setup:
   `deploy/reading/lab-data/storyteller/storyteller.db`.
 - bookkeeprr users and settings live in
   `deploy/reading/lab-data/bookkeeprr/bookkeeprr.db`.
+- qBittorrent's Web UI authentication and client settings live under
+  `deploy/reading/lab-data/qbittorrent/`.
 
-Kavita and Storyteller currently have isolated lab accounts. Use their
-account/settings screens to change passwords. bookkeeprr requires its own user
-account, but the M1 lab has intentionally not completed its first-run wizard and
-there is currently no bookkeeprr password to rotate. Its first-run screen will
-create the first administrator when M3 acquisition qualification begins;
-additional accounts and password resets are managed under **Settings > Users**.
-Its qBittorrent and indexer credentials are separate integration secrets stored
-in the bookkeeprr database.
+Kavita, Storyteller, and bookkeeprr currently have isolated lab accounts. Use
+their account/settings screens to change passwords. BookKeeprr first-run setup
+was completed for M3; additional accounts and password resets are managed under
+**Settings > Users**. Its qBittorrent and future indexer credentials are
+separate integration secrets stored in the BookKeeprr database. The dedicated
+qBittorrent backend is isolated from the production movie/TV download client.
 
 Docker Desktop does not add an application username or password to these
 services. Windows/Docker permissions control container administration, while

@@ -1,0 +1,16 @@
+{
+	admin off
+	auto_https off
+}
+
+:18080 {
+	@pause path /api/v2/torrents/pause
+	rewrite @pause /api/v2/torrents/stop
+
+	@resume path /api/v2/torrents/resume
+	rewrite @resume /api/v2/torrents/start
+
+	reverse_proxy qbittorrent-backend:18080 {
+		header_up Host {upstream_hostport}
+	}
+}
