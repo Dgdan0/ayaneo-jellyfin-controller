@@ -50,8 +50,50 @@ evidence for every row. Never record a password or token here.
 | Storyteller Android downloads and returns offline | Pending | Pending | |
 | Storyteller Android saves reading and audio position | Pending | Pending | |
 | Storyteller Android readaloud highlights and advances | Pending | Pending | |
-| A second user has isolated progress and downloads | Pending | Pending | |
-| Backup/restore retains users, catalog, pairing, and progress | Pending | Pending | |
+| A second user has isolated server progress | Pass | N/A | Kavita retained primary page 1 while secondary saved page 2; Storyteller retained primary 50% while secondary saved 25% |
+| A second user's client downloads remain isolated | Pending | Pending | Requires mobile-client storage checks |
+| Backup/restore retains users, catalog, pairing, and progress | Pass | N/A | Stopped-state copy restored into a separate Compose project; all services healthy, authenticated API/OPDS passed, catalog counts matched, Kavita page 1 and Storyteller 50% progress matched |
+
+## Multi-user isolation evidence
+
+Generated secondary accounts were created in the isolated lab only. Their
+credentials are stored under ignored `lab-secrets` files and no values were
+written to this report.
+
+For Kavita, both users addressed the same comic chapter. The primary account
+remained at page 1 before and after the secondary account saved page 2. For
+Storyteller, both users addressed the same logical book. The secondary account
+initially received HTTP 404 for a position, saved 25% with HTTP 204, and read
+25% back while the primary account remained at 50%.
+
+This proves server-side progress ownership. Offline download separation remains
+a client-side acceptance check because Kavita and Storyteller do not store the
+mobile apps' downloaded files in the server account database.
+
+## Backup and restore evidence
+
+The three lab containers were stopped cleanly while the Hub, Jellyfin, Komga,
+and production media remained online and untouched. The lab data, derived data,
+and secrets were copied to an ignored backup directory and then copied again to
+a separate restore root. All 44 files matched by relative path, size, and
+SHA-256 before startup.
+
+The restored project ran concurrently on alternate loopback ports. All three
+containers became healthy. An authenticated Kavita library request succeeded,
+Storyteller OPDS v1 returned HTTP 200 with catalog entries, and bookkeeprr's
+health endpoint reported healthy. Database checks matched these semantic
+records before the temporary restore containers were removed:
+
+| Service | Restored records |
+| --- | --- |
+| Kavita | 1 user, 3 libraries, 6 series, 6 volumes, 6 chapters, 1 progress row at page 1 |
+| Storyteller | 1 user, 2 logical books, 1 ebook, 1 audiobook, 1 readaloud, 1 position at 50% |
+| bookkeeprr | Empty first-run catalog, matching the source lab |
+
+The original lab was restarted immediately after the consistent copy and all
+three original containers returned healthy. Backup data remains ignored under
+`deploy/reading/lab-backups/`; it contains credentials and must not be
+committed or shared.
 
 ## Decision gate
 

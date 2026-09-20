@@ -15,6 +15,8 @@ The M1 lab stores bootstrap material under
 | `kavita-register-response.json` | Captured lab registration response. It can contain API, access, and refresh tokens. | Revoke or replace tokens in Kavita, then remove the captured response when qualification scripts no longer need it. |
 | `storyteller_secret.txt` | Storyteller's server signing secret, mounted through a Compose secret. It is not the user's login password. | Keep it stable. Rotating it signs users out and invalidates existing sessions. Generate a new random value only during a planned credential rotation. |
 | `storyteller-init-response.txt` | Captured response from initial Storyteller setup. Treat it as secret bootstrap evidence. | Remove it after the lab no longer needs bootstrap evidence. Account changes happen in Storyteller, not in this file. |
+| `m1b-secondary-credentials.json` | Generated Kavita secondary account used only for progress-isolation checks. | Reset or delete it in Kavita after M1B. Updating this file alone does not change the account. |
+| `m1b-storyteller-secondary-credentials.json` | Generated Storyteller secondary account used only for progress-isolation checks. | Reset or delete it in Storyteller after M1B. Updating this file alone does not change the account. |
 
 The service databases are the authority after first-run setup:
 
@@ -25,11 +27,14 @@ The service databases are the authority after first-run setup:
 - bookkeeprr users and settings live in
   `deploy/reading/lab-data/bookkeeprr/bookkeeprr.db`.
 
-Kavita, Storyteller, and bookkeeprr each require their own user account. Use
-their account/settings screens to change passwords. bookkeeprr's first-run
-screen creates its first administrator; additional accounts and password resets
-are managed under **Settings > Users**. Its qBittorrent and indexer credentials
-are separate integration secrets stored in the bookkeeprr database.
+Kavita and Storyteller currently have isolated lab accounts. Use their
+account/settings screens to change passwords. bookkeeprr requires its own user
+account, but the M1 lab has intentionally not completed its first-run wizard and
+there is currently no bookkeeprr password to rotate. Its first-run screen will
+create the first administrator when M3 acquisition qualification begins;
+additional accounts and password resets are managed under **Settings > Users**.
+Its qBittorrent and indexer credentials are separate integration secrets stored
+in the bookkeeprr database.
 
 Docker Desktop does not add an application username or password to these
 services. Windows/Docker permissions control container administration, while
