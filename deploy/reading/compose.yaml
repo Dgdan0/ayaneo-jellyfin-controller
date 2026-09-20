@@ -12,7 +12,7 @@ services:
     networks:
       - reading
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5000"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5000"]
       interval: 30s
       timeout: 5s
       retries: 5

@@ -10,33 +10,45 @@ M1.
 - Kavita and Storyteller see fixture media read-only.
 - bookkeeprr is the only container with a writable fixture-media mount.
 - Secrets are file-backed and ignored by Git.
-- Image placeholders force an explicit tested version or digest.
+- Images are pinned to the immutable digests qualified by the M1A lab.
 - All persistent data stays below this directory unless `.env` explicitly
   chooses another lab path.
 
 ## Prepare the lab
 
 1. Copy `.env.example` to `.env`.
-2. Replace the Kavita and Storyteller image placeholders with exact versions or
-   immutable digests selected during M1.
+2. Review the pinned image digests. Change one only as part of a new service
+   qualification run.
 3. Create `lab-secrets/storyteller_secret.txt` with a cryptographically random
    value of at least 32 bytes.
-4. Generate or copy only public-domain/personally-created fixtures into
-   `lab-media/Books`, `lab-media/Audiobooks`, `lab-media/Comics`, and
-   `lab-media/Manga`.
+4. Generate the synthetic fixture corpus from the repository root:
+
+   ```powershell
+   Set-Location hub
+   go run ./cmd/reading-fixtures -out ../deploy/reading/lab-media
+   ```
 5. Validate the expanded Compose model before starting anything:
 
    ```powershell
-   docker compose --env-file .env config
+   docker-compose --env-file .env config
    ```
 
 6. Start the lab only after the configuration contains no production paths:
 
    ```powershell
-   docker compose --env-file .env up -d
+   docker-compose --env-file .env up -d
    ```
 
-Stopping with `docker compose down` removes containers and the isolated network,
+Kavita libraries must enable embedded metadata parsing while leaving external
+metadata matching disabled. EPUB files are otherwise skipped because Kavita
+uses that switch for local OPF/ComicInfo parsing too.
+
+Storyteller 2.14.21 scans matched ebook and audiobook files as separate books.
+After both are present, call its supported `/api/v2/books/merge` endpoint. The
+two-path create endpoint is not used because this pinned release attempts to
+insert the same UUID twice. The M1A evidence report records the observed error.
+
+Stopping with `docker-compose down` removes containers and the isolated network,
 but retains lab data. Deleting lab data is a separate, deliberate operation.
 
 ## M1 acceptance checklist

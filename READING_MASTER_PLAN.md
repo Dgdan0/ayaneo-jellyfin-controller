@@ -486,12 +486,26 @@ stable release follows hardware acceptance.
 - Gate: Go tests, Compose configuration validation where Docker is available,
   no production paths/secrets, and clean rollback instructions.
 
-### M1 — Service proof of concept
+### M1A — Automated service proof
 
 - Start pinned Kavita, Storyteller, and bookkeeprr containers with fixtures.
-- Test Panels, Android, Storyteller clients, OPDS/API, progress, and restart.
-- Produce an evidence report and select Komga or Kavita for visual catalog.
-- Gate: all acceptance checks pass; no production media mounted writable.
+- Test health, API/OPDS, catalog parsing, edition pairing, progress conflict
+  handling, read-only mounts, source hashes, and restart persistence.
+- Produce a reproducible evidence report. Do not select or deploy the visual
+  catalog yet.
+- Gate: all automated lab checks pass; no production media is mounted and no
+  source-media hash changes.
+
+### M1B — External-client qualification and catalog decision
+
+- Test Panels, the selected Android client, and Storyteller iOS/Android clients
+  against the isolated lab over local HTTPS and Tailscale.
+- Verify browse, stream, download, offline return, page/audio progress,
+  readaloud playback, multiple users, and backup/restore.
+- Produce the final evidence report and select Komga or Kavita for the visual
+  catalog.
+- Gate: every external-client acceptance check passes. Until then Komga stays
+  active and Kavita remains a candidate.
 
 ### M2 — Canonical storage and migration tooling
 

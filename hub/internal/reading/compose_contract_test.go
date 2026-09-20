@@ -3,6 +3,7 @@ package reading
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -11,11 +12,14 @@ import (
 
 type composeContract struct {
 	Services map[string]struct {
-		Image   string   `yaml:"image"`
-		Restart string   `yaml:"restart"`
-		Ports   []string `yaml:"ports"`
-		Volumes []string `yaml:"volumes"`
-		Secrets []string `yaml:"secrets"`
+		Image       string   `yaml:"image"`
+		Restart     string   `yaml:"restart"`
+		Ports       []string `yaml:"ports"`
+		Volumes     []string `yaml:"volumes"`
+		Secrets     []string `yaml:"secrets"`
+		Healthcheck struct {
+			Test []string `yaml:"test"`
+		} `yaml:"healthcheck"`
 	} `yaml:"services"`
 	Secrets map[string]struct {
 		File string `yaml:"file"`
@@ -62,6 +66,10 @@ func TestReadingLabComposeIsSafeByDefault(t *testing.T) {
 	if len(document.Secrets) == 0 || len(document.Services["storyteller"].Secrets) == 0 {
 		t.Fatal("Storyteller secret is not file-backed")
 	}
+	kavitaProbe := strings.Join(document.Services["kavita"].Healthcheck.Test, " ")
+	if strings.Contains(kavitaProbe, "wget") || !strings.Contains(kavitaProbe, "/dev/tcp/127.0.0.1/5000") {
+		t.Errorf("Kavita health check must use its available bash TCP probe: %q", kavitaProbe)
+	}
 }
 
 func TestReadingLabExampleContainsNoRealSecretsOrProductionPaths(t *testing.T) {
@@ -74,6 +82,27 @@ func TestReadingLabExampleContainsNoRealSecretsOrProductionPaths(t *testing.T) {
 	for _, forbidden := range []string{"10.100.102.8", "100.97.20.86", "myjellydan", "D:\\Media"} {
 		if strings.Contains(strings.ToLower(text), strings.ToLower(forbidden)) {
 			t.Errorf("example contains machine-specific value %q", forbidden)
+		}
+	}
+}
+
+func TestReadingLabImagesUseImmutableDigests(t *testing.T) {
+	examplePath := filepath.Join("..", "..", "..", "deploy", "reading", ".env.example")
+	raw, err := os.ReadFile(examplePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	digest := regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
+	for _, key := range []string{"KAVITA_IMAGE", "STORYTELLER_IMAGE", "BOOKKEEPRR_IMAGE"} {
+		if !digest.MatchString(values[key]) {
+			t.Errorf("%s is not pinned to an immutable digest: %q", key, values[key])
 		}
 	}
 }
