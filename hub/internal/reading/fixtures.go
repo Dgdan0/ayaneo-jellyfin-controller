@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -73,6 +74,18 @@ func GenerateFixtureSet(root string) (FixtureManifest, error) {
 			path: "Books/Lab Author/Lab Stories/02 - The Readaloud Signal/The Readaloud Signal.epub",
 			data: func() ([]byte, error) {
 				return buildEPUB(epubSpec{title: "The Readaloud Signal", identifier: "urn:pocketds:fixture:readaloud-signal", readaloud: true})
+			},
+		},
+		{
+			name: "The Readaloud Journey",
+			role: FixtureReadaloud,
+			kind: MediaBook,
+			path: "Books/Lab Author/Lab Stories/05 - The Readaloud Journey/The Readaloud Journey.epub",
+			data: func() ([]byte, error) {
+				return buildEPUB(epubSpec{
+					title: "The Readaloud Journey", identifier: "urn:pocketds:fixture:readaloud-journey",
+					readaloud: true, timedSegments: 6,
+				})
 			},
 		},
 		{
@@ -151,9 +164,10 @@ func GenerateFixtureSet(root string) (FixtureManifest, error) {
 }
 
 type epubSpec struct {
-	title      string
-	identifier string
-	readaloud  bool
+	title         string
+	identifier    string
+	readaloud     bool
+	timedSegments int
 }
 
 func buildEPUB(spec epubSpec) ([]byte, error) {
@@ -163,15 +177,50 @@ func buildEPUB(spec epubSpec) ([]byte, error) {
 	}
 	manifest := `<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>` +
 		`<item id="cover" href="cover.png" media-type="image/png" properties="cover-image"/>`
-	chapterItem := `<item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>`
-	metadata := ""
+	var metadata strings.Builder
+	var spine strings.Builder
+	var navigation strings.Builder
 	extra := map[string][]byte{}
-	if spec.readaloud {
-		chapterItem = `<item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml" media-overlay="overlay"/>`
-		manifest += `<item id="overlay" href="overlay.smil" media-type="application/smil+xml"/>` +
-			`<item id="audio" href="narration.mp3" media-type="audio/mpeg"/>`
-		metadata = `<meta property="media:duration" refines="#overlay">0:00:01.000</meta>`
-		extra["EPUB/overlay.smil"] = []byte(`<?xml version="1.0" encoding="UTF-8"?><smil xmlns="http://www.w3.org/ns/SMIL" version="3.0"><body><seq epub:textref="chapter.xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><par><text src="chapter.xhtml#sentence1"/><audio src="narration.mp3" clipBegin="0s" clipEnd="1s"/></par></seq></body></smil>`)
+	readaloudSentences := []string{
+		"At dawn, the brass lighthouse answered the sea with one clear note.",
+		"A copper bird lifted from the rail and followed the sound east.",
+		"Below it, six quiet gears turned the sleeping island toward morning.",
+		"Every window caught the light and passed it to the next house.",
+		"The harbor bell replied, slower and deeper than the lighthouse.",
+		"When the last echo faded, the clockwork island was awake.",
+	}
+	if !spec.readaloud {
+		manifest += `<item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>`
+		spine.WriteString(`<itemref idref="chapter"/>`)
+		navigation.WriteString(`<li><a href="chapter.xhtml">Signal</a></li>`)
+		extra["EPUB/chapter.xhtml"] = []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>%s</title></head><body><h1>%s</h1><p id="sentence1">%s</p></body></html>`, spec.title, spec.title, readaloudSentences[0]))
+	} else {
+		segments := spec.timedSegments
+		if segments < 1 {
+			segments = 1
+		}
+		fmt.Fprintf(&metadata, `<meta property="media:duration">0:00:%02d.000</meta>`, segments)
+		for index := 0; index < segments; index++ {
+			sentence := readaloudSentences[index%len(readaloudSentences)]
+			chapterID := "chapter"
+			chapterName := "chapter.xhtml"
+			overlayID := "overlay"
+			overlayName := "overlay.smil"
+			if segments > 1 {
+				chapterID = fmt.Sprintf("chapter%d", index+1)
+				chapterName = fmt.Sprintf("chapter%d.xhtml", index+1)
+				overlayID = fmt.Sprintf("overlay%d", index+1)
+				overlayName = fmt.Sprintf("overlay%d.smil", index+1)
+			}
+			anchor := fmt.Sprintf("sentence%d", index+1)
+			manifest += fmt.Sprintf(`<item id="%s" href="%s" media-type="application/xhtml+xml" media-overlay="%s"/><item id="%s" href="%s" media-type="application/smil+xml"/>`, chapterID, chapterName, overlayID, overlayID, overlayName)
+			fmt.Fprintf(&metadata, `<meta property="media:duration" refines="#%s">0:00:01.000</meta>`, overlayID)
+			fmt.Fprintf(&spine, `<itemref idref="%s"/>`, chapterID)
+			fmt.Fprintf(&navigation, `<li><a href="%s">Step %d</a></li>`, chapterName, index+1)
+			extra["EPUB/"+chapterName] = []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>%s — Step %d</title></head><body><h1>%s</h1><p id="%s">%s</p></body></html>`, spec.title, index+1, spec.title, anchor, sentence))
+			extra["EPUB/"+overlayName] = []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><smil xmlns="http://www.w3.org/ns/SMIL" version="3.0"><body><seq epub:textref="%s" xmlns:epub="http://www.idpf.org/2007/ops"><par><text src="%s#%s"/><audio src="narration.mp3" clipBegin="0s" clipEnd="1s"/></par></seq></body></smil>`, chapterName, chapterName, anchor))
+		}
+		manifest += `<item id="audio" href="narration.mp3" media-type="audio/mpeg"/>`
 		audio, err := fixtureMP3()
 		if err != nil {
 			return nil, err
@@ -181,9 +230,8 @@ func buildEPUB(spec epubSpec) ([]byte, error) {
 
 	files := map[string][]byte{
 		"META-INF/container.xml": []byte(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`),
-		"EPUB/package.opf":       []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">%s</dc:identifier><dc:title>%s</dc:title><dc:creator>Lab Author</dc:creator><dc:language>en</dc:language><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>%s</metadata><manifest>%s%s</manifest><spine><itemref idref="chapter"/></spine></package>`, spec.identifier, spec.title, metadata, manifest, chapterItem)),
-		"EPUB/nav.xhtml":         []byte(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol><li><a href="chapter.xhtml">Signal</a></li></ol></nav></body></html>`),
-		"EPUB/chapter.xhtml":     []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>%s</title></head><body><h1>%s</h1><p id="sentence1">At dawn, the brass lighthouse answered the sea with one clear note.</p></body></html>`, spec.title, spec.title)),
+		"EPUB/package.opf":       []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">%s</dc:identifier><dc:title>%s</dc:title><dc:creator>Lab Author</dc:creator><dc:language>en</dc:language><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>%s</metadata><manifest>%s</manifest><spine>%s</spine></package>`, spec.identifier, spec.title, metadata.String(), manifest, spine.String())),
+		"EPUB/nav.xhtml":         []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol>%s</ol></nav></body></html>`, navigation.String())),
 		"EPUB/cover.png":         cover,
 	}
 	for name, data := range extra {

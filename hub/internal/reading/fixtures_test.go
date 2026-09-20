@@ -4,11 +4,79 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestReadaloudFixtureProvidesObservableProgress(t *testing.T) {
+	root := t.TempDir()
+	manifest, err := GenerateFixtureSet(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var fixturePath string
+	for _, asset := range manifest.Assets {
+		if asset.Name == "The Readaloud Journey" {
+			fixturePath = filepath.Join(root, filepath.FromSlash(asset.Path))
+			break
+		}
+	}
+	if fixturePath == "" {
+		t.Fatal("missing multi-segment readaloud fixture")
+	}
+
+	reader, err := zip.OpenReader(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	packageDoc := readFixtureZipEntry(t, reader.File, "EPUB/package.opf")
+	if !strings.Contains(packageDoc, "0:00:06.000") {
+		t.Fatal("readaloud package does not declare a six-second overlay")
+	}
+	if count := strings.Count(packageDoc, `<itemref idref="chapter`); count != 6 {
+		t.Fatalf("readaloud package has %d spine sections, want 6", count)
+	}
+	for index := 1; index <= 6; index++ {
+		chapterName := fmt.Sprintf("EPUB/chapter%d.xhtml", index)
+		overlayName := fmt.Sprintf("EPUB/overlay%d.smil", index)
+		chapter := readFixtureZipEntry(t, reader.File, chapterName)
+		if !strings.Contains(chapter, fmt.Sprintf(`id="sentence%d"`, index)) {
+			t.Fatalf("%s does not expose its timed text anchor", chapterName)
+		}
+		overlay := readFixtureZipEntry(t, reader.File, overlayName)
+		if strings.Count(overlay, "<par>") != 1 || !strings.Contains(overlay, filepath.Base(chapterName)) {
+			t.Fatalf("%s does not time exactly one matching spine section", overlayName)
+		}
+	}
+}
+
+func readFixtureZipEntry(t *testing.T, files []*zip.File, name string) string {
+	t.Helper()
+	for _, file := range files {
+		if file.Name != name {
+			continue
+		}
+		entry, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer entry.Close()
+		contents, err := io.ReadAll(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(contents)
+	}
+	t.Fatalf("fixture archive is missing %s", name)
+	return ""
+}
 
 func TestGenerateFixtureSetProducesPortableCoverage(t *testing.T) {
 	root := t.TempDir()
@@ -124,10 +192,20 @@ func TestGeneratedEpubAndComicArchivesHaveRequiredMetadata(t *testing.T) {
 			}
 		case FixtureReadaloud:
 			assertEpubMimetypeEntry(t, asset.Path, reader.File)
-			for _, name := range []string{"mimetype", "EPUB/package.opf", "EPUB/overlay.smil", "EPUB/narration.mp3"} {
+			for _, name := range []string{"mimetype", "EPUB/package.opf", "EPUB/narration.mp3"} {
 				if !names[name] {
 					t.Errorf("%s missing %s", asset.Path, name)
 				}
+			}
+			hasOverlay := false
+			for name := range names {
+				if strings.HasPrefix(name, "EPUB/overlay") && strings.HasSuffix(name, ".smil") {
+					hasOverlay = true
+					break
+				}
+			}
+			if !hasOverlay {
+				t.Errorf("%s missing a SMIL media overlay", asset.Path)
 			}
 		case FixtureComic, FixtureManga:
 			if !names["ComicInfo.xml"] || !names["001.png"] || !names["002.png"] {

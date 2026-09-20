@@ -51,10 +51,10 @@ evidence for every row. Never record a password or token here.
 | Storyteller iOS downloads and returns offline | Pending | Pending | |
 | Storyteller iOS saves reading and audio position | Pending | Pending | |
 | Storyteller iOS readaloud highlights and advances | Pending | Pending | |
-| Storyteller Android browses ebook/audiobook/readaloud | Pending | Pending | |
-| Storyteller Android downloads and returns offline | Pending | Pending | |
-| Storyteller Android saves reading and audio position | Pending | Pending | |
-| Storyteller Android readaloud highlights and advances | Pending | Pending | |
+| Storyteller Android browses ebook/audiobook/readaloud | Pending | Pass | Official Storyteller 2.11.4 on Pocket DS authenticated to Storyteller 2.14.21 and browsed the isolated ebook, paired audiobook, and readaloud fixtures |
+| Storyteller Android downloads and returns offline | Pending | Pass | Downloaded the paired ebook/audiobook and readaloud; after stopping only Storyteller and cold-starting the app, `On this device` retained both books and the downloaded readaloud opened successfully |
+| Storyteller Android saves reading and audio position | Pending | Pass | A six-spine readaloud paused on its third timed section at 43.97%; the server stored that locator, and a clean app session restored the same sentence at 44% after reconnect and download |
+| Storyteller Android readaloud highlights and advances | Pending | Pass | Embedded narration highlighted the active sentence and advanced through distinct timed spine sections on hardware |
 | A second user has isolated server progress | Pass | N/A | Kavita retained primary page 1 while secondary saved page 2; Storyteller retained primary 50% while secondary saved 25% |
 | A second user's client downloads remain isolated | Pending | Pending | Requires mobile-client storage checks |
 | Backup/restore retains users, catalog, pairing, and progress | Pass | N/A | Stopped-state copy restored into a separate Compose project; all services healthy, authenticated API/OPDS passed, catalog counts matched, Kavita page 1 and Storyteller 50% progress matched |
@@ -101,6 +101,35 @@ server. Kavita was restarted immediately afterward and returned to its normal
 loopback/Tailscale service. A final remote-network pass authenticated, browsed,
 and rendered the comic through public Caddy without changing the content or
 progress model.
+
+## Pocket DS Storyteller evidence
+
+The official Storyteller Android app 2.11.4 (`versionCode=134`) was installed
+from Google Play and connected to Storyteller 2.14.21 through the tailnet HTTPS
+route. The generated lab credentials remain under the ignored `lab-secrets`
+directory and were not saved to the device password manager.
+
+The client browsed the isolated catalog and downloaded both formats of `The
+Clockwork Island` plus the original readaloud fixture. With only the
+Storyteller container stopped, a cold app start still listed both downloaded
+books and opened the readaloud reader, proving the files were local. The
+container was restarted immediately and returned healthy.
+
+The original one-second, one-spine readaloud was too short to distinguish a
+real synchronized locator from a page-level zero position. A tests-first
+fixture, `The Readaloud Journey`, therefore provides six one-second timed spine
+sections. On Pocket DS, narration highlighted the active sentence, advanced to
+the third section, and paused at 43.97%. Storyteller stored the matching locator
+for the primary user. Storyteller app data was then cleared, the same server was
+reconnected, and the fixture was downloaded again. The reader opened on the
+third sentence and displayed 44%, confirming a server-to-fresh-client restore
+rather than reuse of local state.
+
+During fixture replacement, Storyteller's delayed file watcher briefly created
+a second record after a manual import. The redundant record was removed through
+the authenticated delete endpoint without blocking re-import. The final
+catalog contains one `The Readaloud Journey` record with the synchronized
+position.
 
 ## Backup and restore evidence
 
