@@ -1,0 +1,35 @@
+schema_version: 1
+
+# Copy this file to migration.local.yml. The local file is ignored because it
+# records host filesystem paths. Every source is scanned read-only.
+sources:
+  - id: komga-comics
+    kind: comic
+    root: D:\Media\Comics
+  - id: komga-manga
+    kind: manga
+    root: D:\Media\Manga
+  - id: existing-books
+    kind: book
+    root: D:\Media\Books
+  - id: existing-audiobooks
+    kind: audiobook
+    root: D:\Media\Audiobooks
+
+# These are proposed destinations. The dry-run command does not create, copy,
+# move, rename, or delete anything below them.
+destinations:
+  book: D:\Media\Reading\Books
+  audiobook: D:\Media\Reading\Audiobooks
+  comic: D:\Media\Reading\Comics
+  manga: D:\Media\Reading\Manga
+
+# Komga progress is scoped to the authenticated account. Add one entry per
+# account whose progress and read lists must be retained. Values are read from
+# the named environment variables; passwords never appear in this file or the
+# generated report.
+komga_exports:
+  - id: primary
+    base_url: http://127.0.0.1:25600
+    username_env: POCKETDS_KOMGA_PRIMARY_USERNAME
+    password_env: POCKETDS_KOMGA_PRIMARY_PASSWORD

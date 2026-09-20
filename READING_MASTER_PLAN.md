@@ -590,13 +590,19 @@ stable release follows hardware acceptance.
 
 ## 14. Immediate implementation boundary
 
-Start M0 only. It may add tests, pure storage-layout code, Compose lab files,
-fixtures, and documentation. It must not:
+M0 and M1A are complete. M1B is still open for the iOS and client-download
+isolation rows. M2 read-only inventory tooling may proceed in parallel because
+it does not select the catalog or mutate media. It may add tests, scanners,
+metadata readers, per-user Komga exports, ignored report bundles, and
+documentation. It must not:
 
-- install or start containers;
+- copy, move, rename, or delete production media;
+- run a production scan until `migration.local.yml` has been reviewed;
+- import progress or lists into another service;
 - connect bookkeeprr to qBittorrent;
-- mount or scan production media;
-- edit Komga, Jellyfin, Caddy, Tailscale, FireDaemon, or Docker Desktop;
+- begin M3 acquisition work;
+- remove Komga or select Kavita before the M1B decision gate;
+- edit Jellyfin, Caddy, Tailscale, FireDaemon, or Docker Desktop for M2;
 - deploy a Hub or APK;
 - commit credentials or device-specific absolute paths.
 

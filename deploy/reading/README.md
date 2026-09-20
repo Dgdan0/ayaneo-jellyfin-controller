@@ -11,7 +11,9 @@ running service account.
 Automated qualification is recorded in
 [M1A_SERVICE_LAB_EVIDENCE.md](M1A_SERVICE_LAB_EVIDENCE.md). Real-client checks
 are tracked in
-[M1B_EXTERNAL_CLIENT_EVIDENCE.md](M1B_EXTERNAL_CLIENT_EVIDENCE.md).
+[M1B_EXTERNAL_CLIENT_EVIDENCE.md](M1B_EXTERNAL_CLIENT_EVIDENCE.md). The M2
+scanner implementation and its remaining production gate are recorded in
+[M2_MIGRATION_EVIDENCE.md](M2_MIGRATION_EVIDENCE.md).
 
 ## Safety model
 
@@ -99,3 +101,30 @@ Only Kavita is included in this public fragment. Storyteller and bookkeeprr
 remain tailnet or loopback services until their authentication and client
 flows are qualified. Public Kavita accounts must use unique passwords because
 the login and authenticated API are reachable from the Internet.
+
+## Read-only migration inventory
+
+M2 begins with a report and has no apply mode. Copy
+`migration.example.yml` to the ignored `migration.local.yml`, replace the four
+example roots with the actual media roots, and set the environment variables
+named by each `komga_exports` entry. Use one entry per Komga account whose
+progress and read lists must be retained.
+
+From `hub/`, generate the ignored evidence bundle:
+
+```powershell
+go run ./cmd/reading-migrate `
+  -config ../deploy/reading/migration.local.yml `
+  -out ../deploy/reading/migration-reports/initial
+```
+
+The command reads and hashes every regular source file, validates supported
+embedded and sidecar metadata, compares existing canonical targets, and writes
+`config.json`, `inventory.json`, `plan.json`, `rollback.json`, `summary.txt`,
+and optionally `komga-state.json`. It refuses source/destination overlap and
+refuses to put its report inside any media root. `ready` remains a proposal;
+the command contains no code that copies, moves, renames, or deletes media.
+
+Do not share the report bundle without reviewing it. It intentionally contains
+media paths, titles, account identifiers, progress, and read-list membership,
+although it never contains the configured Komga password.

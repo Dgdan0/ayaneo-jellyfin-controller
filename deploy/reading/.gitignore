@@ -4,3 +4,5 @@ lab-media/
 lab-derived/
 lab-secrets/
 lab-backups/
+migration.local.yml
+migration-reports/
