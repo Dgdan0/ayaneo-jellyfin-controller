@@ -2,7 +2,7 @@
 
 Date: 2026-09-20
 Branch: `feature/reading-library`
-Status: Production inventory complete; per-user state export pending
+Status: Migration tooling and production review bundle complete
 
 ## Safety boundary
 
@@ -34,8 +34,9 @@ configuration. The scanner:
   destination collisions, files already present, and destination hash
   conflicts;
 - exports the authenticated Komga user's progress and ordered read lists, one
-  configured account at a time, through the current paginated API using Basic
-  authentication or a revocable `X-API-Key`;
+  configured account at a time, through either the Komga 1.23 paged read-list
+  response or the earlier array response, using Basic authentication or a
+  revocable `X-API-Key`;
 - writes `config.json`, `inventory.json`, `plan.json`, `rollback.json`, and
   `summary.txt`, plus `komga-state.json` when account exports are configured.
 
@@ -107,6 +108,15 @@ The source still contained 450 files totaling 7,002,341,595 bytes, both
 rollback manifests contained 444 entries, and the proposed destination still
 contained zero files.
 
+The production review bundle was then generated with a temporary, revocable
+API key for the sole Komga user. It contains one user-scoped export with four
+reading-progress records and one ordered read list containing 447 book IDs.
+The API key existed only in the migration process environment, was not written
+to local configuration, and a scan of every generated report confirmed that
+the credential was not serialized. This third scan retained the same plan
+digest and `plan.json` SHA-256 shown above, and the destination still contained
+zero files.
+
 The three manual-review files are not valid ZIP/CBZ archives. One begins with
 zero bytes and appears corrupt. Two have valid RAR signatures but a `.cbz`
 extension, so they need an explicit rename to `.cbr` or conversion rather than
@@ -115,14 +125,11 @@ CBL, and CSV manifests; their bytes and hashes remain in the inventory.
 
 ## Open gate
 
-The remaining M2 work is:
+The production inputs that must be decided before an apply milestone are:
 
-1. create one revocable API key from each Komga user's Account Settings page,
-   then run the exporter for every account whose progress or read lists must be
-   retained;
-2. decide whether to rename/convert the two RAR files and replace or exclude the
+1. decide whether to rename/convert the two RAR files and replace or exclude the
    corrupt archive;
-3. review the generated ignored report before any later apply implementation.
+2. review the generated ignored report before any later apply implementation.
 
 M1B also remains open for Panels and Storyteller iOS checks plus client-side
 download isolation. Komga remains active, and M3 acquisition integration does

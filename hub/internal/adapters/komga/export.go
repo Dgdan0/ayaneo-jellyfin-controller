@@ -134,6 +134,30 @@ type komgaReadList struct {
 	Ordered bool   `json:"ordered"`
 }
 
+// Komga 1.23 returns read lists in a Spring page, while older releases and
+// some compatible deployments return the list directly. Accept both shapes
+// so a read-only migration does not depend on the server version.
+type readListResponse struct {
+	Content []komgaReadList `json:"content"`
+}
+
+func (response *readListResponse) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return fmt.Errorf("empty Komga read list response")
+	}
+	if data[0] == '[' {
+		return json.Unmarshal(data, &response.Content)
+	}
+	type readListPage readListResponse
+	var page readListPage
+	if err := json.Unmarshal(data, &page); err != nil {
+		return err
+	}
+	response.Content = page.Content
+	return nil
+}
+
 // ExportReadingState reads the current Komga user's progress and visible read
 // lists. Komga returns progress in the authenticated user's context, so callers
 // run one export per account instead of using an administrator to impersonate
@@ -167,11 +191,11 @@ func (client *Client) ExportReadingState(ctx context.Context) (ReadingStateExpor
 	}
 	sort.Slice(result.Progress, func(i, j int) bool { return result.Progress[i].BookID < result.Progress[j].BookID })
 
-	var lists []komgaReadList
+	var lists readListResponse
 	if err := client.getJSON(ctx, "/api/v1/readlists", nil, &lists); err != nil {
 		return ReadingStateExport{}, fmt.Errorf("export Komga read lists: %w", err)
 	}
-	for _, list := range lists {
+	for _, list := range lists.Content {
 		path := "/api/v1/readlists/" + url.PathEscape(list.ID) + "/books"
 		var page bookPage
 		if err := client.getJSON(ctx, path, url.Values{"unpaged": []string{"true"}}, &page); err != nil {

@@ -52,7 +52,7 @@ func TestExportReadingStatePaginatesAndPreservesReadListOrder(t *testing.T) {
 				t.Fatalf("unexpected books page %q", r.URL.Query().Get("page"))
 			}
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/readlists":
-			_, _ = w.Write([]byte(`[{"id":"list-1","name":"Lantern Order","ordered":true}]`))
+			_, _ = w.Write([]byte(`{"content":[{"id":"list-1","name":"Lantern Order","ordered":true}],"last":true,"number":0,"totalPages":1}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/readlists/list-1/books":
 			if r.URL.Query().Get("unpaged") != "true" {
 				t.Fatalf("readlist query = %s", r.URL.RawQuery)
