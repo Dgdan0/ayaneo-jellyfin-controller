@@ -43,6 +43,9 @@ object PlaybackProgressStore {
         nowMillis: Long = System.currentTimeMillis()
     ): LibraryItem {
         val checkpoint = read(context, userId) ?: return item
+        if (checkpoint.isComplete(item.id, nowMillis)) {
+            return item.copy(played = true, positionSeconds = 0, progress = 0.0)
+        }
         val position = checkpoint.resumePosition(item.id, "resume", nowMillis)
         if (position == 0L || item.played) return item
         return item.copy(
@@ -50,6 +53,14 @@ object PlaybackProgressStore {
             progress = (position.toDouble() / checkpoint.durationMillis.toDouble()).coerceIn(0.0, 1.0)
         )
     }
+
+    /** True only for a fresh checkpoint that reached Jellyfin's completion window. */
+    fun isRecentlyComplete(
+        context: Context,
+        userId: String,
+        itemId: String,
+        nowMillis: Long = System.currentTimeMillis()
+    ): Boolean = read(context, userId)?.isComplete(itemId, nowMillis) == true
 
     private fun read(context: Context, userId: String): PlaybackCheckpoint? {
         val prefix = prefix(userId)
@@ -74,16 +85,21 @@ internal data class PlaybackCheckpoint(
     val durationMillis: Long,
     val updatedAtMillis: Long
 ) {
+    fun isComplete(itemId: String, nowMillis: Long): Boolean =
+        this.itemId == itemId && isFresh(nowMillis) && durationMillis > 0 &&
+            positionMillis >= durationMillis - MIN_REMAINING_MILLIS
+
     fun resumePosition(itemId: String, startMode: String, nowMillis: Long): Long {
         if (startMode != "resume" || this.itemId != itemId) return 0L
-        if (updatedAtMillis <= 0 || nowMillis < updatedAtMillis || nowMillis - updatedAtMillis > MAX_AGE_MILLIS) {
-            return 0L
-        }
+        if (!isFresh(nowMillis)) return 0L
         if (positionMillis < MIN_RESUME_MILLIS || durationMillis - positionMillis <= MIN_REMAINING_MILLIS) {
             return 0L
         }
         return positionMillis
     }
+
+    private fun isFresh(nowMillis: Long): Boolean =
+        updatedAtMillis > 0 && nowMillis >= updatedAtMillis && nowMillis - updatedAtMillis <= MAX_AGE_MILLIS
 
     private companion object {
         const val MAX_AGE_MILLIS = 2 * 60 * 1_000L

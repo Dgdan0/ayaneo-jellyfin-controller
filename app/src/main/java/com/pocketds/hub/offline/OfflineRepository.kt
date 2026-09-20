@@ -147,6 +147,28 @@ class OfflineRepository private constructor(context: Context) {
     fun forItem(itemId: String, userId: String = HubSettings.userId(app)): OfflineDownload? =
         queryDownloads("user_id=? AND item_id=?", arrayOf(userId, itemId), "updated_at DESC", "1").firstOrNull()
 
+    /** Local watch states for an Offline catalog. They never leave this device until sync runs. */
+    @Synchronized
+    fun playbackProgress(itemIds: Collection<String>): Map<String, OfflineCatalogProgress> {
+        if (itemIds.isEmpty()) return emptyMap()
+        val userId = HubSettings.userId(app)
+        val placeholders = itemIds.joinToString(",") { "?" }
+        val args = arrayOf(userId) + itemIds.toTypedArray()
+        val values = linkedMapOf<String, OfflineCatalogProgress>()
+        db.readableDatabase.rawQuery(
+            "SELECT item_id,position_ms,duration_ms,updated_at FROM progress " +
+                "WHERE user_id=? AND item_id IN ($placeholders)",
+            args
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                values[cursor.getString(0)] = OfflineCatalogProgress(
+                    cursor.getLong(1), cursor.getLong(2), cursor.getLong(3)
+                )
+            }
+        }
+        return values
+    }
+
     @Synchronized
     fun nextQueued(now: Long = System.currentTimeMillis()): OfflineDownload? {
         val userId = HubSettings.userId(app)

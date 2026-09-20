@@ -12,8 +12,10 @@ android {
         applicationId = "com.pocketds.hub"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "0.2.2"
+        // Must always increase: Android/Obtanium correctly rejects a release
+        // whose version code is lower than the APK already on the Pocket DS.
+        versionCode = 14
+        versionName = "0.2.3"
     }
 
     buildTypes {

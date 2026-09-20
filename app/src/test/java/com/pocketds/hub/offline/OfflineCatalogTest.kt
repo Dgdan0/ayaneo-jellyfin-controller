@@ -39,6 +39,28 @@ class OfflineCatalogTest {
         assertEquals(listOf("special", "s1e4"), result.flatMap { it.rows }.map { it.id })
     }
 
+    @Test
+    fun `local target resumes the newest partial episode then advances past finished ones`() {
+        val first = episode("s1e1", "lanterns", "Lanterns", "season-1", 1, 1)
+        val second = episode("s1e2", "lanterns", "Lanterns", "season-1", 1, 2)
+        val third = episode("s1e3", "lanterns", "Lanterns", "season-1", 1, 3)
+        val progress = mapOf(
+            "s1e1" to OfflineCatalogProgress(1_190_000, 1_200_000, 1),
+            "s1e2" to OfflineCatalogProgress(300_000, 1_200_000, 2)
+        )
+
+        val resume = OfflineCatalog.playTarget(listOf(first, second, third), progress)
+        assertEquals("s1e2", resume?.row?.id)
+        assertEquals(OfflineCatalogPlayTarget.Kind.RESUME, resume?.kind)
+
+        val next = OfflineCatalog.playTarget(
+            listOf(first, second, third),
+            mapOf("s1e1" to OfflineCatalogProgress(1_190_000, 1_200_000, 1))
+        )
+        assertEquals("s1e2", next?.row?.id)
+        assertEquals(OfflineCatalogPlayTarget.Kind.NEXT, next?.kind)
+    }
+
     private fun episode(
         id: String,
         seriesId: String,

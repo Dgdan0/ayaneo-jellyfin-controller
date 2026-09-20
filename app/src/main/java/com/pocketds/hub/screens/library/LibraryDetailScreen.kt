@@ -98,6 +98,7 @@ class LibraryDetailScreen(
     private var returnRefreshJob: Job? = null
     private var seriesTarget: SeriesPlayTargetResponse? = null
     private var selectedSeason = 0
+    private var staleTargetRetries = 0
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -301,6 +302,7 @@ class LibraryDetailScreen(
         if (item?.type == "series" && seriesTarget == null && targetJob?.isActive != true) loadPlayTarget()
         if (returning) {
             applyPendingPlaybackProgress()
+            invalidateFinishedSeriesTarget()
             returnRefreshJob?.cancel()
             returnRefreshJob = scope.launch {
                 delay(RETURN_REFRESH_DELAY_MILLIS)
@@ -551,6 +553,22 @@ class LibraryDetailScreen(
             when (val result = api.seriesPlayTarget(itemId)) {
                 is HubResult.Ok -> {
                     val alreadyFocusedContent = actions.hasFocus() || seasons.hasFocus() || episodePreview.hasFocus()
+                    if (isFinishedCheckpoint(result.value.item.id)) {
+                        // Jellyfin processes Stop asynchronously. Do not offer the just-finished
+                        // episode as Resume while the server advances its Next Up state.
+                        seriesTarget = null
+                        item?.let(::renderActions)
+                        status.setTextColor(colors.mutedText)
+                        status.text = "Updating next episode…"
+                        if (staleTargetRetries++ < MAX_STALE_TARGET_RETRIES) {
+                            scope.launch {
+                                delay(STALE_TARGET_RETRY_MILLIS)
+                                loadPlayTarget()
+                            }
+                        }
+                        return@launch
+                    }
+                    staleTargetRetries = 0
                     val resolved = withPendingPlaybackProgress(result.value)
                     seriesTarget = resolved
                     renderEpisodePreview(resolved)
@@ -593,12 +611,27 @@ class LibraryDetailScreen(
 
     private fun withPendingPlaybackProgress(target: SeriesPlayTargetResponse): SeriesPlayTargetResponse {
         val context = host?.viewContext ?: return target
+        if (isFinishedCheckpoint(target.item.id)) return target
         val resolved = PlaybackProgressStore.applyTo(
             context,
             HubSettings.userId(context),
             target.item
         )
         return if (resolved == target.item) target else target.copy(kind = "resume", item = resolved)
+    }
+
+    private fun isFinishedCheckpoint(itemId: String): Boolean {
+        val context = host?.viewContext ?: return false
+        return PlaybackProgressStore.isRecentlyComplete(context, HubSettings.userId(context), itemId)
+    }
+
+    private fun invalidateFinishedSeriesTarget() {
+        val current = seriesTarget ?: return
+        if (!isFinishedCheckpoint(current.item.id)) return
+        seriesTarget = null
+        staleTargetRetries = 0
+        renderEpisodePreview(null)
+        item?.let(::renderActions)
     }
 
     private fun renderEpisodePreview(target: SeriesPlayTargetResponse?) {
@@ -973,6 +1006,8 @@ class LibraryDetailScreen(
         const val ACTION_FAVORITE = "favorite"
         const val ACTION_DOWNLOAD = "download"
         const val RETURN_REFRESH_DELAY_MILLIS = 450L
+        const val STALE_TARGET_RETRY_MILLIS = 700L
+        const val MAX_STALE_TARGET_RETRIES = 3
     }
 }
 

@@ -30,4 +30,14 @@ class PlaybackProgressStoreTest {
         assertEquals(30_000L, PlaybackCheckpoint("episode", 30_000L, 600_000L, now)
             .resumePosition("episode", "resume", now))
     }
+
+    @Test
+    fun `checkpoint marks an item complete inside Jellyfin completion window`() {
+        assertEquals(true, PlaybackCheckpoint("episode", 570_000L, 600_000L, now)
+            .isComplete("episode", now))
+        assertEquals(false, PlaybackCheckpoint("episode", 569_999L, 600_000L, now)
+            .isComplete("episode", now))
+        assertEquals(false, PlaybackCheckpoint("episode", 570_000L, 600_000L, now - 120_001L)
+            .isComplete("episode", now))
+    }
 }
