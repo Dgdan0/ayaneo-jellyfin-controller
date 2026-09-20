@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+    {
+      "name": "epub in a series book folder",
+      "kind": "book",
+      "path": "Pierce Brown/Red Rising/01 - Red Rising/Red Rising.epub",
+      "valid": true
+    },
+    {
+      "name": "audiobook in its own title folder",
+      "kind": "audiobook",
+      "path": "Pierce Brown/Red Rising/01 - Red Rising/Red Rising.m4b",
+      "valid": true
+    },
+    {
+      "name": "comic issue with standard sidecar",
+      "kind": "comic",
+      "path": "DC/Green Lantern (2023)/Green Lantern #001 (2023).cbz",
+      "valid": true
+    },
+    {
+      "name": "manga volume",
+      "kind": "manga",
+      "path": "Attack on Titan/Attack on Titan - v01.cbz",
+      "valid": true
+    },
+    {
+      "name": "comic metadata sidecar",
+      "kind": "comic",
+      "path": "DC/Green Lantern (2023)/ComicInfo.xml",
+      "valid": true
+    },
+    {
+      "name": "book cover",
+      "kind": "book",
+      "path": "Pierce Brown/Red Rising/01 - Red Rising/cover.jpg",
+      "valid": true
+    },
+    {
+      "name": "parent traversal",
+      "kind": "book",
+      "path": "../Movies/Not A Book.mkv",
+      "valid": false
+    },
+    {
+      "name": "windows drive path",
+      "kind": "audiobook",
+      "path": "C:\\Media\\Reading\\Audiobooks\\Book.m4b",
+      "valid": false
+    },
+    {
+      "name": "unc path",
+      "kind": "comic",
+      "path": "\\\\server\\share\\Comic.cbz",
+      "valid": false
+    },
+    {
+      "name": "video in books",
+      "kind": "book",
+      "path": "Author/Title/Title.mkv",
+      "valid": false
+    },
+    {
+      "name": "file directly in media root",
+      "kind": "manga",
+      "path": "Volume 01.cbz",
+      "valid": false
+    },
+    {
+      "name": "unknown media type",
+      "kind": "magazine",
+      "path": "Magazine/Issue 01.pdf",
+      "valid": false
+    }
+  ]
+}

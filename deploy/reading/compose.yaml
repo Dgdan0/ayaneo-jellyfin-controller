@@ -1,0 +1,75 @@
+name: pocketds-reading-lab
+
+services:
+  kavita:
+    image: ${KAVITA_IMAGE:?Set KAVITA_IMAGE to a tested version or digest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${KAVITA_PORT:-5000}:5000"
+    volumes:
+      - "${READING_LAB_DATA_ROOT}/kavita:/kavita/config"
+      - "${READING_MEDIA_ROOT}:/reading:ro"
+    networks:
+      - reading
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5000"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  storyteller:
+    image: ${STORYTELLER_IMAGE:?Set STORYTELLER_IMAGE to a tested version or digest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${STORYTELLER_PORT:-8001}:8001"
+    environment:
+      STORYTELLER_SECRET_KEY_FILE: /run/secrets/storyteller_secret
+      STORYTELLER_LOG_LEVEL: info
+      STORYTELLER_SCRATCH_DIR: /data/tmp
+    secrets:
+      - storyteller_secret
+    volumes:
+      - "${READING_LAB_DATA_ROOT}/storyteller:/data"
+      - "${READING_MEDIA_ROOT}:/library:ro"
+      - "${READING_DERIVED_ROOT}:/derived"
+    networks:
+      - reading
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8001"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+
+  bookkeeprr:
+    image: ${BOOKKEEPRR_IMAGE:?Set BOOKKEEPRR_IMAGE to a tested version or digest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${BOOKKEEPRR_PORT:-3000}:3000"
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      BOOKKEEPRR_DB_PATH: /config/bookkeeprr.db
+      BOOKKEEPRR_CONFIG_DIR: /config
+      BOOKKEEPRR_MEDIA_ROOT: /media
+      BOOKKEEPRR_PORT: "3000"
+      BOOKKEEPRR_LOG_LEVEL: info
+    volumes:
+      - "${READING_LAB_DATA_ROOT}/bookkeeprr:/config"
+      - "${READING_MEDIA_ROOT}:/media:rw"
+    networks:
+      - reading
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+networks:
+  reading:
+    name: pocketds-reading-lab
+
+secrets:
+  storyteller_secret:
+    file: ${READING_SECRETS_ROOT}/storyteller_secret.txt

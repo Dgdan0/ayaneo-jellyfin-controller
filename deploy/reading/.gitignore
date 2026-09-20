@@ -1,0 +1,5 @@
+.env
+lab-data/
+lab-media/
+lab-derived/
+lab-secrets/
