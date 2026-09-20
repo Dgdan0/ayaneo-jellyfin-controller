@@ -4,6 +4,15 @@ This Compose project is an isolated qualification environment for Kavita,
 Storyteller, and bookkeeprr. It must not point at production media during M0 or
 M1.
 
+See [SECRETS_AND_ACCESS.md](SECRETS_AND_ACCESS.md) before changing accounts,
+tokens, or remote-access routes. Bootstrap files are not the authority for a
+running service account.
+
+Automated qualification is recorded in
+[M1A_SERVICE_LAB_EVIDENCE.md](M1A_SERVICE_LAB_EVIDENCE.md). Real-client checks
+are tracked in
+[M1B_EXTERNAL_CLIENT_EVIDENCE.md](M1B_EXTERNAL_CLIENT_EVIDENCE.md).
+
 ## Safety model
 
 - Every published port binds to loopback.
