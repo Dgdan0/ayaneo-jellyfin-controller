@@ -106,3 +106,38 @@ func TestReadingLabImagesUseImmutableDigests(t *testing.T) {
 		}
 	}
 }
+
+func TestReadingPublicKavitaProxyContract(t *testing.T) {
+	configPath := filepath.Join("..", "..", "..", "deploy", "reading", "Caddyfile.public.example")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	lines := map[string]bool{}
+	for _, line := range strings.Split(text, "\n") {
+		lines[strings.TrimSpace(line)] = true
+	}
+
+	for _, required := range []string{
+		"handle /kavita {",
+		"redir * /kavita/ 308",
+		"handle /kavita/* {",
+		"handle /api/* {",
+		"reverse_proxy 127.0.0.1:5000",
+	} {
+		if !lines[required] {
+			t.Errorf("public proxy example is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"handle_path /kavita",
+		"redir https://myjellydan.duckdns.org/kavita/",
+		"127.0.0.1:8001",
+		"127.0.0.1:3000",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Errorf("public proxy example contains unsafe or path-stripping route %q", forbidden)
+		}
+	}
+}

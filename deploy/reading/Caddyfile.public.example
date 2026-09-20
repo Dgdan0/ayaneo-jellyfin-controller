@@ -1,0 +1,22 @@
+# Add these handlers inside the existing myjellydan.duckdns.org:443 site block.
+# Kavita's Server Settings -> Base URL must be /kavita/ so generated links,
+# images, API calls, and OPDS URLs keep the public prefix.
+#
+# Keep the upstream bound to 127.0.0.1 in compose.yaml. Caddy is the only
+# public entry point and supplies the existing HTTPS certificate.
+
+handle /kavita {
+	# Keep the request's scheme, host, and external port (for example 55886).
+	redir * /kavita/ 308
+}
+
+# Do not use handle_path here: Kavita expects to receive the /kavita/ prefix.
+handle /kavita/* {
+	reverse_proxy 127.0.0.1:5000
+}
+
+# Kavita native clients such as CDisplayEx address the API at the site root,
+# even when the web client uses a subfolder base URL.
+handle /api/* {
+	reverse_proxy 127.0.0.1:5000
+}

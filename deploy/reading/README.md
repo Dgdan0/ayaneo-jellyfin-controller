@@ -77,3 +77,25 @@ but retains lab data. Deleting lab data is a separate, deliberate operation.
   corrupting either source.
 - Container restart preserves users, metadata, and progress.
 - Backup and restore reproduce the same counts and progress.
+
+## Optional public Kavita route
+
+Kavita can share the existing public HTTPS listener. On the current Cudy
+configuration the externally reachable URL is
+`https://myjellydan.duckdns.org:55886/kavita/`; Cudy forwards WAN TCP 55886 to
+the Ayaneo Media PC's Caddy listener on TCP 443. Set Kavita's **Base URL** to
+`/kavita/` first, then add the handlers from
+`Caddyfile.public.example` inside the existing Caddy site block. The route
+preserves the prefix deliberately; `handle_path` would strip it and break
+generated links and OPDS URLs. Its relative `/kavita` redirect also preserves
+the external port.
+
+The fragment also routes root `/api/*` requests to Kavita. CDisplayEx 1.3.96
+was observed using that API shape on the Pocket DS even after it learned the
+`/kavita/` web base URL. Without this handler, the browser works while native
+Kavita clients fail authentication or catalog loading.
+
+Only Kavita is included in this public fragment. Storyteller and bookkeeprr
+remain tailnet or loopback services until their authentication and client
+flows are qualified. Public Kavita accounts must use unique passwords because
+the login and authenticated API are reachable from the Internet.
