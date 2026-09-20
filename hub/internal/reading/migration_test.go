@@ -187,6 +187,30 @@ func TestBuildMigrationPlanRejectsInvalidAndOrphanSidecars(t *testing.T) {
 	}
 }
 
+func TestBuildMigrationPlanDistinguishesMislabeledRARFromCorruptZIP(t *testing.T) {
+	source := t.TempDir()
+	destination := t.TempDir()
+	writeTestFile(t, filepath.Join(source, "Series", "Mislabeled.cbz"), append([]byte("Rar!\x1a\x07\x00"), []byte("archive payload")...))
+	writeTestFile(t, filepath.Join(source, "Series", "Corrupt.cbz"), append(make([]byte, 32), []byte("PK\x03\x04truncated")...))
+
+	plan, err := BuildMigrationPlan(context.Background(), MigrationConfig{
+		Sources:      []MigrationSource{{ID: "comics", Kind: MediaComic, Root: source}},
+		Destinations: map[MediaKind]string{MediaComic: destination},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mislabeled := findPlannedAsset(t, plan, "Series/Mislabeled.cbz")
+	if mislabeled.Disposition != MigrationManualReview || !containsIssue(mislabeled.Issues, "archive_extension_mismatch") || containsIssue(mislabeled.Issues, "invalid_archive") {
+		t.Fatalf("mislabeled RAR = %+v", mislabeled)
+	}
+	corrupt := findPlannedAsset(t, plan, "Series/Corrupt.cbz")
+	if corrupt.Disposition != MigrationManualReview || !containsIssue(corrupt.Issues, "invalid_archive") || containsIssue(corrupt.Issues, "archive_extension_mismatch") {
+		t.Fatalf("corrupt ZIP = %+v", corrupt)
+	}
+}
+
 func TestBuildMigrationPlanAppliesExternalSidecarMetadataToSiblingMedia(t *testing.T) {
 	source := t.TempDir()
 	destination := t.TempDir()

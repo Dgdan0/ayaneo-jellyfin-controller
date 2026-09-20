@@ -54,6 +54,7 @@ The implementation was written from failing tests first. Coverage includes:
   collisions, and conflicting targets;
 - EPUB, OPF, CBZ, and ComicInfo parsing, including ISBN normalization;
 - orphan, invalid, propagated, and conflicting sidecar metadata;
+- corrupt ZIP/CBZ data versus recoverable RAR/CBZ extension mismatches;
 - configuration-to-plan and plan-content digest binding;
 - Komga pagination, current-user progress, unread omission, read-list order,
   authentication, URL validation, and secret/error-body redaction;
@@ -93,17 +94,18 @@ TCP 25600. The FireDaemon wrapper and Java child were both running; the earlier
 root-path HTTP 404 was the expected result of probing outside that context, not
 a missing listener.
 
-The single production Komga library was scanned twice from the ignored local
-configuration. Both runs returned:
+The single production Komga library was scanned repeatedly from ignored local
+configuration. After adding explicit RAR-signature classification, two final
+runs returned:
 
 ```text
 450 files, 444 ready, 0 conflicts, 3 manual review, 3 unsupported
 ```
 
-Both plans had digest
-`89bca2ed0a9e1953fc3097bbde012c8c51353a082a75328ddd7e5786fdb39cd5`.
+Both final plans had digest
+`0c057debbc3de62f9db30d753d46438466fd7db2b7cb2dedd541ce8ed2124975`.
 The two `plan.json` files had the same SHA-256,
-`EC4A5E0ADB062DDE053C2A1BA9FEFE52408D33D1183BB51C0D9DA4909659445D`.
+`753BD5DF2E7CC02EC38BCB904649A28050BF76EB515BC3623CD321996A556662`.
 The source still contained 450 files totaling 7,002,341,595 bytes, both
 rollback manifests contained 444 entries, and the proposed destination still
 contained zero files.
@@ -113,24 +115,26 @@ API key for the sole Komga user. It contains one user-scoped export with four
 reading-progress records and one ordered read list containing 447 book IDs.
 The API key existed only in the migration process environment, was not written
 to local configuration, and a scan of every generated report confirmed that
-the credential was not serialized. This third scan retained the same plan
-digest and `plan.json` SHA-256 shown above, and the destination still contained
-zero files.
+the credential was not serialized. After export, only the newly created key
+labelled `pocket test` was revoked: deletion returned HTTP 204, the supplied
+credential then returned HTTP 401, and Komga health remained HTTP 200. The
+exported `komga-state.json` hash remained unchanged while the plan was refreshed
+with the final archive classification. The destination still contained zero
+files.
 
-The three manual-review files are not valid ZIP/CBZ archives. One begins with
-zero bytes and appears corrupt. Two have valid RAR signatures but a `.cbz`
-extension, so they need an explicit rename to `.cbr` or conversion rather than
-an automatic migration. The three unsupported files are the existing Markdown,
-CBL, and CSV manifests; their bytes and hashes remain in the inventory.
+The scanner now distinguishes a RAR-signature extension mismatch from a corrupt
+ZIP. The two Defenders files have valid RAR signatures and each lists 24 image
+entries without extraction, so the migration decision is to preserve their
+bytes and use a `.cbr` destination name. Fantastic Four Annual #2 has a
+3,306,596-byte zeroed prefix, seven local ZIP headers, and no central directory;
+it is excluded from any apply operation until a valid replacement is acquired.
+The original remains untouched. The Markdown, CBL, and CSV manifests remain
+source-only reference files; their bytes and hashes remain in the inventory.
 
-## Open gate
+## Remaining gate
 
-The production inputs that must be decided before an apply milestone are:
-
-1. decide whether to rename/convert the two RAR files and replace or exclude the
-   corrupt archive;
-2. review the generated ignored report before any later apply implementation.
-
-M1B also remains open for Panels and Storyteller iOS checks plus client-side
-download isolation. Komga remains active, and M3 acquisition integration does
-not start until these gates are resolved.
+The M2 read-only tooling and production review gate are complete. No apply
+operation has been implemented or authorized. M1B remains open for Panels and
+Storyteller iOS checks plus client-side download isolation. Komga remains
+active, and M3 acquisition integration does not start until that client gate is
+resolved.

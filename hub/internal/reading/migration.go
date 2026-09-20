@@ -171,7 +171,7 @@ func BuildMigrationPlan(ctx context.Context, config MigrationConfig) (MigrationP
 			if asset.Role == AssetSidecar && hasIssue(asset.Issues, "invalid_sidecar") {
 				asset.Disposition = MigrationManualReview
 			}
-			if asset.Role == AssetMedia && (hasIssue(asset.Issues, "invalid_archive") || hasIssue(asset.Issues, "invalid_epub")) {
+			if asset.Role == AssetMedia && (hasIssue(asset.Issues, "invalid_archive") || hasIssue(asset.Issues, "archive_extension_mismatch") || hasIssue(asset.Issues, "invalid_epub")) {
 				asset.Disposition = MigrationManualReview
 			}
 			assets = append(assets, asset)

@@ -2,6 +2,7 @@ package reading
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -40,6 +41,16 @@ func ExtractAssetMetadata(name string, kind MediaKind) (AssetMetadata, []Migrati
 		}
 		return metadata, nil
 	case (kind == MediaComic || kind == MediaManga) && (extension == ".cbz" || extension == ".zip"):
+		isRAR, err := hasRARSignature(name)
+		if err != nil {
+			return AssetMetadata{}, []MigrationIssue{{Code: "invalid_archive", Message: fmt.Sprintf("inspect comic archive: %v", err)}}
+		}
+		if isRAR {
+			return AssetMetadata{}, []MigrationIssue{{
+				Code:    "archive_extension_mismatch",
+				Message: "comic archive has a RAR signature but a ZIP/CBZ extension; verify it and use a .cbr destination",
+			}}
+		}
 		metadata, found, err := readComicArchiveMetadata(name)
 		if err != nil {
 			return AssetMetadata{}, []MigrationIssue{{Code: "invalid_archive", Message: err.Error()}}
@@ -49,6 +60,21 @@ func ExtractAssetMetadata(name string, kind MediaKind) (AssetMetadata, []Migrati
 		}
 	}
 	return AssetMetadata{}, nil
+}
+
+func hasRARSignature(name string) (bool, error) {
+	file, err := os.Open(name)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+	header := make([]byte, 8)
+	read, err := io.ReadFull(file, header)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return false, err
+	}
+	header = header[:read]
+	return bytes.HasPrefix(header, []byte("Rar!\x1a\x07\x00")) || bytes.HasPrefix(header, []byte("Rar!\x1a\x07\x01\x00")), nil
 }
 
 type comicInfoXML struct {
