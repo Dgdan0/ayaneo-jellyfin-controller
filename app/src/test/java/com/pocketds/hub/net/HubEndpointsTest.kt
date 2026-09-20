@@ -25,6 +25,22 @@ class HubEndpointsTest {
     }
 
     @Test
+    fun `reading catalog endpoints preserve opaque ids paging and sorting`() {
+        assertEquals(
+            "$base/v1/reading/libraries",
+            HubEndpoints.readingLibraries(base).url
+        )
+        assertEquals(
+            "$base/v1/reading/libraries/kavita%3A2/items?page=3&sort=progress&direction=desc",
+            HubEndpoints.readingLibraryItems(base, "kavita:2", 3, "progress", "desc").url
+        )
+        assertEquals(
+            "$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef",
+            HubEndpoints.readingWork(base, "rw_0123456789abcdef0123456789abcdef").url
+        )
+    }
+
+    @Test
     fun `builds a search url`() {
         assertEquals(
             "$base/v1/search?q=dune",

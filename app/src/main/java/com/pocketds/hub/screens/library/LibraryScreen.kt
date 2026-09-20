@@ -13,6 +13,8 @@ import com.pocketds.hub.input.HorizontalMode
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.LibraryResponse
 import com.pocketds.hub.model.LibraryView
+import com.pocketds.hub.model.ReadingLibrariesResponse
+import com.pocketds.hub.model.ReadingLibrary
 import com.pocketds.hub.model.SearchHit
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
@@ -21,8 +23,11 @@ import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.state.LibraryGridSizing
+import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.state.PagedLoadState
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.settings.ContentModeSettings
+import com.pocketds.hub.ui.ContentModeToggleView
 import com.pocketds.hub.ui.LibraryCardView
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.PosterCardView
@@ -38,7 +43,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 
-/** The Jellyfin folders exactly as the server names and orders them. */
+/** Media and reading folders exactly as their servers name and order them. */
 class LibraryScreen(
     private val api: HubApi,
     private val ringVisible: () -> Boolean
@@ -47,31 +52,48 @@ class LibraryScreen(
     override val horizontalMode = HorizontalMode.GRID
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val adapter = ViewAdapter()
+    private val mediaAdapter = ViewAdapter()
+    private val readingAdapter = ReadingViewAdapter()
     private lateinit var colors: PocketColors
+    private lateinit var heading: TextView
+    private lateinit var modeToggle: ContentModeToggleView
+    private lateinit var mediaTools: LinearLayout
     private lateinit var status: TextView
     private lateinit var list: RecyclerView
     private lateinit var searchBox: EditText
     private lateinit var favourites: TextView
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
-    private var selected = 0
+    private var mode = ContentMode.MEDIA
+    private var selectedMedia = 0
+    private var selectedBooks = 0
+    private var loadGeneration = 0
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
+        mode = ContentModeSettings.get(host.viewContext)
         return LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(colors.background)
-            addView(TextView(context).apply {
-                text = "Your Jellyfin libraries"
+            modeToggle = ContentModeToggleView(context, colors).apply {
+                select(mode)
+                onModeSelected = { switchMode(it, persist = true) }
+            }
+            addView(modeToggle, LinearLayout.LayoutParams(WRAP, WRAP).apply {
+                setMargins(dp(12), dp(6), dp(12), 0)
+            })
+            heading = TextView(context).apply {
+                text = headingText()
                 textSize = 18f
                 setTextColor(colors.primaryText)
                 setPadding(dp(16), dp(12), dp(16), dp(4))
-            })
-            addView(LinearLayout(context).apply {
+            }
+            addView(heading)
+            mediaTools = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(dp(12), dp(2), dp(12), dp(7))
+                visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
                 searchBox = EditText(context).apply {
                     hint = "Search your Jellyfin library"
                     textSize = 13f
@@ -121,7 +143,8 @@ class LibraryScreen(
                 addView(favourites, LinearLayout.LayoutParams(WRAP, dp(43)).apply {
                     marginStart = dp(8)
                 })
-            })
+            }
+            addView(mediaTools)
             status = TextView(context).apply {
                 textSize = 11f
                 setTextColor(colors.mutedText)
@@ -130,7 +153,7 @@ class LibraryScreen(
             addView(status)
             list = RecyclerView(context).apply {
                 layoutManager = GridLayoutManager(context, LIBRARY_COLUMNS)
-                adapter = this@LibraryScreen.adapter
+                adapter = activeAdapter()
                 setItemViewCacheSize(LIBRARY_COLUMNS * 2)
                 clipToPadding = false
                 clipChildren = false
@@ -142,12 +165,14 @@ class LibraryScreen(
     }
 
     override fun onShow() {
-        if (adapter.itemCount == 0 && loadJob?.isActive != true) load()
+        val stored = host?.viewContext?.let(ContentModeSettings::get) ?: mode
+        if (stored != mode) switchMode(stored, persist = false)
+        if (activeAdapter().itemCount == 0 && loadJob?.isActive != true) load()
         else restoreFocus()
     }
 
     override fun onHide() {
-        selected = focusedPosition().takeIf { it >= 0 } ?: selected
+        rememberSelection()
         scope.coroutineContext.cancelChildren()
         loadJob = null
     }
@@ -158,8 +183,9 @@ class LibraryScreen(
     }
 
     override fun requestInitialFocus(): Boolean {
-        if (!::list.isInitialized || adapter.itemCount == 0) return false
-        val target = selected.coerceIn(0, adapter.itemCount - 1)
+        val count = activeAdapter().itemCount
+        if (!::list.isInitialized || count == 0) return false
+        val target = selectedIndex().coerceIn(0, count - 1)
         list.scrollToPosition(target)
         list.post { list.findViewHolderForAdapterPosition(target)?.itemView?.requestFocus() }
         return true
@@ -173,14 +199,15 @@ class LibraryScreen(
                 else -> "Open"
             }
         ),
-        ButtonHint.secondary("Search"),
+        ButtonHint.secondary(if (mode == ContentMode.MEDIA) "Search" else "Books search"),
         ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh)
     )
 
     override fun onPad(action: PadAction): Boolean = when (action) {
         PadAction.Activate -> focusedView()?.let { open(it) } != null
         PadAction.Secondary -> {
-            searchBox.requestFocus()
+            if (mode == ContentMode.MEDIA) searchBox.requestFocus()
+            else host?.switchSection(-1)
             true
         }
         PadAction.Refresh -> { load(force = true); true }
@@ -189,20 +216,41 @@ class LibraryScreen(
 
     private fun load(force: Boolean = false) {
         if (loadJob?.isActive == true) return
-        if (force) status.text = "Refreshing…" else status.text = "Asking Jellyfin…"
+        val generation = ++loadGeneration
+        val requestedMode = mode
+        if (force) status.text = "Refreshing…"
+        else status.text = if (mode == ContentMode.MEDIA) "Asking Jellyfin…" else "Loading reading libraries…"
         loadJob = scope.launch {
-            when (val result = api.library()) {
-                is HubResult.Ok -> render(result.value)
-                is HubResult.Failed -> {
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message + " · Select retries"
+            if (requestedMode == ContentMode.MEDIA) {
+                when (val result = api.library()) {
+                    is HubResult.Ok -> if (generation == loadGeneration && requestedMode == mode) {
+                        renderMedia(result.value)
+                    }
+                    is HubResult.Failed -> if (generation == loadGeneration && requestedMode == mode) {
+                        renderFailure(result)
+                    }
+                }
+            } else {
+                when (val result = api.readingLibraries()) {
+                    is HubResult.Ok -> if (generation == loadGeneration && requestedMode == mode) {
+                        renderReading(result.value)
+                    }
+                    is HubResult.Failed -> if (generation == loadGeneration && requestedMode == mode) {
+                        renderFailure(result)
+                    }
                 }
             }
+            loadJob = null
         }
     }
 
-    private fun render(body: LibraryResponse) {
-        adapter.submit(body.views)
+    private fun renderFailure(result: HubResult.Failed) {
+        status.setTextColor(colors.dangerText)
+        status.text = result.message + " · Select retries"
+    }
+
+    private fun renderMedia(body: LibraryResponse) {
+        mediaAdapter.submit(body.views)
         status.setTextColor(if (body.partial.isEmpty()) colors.mutedText else colors.badgePending)
         status.text = when {
             body.views.isEmpty() -> "No movie or TV libraries were found."
@@ -217,8 +265,21 @@ class LibraryScreen(
         host?.refreshHints()
     }
 
+    private fun renderReading(body: ReadingLibrariesResponse) {
+        readingAdapter.submit(body.libraries)
+        status.setTextColor(if (body.partial.isEmpty()) colors.mutedText else colors.badgePending)
+        status.text = when {
+            body.libraries.isEmpty() -> "No reading libraries were found."
+            body.partial.isNotEmpty() -> body.partial.joinToString(" · ") { it.message }
+            body.cache.stale -> "Showing cached reading libraries"
+            else -> "${body.libraries.size} reading libraries"
+        }
+        restoreFocus()
+        host?.refreshHints()
+    }
+
     private fun restoreFocus() {
-        if (adapter.itemCount == 0) return
+        if (activeAdapter().itemCount == 0) return
         requestInitialFocus()
     }
 
@@ -226,11 +287,57 @@ class LibraryScreen(
         val focused = list.focusedChild ?: return -1
         return list.getChildAdapterPosition(focused)
     }
-    private fun focusedView(): LibraryView? = adapter.at(focusedPosition())
+    private fun focusedView(): Any? = when (mode) {
+        ContentMode.MEDIA -> mediaAdapter.at(focusedPosition())
+        ContentMode.BOOKS -> readingAdapter.at(focusedPosition())
+    }
 
-    private fun open(view: LibraryView) {
-        selected = focusedPosition().coerceAtLeast(0)
-        host?.push(LibraryGridScreen(api, view, ringVisible))
+    private fun open(view: Any) {
+        rememberSelection()
+        when (view) {
+            is LibraryView -> host?.push(LibraryGridScreen(api, view, ringVisible))
+            is ReadingLibrary -> host?.push(ReadingLibraryGridScreen(api, view, ringVisible))
+        }
+    }
+
+    private fun switchMode(next: ContentMode, persist: Boolean) {
+        if (next == mode) return
+        rememberSelection()
+        scope.coroutineContext.cancelChildren()
+        loadJob = null
+        loadGeneration++
+        mode = next
+        if (persist) ContentModeSettings.set(requireNotNull(host).viewContext, mode)
+        modeToggle.select(mode)
+        heading.text = headingText()
+        mediaTools.visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
+        list.adapter = activeAdapter()
+        status.setTextColor(colors.mutedText)
+        if (activeAdapter().itemCount == 0) load()
+        else {
+            status.text = if (mode == ContentMode.MEDIA) "${mediaAdapter.itemCount} libraries"
+            else "${readingAdapter.itemCount} reading libraries"
+            restoreFocus()
+        }
+        host?.refreshHints()
+    }
+
+    private fun headingText(): String = if (mode == ContentMode.MEDIA) {
+        "Your Jellyfin libraries"
+    } else {
+        "Your reading libraries"
+    }
+
+    private fun activeAdapter(): RecyclerView.Adapter<*> = when (mode) {
+        ContentMode.MEDIA -> mediaAdapter
+        ContentMode.BOOKS -> readingAdapter
+    }
+
+    private fun selectedIndex(): Int = if (mode == ContentMode.MEDIA) selectedMedia else selectedBooks
+
+    private fun rememberSelection() {
+        val position = focusedPosition().takeIf { it >= 0 } ?: return
+        if (mode == ContentMode.MEDIA) selectedMedia = position else selectedBooks = position
     }
 
     private fun openSearch(raw: String) {
@@ -272,7 +379,7 @@ class LibraryScreen(
                 setOnFocusChangeListener { _, focused ->
                     FocusDecorator.refresh(this, ringVisible())
                     if (focused) {
-                        selected = list.getChildAdapterPosition(this)
+                        selectedMedia = list.getChildAdapterPosition(this)
                         host?.refreshHints()
                     }
                 }
@@ -289,6 +396,49 @@ class LibraryScreen(
         }
     }
 
+    private inner class ReadingViewAdapter : RecyclerView.Adapter<ViewHolder>() {
+        private val values = mutableListOf<ReadingLibrary>()
+
+        fun submit(next: List<ReadingLibrary>) {
+            values.clear()
+            values.addAll(next)
+            notifyDataSetChanged()
+        }
+
+        fun at(position: Int): ReadingLibrary? = values.getOrNull(position)
+        override fun getItemCount() = values.size
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+            val row = LibraryCardView(parent.context, colors).apply {
+                layoutParams = RecyclerView.LayoutParams(dp(LIBRARY_CARD_DP), dp(LIBRARY_CARD_DP)).apply {
+                    setMargins(dp(8), dp(8), dp(8), dp(8))
+                }
+                FocusDecorator.attach(this, ringVisible)
+                setOnFocusChangeListener { _, focused ->
+                    FocusDecorator.refresh(this, ringVisible())
+                    if (focused) {
+                        selectedBooks = list.getChildAdapterPosition(this)
+                        host?.refreshHints()
+                    }
+                }
+                activateOnTap { (getTag(TAG_READING_VIEW) as? ReadingLibrary)?.let(::open) }
+            }
+            return ViewHolder(row)
+        }
+
+        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+            val value = values[position]
+            val row = holder.itemView as LibraryCardView
+            row.setTag(TAG_READING_VIEW, value)
+            val client = api as? HubClient
+            row.bindReading(
+                value,
+                client?.imageLoader ?: coil.ImageLoader(row.context),
+                api::imageUrl
+            )
+        }
+    }
+
     private class ViewHolder(view: View) : RecyclerView.ViewHolder(view)
     private fun dp(value: Int) = Styler.dpInt(requireNotNull(host).viewContext, value.toFloat())
 
@@ -298,6 +448,7 @@ class LibraryScreen(
         const val LIBRARY_COLUMNS = 3
         const val LIBRARY_CARD_DP = 176
         const val TAG_VIEW = -0x7fffffe1
+        const val TAG_READING_VIEW = -0x7fffffe0
     }
 }
 

@@ -13,6 +13,7 @@ import android.widget.TextView
 import coil.ImageLoader
 import coil.request.ImageRequest
 import com.pocketds.hub.model.LibraryView
+import com.pocketds.hub.model.ReadingLibrary
 
 /** A bounded square library tile, with its folder name kept readable over art. */
 class LibraryCardView(
@@ -86,6 +87,23 @@ class LibraryCardView(
             "tvshows" -> ", TV library"
             else -> ", movie library"
         }
+    }
+
+    fun bindReading(view: ReadingLibrary, imageLoader: ImageLoader, imageUrl: (String) -> String) {
+        label.text = view.title
+        placeholder.text = view.title.trim().firstOrNull()?.uppercaseChar()?.toString().orEmpty()
+        artwork.setImageDrawable(ColorDrawable(Color.TRANSPARENT))
+        val url = imageUrl(view.artwork)
+        if (url.isNotEmpty()) {
+            imageLoader.enqueue(
+                ImageRequest.Builder(context)
+                    .data(url)
+                    .target(artwork)
+                    .bitmapConfig(Bitmap.Config.RGB_565)
+                    .build()
+            )
+        }
+        contentDescription = "${view.title}, ${view.kind} library, ${view.source}"
     }
 
     private companion object {

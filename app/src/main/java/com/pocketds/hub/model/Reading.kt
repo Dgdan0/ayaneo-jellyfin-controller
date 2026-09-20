@@ -1,6 +1,7 @@
 package com.pocketds.hub.model
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 
 object ReadingType {
     const val ALL = "all"
@@ -69,6 +70,121 @@ data class ReadingSearchResponse(
     val query: String = "",
     val contentType: String = ReadingType.ALL,
     val results: List<ReadingItem> = emptyList(),
+    val partial: List<PartialFailure> = emptyList(),
+    val cache: CacheInfo = CacheInfo()
+)
+
+@Serializable
+data class ReadingLibrary(
+    val id: String = "",
+    val source: String = "",
+    val kind: String = "book",
+    val title: String = "",
+    val artwork: String = "",
+    val capabilities: List<String> = emptyList()
+)
+
+@Serializable
+data class ReadingLibrariesResponse(
+    val libraries: List<ReadingLibrary> = emptyList(),
+    val partial: List<PartialFailure> = emptyList(),
+    val cache: CacheInfo = CacheInfo()
+)
+
+@Serializable
+data class ReadingProgress(
+    val percentage: Double = 0.0,
+    val completed: Boolean = false,
+    val current: Int = 0,
+    val total: Int = 0,
+    val updatedAt: String = ""
+)
+
+@Serializable
+data class ReadingEdition(
+    val id: String = "",
+    val workId: String = "",
+    val source: String = "",
+    val sourceItemId: String = "",
+    val kind: String = "book",
+    val format: String = "",
+    val identifiers: Map<String, String> = emptyMap(),
+    val narrator: String = "",
+    val pageCount: Int = 0,
+    val durationMs: Long = 0,
+    val availability: String = ""
+)
+
+@Serializable
+data class ReadingSectionItem(
+    val sourceItemId: String = "",
+    val title: String = "",
+    val number: String = "",
+    val kind: String = "book",
+    val pageCount: Int = 0,
+    val progress: ReadingProgress? = null
+)
+
+@Serializable
+data class ReadingSection(
+    val id: String = "",
+    val title: String = "",
+    val number: Double = 0.0,
+    val items: List<ReadingSectionItem> = emptyList()
+)
+
+@Serializable
+data class ReadingContinue(
+    val source: String = "",
+    val sourceItemId: String = "",
+    val title: String = "",
+    val number: String = "",
+    val percentage: Double = 0.0
+)
+
+@Serializable
+data class ReadingWork(
+    val id: String = "",
+    val libraryId: String = "",
+    val kind: String = "book",
+    val title: String = "",
+    val sortTitle: String = "",
+    val authors: List<String> = emptyList(),
+    val series: String = "",
+    val seriesIndex: Double = 0.0,
+    val overview: String = "",
+    val artwork: String = "",
+    val genres: List<String> = emptyList(),
+    val year: Int = 0,
+    val languages: List<String> = emptyList(),
+    val editions: List<ReadingEdition> = emptyList(),
+    val progress: ReadingProgress? = null,
+    val availability: List<String> = emptyList(),
+    val sections: List<ReadingSection> = emptyList(),
+    @SerialName("continue") val continueAt: ReadingContinue? = null,
+    val partial: List<PartialFailure> = emptyList(),
+    val cache: CacheInfo = CacheInfo()
+) {
+    val byline: String get() = authors.joinToString(", ")
+
+    val subtitle: String
+        get() = buildList {
+            if (series.isNotBlank()) add(series)
+            if (byline.isNotBlank()) add(byline)
+            if (isEmpty() && year > 0) add(year.toString())
+            if (isEmpty()) add(ReadingType.label(kind))
+        }.joinToString(" · ")
+}
+
+@Serializable
+data class ReadingLibraryItemsResponse(
+    val libraryId: String = "",
+    val page: Int = 1,
+    val pageSize: Int = 60,
+    val total: Int = 0,
+    val totalPages: Int = 0,
+    val hasMore: Boolean = false,
+    val items: List<ReadingWork> = emptyList(),
     val partial: List<PartialFailure> = emptyList(),
     val cache: CacheInfo = CacheInfo()
 )

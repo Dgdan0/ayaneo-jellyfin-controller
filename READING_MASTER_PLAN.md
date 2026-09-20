@@ -552,8 +552,11 @@ remain in later M4 slices.
 
 Status on 2026-09-20: Discover now has the persistent Media/Books switch,
 reading-type filters, browse/category paging, search, separate mode state, and a
-read-only metadata page. Kotlin tests and the debug build pass. Hardware
-acceptance and the Home/Library/Offline/Transfers Books views remain open.
+read-only discovery metadata page. Library shares that global switch and now
+browses real Kavita/Storyteller libraries, paged and sortable normalized work
+grids, progress, canonical work details, editions, Continue data, and available
+sections. Kotlin tests and the debug build pass. Pocket DS hardware acceptance
+and the Home/Offline/Transfers Books views remain open.
 
 ### M6 — Shared reader shell
 

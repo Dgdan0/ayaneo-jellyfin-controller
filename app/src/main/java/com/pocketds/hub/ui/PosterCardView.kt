@@ -14,6 +14,7 @@ import coil.request.ImageRequest
 import com.pocketds.hub.model.Availability
 import com.pocketds.hub.model.SearchHit
 import com.pocketds.hub.model.ReadingItem
+import com.pocketds.hub.model.ReadingWork
 
 /**
  * One title in a grid: poster, badge, title, subtitle.
@@ -184,6 +185,39 @@ class PosterCardView(
             badge.visibility = GONE
         }
         loadPoster(item.cover, imageLoader, imageUrl)
+    }
+
+    fun bindReadingWork(work: ReadingWork, imageLoader: ImageLoader, imageUrl: (String) -> String) {
+        title.text = work.title
+        subtitle.text = work.subtitle
+        subtitle.visibility = if (compactCard) GONE else VISIBLE
+        boundProgress = if (work.progress?.completed == true) 0.0
+        else work.progress?.percentage?.coerceIn(0.0, 1.0) ?: 0.0
+        if (work.progress?.completed == true) {
+            badge.visibility = VISIBLE
+            badge.text = "✓"
+            badge.background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(this@PosterCardView.colors.badgeAvailable)
+            }
+            badge.minWidth = Styler.dpInt(context, 24f)
+            badge.gravity = Gravity.CENTER
+        } else {
+            badge.visibility = GONE
+        }
+        if (boundProgress > 0.0) {
+            progressBar.visibility = VISIBLE
+            updateProgressWidth()
+            poster.post(::updateProgressWidth)
+        } else {
+            progressBar.visibility = GONE
+        }
+        loadPoster(work.artwork, imageLoader, imageUrl)
+        contentDescription = buildString {
+            append(work.title)
+            if (work.subtitle.isNotBlank()) append(", ").append(work.subtitle)
+            work.progress?.let { append(", ").append((it.percentage * 100).toInt()).append(" percent read") }
+        }
     }
 
     private fun loadPoster(path: String, imageLoader: ImageLoader, imageUrl: (String) -> String) {

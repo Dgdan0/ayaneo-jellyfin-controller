@@ -478,6 +478,8 @@ class DiscoverScreen(
         }
 
     override fun onShow() {
+        val stored = host?.viewContext?.let(ContentModeSettings::get) ?: mode
+        if (stored != mode) switchMode(stored)
         if (searching) {
             val empty = if (mode == ContentMode.MEDIA) resultsAdapter.itemCount == 0
             else readingResultsAdapter.itemCount == 0

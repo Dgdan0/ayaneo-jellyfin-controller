@@ -147,6 +147,23 @@ object HubEndpoints {
                 "?q=" + encode(query.trim()) + "&type=" + encode(type)
         )
 
+    fun readingLibraries(base: String): HubRequest =
+        HubRequest(join(base, "/v1/reading/libraries"))
+
+    fun readingLibraryItems(
+        base: String,
+        libraryId: String,
+        page: Int = 1,
+        sort: String = "title",
+        direction: String = "asc"
+    ): HubRequest = HubRequest(
+        join(base, "/v1/reading/libraries/" + encode(libraryId) + "/items") +
+            "?page=$page&sort=" + encode(sort) + "&direction=" + encode(direction)
+    )
+
+    fun readingWork(base: String, workId: String): HubRequest =
+        HubRequest(join(base, "/v1/reading/works/" + encode(workId)))
+
     fun requestOptions(base: String, key: String): HubRequest =
         HubRequest(join(base, "/v1/requests/options") + "?key=" + encode(key))
 
