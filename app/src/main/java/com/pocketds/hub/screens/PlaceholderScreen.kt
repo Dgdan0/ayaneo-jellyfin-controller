@@ -54,8 +54,8 @@ class PlaceholderScreen(
             // selection flush against the bottom edge with no context below it.
             clipToPadding = false
             setPadding(
-                Styler.dpInt(context, 12f), Styler.dpInt(context, 12f),
-                Styler.dpInt(context, 12f), Styler.dpInt(context, 96f)
+                Styler.dpInt(context, 16f), Styler.dpInt(context, 16f),
+                Styler.dpInt(context, 16f), Styler.dpInt(context, 96f)
             )
             // Or the focus ring and the 1.08 scale get clipped by the neighbours.
             clipChildren = false
@@ -109,7 +109,7 @@ class PlaceholderScreen(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    val m = Styler.dpInt(context, 6f)
+                    val m = Styler.dpInt(context, 8f)
                     setMargins(m, m, m, m)
                 }
                 // A single-column list is full-width already: see FocusDecorator.

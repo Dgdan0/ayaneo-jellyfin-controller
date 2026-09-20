@@ -365,7 +365,9 @@ class HomeScreen(
                 clipToPadding = false
                 clipChildren = false
                 setItemViewCacheSize(8)
-                setPadding(dp(8), 0, dp(8), 0)
+                // Eight percent focus scale needs a real edge gutter. Four dp
+                // margins made the first/last card spill into app chrome.
+                setPadding(dp(16), 0, dp(16), 0)
                 addOnChildAttachStateChangeListener(
                     object : RecyclerView.OnChildAttachStateChangeListener {
                         override fun onChildViewAttachedToWindow(view: View) {
@@ -430,21 +432,21 @@ class HomeScreen(
                 val card: View = if (viewType == CARD_LANDSCAPE) {
                     HomeMediaCardView(parent.context).apply {
                         layoutParams = RecyclerView.LayoutParams(dp(LANDSCAPE_CARD_DP), WRAP).apply {
-                            val margin = dp(4)
+                            val margin = dp(8)
                             setMargins(margin, margin, margin, margin)
                         }
                     }
                 } else {
                     PosterCardView(parent.context, colors, POSTER_DP).apply {
                         layoutParams = RecyclerView.LayoutParams(dp(POSTER_CARD_DP), WRAP).apply {
-                            val margin = dp(4)
+                            val margin = dp(8)
                             setMargins(margin, margin, margin, margin)
                         }
                     }
                 }
                 card.apply {
                     if (layoutParams == null) layoutParams = RecyclerView.LayoutParams(WRAP, WRAP).apply {
-                        val margin = dp(4)
+                        val margin = dp(8)
                         setMargins(margin, margin, margin, margin)
                     }
                     FocusDecorator.attach(this, ringVisible)

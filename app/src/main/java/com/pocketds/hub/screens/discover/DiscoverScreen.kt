@@ -548,7 +548,7 @@ class DiscoverScreen(
     private fun newCard(parent: ViewGroup, posterHeight: Float, width: Int): PosterCardView =
         PosterCardView(parent.context, colors, posterHeight).apply {
             layoutParams = RecyclerView.LayoutParams(width, WRAP).apply {
-                val m = Styler.dpInt(parent.context, 4f)
+                val m = Styler.dpInt(parent.context, 8f)
                 setMargins(m, m, m, m)
             }
             FocusDecorator.attach(this, ringVisible)
@@ -656,7 +656,7 @@ class DiscoverScreen(
                 clipToPadding = false
                 clipChildren = false
                 setItemViewCacheSize(8)
-                setPadding(Styler.dpInt(context, 8f), 0, Styler.dpInt(context, 8f), 0)
+                setPadding(Styler.dpInt(context, 16f), 0, Styler.dpInt(context, 16f), 0)
                 addOnScrollListener(object : RecyclerView.OnScrollListener() {
                     override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
                         val manager = view.layoutManager as? LinearLayoutManager ?: return

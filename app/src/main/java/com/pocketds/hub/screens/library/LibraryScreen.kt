@@ -96,7 +96,7 @@ class LibraryScreen(
                             true
                         } else false
                     }
-                    FocusDecorator.attach(this, ringVisible)
+                    FocusDecorator.attach(this, ringVisible, scale = false)
                     setOnFocusChangeListener { view, _ ->
                         FocusDecorator.refresh(view, ringVisible())
                         host.refreshHints()
@@ -111,7 +111,7 @@ class LibraryScreen(
                     background = Styler.cardBackground(context, colors)
                     setPadding(dp(14), 0, dp(14), 0)
                     Styler.makeFocusable(this)
-                    FocusDecorator.attach(this, ringVisible)
+                    FocusDecorator.attach(this, ringVisible, scale = false)
                     setOnFocusChangeListener { view, _ ->
                         FocusDecorator.refresh(view, ringVisible())
                         host.refreshHints()
@@ -134,7 +134,7 @@ class LibraryScreen(
                 setItemViewCacheSize(LIBRARY_COLUMNS * 2)
                 clipToPadding = false
                 clipChildren = false
-                setPadding(dp(12), dp(2), dp(12), dp(84))
+                setPadding(dp(16), dp(12), dp(16), dp(84))
                 layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
             }
             addView(list)
@@ -266,7 +266,7 @@ class LibraryScreen(
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
             val row = LibraryCardView(parent.context, colors).apply {
                 layoutParams = RecyclerView.LayoutParams(dp(LIBRARY_CARD_DP), dp(LIBRARY_CARD_DP)).apply {
-                    setMargins(dp(4), dp(4), dp(4), dp(4))
+                    setMargins(dp(8), dp(8), dp(8), dp(8))
                 }
                 FocusDecorator.attach(this, ringVisible)
                 setOnFocusChangeListener { _, focused ->
@@ -345,7 +345,7 @@ class LibraryGridScreen(
                 setItemViewCacheSize(MAX_COLUMNS * 3)
                 clipToPadding = false
                 clipChildren = false
-                setPadding(dp(6), 0, dp(6), dp(84))
+                setPadding(dp(16), dp(12), dp(16), dp(84))
                 layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
                 addOnScrollListener(object : RecyclerView.OnScrollListener() {
                     override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
@@ -588,7 +588,7 @@ class LibraryGridScreen(
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ItemHolder {
             val card = PosterCardView(parent.context, colors, POSTER_DP).apply {
                 layoutParams = RecyclerView.LayoutParams(dp(CARD_DP), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    setMargins(dp(4), dp(4), dp(4), dp(6))
+                    setMargins(dp(8), dp(8), dp(8), dp(8))
                 }
                 FocusDecorator.attach(this, ringVisible)
                 setOnFocusChangeListener { _, focused ->

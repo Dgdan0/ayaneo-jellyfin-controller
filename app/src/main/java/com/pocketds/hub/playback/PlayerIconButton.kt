@@ -12,6 +12,7 @@ import kotlin.math.min
 /** Media control icons drawn in-app so their appearance does not depend on device fonts. */
 internal enum class PlayerControlIcon {
     AUDIO,
+    AUDIO_EFFECTS,
     SUBTITLES,
     OPTIONS,
     PICTURE_IN_PICTURE,
@@ -71,6 +72,7 @@ internal class PlayerIconButton(
 
         when (icon) {
             PlayerControlIcon.AUDIO -> drawAudio(canvas)
+            PlayerControlIcon.AUDIO_EFFECTS -> drawAudioEffects(canvas)
             PlayerControlIcon.SUBTITLES -> drawSubtitles(canvas)
             PlayerControlIcon.OPTIONS -> drawOptions(canvas)
             PlayerControlIcon.PICTURE_IN_PICTURE -> drawPictureInPicture(canvas)
@@ -99,6 +101,20 @@ internal class PlayerIconButton(
         paint.style = Paint.Style.STROKE
         canvas.drawArc(RectF(-0.08f, -0.24f, 0.31f, 0.24f), -48f, 96f, false, paint)
         canvas.drawArc(RectF(-0.10f, -0.36f, 0.47f, 0.36f), -47f, 94f, false, paint)
+    }
+
+    private fun drawAudioEffects(canvas: Canvas) {
+        // Three equalizer sliders remain clear at the player's compact icon size.
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 0.065f
+        val xs = floatArrayOf(-0.25f, 0f, 0.25f)
+        val ys = floatArrayOf(0.16f, -0.12f, 0.05f)
+        xs.forEachIndexed { index, x ->
+            canvas.drawLine(x, -0.31f, x, 0.31f, paint)
+            paint.style = Paint.Style.FILL
+            canvas.drawCircle(x, ys[index], 0.095f, paint)
+            paint.style = Paint.Style.STROKE
+        }
     }
 
     private fun drawSubtitles(canvas: Canvas) {

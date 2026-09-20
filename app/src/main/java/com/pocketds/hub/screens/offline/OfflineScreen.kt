@@ -307,14 +307,14 @@ class OfflineScreen(
             columnCount = 5
             alignmentMode = GridLayout.ALIGN_BOUNDS
             useDefaultMargins = false
-            setPadding(0, dp(4), 0, dp(22))
+            setPadding(dp(8), dp(12), dp(8), dp(22))
         }
         groups.forEach { value ->
             grid.addView(catalogCard(value), GridLayout.LayoutParams().apply {
                 width = 0
                 height = WRAP
                 columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                setMargins(dp(5), dp(5), dp(5), dp(7))
+                setMargins(dp(8), dp(8), dp(8), dp(8))
             })
         }
         content.addView(grid, LinearLayout.LayoutParams(MATCH, WRAP))

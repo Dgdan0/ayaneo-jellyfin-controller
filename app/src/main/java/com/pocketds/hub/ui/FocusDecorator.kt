@@ -23,6 +23,7 @@ object FocusDecorator {
     private const val FOCUSED_SCALE = 1.08f
     private const val TAG_SCALE_X = -0x7ffffff1
     private const val TAG_SCALE_Y = -0x7ffffff2
+    private const val TAG_SCALE_ENABLED = -0x7ffffff3
 
     /**
      * @param ringVisible whether the app is in directional mode. When the user is
@@ -30,26 +31,33 @@ object FocusDecorator {
      *   chasing it is noise.
      */
     fun attach(view: View, ringVisible: () -> Boolean, scale: Boolean = true) {
+        // Most screens also need focus changes to update their selected item or
+        // hint bar, so they replace this listener and call [refresh] themselves.
+        // Keep the scale choice on the view so refresh cannot accidentally turn
+        // a deliberately non-scaling full-width row back into an 8% larger one.
+        view.setTag(TAG_SCALE_ENABLED, scale)
         // Keep artwork fully opaque. Fading the whole card blends posters into
         // the page background and makes them look grey in the light theme.
         view.alpha = 1f
         view.setOnFocusChangeListener { v, hasFocus ->
             val decorate = hasFocus && ringVisible()
-            val target = if (decorate && scale) FOCUSED_SCALE else 1f
-            spring(v, TAG_SCALE_X, SpringAnimation.SCALE_X).animateToFinalPosition(target)
-            spring(v, TAG_SCALE_Y, SpringAnimation.SCALE_Y).animateToFinalPosition(target)
-            // Above its neighbours, or the ring is clipped by the next card.
-            v.translationZ = if (decorate) Styler.dp(v.context, 8f) else 0f
+            apply(v, decorate, scale)
         }
     }
 
     /** Re-run the decoration after the input mode flips, without a focus change. */
     fun refresh(view: View, ringVisible: Boolean) {
         val decorate = view.hasFocus() && ringVisible
-        spring(view, TAG_SCALE_X, SpringAnimation.SCALE_X)
-            .animateToFinalPosition(if (decorate) FOCUSED_SCALE else 1f)
-        spring(view, TAG_SCALE_Y, SpringAnimation.SCALE_Y)
-            .animateToFinalPosition(if (decorate) FOCUSED_SCALE else 1f)
+        val scale = view.getTag(TAG_SCALE_ENABLED) as? Boolean ?: true
+        apply(view, decorate, scale)
+    }
+
+    private fun apply(view: View, decorate: Boolean, scale: Boolean) {
+        val target = if (decorate && scale) FOCUSED_SCALE else 1f
+        spring(view, TAG_SCALE_X, SpringAnimation.SCALE_X).animateToFinalPosition(target)
+        spring(view, TAG_SCALE_Y, SpringAnimation.SCALE_Y).animateToFinalPosition(target)
+        // Above its neighbours, or the ring is clipped by the next card.
+        view.translationZ = if (decorate) Styler.dp(view.context, 8f) else 0f
     }
 
     /**

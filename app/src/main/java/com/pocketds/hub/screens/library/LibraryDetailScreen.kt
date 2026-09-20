@@ -259,7 +259,9 @@ class LibraryDetailScreen(
                             topMargin = dp(7)
                         })
                     }, LinearLayout.LayoutParams(0, WRAP, 1f))
-                    FocusDecorator.attach(this, ringVisible)
+                    // The resume/next preview spans the detail pane; keep its
+                    // ring but never grow it beneath the navigation rail.
+                    FocusDecorator.attach(this, ringVisible, scale = false)
                     setOnFocusChangeListener { view, focused ->
                         FocusDecorator.refresh(view, ringVisible())
                         if (focused) host.refreshHints()
@@ -282,6 +284,7 @@ class LibraryDetailScreen(
                     clipToPadding = false
                     visibility = View.GONE
                     setItemViewCacheSize(8)
+                    setPadding(dp(16), dp(12), dp(16), dp(12))
                     layoutParams = LinearLayout.LayoutParams(MATCH, dp(226))
                 }
                 addView(seasons)
@@ -897,8 +900,7 @@ class LibraryDetailScreen(
                 descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                 setPadding(dp(6), dp(6), dp(6), dp(8))
                 layoutParams = RecyclerView.LayoutParams(dp(132), dp(216)).apply {
-                    marginEnd = dp(10)
-                    topMargin = dp(4)
+                    setMargins(dp(8), dp(8), dp(8), dp(8))
                 }
                 image = ImageView(context).apply {
                     scaleType = ImageView.ScaleType.CENTER_CROP
@@ -1018,7 +1020,8 @@ class EpisodesScreen(
                 setItemViewCacheSize(12)
                 descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
                 clipToPadding = false
-                setPadding(dp(12), dp(8), dp(12), dp(84))
+                clipChildren = false
+                setPadding(dp(16), dp(12), dp(16), dp(84))
                 layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
                 addOnScrollListener(object : RecyclerView.OnScrollListener() {
                     override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
@@ -1226,7 +1229,7 @@ class EpisodesScreen(
                 descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                 setPadding(dp(7), dp(7), dp(7), dp(10))
                 layoutParams = RecyclerView.LayoutParams(dp(270), dp(242)).apply {
-                    setMargins(dp(4), dp(4), dp(7), dp(4))
+                    setMargins(dp(8), dp(8), dp(8), dp(8))
                 }
                 image = ImageView(context).apply {
                     scaleType = ImageView.ScaleType.CENTER_CROP

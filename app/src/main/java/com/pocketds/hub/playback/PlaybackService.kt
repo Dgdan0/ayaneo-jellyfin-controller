@@ -130,6 +130,7 @@ class PlaybackService : MediaSessionService() {
             .setTrackSelector(trackSelector)
             .setMediaSourceFactory(mediaSources)
             .build()
+        publishedAudioSessionId = player.audioSessionId
         // ExoPlayer initially assumes full app volume. Hold it silent until the
         // audio route is ready so Android has time to apply an existing device mute.
         player.volume = 0f
@@ -492,6 +493,7 @@ class PlaybackService : MediaSessionService() {
         if (::mediaSession.isInitialized) mediaSession.release()
         if (::player.isInitialized) player.release()
         publishedPlan = null
+        publishedAudioSessionId = 0
         operations.close()
         serviceScope.cancel()
         super.onDestroy()
@@ -529,8 +531,10 @@ class PlaybackService : MediaSessionService() {
         private const val MAX_SUBTITLE_OFFSET_MS = 10 * 60 * 1_000L
         private val PLAYBACK_EVENT_RETRY_DELAYS = longArrayOf(1_000L, 3_000L)
         @Volatile private var publishedPlan: PlaybackPrepareResponse? = null
+        @Volatile private var publishedAudioSessionId: Int = 0
 
         fun currentPlan(): PlaybackPrepareResponse? = publishedPlan
+        fun audioSessionId(): Int = publishedAudioSessionId
 
         fun load(
             context: Context,

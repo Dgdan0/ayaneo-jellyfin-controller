@@ -96,8 +96,8 @@ class PersonScreen(
             clipToPadding = false
             clipChildren = false
             setPadding(
-                Styler.dpInt(context, 8f), 0,
-                Styler.dpInt(context, 8f), Styler.dpInt(context, 90f)
+                Styler.dpInt(context, 16f), Styler.dpInt(context, 12f),
+                Styler.dpInt(context, 16f), Styler.dpInt(context, 90f)
             )
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
         }
@@ -177,7 +177,7 @@ class PersonScreen(
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder {
             val card = PosterCardView(parent.context, colors).apply {
                 layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
-                    val m = Styler.dpInt(parent.context, 5f)
+                    val m = Styler.dpInt(parent.context, 8f)
                     setMargins(m, m, m, m)
                 }
                 FocusDecorator.attach(this, ringVisible)

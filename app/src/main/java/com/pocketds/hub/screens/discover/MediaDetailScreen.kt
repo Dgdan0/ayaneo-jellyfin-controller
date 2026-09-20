@@ -213,6 +213,7 @@ class MediaDetailScreen(
         castRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             clipChildren = false
+            setPadding(Styler.dpInt(context, 8f), Styler.dpInt(context, 8f), Styler.dpInt(context, 8f), Styler.dpInt(context, 8f))
         }
         castScroller = HorizontalScrollView(context).apply {
             isFocusable = false
@@ -509,7 +510,8 @@ class MediaDetailScreen(
             val pad = Styler.dpInt(context, 6f)
             setPadding(pad, pad, pad, pad)
             layoutParams = LinearLayout.LayoutParams(Styler.dpInt(context, 100f), WRAP).apply {
-                rightMargin = Styler.dpInt(context, 8f)
+                marginStart = Styler.dpInt(context, 4f)
+                rightMargin = Styler.dpInt(context, 12f)
             }
         }
 

@@ -12,8 +12,8 @@ android {
         applicationId = "com.pocketds.hub"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 12
+        versionName = "0.2.1"
     }
 
     buildTypes {

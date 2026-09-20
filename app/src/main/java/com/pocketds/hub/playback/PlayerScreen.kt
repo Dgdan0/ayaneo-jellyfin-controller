@@ -1,6 +1,7 @@
 package com.pocketds.hub.playback
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
@@ -8,6 +9,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.media.AudioManager
+import android.media.audiofx.AudioEffect
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -89,6 +91,7 @@ class PlayerScreen(
     private lateinit var seekBar: SeekBar
     private lateinit var playButton: PlayerIconButton
     private lateinit var audioButton: PlayerIconButton
+    private lateinit var effectsButton: PlayerIconButton
     private lateinit var subtitleButton: PlayerIconButton
     private lateinit var optionsButton: PlayerIconButton
     private lateinit var pipButton: PlayerIconButton
@@ -125,6 +128,7 @@ class PlayerScreen(
     private var timelineWasPlaying = false
     private var brightnessStart = 0.5f
     private var volumeStart = 0
+    private var lastGestureVolume: Int? = null
     private var subtitleOffsetMillis = 0L
     private var subtitleOffsetPreferenceScope = ""
     private var subtitleOffsetDirty = false
@@ -506,6 +510,24 @@ class PlayerScreen(
         showControls()
     }
 
+    /** Opens Android's installed effect panel for this exact Media3 audio session. */
+    private fun openAudioEffects() {
+        val sessionId = PlaybackService.audioSessionId()
+        if (sessionId <= 0) {
+            host.notify("Audio effects are available once playback starts")
+            showControls()
+            return
+        }
+        val panel = Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
+            putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+            putExtra(AudioEffect.EXTRA_PACKAGE_NAME, host.viewContext.packageName)
+            putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MOVIE)
+        }
+        runCatching { host.viewContext.startActivity(panel) }
+            .onFailure { host.notify("No Android audio-effects panel is available") }
+        showControls()
+    }
+
     private fun moveControllerFocus(direction: Direction) {
         if (!controlsVisible) {
             showControls()
@@ -513,7 +535,7 @@ class PlayerScreen(
             return
         }
         val focused = root.findFocus()
-        val top = listOf(audioButton, subtitleButton, optionsButton, pipButton, closeButton)
+        val top = listOf(audioButton, effectsButton, subtitleButton, optionsButton, pipButton, closeButton)
             .filter { it.visibility == View.VISIBLE && it.isEnabled }
         val playback = listOf(previousButton, rewindButton, playButton, forwardButton, nextButton)
             .filter { it.visibility == View.VISIBLE && it.isEnabled }
@@ -617,6 +639,7 @@ class PlayerScreen(
             brightnessStart = currentBrightness()
         } else {
             volumeStart = audioManager().getStreamVolume(AudioManager.STREAM_MUSIC)
+            lastGestureVolume = volumeStart
         }
     }
 
@@ -630,15 +653,22 @@ class PlayerScreen(
             val manager = audioManager()
             val max = manager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
             val next = (volumeStart + fraction * max).roundToInt().coerceIn(0, max)
-            manager.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0)
+            // The Pocket DS exposes fifteen media-volume steps. Motion events
+            // arrive far more frequently, so avoid repeatedly writing the same
+            // hardware level while a finger is between two real steps.
+            if (lastGestureVolume != next) {
+                manager.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0)
+                lastGestureVolume = next
+            }
             showLevelFeedback(PlayerLevelView.Kind.VOLUME, next.toFloat() / max, side)
         }
     }
 
     private fun finishVerticalGesture(
-        @Suppress("UNUSED_PARAMETER") side: PlayerGestureView.Side,
+        side: PlayerGestureView.Side,
         @Suppress("UNUSED_PARAMETER") cancelled: Boolean
     ) {
+        if (side == PlayerGestureView.Side.RIGHT) lastGestureVolume = null
         handler.removeCallbacks(hideLevelFeedback)
         handler.postDelayed(hideLevelFeedback, 700L)
         scheduleHide()
@@ -1278,6 +1308,10 @@ class PlayerScreen(
         addView(titleView, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginEnd = dp(10) })
         audioButton = control(PlayerControlIcon.AUDIO, "Choose audio track") { showAudioSheet() }
         addView(audioButton)
+        effectsButton = control(PlayerControlIcon.AUDIO_EFFECTS, "Open Android audio effects") {
+            openAudioEffects()
+        }
+        addView(effectsButton)
         subtitleButton = control(PlayerControlIcon.SUBTITLES, "Choose subtitles") { showSubtitleSheet() }
         addView(subtitleButton)
         optionsButton = control(

@@ -74,7 +74,8 @@ class SeasonReleasePickerScreen(
                 layoutManager = LinearLayoutManager(context, RecyclerView.HORIZONTAL, false)
                 adapter = this@SeasonReleasePickerScreen.adapter
                 clipToPadding = false
-                setPadding(dp(12), dp(7), dp(12), dp(84))
+                clipChildren = false
+                setPadding(dp(16), dp(16), dp(16), dp(84))
                 layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
             }
             addView(list)
@@ -131,7 +132,7 @@ class SeasonReleasePickerScreen(
                 descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                 setPadding(dp(7), dp(7), dp(7), dp(10))
                 layoutParams = RecyclerView.LayoutParams(dp(172), dp(282)).apply {
-                    setMargins(dp(4), dp(4), dp(8), dp(4))
+                    setMargins(dp(8), dp(8), dp(8), dp(8))
                 }
                 art = ImageView(context).apply {
                     scaleType = ImageView.ScaleType.CENTER_CROP
@@ -284,7 +285,8 @@ class ReleaseTargetsScreen(
                         setPadding(0, dp(5), 0, 0)
                     })
                 }, LinearLayout.LayoutParams(0, WRAP, 1f))
-                FocusDecorator.attach(this, ringVisible)
+                // This is a fixed-width, full-detail action card, not a poster.
+                FocusDecorator.attach(this, ringVisible, scale = false)
                 setOnFocusChangeListener { view, _ ->
                     FocusDecorator.refresh(view, ringVisible())
                     host.refreshHints()
@@ -303,7 +305,8 @@ class ReleaseTargetsScreen(
                 layoutManager = LinearLayoutManager(context, RecyclerView.HORIZONTAL, false)
                 adapter = this@ReleaseTargetsScreen.adapter
                 clipToPadding = false
-                setPadding(dp(12), dp(3), dp(12), dp(84))
+                clipChildren = false
+                setPadding(dp(16), dp(12), dp(16), dp(84))
                 layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
             }
             addView(list)
@@ -435,7 +438,7 @@ class ReleaseTargetsScreen(
                 descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                 setPadding(dp(7), dp(7), dp(7), dp(9))
                 layoutParams = RecyclerView.LayoutParams(dp(270), dp(238)).apply {
-                    setMargins(dp(4), dp(4), dp(7), dp(4))
+                    setMargins(dp(8), dp(8), dp(8), dp(8))
                 }
                 art = ImageView(context).apply {
                     scaleType = ImageView.ScaleType.CENTER_CROP
