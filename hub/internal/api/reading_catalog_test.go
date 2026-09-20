@@ -192,6 +192,19 @@ func TestReadingCatalogImagesProxyAuthenticatedSources(t *testing.T) {
 	}
 }
 
+func TestKavitaUnnumberedChapterSentinelIsNotExposed(t *testing.T) {
+	for input, want := range map[string]string{
+		"-100000": "",
+		"100000":  "",
+		" 1 ":     "1",
+		"Special": "Special",
+	} {
+		if got := kavitaChapterNumber(input); got != want {
+			t.Errorf("kavitaChapterNumber(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestReadingCatalogRoutesRequireScopeAndValidateIDs(t *testing.T) {
 	upstream := newReadingCatalogUpstream(t)
 	defer upstream.Close()

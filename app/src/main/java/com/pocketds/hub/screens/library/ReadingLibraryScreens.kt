@@ -30,6 +30,7 @@ import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.state.LibraryGridSizing
 import com.pocketds.hub.state.PagedLoadState
+import com.pocketds.hub.state.StableItemFocus
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
@@ -64,8 +65,7 @@ class ReadingLibraryGridScreen(
     private lateinit var overlay: ChoiceOverlay
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
-    private var selected = 0
-    private var selectedWorkId = ""
+    private val focusState = StableItemFocus()
     private var sortKey = "title"
     private var sortAscending = true
     private var loadGeneration = 0
@@ -130,8 +130,8 @@ class ReadingLibraryGridScreen(
     }
 
     override fun onHide() {
-        selected = focusedPosition().takeIf { it >= 0 } ?: selected
-        selectedWorkId = focusedWork()?.id ?: selectedWorkId
+        val position = focusedPosition()
+        focusedWork()?.let { focusState.remember(position, it.id) }
         if (::overlay.isInitialized && overlay.isOpen) overlay.dismiss()
         paging.cancelLoading()
         scope.coroutineContext.cancelChildren()
@@ -145,7 +145,8 @@ class ReadingLibraryGridScreen(
 
     override fun requestInitialFocus(): Boolean {
         if (!::grid.isInitialized || adapter.itemCount == 0) return false
-        val target = selected.coerceIn(0, adapter.itemCount - 1)
+        val target = focusState.resolve(adapter.ids())
+        if (target < 0) return false
         grid.scrollToPosition(target)
         grid.post { grid.findViewHolderForAdapterPosition(target)?.itemView?.requestFocus() }
         return true
@@ -187,10 +188,10 @@ class ReadingLibraryGridScreen(
         loadJob = null
         paging.reset()
         if (resetSelection) {
-            selected = 0
-            selectedWorkId = ""
+            focusState.reset()
         } else {
-            selectedWorkId = focusedWork()?.id ?: selectedWorkId
+            val position = focusedPosition()
+            focusedWork()?.let { focusState.remember(position, it.id) }
         }
         refreshing = true
         paging.initial()?.let(::loadPage)
@@ -217,7 +218,6 @@ class ReadingLibraryGridScreen(
                     paging.complete(page, result.value.totalPages)
                     if (page == 1 && refreshing) {
                         adapter.replace(result.value.items)
-                        selected = adapter.indexOf(selectedWorkId).takeIf { it >= 0 } ?: 0
                         refreshing = false
                     } else if (page == 1 && adapter.itemCount == 0) {
                         adapter.replace(result.value.items)
@@ -296,15 +296,14 @@ class ReadingLibraryGridScreen(
     private fun restoreFocus() { if (adapter.itemCount > 0) requestInitialFocus() }
 
     private fun open(work: ReadingWork) {
-        selected = focusedPosition().coerceAtLeast(0)
-        selectedWorkId = work.id
+        focusState.pin(focusedPosition().coerceAtLeast(0), work.id)
         host?.push(ReadingWorkScreen(api, work.id, work.title, ringVisible))
     }
 
     private inner class WorkAdapter : RecyclerView.Adapter<WorkHolder>() {
         private val values = mutableListOf<ReadingWork>()
         fun at(position: Int): ReadingWork? = values.getOrNull(position)
-        fun indexOf(id: String) = values.indexOfFirst { it.id == id }
+        fun ids(): List<String> = values.map { it.id }
         fun replace(next: List<ReadingWork>) {
             values.clear()
             values.addAll(next.distinctBy { it.id })
@@ -328,8 +327,9 @@ class ReadingLibraryGridScreen(
                 setOnFocusChangeListener { _, focused ->
                     FocusDecorator.refresh(this, ringVisible())
                     if (focused) {
-                        selected = grid.getChildAdapterPosition(this)
-                        selectedWorkId = (getTag(TAG_WORK) as? ReadingWork)?.id.orEmpty()
+                        val position = grid.getChildAdapterPosition(this)
+                        val itemId = (getTag(TAG_WORK) as? ReadingWork)?.id.orEmpty()
+                        focusState.confirmRestored(position, itemId)
                         host?.refreshHints()
                     }
                 }

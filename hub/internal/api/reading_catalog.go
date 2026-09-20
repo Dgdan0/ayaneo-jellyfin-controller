@@ -456,7 +456,7 @@ func (s *Server) kavitaWork(ctx context.Context, workID string, detail *kavita.D
 				identities = append(identities, "isbn:"+value)
 				identifiers["isbn"] = value
 			}
-			section.Items = append(section.Items, ReadingSectionItem{SourceItemID: strconv.Itoa(chapter.ID), Title: chapter.Title, Number: chapter.Number, Kind: kind, PageCount: chapter.Pages, Progress: pageProgress(chapter.PagesRead, chapter.Pages)})
+			section.Items = append(section.Items, ReadingSectionItem{SourceItemID: strconv.Itoa(chapter.ID), Title: chapter.Title, Number: kavitaChapterNumber(chapter.Number), Kind: kind, PageCount: chapter.Pages, Progress: pageProgress(chapter.PagesRead, chapter.Pages)})
 		}
 		sections = append(sections, section)
 	}
@@ -480,7 +480,7 @@ func (s *Server) kavitaWork(ctx context.Context, workID string, detail *kavita.D
 	edition := ReadingEdition{ID: editionID("kavita", strconv.Itoa(detail.Series.ID), kind), WorkID: workID, Source: "kavita", SourceItemID: strconv.Itoa(detail.Series.ID), Kind: kind, Format: kavitaFormat(detail.Series.Format), Identifiers: identifiers, PageCount: detail.Series.Pages, Availability: "available"}
 	work := ReadingWork{ID: workID, LibraryID: "kavita:" + strconv.Itoa(detail.Series.LibraryID), Kind: kind, Title: detail.Series.Name, SortTitle: detail.Series.SortName, Authors: authors, Overview: detail.Metadata.Summary, Artwork: "/v1/img/reading/kavita/" + strconv.Itoa(detail.Series.ID), Genres: genres, Year: detail.Metadata.ReleaseYear, Languages: languages, Editions: []ReadingEdition{edition}, Progress: pageProgress(detail.Series.PagesRead, detail.Series.Pages), Availability: []string{kind}, Sections: sections, Partial: []Partial{}}
 	if detail.Continue.ID > 0 {
-		work.Continue = &ReadingContinue{Source: "kavita", SourceItemID: strconv.Itoa(detail.Continue.ID), Title: detail.Continue.Title, Number: detail.Continue.Number, Percentage: percentage(detail.Continue.PagesRead, detail.Continue.Pages)}
+		work.Continue = &ReadingContinue{Source: "kavita", SourceItemID: strconv.Itoa(detail.Continue.ID), Title: detail.Continue.Title, Number: kavitaChapterNumber(detail.Continue.Number), Percentage: percentage(detail.Continue.PagesRead, detail.Continue.Pages)}
 	}
 	return work, nil
 }
@@ -650,6 +650,13 @@ func kavitaVolumeTitle(volume kavita.Volume) string {
 		return "Issues"
 	}
 	return "Volume " + name
+}
+func kavitaChapterNumber(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "-100000" || value == "100000" {
+		return ""
+	}
+	return value
 }
 func editionID(source, sourceID, kind string) string {
 	return fmt.Sprintf("re_%x", simpleDigest(source+"\x00"+sourceID+"\x00"+kind))
