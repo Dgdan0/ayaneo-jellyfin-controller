@@ -110,6 +110,11 @@ example roots with the actual media roots, and set the environment variables
 named by each `komga_exports` entry. Use one entry per Komga account whose
 progress and read lists must be retained.
 
+Prefer `api_key_env`: create a revocable key from the user's Komga **Account
+Settings** page and expose it only to the migration command. The exporter sends
+it as `X-API-Key`. `username_env` plus `password_env` remains supported as an
+alternative; the two authentication modes cannot be combined in one entry.
+
 From `hub/`, generate the ignored evidence bundle:
 
 ```powershell

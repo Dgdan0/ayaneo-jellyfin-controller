@@ -24,10 +24,26 @@ type Client struct {
 	baseURL    *url.URL
 	username   string
 	password   string
+	apiKey     string
 	httpClient *http.Client
 }
 
 func NewClient(rawURL, username, password string, httpClient *http.Client) (*Client, error) {
+	if strings.TrimSpace(username) == "" || password == "" {
+		return nil, fmt.Errorf("Komga username and password are required")
+	}
+	return newClient(rawURL, username, password, "", httpClient)
+}
+
+func NewAPIKeyClient(rawURL, apiKey string, httpClient *http.Client) (*Client, error) {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return nil, fmt.Errorf("Komga API key is required")
+	}
+	return newClient(rawURL, "", "", apiKey, httpClient)
+}
+
+func newClient(rawURL, username, password, apiKey string, httpClient *http.Client) (*Client, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return nil, fmt.Errorf("parse Komga URL: %w", err)
@@ -38,16 +54,13 @@ func NewClient(rawURL, username, password string, httpClient *http.Client) (*Cli
 	if parsed.User != nil {
 		return nil, fmt.Errorf("Komga URL must not contain credentials")
 	}
-	if strings.TrimSpace(username) == "" || password == "" {
-		return nil, fmt.Errorf("Komga username and password are required")
-	}
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
-	return &Client{baseURL: parsed, username: username, password: password, httpClient: httpClient}, nil
+	return &Client{baseURL: parsed, username: username, password: password, apiKey: apiKey, httpClient: httpClient}, nil
 }
 
 type ReadingStateExport struct {
@@ -218,7 +231,11 @@ func (client *Client) doJSON(ctx context.Context, method, requestPath string, qu
 	if err != nil {
 		return err
 	}
-	request.SetBasicAuth(client.username, client.password)
+	if client.apiKey != "" {
+		request.Header.Set("X-API-Key", client.apiKey)
+	} else {
+		request.SetBasicAuth(client.username, client.password)
+	}
 	request.Header.Set("Accept", "application/json")
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")

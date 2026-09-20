@@ -39,8 +39,9 @@ type commandSource struct {
 type komgaExportConfig struct {
 	ID          string `json:"id" yaml:"id"`
 	BaseURL     string `json:"base_url" yaml:"base_url"`
-	UsernameEnv string `json:"username_env" yaml:"username_env"`
-	PasswordEnv string `json:"password_env" yaml:"password_env"`
+	APIKeyEnv   string `json:"api_key_env,omitempty" yaml:"api_key_env,omitempty"`
+	UsernameEnv string `json:"username_env,omitempty" yaml:"username_env,omitempty"`
+	PasswordEnv string `json:"password_env,omitempty" yaml:"password_env,omitempty"`
 }
 
 type labelledKomgaExport struct {
@@ -102,10 +103,26 @@ func run(ctx context.Context, args []string, stdout io.Writer, getenv func(strin
 			return fmt.Errorf("duplicate Komga export id %q", exportConfig.ID)
 		}
 		seenExportIDs[strings.ToLower(exportConfig.ID)] = true
+		apiKeyName := strings.TrimSpace(exportConfig.APIKeyEnv)
 		usernameName := strings.TrimSpace(exportConfig.UsernameEnv)
 		passwordName := strings.TrimSpace(exportConfig.PasswordEnv)
+		if apiKeyName != "" && (usernameName != "" || passwordName != "") {
+			return fmt.Errorf("Komga export %q requires either api_key_env or username_env/password_env", exportConfig.ID)
+		}
+		if apiKeyName != "" {
+			apiKey := getenv(apiKeyName)
+			if apiKey == "" {
+				return fmt.Errorf("Komga export %q environment variable %s is empty", exportConfig.ID, apiKeyName)
+			}
+			client, err := komga.NewAPIKeyClient(exportConfig.BaseURL, apiKey, httpClient)
+			if err != nil {
+				return fmt.Errorf("Komga export %q: %w", exportConfig.ID, err)
+			}
+			prepared = append(prepared, preparedExport{id: exportConfig.ID, client: client})
+			continue
+		}
 		if usernameName == "" || passwordName == "" {
-			return fmt.Errorf("Komga export %q requires username_env and password_env", exportConfig.ID)
+			return fmt.Errorf("Komga export %q requires either api_key_env or username_env/password_env", exportConfig.ID)
 		}
 		username := getenv(usernameName)
 		if username == "" {

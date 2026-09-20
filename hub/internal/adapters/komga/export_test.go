@@ -130,6 +130,48 @@ func TestExportReadingStateOmitsUnreadBooksAndCredentials(t *testing.T) {
 	}
 }
 
+func TestExportReadingStateSupportsAPIKeyWithoutBasicCredentials(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-API-Key"); got != "migration-api-key" {
+			t.Fatalf("X-API-Key = %q", got)
+		}
+		if _, _, ok := r.BasicAuth(); ok || r.Header.Get("Authorization") != "" {
+			t.Fatalf("API-key request also sent basic authentication")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v2/users/me":
+			_, _ = w.Write([]byte(`{"id":"api-user","email":"reader@example.test"}`))
+		case "/api/v1/books/list":
+			_, _ = w.Write([]byte(bookPageJSON(true, 0, 1, `{"id":"book","metadata":{},"media":{"pagesCount":10},"readProgress":{"page":3,"completed":false}}`)))
+		case "/api/v1/readlists":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewAPIKeyClient(server.URL, "migration-api-key", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	export, err := client.ExportReadingState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if export.User.ID != "api-user" || len(export.Progress) != 1 || export.Progress[0].Page != 3 {
+		t.Fatalf("API-key export = %+v", export)
+	}
+	raw, err := json.Marshal(export)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "migration-api-key") {
+		t.Fatalf("API key leaked in export: %s", raw)
+	}
+}
+
 func TestExportReadingStateRedactsUpstreamErrorBodies(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -158,6 +200,9 @@ func TestNewClientRejectsCredentialBearingAndNonHTTPURLs(t *testing.T) {
 	}
 	if _, err := NewClient("https://example.test", "", "password", http.DefaultClient); err == nil {
 		t.Fatal("accepted empty username")
+	}
+	if _, err := NewAPIKeyClient("https://example.test", "", http.DefaultClient); err == nil {
+		t.Fatal("accepted empty API key")
 	}
 }
 

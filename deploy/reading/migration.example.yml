@@ -25,11 +25,13 @@ destinations:
   manga: D:\Media\Reading\Manga
 
 # Komga progress is scoped to the authenticated account. Add one entry per
-# account whose progress and read lists must be retained. Values are read from
-# the named environment variables; passwords never appear in this file or the
-# generated report.
+# account whose progress and read lists must be retained. A revocable API key is
+# preferred. Generate it in Komga Account Settings and put it only in the named
+# environment variable; the key never appears in this file or the report.
 komga_exports:
   - id: primary
-    base_url: http://127.0.0.1:25600
-    username_env: POCKETDS_KOMGA_PRIMARY_USERNAME
-    password_env: POCKETDS_KOMGA_PRIMARY_PASSWORD
+    base_url: http://127.0.0.1:25600/komga
+    api_key_env: POCKETDS_KOMGA_PRIMARY_API_KEY
+
+# Basic authentication remains available when an account cannot use an API
+# key. Use username_env and password_env together instead of api_key_env.

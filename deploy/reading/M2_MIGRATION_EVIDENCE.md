@@ -2,7 +2,7 @@
 
 Date: 2026-09-20
 Branch: `feature/reading-library`
-Status: Tooling complete; production dry run pending
+Status: Production inventory complete; per-user state export pending
 
 ## Safety boundary
 
@@ -34,7 +34,8 @@ configuration. The scanner:
   destination collisions, files already present, and destination hash
   conflicts;
 - exports the authenticated Komga user's progress and ordered read lists, one
-  configured account at a time, through the current paginated API;
+  configured account at a time, through the current paginated API using Basic
+  authentication or a revocable `X-API-Key`;
 - writes `config.json`, `inventory.json`, `plan.json`, `rollback.json`, and
   `summary.txt`, plus `komga-state.json` when account exports are configured.
 
@@ -84,20 +85,44 @@ The configuration digest was
 Each rollback bundle contained eight matching entries, and the proposed
 canonical roots still contained zero files after both scans.
 
-## Open production gate
+## Production inventory
 
-M2 is not marked complete for production yet. The real dry run needs:
+Komga 1.23.1 was confirmed healthy at its configured `/komga` context path on
+TCP 25600. The FireDaemon wrapper and Java child were both running; the earlier
+root-path HTTP 404 was the expected result of probing outside that context, not
+a missing listener.
 
-1. the production Komga service listening on the media PC. During this run its
-   FireDaemon wrapper reported `Running`, but Windows had no TCP listener on
-   port 25600;
-2. a reviewed ignored `migration.local.yml` containing the actual source and
-   proposed destination roots;
-3. one credential-environment pair for every Komga user whose progress or read
-   lists must be retained;
-4. a human review of conflicts, unsupported files, and manual-review findings;
-5. a repeated scan with identical input/configuration digests and a source hash
-   comparison.
+The single production Komga library was scanned twice from the ignored local
+configuration. Both runs returned:
+
+```text
+450 files, 444 ready, 0 conflicts, 3 manual review, 3 unsupported
+```
+
+Both plans had digest
+`89bca2ed0a9e1953fc3097bbde012c8c51353a082a75328ddd7e5786fdb39cd5`.
+The two `plan.json` files had the same SHA-256,
+`EC4A5E0ADB062DDE053C2A1BA9FEFE52408D33D1183BB51C0D9DA4909659445D`.
+The source still contained 450 files totaling 7,002,341,595 bytes, both
+rollback manifests contained 444 entries, and the proposed destination still
+contained zero files.
+
+The three manual-review files are not valid ZIP/CBZ archives. One begins with
+zero bytes and appears corrupt. Two have valid RAR signatures but a `.cbz`
+extension, so they need an explicit rename to `.cbr` or conversion rather than
+an automatic migration. The three unsupported files are the existing Markdown,
+CBL, and CSV manifests; their bytes and hashes remain in the inventory.
+
+## Open gate
+
+The remaining M2 work is:
+
+1. create one revocable API key from each Komga user's Account Settings page,
+   then run the exporter for every account whose progress or read lists must be
+   retained;
+2. decide whether to rename/convert the two RAR files and replace or exclude the
+   corrupt archive;
+3. review the generated ignored report before any later apply implementation.
 
 M1B also remains open for Panels and Storyteller iOS checks plus client-side
 download isolation. Komga remains active, and M3 acquisition integration does

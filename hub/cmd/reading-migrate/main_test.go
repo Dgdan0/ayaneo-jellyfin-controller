@@ -126,6 +126,87 @@ func TestRunRequiresEnvironmentCredentialsBeforeWritingBundle(t *testing.T) {
 	}
 }
 
+func TestRunSupportsKomgaAPIKeyFromEnvironment(t *testing.T) {
+	source := t.TempDir()
+	destination := t.TempDir()
+	output := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") != "command-api-key" || r.Header.Get("Authorization") != "" {
+			t.Fatalf("unexpected API authentication headers")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v2/users/me":
+			_, _ = w.Write([]byte(`{"id":"api-user"}`))
+		case "/api/v1/books/list":
+			_, _ = w.Write([]byte(`{"content":[],"last":true,"number":0,"totalPages":1}`))
+		case "/api/v1/readlists":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "migration.json")
+	config := commandConfig{
+		SchemaVersion: 1,
+		Sources:       []commandSource{{ID: "comics", Kind: "comic", Root: source}},
+		Destinations:  map[string]string{"comic": destination},
+		KomgaExports: []komgaExportConfig{{
+			ID: "primary", BaseURL: server.URL, APIKeyEnv: "TEST_KOMGA_API_KEY",
+		}},
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	environment := map[string]string{"TEST_KOMGA_API_KEY": "command-api-key"}
+	if err := run(context.Background(), []string{"-config", configPath, "-out", output}, &bytes.Buffer{}, func(name string) string { return environment[name] }, server.Client()); err != nil {
+		t.Fatal(err)
+	}
+	report, err := os.ReadFile(filepath.Join(output, "komga-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(report, []byte("command-api-key")) {
+		t.Fatalf("API key leaked into report")
+	}
+}
+
+func TestRunRejectsMixedKomgaAuthentication(t *testing.T) {
+	source := t.TempDir()
+	destination := t.TempDir()
+	output := filepath.Join(t.TempDir(), "not-created")
+	configPath := filepath.Join(t.TempDir(), "migration.json")
+	config := commandConfig{
+		SchemaVersion: 1,
+		Sources:       []commandSource{{ID: "comics", Kind: "comic", Root: source}},
+		Destinations:  map[string]string{"comic": destination},
+		KomgaExports: []komgaExportConfig{{
+			ID: "primary", BaseURL: "https://example.test", APIKeyEnv: "KOMGA_KEY",
+			UsernameEnv: "KOMGA_USER", PasswordEnv: "KOMGA_PASSWORD",
+		}},
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = run(context.Background(), []string{"-config", configPath, "-out", output}, &bytes.Buffer{}, func(string) string { return "set" }, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "either api_key_env or username_env/password_env") {
+		t.Fatalf("mixed authentication error = %v", err)
+	}
+	if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
+		t.Fatalf("output created for mixed authentication: %v", statErr)
+	}
+}
+
 func TestRunRejectsUnknownConfigurationFields(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "migration.yml")
 	if err := os.WriteFile(configPath, []byte("schema_version: 1\nunknown_field: true\n"), 0o600); err != nil {
