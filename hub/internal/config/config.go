@@ -131,7 +131,7 @@ type LogConfig struct {
 // config is a typo, and a silently ignored typo in a base_url is a service that
 // mysteriously never works.
 var KnownServices = []string{
-	"jellyfin", "jellyseerr", "radarr", "sonarr", "bazarr", "qbittorrent",
+	"jellyfin", "jellyseerr", "prowlarr", "radarr", "sonarr", "readarr", "bazarr", "qbittorrent",
 }
 
 var envPattern = regexp.MustCompile(`\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}`)

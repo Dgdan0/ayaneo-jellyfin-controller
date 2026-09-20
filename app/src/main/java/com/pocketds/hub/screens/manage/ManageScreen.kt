@@ -449,8 +449,10 @@ class ManageScreen(
     private fun serviceLogo(service: String): Int = when (service) {
         "jellyfin" -> R.drawable.logo_jellyfin
         "jellyseerr" -> R.drawable.logo_jellyseerr
+        "prowlarr" -> R.drawable.logo_prowlarr
         "sonarr" -> R.drawable.logo_sonarr
         "radarr" -> R.drawable.logo_radarr
+        "readarr" -> R.drawable.logo_readarr
         "bazarr" -> R.drawable.logo_bazarr
         "qbittorrent" -> R.drawable.logo_qbittorrent
         else -> R.drawable.ic_launcher_foreground
@@ -534,13 +536,15 @@ class ManageScreen(
         val displayNames = mapOf(
             "jellyfin" to "Jellyfin",
             "jellyseerr" to "Jellyseerr",
+            "prowlarr" to "Prowlarr",
             "sonarr" to "Sonarr",
             "radarr" to "Radarr",
+            "readarr" to "Readarr",
             "qbittorrent" to "qBittorrent",
             "bazarr" to "Bazarr"
         )
         val serviceOrder = listOf(
-            "jellyfin", "jellyseerr", "sonarr", "radarr", "qbittorrent", "bazarr"
+            "jellyfin", "jellyseerr", "prowlarr", "sonarr", "radarr", "readarr", "qbittorrent", "bazarr"
         ).withIndex().associate { it.value to it.index }
     }
 }

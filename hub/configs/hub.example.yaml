@@ -60,12 +60,28 @@ services:
     # Without this, requests are attributed to admin user 1 rather than to you.
     act_as_user_id: 1
 
+  # Indexer manager. It is shown in Manage for health and opening its dashboard;
+  # the handheld never receives this API key.
+  prowlarr:
+    enabled: false
+    base_url: "http://127.0.0.1:9696"
+    web_url: ""
+    api_key: "${env:PROWLARR_API_KEY}"
+
   radarr:
     enabled: true
     base_url: "http://127.0.0.1:7878"
     web_url: ""
     api_key: "${env:RADARR_API_KEY}"
     jellyseerr_service_id: 0
+
+  # Books and audiobooks. This is intentionally a Manage-only integration for
+  # now; Discovery, Library and requests remain movie/TV focused.
+  readarr:
+    enabled: false
+    base_url: "http://127.0.0.1:8787"
+    web_url: ""
+    api_key: "${env:READARR_API_KEY}"
 
   sonarr:
     enabled: true

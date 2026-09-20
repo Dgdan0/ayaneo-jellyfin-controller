@@ -8,9 +8,9 @@ upstream-specific findings and is the file to keep updating.
 
 ## 1. What this is
 
-One control seat for a self-hosted media stack — Jellyfin, Jellyseerr, Radarr,
-Sonarr, Bazarr, qBittorrent — driven from an **AYANEO Pocket DS** handheld with
-the gamepad.
+One control seat for a self-hosted media stack — Jellyfin, Jellyseerr, Prowlarr,
+Radarr, Sonarr, Readarr, Bazarr and qBittorrent — driven from an **AYANEO Pocket
+DS** handheld with the gamepad.
 
 The problem it solves: answering *"where is the film I asked for three days
 ago?"* currently means opening four web UIs in a browser, on a handheld, none of
@@ -21,7 +21,7 @@ Two components:
 | | |
 |---|---|
 | **`app/`** | `com.pocketds.hub`, Kotlin Android. Talks **only** to the hub, over HTTP(S) with a bearer token. Holds no service API keys. |
-| **`hub/`** | A Go service on the Windows media PC. Holds every API key, fans out to all six services, does the cross-service join. |
+| **`hub/`** | A Go service on the Windows media PC. Holds every API key, fans out to the media services, and does the cross-service join. |
 
 The split exists so the handheld never carries credentials and makes **one**
 round trip per screen instead of orchestrating five over a slow link.
@@ -44,6 +44,7 @@ round trip per screen instead of orchestrating five over a slow link.
 | **A8** | Home is the first app section: selectable Jellyfin profile; landscape episode/movie cards for Continue Watching and Next Up with season/episode context; title-level Recently Added; per-series row exclusivity and focus restoration |
 | **H6 / A9** | Native Media3 playback: Jellyfin prepare/range/HLS/subtitle/session gateway, movies and episodes, series play targets, resume/start-over, source/audio/subtitle/quality selection, progress reporting, adjacent episodes and native PiP |
 | **A10** | Manage health dashboard: Ayaneo Hub plus all configured services with official project logos, state, version, latency, uptime, explicit vertical focus, A/tap dashboard launching, and a Jellyfin library-scan action |
+| **A10b** | Prowlarr and Readarr can appear as Manage-only health and dashboard cards. `hub/deploy/windows/enable-arr-manage.ps1` reads their local keys, writes only the Hub secrets overlay, and updates FireDaemon from an Administrator PowerShell session. |
 | **A11** | Collapsible left navigation rail: compact icons by default, labels on Start or app-mark tap, persistent preference, touch section selection, and unchanged L1/R1 switching |
 | **H7 / A12** | In-app notification center: authenticated `/v1/notifications` joins recent Sonarr/Radarr history, Bazarr subtitle history, and current health warnings into three service columns; stable IDs drive persistent unread state, focus marks entries seen, and badges show unread totals |
 | **A13** | Settings: follow-system/light/dark appearance, theme-matched service logos, configurable per-service notification history limits, playback seek distance, and controller-test access |

@@ -302,10 +302,14 @@ func defaultPort(service string) string {
 		return "8096"
 	case "jellyseerr":
 		return "5055"
+	case "prowlarr":
+		return "9696"
 	case "radarr":
 		return "7878"
 	case "sonarr":
 		return "8989"
+	case "readarr":
+		return "8787"
 	case "bazarr":
 		return "6767"
 	case "qbittorrent":

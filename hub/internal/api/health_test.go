@@ -22,3 +22,19 @@ func TestServiceDashboardURLSanitizesFallback(t *testing.T) {
 		t.Fatalf("serviceDashboardURL() = %q, want %q", got, want)
 	}
 }
+
+func TestProwlarrAndReadarrUseTheirSystemStatusEndpoints(t *testing.T) {
+	cases := map[string]string{
+		"prowlarr": "/api/v1/system/status",
+		"readarr":  "/api/v1/system/status",
+	}
+	for name, wantPath := range cases {
+		spec, ok := probes[name]
+		if !ok {
+			t.Fatalf("no probe for %s", name)
+		}
+		if spec.path != wantPath || spec.authHeader != "X-Api-Key" || spec.versionField != "version" {
+			t.Fatalf("probe for %s = %+v", name, spec)
+		}
+	}
+}

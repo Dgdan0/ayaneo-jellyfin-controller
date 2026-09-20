@@ -180,6 +180,16 @@ func TestDisabledServicesAreNotChecked(t *testing.T) {
 	wantOK(t, c)
 }
 
+func TestAcceptsManageOnlyArrServices(t *testing.T) {
+	for name, port := range map[string]string{"prowlarr": "9696", "readarr": "8787"} {
+		c := base()
+		c.Services[name] = ServiceConfig{
+			Enabled: true, BaseURL: "http://127.0.0.1:" + port, APIKey: "key",
+		}
+		wantOK(t, c)
+	}
+}
+
 func TestRefusesAnEnabledServiceWithNoBaseURL(t *testing.T) {
 	c := base()
 	c.Services["radarr"] = ServiceConfig{Enabled: true, APIKey: "k"}

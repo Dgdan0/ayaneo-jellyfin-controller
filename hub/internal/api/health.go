@@ -59,11 +59,17 @@ var probes = map[string]probeSpec{
 	"jellyseerr": {
 		path: "/api/v1/status", authHeader: "X-Api-Key", versionField: "version",
 	},
+	"prowlarr": {
+		path: "/api/v1/system/status", authHeader: "X-Api-Key", versionField: "version",
+	},
 	"radarr": {
 		path: "/api/v3/system/status", authHeader: "X-Api-Key", versionField: "version",
 	},
 	"sonarr": {
 		path: "/api/v3/system/status", authHeader: "X-Api-Key", versionField: "version",
+	},
+	"readarr": {
+		path: "/api/v1/system/status", authHeader: "X-Api-Key", versionField: "version",
 	},
 	"bazarr": {
 		// Verified against source: the blueprint is registered at /api with
