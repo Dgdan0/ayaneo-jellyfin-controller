@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.HorizontalScrollView
 import android.widget.TextView
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -14,6 +15,9 @@ import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.DiscoverRow
 import com.pocketds.hub.model.SearchHit
+import com.pocketds.hub.model.ReadingDiscoverRow
+import com.pocketds.hub.model.ReadingItem
+import com.pocketds.hub.model.ReadingType
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
@@ -21,6 +25,10 @@ import com.pocketds.hub.net.FailureKind
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
+import com.pocketds.hub.settings.ContentModeSettings
+import com.pocketds.hub.state.ContentMode
+import com.pocketds.hub.state.ContentModeMemory
+import com.pocketds.hub.ui.ContentModeToggleView
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.FormOverlay
 import com.pocketds.hub.ui.PocketColors
@@ -62,18 +70,43 @@ class DiscoverScreen(
 
     private lateinit var colors: PocketColors
     private lateinit var searchBox: EditText
+    private lateinit var modeToggle: ContentModeToggleView
+    private lateinit var readingFilters: HorizontalScrollView
+    private val readingFilterButtons = mutableMapOf<String, TextView>()
     private lateinit var statusLine: TextView
     private lateinit var rowsList: RecyclerView
     private lateinit var resultsGrid: RecyclerView
+    private lateinit var readingRowsList: RecyclerView
+    private lateinit var readingResultsGrid: RecyclerView
     private val rowsAdapter = RowsAdapter()
     private val resultsAdapter = HitAdapter()
+    private val readingRowsAdapter = ReadingRowsAdapter()
+    private val readingResultsAdapter = ReadingHitAdapter()
     private lateinit var form: FormOverlay
     private lateinit var flow: RequestFlow
 
     private var host: ScreenHost? = null
-    private var lastQuery = ""
-    private var searching = false
+    private data class ModeState(
+        var query: String = "",
+        var searching: Boolean = false,
+        var focusedKey: String = ""
+    )
+    private val modeStates = ContentModeMemory<ModeState>().apply {
+        remember(ContentMode.MEDIA, ModeState())
+        remember(ContentMode.BOOKS, ModeState())
+    }
+    private var mode = ContentMode.MEDIA
+    private var readingType = ReadingType.ALL
+    private val readingRowsByType = mutableMapOf<String, List<ReadingDiscoverRow>>()
+    private val activeState: ModeState get() = checkNotNull(modeStates.recall(mode))
+    private var lastQuery: String
+        get() = activeState.query
+        set(value) { activeState.query = value }
+    private var searching: Boolean
+        get() = activeState.searching
+        set(value) { activeState.searching = value }
     private var rowsJob: Job? = null
+    private var readingRowsJob: Job? = null
 
     /**
      * Set while waiting for content to arrive so the first card can be focused
@@ -86,10 +119,11 @@ class DiscoverScreen(
      * focus guard, which reads exactly like the pad being dead. Measured: 20
      * right-presses, 20 refusals, focus never once on a card.
      */
-    private var wantsFocus = false
+    private var focusTarget: RecyclerView? = null
 
     /** Row id -> job, so two flings at one row do not both fetch its next page. */
     private val rowLoads = mutableMapOf<String, Job>()
+    private val readingRowLoads = mutableMapOf<String, Job>()
 
     /**
      * Highest page already asked for, per row.
@@ -100,11 +134,13 @@ class DiscoverScreen(
      * twice. Measured exactly that, 48ms apart.
      */
     private val requestedPages = mutableMapOf<String, Int>()
+    private val readingRequestedPages = mutableMapOf<String, Int>()
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         val context = host.viewContext
         colors = Theme.colors(context)
+        mode = ContentModeSettings.get(context)
 
         val frame = android.widget.FrameLayout(context)
         val root = LinearLayout(context).apply {
@@ -112,6 +148,24 @@ class DiscoverScreen(
             setBackgroundColor(colors.background)
         }
         frame.addView(root, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
+
+        modeToggle = ContentModeToggleView(context, colors).apply {
+            select(mode)
+            onModeSelected = ::switchMode
+            layoutParams = LinearLayout.LayoutParams(WRAP, WRAP).apply {
+                val horizontal = Styler.dpInt(context, 10f)
+                setMargins(horizontal, Styler.dpInt(context, 5f), horizontal, 0)
+            }
+        }
+        root.addView(modeToggle)
+
+        readingFilters = HorizontalScrollView(context).apply {
+            isFocusable = false
+            isHorizontalScrollBarEnabled = false
+            visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
+            addView(buildReadingFilters())
+        }
+        root.addView(readingFilters, LinearLayout.LayoutParams(MATCH, WRAP))
 
         searchBox = EditText(context).apply {
             hint = "Search"
@@ -191,7 +245,7 @@ class DiscoverScreen(
             // second an instant jump, which is the stutter you noticed.
             setPadding(0, Styler.dpInt(context, 28f), 0, Styler.dpInt(context, 84f))
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
-            addOnChildAttachStateChangeListener(claimFocusOnFirstChild())
+            addOnChildAttachStateChangeListener(claimFocusOnFirstChild(this))
         }
         root.addView(rowsList)
 
@@ -215,9 +269,39 @@ class DiscoverScreen(
                     maybeLoadMoreResults()
                 }
             })
-            addOnChildAttachStateChangeListener(claimFocusOnFirstChild())
+            addOnChildAttachStateChangeListener(claimFocusOnFirstChild(this))
         }
         root.addView(resultsGrid)
+
+        readingRowsList = RecyclerView(context).apply {
+            layoutManager = LinearLayoutManager(context)
+            adapter = readingRowsAdapter
+            clipToPadding = false
+            clipChildren = false
+            setItemViewCacheSize(6)
+            setPadding(0, Styler.dpInt(context, 28f), 0, Styler.dpInt(context, 84f))
+            layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
+            visibility = View.GONE
+            addOnChildAttachStateChangeListener(claimFocusOnFirstChild(this))
+        }
+        root.addView(readingRowsList)
+
+        readingResultsGrid = RecyclerView(context).apply {
+            layoutManager = GridLayoutManager(context, SEARCH_COLUMNS)
+            adapter = readingResultsAdapter
+            setHasFixedSize(true)
+            setItemViewCacheSize(SEARCH_COLUMNS * 3)
+            clipToPadding = false
+            clipChildren = false
+            visibility = View.GONE
+            setPadding(
+                Styler.dpInt(context, 6f), 0,
+                Styler.dpInt(context, 6f), Styler.dpInt(context, 84f)
+            )
+            layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
+            addOnChildAttachStateChangeListener(claimFocusOnFirstChild(this))
+        }
+        root.addView(readingResultsGrid)
 
         form = FormOverlay(context, colors, ringVisible)
         frame.addView(form, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
@@ -230,11 +314,138 @@ class DiscoverScreen(
                 statusLine.setTextColor(if (isError) colors.dangerText else colors.mutedText)
                 statusLine.text = text
             },
-            onNotify = { host?.notify(it) },
-            onHintsChanged = { host?.refreshHints() }
+            onNotify = { host.notify(it) },
+            onHintsChanged = { host.refreshHints() }
         )
 
+        applyModeVisibility()
+
         return frame
+    }
+
+    private fun buildReadingFilters(): View {
+        val bar = LinearLayout(host?.viewContext ?: throw IllegalStateException("host missing")).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(
+                Styler.dpInt(context, 10f), Styler.dpInt(context, 4f),
+                Styler.dpInt(context, 10f), 0
+            )
+        }
+        ReadingType.filters.forEach { (wire, label) ->
+            val chip = TextView(bar.context).apply {
+                text = label
+                textSize = 11f
+                gravity = Gravity.CENTER
+                setTextColor(colors.primaryText)
+                val horizontal = Styler.dpInt(context, 11f)
+                val vertical = Styler.dpInt(context, 5f)
+                setPadding(horizontal, vertical, horizontal, vertical)
+                contentDescription = "Show $label"
+                Styler.makeFocusable(this)
+                isClickable = true
+                setOnClickListener { selectReadingType(wire) }
+            }
+            readingFilterButtons[wire] = chip
+            bar.addView(chip, LinearLayout.LayoutParams(WRAP, WRAP).apply {
+                marginEnd = Styler.dpInt(bar.context, 5f)
+            })
+        }
+        updateReadingFilterStyles()
+        return bar
+    }
+
+    private fun updateReadingFilterStyles() {
+        readingFilterButtons.forEach { (wire, button) ->
+            val selected = wire == readingType
+            button.background = Styler.chipBackground(button.context, colors, selected)
+            button.setTextColor(if (selected) colors.accentText else colors.primaryText)
+        }
+    }
+
+    private fun selectReadingType(type: String) {
+        if (type == readingType) return
+        readingType = type
+        activeState.focusedKey = ""
+        updateReadingFilterStyles()
+        readingRowLoads.values.forEach(Job::cancel)
+        readingRowLoads.clear()
+        readingRequestedPages.clear()
+        if (searching) {
+            runSearch(lastQuery, force = true)
+        } else {
+            val cached = readingRowsByType[type]
+            if (cached != null) {
+                readingRowsAdapter.submit(cached)
+                applyModeVisibility()
+                focusTarget = readingRowsList
+                readingRowsList.scrollToPosition(0)
+            } else {
+                loadReadingRows(force = true)
+            }
+        }
+    }
+
+    private fun switchMode(next: ContentMode) {
+        if (mode == next) return
+        mode = next
+        ContentModeSettings.set(host?.viewContext ?: return, mode)
+        modeToggle.select(mode)
+        searchBox.setText(lastQuery)
+        readingFilters.visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
+        applyModeVisibility()
+        statusLine.setTextColor(colors.mutedText)
+        if (searching) {
+            val count = if (mode == ContentMode.MEDIA) resultsAdapter.itemCount else readingResultsAdapter.itemCount
+            statusLine.text = "$count results"
+            if (count == 0 && lastQuery.isNotBlank()) runSearch(lastQuery, force = true)
+        } else if (mode == ContentMode.MEDIA) {
+            statusLine.text = "${rowsAdapter.itemCount} rows"
+            if (rowsAdapter.itemCount == 0) loadRows()
+        } else {
+            statusLine.text = "${readingRowsAdapter.itemCount} rows"
+            if (readingRowsAdapter.itemCount == 0) loadReadingRows()
+        }
+        activeList().post {
+            restoreContentFocus()
+            host?.refreshHints()
+        }
+    }
+
+    private fun applyModeVisibility() {
+        rowsList.visibility = if (mode == ContentMode.MEDIA && !searching) View.VISIBLE else View.GONE
+        resultsGrid.visibility = if (mode == ContentMode.MEDIA && searching) View.VISIBLE else View.GONE
+        readingRowsList.visibility = if (mode == ContentMode.BOOKS && !searching) View.VISIBLE else View.GONE
+        readingResultsGrid.visibility = if (mode == ContentMode.BOOKS && searching) View.VISIBLE else View.GONE
+        if (::readingFilters.isInitialized) {
+            readingFilters.visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun activeList(): RecyclerView = when {
+        mode == ContentMode.MEDIA && searching -> resultsGrid
+        mode == ContentMode.MEDIA -> rowsList
+        searching -> readingResultsGrid
+        else -> readingRowsList
+    }
+
+    private fun restoreContentFocus(): Boolean {
+        val key = activeState.focusedKey
+        if (key.isNotEmpty()) {
+            findContentKey(activeList(), key)?.let { if (it.requestFocus()) return true }
+        }
+        return activeList().getChildAt(0)?.requestFocus() == true
+    }
+
+    private fun findContentKey(root: ViewGroup, key: String): View? {
+        for (index in 0 until root.childCount) {
+            val child = root.getChildAt(index)
+            val media = child.getTag(TAG_HIT) as? SearchHit
+            if (media?.media?.key == key) return child
+            val reading = child.getTag(TAG_READING_ITEM) as? ReadingItem
+            if (reading?.key == key) return child
+            if (child is ViewGroup) findContentKey(child, key)?.let { return it }
+        }
+        return null
     }
 
     /**
@@ -252,11 +463,11 @@ class DiscoverScreen(
      * Attached rather than posted, because attachment is the event that
      * actually guarantees a child exists.
      */
-    private fun claimFocusOnFirstChild() =
+    private fun claimFocusOnFirstChild(owner: RecyclerView) =
         object : RecyclerView.OnChildAttachStateChangeListener {
             override fun onChildViewAttachedToWindow(view: View) {
-                if (!wantsFocus) return
-                wantsFocus = false
+                if (focusTarget !== owner || owner.visibility != View.VISIBLE) return
+                focusTarget = null
                 view.post {
                     view.requestFocus()
                     host?.refreshHints()
@@ -267,8 +478,17 @@ class DiscoverScreen(
         }
 
     override fun onShow() {
-        if (searching) return
-        if (rowsAdapter.itemCount == 0 && rowsJob?.isActive != true) loadRows()
+        if (searching) {
+            val empty = if (mode == ContentMode.MEDIA) resultsAdapter.itemCount == 0
+            else readingResultsAdapter.itemCount == 0
+            if (empty && lastQuery.isNotBlank()) runSearch(lastQuery, force = true)
+            return
+        }
+        if (mode == ContentMode.MEDIA) {
+            if (rowsAdapter.itemCount == 0 && rowsJob?.isActive != true) loadRows()
+        } else if (readingRowsAdapter.itemCount == 0 && readingRowsJob?.isActive != true) {
+            loadReadingRows()
+        }
     }
 
     override fun onHide() {
@@ -281,6 +501,9 @@ class DiscoverScreen(
         scope.coroutineContext.cancelChildren()
         rowLoads.clear()
         requestedPages.clear()
+        readingRowLoads.clear()
+        readingRequestedPages.clear()
+        focusTarget = null
     }
 
     override fun onDestroyView() {
@@ -298,6 +521,11 @@ class DiscoverScreen(
                 if (::searchBox.isInitialized && searchBox.hasFocus()) "Search" else "Open"
             )
         )
+        if (mode == ContentMode.BOOKS) {
+            hints.add(ButtonHint.secondary("Search box"))
+            if (searching) hints.add(ButtonHint.back("Browse"))
+            return hints
+        }
         val hit = focusedHit()
         // Ⓧ opens the request *form* on the card you are looking at. It used to
         // open the detail screen, so requesting took two presses and a second
@@ -328,7 +556,7 @@ class DiscoverScreen(
         }
 
     override fun requestInitialFocus(): Boolean {
-        val list = if (searching) resultsGrid else rowsList
+        val list = activeList()
         return list.getChildAt(0)?.requestFocus() == true
     }
 
@@ -353,16 +581,20 @@ class DiscoverScreen(
         // under a thumbstick -- but not a detour through the detail screen
         // either, which is what it used to be.
         action == PadAction.Primary -> {
-            val hit = focusedHit()
-            when {
-                hit == null -> false
-                hit.canRequest -> {
-                    flow.start(hit.media.key, hit.media.title)
-                    true
-                }
-                else -> {
-                    host?.notify(hit.media.title + " is already in your library")
-                    true
+            if (mode == ContentMode.BOOKS) {
+                false
+            } else {
+                val hit = focusedHit()
+                when {
+                    hit == null -> false
+                    hit.canRequest -> {
+                        flow.start(hit.media.key, hit.media.title)
+                        true
+                    }
+                    else -> {
+                        host?.notify(hit.media.title + " is already in your library")
+                        true
+                    }
                 }
             }
         }
@@ -373,7 +605,13 @@ class DiscoverScreen(
             true
         }
         action == PadAction.Refresh -> {
-            if (searching) runSearch(lastQuery, force = true) else loadRows(force = true)
+            if (searching) {
+                runSearch(lastQuery, force = true)
+            } else if (mode == ContentMode.MEDIA) {
+                loadRows(force = true)
+            } else {
+                loadReadingRows(force = true)
+            }
             true
         }
         else -> false
@@ -381,12 +619,17 @@ class DiscoverScreen(
 
     /** The hit the selection is on, so X can act without opening anything. */
     private fun focusedHit(): SearchHit? {
-        val focused = (if (searching) resultsGrid else rowsList).findFocus() ?: return null
+        if (mode != ContentMode.MEDIA) return null
+        val focused = activeList().findFocus() ?: return null
         return focused.getTag(TAG_HIT) as? SearchHit
     }
 
     private fun openDetail(hit: SearchHit) {
         host?.push(MediaDetailScreen(api, hit.media.key, hit.media.title, ringVisible))
+    }
+
+    private fun openReadingDetail(item: ReadingItem) {
+        host?.push(ReadingDetailScreen(api, item))
     }
 
     // ---- browse ------------------------------------------------------------
@@ -395,27 +638,31 @@ class DiscoverScreen(
         statusLine.setTextColor(colors.mutedText)
         statusLine.text = "Loading…"
         if (force) rowsAdapter.submit(emptyList())
-        wantsFocus = true
+        focusTarget = rowsList
         rowsJob?.cancel()
         rowsJob = scope.launch {
             when (val result = api.discover()) {
                 is HubResult.Ok -> {
                     val body = result.value
                     rowsAdapter.submit(body.rows)
-                    statusLine.text = buildString {
-                        append(body.rows.size).append(" rows")
-                        if (body.cache.hit && body.cache.ageSeconds > 0) {
-                            append(" · cached ").append(body.cache.ageSeconds).append("s ago")
+                    if (mode == ContentMode.MEDIA && !searching) {
+                        statusLine.text = buildString {
+                            append(body.rows.size).append(" rows")
+                            if (body.cache.hit && body.cache.ageSeconds > 0) {
+                                append(" · cached ").append(body.cache.ageSeconds).append("s ago")
+                            }
+                            if (body.partial.isNotEmpty()) {
+                                append(" · ").append(body.partial.joinToString(", ") { it.message })
+                            }
                         }
-                        if (body.partial.isNotEmpty()) {
-                            append(" · ").append(body.partial.joinToString(", ") { it.message })
-                        }
+                        host?.refreshHints()
                     }
                     // Focus is claimed by claimFocusOnFirstChild once a row is
                     // actually attached; asking here would be too early.
-                    host?.refreshHints()
                 }
-                is HubResult.Failed -> showFailure(result.kind, result.message)
+                is HubResult.Failed -> if (mode == ContentMode.MEDIA && !searching) {
+                    showFailure(result.kind, result.message)
+                }
             }
         }
     }
@@ -427,7 +674,7 @@ class DiscoverScreen(
      * fires this on every step and four concurrent fetches of page 2 would all
      * append the same twenty titles.
      */
-    private fun loadMoreRow(position: Int, row: DiscoverRow) {
+    private fun loadMoreRow(row: DiscoverRow) {
         if (!row.hasMore) return
         if (rowLoads[row.id]?.isActive == true) return
         val next = row.page + 1
@@ -438,7 +685,7 @@ class DiscoverScreen(
             when (val result = api.discoverRow(row.id, next)) {
                 is HubResult.Ok -> {
                     val fetched = result.value.rows.firstOrNull() ?: return@launch
-                    rowsAdapter.append(position, row.id, fetched)
+                    rowsAdapter.append(row.id, fetched)
                 }
                 is HubResult.Failed -> {
                     // Let it be retried: a failed page must not permanently cap
@@ -450,16 +697,72 @@ class DiscoverScreen(
         }
     }
 
+    private fun loadReadingRows(force: Boolean = false) {
+        val requestedType = readingType
+        statusLine.setTextColor(colors.mutedText)
+        statusLine.text = "Loading ${ReadingType.label(requestedType).lowercase()}…"
+        if (force) readingRowsAdapter.submit(emptyList())
+        focusTarget = readingRowsList
+        readingRowsJob?.cancel()
+        readingRowsJob = scope.launch {
+            when (val result = api.readingDiscover(requestedType)) {
+                is HubResult.Ok -> {
+                    if (requestedType != readingType) return@launch
+                    val body = result.value
+                    readingRowsByType[requestedType] = body.rows
+                    readingRowsAdapter.submit(body.rows)
+                    if (mode == ContentMode.BOOKS && !searching) {
+                        statusLine.text = buildString {
+                            append(body.rows.size).append(" rows")
+                            if (body.cache.hit && body.cache.ageSeconds > 0) {
+                                append(" · cached ").append(body.cache.ageSeconds).append("s ago")
+                            }
+                            if (body.partial.isNotEmpty()) {
+                                append(" · ").append(body.partial.joinToString(", ") { it.message })
+                            }
+                        }
+                        host?.refreshHints()
+                    }
+                }
+                is HubResult.Failed -> if (mode == ContentMode.BOOKS && !searching && requestedType == readingType) {
+                    showFailure(result.kind, result.message)
+                }
+            }
+        }
+    }
+
+    private fun loadMoreReadingRow(row: ReadingDiscoverRow) {
+        if (!row.hasMore) return
+        val loadKey = row.contentType + ":" + row.id
+        if (readingRowLoads[loadKey]?.isActive == true) return
+        val next = row.page + 1
+        if (next <= (readingRequestedPages[loadKey] ?: 0)) return
+        readingRequestedPages[loadKey] = next
+        readingRowLoads[loadKey] = scope.launch {
+            when (val result = api.readingDiscoverRow(row.id, row.contentType, next)) {
+                is HubResult.Ok -> {
+                    val fetched = result.value.rows.firstOrNull() ?: return@launch
+                    readingRowsAdapter.append(loadKey, fetched)
+                    readingRowsByType[readingType] = readingRowsAdapter.snapshot()
+                }
+                is HubResult.Failed -> {
+                    readingRequestedPages[loadKey] = next - 1
+                    DebugLog.log("net", "reading discover $loadKey page $next failed: ${result.message}")
+                }
+            }
+        }
+    }
+
     private fun showBrowse() {
         searching = false
         lastQuery = ""
         searchBox.setText("")
-        resultsGrid.visibility = View.GONE
-        rowsList.visibility = View.VISIBLE
-        statusLine.text = "${rowsAdapter.itemCount} rows"
+        applyModeVisibility()
+        val count = if (mode == ContentMode.MEDIA) rowsAdapter.itemCount else readingRowsAdapter.itemCount
+        statusLine.text = "$count rows"
         // Children are already attached here, so this one can focus directly.
-        rowsList.post {
-            rowsList.getChildAt(0)?.requestFocus()
+        activeList().post {
+            activeList().getChildAt(0)?.requestFocus()
             host?.refreshHints()
         }
     }
@@ -473,12 +776,13 @@ class DiscoverScreen(
             return
         }
         if (trimmed == lastQuery && !force && searching) return
+        val requestedMode = mode
+        val requestedType = readingType
         lastQuery = trimmed
         searching = true
         searchPage = 1
         searchTotalPages = 1
-        rowsList.visibility = View.GONE
-        resultsGrid.visibility = View.VISIBLE
+        applyModeVisibility()
         statusLine.setTextColor(colors.mutedText)
         statusLine.text = "Searching…"
         host?.refreshHints()
@@ -487,28 +791,56 @@ class DiscoverScreen(
         scope.coroutineContext.cancelChildren()
         rowLoads.clear()
         requestedPages.clear()
-        wantsFocus = true
+        focusTarget = if (requestedMode == ContentMode.MEDIA) resultsGrid else readingResultsGrid
         scope.launch {
             DebugLog.log("net", "search \"$trimmed\"")
+            if (requestedMode == ContentMode.BOOKS) {
+                when (val result = api.readingSearch(trimmed, requestedType)) {
+                    is HubResult.Ok -> {
+                        if (requestedType != readingType || modeStates.recall(ContentMode.BOOKS)?.query != trimmed) {
+                            return@launch
+                        }
+                        val body = result.value
+                        readingResultsAdapter.submit(body.results)
+                        if (mode == ContentMode.BOOKS) {
+                            statusLine.text = buildString {
+                                append(body.results.size).append(" results")
+                                if (body.cache.hit) append(" · cached")
+                                if (body.partial.isNotEmpty()) append(" · some sources unavailable")
+                            }
+                            host?.refreshHints()
+                        }
+                    }
+                    is HubResult.Failed -> if (mode == ContentMode.BOOKS && modeStates.recall(ContentMode.BOOKS)?.query == trimmed) {
+                        showFailure(result.kind, result.message)
+                    }
+                }
+                return@launch
+            }
             when (val result = api.search(trimmed)) {
                 is HubResult.Ok -> {
+                    if (modeStates.recall(ContentMode.MEDIA)?.query != trimmed) return@launch
                     val body = result.value
                     searchPage = body.page
                     searchTotalPages = body.totalPages
                     resultsAdapter.submit(body.results)
-                    statusLine.text = buildString {
-                        append(body.totalResults).append(" results")
-                        if (body.cache.hit) {
-                            append(" · cached")
-                            if (body.cache.ageSeconds > 0) {
-                                append(" ").append(body.cache.ageSeconds).append("s ago")
+                    if (mode == ContentMode.MEDIA) {
+                        statusLine.text = buildString {
+                            append(body.totalResults).append(" results")
+                            if (body.cache.hit) {
+                                append(" · cached")
+                                if (body.cache.ageSeconds > 0) {
+                                    append(" ").append(body.cache.ageSeconds).append("s ago")
+                                }
                             }
+                            if (body.cache.degraded) append(" · hub degraded")
                         }
-                        if (body.cache.degraded) append(" · hub degraded")
+                        host?.refreshHints()
                     }
-                    host?.refreshHints()
                 }
-                is HubResult.Failed -> showFailure(result.kind, result.message)
+                is HubResult.Failed -> if (mode == ContentMode.MEDIA && modeStates.recall(ContentMode.MEDIA)?.query == trimmed) {
+                    showFailure(result.kind, result.message)
+                }
             }
         }
     }
@@ -518,22 +850,27 @@ class DiscoverScreen(
     private var loadingMoreResults = false
 
     private fun maybeLoadMoreResults() {
-        if (!searching || loadingMoreResults || searchPage >= searchTotalPages) return
+        if (mode != ContentMode.MEDIA || !searching || loadingMoreResults || searchPage >= searchTotalPages) return
         val manager = resultsGrid.layoutManager as? GridLayoutManager ?: return
         val last = manager.findLastVisibleItemPosition()
         if (last < resultsAdapter.itemCount - SEARCH_COLUMNS * 2) return
         loadingMoreResults = true
+        val query = modeStates.recall(ContentMode.MEDIA)?.query.orEmpty()
         scope.launch {
-            val next = searchPage + 1
-            when (val result = api.search(lastQuery, next)) {
-                is HubResult.Ok -> {
-                    searchPage = result.value.page
-                    resultsAdapter.append(result.value.results)
+            try {
+                val next = searchPage + 1
+                when (val result = api.search(query, next)) {
+                    is HubResult.Ok -> {
+                        if (modeStates.recall(ContentMode.MEDIA)?.query != query) return@launch
+                        searchPage = result.value.page
+                        resultsAdapter.append(result.value.results)
+                    }
+                    is HubResult.Failed ->
+                        DebugLog.log("net", "search page $next failed: ${result.message}")
                 }
-                is HubResult.Failed ->
-                    DebugLog.log("net", "search page $next failed: ${result.message}")
+            } finally {
+                loadingMoreResults = false
             }
-            loadingMoreResults = false
         }
     }
 
@@ -562,7 +899,177 @@ class DiscoverScreen(
         ) { path -> api.imageUrl(path) }
         card.setTag(TAG_HIT, hit)
         card.setOnClickListener { openDetail(hit) }
-        card.setOnFocusChangeListener { _, hasFocus -> if (hasFocus) host?.refreshHints() }
+        card.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) {
+                modeStates.recall(ContentMode.MEDIA)?.focusedKey = hit.media.key
+                host?.refreshHints()
+            }
+        }
+    }
+
+    private fun bindReadingCard(card: PosterCardView, item: ReadingItem) {
+        val client = api as? HubClient
+        card.bindReading(
+            item,
+            client?.imageLoader ?: coil.ImageLoader(card.context)
+        ) { path -> api.imageUrl(path) }
+        card.setTag(TAG_READING_ITEM, item)
+        card.setOnClickListener { openReadingDetail(item) }
+        card.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) {
+                modeStates.recall(ContentMode.BOOKS)?.focusedKey = item.key
+                host?.refreshHints()
+            }
+        }
+    }
+
+    private inner class ReadingRowsAdapter : RecyclerView.Adapter<ReadingRowHolder>() {
+        private val rows = mutableListOf<ReadingDiscoverRow>()
+
+        fun submit(next: List<ReadingDiscoverRow>) {
+            rows.clear()
+            rows.addAll(next)
+            notifyDataSetChanged()
+        }
+
+        fun snapshot(): List<ReadingDiscoverRow> = rows.toList()
+
+        fun append(loadKey: String, fetched: ReadingDiscoverRow) {
+            val index = rows.indexOfFirst { it.contentType + ":" + it.id == loadKey }
+                .takeIf { it >= 0 } ?: return
+            val existing = rows[index]
+            val seen = existing.items.mapTo(HashSet()) { it.key }
+            val fresh = fetched.items.filter { seen.add(it.key) }
+            rows[index] = existing.copy(
+                page = fetched.page,
+                hasMore = fetched.hasMore,
+                items = existing.items + fresh
+            )
+            notifyItemChanged(index, PAYLOAD_MORE)
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ReadingRowHolder =
+            ReadingRowHolder(ReadingPosterRowView(parent.context, colors))
+
+        override fun onBindViewHolder(holder: ReadingRowHolder, position: Int) {
+            (holder.itemView as ReadingPosterRowView).bind(rows[position])
+        }
+
+        override fun onBindViewHolder(
+            holder: ReadingRowHolder,
+            position: Int,
+            payloads: MutableList<Any>
+        ) {
+            if (payloads.contains(PAYLOAD_MORE)) {
+                (holder.itemView as ReadingPosterRowView).appendOnly(rows[position])
+            } else {
+                onBindViewHolder(holder, position)
+            }
+        }
+
+        override fun getItemCount(): Int = rows.size
+    }
+
+    private class ReadingRowHolder(view: View) : RecyclerView.ViewHolder(view)
+
+    private inner class ReadingPosterRowView(
+        context: android.content.Context,
+        colors: PocketColors
+    ) : LinearLayout(context) {
+        private val label: TextView
+        private val strip: RecyclerView
+        private val stripAdapter = ReadingStripAdapter()
+        private var current: ReadingDiscoverRow? = null
+
+        init {
+            orientation = VERTICAL
+            clipChildren = false
+            label = TextView(context).apply {
+                textSize = 13f
+                setTextColor(colors.primaryText)
+                setPadding(
+                    Styler.dpInt(context, 12f), Styler.dpInt(context, 6f),
+                    Styler.dpInt(context, 12f), Styler.dpInt(context, 1f)
+                )
+            }
+            addView(label)
+            strip = RecyclerView(context).apply {
+                layoutManager = LinearLayoutManager(context, RecyclerView.HORIZONTAL, false)
+                adapter = stripAdapter
+                isFocusable = false
+                clipToPadding = false
+                clipChildren = false
+                setItemViewCacheSize(8)
+                setPadding(Styler.dpInt(context, 16f), 0, Styler.dpInt(context, 16f), 0)
+                addOnScrollListener(object : RecyclerView.OnScrollListener() {
+                    override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
+                        val manager = view.layoutManager as? LinearLayoutManager ?: return
+                        val row = current ?: return
+                        if (manager.findLastVisibleItemPosition() >= stripAdapter.itemCount - PREFETCH_AHEAD) {
+                            loadMoreReadingRow(row)
+                        }
+                    }
+                })
+            }
+            addView(strip, LayoutParams(MATCH, WRAP))
+        }
+
+        fun bind(row: ReadingDiscoverRow) {
+            current = row
+            label.text = row.title
+            stripAdapter.submit(row.items)
+            strip.scrollToPosition(0)
+        }
+
+        fun appendOnly(row: ReadingDiscoverRow) {
+            current = row
+            stripAdapter.submit(row.items)
+        }
+
+        private inner class ReadingStripAdapter : RecyclerView.Adapter<CardHolder>() {
+            private val items = mutableListOf<ReadingItem>()
+
+            fun submit(next: List<ReadingItem>) {
+                val added = next.size - items.size
+                if (added > 0 && next.take(items.size).map { it.key } == items.map { it.key }) {
+                    val from = items.size
+                    items.addAll(next.drop(from))
+                    notifyItemRangeInserted(from, added)
+                    return
+                }
+                items.clear()
+                items.addAll(next)
+                notifyDataSetChanged()
+            }
+
+            override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
+                CardHolder(newCard(parent, ROW_POSTER_DP, Styler.dpInt(parent.context, ROW_CARD_DP)))
+
+            override fun onBindViewHolder(holder: CardHolder, position: Int) {
+                bindReadingCard(holder.itemView as PosterCardView, items[position])
+            }
+
+            override fun getItemCount(): Int = items.size
+        }
+    }
+
+    private inner class ReadingHitAdapter : RecyclerView.Adapter<CardHolder>() {
+        private val items = mutableListOf<ReadingItem>()
+
+        fun submit(next: List<ReadingItem>) {
+            items.clear()
+            items.addAll(next)
+            notifyDataSetChanged()
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
+            CardHolder(newCard(parent, GRID_POSTER_DP, MATCH))
+
+        override fun onBindViewHolder(holder: CardHolder, position: Int) {
+            bindReadingCard(holder.itemView as PosterCardView, items[position])
+        }
+
+        override fun getItemCount(): Int = items.size
     }
 
     /** The vertical list of rows. */
@@ -582,7 +1089,7 @@ class DiscoverScreen(
          * rows would throw focus out of the one being scrolled, which on a
          * gamepad is the cursor.
          */
-        fun append(position: Int, rowId: String, fetched: DiscoverRow) {
+        fun append(rowId: String, fetched: DiscoverRow) {
             val index = rows.indexOfFirst { it.id == rowId }.takeIf { it >= 0 } ?: return
             val existing = rows[index]
             val seen = existing.items.mapTo(HashSet()) { it.media.key }
@@ -601,7 +1108,7 @@ class DiscoverScreen(
             RowHolder(PosterRowView(parent.context, colors))
 
         override fun onBindViewHolder(holder: RowHolder, position: Int) {
-            (holder.itemView as PosterRowView).bind(position, rows[position])
+            (holder.itemView as PosterRowView).bind(rows[position])
         }
 
         override fun onBindViewHolder(
@@ -664,7 +1171,7 @@ class DiscoverScreen(
                         if (manager.findLastVisibleItemPosition() >=
                             stripAdapter.itemCount - PREFETCH_AHEAD
                         ) {
-                            loadMoreRow(bindingIndex, row)
+                            loadMoreRow(row)
                         }
                     }
                 })
@@ -673,11 +1180,9 @@ class DiscoverScreen(
         }
 
         private var current: DiscoverRow? = null
-        private var bindingIndex = 0
 
-        fun bind(position: Int, row: DiscoverRow) {
+        fun bind(row: DiscoverRow) {
             current = row
-            bindingIndex = position
             label.text = row.title
             stripAdapter.submit(row.items)
             strip.scrollToPosition(0)
@@ -778,5 +1283,6 @@ class DiscoverScreen(
 
         const val PAYLOAD_MORE = "more"
         const val TAG_HIT = -0x7ffffff5
+        const val TAG_READING_ITEM = -0x7ffffff4
     }
 }

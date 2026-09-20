@@ -9,6 +9,22 @@ class HubEndpointsTest {
     private val base = "http://127.0.0.1:8791"
 
     @Test
+    fun `reading discovery endpoints preserve type row page and query`() {
+        assertEquals(
+            "$base/v1/reading/discover?type=all",
+            HubEndpoints.readingDiscover(base, "all").url
+        )
+        assertEquals(
+            "$base/v1/reading/discover/novel-trending?type=light_novel&page=3",
+            HubEndpoints.readingDiscoverRow(base, "novel-trending", "light_novel", 3).url
+        )
+        assertEquals(
+            "$base/v1/reading/search?q=red%20rising&type=audiobook",
+            HubEndpoints.readingSearch(base, "red rising", "audiobook").url
+        )
+    }
+
+    @Test
     fun `builds a search url`() {
         assertEquals(
             "$base/v1/search?q=dune",

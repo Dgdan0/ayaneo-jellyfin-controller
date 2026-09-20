@@ -13,6 +13,7 @@ import coil.ImageLoader
 import coil.request.ImageRequest
 import com.pocketds.hub.model.Availability
 import com.pocketds.hub.model.SearchHit
+import com.pocketds.hub.model.ReadingItem
 
 /**
  * One title in a grid: poster, badge, title, subtitle.
@@ -166,8 +167,28 @@ class PosterCardView(
             progressBar.visibility = GONE
         }
 
+        loadPoster(hit.media.poster, imageLoader, imageUrl)
+    }
+
+    fun bindReading(item: ReadingItem, imageLoader: ImageLoader, imageUrl: (String) -> String) {
+        title.text = item.title
+        subtitle.text = item.subtitle
+        subtitle.visibility = if (compactCard) GONE else VISIBLE
+        boundProgress = 0.0
+        progressBar.visibility = GONE
+        if (item.inLibrary) {
+            badge.visibility = VISIBLE
+            badge.text = "In library"
+            badge.setBackgroundColor(colors.badgeAvailable)
+        } else {
+            badge.visibility = GONE
+        }
+        loadPoster(item.cover, imageLoader, imageUrl)
+    }
+
+    private fun loadPoster(path: String, imageLoader: ImageLoader, imageUrl: (String) -> String) {
         poster.setImageDrawable(ColorDrawable(colors.posterPlaceholder))
-        val url = imageUrl(hit.media.poster)
+        val url = imageUrl(path)
         if (url.isNotEmpty()) {
             imageLoader.enqueue(
                 ImageRequest.Builder(context)

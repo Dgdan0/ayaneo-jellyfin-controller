@@ -264,18 +264,17 @@ the Hub. Range requests and cancellation are forwarded incrementally.
 
 ## 7. Pocket DS information architecture
 
-Add one `Reading` rail destination. Its default view is the unified catalog,
-not the download manager.
+Retain the existing sidebar and put one persistent `Media | Books` switch at
+the top of content screens. Home, Discover, Library, Offline, and Transfers
+remember independent focus and scroll state for each mode. Notifications,
+Manage, and Settings are shared system screens and do not change with the
+switch.
 
-Top filters:
-
-- Continue Reading
-- Books
-- Audiobooks
-- Comics
-- Manga
-- Reading Lists
-- Downloaded
+Books Discover has a second filter row: All, Books, Audiobooks, Comics, Manga,
+and Light novels. Offline groups local reading assets by their original source
+library and recreates the online work/series hierarchy using only downloaded
+editions. Transfer views keep media and reading queues distinct without adding
+more sidebar destinations.
 
 Cards retain the app's focus treatment but reserve scale padding so focused
 items cannot leave the screen. A opens the work/detail page. X opens contextual
@@ -521,9 +520,10 @@ stable release follows hardware acceptance.
   media; cancel/retry works.
 
 Status on 2026-09-20: the isolated service slice proves category routing,
-byte-identical import, and idempotent cancel. The Hub adapter has deliberately
-not started. BookKeeprr 1.1.1 has qBittorrent 5 control-name, personal-key
-authorization, and retry-contract gaps that require a joint Hub integration
+byte-identical import, and idempotent cancel. BookKeeprr 1.1.1 still has
+qBittorrent 5 control-name, personal-key authorization, and retry-contract gaps,
+so acquisition mutations and queue control remain outside the Hub. The
+read-only discovery adapter started under M4 after the joint integration
 decision. See `deploy/reading/M3_ACQUISITION_EVIDENCE.md`.
 
 ### M4 — Hub reading catalog
@@ -532,11 +532,23 @@ decision. See `deploy/reading/M3_ACQUISITION_EVIDENCE.md`.
   endpoints, image/resource proxies, authentication, cache, and cancellation.
 - Gate: adapter contract and API tests green against recorded fixtures.
 
+Status on 2026-09-20: the first green slice is complete and pushed. It adds
+BookKeeprr configuration/health, bearer-authenticated browse/category/search,
+the `reading` token scope, normalized five-type discovery models, partial
+failure handling, caching, and opaque registered cover proxying. Catalog
+libraries, canonical work details/editions, lists, reader resources, and
+progress remain in later M4 slices.
+
 ### M5 — Pocket DS browsing
 
-- Add Reading rail destination, unified catalog, work/series details, edition
-  chooser, lists, search, focus/scroll restoration, and states.
+- Add the global content-mode switch, unified catalog, work/series details,
+  edition chooser, lists, search, focus/scroll restoration, and states.
 - Gate: Kotlin tests, debug build, and hardware navigation acceptance.
+
+Status on 2026-09-20: Discover now has the persistent Media/Books switch,
+reading-type filters, browse/category paging, search, separate mode state, and a
+read-only metadata page. Kotlin tests and the debug build pass. Hardware
+acceptance and the Home/Library/Offline/Transfers Books views remain open.
 
 ### M6 — Shared reader shell
 

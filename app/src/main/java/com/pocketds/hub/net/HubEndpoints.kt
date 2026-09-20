@@ -132,6 +132,21 @@ object HubEndpoints {
     fun discoverRow(base: String, row: String, page: Int): HubRequest =
         HubRequest(join(base, "/v1/discover/" + encode(row)) + "?page=" + page)
 
+    fun readingDiscover(base: String, type: String): HubRequest =
+        HubRequest(join(base, "/v1/reading/discover") + "?type=" + encode(type))
+
+    fun readingDiscoverRow(base: String, row: String, type: String, page: Int): HubRequest =
+        HubRequest(
+            join(base, "/v1/reading/discover/" + encode(row)) +
+                "?type=" + encode(type) + "&page=" + page
+        )
+
+    fun readingSearch(base: String, query: String, type: String): HubRequest =
+        HubRequest(
+            join(base, "/v1/reading/search") +
+                "?q=" + encode(query.trim()) + "&type=" + encode(type)
+        )
+
     fun requestOptions(base: String, key: String): HubRequest =
         HubRequest(join(base, "/v1/requests/options") + "?key=" + encode(key))
 

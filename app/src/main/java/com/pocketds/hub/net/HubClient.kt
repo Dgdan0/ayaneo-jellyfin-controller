@@ -20,6 +20,8 @@ import com.pocketds.hub.model.MediaDetail
 import com.pocketds.hub.model.NotificationsResponse
 import com.pocketds.hub.model.PersonResponse
 import com.pocketds.hub.model.SearchResponse
+import com.pocketds.hub.model.ReadingDiscoverResponse
+import com.pocketds.hub.model.ReadingSearchResponse
 import com.pocketds.hub.model.LibraryResponse
 import com.pocketds.hub.model.LibraryItemsResponse
 import com.pocketds.hub.model.LibraryItemResponse
@@ -123,6 +125,13 @@ interface HubApi {
     ): HubResult<CreateRequestResponse>
     suspend fun discover(): HubResult<DiscoverResponse>
     suspend fun discoverRow(row: String, page: Int): HubResult<DiscoverResponse>
+    suspend fun readingDiscover(type: String): HubResult<ReadingDiscoverResponse>
+    suspend fun readingDiscoverRow(
+        row: String,
+        type: String,
+        page: Int
+    ): HubResult<ReadingDiscoverResponse>
+    suspend fun readingSearch(query: String, type: String): HubResult<ReadingSearchResponse>
     suspend fun requestOptions(key: String): HubResult<RequestOptions>
     suspend fun releaseTargets(key: String, season: Int): HubResult<ReleaseTargetsResponse>
     suspend fun releases(key: String, season: Int = 0, episode: Int = 0): HubResult<ReleasesResponse>
@@ -574,6 +583,25 @@ class HubClient(private val context: Context) : HubApi {
     override suspend fun discoverRow(row: String, page: Int): HubResult<DiscoverResponse> =
         get(HubEndpoints.discoverRow(base(), row, page)) {
             json.decodeFromString<DiscoverResponse>(it)
+        }
+
+    override suspend fun readingDiscover(type: String): HubResult<ReadingDiscoverResponse> =
+        get(HubEndpoints.readingDiscover(base(), type)) {
+            json.decodeFromString<ReadingDiscoverResponse>(it)
+        }
+
+    override suspend fun readingDiscoverRow(
+        row: String,
+        type: String,
+        page: Int
+    ): HubResult<ReadingDiscoverResponse> =
+        get(HubEndpoints.readingDiscoverRow(base(), row, type, page)) {
+            json.decodeFromString<ReadingDiscoverResponse>(it)
+        }
+
+    override suspend fun readingSearch(query: String, type: String): HubResult<ReadingSearchResponse> =
+        get(HubEndpoints.readingSearch(base(), query, type)) {
+            json.decodeFromString<ReadingSearchResponse>(it)
         }
 
     override suspend fun requestOptions(key: String): HubResult<RequestOptions> =
