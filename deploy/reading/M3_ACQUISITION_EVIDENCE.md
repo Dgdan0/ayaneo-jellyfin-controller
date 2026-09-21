@@ -106,6 +106,16 @@ stays pending and is retried without repeating readers that succeeded. Manage
 also exposes scoped manual Kavita and Storyteller scan actions. The Android app
 receives only the result and never sees a canonical filesystem path.
 
+The production Compose contract now keeps the existing `D:\Bookshelf` catalog
+read-only at `/legacy`, gives BookKeeprr exclusive write access to the new
+`D:\Media\Reading` managed root, and gives BookKeeprr plus its dedicated
+qBittorrent only the `E:\Downloads\Reading` acquisition workspace. Contract
+tests reject reader write access, any legacy mount in BookKeeprr, and any
+library mount in qBittorrent. The expanded Compose model validates, all six host
+roots have been prepared, and the existing 9,638 readable legacy assets remain
+untouched. Consistent service-state promotion and the disposable acquisition
+gate remain pending before the Red Rising run.
+
 Automated adapter/API tests cover the installed search shape, read bearer,
 mobile exchange, one-time renewal, missing admin credentials, scope isolation,
 opaque candidate expiry, series payload mapping, quality-profile validation,

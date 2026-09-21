@@ -4,6 +4,12 @@ This Compose project is an isolated qualification environment for Kavita,
 Storyteller, bookkeeprr, and a dedicated qBittorrent client. It must not point
 at production media during qualification.
 
+The separately tested production mount model is in
+[`compose.production.yaml`](compose.production.yaml), with concrete Ayaneo
+defaults in [`.env.production.example`](.env.production.example) and its
+promotion gate in [`PRODUCTION_STORAGE.md`](PRODUCTION_STORAGE.md). It keeps
+the existing Bookshelf read-only and gives BookKeeprr a new managed root.
+
 See [SECRETS_AND_ACCESS.md](SECRETS_AND_ACCESS.md) before changing accounts,
 tokens, or remote-access routes. Bootstrap files are not the authority for a
 running service account.

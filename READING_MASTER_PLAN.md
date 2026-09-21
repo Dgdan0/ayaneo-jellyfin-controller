@@ -536,6 +536,15 @@ Red Rising acceptance run remain open. Pause remains absent because BookKeeprr
 1.1.1 cannot model it correctly. See
 `deploy/reading/M3_ACQUISITION_EVIDENCE.md`.
 
+Production storage addendum on 2026-09-21: inventory found 9,638 readable
+legacy assets totaling about 215 GB under `D:\Bookshelf`, far beyond the first
+7 GB migration subset. The production contract therefore mounts that catalog
+read-only and sends every new acquisition to `D:\Media\Reading`; qBittorrent
+uses the separate `E:\Downloads\Reading` workspace and cannot see either
+library. The concrete Compose model and root contract tests pass, and empty
+host roots are prepared. Service-state promotion and the disposable import
+gate remain before Red Rising.
+
 ### M4 — Hub reading catalog
 
 - Add configuration, adapters, normalized domain, browse/detail/search/list

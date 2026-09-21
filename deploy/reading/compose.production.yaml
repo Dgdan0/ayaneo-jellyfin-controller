@@ -1,0 +1,118 @@
+name: pocketds-reading
+
+services:
+  kavita:
+    image: ${KAVITA_IMAGE:?Set KAVITA_IMAGE to the qualified digest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${KAVITA_PORT:-5000}:5000"
+    volumes:
+      - "${READING_STATE_ROOT}/kavita:/kavita/config"
+      - "${READING_LEGACY_ROOT}:/legacy:ro"
+      - "${READING_MANAGED_ROOT}:/reading:ro"
+    networks:
+      - reading
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5000"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  storyteller:
+    image: ${STORYTELLER_IMAGE:?Set STORYTELLER_IMAGE to the qualified digest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${STORYTELLER_PORT:-8001}:8001"
+    environment:
+      STORYTELLER_SECRET_KEY_FILE: /run/secrets/storyteller_secret
+      STORYTELLER_LOG_LEVEL: info
+      STORYTELLER_SCRATCH_DIR: /data/tmp
+    secrets:
+      - storyteller_secret
+    volumes:
+      - "${READING_STATE_ROOT}/storyteller:/data"
+      - "${READING_LEGACY_ROOT}:/legacy:ro"
+      - "${READING_MANAGED_ROOT}:/library:ro"
+      - "${READING_DERIVED_ROOT}:/derived:rw"
+    networks:
+      - reading
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8001"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+
+  bookkeeprr:
+    image: ${BOOKKEEPRR_IMAGE:?Set BOOKKEEPRR_IMAGE to the qualified digest}
+    restart: unless-stopped
+    depends_on:
+      - qbittorrent
+    ports:
+      - "127.0.0.1:${BOOKKEEPRR_PORT:-3000}:3000"
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      BOOKKEEPRR_DB_PATH: /config/bookkeeprr.db
+      BOOKKEEPRR_CONFIG_DIR: /config
+      BOOKKEEPRR_MEDIA_ROOT: /media
+      BOOKKEEPRR_PORT: "3000"
+      BOOKKEEPRR_LOG_LEVEL: info
+    volumes:
+      - "${READING_STATE_ROOT}/bookkeeprr:/config"
+      - "${READING_MANAGED_ROOT}:/media:rw"
+      - "${READING_DOWNLOAD_ROOT}:/downloads:rw"
+    networks:
+      - reading
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  qbittorrent:
+    image: ${QBITTORRENT_COMPAT_IMAGE:?Set QBITTORRENT_COMPAT_IMAGE to the qualified digest}
+    restart: unless-stopped
+    depends_on:
+      - qbittorrent-backend
+    volumes:
+      - "./qbt5-compat.Caddyfile:/etc/caddy/Caddyfile:ro"
+    networks:
+      - reading
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  qbittorrent-backend:
+    image: ${QBITTORRENT_IMAGE:?Set QBITTORRENT_IMAGE to the qualified digest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${QBITTORRENT_WEBUI_PORT:-18080}:${QBITTORRENT_WEBUI_PORT:-18080}"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: ${TZ:-Etc/UTC}
+      WEBUI_PORT: ${QBITTORRENT_WEBUI_PORT:-18080}
+    volumes:
+      - "${READING_STATE_ROOT}/qbittorrent:/config"
+      - "${READING_DOWNLOAD_ROOT}:/downloads:rw"
+    networks:
+      - reading
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${QBITTORRENT_WEBUI_PORT:-18080}/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+networks:
+  reading:
+    name: pocketds-reading
+
+secrets:
+  storyteller_secret:
+    file: ${READING_SECRETS_ROOT}/storyteller_secret.txt

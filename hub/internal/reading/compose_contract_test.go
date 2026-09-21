@@ -11,6 +11,7 @@ import (
 )
 
 type composeContract struct {
+	Name     string `yaml:"name"`
 	Services map[string]struct {
 		Image       string            `yaml:"image"`
 		Restart     string            `yaml:"restart"`
@@ -26,6 +27,113 @@ type composeContract struct {
 	Secrets map[string]struct {
 		File string `yaml:"file"`
 	} `yaml:"secrets"`
+}
+
+func TestReadingProductionComposeSeparatesLegacyManagedAndDownloads(t *testing.T) {
+	composePath := filepath.Join("..", "..", "..", "deploy", "reading", "compose.production.yaml")
+	raw, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document composeContract
+	if err := yaml.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.Name != "pocketds-reading" {
+		t.Fatalf("production Compose name = %q", document.Name)
+	}
+	for _, name := range []string{"kavita", "storyteller", "bookkeeprr", "qbittorrent", "qbittorrent-backend"} {
+		service, ok := document.Services[name]
+		if !ok {
+			t.Errorf("missing %s service", name)
+			continue
+		}
+		if service.Image == "" || strings.HasSuffix(service.Image, ":latest") {
+			t.Errorf("%s image is not pinned: %q", name, service.Image)
+		}
+		if service.Restart != "unless-stopped" {
+			t.Errorf("%s restart = %q", name, service.Restart)
+		}
+		for _, binding := range service.Ports {
+			if !strings.HasPrefix(binding, "127.0.0.1:") {
+				t.Errorf("%s exposes non-loopback port %q", name, binding)
+			}
+		}
+	}
+
+	for _, name := range []string{"kavita", "storyteller"} {
+		mounts := strings.Join(document.Services[name].Volumes, "\n")
+		managedTarget := "/reading"
+		if name == "storyteller" {
+			managedTarget = "/library"
+		}
+		for _, required := range []string{
+			"${READING_LEGACY_ROOT}:/legacy:ro",
+			"${READING_MANAGED_ROOT}:" + managedTarget + ":ro",
+		} {
+			if !strings.Contains(mounts, required) {
+				t.Errorf("%s is missing read-only reader mount %q: %s", name, required, mounts)
+			}
+		}
+		if strings.Contains(mounts, "READING_LEGACY_ROOT}:/legacy:rw") || strings.Contains(mounts, "READING_MANAGED_ROOT}:"+managedTarget+":rw") {
+			t.Errorf("%s can write source media: %s", name, mounts)
+		}
+	}
+
+	bookkeeprr := strings.Join(document.Services["bookkeeprr"].Volumes, "\n")
+	for _, required := range []string{
+		"${READING_MANAGED_ROOT}:/media:rw",
+		"${READING_DOWNLOAD_ROOT}:/downloads:rw",
+	} {
+		if !strings.Contains(bookkeeprr, required) {
+			t.Errorf("bookkeeprr is missing %q: %s", required, bookkeeprr)
+		}
+	}
+	if strings.Contains(bookkeeprr, "READING_LEGACY_ROOT") {
+		t.Errorf("bookkeeprr must never see legacy media: %s", bookkeeprr)
+	}
+
+	qbit := strings.Join(document.Services["qbittorrent-backend"].Volumes, "\n")
+	if !strings.Contains(qbit, "${READING_DOWNLOAD_ROOT}:/downloads:rw") {
+		t.Errorf("qBittorrent is missing its download root: %s", qbit)
+	}
+	if strings.Contains(qbit, "READING_LEGACY_ROOT") || strings.Contains(qbit, "READING_MANAGED_ROOT") {
+		t.Errorf("qBittorrent must not see any library root: %s", qbit)
+	}
+}
+
+func TestReadingProductionEnvironmentUsesDistinctAbsoluteWindowsRoots(t *testing.T) {
+	envPath := filepath.Join("..", "..", "..", "deploy", "reading", ".env.production.example")
+	raw, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok && !strings.HasPrefix(key, "#") {
+			values[key] = strings.TrimSpace(value)
+		}
+	}
+	roots := []string{"READING_STATE_ROOT", "READING_LEGACY_ROOT", "READING_MANAGED_ROOT", "READING_DOWNLOAD_ROOT", "READING_DERIVED_ROOT", "READING_SECRETS_ROOT"}
+	seen := map[string]string{}
+	windowsAbsolute := regexp.MustCompile(`^[A-Za-z]:[/\\]`)
+	for _, key := range roots {
+		value := values[key]
+		if !windowsAbsolute.MatchString(value) {
+			t.Errorf("%s must be an absolute Windows path, got %q", key, value)
+		}
+		normalized := strings.ToLower(strings.TrimRight(strings.ReplaceAll(value, "\\", "/"), "/"))
+		if previous := seen[normalized]; previous != "" {
+			t.Errorf("%s and %s share root %q", previous, key, value)
+		}
+		seen[normalized] = key
+	}
+	for _, forbidden := range []string{"password=", "token=", "api_key=", "lab-data", "lab-media", "lab-acquisition"} {
+		if strings.Contains(strings.ToLower(string(raw)), forbidden) {
+			t.Errorf("production environment example contains %q", forbidden)
+		}
+	}
 }
 
 func TestReadingLabComposeIsSafeByDefault(t *testing.T) {
