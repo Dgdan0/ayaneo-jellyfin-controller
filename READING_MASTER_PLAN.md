@@ -546,6 +546,18 @@ and three-book Trilogy. A durable manifest makes retries idempotent and repairs
 weak imported series metadata before Storyteller grouping. The app also shows
 the Open Library author portrait in the selection view.
 
+Mistborn acceptance addendum on 2026-09-21: Open Library exposed only the first
+volume for its trilogy tags, so the Hub now repairs incomplete membership from
+Wikidata's explicit has-part/Open-Library identifiers and then hydrates covers,
+authors, ISBNs, and dates through Open Library. Verified member order survives
+edition metadata with misleading publication dates. The Pocket DS selected the
+three-book original trilogy; BookKeeprr imported The Final Empire and The Hero
+of Ages while The Well of Ascension remained unavailable after an indexer HTTP
+429. The library presents one Mistborn Original Trilogy collection with two
+available full-colour volumes and the missing middle volume dimmed in its
+correct position. A common EPUB prefix variation (`Mistborn: The Final Empire`)
+is reconciled only when both the requested title suffix and author match.
+
 Production storage addendum on 2026-09-21: inventory found 9,638 readable
 legacy assets totaling about 215 GB under `D:\Bookshelf`, far beyond the first
 7 GB migration subset. The production contract therefore mounts that catalog
@@ -646,6 +658,14 @@ and pinned offline publications remain in a later M7 enhancement slice.
   cache, progress, and offline.
 - Gate: rendering/instrumentation tests plus representative hardware books.
 
+Status on 2026-09-21: R3a is accepted on Pocket DS. Readium renders real
+Storyteller EPUBs from the Hub's authenticated range gateway, persists and
+restores locators, keeps text clear of visible chrome, and provides real TOC
+jumps plus live persistent appearance controls. Red Rising and Mistborn passed
+native opening and resume checks. EPUB search, selection/dictionary,
+bookmarks, Page Flip-style preview, the broader EPUB fixture matrix, offline
+pinning, and PDF remain open.
+
 ### M9 — Audiobooks and edition pairing
 
 - Extend Media3 audio mode, chapters, speed, sleep, bookmarks, pairing UI, and
@@ -686,21 +706,18 @@ and pinned offline publications remain in a later M7 enhancement slice.
 
 ## 14. Immediate implementation boundary
 
-M0-M5 now have working service, acquisition, catalog, and Pocket DS browsing
-slices. The tested Hub is installed and running under FireDaemon with the
-reading reconciler and series grouping active. M6's reference review,
-test-first shared reader state, fake engines, and Pocket DS hardware acceptance
-are complete. The remaining M5 gate is Pocket DS hardware navigation against
-the production Hub.
+M0-M8 now have working service, acquisition, catalog, Pocket DS browsing,
+shared-reader, paged-image, and native-EPUB slices. The current Hub candidate
+passed the installed production configuration and the current app candidate
+passed real Pocket DS navigation through Mistborn acquisition, partial import,
+grouping, missing-book presentation, and EPUB opening.
 
-The next reader milestone is M8/R3a: test and integrate the real EPUB engine,
-including stable locators, themes and typography, one/two-column layout,
-TOC/search, dictionary routing, temporary cache, progress, and lifecycle
-restoration. Mistborn is reserved as its real end-to-end acquisition,
-series/author grouping, metadata/cover, open, and resume acceptance run. PDF is
-the following R3b slice. Advanced image modes remain an M7 enhancement; audio,
-read/listen handoff, and synchronized highlighting remain M9/M12 work. M1B's
-remaining iPhone rows can be completed when that device is available.
+The next reader slice completes EPUB study/navigation tools: in-book search,
+bookmarks, selection and Android dictionary routing, and a Page Flip-style
+non-committing preview. PDF is the following R3b slice. Advanced image modes
+remain an M7 enhancement; audio, read/listen handoff, and synchronized
+highlighting remain M9/M12 work. M1B's remaining iPhone rows can be completed
+when that device is available.
 
 The accepted interaction contract, controller map, reference-app audit, and
 test-first R0-R6 delivery gates are in `READER_DESIGN_PLAN.md`.

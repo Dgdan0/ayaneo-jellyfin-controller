@@ -2,7 +2,7 @@
 
 Date: 2026-09-21  
 Branch: `feature/reading-library`  
-Status: R0 reference audit, R1 shared shell, and the R2 real paged-image slice accepted on Pocket DS
+Status: R0 reference audit, R1 shared shell, R2 paged images, and R3a native EPUB accepted on Pocket DS
 
 ## 1. Product boundary
 
@@ -461,6 +461,17 @@ crop/rotation/filters, and pinned offline publications.
 - Gate: EPUB 2/3, RTL, vertical text, footnotes, tables, embedded fonts,
   fixed-layout EPUB, text PDF, scan PDF, offline return, and Kindle comparison.
 
+R3a's production EPUB slice passed on the Pocket DS on 2026-09-21. The Hub
+streams authenticated Storyteller EPUBs with range support and opaque URLs.
+The Android app caches complete packages, opens them through Readium, restores
+stable Storyteller locators, reserves the page viewport while chrome is shown,
+and exposes a controller-first table of contents and live appearance sheet.
+Theme, font, size, spacing, margins, columns, and publisher-style choices
+persist without reopening the publication. Live acceptance covered Red Rising
+resume/TOC/appearance and a newly acquired Mistborn volume. Search, selection,
+dictionary, bookmarks, Page Flip-style preview, additional EPUB layout
+fixtures, pinned offline files, and PDF remain in R3b/R3c.
+
 ### R4 — audio and handoff
 
 - First write tests for chapter mapping, calibration, speed/sleep/bookmarks,
@@ -499,10 +510,9 @@ The design recommends:
 - test-first delivery at every milestone, with reader code beginning only after
   R0 is observed on the actual device.
 
-R0, R1, and the real single-page R2 slice are complete. The next implementation
-slice is R3a: write the Readium locator, typography, columns, navigation,
-search, dictionary-routing, caching, and progress tests, then connect real EPUB
-publications. Mistborn is the end-to-end acquisition, series/author grouping,
-cover, opening, and resume fixture for that slice. PDF follows as R3b; the
-remaining advanced image modes and audiobook/read-along work retain their
-separate gates.
+R0, R1, R2, and the first real R3a EPUB slice are complete. Mistborn passed the
+end-to-end acquisition, verified-trilogy selection, partial-download grouping,
+missing-volume presentation, cover, and native-open gates. The next EPUB slice
+adds in-book search, bookmarks, selection/dictionary routing, and Page
+Flip-style preview. PDF follows as R3b; the remaining advanced image modes and
+audiobook/read-along work retain their separate gates.
