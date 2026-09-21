@@ -268,6 +268,11 @@ func (s *Server) readingItem(item bookkeeprr.Item, fallback bookkeeprr.ContentTy
 		Source: item.Source, SourceID: item.SourceID, Description: item.Description,
 		InLibrary: item.InLibrary, Actions: []string{"detail"},
 	}
+	item.ContentType = kind
+	s.readingCandidates.put(out.Key, item)
+	if !item.InLibrary && s.bookkeeprr != nil && s.bookkeeprr.CanRequest() {
+		out.Actions = append(out.Actions, "request")
+	}
 	if token := s.images.registerReadingCover(item.CoverURL); token != "" {
 		out.Cover = "/v1/img/reading/" + token
 	}

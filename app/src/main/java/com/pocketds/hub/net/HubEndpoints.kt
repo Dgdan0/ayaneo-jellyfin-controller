@@ -164,6 +164,15 @@ object HubEndpoints {
     fun readingWork(base: String, workId: String): HubRequest =
         HubRequest(join(base, "/v1/reading/works/" + encode(workId)))
 
+    fun readingRequestOptions(base: String, key: String): HubRequest =
+        HubRequest(join(base, "/v1/reading/requests/options") + "?key=" + encode(key))
+
+    fun readingRequests(base: String): HubRequest =
+        HubRequest(join(base, "/v1/reading/requests"), method = "POST")
+
+    fun readingDownloads(base: String): HubRequest =
+        HubRequest(join(base, "/v1/reading/downloads"))
+
     fun requestOptions(base: String, key: String): HubRequest =
         HubRequest(join(base, "/v1/requests/options") + "?key=" + encode(key))
 

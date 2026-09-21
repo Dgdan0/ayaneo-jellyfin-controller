@@ -66,11 +66,22 @@ The Android application must receive only its Hub URL and scoped Hub bearer
 token. Kavita, Storyteller, bookkeeprr, qBittorrent, indexer, and Jellyfin
 administrator secrets stay on the Ayaneo Media PC.
 
-The Hub's read-only BookKeeprr discovery adapter uses a revocable personal API
-key from `hub.secrets.yaml` under `services.bookkeeprr.api_key`. The matching
-service address and enable flag belong in `hub.yaml`; tokens that call the
-reading endpoints need the `reading` scope. This key does not grant the Hub
-BookKeeprr's administrator-only acquisition controls.
+The Hub uses two BookKeeprr credentials with separate jobs:
+
+- `services.bookkeeprr.api_key` is a revocable personal API key used for
+  discovery, quality-profile reads, and transfer status.
+- `services.bookkeeprr.username` and `services.bookkeeprr.password` identify a
+  dedicated local administrator service account used only for acquisition
+  writes. The Hub signs in, exchanges the one-time mobile code for an in-memory
+  bearer, and signs in again once if BookKeeprr returns 401. BookKeeprr 1.1.1
+  has no refresh-token route, so no mobile or browser-session token is written
+  to disk. Do not enable TOTP on this non-interactive service account.
+
+Put the password only in `hub.secrets.yaml` or the referenced environment
+variable. The matching service address, enable flag, and non-secret username
+can stay in `hub.yaml`. Tokens that browse reading data need the `reading`
+scope; adding a title also requires `request`. The Android app receives neither
+BookKeeprr credential.
 
 The normalized reading catalog has two additional server-side credentials:
 

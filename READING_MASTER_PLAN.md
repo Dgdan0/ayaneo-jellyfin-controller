@@ -519,12 +519,15 @@ stable release follows hardware acceptance.
 - Gate: fixture acquisitions import correctly; failures never touch existing
   media; cancel/retry works.
 
-Status on 2026-09-20: the isolated service slice proves category routing,
-byte-identical import, and idempotent cancel. BookKeeprr 1.1.1 still has
-qBittorrent 5 control-name, personal-key authorization, and retry-contract gaps,
-so acquisition mutations and queue control remain outside the Hub. The
-read-only discovery adapter started under M4 after the joint integration
-decision. See `deploy/reading/M3_ACQUISITION_EVIDENCE.md`.
+Status on 2026-09-21: the isolated service slice proves category routing,
+byte-identical import, and idempotent cancel. The Hub now exposes tested opaque
+request options, single-book/whole-series creation, and normalized BookKeeprr
+transfer status. Admin writes use BookKeeprr's mobile login/exchange flow;
+personal-key reads remain separate. The Pocket DS has the request form and a
+Books transfer view. Production paths, Hub-owned retry/cancel reconciliation,
+and the deferred Red Rising acceptance run remain open. Pause remains absent
+because BookKeeprr 1.1.1 cannot model it correctly. See
+`deploy/reading/M3_ACQUISITION_EVIDENCE.md`.
 
 ### M4 — Hub reading catalog
 
@@ -550,13 +553,15 @@ remain in later M4 slices.
   edition chooser, lists, search, focus/scroll restoration, and states.
 - Gate: Kotlin tests, debug build, and hardware navigation acceptance.
 
-Status on 2026-09-20: Discover now has the persistent Media/Books switch,
+Status on 2026-09-21: Discover now has the persistent Media/Books switch,
 reading-type filters, browse/category paging, search, separate mode state, and a
 read-only discovery metadata page. Library shares that global switch and now
 browses real Kavita/Storyteller libraries, paged and sortable normalized work
 grids, progress, canonical work details, editions, Continue data, and available
-sections. Kotlin tests and the debug build pass. Pocket DS hardware acceptance
-and the Home/Offline/Transfers Books views remain open.
+sections. Reading discovery details now offer the tested BookKeeprr request
+form, and Transfers shares the Media/Books switch. Kotlin tests and the debug
+build pass. Pocket DS hardware acceptance and the Home/Offline Books views
+remain open.
 
 ### M6 — Shared reader shell
 

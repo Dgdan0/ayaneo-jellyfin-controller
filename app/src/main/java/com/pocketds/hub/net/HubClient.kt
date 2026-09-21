@@ -25,6 +25,10 @@ import com.pocketds.hub.model.ReadingSearchResponse
 import com.pocketds.hub.model.ReadingLibrariesResponse
 import com.pocketds.hub.model.ReadingLibraryItemsResponse
 import com.pocketds.hub.model.ReadingWork
+import com.pocketds.hub.model.ReadingCreateRequestBody
+import com.pocketds.hub.model.ReadingDownloadsResponse
+import com.pocketds.hub.model.ReadingRequestOptions
+import com.pocketds.hub.model.ReadingRequestResponse
 import com.pocketds.hub.model.LibraryResponse
 import com.pocketds.hub.model.LibraryItemsResponse
 import com.pocketds.hub.model.LibraryItemResponse
@@ -143,6 +147,9 @@ interface HubApi {
         direction: String = "asc"
     ): HubResult<ReadingLibraryItemsResponse>
     suspend fun readingWork(workId: String): HubResult<ReadingWork>
+    suspend fun readingRequestOptions(key: String): HubResult<ReadingRequestOptions>
+    suspend fun requestReading(body: ReadingCreateRequestBody): HubResult<ReadingRequestResponse>
+    suspend fun readingDownloads(): HubResult<ReadingDownloadsResponse>
     suspend fun requestOptions(key: String): HubResult<RequestOptions>
     suspend fun releaseTargets(key: String, season: Int): HubResult<ReleaseTargetsResponse>
     suspend fun releases(key: String, season: Int = 0, episode: Int = 0): HubResult<ReleasesResponse>
@@ -633,6 +640,23 @@ class HubClient(private val context: Context) : HubApi {
     override suspend fun readingWork(workId: String): HubResult<ReadingWork> =
         get(HubEndpoints.readingWork(base(), workId)) {
             json.decodeFromString<ReadingWork>(it)
+        }
+
+    override suspend fun readingRequestOptions(key: String): HubResult<ReadingRequestOptions> =
+        get(HubEndpoints.readingRequestOptions(base(), key), noCache = true) {
+            json.decodeFromString<ReadingRequestOptions>(it)
+        }
+
+    override suspend fun requestReading(
+        body: ReadingCreateRequestBody
+    ): HubResult<ReadingRequestResponse> = postOnce(
+        HubEndpoints.readingRequests(base()),
+        json.encodeToString(ReadingCreateRequestBody.serializer(), body)
+    ) { json.decodeFromString<ReadingRequestResponse>(it) }
+
+    override suspend fun readingDownloads(): HubResult<ReadingDownloadsResponse> =
+        get(HubEndpoints.readingDownloads(base()), noCache = true) {
+            json.decodeFromString<ReadingDownloadsResponse>(it)
         }
 
     override suspend fun requestOptions(key: String): HubResult<RequestOptions> =

@@ -52,10 +52,11 @@ type Server struct {
 	// takes 362ms here. See internal/index.
 	index *index.Index
 
-	cache          *cache.Store
-	images         *imageProxy
-	offline        *offlineStore
-	readingCatalog *readingdomain.CatalogStore
+	cache             *cache.Store
+	images            *imageProxy
+	offline           *offlineStore
+	readingCatalog    *readingdomain.CatalogStore
+	readingCandidates *readingCandidateStore
 
 	playbackMu       sync.Mutex
 	playbackSessions map[string]*playbackSession
@@ -76,16 +77,17 @@ func NewServer(cfg *config.Config) *Server {
 			cfg.Auth.AuthFailureBan.Window.OrDefault(time.Minute),
 			cfg.Auth.AuthFailureBan.Ban.OrDefault(15*time.Minute),
 		),
-		prober:           NewProber(cfg),
-		cache:            cache.New(),
-		index:            index.New(),
-		images:           newImageProxy(),
-		offline:          newOfflineStore(cfg.Server.OfflineRegistry),
-		readingCatalog:   readingdomain.NewCatalogStore(cfg.Server.ReadingCatalog),
-		playbackSessions: make(map[string]*playbackSession),
-		playbackTTL:      30 * time.Minute,
-		previewFrame:     extractPreviewFrame,
-		startedAt:        time.Now(),
+		prober:            NewProber(cfg),
+		cache:             cache.New(),
+		index:             index.New(),
+		images:            newImageProxy(),
+		offline:           newOfflineStore(cfg.Server.OfflineRegistry),
+		readingCatalog:    readingdomain.NewCatalogStore(cfg.Server.ReadingCatalog),
+		readingCandidates: newReadingCandidateStore(2000),
+		playbackSessions:  make(map[string]*playbackSession),
+		playbackTTL:       30 * time.Minute,
+		previewFrame:      extractPreviewFrame,
+		startedAt:         time.Now(),
 	}
 	for _, cidr := range cfg.Server.TrustProxyCIDRs {
 		if _, network, err := net.ParseCIDR(cidr); err == nil {
@@ -232,6 +234,9 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/libraries", s.handleReadingLibraries)
 	authed.HandleFunc("GET /v1/reading/libraries/{libraryId}/items", s.handleReadingLibraryItems)
 	authed.HandleFunc("GET /v1/reading/works/{workId}", s.handleReadingWork)
+	authed.HandleFunc("GET /v1/reading/requests/options", s.handleReadingRequestOptions)
+	authed.HandleFunc("POST /v1/reading/requests", s.handleReadingCreateRequest)
+	authed.HandleFunc("GET /v1/reading/downloads", s.handleReadingDownloads)
 	authed.HandleFunc("GET /v1/img/reading/kavita/{seriesId}", s.handleKavitaReadingImage)
 	authed.HandleFunc("GET /v1/img/reading/storyteller/{bookId}", s.handleStorytellerReadingImage)
 	authed.HandleFunc("GET /v1/img/reading/{token}", s.handleReadingImage)

@@ -631,7 +631,7 @@ class DiscoverScreen(
     }
 
     private fun openReadingDetail(item: ReadingItem) {
-        host?.push(ReadingDetailScreen(api, item))
+        host?.push(ReadingDetailScreen(api, item, ringVisible))
     }
 
     // ---- browse ------------------------------------------------------------

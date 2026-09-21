@@ -1,8 +1,8 @@
 # M3 BookKeeprr acquisition evidence
 
-Date: 2026-09-20
+Date: 2026-09-21
 Branch: `feature/reading-library`
-Status: service-side qualification complete; Hub integration not started
+Status: request/status integration implemented and automated; production storage gate open
 
 ## Scope and safety
 
@@ -73,7 +73,31 @@ mobile tokens. This mismatch is why a valid admin personal key receives 401 on
 those writes. The Hub must not store a browser session as an accidental
 workaround.
 
-## Gate and next decision
+## Hub and Pocket DS integration
+
+The selected boundary is option 1 below. BookKeeprr owns metadata search,
+request creation, release search, and import. The Hub exposes opaque request
+keys, normalized quality profiles, single-book/whole-series choices, and
+sanitized transfer status. It does not expose qBittorrent hashes, indexer GUIDs,
+filesystem paths, upstream URLs, or BookKeeprr credentials.
+
+BookKeeprr search parsing now accepts the installed 1.1.1 error object as well
+as legacy array and null forms. Acquisition writes use a dedicated admin mobile
+bearer obtained through the documented login/exchange flow and renew once after
+401. The Pocket DS reading detail page has an explicit controller form, and
+Transfers now has a Media/Books switch with BookKeeprr status rows.
+
+Automated adapter/API tests cover the installed search shape, read bearer,
+mobile exchange, one-time renewal, missing admin credentials, scope isolation,
+opaque candidate expiry, series payload mapping, quality-profile validation,
+and transport-identity redaction. Kotlin tests cover endpoints, wire models,
+and single-versus-series form state.
+
+No production media root, indexer, download client, or real title was changed.
+The full Red Rising run remains deferred until production storage, import roots,
+and reader scans are configured together.
+
+## Remaining gate
 
 The service-side acquisition slice is reproducible and safe enough to proceed
 to adapter design: local fixture acquisition, category routing, import naming,
@@ -81,7 +105,7 @@ byte integrity, and idempotent cancel work. The complete M3 gate remains open
 because retry and durable pause semantics are not supplied by the pinned
 BookKeeprr API.
 
-Before any Ayaneo Hub code is written, choose the ownership boundary together:
+The ownership alternatives considered were:
 
 1. keep BookKeeprr for search/request/import and let the Hub model transport
    controls and retry using the dedicated qBittorrent plus a BookKeeprr
@@ -91,4 +115,7 @@ Before any Ayaneo Hub code is written, choose the ownership boundary together:
 3. initially expose request, queue, diagnostics, and cancel only, then add
    pause/retry after upstream support exists.
 
-No Hub configuration, adapter, endpoint, or Android UI was added in this slice.
+Option 1 is now implemented for request creation and status. Hub-owned retry,
+cancel/reconciliation, production path cutover, and the full Red Rising
+acceptance run remain open. Pause is still intentionally absent because the
+pinned BookKeeprr version cannot represent its state accurately.

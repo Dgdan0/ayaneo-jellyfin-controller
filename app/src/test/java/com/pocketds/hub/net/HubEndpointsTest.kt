@@ -41,6 +41,18 @@ class HubEndpointsTest {
     }
 
     @Test
+    fun `reading acquisition endpoints keep opaque candidate keys`() {
+        val key = "reading:0123456789abcdef0123456789abcdef"
+        assertEquals(
+            "$base/v1/reading/requests/options?key=reading%3A0123456789abcdef0123456789abcdef",
+            HubEndpoints.readingRequestOptions(base, key).url
+        )
+        assertEquals("$base/v1/reading/requests", HubEndpoints.readingRequests(base).url)
+        assertEquals("POST", HubEndpoints.readingRequests(base).method)
+        assertEquals("$base/v1/reading/downloads", HubEndpoints.readingDownloads(base).url)
+    }
+
+    @Test
     fun `builds a search url`() {
         assertEquals(
             "$base/v1/search?q=dune",

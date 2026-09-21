@@ -62,4 +62,38 @@ class ReadingTest {
         )
         assertEquals("Manga", ReadingWork(title = "Lab Manga", kind = "manga").subtitle)
     }
+
+    @Test
+    fun `decodes request choices and normalized reading transfers`() {
+        val options = json.decodeFromString<ReadingRequestOptions>(
+            """{"key":"reading:abc","contentType":"ebook","title":"Red Rising","author":"Pierce Brown","modes":[{"id":"single","label":"This book","requiresTotalBooks":false},{"id":"series","label":"Entire series","requiresTotalBooks":true}],"qualityProfiles":[{"id":7,"label":"English EPUB","default":true,"preferCompleteBatches":true}],"monitoring":["all","none"]}"""
+        )
+        assertEquals("series", options.modes.last().id)
+        assertTrue(options.modes.last().requiresTotalBooks)
+        assertEquals(7, options.qualityProfiles.single().id)
+        assertEquals(0, options.defaultProfileIndex)
+
+        val transfers = json.decodeFromString<ReadingDownloadsResponse>(
+            """{"items":[{"id":"reading:download:9","seriesId":4,"contentType":"ebook","title":"Red Rising","releaseTitle":"Red Rising EPUB","status":"downloading","progressPercent":25,"downloadSpeedBytesPerSecond":4096,"etaSeconds":90,"sizeBytes":12345,"failed":false}]}"""
+        )
+        val transfer = transfers.items.single()
+        assertEquals("Red Rising", transfer.title)
+        assertEquals(0.25, transfer.progress, 0.0001)
+        assertTrue(transfer.isActive)
+    }
+
+    @Test
+    fun `reading request body retains series count and selected profile`() {
+        val encoded = json.encodeToString(
+            ReadingCreateRequestBody.serializer(),
+            ReadingCreateRequestBody(
+                key = "reading:abc", mode = "series", totalBooks = 6,
+                qualityProfileId = 7, monitoring = "all"
+            )
+        )
+        val decoded = json.decodeFromString<ReadingCreateRequestBody>(encoded)
+        assertEquals("series", decoded.mode)
+        assertEquals(6, decoded.totalBooks)
+        assertEquals(7, decoded.qualityProfileId)
+    }
 }

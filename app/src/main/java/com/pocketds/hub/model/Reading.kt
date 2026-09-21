@@ -75,6 +75,81 @@ data class ReadingSearchResponse(
 )
 
 @Serializable
+data class ReadingRequestMode(
+    val id: String = "",
+    val label: String = "",
+    val requiresTotalBooks: Boolean = false
+)
+
+@Serializable
+data class ReadingQualityProfile(
+    val id: Int = 0,
+    val label: String = "",
+    val default: Boolean = false,
+    val preferCompleteBatches: Boolean = false
+)
+
+@Serializable
+data class ReadingRequestOptions(
+    val key: String = "",
+    val contentType: String = "ebook",
+    val title: String = "",
+    val author: String = "",
+    val modes: List<ReadingRequestMode> = emptyList(),
+    val qualityProfiles: List<ReadingQualityProfile> = emptyList(),
+    val monitoring: List<String> = emptyList()
+) {
+    val defaultProfileIndex: Int
+        get() = qualityProfiles.indexOfFirst { it.default }.coerceAtLeast(0)
+}
+
+@Serializable
+data class ReadingCreateRequestBody(
+    val key: String,
+    val mode: String,
+    val totalBooks: Int = 0,
+    val qualityProfileId: Int,
+    val monitoring: String = "all"
+)
+
+@Serializable
+data class ReadingRequestResponse(
+    val requestId: String = "",
+    val seriesId: Int = 0,
+    val state: String = "",
+    val message: String = ""
+)
+
+@Serializable
+data class ReadingDownloadItem(
+    val id: String = "",
+    val seriesId: Int = 0,
+    val contentType: String = "",
+    val title: String = "",
+    val releaseTitle: String = "",
+    val status: String = "",
+    val progressPercent: Int = 0,
+    val downloadSpeedBytesPerSecond: Long = 0,
+    val etaSeconds: Long = 0,
+    val sizeBytes: Long = 0,
+    val addedAt: String = "",
+    val completedAt: String = "",
+    val importedAt: String = "",
+    val failed: Boolean = false
+) {
+    val progress: Double get() = progressPercent.coerceIn(0, 100) / 100.0
+    val isActive: Boolean
+        get() = status == "queued" || status == "downloading" || status == "importing"
+}
+
+@Serializable
+data class ReadingDownloadsResponse(
+    val items: List<ReadingDownloadItem> = emptyList()
+) {
+    val anyActive: Boolean get() = items.any { it.isActive }
+}
+
+@Serializable
 data class ReadingLibrary(
     val id: String = "",
     val source: String = "",

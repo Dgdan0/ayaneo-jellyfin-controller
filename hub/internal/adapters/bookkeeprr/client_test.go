@@ -2,8 +2,10 @@ package bookkeeprr
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"ayaneohub/internal/config"
@@ -36,6 +38,161 @@ func TestBrowseUsesBearerAuthAndDecodesRows(t *testing.T) {
 	item := got.Rows[0].Items[0]
 	if item.Title != "Red Rising" || item.Author != "Pierce Brown" || !item.InLibrary {
 		t.Fatalf("item = %+v", item)
+	}
+}
+
+func TestQualityProfilesAndDownloadsUseReadBearer(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer read-key" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		switch r.URL.Path {
+		case "/api/quality-profiles":
+			_, _ = w.Write([]byte(`[{"id":7,"name":"Books","isDefault":true,"preferCompleteBatches":true}]`))
+		case "/api/downloads":
+			_, _ = w.Write([]byte(`{"downloads":[{"id":9,"qbtHash":"abcdef","status":"downloading","progress":0.5,"downloadSpeed":2048,"eta":30,"series":{"id":4,"title":"Red Rising","coverUrl":"/api/img/x","contentType":"ebook"}}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	client, err := New(config.ServiceConfig{BaseURL: upstream.URL, APIKey: config.Secret("read-key")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles, err := client.QualityProfiles(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != 1 || profiles[0].ID != 7 || !profiles[0].IsDefault {
+		t.Fatalf("profiles = %+v", profiles)
+	}
+	downloads, err := client.Downloads(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(downloads.Downloads) != 1 || downloads.Downloads[0].Status != "downloading" || downloads.Downloads[0].Series == nil || downloads.Downloads[0].Series.Title != "Red Rising" {
+		t.Fatalf("downloads = %+v", downloads)
+	}
+}
+
+func TestCreateSeriesUsesMobileAdminTokenAndRenewsOnce(t *testing.T) {
+	loginCalls := 0
+	exchangeCalls := 0
+	createCalls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/auth/login":
+			loginCalls++
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["username"] != "hub-admin" || body["password"] != "secret" || !strings.HasPrefix(body["return_to"].(string), "bookkeeprr://") {
+				t.Fatalf("login body = %#v", body)
+			}
+			_, _ = w.Write([]byte(`{"user":{"id":1,"username":"hub-admin","role":"admin","mustChangePassword":false},"redirect_to":"bookkeeprr://hub/auth?exchange=code-` + string(rune('0'+loginCalls)) + `"}`))
+		case "/api/mobile/exchange":
+			exchangeCalls++
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			want := "code-" + string(rune('0'+exchangeCalls))
+			if body["exchange_code"] != want {
+				t.Fatalf("exchange code = %q, want %q", body["exchange_code"], want)
+			}
+			_, _ = w.Write([]byte(`{"token":"admin-` + string(rune('0'+exchangeCalls)) + `","refresh_token":"refresh","expires_at":"2026-12-20T00:00:00Z"}`))
+		case "/api/series":
+			createCalls++
+			if createCalls == 1 {
+				if r.Header.Get("Authorization") != "Bearer admin-1" {
+					t.Fatalf("first token = %q", r.Header.Get("Authorization"))
+				}
+				http.Error(w, "expired", http.StatusUnauthorized)
+				return
+			}
+			if r.Header.Get("Authorization") != "Bearer admin-2" {
+				t.Fatalf("renewed token = %q", r.Header.Get("Authorization"))
+			}
+			var body CreateSeriesRequest
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.ContentType != TypeEbook || body.Flow != "series" || body.Title != "Red Rising" || body.TotalVolumes != 6 || body.QualityProfileID != 7 {
+				t.Fatalf("create body = %+v", body)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":42}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	client, err := New(config.ServiceConfig{
+		BaseURL: upstream.URL, APIKey: config.Secret("read-key"),
+		Username: "hub-admin", Password: config.Secret("secret"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := client.CreateSeries(context.Background(), CreateSeriesRequest{
+		ContentType: TypeEbook, Flow: "series", OLID: "OL123W", Title: "Red Rising",
+		TotalVolumes: 6, QualityProfileID: 7, Monitoring: "all",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ID != 42 || loginCalls != 2 || exchangeCalls != 2 || createCalls != 2 {
+		t.Fatalf("created=%+v login=%d exchange=%d create=%d", created, loginCalls, exchangeCalls, createCalls)
+	}
+}
+
+func TestCreateSeriesWithoutAdminCredentialsDoesNotCallUpstream(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++ }))
+	defer upstream.Close()
+	client, err := New(config.ServiceConfig{BaseURL: upstream.URL, APIKey: config.Secret("read-key")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.CanRequest() {
+		t.Fatal("CanRequest() = true without username/password")
+	}
+	if _, err := client.CreateSeries(context.Background(), CreateSeriesRequest{}); err == nil {
+		t.Fatal("CreateSeries succeeded without admin credentials")
+	}
+	if calls != 0 {
+		t.Fatalf("made %d upstream calls", calls)
+	}
+}
+
+func TestCreateSeriesRejectsInteractiveTOTPServiceAccount(t *testing.T) {
+	seriesCalls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/login" {
+			_, _ = w.Write([]byte(`{"requiresTotp":true,"challengeToken":"challenge"}`))
+			return
+		}
+		if r.URL.Path == "/api/series" {
+			seriesCalls++
+		}
+	}))
+	defer upstream.Close()
+	client, err := New(config.ServiceConfig{
+		BaseURL: upstream.URL, APIKey: config.Secret("read-key"),
+		Username: "hub-admin", Password: config.Secret("secret"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.CreateSeries(context.Background(), CreateSeriesRequest{ContentType: TypeEbook}); err == nil || !strings.Contains(err.Error(), "two-factor") {
+		t.Fatalf("CreateSeries error = %v", err)
+	}
+	if seriesCalls != 0 {
+		t.Fatalf("made %d create calls", seriesCalls)
 	}
 }
 
@@ -83,6 +240,54 @@ func TestSearchSupportsAllTypesAndReportsProviderErrors(t *testing.T) {
 	}
 	if len(got.Results) != 1 || got.TookMS != 91 || len(got.Errors) != 1 || got.Errors[0].Source != "openlibrary" {
 		t.Fatalf("Search() = %+v", got)
+	}
+}
+
+func TestSearchAcceptsProviderErrorsFromInstalledBookKeeprr(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want []ProviderError
+	}{
+		{
+			name: "keyed object",
+			body: `{"results":[],"tookMs":12,"errors":{"openlibrary":"timed out","googlebooks":"quota exceeded"}}`,
+			want: []ProviderError{
+				{Source: "googlebooks", Message: "quota exceeded"},
+				{Source: "openlibrary", Message: "timed out"},
+			},
+		},
+		{
+			name: "null",
+			body: `{"results":[],"tookMs":12,"errors":null}`,
+			want: []ProviderError{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer upstream.Close()
+
+			client, err := New(config.ServiceConfig{BaseURL: upstream.URL, APIKey: config.Secret("key")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := client.Search(context.Background(), "Red Rising", TypeAll)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Errors) != len(test.want) {
+				t.Fatalf("errors = %+v, want %+v", got.Errors, test.want)
+			}
+			for i := range test.want {
+				if got.Errors[i] != test.want[i] {
+					t.Fatalf("errors[%d] = %+v, want %+v", i, got.Errors[i], test.want[i])
+				}
+			}
+		})
 	}
 }
 

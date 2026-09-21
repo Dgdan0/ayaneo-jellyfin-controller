@@ -86,13 +86,16 @@ services:
     api_key: "${env:READARR_API_KEY}"
 
   # Unified discovery for ebooks, audiobooks, comics, manga and light novels.
-  # The Hub uses a revocable personal BookKeeprr key and exposes only its own
-  # normalized read-only contract to the handheld.
+  # The personal key handles discovery and transfer reads. Acquisition writes
+  # use a dedicated local admin service account to obtain a renewable mobile
+  # bearer; its password belongs in hub.secrets.yaml or an environment variable.
   bookkeeprr:
     enabled: false
     base_url: "http://127.0.0.1:3000"
     web_url: ""
     api_key: "${env:BOOKKEEPRR_API_KEY}"
+    username: "pocketds-hub"
+    password: "${env:BOOKKEEPRR_PASSWORD}"
 
   # Read-only comic, manga and visual-book catalog. Generate a revocable auth
   # key in Kavita's user settings; the Hub sends it only as X-Api-Key.

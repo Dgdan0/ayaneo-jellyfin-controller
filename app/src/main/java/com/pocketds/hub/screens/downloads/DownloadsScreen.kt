@@ -11,6 +11,8 @@ import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.ActivityItem
 import com.pocketds.hub.model.ActivityResponse
+import com.pocketds.hub.model.ReadingDownloadItem
+import com.pocketds.hub.model.ReadingDownloadsResponse
 import com.pocketds.hub.model.Stages
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
@@ -18,9 +20,12 @@ import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.FailureKind
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubResult
+import com.pocketds.hub.settings.ContentModeSettings
+import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.state.Fmt
 import com.pocketds.hub.state.PollSchedule
 import com.pocketds.hub.ui.ChoiceOverlay
+import com.pocketds.hub.ui.ContentModeToggleView
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
@@ -64,6 +69,9 @@ class DownloadsScreen(
     private lateinit var list: RecyclerView
     private lateinit var overlay: ChoiceOverlay
     private val adapter = ItemAdapter()
+    private val readingAdapter = ReadingItemAdapter()
+    private lateinit var modeToggle: ContentModeToggleView
+    private var mode = ContentMode.MEDIA
 
     private var host: ScreenHost? = null
     private var pollJob: Job? = null
@@ -96,6 +104,16 @@ class DownloadsScreen(
         val content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
 
+        mode = ContentModeSettings.get(context)
+        modeToggle = ContentModeToggleView(context, colors).apply {
+            select(mode)
+            onModeSelected = ::switchMode
+        }
+        content.addView(modeToggle, LinearLayout.LayoutParams(WRAP, WRAP).apply {
+            leftMargin = Styler.dpInt(context, 12f)
+            topMargin = Styler.dpInt(context, 7f)
+        })
+
         summaryLine = TextView(context).apply {
             textSize = 13f
             setTextColor(colors.primaryText)
@@ -118,7 +136,7 @@ class DownloadsScreen(
 
         list = RecyclerView(context).apply {
             layoutManager = LinearLayoutManager(context)
-            adapter = this@DownloadsScreen.adapter
+            adapter = activeAdapter()
             // No change animation. The default one cross-fades a *copy* of the
             // view being rebound, which takes focus off the row the user is on --
             // on a two-second poll, forever.
@@ -142,7 +160,7 @@ class DownloadsScreen(
     override fun onShow() {
         visible = true
         failures = 0
-        if (adapter.itemCount == 0) statusLine.text = "Asking the hub…"
+        if (activeAdapter().itemCount == 0) statusLine.text = "Asking the hub…"
         startPolling()
     }
 
@@ -166,6 +184,9 @@ class DownloadsScreen(
         if (overlay.isOpen) {
             return listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
         }
+        if (mode == ContentMode.BOOKS) {
+            return listOf(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
+        }
         val item = focusedItem()
         val toggle = when {
             item == null -> null
@@ -185,7 +206,8 @@ class DownloadsScreen(
     }
 
     override fun requestInitialFocus(): Boolean =
-        ::list.isInitialized && list.getChildAt(0)?.requestFocus() == true
+        (::list.isInitialized && list.getChildAt(0)?.requestFocus() == true) ||
+            (::modeToggle.isInitialized && modeToggle.focus(mode))
 
     override fun onPad(action: PadAction): Boolean {
         // Everything is consumed while the menu is open, or a directional press
@@ -195,8 +217,9 @@ class DownloadsScreen(
             return true
         }
         return when (action) {
-            PadAction.Activate -> focusedItem()?.let { openActions(it) } != null
+            PadAction.Activate -> mode == ContentMode.MEDIA && focusedItem()?.let { openActions(it) } != null
             PadAction.Primary -> {
+                if (mode == ContentMode.BOOKS) return false
                 val item = focusedItem()
                 when {
                     item == null -> false
@@ -208,6 +231,7 @@ class DownloadsScreen(
                 }
             }
             PadAction.Secondary -> {
+                if (mode == ContentMode.BOOKS) return false
                 includeFinished = !includeFinished
                 host?.refreshHints()
                 refreshNow()
@@ -242,7 +266,32 @@ class DownloadsScreen(
         startPolling()
     }
 
+    private fun activeAdapter(): RecyclerView.Adapter<out RecyclerView.ViewHolder> =
+        if (mode == ContentMode.MEDIA) adapter else readingAdapter
+
+    private fun switchMode(next: ContentMode) {
+        if (mode == next) return
+        mode = next
+        val context = host?.viewContext ?: return
+        ContentModeSettings.set(context, mode)
+        modeToggle.select(mode)
+        list.adapter = activeAdapter()
+        summaryLine.text = ""
+        statusLine.setTextColor(colors.mutedText)
+        statusLine.text = "Asking the hub…"
+        failures = 0
+        refreshNow()
+        list.post {
+            if (list.getChildAt(0)?.requestFocus() != true) modeToggle.focus(mode)
+            host?.refreshHints()
+        }
+    }
+
     private suspend fun fetchOnce() {
+        if (mode == ContentMode.BOOKS) {
+            fetchReadingOnce()
+            return
+        }
         when (val result = api.activity(includeFinished)) {
             is HubResult.Ok -> {
                 failures = 0
@@ -254,6 +303,21 @@ class DownloadsScreen(
                 // The list is deliberately kept. A failed poll means the hub was
                 // unreachable for a moment, not that the downloads stopped, and
                 // blanking the screen would say the opposite.
+                statusLine.setTextColor(colors.dangerText)
+                statusLine.text = result.message + " · retrying"
+            }
+        }
+    }
+
+    private suspend fun fetchReadingOnce() {
+        when (val result = api.readingDownloads()) {
+            is HubResult.Ok -> {
+                failures = 0
+                renderReading(result.value)
+            }
+            is HubResult.Failed -> {
+                failures++
+                DebugLog.log("net", "reading downloads failed #$failures: ${result.kind}")
                 statusLine.setTextColor(colors.dangerText)
                 statusLine.text = result.message + " · retrying"
             }
@@ -289,6 +353,31 @@ class DownloadsScreen(
             body.items.isEmpty() && includeFinished -> "Nothing in the queues."
             body.items.isEmpty() -> "Nothing running. Ⓨ shows finished items."
             else -> "${body.items.size} items" + if (includeFinished) " · including finished" else ""
+        }
+        host?.refreshHints()
+    }
+
+    private fun renderReading(body: ReadingDownloadsResponse) {
+        anyActive = body.anyActive
+        readingAdapter.submit(body.items)
+        val downloading = body.items.count { it.status == "downloading" }
+        val queued = body.items.count { it.status == "queued" }
+        val importing = body.items.count { it.status == "importing" }
+        val failed = body.items.count { it.failed }
+        val speed = body.items.sumOf { it.downloadSpeedBytesPerSecond }
+        summaryLine.setTextColor(colors.primaryText)
+        summaryLine.text = buildString {
+            append(downloading).append(" downloading")
+            if (queued > 0) append(" · ").append(queued).append(" queued")
+            if (importing > 0) append(" · ").append(importing).append(" importing")
+            if (failed > 0) append(" · ").append(failed).append(" failed")
+            if (speed > 0) append("   ↓ ").append(Fmt.speed(speed))
+        }
+        statusLine.setTextColor(if (failed > 0) colors.badgeFailed else colors.mutedText)
+        statusLine.text = when {
+            body.items.isEmpty() -> "No book transfers yet."
+            failed > 0 -> "$failed transfer${if (failed == 1) "" else "s"} need attention"
+            else -> "${body.items.size} BookKeeprr transfer${if (body.items.size == 1) "" else "s"}"
         }
         host?.refreshHints()
     }
@@ -518,6 +607,61 @@ class DownloadsScreen(
         }
 
         override fun getItemCount(): Int = items.size
+    }
+
+    private inner class ReadingItemAdapter : RecyclerView.Adapter<RowHolder>() {
+        private val items = mutableListOf<ReadingDownloadItem>()
+
+        fun submit(next: List<ReadingDownloadItem>) {
+            val sameShape = next.size == items.size && next.indices.all { next[it].id == items[it].id }
+            val focusedID = focusedReadingItem()?.id
+            items.clear()
+            items.addAll(next)
+            if (sameShape) {
+                notifyItemRangeChanged(0, items.size, PAYLOAD_REBIND)
+            } else {
+                notifyDataSetChanged()
+                list.post {
+                    val position = items.indexOfFirst { it.id == focusedID }
+                    val target = if (position >= 0) {
+                        list.findViewHolderForAdapterPosition(position)?.itemView
+                    } else {
+                        list.getChildAt(0)
+                    }
+                    target?.requestFocus()
+                    host?.refreshHints()
+                }
+            }
+        }
+
+        fun itemAt(position: Int): ReadingDownloadItem? = items.getOrNull(position)
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RowHolder {
+            val row = ReadingDownloadRowView(parent.context, colors).apply {
+                layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
+                    val margin = Styler.dpInt(parent.context, 4f)
+                    setMargins(margin, margin, margin, margin)
+                }
+                FocusDecorator.attach(this, ringVisible, scale = false)
+            }
+            return RowHolder(row)
+        }
+
+        override fun onBindViewHolder(holder: RowHolder, position: Int) {
+            (holder.itemView as ReadingDownloadRowView).bind(items[position])
+            holder.itemView.setOnClickListener(null)
+        }
+
+        override fun onBindViewHolder(holder: RowHolder, position: Int, payloads: MutableList<Any>) =
+            onBindViewHolder(holder, position)
+
+        override fun getItemCount(): Int = items.size
+    }
+
+    private fun focusedReadingItem(): ReadingDownloadItem? {
+        if (!::list.isInitialized || mode != ContentMode.BOOKS) return null
+        val focused = list.focusedChild ?: return null
+        return readingAdapter.itemAt(list.getChildAdapterPosition(focused))
     }
 
     private class RowHolder(view: View) : RecyclerView.ViewHolder(view)

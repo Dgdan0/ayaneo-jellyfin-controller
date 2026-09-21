@@ -13,8 +13,8 @@ Automated qualification is recorded in
 are tracked in
 [M1B_EXTERNAL_CLIENT_EVIDENCE.md](M1B_EXTERNAL_CLIENT_EVIDENCE.md). The M2
 scanner implementation and its remaining production gate are recorded in
-[M2_MIGRATION_EVIDENCE.md](M2_MIGRATION_EVIDENCE.md). The isolated acquisition
-proof and its remaining Hub design gate are recorded in
+[M2_MIGRATION_EVIDENCE.md](M2_MIGRATION_EVIDENCE.md). The acquisition proof,
+Hub request/status integration, and remaining production gate are recorded in
 [M3_ACQUISITION_EVIDENCE.md](M3_ACQUISITION_EVIDENCE.md).
 
 ## Safety model
