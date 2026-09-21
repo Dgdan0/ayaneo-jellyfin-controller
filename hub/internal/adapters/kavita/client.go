@@ -101,8 +101,10 @@ type Direction string
 
 const (
 	SortTitle    Sort      = "title"
+	SortSeries   Sort      = "series"
 	SortAdded    Sort      = "added"
 	SortProgress Sort      = "progress"
+	SortLastRead Sort      = "last_read"
 	Ascending    Direction = "asc"
 	Descending   Direction = "desc"
 )
@@ -182,11 +184,11 @@ func (c *Client) Series(ctx context.Context, libraryID, page, pageSize int, sort
 
 func sortField(value Sort) (int, error) {
 	switch value {
-	case SortTitle:
+	case SortTitle, SortSeries:
 		return 1, nil
 	case SortAdded:
 		return 2, nil
-	case SortProgress:
+	case SortProgress, SortLastRead:
 		return 7, nil
 	default:
 		return 0, fmt.Errorf("kavita: unsupported sort %q", value)

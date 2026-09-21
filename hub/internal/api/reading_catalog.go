@@ -59,9 +59,12 @@ type ReadingEdition struct {
 
 type ReadingSectionItem struct {
 	SourceItemID string           `json:"sourceItemId"`
+	WorkID       string           `json:"workId,omitempty"`
 	Title        string           `json:"title"`
 	Number       string           `json:"number,omitempty"`
 	Kind         string           `json:"kind"`
+	Artwork      string           `json:"artwork,omitempty"`
+	Authors      []string         `json:"authors,omitempty"`
 	PageCount    int              `json:"pageCount,omitempty"`
 	Progress     *ReadingProgress `json:"progress,omitempty"`
 }
@@ -84,6 +87,7 @@ type ReadingContinue struct {
 type ReadingWork struct {
 	ID           string           `json:"id"`
 	LibraryID    string           `json:"libraryId,omitempty"`
+	EntityType   string           `json:"entityType,omitempty"`
 	Kind         string           `json:"kind"`
 	Title        string           `json:"title"`
 	SortTitle    string           `json:"sortTitle,omitempty"`
@@ -94,6 +98,8 @@ type ReadingWork struct {
 	Artwork      string           `json:"artwork,omitempty"`
 	Genres       []string         `json:"genres"`
 	Year         int              `json:"year,omitempty"`
+	AddedAt      string           `json:"addedAt,omitempty"`
+	BookCount    int              `json:"bookCount,omitempty"`
 	Languages    []string         `json:"languages"`
 	Editions     []ReadingEdition `json:"editions"`
 	Progress     *ReadingProgress `json:"progress,omitempty"`
@@ -134,7 +140,9 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 			for _, library := range libraries {
 				out.Libraries = append(out.Libraries, ReadingLibrary{
 					ID: "kavita:" + strconv.Itoa(library.ID), Source: "kavita", Kind: kavitaLibraryKind(library.Type),
-					Title: library.Name, Capabilities: []string{"browse", "details", "progress"},
+					Title: library.Name, Capabilities: []string{
+						"browse", "details", "progress", "sort:title", "sort:series", "sort:added", "sort:last_read",
+					},
 				})
 			}
 			allHits = allHits && meta.Hit
@@ -150,7 +158,10 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 		} else {
 			out.Libraries = append(out.Libraries, ReadingLibrary{
 				ID: "storyteller:books", Source: "storyteller", Kind: "book", Title: "Books & Audiobooks",
-				Capabilities: []string{"browse", "details", "ebook", "audiobook", "readaloud", "progress"},
+				Capabilities: []string{
+					"browse", "details", "ebook", "audiobook", "readaloud", "progress",
+					"sort:title", "sort:series", "sort:author", "sort:added", "sort:last_read",
+				},
 			})
 			_ = books
 			allHits = allHits && meta.Hit
@@ -195,9 +206,14 @@ func (s *Server) handleReadingLibraryItems(w http.ResponseWriter, r *http.Reques
 			writeUpstreamError(w, r, "kavita", err)
 			return
 		}
+		upstreamSort, supported := kavitaReadingSort(sortBy)
+		if !supported {
+			writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "this reading sort is unavailable for Kavita"})
+			return
+		}
 		key := fmt.Sprintf("reading:kavita:library:%d:%d:%s:%s", id, page, sortBy, direction)
 		upstream, meta, err := cache.Fetch(ctx, s.cache, key, cache.LibraryPage, func(fetchCtx context.Context) (*kavita.SeriesPage, error) {
-			return s.kavita.Series(fetchCtx, id, page, 60, kavita.Sort(sortBy), kavita.Direction(direction))
+			return s.kavita.Series(fetchCtx, id, page, 60, upstreamSort, kavita.Direction(direction))
 		})
 		if err != nil {
 			writeUpstreamError(w, r, "kavita", err)
@@ -228,32 +244,25 @@ func (s *Server) handleReadingLibraryItems(w http.ResponseWriter, r *http.Reques
 			writeUpstreamError(w, r, "storyteller", err)
 			return
 		}
-		// Cache entries are shared between requests. Sort a private copy so two
-		// concurrent requests cannot reorder the same backing array.
-		books = append([]storyteller.Book(nil), books...)
-		sortStorytellerBooks(books, sortBy, direction)
+		items, bindErr := s.storytellerShelf("storyteller:books", books)
+		if bindErr != nil {
+			writeReadingCatalogError(w, r, bindErr)
+			return
+		}
+		sortReadingWorks(items, sortBy, direction)
 		const pageSize = 60
 		start := (page - 1) * pageSize
-		if start > len(books) {
-			start = len(books)
+		if start > len(items) {
+			start = len(items)
 		}
 		end := start + pageSize
-		if end > len(books) {
-			end = len(books)
+		if end > len(items) {
+			end = len(items)
 		}
-		items := make([]ReadingWork, 0, end-start)
-		for _, book := range books[start:end] {
-			mapped, bindErr := s.storytellerWork("storyteller:books", book, false)
-			if bindErr != nil {
-				writeReadingCatalogError(w, r, bindErr)
-				return
-			}
-			items = append(items, mapped)
-		}
-		totalPages := (len(books) + pageSize - 1) / pageSize
+		totalPages := (len(items) + pageSize - 1) / pageSize
 		writeJSON(w, http.StatusOK, ReadingLibraryItemsResponse{
-			LibraryID: libraryID, Page: page, PageSize: pageSize, Total: len(books), TotalPages: totalPages,
-			HasMore: page < totalPages, Items: items, Partial: []Partial{}, Cache: cacheInfoFrom(meta),
+			LibraryID: libraryID, Page: page, PageSize: pageSize, Total: len(items), TotalPages: totalPages,
+			HasMore: page < totalPages, Items: items[start:end], Partial: []Partial{}, Cache: cacheInfoFrom(meta),
 		})
 
 	default:
@@ -302,6 +311,15 @@ func (s *Server) handleReadingWork(w http.ResponseWriter, r *http.Request) {
 			book, _, err = cache.Fetch(ctx, s.cache, "reading:storyteller:work:"+source.SourceID, cache.Metadata, func(fetchCtx context.Context) (*storyteller.Book, error) { return s.storyteller.Book(fetchCtx, id) })
 			if err == nil {
 				mapped, err = s.storytellerWork("storyteller:books", *book, true)
+			}
+		case "storyteller-series":
+			if s.storyteller == nil {
+				continue
+			}
+			var books []storyteller.Book
+			books, _, err = cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+			if err == nil {
+				mapped, err = s.storytellerCollectionBySourceID("storyteller:books", source.SourceID, books)
 			}
 		}
 		if err != nil {
@@ -384,11 +402,29 @@ func readingPageOptions(w http.ResponseWriter, r *http.Request) (int, string, st
 	if direction == "" {
 		direction = "asc"
 	}
-	if page < 1 || page > 10000 || (sortBy != "title" && sortBy != "added" && sortBy != "progress") || (direction != "asc" && direction != "desc") {
+	validSort := sortBy == "title" || sortBy == "series" || sortBy == "author" || sortBy == "added" || sortBy == "last_read" || sortBy == "progress"
+	if page < 1 || page > 10000 || !validSort || (direction != "asc" && direction != "desc") {
 		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "invalid reading page options"})
 		return 0, "", "", false
 	}
 	return page, sortBy, direction, true
+}
+
+func kavitaReadingSort(sortBy string) (kavita.Sort, bool) {
+	switch sortBy {
+	case "title":
+		return kavita.SortTitle, true
+	case "series":
+		return kavita.SortSeries, true
+	case "added":
+		return kavita.SortAdded, true
+	case "last_read":
+		return kavita.SortLastRead, true
+	case "progress":
+		return kavita.SortProgress, true
+	default:
+		return "", false
+	}
 }
 
 func (s *Server) kavitaLibraryKind(ctx context.Context, libraryID int) (string, error) {
@@ -503,7 +539,14 @@ func (s *Server) storytellerWork(libraryID string, book storyteller.Book, includ
 	if book.Ebook == nil && book.Readaloud == nil && book.Audiobook != nil {
 		kind = "audiobook"
 	}
-	work := ReadingWork{ID: id, LibraryID: libraryID, Kind: kind, Title: book.Title, SortTitle: book.Title, Authors: authors, Series: seriesName, SeriesIndex: seriesIndex, Overview: book.Description, Artwork: "/v1/img/reading/storyteller/" + strconv.FormatInt(book.ID, 10), Genres: []string{}, Languages: []string{}, Editions: []ReadingEdition{}, Progress: storytellerProgress(book.Position), Availability: availability, Partial: []Partial{}}
+	work := ReadingWork{
+		ID: id, LibraryID: libraryID, EntityType: "work", Kind: kind, Title: book.Title,
+		SortTitle: book.Title, Authors: authors, Series: seriesName, SeriesIndex: seriesIndex,
+		Overview: book.Description, Artwork: "/v1/img/reading/storyteller/" + strconv.FormatInt(book.ID, 10),
+		Genres: []string{}, Languages: []string{}, Editions: []ReadingEdition{},
+		Progress: storytellerProgress(book.Position), Availability: availability, AddedAt: book.CreatedAt,
+		BookCount: 1, Partial: []Partial{},
+	}
 	if book.Language != "" {
 		work.Languages = []string{book.Language}
 	}
@@ -512,6 +555,211 @@ func (s *Server) storytellerWork(libraryID string, book storyteller.Book, includ
 		work.Editions = storytellerEditions(id, book)
 	}
 	return work, nil
+}
+
+type storytellerSeriesGroup struct {
+	sourceID string
+	title    string
+	books    []storyteller.Book
+}
+
+// storytellerShelf keeps standalone books as works and collapses every named
+// series into one collection card. The collection source id is derived from
+// stable upstream metadata, then bound through the durable catalog like every
+// other Hub work id.
+func (s *Server) storytellerShelf(libraryID string, books []storyteller.Book) ([]ReadingWork, error) {
+	groups := map[string]*storytellerSeriesGroup{}
+	standalone := make([]storyteller.Book, 0, len(books))
+	for _, book := range books {
+		sourceID, title, grouped := storytellerSeriesSource(book)
+		if !grouped {
+			standalone = append(standalone, book)
+			continue
+		}
+		group := groups[sourceID]
+		if group == nil {
+			group = &storytellerSeriesGroup{sourceID: sourceID, title: title}
+			groups[sourceID] = group
+		}
+		group.books = append(group.books, book)
+	}
+
+	out := make([]ReadingWork, 0, len(standalone)+len(groups))
+	for _, book := range standalone {
+		work, err := s.storytellerWork(libraryID, book, false)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, work)
+	}
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		work, err := s.storytellerCollection(libraryID, groups[key], false)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, work)
+	}
+	return out, nil
+}
+
+func storytellerSeriesSource(book storyteller.Book) (string, string, bool) {
+	if len(book.Series) == 0 || strings.TrimSpace(book.Series[0].Name) == "" {
+		return "", "", false
+	}
+	series := book.Series[0]
+	identity := ""
+	if uuid := strings.TrimSpace(series.UUID); uuid != "" {
+		identity = "uuid:" + strings.ToLower(uuid)
+	} else {
+		author := ""
+		if names := creatorNames(book.Authors); len(names) > 0 {
+			author = names[0]
+		}
+		identity = "name:" + normalizeReadingIdentity(series.Name) + "|author:" + normalizeReadingIdentity(author)
+	}
+	return hex.EncodeToString(simpleDigest(identity)), strings.TrimSpace(series.Name), true
+}
+
+func (s *Server) storytellerCollection(
+	libraryID string, group *storytellerSeriesGroup, includeChildren bool,
+) (ReadingWork, error) {
+	books := append([]storyteller.Book(nil), group.books...)
+	sortStorytellerBooks(books, "series", "asc")
+	id, err := s.readingCatalog.Bind(readingdomain.WorkBinding{
+		Source: "storyteller-series", SourceID: group.sourceID,
+	})
+	if err != nil {
+		return ReadingWork{}, err
+	}
+	authors := []string{}
+	availability := []string{}
+	addedAt := ""
+	year := 0
+	allAudioOnly := len(books) > 0
+	for _, book := range books {
+		authors = mergeUnique(authors, creatorNames(book.Authors))
+		availability = mergeUnique(availability, storytellerAvailability(book))
+		if book.CreatedAt > addedAt {
+			addedAt = book.CreatedAt
+		}
+		if value := readingYear(book.PublicationDate); value > 0 && (year == 0 || value < year) {
+			year = value
+		}
+		if book.Ebook != nil || book.Readaloud != nil || book.Audiobook == nil {
+			allAudioOnly = false
+		}
+	}
+	kind := "book"
+	if allAudioOnly {
+		kind = "audiobook"
+	}
+	work := ReadingWork{
+		ID: id, LibraryID: libraryID, EntityType: "collection", Kind: kind,
+		Title: group.title, SortTitle: group.title, Authors: authors,
+		Artwork: "/v1/img/reading/storyteller/" + strconv.FormatInt(books[0].ID, 10),
+		Genres:  []string{}, Languages: []string{}, Editions: []ReadingEdition{},
+		Progress: storytellerCollectionProgress(books), Availability: availability,
+		Year: year, AddedAt: addedAt, BookCount: len(books), Partial: []Partial{},
+	}
+	if !includeChildren {
+		return work, nil
+	}
+	section := ReadingSection{ID: "storyteller-series:" + group.sourceID, Title: "Books", Items: []ReadingSectionItem{}}
+	var continueBook *storyteller.Book
+	for i := range books {
+		book := books[i]
+		child, bindErr := s.storytellerWork(libraryID, book, false)
+		if bindErr != nil {
+			return ReadingWork{}, bindErr
+		}
+		pageCount := book.PageCount
+		if pageCount == 0 && book.Ebook != nil {
+			pageCount = book.Ebook.PageCount
+		}
+		section.Items = append(section.Items, ReadingSectionItem{
+			SourceItemID: strconv.FormatInt(book.ID, 10), WorkID: child.ID,
+			Title: book.Title, Number: storytellerSeriesNumber(book), Kind: child.Kind,
+			Artwork: child.Artwork, Authors: child.Authors, PageCount: pageCount, Progress: child.Progress,
+		})
+		if book.Position != nil && (continueBook == nil || storytellerLastRead(book) > storytellerLastRead(*continueBook)) {
+			candidate := book
+			continueBook = &candidate
+		}
+	}
+	work.Sections = []ReadingSection{section}
+	if continueBook != nil {
+		position := storytellerProgress(continueBook.Position)
+		work.Continue = &ReadingContinue{
+			Source: "storyteller", SourceItemID: strconv.FormatInt(continueBook.ID, 10),
+			Title: continueBook.Title, Number: storytellerSeriesNumber(*continueBook),
+			Percentage: position.Percentage,
+		}
+	}
+	return work, nil
+}
+
+func storytellerSeriesNumber(book storyteller.Book) string {
+	if len(book.Series) == 0 || book.Series[0].Position <= 0 {
+		return ""
+	}
+	return strconv.FormatFloat(book.Series[0].Position, 'f', -1, 64)
+}
+
+func storytellerCollectionProgress(books []storyteller.Book) *ReadingProgress {
+	if len(books) == 0 {
+		return nil
+	}
+	total := 0.0
+	completed := 0
+	seen := false
+	updatedAt := ""
+	latest := int64(0)
+	for _, book := range books {
+		progress := storytellerProgress(book.Position)
+		if progress == nil {
+			continue
+		}
+		seen = true
+		total += progress.Percentage
+		if progress.Completed {
+			completed++
+		}
+		if timestamp := storytellerLastRead(book); timestamp >= latest {
+			latest = timestamp
+			updatedAt = progress.UpdatedAt
+		}
+	}
+	if !seen {
+		return nil
+	}
+	return &ReadingProgress{
+		Percentage: total / float64(len(books)), Completed: completed == len(books),
+		Current: completed, Total: len(books), UpdatedAt: updatedAt,
+	}
+}
+
+func (s *Server) storytellerCollectionBySourceID(
+	libraryID, sourceID string, books []storyteller.Book,
+) (ReadingWork, error) {
+	group := &storytellerSeriesGroup{sourceID: sourceID}
+	for _, book := range books {
+		candidateID, title, grouped := storytellerSeriesSource(book)
+		if grouped && candidateID == sourceID {
+			if group.title == "" {
+				group.title = title
+			}
+			group.books = append(group.books, book)
+		}
+	}
+	if len(group.books) == 0 {
+		return ReadingWork{}, errReadingLibraryNotFound
+	}
+	return s.storytellerCollection(libraryID, group, true)
 }
 
 func storytellerEditions(workID string, book storyteller.Book) []ReadingEdition {
@@ -602,7 +850,11 @@ func storytellerProgress(position *storyteller.Position) *ReadingProgress {
 		value = position.Locator.Locations.Progression
 	}
 	value = clampProgress(value)
-	return &ReadingProgress{Percentage: value, Completed: value >= 0.999, UpdatedAt: position.UpdatedAt}
+	updatedAt := position.UpdatedAt
+	if updatedAt == "" && position.Timestamp > 0 {
+		updatedAt = strconv.FormatInt(position.Timestamp, 10)
+	}
+	return &ReadingProgress{Percentage: value, Completed: value >= 0.999, UpdatedAt: updatedAt}
 }
 func pageProgress(current, total int) *ReadingProgress {
 	if total <= 0 {
@@ -685,14 +937,18 @@ func sortStorytellerBooks(books []storyteller.Book, sortBy, direction string) {
 		switch sortBy {
 		case "added":
 			comparison = strings.Compare(books[i].CreatedAt, books[j].CreatedAt)
+		case "author":
+			comparison = strings.Compare(storytellerAuthorSort(books[i]), storytellerAuthorSort(books[j]))
+			if comparison == 0 {
+				comparison = compareStorytellerSeries(books[i], books[j])
+			}
+		case "series":
+			comparison = compareStorytellerSeries(books[i], books[j])
+		case "last_read":
+			comparison = compareInt64(storytellerLastRead(books[i]), storytellerLastRead(books[j]))
 		case "progress":
 			left, right := progressValue(books[i].Position), progressValue(books[j].Position)
-			switch {
-			case left < right:
-				comparison = -1
-			case left > right:
-				comparison = 1
-			}
+			comparison = compareFloat(left, right)
 		default:
 			comparison = strings.Compare(strings.ToLower(books[i].Title), strings.ToLower(books[j].Title))
 		}
@@ -701,6 +957,140 @@ func sortStorytellerBooks(books []storyteller.Book, sortBy, direction string) {
 		}
 		return comparison < 0 != (direction == "desc")
 	})
+}
+
+func sortReadingWorks(works []ReadingWork, sortBy, direction string) {
+	sort.SliceStable(works, func(i, j int) bool {
+		left, right := works[i], works[j]
+		comparison := 0
+		switch sortBy {
+		case "series":
+			comparison = strings.Compare(readingSeriesSort(left), readingSeriesSort(right))
+			if comparison == 0 {
+				comparison = compareFloat(left.SeriesIndex, right.SeriesIndex)
+			}
+		case "author":
+			comparison = strings.Compare(readingAuthorSort(left), readingAuthorSort(right))
+			if comparison == 0 {
+				comparison = strings.Compare(readingSeriesSort(left), readingSeriesSort(right))
+			}
+		case "added":
+			comparison = strings.Compare(left.AddedAt, right.AddedAt)
+		case "last_read":
+			comparison = compareInt64(readingProgressTime(left.Progress), readingProgressTime(right.Progress))
+		case "progress":
+			leftProgress, rightProgress := 0.0, 0.0
+			if left.Progress != nil {
+				leftProgress = left.Progress.Percentage
+			}
+			if right.Progress != nil {
+				rightProgress = right.Progress.Percentage
+			}
+			comparison = compareFloat(leftProgress, rightProgress)
+		default:
+			comparison = strings.Compare(readingTitleSort(left), readingTitleSort(right))
+		}
+		if comparison == 0 {
+			comparison = strings.Compare(readingTitleSort(left), readingTitleSort(right))
+		}
+		if comparison == 0 {
+			return left.ID < right.ID
+		}
+		return comparison < 0 != (direction == "desc")
+	})
+}
+
+func storytellerAuthorSort(book storyteller.Book) string {
+	names := creatorNames(book.Authors)
+	if len(names) == 0 {
+		return "\uffff"
+	}
+	return strings.ToLower(names[0])
+}
+
+func compareStorytellerSeries(left, right storyteller.Book) int {
+	leftName, leftIndex := strings.ToLower(left.Title), 0.0
+	rightName, rightIndex := strings.ToLower(right.Title), 0.0
+	if len(left.Series) > 0 && strings.TrimSpace(left.Series[0].Name) != "" {
+		leftName, leftIndex = strings.ToLower(left.Series[0].Name), left.Series[0].Position
+	}
+	if len(right.Series) > 0 && strings.TrimSpace(right.Series[0].Name) != "" {
+		rightName, rightIndex = strings.ToLower(right.Series[0].Name), right.Series[0].Position
+	}
+	if comparison := strings.Compare(leftName, rightName); comparison != 0 {
+		return comparison
+	}
+	if comparison := compareFloat(leftIndex, rightIndex); comparison != 0 {
+		return comparison
+	}
+	return strings.Compare(strings.ToLower(left.Title), strings.ToLower(right.Title))
+}
+
+func storytellerLastRead(book storyteller.Book) int64 {
+	if book.Position == nil {
+		return 0
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, book.Position.UpdatedAt); err == nil {
+		return parsed.UnixNano()
+	}
+	return book.Position.Timestamp
+}
+
+func readingProgressTime(progress *ReadingProgress) int64 {
+	if progress == nil || progress.UpdatedAt == "" {
+		return 0
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, progress.UpdatedAt); err == nil {
+		return parsed.UnixNano()
+	}
+	value, _ := strconv.ParseInt(progress.UpdatedAt, 10, 64)
+	return value
+}
+
+func readingTitleSort(work ReadingWork) string {
+	if value := strings.TrimSpace(work.SortTitle); value != "" {
+		return strings.ToLower(value)
+	}
+	return strings.ToLower(work.Title)
+}
+
+func readingSeriesSort(work ReadingWork) string {
+	if work.EntityType == "collection" {
+		return readingTitleSort(work)
+	}
+	if value := strings.TrimSpace(work.Series); value != "" {
+		return strings.ToLower(value)
+	}
+	return readingTitleSort(work)
+}
+
+func readingAuthorSort(work ReadingWork) string {
+	if len(work.Authors) == 0 || strings.TrimSpace(work.Authors[0]) == "" {
+		return "\uffff"
+	}
+	return strings.ToLower(work.Authors[0])
+}
+
+func compareFloat(left, right float64) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func compareInt64(left, right int64) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
 }
 func progressValue(position *storyteller.Position) float64 {
 	if position == nil {
@@ -715,6 +1105,15 @@ func progressValue(position *storyteller.Position) float64 {
 func mergeReadingWork(target *ReadingWork, source ReadingWork) {
 	target.Editions = append(target.Editions, source.Editions...)
 	target.Availability = mergeUnique(target.Availability, source.Availability)
+	if target.EntityType == "" {
+		target.EntityType = source.EntityType
+	}
+	if source.BookCount > target.BookCount {
+		target.BookCount = source.BookCount
+	}
+	if source.AddedAt > target.AddedAt {
+		target.AddedAt = source.AddedAt
+	}
 	if target.Overview == "" {
 		target.Overview = source.Overview
 	}

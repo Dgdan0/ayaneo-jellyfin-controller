@@ -193,9 +193,12 @@ data class ReadingEdition(
 @Serializable
 data class ReadingSectionItem(
     val sourceItemId: String = "",
+    val workId: String = "",
     val title: String = "",
     val number: String = "",
     val kind: String = "book",
+    val artwork: String = "",
+    val authors: List<String> = emptyList(),
     val pageCount: Int = 0,
     val progress: ReadingProgress? = null
 )
@@ -221,6 +224,7 @@ data class ReadingContinue(
 data class ReadingWork(
     val id: String = "",
     val libraryId: String = "",
+    val entityType: String = "work",
     val kind: String = "book",
     val title: String = "",
     val sortTitle: String = "",
@@ -231,6 +235,8 @@ data class ReadingWork(
     val artwork: String = "",
     val genres: List<String> = emptyList(),
     val year: Int = 0,
+    val addedAt: String = "",
+    val bookCount: Int = 0,
     val languages: List<String> = emptyList(),
     val editions: List<ReadingEdition> = emptyList(),
     val progress: ReadingProgress? = null,

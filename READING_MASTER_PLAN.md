@@ -547,6 +547,12 @@ lab run across three Kavita libraries and the Storyteller catalog. Lists,
 reader manifests/resources, progress writes/reconciliation, and catalog search
 remain in later M4 slices.
 
+Status addendum on 2026-09-21: Storyteller series now collapse into one stable
+collection entry while standalone books remain independent. Collection details
+return their available books in series order with child work IDs. Library sort
+semantics now include series, author, and true last-read time; Kavita advertises
+only the sorts its API can honor.
+
 ### M5 — Pocket DS browsing
 
 - Add the global content-mode switch, unified catalog, work/series details,
@@ -560,8 +566,11 @@ browses real Kavita/Storyteller libraries, paged and sortable normalized work
 grids, progress, canonical work details, editions, Continue data, and available
 sections. Reading discovery details now offer the tested BookKeeprr request
 form, and Transfers shares the Media/Books switch. Kotlin tests and the debug
-build pass. Pocket DS hardware acceptance and the Home/Offline Books views
-remain open.
+build pass. Series collections now open into a horizontal row of available
+books, and sort menus expose Title, Series, Author, Date added, and Last read
+according to each source's capabilities. Recent activity defaults to newest
+first. Pocket DS hardware acceptance and the Home/Offline Books views remain
+open.
 
 ### M6 — Shared reader shell
 

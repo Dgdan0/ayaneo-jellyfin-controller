@@ -97,6 +97,9 @@ func TestReadingLibrariesCombineKavitaAndStoryteller(t *testing.T) {
 	if len(body.Libraries) != 2 || body.Libraries[0].ID != "kavita:2" || body.Libraries[0].Kind != "comic" || body.Libraries[1].ID != "storyteller:books" {
 		t.Fatalf("libraries = %+v", body.Libraries)
 	}
+	if containsString(body.Libraries[0].Capabilities, "sort:author") || !containsString(body.Libraries[0].Capabilities, "sort:last_read") || !containsString(body.Libraries[1].Capabilities, "sort:author") {
+		t.Fatalf("sort capabilities = %+v / %+v", body.Libraries[0].Capabilities, body.Libraries[1].Capabilities)
+	}
 	if len(body.Partial) != 0 {
 		t.Fatalf("partial = %+v", body.Partial)
 	}
@@ -177,6 +180,98 @@ func TestStorytellerLibraryMapsEditionsAndProgress(t *testing.T) {
 	}
 }
 
+func TestStorytellerLibraryGroupsSeriesAndOpensOrderedBooks(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/token":
+			_, _ = io.WriteString(w, `{"access_token":"story-token","token_type":"Bearer","expires_in":3600}`)
+		case "/api/v2/books":
+			_, _ = io.WriteString(w, `[
+				{"id":1,"uuid":"rr-1","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"series":[{"name":"Red Rising","position":1}],"ebook":{"uuid":"epub-1","pageCount":400},"position":{"locator":{"locations":{"totalProgression":0.5}},"updatedAt":"2026-08-01T12:00:00Z"}},
+				{"id":2,"uuid":"rr-2","title":"Golden Son","authors":[{"name":"Pierce Brown"}],"series":[{"name":"Red Rising","position":2}],"ebook":{"uuid":"epub-2","pageCount":430},"position":{"locator":{"locations":{"totalProgression":0.2}},"updatedAt":"2026-09-20T12:00:00Z"}},
+				{"id":3,"uuid":"standalone","title":"The Left Hand of Darkness","authors":[{"name":"Ursula K. Le Guin"}],"ebook":{"uuid":"epub-3","pageCount":300}}
+			]`)
+		case "/api/v2/books/1":
+			_, _ = io.WriteString(w, `{"id":1,"uuid":"rr-1","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"series":[{"name":"Red Rising","position":1}],"ebook":{"uuid":"epub-1","pageCount":400},"position":{"locator":{"locations":{"totalProgression":0.5}},"updatedAt":"2026-08-01T12:00:00Z"}}`)
+		case "/api/v2/books/2":
+			_, _ = io.WriteString(w, `{"id":2,"uuid":"rr-2","title":"Golden Son","authors":[{"name":"Pierce Brown"}],"series":[{"name":"Red Rising","position":2}],"ebook":{"uuid":"epub-2","pageCount":430},"position":{"locator":{"locations":{"totalProgression":0.2}},"updatedAt":"2026-09-20T12:00:00Z"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	cfg := readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})
+	delete(cfg.Services, "kavita")
+	handler := NewServer(cfg).Handler()
+
+	page := libraryRequest(handler, "/v1/reading/libraries/storyteller:books/items?page=1&sort=series&direction=asc")
+	if page.Code != http.StatusOK {
+		t.Fatalf("series page = %d: %s", page.Code, page.Body.String())
+	}
+	var body ReadingLibraryItemsResponse
+	if err := json.Unmarshal(page.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Total != 2 || len(body.Items) != 2 {
+		t.Fatalf("grouped page = %+v", body)
+	}
+	var collection ReadingWork
+	for _, item := range body.Items {
+		if item.EntityType == "collection" {
+			collection = item
+		}
+	}
+	if collection.ID == "" || collection.Title != "Red Rising" || collection.BookCount != 2 || collection.Authors[0] != "Pierce Brown" {
+		t.Fatalf("collection = %+v", collection)
+	}
+
+	lastRead := libraryRequest(handler, "/v1/reading/libraries/storyteller:books/items?page=1&sort=last_read&direction=desc")
+	if lastRead.Code != http.StatusOK {
+		t.Fatalf("last-read page = %d: %s", lastRead.Code, lastRead.Body.String())
+	}
+	var recent ReadingLibraryItemsResponse
+	if err := json.Unmarshal(lastRead.Body.Bytes(), &recent); err != nil {
+		t.Fatal(err)
+	}
+	if len(recent.Items) == 0 || recent.Items[0].ID != collection.ID {
+		t.Fatalf("last-read order = %+v", recent.Items)
+	}
+
+	detailResponse := libraryRequest(handler, "/v1/reading/works/"+collection.ID)
+	if detailResponse.Code != http.StatusOK {
+		t.Fatalf("collection detail = %d: %s", detailResponse.Code, detailResponse.Body.String())
+	}
+	var detail ReadingWork
+	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.EntityType != "collection" || len(detail.Sections) != 1 || len(detail.Sections[0].Items) != 2 {
+		t.Fatalf("collection detail = %+v", detail)
+	}
+	books := detail.Sections[0].Items
+	if books[0].Title != "Red Rising" || books[1].Title != "Golden Son" || books[0].WorkID == "" || books[1].WorkID == "" || books[0].WorkID == books[1].WorkID {
+		t.Fatalf("ordered books = %+v", books)
+	}
+}
+
+func TestStorytellerAuthorSortUsesFirstAuthorThenSeriesPosition(t *testing.T) {
+	books := []storyteller.Book{
+		{ID: 3, Title: "B", Authors: []storyteller.Creator{{Name: "Zed"}}},
+		{ID: 2, Title: "Second", Authors: []storyteller.Creator{{Name: "Amy"}}, Series: []storyteller.Series{{Name: "Saga", Position: 2}}},
+		{ID: 1, Title: "First", Authors: []storyteller.Creator{{Name: "Amy"}}, Series: []storyteller.Series{{Name: "Saga", Position: 1}}},
+	}
+
+	sortStorytellerBooks(books, "author", "asc")
+	got := []int64{books[0].ID, books[1].ID, books[2].ID}
+	want := []int64{1, 2, 3}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("author order = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestReadingCatalogImagesProxyAuthenticatedSources(t *testing.T) {
 	upstream := newReadingCatalogUpstream(t)
 	defer upstream.Close()
@@ -216,6 +311,7 @@ func TestReadingCatalogRoutesRequireScopeAndValidateIDs(t *testing.T) {
 	for _, path := range []string{
 		"/v1/reading/libraries/kavita:nope/items?page=1&sort=title&direction=asc",
 		"/v1/reading/libraries/kavita:2/items?page=0&sort=title&direction=asc",
+		"/v1/reading/libraries/kavita:2/items?page=1&sort=author&direction=asc",
 		"/v1/reading/libraries/storyteller:books/items?page=1&sort=nope&direction=asc",
 		"/v1/reading/works/not-a-work-id",
 		"/v1/img/reading/kavita/not-a-number",
@@ -259,4 +355,13 @@ func TestSortStorytellerBooksIsDeterministicForEqualValues(t *testing.T) {
 			t.Fatalf("second order = %v, want stable %v", gotAgain, want)
 		}
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

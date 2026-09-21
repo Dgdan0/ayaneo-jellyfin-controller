@@ -6,6 +6,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -66,7 +67,8 @@ class ReadingLibraryGridScreen(
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
     private val focusState = StableItemFocus()
-    private var sortKey = "title"
+    private val sortFields = ReadingSortFields.forLibrary(library)
+    private var sortKey = if (sortFields.any { it.first == "series" }) "series" else "title"
     private var sortAscending = true
     private var loadGeneration = 0
     private var refreshing = false
@@ -252,24 +254,26 @@ class ReadingLibraryGridScreen(
         overlay.show(
             title = "Sort ${library.title}",
             subtitle = "Choose what the library is ordered by",
-            choices = SORT_FIELDS.map { (id, label) ->
+            choices = sortFields.map { (id, label) ->
                 ChoiceOverlay.Choice(id, label, if (id == sortKey) "Currently selected" else "")
             },
-            startIndex = SORT_FIELDS.indexOfFirst { it.first == sortKey }.coerceAtLeast(0),
+            startIndex = sortFields.indexOfFirst { it.first == sortKey }.coerceAtLeast(0),
             onCancel = { host?.refreshHints() }
         ) { showSortDirection(it) }
         host?.refreshHints()
     }
 
     private fun showSortDirection(field: String) {
+        val suggestedAscending = if (field == sortKey) sortAscending
+        else ReadingSortFields.defaultAscending(field)
         overlay.show(
             title = "Sort direction",
-            subtitle = SORT_FIELDS.firstOrNull { it.first == field }?.second.orEmpty(),
+            subtitle = sortFields.firstOrNull { it.first == field }?.second.orEmpty(),
             choices = listOf(
                 ChoiceOverlay.Choice("asc", "Ascending", "A to Z, oldest or lowest first"),
                 ChoiceOverlay.Choice("desc", "Descending", "Z to A, newest or highest first")
             ),
-            startIndex = if (sortAscending) 0 else 1,
+            startIndex = if (suggestedAscending) 0 else 1,
             onCancel = { host?.refreshHints() }
         ) { direction ->
             val ascending = direction == "asc"
@@ -283,7 +287,7 @@ class ReadingLibraryGridScreen(
     }
 
     private fun sortLabel(): String {
-        val field = SORT_FIELDS.firstOrNull { it.first == sortKey }?.second ?: "Title"
+        val field = sortFields.firstOrNull { it.first == sortKey }?.second ?: "Title"
         return "$field ${if (sortAscending) "ascending" else "descending"}"
     }
 
@@ -361,11 +365,6 @@ class ReadingLibraryGridScreen(
         const val CARD_DP = 104
         const val POSTER_DP = 150f
         const val TAG_WORK = -0x7fffffdf
-        val SORT_FIELDS = listOf(
-            "title" to "Title",
-            "added" to "Date added",
-            "progress" to "Reading progress"
-        )
     }
 }
 
@@ -386,6 +385,7 @@ class ReadingWorkScreen(
     private lateinit var content: LinearLayout
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
+    private var hasChildLinks = false
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -429,10 +429,11 @@ class ReadingWorkScreen(
 
     override fun requestInitialFocus(): Boolean = ::scroll.isInitialized && scroll.requestFocus()
 
-    override fun hints() = listOf(
-        ButtonHint.back(),
-        ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh)
-    )
+    override fun hints() = buildList {
+        if (hasChildLinks) add(ButtonHint.activate("Open book"))
+        add(ButtonHint.back())
+        add(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
+    }
 
     override fun onPad(action: PadAction): Boolean = when (action) {
         PadAction.Refresh -> {
@@ -460,6 +461,7 @@ class ReadingWorkScreen(
 
     private fun render(work: ReadingWork) {
         content.removeAllViews()
+        hasChildLinks = false
         content.addView(hero(work))
         work.continueAt?.let { point ->
             content.addView(sectionTitle("Continue reading"))
@@ -477,12 +479,19 @@ class ReadingWorkScreen(
         }
         work.sections.forEach { section ->
             content.addView(sectionTitle(section.title))
-            section.items.forEach { content.addView(sectionItemCard(it)) }
+            if (work.entityType == "collection" && section.items.any { it.workId.isNotBlank() }) {
+                hasChildLinks = true
+                content.addView(bookRow(section))
+            } else {
+                section.items.forEach { content.addView(sectionItemCard(it)) }
+            }
         }
         status.setTextColor(if (work.partial.isEmpty()) colors.mutedText else colors.badgePending)
         status.text = when {
             work.partial.isNotEmpty() -> work.partial.joinToString(" · ") { it.message }
             work.cache.stale -> "Showing cached details"
+            work.entityType == "collection" ->
+                "${work.bookCount} book${if (work.bookCount == 1) "" else "s"} available"
             else -> "${work.editions.size} edition${if (work.editions.size == 1) "" else "s"} available"
         }
         scroll.scrollTo(0, 0)
@@ -563,6 +572,42 @@ class ReadingWorkScreen(
         }.joinToString(" · ")
     )
 
+    private fun bookRow(section: ReadingSection): View =
+        HorizontalScrollView(requireNotNull(host).viewContext).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                section.items.forEach { item ->
+                    addView(PosterCardView(context, colors, CHILD_POSTER_DP).apply {
+                        layoutParams = LinearLayout.LayoutParams(dp(CHILD_CARD_DP), WRAP).apply {
+                            marginEnd = dp(10)
+                        }
+                        FocusDecorator.attach(this, ringVisible)
+                        bindReadingWork(
+                            ReadingWork(
+                                id = item.workId,
+                                kind = item.kind,
+                                title = item.title,
+                                authors = item.authors,
+                                artwork = item.artwork,
+                                progress = item.progress,
+                                bookCount = 1
+                            ),
+                            (api as? HubClient)?.imageLoader ?: ImageLoader(context),
+                            api::imageUrl
+                        )
+                        activateOnTap {
+                            if (item.workId.isNotBlank()) {
+                                host?.push(ReadingWorkScreen(api, item.workId, item.title, ringVisible))
+                            }
+                        }
+                    })
+                }
+            })
+        }
+
     private fun sectionTitle(text: String): TextView = TextView(requireNotNull(host).viewContext).apply {
         this.text = text
         textSize = 17f
@@ -600,5 +645,7 @@ class ReadingWorkScreen(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        const val CHILD_CARD_DP = 100
+        const val CHILD_POSTER_DP = 145f
     }
 }

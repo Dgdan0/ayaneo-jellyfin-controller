@@ -202,6 +202,15 @@ class PosterCardView(
             }
             badge.minWidth = Styler.dpInt(context, 24f)
             badge.gravity = Gravity.CENTER
+        } else if (work.entityType == "collection" && work.bookCount > 0) {
+            badge.visibility = VISIBLE
+            badge.text = work.bookCount.toString()
+            badge.background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(this@PosterCardView.colors.accent)
+            }
+            badge.minWidth = Styler.dpInt(context, 24f)
+            badge.gravity = Gravity.CENTER
         } else {
             badge.visibility = GONE
         }
@@ -215,6 +224,9 @@ class PosterCardView(
         loadPoster(work.artwork, imageLoader, imageUrl)
         contentDescription = buildString {
             append(work.title)
+            if (work.entityType == "collection" && work.bookCount > 0) {
+                append(", ").append(work.bookCount).append(if (work.bookCount == 1) " book" else " books")
+            }
             if (work.subtitle.isNotBlank()) append(", ").append(work.subtitle)
             work.progress?.let { append(", ").append((it.percentage * 100).toInt()).append(" percent read") }
         }

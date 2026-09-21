@@ -58,6 +58,17 @@ func TestCatalogUsesAPIKeyBodyFilterSortAndPagination(t *testing.T) {
 	}
 }
 
+func TestReadingSortAliasesMatchKavitaSeriesAndLastReadFields(t *testing.T) {
+	for input, want := range map[Sort]int{
+		SortTitle: 1, SortSeries: 1, SortAdded: 2, SortProgress: 7, SortLastRead: 7,
+	} {
+		got, err := sortField(input)
+		if err != nil || got != want {
+			t.Errorf("sortField(%q) = %d, %v; want %d", input, got, err, want)
+		}
+	}
+}
+
 func TestDetailVolumesAndCoverStayAuthenticated(t *testing.T) {
 	requests := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

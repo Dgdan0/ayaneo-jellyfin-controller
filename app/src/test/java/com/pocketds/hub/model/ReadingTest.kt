@@ -55,6 +55,24 @@ class ReadingTest {
     }
 
     @Test
+    fun `reading collection decodes ordered child works`() {
+        val work = json.decodeFromString<ReadingWork>(
+            """{
+                "id":"rw_collection","entityType":"collection","kind":"book","title":"Red Rising",
+                "authors":["Pierce Brown"],"bookCount":2,"genres":[],"languages":[],"editions":[],"availability":["ebook"],
+                "sections":[{"id":"books","title":"Books","items":[
+                    {"workId":"rw_one","sourceItemId":"1","title":"Red Rising","number":"1","kind":"book","artwork":"/cover/1","authors":["Pierce Brown"]},
+                    {"workId":"rw_two","sourceItemId":"2","title":"Golden Son","number":"2","kind":"book","artwork":"/cover/2","authors":["Pierce Brown"]}
+                ]}]
+            }""".trimIndent()
+        )
+
+        assertEquals("collection", work.entityType)
+        assertEquals(2, work.bookCount)
+        assertEquals(listOf("rw_one", "rw_two"), work.sections.single().items.map { it.workId })
+    }
+
+    @Test
     fun `work subtitle uses series then author then kind`() {
         assertEquals(
             "Red Rising · Pierce Brown",
