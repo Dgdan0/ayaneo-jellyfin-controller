@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"ayaneohub/internal/adapters/openlibrary"
+	"ayaneohub/internal/adapters/wikidata"
 )
 
 func TestReadingSeriesPreviewAndExactGroupedRequest(t *testing.T) {
@@ -131,5 +132,74 @@ func TestReadingSeriesRequestRejectsBookOutsidePreview(t *testing.T) {
 	})
 	if _, err := store.selected("reading:00000000000000000000000000000000", "OL100L", []string{"OL999W"}); err == nil {
 		t.Fatal("expected an out-of-roster selection error")
+	}
+}
+
+func TestReadingSeriesPreviewRepairsPartialOpenLibraryTrilogyWithWikidata(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/discover/search":
+			_, _ = w.Write([]byte(`{"results":[{"contentType":"ebook","source":"openlibrary","sourceId":"OL1W","title":"The Final Empire","author":"Brandon Sanderson","isbn":"9780000000001"}]}`))
+		case "/api/book-series":
+			_, _ = w.Write([]byte(`{"bookSeries":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	ol := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/isbn/9780000000001.json":
+			_, _ = w.Write([]byte(`{"works":[{"key":"/works/OL1W"}]}`))
+		case "/works/OL1W.json":
+			_, _ = w.Write([]byte(`{"subjects":["series:The Mistborn Saga","series:Mistborn Original Trilogy"]}`))
+		case "/search.json":
+			if strings.HasPrefix(r.URL.Query().Get("q"), "subject:") {
+				_, _ = w.Write([]byte(`{"numFound":1,"docs":[{"key":"/works/OL1W","title":"The Final Empire","author_key":["OL1A"],"author_name":["Brandon Sanderson"],"first_publish_year":2006}]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"numFound":4,"docs":[
+				{"key":"/works/OL1W","title":"The Final Empire","author_key":["OL1A"],"author_name":["Brandon Sanderson"],"first_publish_year":2001},
+				{"key":"/works/OL2W","title":"The Well of Ascension","author_key":["OL1A"],"author_name":["Brandon Sanderson"],"first_publish_year":2018},
+				{"key":"/works/OL3W","title":"The Hero of Ages","author_key":["OL1A"],"author_name":["Brandon Sanderson"],"first_publish_year":1999},
+				{"key":"/works/OL4W","title":"The Alloy of Law","author_key":["OL1A"],"author_name":["Brandon Sanderson"],"first_publish_year":2011}
+			]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ol.Close()
+
+	wiki := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"results":{"bindings":[
+			{"series":{"value":"http://www.wikidata.org/entity/Q10"},"seriesLabel":{"value":"Mistborn"},"book":{"value":"http://www.wikidata.org/entity/Q1"},"bookLabel":{"value":"The Final Empire"},"olid":{"value":"OL1W"},"date":{"value":"2006"}},
+			{"series":{"value":"http://www.wikidata.org/entity/Q10"},"seriesLabel":{"value":"Mistborn"},"book":{"value":"http://www.wikidata.org/entity/Q2"},"bookLabel":{"value":"The Well of Ascension"},"olid":{"value":"OL2W"},"date":{"value":"2007"}},
+			{"series":{"value":"http://www.wikidata.org/entity/Q10"},"seriesLabel":{"value":"Mistborn"},"book":{"value":"http://www.wikidata.org/entity/Q3"},"bookLabel":{"value":"The Hero of Ages"},"olid":{"value":"OL3W"},"date":{"value":"2008"}},
+			{"series":{"value":"http://www.wikidata.org/entity/Q10"},"seriesLabel":{"value":"Mistborn"},"book":{"value":"http://www.wikidata.org/entity/Q4"},"bookLabel":{"value":"The Alloy of Law"},"olid":{"value":"OL4W"},"date":{"value":"2011"}}
+		]}}`))
+	}))
+	defer wiki.Close()
+
+	server := NewServer(readingAcquisitionConfig(upstream.URL, []string{"reading", "request"}, true))
+	server.openlibrary = openlibrary.New(ol.URL)
+	server.wikidata = wikidata.New(wiki.URL)
+	handler := server.Handler()
+	search := libraryRequest(handler, "/v1/reading/search?q=Mistborn&type=ebook")
+	var found ReadingSearchResponse
+	_ = json.Unmarshal(search.Body.Bytes(), &found)
+	previewResponse := libraryRequest(handler, "/v1/reading/requests/series-preview?key="+found.Results[0].Key)
+	if previewResponse.Code != http.StatusOK {
+		t.Fatalf("preview = %d: %s", previewResponse.Code, previewResponse.Body.String())
+	}
+	var body ReadingSeriesPreviewResponse
+	if err := json.Unmarshal(previewResponse.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Scopes) != 2 || body.Scopes[0].Name != "Mistborn" || len(body.Scopes[0].Books) != 4 {
+		t.Fatalf("scopes = %+v", body.Scopes)
+	}
+	if body.Scopes[1].Name != "Mistborn Original Trilogy" || len(body.Scopes[1].Books) != 3 || body.Scopes[1].Books[2].Title != "The Hero of Ages" {
+		t.Fatalf("trilogy = %+v", body.Scopes[1])
 	}
 }

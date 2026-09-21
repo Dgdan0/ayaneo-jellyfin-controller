@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -137,6 +138,10 @@ func (s *Server) handleReadingSeriesPreview(w http.ResponseWriter, r *http.Reque
 		WorkID: workID, ISBN: item.ISBN, Title: item.Title, Author: item.Author,
 	})
 	if err != nil {
+		resolvedScopes = nil
+	}
+	resolvedScopes = s.enrichIncompleteSeriesScopes(ctx, workID, item, resolvedScopes)
+	if len(resolvedScopes) == 0 {
 		writeError(w, r, http.StatusUnprocessableEntity, Error{
 			Code: CodeInvalidRequest, Service: "openlibrary",
 			Message: "Could not verify a complete series list for this book", Retryable: true,
@@ -173,6 +178,136 @@ func (s *Server) handleReadingSeriesPreview(w http.ResponseWriter, r *http.Reque
 		response.Scopes = append(response.Scopes, preview)
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+// Open Library sometimes puts a series subject on only its first volume. A
+// one-book "trilogy" is worse than no grouping because it looks authoritative.
+// Wikidata's explicit has-part roster repairs membership, while Open Library
+// still supplies the covers, ISBNs, authors and publication order shown to the
+// user. Failure remains a soft fallback: a healthy Open Library roster wins.
+func (s *Server) enrichIncompleteSeriesScopes(
+	ctx context.Context,
+	workID string,
+	item bookkeeprr.Item,
+	scopes []openlibrary.Series,
+) []openlibrary.Series {
+	for _, scope := range scopes {
+		if len(scope.Books) > 1 {
+			return scopes
+		}
+	}
+	if s.wikidata == nil || workID == "" {
+		return scopes
+	}
+	wikiSeries, err := s.wikidata.SeriesContainingOpenLibraryWork(ctx, workID)
+	if err != nil {
+		return scopes
+	}
+	candidate := openlibrary.Candidate{WorkID: workID, ISBN: item.ISBN, Title: item.Title, Author: item.Author}
+	for _, verified := range wikiSeries {
+		books, hydrateErr := s.openlibrary.BooksByWorkIDs(ctx, verified.OpenLibraryWorkIDs, candidate)
+		if hydrateErr != nil || !containsReadingWork(books, workID) {
+			continue
+		}
+		authorID, author := "", strings.TrimSpace(item.Author)
+		for _, book := range books {
+			if authorID == "" {
+				authorID = book.AuthorID
+			}
+			if author == "" {
+				author = book.Author
+			}
+		}
+		for index := range scopes {
+			if len(scopes[index].Books) > 1 {
+				continue
+			}
+			name := strings.ToLower(scopes[index].Name)
+			switch {
+			case strings.Contains(name, "trilogy"):
+				if trilogy := trilogyContaining(books, workID); len(trilogy) == 3 {
+					scopes[index].Books = trilogy
+				}
+			case strings.Contains(name, "saga") || strings.Contains(name, "series"):
+				scopes[index].Books = append([]openlibrary.Book(nil), books...)
+			}
+		}
+		full := openlibrary.Series{
+			ID: "wikidata:" + verified.ID, Name: verified.Name, AuthorID: authorID, Author: author,
+			Books: append([]openlibrary.Book(nil), books...),
+		}
+		if authorID != "" {
+			full.AuthorImageURL = "https://covers.openlibrary.org/a/olid/" + authorID + "-L.jpg?default=false"
+		}
+		scopes = append(scopes, full)
+	}
+	scopes = deduplicateResolvedScopes(scopes)
+	sort.SliceStable(scopes, func(i, j int) bool {
+		if len(scopes[i].Books) != len(scopes[j].Books) {
+			return len(scopes[i].Books) > len(scopes[j].Books)
+		}
+		return strings.ToLower(scopes[i].Name) < strings.ToLower(scopes[j].Name)
+	})
+	return scopes
+}
+
+func containsReadingWork(books []openlibrary.Book, workID string) bool {
+	workID = normalizeReadingProviderRef(workID)
+	for _, book := range books {
+		if normalizeReadingProviderRef(book.WorkID) == workID {
+			return true
+		}
+	}
+	return false
+}
+
+func trilogyContaining(books []openlibrary.Book, workID string) []openlibrary.Book {
+	if len(books) < 3 {
+		return nil
+	}
+	index := -1
+	for i, book := range books {
+		if normalizeReadingProviderRef(book.WorkID) == normalizeReadingProviderRef(workID) {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return nil
+	}
+	start := (index / 3) * 3
+	if start+3 > len(books) {
+		start = len(books) - 3
+	}
+	result := append([]openlibrary.Book(nil), books[start:start+3]...)
+	for i := range result {
+		result[i].Position = i + 1
+	}
+	return result
+}
+
+func deduplicateResolvedScopes(scopes []openlibrary.Series) []openlibrary.Series {
+	result := make([]openlibrary.Series, 0, len(scopes))
+	byRoster := map[string]int{}
+	for _, scope := range scopes {
+		if len(scope.Books) == 0 {
+			continue
+		}
+		ids := make([]string, 0, len(scope.Books))
+		for _, book := range scope.Books {
+			ids = append(ids, normalizeReadingProviderRef(book.WorkID))
+		}
+		key := strings.Join(ids, "|")
+		if existing, ok := byRoster[key]; ok {
+			if len([]rune(scope.Name)) > len([]rune(result[existing].Name)) {
+				result[existing] = scope
+			}
+			continue
+		}
+		byRoster[key] = len(result)
+		result = append(result, scope)
+	}
+	return result
 }
 
 func (s *Server) readingOwnedSeriesEntries(ctx context.Context, name string) map[string]bool {

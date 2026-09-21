@@ -20,6 +20,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "", "path to hub.yaml (default: %ProgramData%\\AyaneoHub\\hub.yaml, then ./hub.yaml)")
+	listenOverride := flag.String("listen", "", "temporary listen address override (must pass normal config validation)")
 	checkOnly := flag.Bool("check", false, "validate the config and exit")
 	flag.Parse()
 
@@ -32,6 +33,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\n%v\n\n", err)
 		fmt.Fprintf(os.Stderr, "config file: %s\n", path)
 		os.Exit(config.ExitConfig)
+	}
+	if *listenOverride != "" {
+		cfg.Server.Listen = *listenOverride
+		if err := cfg.Validate(); err != nil {
+			fmt.Fprintf(os.Stderr, "\ninvalid listen override: %v\n\n", err)
+			os.Exit(config.ExitConfig)
+		}
 	}
 
 	setupLogging(cfg.Log.Level)

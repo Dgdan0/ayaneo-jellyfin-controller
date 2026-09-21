@@ -20,11 +20,12 @@ import (
 )
 
 type Client struct {
-	base     *url.URL
-	http     *http.Client
-	scanHTTP *http.Client
-	username string
-	password string
+	base       *url.URL
+	http       *http.Client
+	scanHTTP   *http.Client
+	streamHTTP *http.Client
+	username   string
+	password   string
 
 	tokenMu sync.Mutex
 	token   string
@@ -44,6 +45,10 @@ func New(cfg config.ServiceConfig) (*Client, error) {
 		base: parsed, username: strings.TrimSpace(cfg.Username), password: cfg.Password.Reveal(),
 		http:     &http.Client{Transport: transport, Timeout: cfg.Timeout.OrDefault(8 * time.Second)},
 		scanHTTP: &http.Client{Transport: transport, Timeout: 2 * time.Minute},
+		// Complete EPUBs can be much larger than normal JSON responses. Their
+		// lifetime is governed by the caller's context so a slow, valid transfer
+		// is not cut off by the metadata timeout.
+		streamHTTP: &http.Client{Transport: transport},
 	}, nil
 }
 
@@ -107,6 +112,16 @@ type Position struct {
 	Locator   Locator `json:"locator"`
 	Timestamp int64   `json:"timestamp"`
 	UpdatedAt string  `json:"updatedAt,omitempty"`
+}
+
+// PositionRecord intentionally keeps Locator as raw JSON. It is a Readium
+// locator and can gain new optional location or text fields without requiring
+// this adapter to understand, discard, or rewrite them.
+type PositionRecord struct {
+	UUID      string          `json:"uuid,omitempty"`
+	Locator   json.RawMessage `json:"locator"`
+	Timestamp int64           `json:"timestamp"`
+	UpdatedAt string          `json:"updatedAt,omitempty"`
 }
 
 type Book struct {
@@ -193,6 +208,57 @@ func (c *Client) Cover(ctx context.Context, id int64) ([]byte, string, error) {
 	return body, contentType, nil
 }
 
+// OpenEbook returns the streaming response owned by the caller. Range and
+// If-Range are the only client headers forwarded to Storyteller.
+func (c *Client) OpenEbook(ctx context.Context, id int64, byteRange, ifRange string) (*http.Response, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("storyteller: invalid book id")
+	}
+	headers := http.Header{"Accept": []string{"application/epub+zip, application/octet-stream"}}
+	if byteRange != "" {
+		headers.Set("Range", byteRange)
+	}
+	if ifRange != "" {
+		headers.Set("If-Range", ifRange)
+	}
+	return c.requestWith(ctx, c.streamHTTP, http.MethodGet,
+		"/api/v2/books/"+strconv.FormatInt(id, 10)+"/files",
+		url.Values{"format": []string{"ebook"}}, headers, nil)
+}
+
+func (c *Client) Position(ctx context.Context, id int64) (*PositionRecord, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("storyteller: invalid book id")
+	}
+	var out PositionRecord
+	if err := c.getJSON(ctx, "/api/v2/books/"+strconv.FormatInt(id, 10)+"/positions", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) SavePosition(ctx context.Context, id int64, locator json.RawMessage, timestamp int64) error {
+	if id <= 0 {
+		return fmt.Errorf("storyteller: invalid book id")
+	}
+	body, err := json.Marshal(struct {
+		Locator   json.RawMessage `json:"locator"`
+		Timestamp int64           `json:"timestamp"`
+	}{Locator: locator, Timestamp: timestamp})
+	if err != nil {
+		return err
+	}
+	resp, err := c.requestWith(ctx, c.http, http.MethodPost,
+		"/api/v2/books/"+strconv.FormatInt(id, 10)+"/positions", nil,
+		http.Header{"Accept": []string{"application/json"}, "Content-Type": []string{"application/json"}}, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, httpx.MaxBodyBytes))
+	return nil
+}
+
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 	resp, err := c.get(ctx, path)
 	if err != nil {
@@ -214,6 +280,17 @@ func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
 }
 
 func (c *Client) request(ctx context.Context, client *http.Client, method, path string) (*http.Response, error) {
+	return c.requestWith(ctx, client, method, path, nil, nil, nil)
+}
+
+func (c *Client) requestWith(
+	ctx context.Context,
+	client *http.Client,
+	method, path string,
+	query url.Values,
+	headers http.Header,
+	body []byte,
+) (*http.Response, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		token, err := c.accessToken(ctx)
 		if err != nil {
@@ -221,11 +298,24 @@ func (c *Client) request(ctx context.Context, client *http.Client, method, path 
 		}
 		target := *c.base
 		target.Path = strings.TrimRight(c.base.Path, "/") + "/" + strings.TrimLeft(path, "/")
-		req, err := http.NewRequestWithContext(ctx, method, target.String(), nil)
+		if len(query) > 0 {
+			target.RawQuery = query.Encode()
+		}
+		var reader io.Reader
+		if body != nil {
+			reader = strings.NewReader(string(body))
+		}
+		req, err := http.NewRequestWithContext(ctx, method, target.String(), reader)
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("Accept", "application/json, image/*")
+		for name, values := range headers {
+			req.Header.Del(name)
+			for _, value := range values {
+				req.Header.Add(name, value)
+			}
+		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		resp, err := client.Do(req)
 		if err != nil {

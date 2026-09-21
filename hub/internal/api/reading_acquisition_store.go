@@ -241,9 +241,19 @@ func (s *readingAcquisitionStore) matchBook(
 			}
 			bookISBN := normalizeISBN(book.ISBN)
 			strong := isbn != "" && bookISBN != "" && isbn == bookISBN
-			titleMatch := normalizedTitle != "" && normalizedTitle == normalizeReadingIdentity(book.Title)
-			authorMatch := normalizedAuthors == "" || normalizeReadingIdentity(book.Author) == "" ||
-				strings.Contains(normalizedAuthors, normalizeReadingIdentity(book.Author))
+			expectedTitle := normalizeReadingIdentity(book.Title)
+			expectedAuthor := normalizeReadingIdentity(book.Author)
+			strongAuthorMatch := normalizedAuthors != "" && expectedAuthor != "" &&
+				strings.Contains(normalizedAuthors, expectedAuthor)
+			titleMatch := normalizedTitle != "" && normalizedTitle == expectedTitle
+			// EPUB metadata often prefixes a volume title with the series name,
+			// for example "Mistborn: The Final Empire". Accept that form only
+			// when the manifest author also matches so generic suffixes cannot
+			// merge unrelated books into a requested collection.
+			if !titleMatch && strongAuthorMatch && len(strings.Fields(expectedTitle)) >= 2 {
+				titleMatch = strings.HasSuffix(normalizedTitle, " "+expectedTitle)
+			}
+			authorMatch := normalizedAuthors == "" || expectedAuthor == "" || strongAuthorMatch
 			if !strong && !(titleMatch && authorMatch) {
 				continue
 			}

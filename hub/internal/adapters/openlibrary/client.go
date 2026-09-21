@@ -299,6 +299,53 @@ func (c *Client) seriesBooks(ctx context.Context, searchQuery string, candidate 
 	return books, nil
 }
 
+// BooksByWorkIDs hydrates an already verified roster with Open Library's
+// covers, ISBNs, authors and publication dates. The caller owns membership;
+// this method rejects partial search results rather than silently shrinking it.
+func (c *Client) BooksByWorkIDs(ctx context.Context, workIDs []string, candidate Candidate) ([]Book, error) {
+	if len(workIDs) < 2 || len(workIDs) > 100 {
+		return nil, fmt.Errorf("openlibrary: roster must contain 2 to 100 works")
+	}
+	parts := make([]string, 0, len(workIDs))
+	orderedIDs := make([]string, 0, len(workIDs))
+	seen := map[string]bool{}
+	for _, raw := range workIDs {
+		id := normalizeWorkID(raw)
+		if id == "" || seen[id] {
+			return nil, fmt.Errorf("openlibrary: invalid roster work id")
+		}
+		seen[id] = true
+		orderedIDs = append(orderedIDs, id)
+		parts = append(parts, "/works/"+id)
+	}
+	books, err := c.seriesBooks(ctx, "key:("+strings.Join(parts, " OR ")+")", candidate)
+	if err != nil {
+		return nil, err
+	}
+	if len(books) != len(parts) {
+		return nil, fmt.Errorf("openlibrary: hydrated %d of %d roster books", len(books), len(parts))
+	}
+	// seriesBooks orders an ordinary Open Library result by its publication
+	// metadata. That is useful when Open Library owns the roster, but these IDs
+	// already arrived in the order verified by Wikidata. Edition dates can be
+	// missing or misleading (translations and reissues are common), so preserve
+	// the verified order while retaining Open Library's descriptive metadata.
+	byID := make(map[string]Book, len(books))
+	for _, book := range books {
+		byID[book.WorkID] = book
+	}
+	ordered := make([]Book, 0, len(orderedIDs))
+	for index, id := range orderedIDs {
+		book, ok := byID[id]
+		if !ok {
+			return nil, fmt.Errorf("openlibrary: hydrated roster is missing %s", id)
+		}
+		book.Position = index + 1
+		ordered = append(ordered, book)
+	}
+	return ordered, nil
+}
+
 func dominantPublicationYear(dates []string, fallback int) int {
 	counts := map[int]int{}
 	for _, date := range dates {

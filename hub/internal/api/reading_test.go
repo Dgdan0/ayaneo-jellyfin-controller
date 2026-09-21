@@ -94,6 +94,9 @@ func TestReadingCategoryAndSearchUseNormalizedContracts(t *testing.T) {
 	if search.Code != http.StatusOK {
 		t.Fatalf("search status = %d: %s", search.Code, search.Body.String())
 	}
+	if got := search.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("search Cache-Control = %q, want no-store because request keys are ephemeral", got)
+	}
 	var found ReadingSearchResponse
 	if err := json.Unmarshal(search.Body.Bytes(), &found); err != nil {
 		t.Fatal(err)

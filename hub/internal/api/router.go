@@ -17,6 +17,7 @@ import (
 	"ayaneohub/internal/adapters/openlibrary"
 	"ayaneohub/internal/adapters/qbittorrent"
 	"ayaneohub/internal/adapters/storyteller"
+	"ayaneohub/internal/adapters/wikidata"
 	"ayaneohub/internal/auth"
 	"ayaneohub/internal/cache"
 	"ayaneohub/internal/config"
@@ -47,6 +48,7 @@ type Server struct {
 	kavita      *kavita.Client
 	storyteller *storyteller.Client
 	openlibrary *openlibrary.Client
+	wikidata    *wikidata.Client
 	arrs        map[string]*arr.Client
 
 	// The provider-id index, because Jellyfin has no provider-id query. A map
@@ -96,6 +98,7 @@ func NewServer(cfg *config.Config) *Server {
 		readingSeriesPreviews: newReadingSeriesPreviewStore(250),
 		readingAcquisitions:   newReadingAcquisitionStore(readingAcquisitionPath(cfg.Server.ReadingTransfers)),
 		openlibrary:           openlibrary.New(""),
+		wikidata:              wikidata.New(""),
 		playbackSessions:      make(map[string]*playbackSession),
 		playbackTTL:           30 * time.Minute,
 		previewFrame:          extractPreviewFrame,
@@ -249,6 +252,9 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}", s.handleReadingPublication)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/pages/{page}", s.handleReadingPublicationPage)
 	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/progress", s.handleReadingPublicationProgress)
+	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/file", s.handleReadingEpubFile)
+	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/position", s.handleReadingEpubPosition)
+	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/position", s.handleReadingEpubPosition)
 	authed.HandleFunc("GET /v1/reading/requests/options", s.handleReadingRequestOptions)
 	authed.HandleFunc("GET /v1/reading/requests/series-preview", s.handleReadingSeriesPreview)
 	authed.HandleFunc("POST /v1/reading/requests", s.handleReadingCreateRequest)

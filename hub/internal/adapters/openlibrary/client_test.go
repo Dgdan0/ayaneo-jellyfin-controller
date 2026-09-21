@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -122,5 +123,36 @@ func TestSeriesPreviewRejectsUnverifiedStandaloneWork(t *testing.T) {
 	_, err := New(server.URL).SeriesPreview(context.Background(), Candidate{WorkID: "OL1W"})
 	if err == nil {
 		t.Fatal("expected an unavailable-series error")
+	}
+}
+
+func TestBooksByWorkIDsHydratesWikidataRosterFromOpenLibrary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search.json" {
+			http.NotFound(w, r)
+			return
+		}
+		query := r.URL.Query().Get("q")
+		for _, id := range []string{"OL1W", "OL2W", "OL3W"} {
+			if !strings.Contains(query, "/works/"+id) {
+				t.Fatalf("query %q is missing %s", query, id)
+			}
+		}
+		_, _ = w.Write([]byte(`{"numFound":3,"docs":[
+			{"key":"/works/OL2W","title":"The Well of Ascension","author_name":["Brandon Sanderson"],"first_publish_year":2018,"cover_i":20},
+			{"key":"/works/OL1W","title":"The Final Empire","author_name":["Brandon Sanderson"],"first_publish_year":2001,"cover_i":10},
+			{"key":"/works/OL3W","title":"The Hero of Ages","author_name":["Brandon Sanderson"],"first_publish_year":1999,"cover_i":30}
+		]}`))
+	}))
+	defer server.Close()
+
+	books, err := New(server.URL).BooksByWorkIDs(
+		context.Background(), []string{"OL1W", "OL2W", "OL3W"}, Candidate{Author: "Brandon Sanderson"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(books) != 3 || books[0].WorkID != "OL1W" || books[1].WorkID != "OL2W" || books[2].WorkID != "OL3W" || books[2].Position != 3 || books[1].CoverURL == "" {
+		t.Fatalf("books = %+v", books)
 	}
 }

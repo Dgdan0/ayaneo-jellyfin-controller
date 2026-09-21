@@ -348,6 +348,40 @@ func TestStorytellerShelfRepairsMissingSeriesFromAcquisitionManifest(t *testing.
 	}
 }
 
+func TestStorytellerShelfKeepsRequestedCollectionWhenEpubAddsSeriesPrefix(t *testing.T) {
+	temporary := t.TempDir()
+	cfg := readingCatalogConfig("http://127.0.0.1:1", filepath.Join(temporary, "catalog.json"), []string{"reading"})
+	cfg.Server.ReadingTransfers = filepath.Join(temporary, "reading-transfers.json")
+	server := NewServer(cfg)
+	preview := ReadingSeriesPreview{
+		SeriesID: "subject:mistborn-original-trilogy", Name: "Mistborn Original Trilogy", Author: "Brandon Sanderson",
+		Books: []ReadingSeriesPreviewBook{
+			{ID: "OL1W", Title: "The Final Empire", Author: "Brandon Sanderson", Position: 1},
+			{ID: "OL3W", Title: "The Hero of Ages", Author: "Brandon Sanderson", Position: 3},
+		},
+	}
+	manifest, err := server.readingAcquisitions.begin("reading:key", preview, preview.Books, 7, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, book := range preview.Books {
+		if err := server.readingAcquisitions.setBook(manifest.ID, book.ID, 30+index, "accepted", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rawSeries := []storyteller.Series{{UUID: "epub-series", Name: "Mistborn Trilogy"}}
+	items, err := server.storytellerShelf("storyteller:books", []storyteller.Book{
+		{ID: 1, Title: "Mistborn: The Final Empire", Authors: []storyteller.Creator{{Name: "Brandon Sanderson"}}, Series: rawSeries, Ebook: &storyteller.Ebook{UUID: "one"}},
+		{ID: 2, Title: "The Hero of Ages", Authors: []storyteller.Creator{{Name: "Brandon Sanderson"}}, Series: rawSeries, Ebook: &storyteller.Ebook{UUID: "two"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].EntityType != "collection" || items[0].Title != preview.Name || items[0].BookCount != 2 {
+		t.Fatalf("items = %+v", items)
+	}
+}
+
 func TestStorytellerCollectionIncludesMissingManifestBooksAndContinueArtwork(t *testing.T) {
 	temporary := t.TempDir()
 	cfg := readingCatalogConfig("http://127.0.0.1:1", filepath.Join(temporary, "catalog.json"), []string{"reading"})
