@@ -92,3 +92,9 @@ sealed interface HubResult<out T> {
         val message: String = HubFailures.message(kind)
     ) : HubResult<Nothing>
 }
+
+data class ReadingEpubDownload(
+    val bytes: Long,
+    val etag: String = "",
+    val contentHash: String = ""
+)

@@ -194,6 +194,19 @@ object HubEndpoints {
             method = "POST"
         )
 
+    fun readingEpubFile(base: String, workId: String, sourceItemId: String): String =
+        join(
+            base,
+            "/v1/reading/works/" + encode(workId) + "/publications/" +
+                encode(sourceItemId) + "/file"
+        )
+
+    fun readingEpubPosition(base: String, workId: String, sourceItemId: String): HubRequest =
+        HubRequest(
+            join(base, "/v1/reading/works/" + encode(workId) +
+                "/publications/" + encode(sourceItemId) + "/position")
+        )
+
     fun readingRequestOptions(base: String, key: String): HubRequest =
         HubRequest(join(base, "/v1/reading/requests/options") + "?key=" + encode(key))
 

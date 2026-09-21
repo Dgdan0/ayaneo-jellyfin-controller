@@ -1,6 +1,9 @@
 package com.pocketds.hub.state
 
 object HubConnectionValidation {
+    fun effectiveToken(storedToken: String, enteredToken: String): String =
+        enteredToken.trim().ifEmpty { storedToken.trim() }
+
     fun error(normalizedAddress: String, token: String): String? {
         val addressAllowed =
             normalizedAddress.startsWith("https://") && normalizedAddress.length > "https://".length ||

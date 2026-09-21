@@ -2,6 +2,7 @@ package com.pocketds.hub.model
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
+import kotlinx.serialization.json.JsonObject
 
 object ReadingType {
     const val ALL = "all"
@@ -359,3 +360,18 @@ data class ReadingPublicationManifest(
 
 @Serializable
 data class ReadingPublicationProgressBody(val pageIndex: Int)
+
+@Serializable
+data class EpubPositionResponse(
+    val workId: String = "",
+    val sourceItemId: String = "",
+    val locator: JsonObject? = null,
+    val timestamp: Long = 0,
+    val updatedAt: String = ""
+)
+
+@Serializable
+data class EpubPositionBody(
+    val locator: JsonObject,
+    val timestamp: Long
+)

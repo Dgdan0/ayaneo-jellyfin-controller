@@ -28,6 +28,8 @@ import com.pocketds.hub.model.ReadingLibraryItemsResponse
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.model.ReadingPublicationManifest
 import com.pocketds.hub.model.ReadingPublicationProgressBody
+import com.pocketds.hub.model.EpubPositionBody
+import com.pocketds.hub.model.EpubPositionResponse
 import com.pocketds.hub.model.ReadingCreateRequestBody
 import com.pocketds.hub.model.ReadingDownloadsResponse
 import com.pocketds.hub.model.ReadingRequestOptions
@@ -67,6 +69,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
@@ -162,6 +165,23 @@ interface HubApi {
         sourceItemId: String,
         pageIndex: Int
     ): HubResult<ActionAck>
+    suspend fun readingEpubPosition(
+        workId: String,
+        sourceItemId: String
+    ): HubResult<EpubPositionResponse> =
+        HubResult.Failed(FailureKind.UNKNOWN, "EPUB position loading is unavailable")
+    suspend fun saveReadingEpubPosition(
+        workId: String,
+        sourceItemId: String,
+        body: EpubPositionBody
+    ): HubResult<ActionAck> =
+        HubResult.Failed(FailureKind.UNKNOWN, "EPUB position saving is unavailable")
+    suspend fun downloadReadingEpub(
+        workId: String,
+        sourceItemId: String,
+        destination: File
+    ): HubResult<ReadingEpubDownload> =
+        HubResult.Failed(FailureKind.UNKNOWN, "EPUB downloading is unavailable")
     suspend fun readingRequestOptions(key: String): HubResult<ReadingRequestOptions>
     suspend fun readingSeriesPreview(key: String): HubResult<ReadingSeriesPreviewResponse>
     suspend fun requestReading(body: ReadingCreateRequestBody): HubResult<ReadingRequestResponse>
@@ -721,6 +741,74 @@ class HubClient(private val context: Context) : HubApi {
             ReadingPublicationProgressBody(pageIndex)
         )
     ) { json.decodeFromString<ActionAck>(it) }
+
+    override suspend fun readingEpubPosition(
+        workId: String,
+        sourceItemId: String
+    ): HubResult<EpubPositionResponse> =
+        get(HubEndpoints.readingEpubPosition(base(), workId, sourceItemId), noCache = true) {
+            json.decodeFromString<EpubPositionResponse>(it)
+        }
+
+    override suspend fun saveReadingEpubPosition(
+        workId: String,
+        sourceItemId: String,
+        body: EpubPositionBody
+    ): HubResult<ActionAck> = postOnce(
+        HubEndpoints.readingEpubPosition(base(), workId, sourceItemId).copy(method = "POST"),
+        json.encodeToString(EpubPositionBody.serializer(), body)
+    ) { json.decodeFromString<ActionAck>(it) }
+
+    override suspend fun downloadReadingEpub(
+        workId: String,
+        sourceItemId: String,
+        destination: File
+    ): HubResult<ReadingEpubDownload> {
+        connectionFailure()?.let { return it }
+        return try {
+            withContext(Dispatchers.IO) {
+                destination.parentFile?.mkdirs()
+                val request = Request.Builder()
+                    .url(HubEndpoints.readingEpubFile(base(), workId, sourceItemId))
+                    .cacheControl(noStore)
+                    .build()
+                offlineHttp.newCall(request).await().use { response ->
+                    if (!response.isSuccessful) {
+                        val body = response.body?.string().orEmpty()
+                        return@withContext HubResult.Failed(
+                            HubFailures.classify(null, response.code),
+                            hubMessage(body) ?: "The EPUB could not be downloaded"
+                        )
+                    }
+                    val body = response.body ?: return@withContext HubResult.Failed(
+                        FailureKind.BAD_RESPONSE, "The EPUB response was empty"
+                    )
+                    FileOutputStream(destination, false).use { output ->
+                        body.byteStream().use { input -> input.copyTo(output, 128 * 1024) }
+                        output.fd.sync()
+                    }
+                    if (destination.length() <= 0L) {
+                        destination.delete()
+                        return@withContext HubResult.Failed(FailureKind.BAD_RESPONSE, "The EPUB response was empty")
+                    }
+                    HubResult.Ok(
+                        ReadingEpubDownload(
+                            bytes = destination.length(),
+                            etag = response.header("ETag").orEmpty(),
+                            contentHash = response.header("X-Reading-Content-Hash").orEmpty()
+                        )
+                    )
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            destination.delete()
+            throw e
+        } catch (e: Exception) {
+            destination.delete()
+            DebugLog.log("net", "epub download failed ${e.javaClass.name}: ${e.message?.take(160)}")
+            HubResult.Failed(HubFailures.classify(e.javaClass.name, null), "The EPUB could not be downloaded")
+        }
+    }
 
     override suspend fun readingRequestOptions(key: String): HubResult<ReadingRequestOptions> =
         get(HubEndpoints.readingRequestOptions(base(), key), noCache = true) {

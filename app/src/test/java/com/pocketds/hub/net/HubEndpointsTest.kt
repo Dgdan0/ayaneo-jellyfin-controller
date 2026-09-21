@@ -53,6 +53,14 @@ class HubEndpointsTest {
             ),
             HubEndpoints.readingPublicationProgress(base, "rw_0123456789abcdef0123456789abcdef", "6")
         )
+        assertEquals(
+            "$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef/publications/12/file",
+            HubEndpoints.readingEpubFile(base, "rw_0123456789abcdef0123456789abcdef", "12")
+        )
+        assertEquals(
+            "$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef/publications/12/position",
+            HubEndpoints.readingEpubPosition(base, "rw_0123456789abcdef0123456789abcdef", "12").url
+        )
     }
 
     @Test

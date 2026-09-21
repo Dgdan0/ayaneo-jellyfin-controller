@@ -20,6 +20,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.recyclerview.widget.RecyclerView
+import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.FocusGuard
@@ -142,6 +143,11 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private val sectionTitles get() = sectionItems.map { it.title }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // An EPUB navigator has constructor dependencies supplied by Readium's
+        // factory. Install its safe restoration factory before FragmentActivity
+        // restores state; this Activity intentionally rebuilds its own screen
+        // stack after process death.
+        supportFragmentManager.fragmentFactory = EpubNavigatorFragment.createDummyFactory()
         AppCompatDelegate.setDefaultNightMode(
             when (ThemeSettings.getMode(this)) {
                 ThemeSettings.Mode.SYSTEM -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
@@ -163,6 +169,15 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         sections = SectionStacks(sectionTitles.size)
 
         setContentView(buildChrome())
+        if (savedInstanceState != null) {
+            supportFragmentManager.fragments
+                .filterIsInstance<EpubNavigatorFragment>()
+                .forEach { fragment ->
+                    supportFragmentManager.beginTransaction()
+                        .remove(fragment)
+                        .commitNowAllowingStateLoss()
+                }
+        }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = handleSystemBack()
@@ -219,6 +234,19 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         if (!url.isNullOrBlank() && !token.isNullOrBlank()) {
             HubSettings.save(this, url, token)
             DebugLog.log("auth", "hub seeded from intent: $url")
+        } else if (
+            applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
+            !url.isNullOrBlank()
+        ) {
+            // Hardware tests often tunnel a development Hub through `adb
+            // reverse`. A debug build may repoint the existing credential
+            // without ever reading it into the desktop shell. Release builds
+            // require URL and token together so another app cannot redirect a
+            // valid credential to an address it controls.
+            HubSettings.token(this).takeIf { it.isNotBlank() }?.let {
+                HubSettings.setDebugBaseUrl(url)
+                DebugLog.log("auth", "debug hub URL seeded from intent: $url")
+            }
         }
     }
 

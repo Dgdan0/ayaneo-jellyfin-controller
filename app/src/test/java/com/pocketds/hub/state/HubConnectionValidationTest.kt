@@ -35,4 +35,15 @@ class HubConnectionValidationTest {
             HubConnectionValidation.error("http://ayaneo.example.ts.net", token)
         )
     }
+
+    @Test
+    fun `blank edit keeps the stored token out of the editable field`() {
+        assertEquals(token, HubConnectionValidation.effectiveToken(token, "   "))
+    }
+
+    @Test
+    fun `new token replaces the stored token after trimming`() {
+        val replacement = "b".repeat(43)
+        assertEquals(replacement, HubConnectionValidation.effectiveToken(token, " $replacement "))
+    }
 }

@@ -3,6 +3,7 @@ package com.pocketds.hub.screens.manage
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.InputType
+import android.text.method.PasswordTransformationMethod
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -114,14 +115,16 @@ class HubConnectionScreen(
         })
 
         token = EditText(host.viewContext).apply {
-            setText(HubSettings.token(context))
+            setText("")
             textSize = 16f
             setTextColor(colors.primaryText)
             setHintTextColor(colors.mutedText)
-            hint = "Paste the HUB_TOKEN value"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             imeOptions = EditorInfo.IME_ACTION_DONE
             isSingleLine = true
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            transformationMethod = PasswordTransformationMethod.getInstance()
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+            isSaveEnabled = false
             setSelectAllOnFocus(false)
             setPadding(dp(15), dp(13), dp(15), dp(13))
             background = fieldBackground()
@@ -135,6 +138,7 @@ class HubConnectionScreen(
                 }
             }
         }
+        updateTokenHint()
         card.addView(token, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
 
         save = TextView(host.viewContext).apply {
@@ -170,7 +174,8 @@ class HubConnectionScreen(
 
     override fun onShow() {
         address.setText(HubSettings.baseUrl(host.viewContext))
-        token.setText(HubSettings.token(host.viewContext))
+        token.setText("")
+        updateTokenHint()
     }
 
     override fun onHide() {
@@ -194,8 +199,11 @@ class HubConnectionScreen(
     private fun testAndSave() {
         if (testJob?.isActive == true) return
         val normalized = HubEndpoints.normaliseBase(address.text.toString())
-        val enteredToken = token.text.toString().trim()
-        val validationError = HubConnectionValidation.error(normalized, enteredToken)
+        val effectiveToken = HubConnectionValidation.effectiveToken(
+            HubSettings.token(host.viewContext),
+            token.text.toString()
+        )
+        val validationError = HubConnectionValidation.error(normalized, effectiveToken)
         if (validationError != null) {
             status.setTextColor(colors.dangerText)
             status.text = validationError
@@ -204,9 +212,11 @@ class HubConnectionScreen(
             return
         }
 
-        HubSettings.save(host.viewContext, normalized, enteredToken)
+        HubSettings.save(host.viewContext, normalized, effectiveToken)
         address.setText(normalized)
         address.setSelection(normalized.length)
+        token.setText("")
+        updateTokenHint()
         status.setTextColor(colors.mutedText)
         status.text = "Testing connection…"
         save.isEnabled = false
@@ -232,6 +242,14 @@ class HubConnectionScreen(
         cornerRadius = Styler.dp(host.viewContext, 10f)
         setColor(this@HubConnectionScreen.colors.stripBackground)
         setStroke(dp(2), this@HubConnectionScreen.colors.focusRing)
+    }
+
+    private fun updateTokenHint() {
+        token.hint = if (HubSettings.token(host.viewContext).isEmpty()) {
+            "Paste the HUB_TOKEN value"
+        } else {
+            "Stored token · leave blank to keep it"
+        }
     }
 
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())

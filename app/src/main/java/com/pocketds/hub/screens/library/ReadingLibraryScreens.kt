@@ -27,6 +27,7 @@ import com.pocketds.hub.model.ReadingSection
 import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.reader.PagedImageReaderScreen
+import com.pocketds.hub.reader.EpubReaderScreen
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
@@ -501,7 +502,7 @@ class ReadingWorkScreen(
         }
         if (work.editions.isNotEmpty()) {
             content.addView(sectionTitle("Available editions"))
-            work.editions.forEach { content.addView(editionCard(it)) }
+            work.editions.forEach { content.addView(editionCard(work, it)) }
         }
         work.sections.forEach { section ->
             content.addView(sectionTitle(section.title))
@@ -699,16 +700,16 @@ class ReadingWorkScreen(
                     setPadding(0, dp(5), 0, 0)
                 })
             }, LinearLayout.LayoutParams(0, WRAP, 1f))
-            if (canReadPublication(work.kind, point.sourceItemId) && point.source == "kavita") {
+            if (canReadPublication(work.kind, point.sourceItemId)) {
                 hasChildLinks = true
                 Styler.makeFocusable(this)
                 FocusDecorator.attach(this, ringVisible)
-                activateOnTap { openPublication(work, point.sourceItemId, point.title) }
+                activateOnTap { openPublication(work, point.sourceItemId, point.title, point.source) }
                 actionViews.putIfAbsent(point.sourceItemId, this)
             }
         }
 
-    private fun editionCard(edition: ReadingEdition): View = infoCard(
+    private fun editionCard(work: ReadingWork, edition: ReadingEdition): View = infoCard(
         edition.kind.replaceFirstChar { it.uppercase() },
         buildList {
             if (edition.format.isNotBlank()) add(edition.format.uppercase())
@@ -717,7 +718,15 @@ class ReadingWorkScreen(
             if (edition.narrator.isNotBlank()) add("Narrated by ${edition.narrator}")
             add(edition.source.replaceFirstChar { it.uppercase() })
         }.joinToString(" · ")
-    )
+    ).apply {
+        if (edition.source == "storyteller" && edition.kind == "ebook" && edition.sourceItemId.isNotBlank()) {
+            hasChildLinks = true
+            Styler.makeFocusable(this)
+            FocusDecorator.attach(this, ringVisible)
+            activateOnTap { openPublication(work, edition.sourceItemId, work.title, edition.source) }
+            actionViews.putIfAbsent(edition.sourceItemId, this)
+        }
+    }
 
     private fun sectionItemCard(work: ReadingWork, item: ReadingSectionItem): View = infoCard(
         buildString {
@@ -733,17 +742,24 @@ class ReadingWorkScreen(
             hasChildLinks = true
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible)
-            activateOnTap { openPublication(work, item.sourceItemId, item.title) }
+            activateOnTap { openPublication(work, item.sourceItemId, item.title, "kavita") }
             actionViews.putIfAbsent(item.sourceItemId, this)
         }
     }
 
     private fun canReadPublication(kind: String, sourceItemId: String): Boolean =
-        sourceItemId.isNotBlank() && kind in setOf("comic", "manga")
+        sourceItemId.isNotBlank() && kind in setOf("comic", "manga", "book", "ebook")
 
-    private fun openPublication(work: ReadingWork, sourceItemId: String, publicationTitle: String) {
+    private fun openPublication(work: ReadingWork, sourceItemId: String, publicationTitle: String, source: String) {
         host?.push(
-            PagedImageReaderScreen(
+            if (source == "storyteller" || work.kind in setOf("book", "ebook")) EpubReaderScreen(
+                api = api,
+                workId = work.id,
+                sourceItemId = sourceItemId,
+                title = publicationTitle.ifBlank { work.title },
+                ringVisible = ringVisible,
+                onProgressChanged = ::requestRefreshAfterReading
+            ) else PagedImageReaderScreen(
                 api = api,
                 workId = work.id,
                 initialSourceItemId = sourceItemId,

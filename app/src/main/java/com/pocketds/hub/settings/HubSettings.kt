@@ -24,9 +24,15 @@ object HubSettings {
     private const val KEY_USER_ID = "jellyfin_user_id"
     private const val KEY_USER_NAME = "jellyfin_user_name"
     private const val KEY_NAV_EXPANDED = "navigation_expanded"
+    @Volatile private var debugBaseUrlOverride: String? = null
 
     fun baseUrl(context: Context): String =
-        Prefs.of(context).getString(KEY_URL, "").orEmpty()
+        debugBaseUrlOverride ?: Prefs.of(context).getString(KEY_URL, "").orEmpty()
+
+    /** Process-local address used by debug builds and adb reverse hardware tests. */
+    fun setDebugBaseUrl(url: String) {
+        debugBaseUrlOverride = HubEndpoints.normaliseBase(url)
+    }
 
     fun token(context: Context): String =
         Prefs.of(context).getString(KEY_TOKEN, "").orEmpty()
@@ -54,6 +60,7 @@ object HubSettings {
     val isConfigured: (Context) -> Boolean = { baseUrl(it).isNotEmpty() && token(it).isNotEmpty() }
 
     fun save(context: Context, url: String, token: String) {
+        debugBaseUrlOverride = null
         Prefs.of(context).edit()
             .putString(KEY_URL, HubEndpoints.normaliseBase(url))
             .putString(KEY_TOKEN, token.trim())
@@ -62,6 +69,7 @@ object HubSettings {
 
     /** Clears both. Offered in Settings so a lost device can be cut off locally. */
     fun forget(context: Context) {
+        debugBaseUrlOverride = null
         Prefs.of(context).edit()
             .remove(KEY_URL).remove(KEY_TOKEN)
             .remove(KEY_USER_ID).remove(KEY_USER_NAME)

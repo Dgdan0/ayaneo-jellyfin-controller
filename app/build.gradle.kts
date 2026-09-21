@@ -14,8 +14,8 @@ android {
         targetSdk = 34
         // Must always increase: Android/Obtanium correctly rejects a release
         // whose version code is lower than the APK already on the Pocket DS.
-        versionCode = 14
-        versionName = "0.2.3"
+        versionCode = 15
+        versionName = "0.3.0"
     }
 
     buildTypes {
@@ -28,6 +28,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -38,6 +39,7 @@ android {
 }
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     // Navigation, input routing, retry/cache policy and load-state transitions
     // live in plain Kotlin classes that take primitives rather than
     // View/MotionEvent/Context, so they can be tested on the JVM without a
@@ -80,4 +82,10 @@ dependencies {
     // Comic and manga scans routinely exceed the bitmap memory budget. This
     // view decodes only visible tiles while retaining native pinch/pan support.
     implementation("com.davemorrissey.labs:subsampling-scale-image-view-androidx:3.10.0")
+    // 3.0.0 is the Readium line built for compileSdk 34 and Kotlin 1.9.24,
+    // matching this app without a toolchain migration. Readium owns EPUB
+    // parsing/navigation; the Pocket UI continues to own every control.
+    implementation("org.readium.kotlin-toolkit:readium-shared:3.0.0")
+    implementation("org.readium.kotlin-toolkit:readium-streamer:3.0.0")
+    implementation("org.readium.kotlin-toolkit:readium-navigator:3.0.0")
 }
