@@ -170,8 +170,35 @@ object HubEndpoints {
     fun readingWork(base: String, workId: String): HubRequest =
         HubRequest(join(base, "/v1/reading/works/" + encode(workId)))
 
+    fun readingPublication(base: String, workId: String, sourceItemId: String): HubRequest =
+        HubRequest(
+            join(base, "/v1/reading/works/" + encode(workId) +
+                "/publications/" + encode(sourceItemId))
+        )
+
+    fun readingPublicationPage(
+        base: String,
+        workId: String,
+        sourceItemId: String,
+        pageIndex: Int
+    ): String = join(
+        base,
+        "/v1/reading/works/" + encode(workId) + "/publications/" +
+            encode(sourceItemId) + "/pages/$pageIndex"
+    )
+
+    fun readingPublicationProgress(base: String, workId: String, sourceItemId: String): HubRequest =
+        HubRequest(
+            join(base, "/v1/reading/works/" + encode(workId) +
+                "/publications/" + encode(sourceItemId) + "/progress"),
+            method = "POST"
+        )
+
     fun readingRequestOptions(base: String, key: String): HubRequest =
         HubRequest(join(base, "/v1/reading/requests/options") + "?key=" + encode(key))
+
+    fun readingSeriesPreview(base: String, key: String): HubRequest =
+        HubRequest(join(base, "/v1/reading/requests/series-preview") + "?key=" + encode(key))
 
     fun readingRequests(base: String): HubRequest =
         HubRequest(join(base, "/v1/reading/requests"), method = "POST")

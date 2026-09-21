@@ -2,6 +2,8 @@ package com.pocketds.hub.ui
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.drawable.ColorDrawable
 import android.view.Gravity
 import android.view.ViewGroup
@@ -230,6 +232,40 @@ class PosterCardView(
             if (work.subtitle.isNotBlank()) append(", ").append(work.subtitle)
             work.progress?.let { append(", ").append((it.percentage * 100).toInt()).append(" percent read") }
         }
+    }
+
+    /**
+     * Keep a known series member in its correct place even when its file is not
+     * local yet. Desaturating the artwork communicates absence without making
+     * the title unreadable or relying on colour alone; missing cards are not
+     * focus targets because there is no detail page they can open.
+     */
+    fun setReadingAvailability(available: Boolean) {
+        if (available) {
+            poster.clearColorFilter()
+            poster.imageAlpha = 255
+            title.alpha = 1f
+            subtitle.alpha = 1f
+            isClickable = true
+            Styler.makeFocusable(this)
+            return
+        }
+        poster.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
+        poster.imageAlpha = 105
+        title.alpha = .62f
+        subtitle.alpha = .62f
+        boundProgress = 0.0
+        progressBar.visibility = GONE
+        badge.visibility = VISIBLE
+        badge.text = "Missing"
+        badge.background = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = Styler.dp(context, 8f)
+            setColor(this@PosterCardView.colors.stripBackground)
+        }
+        badge.setTextColor(colors.mutedText)
+        isClickable = false
+        isFocusable = false
+        isFocusableInTouchMode = false
     }
 
     private fun loadPoster(path: String, imageLoader: ImageLoader, imageUrl: (String) -> String) {

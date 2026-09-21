@@ -265,7 +265,7 @@ func (s *Server) readingItem(item bookkeeprr.Item, fallback bookkeeprr.ContentTy
 	out := ReadingItem{
 		Key: "reading:" + hex.EncodeToString(digest[:16]), ContentType: string(kind),
 		Title: item.Title, Author: item.Author, Year: item.Year, ISBN: item.ISBN,
-		Source: item.Source, SourceID: item.SourceID, Description: item.Description,
+		Source: item.Source, SourceID: item.SourceID, Description: readingDescriptionText(item.Description),
 		InLibrary: item.InLibrary, Actions: []string{"detail"},
 	}
 	item.ContentType = kind

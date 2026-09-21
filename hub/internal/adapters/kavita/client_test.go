@@ -134,3 +134,97 @@ func TestScanAllUsesAuthenticatedInstalledRoute(t *testing.T) {
 		t.Fatalf("scan calls = %d", calls)
 	}
 }
+
+func TestReaderManifestPageAndProgressStayAuthenticated(t *testing.T) {
+	var saved Progress
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Api-Key") != "kavita-key" {
+			t.Fatalf("reader auth = %q", r.Header.Get("X-Api-Key"))
+		}
+		switch r.URL.Path {
+		case "/api/Reader/chapter-info":
+			if r.Method != http.MethodGet || r.URL.Query().Get("chapterId") != "7" ||
+				r.URL.Query().Get("extractPdf") != "false" || r.URL.Query().Get("includeDimensions") != "true" {
+				t.Fatalf("chapter info request = %s %s", r.Method, r.URL.String())
+			}
+			_, _ = io.WriteString(w, `{"chapterNumber":"1","volumeNumber":"1","volumeId":4,"seriesName":"Lab Manga","seriesId":9,"libraryId":3,"libraryType":0,"chapterTitle":"Awakening","pages":3,"pageDimensions":[{"width":1200,"height":1800,"pageNumber":0,"fileName":"000.jpg","isWide":false},{"width":2400,"height":1600,"pageNumber":1,"fileName":"001.jpg","isWide":true}],"doublePairs":{"1":2}}`)
+		case "/api/Reader/get-progress":
+			if r.URL.Query().Get("chapterId") != "7" {
+				t.Fatalf("progress query = %s", r.URL.RawQuery)
+			}
+			_, _ = io.WriteString(w, `{"volumeId":4,"chapterId":7,"pageNum":1,"seriesId":9,"libraryId":3,"bookScrollId":""}`)
+		case "/api/Reader/image":
+			if r.Method != http.MethodGet || r.URL.Query().Get("chapterId") != "7" || r.URL.Query().Get("page") != "2" || r.URL.Query().Get("apiKey") != "kavita-key" {
+				t.Fatalf("page request = %s %s", r.Method, r.URL.String())
+			}
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.Header().Set("Cache-Control", "private, max-age=120")
+			_, _ = w.Write([]byte("page-two"))
+		case "/api/Reader/progress":
+			if r.Method != http.MethodPost {
+				t.Fatalf("progress method = %s", r.Method)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&saved); err != nil {
+				t.Fatal(err)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	client, err := New(config.ServiceConfig{BaseURL: upstream.URL, APIKey: config.Secret("kavita-key")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := client.ChapterInfo(context.Background(), 7)
+	if err != nil || info.SeriesID != 9 || info.Pages != 3 || len(info.PageDimensions) != 2 || !info.PageDimensions[1].IsWide || info.DoublePairs["1"] != 2 {
+		t.Fatalf("ChapterInfo() = %+v, %v", info, err)
+	}
+	progress, err := client.Progress(context.Background(), 7)
+	if err != nil || progress.PageNum != 1 || progress.SeriesID != 9 {
+		t.Fatalf("Progress() = %+v, %v", progress, err)
+	}
+	response, err := client.OpenPage(context.Background(), 7, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, readErr := io.ReadAll(response.Body)
+	response.Body.Close()
+	if readErr != nil || response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "image/jpeg" || string(body) != "page-two" {
+		t.Fatalf("OpenPage() = %d %q %q, %v", response.StatusCode, response.Header.Get("Content-Type"), body, readErr)
+	}
+	want := Progress{VolumeID: 4, ChapterID: 7, PageNum: 2, SeriesID: 9, LibraryID: 3}
+	if err := client.SaveProgress(context.Background(), want); err != nil {
+		t.Fatal(err)
+	}
+	if saved.VolumeID != 4 || saved.ChapterID != 7 || saved.PageNum != 2 || saved.SeriesID != 9 || saved.LibraryID != 3 {
+		t.Fatalf("saved progress = %+v", saved)
+	}
+}
+
+func TestReaderMethodsRejectInvalidCoordinatesWithoutCallingKavita(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+	client, err := New(config.ServiceConfig{BaseURL: upstream.URL, APIKey: config.Secret("kavita-key")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ChapterInfo(context.Background(), 0); err == nil {
+		t.Fatal("ChapterInfo accepted chapter zero")
+	}
+	if _, err := client.OpenPage(context.Background(), 7, -1); err == nil {
+		t.Fatal("OpenPage accepted a negative page")
+	}
+	if err := client.SaveProgress(context.Background(), Progress{ChapterID: 7, PageNum: -1}); err == nil {
+		t.Fatal("SaveProgress accepted an incomplete position")
+	}
+	if calls != 0 {
+		t.Fatalf("invalid requests reached Kavita %d times", calls)
+	}
+}

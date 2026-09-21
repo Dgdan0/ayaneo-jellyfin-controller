@@ -38,6 +38,21 @@ class HubEndpointsTest {
             "$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef",
             HubEndpoints.readingWork(base, "rw_0123456789abcdef0123456789abcdef").url
         )
+        assertEquals(
+            "$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef/publications/6",
+            HubEndpoints.readingPublication(base, "rw_0123456789abcdef0123456789abcdef", "6").url
+        )
+        assertEquals(
+            "$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef/publications/6/pages/2",
+            HubEndpoints.readingPublicationPage(base, "rw_0123456789abcdef0123456789abcdef", "6", 2)
+        )
+        assertEquals(
+            HubRequest(
+                "$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef/publications/6/progress",
+                method = "POST"
+            ),
+            HubEndpoints.readingPublicationProgress(base, "rw_0123456789abcdef0123456789abcdef", "6")
+        )
     }
 
     @Test
@@ -221,6 +236,14 @@ class HubEndpointsTest {
         assertEquals(
             "$base/v1/media/tmdb%3Aseries%3A258230/releases?season=1&episode=2",
             HubEndpoints.releases(base, key, 1, 2).url
+        )
+    }
+
+    @Test
+    fun `reading series preview keeps the opaque candidate key encoded`() {
+        assertEquals(
+            "$base/v1/reading/requests/series-preview?key=reading%3Aabc",
+            HubEndpoints.readingSeriesPreview(base, "reading:abc").url
         )
     }
 

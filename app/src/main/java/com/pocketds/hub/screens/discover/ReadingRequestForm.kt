@@ -11,7 +11,6 @@ object ReadingRequestForm {
         options: ReadingRequestOptions,
         modeIndex: Int = 0,
         profileIndex: Int = -1,
-        totalBooks: Int = 1,
         monitoringIndex: Int = 0
     ): List<FormRow> {
         val rows = mutableListOf<FormRow>()
@@ -24,14 +23,6 @@ object ReadingRequestForm {
             )
         }
         val selectedMode = options.modes.getOrNull(modeIndex)
-        if (selectedMode?.requiresTotalBooks == true) {
-            rows += FormRow.Choice(
-                id = "totalBooks",
-                label = "Books in series",
-                options = (1..200).map(Int::toString),
-                selected = (totalBooks - 1).coerceIn(0, 199)
-            )
-        }
         if (options.qualityProfiles.isNotEmpty()) {
             val selected = if (profileIndex >= 0) profileIndex else options.defaultProfileIndex
             rows += FormRow.Choice(
@@ -59,7 +50,10 @@ object ReadingRequestForm {
             )
         }
         if (options.qualityProfiles.isNotEmpty() && options.modes.isNotEmpty()) {
-            rows += FormRow.Action("submit", "Start search")
+            rows += FormRow.Action(
+                "submit",
+                if (selectedMode?.requiresSeriesPreview == true) "Review books" else "Start search"
+            )
         }
         return rows
     }
@@ -69,16 +63,10 @@ object ReadingRequestForm {
             ?: error("request mode is unavailable")
         val profile = options.qualityProfiles.getOrNull(model.selectedIndex("profile"))
             ?: error("quality profile is unavailable")
-        val totalBooks = if (mode.requiresTotalBooks) {
-            model.selectedIndex("totalBooks").coerceAtLeast(0) + 1
-        } else {
-            0
-        }
         val monitoring = options.monitoring.getOrNull(model.selectedIndex("monitoring")) ?: "all"
         return ReadingCreateRequestBody(
             key = options.key,
             mode = mode.id,
-            totalBooks = totalBooks,
             qualityProfileId = profile.id,
             monitoring = monitoring
         )

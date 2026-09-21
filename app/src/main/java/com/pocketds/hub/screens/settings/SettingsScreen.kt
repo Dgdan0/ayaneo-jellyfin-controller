@@ -6,12 +6,14 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatDelegate
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
+import com.pocketds.hub.reader.ReaderLabScreen
 import com.pocketds.hub.screens.system.PadTestScreen
 import com.pocketds.hub.settings.NotificationSettings
 import com.pocketds.hub.settings.PlaybackSettings
@@ -63,8 +65,15 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
             addSetting("controller", "Controller test", "Inspect buttons, sticks and triggers") {
                 host.push(PadTestScreen())
             }
+            addSetting("reader", "Reader lab", "Test comic, manga, book and read-along controls") {
+                host.push(ReaderLabScreen(ringVisible))
+            }
         }
-        root.addView(page, FrameLayout.LayoutParams(MATCH, MATCH))
+        root.addView(ScrollView(host.viewContext).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(page, FrameLayout.LayoutParams(MATCH, WRAP))
+        }, FrameLayout.LayoutParams(MATCH, MATCH))
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         updateDetails()
@@ -82,7 +91,7 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
     override fun hints(): List<ButtonHint> = if (::overlay.isInitialized && overlay.isOpen) {
         listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
     } else {
-        listOf(ButtonHint.activate(if (selected in setOf("controller", "notifications", "offline")) "Open" else "Change"))
+        listOf(ButtonHint.activate("Open"))
     }
 
     override fun onPad(action: PadAction): Boolean = overlay.onPad(action)

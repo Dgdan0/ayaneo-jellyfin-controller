@@ -73,6 +73,27 @@ class ReadingTest {
     }
 
     @Test
+    fun `reading collection preserves available and missing books plus continue artwork`() {
+        val work = json.decodeFromString<ReadingWork>(
+            """{
+                "id":"rw_collection","entityType":"collection","kind":"book","title":"Red Rising",
+                "artwork":"/series","authors":["Pierce Brown"],"bookCount":1,"genres":[],"languages":[],"editions":[],
+                "availability":["ebook"],
+                "sections":[{"id":"books","title":"Books","items":[
+                    {"workId":"rw_one","sourceItemId":"1","title":"Red Rising","number":"1","kind":"book","artwork":"/cover/1","availability":"available"},
+                    {"title":"Golden Son","number":"2","kind":"book","artwork":"/cover/2","availability":"missing"}
+                ]}],
+                "continue":{"workId":"rw_one","source":"storyteller","sourceItemId":"1","title":"Red Rising","number":"1","artwork":"/cover/1","percentage":0.25}
+            }""".trimIndent()
+        )
+
+        assertTrue(work.sections.single().items.first().isAvailable)
+        assertFalse(work.sections.single().items.last().isAvailable)
+        assertEquals("/cover/1", work.continueAt?.artwork)
+        assertEquals("rw_one", work.continueAt?.workId)
+    }
+
+    @Test
     fun `work subtitle uses series then author then kind`() {
         assertEquals(
             "Red Rising · Pierce Brown",
@@ -84,10 +105,10 @@ class ReadingTest {
     @Test
     fun `decodes request choices and normalized reading transfers`() {
         val options = json.decodeFromString<ReadingRequestOptions>(
-            """{"key":"reading:abc","contentType":"ebook","title":"Red Rising","author":"Pierce Brown","modes":[{"id":"single","label":"This book","requiresTotalBooks":false},{"id":"series","label":"Entire series","requiresTotalBooks":true}],"qualityProfiles":[{"id":7,"label":"English EPUB","default":true,"preferCompleteBatches":true}],"monitoring":["all","none"]}"""
+            """{"key":"reading:abc","contentType":"ebook","title":"Red Rising","author":"Pierce Brown","modes":[{"id":"single","label":"This book"},{"id":"series","label":"Choose books from series","requiresSeriesPreview":true}],"qualityProfiles":[{"id":7,"label":"English EPUB","default":true,"preferCompleteBatches":true}],"monitoring":["all","none"]}"""
         )
         assertEquals("series", options.modes.last().id)
-        assertTrue(options.modes.last().requiresTotalBooks)
+        assertTrue(options.modes.last().requiresSeriesPreview)
         assertEquals(7, options.qualityProfiles.single().id)
         assertEquals(0, options.defaultProfileIndex)
 
@@ -102,17 +123,50 @@ class ReadingTest {
     }
 
     @Test
-    fun `reading request body retains series count and selected profile`() {
+    fun `reading request body retains exact series selection and selected profile`() {
         val encoded = json.encodeToString(
             ReadingCreateRequestBody.serializer(),
             ReadingCreateRequestBody(
-                key = "reading:abc", mode = "series", totalBooks = 6,
+                key = "reading:abc", mode = "series", seriesId = "OL100L",
+                bookIds = listOf("OL1W", "OL3W"),
                 qualityProfileId = 7, monitoring = "all"
             )
         )
         val decoded = json.decodeFromString<ReadingCreateRequestBody>(encoded)
         assertEquals("series", decoded.mode)
-        assertEquals(6, decoded.totalBooks)
+        assertEquals("OL100L", decoded.seriesId)
+        assertEquals(listOf("OL1W", "OL3W"), decoded.bookIds)
         assertEquals(7, decoded.qualityProfileId)
+    }
+
+    @Test
+    fun `publication manifest decodes sanitized comic pages and navigation`() {
+        val manifest = json.decodeFromString<ReadingPublicationManifest>(
+            """{
+                "workId":"rw_0123456789abcdef0123456789abcdef","source":"kavita","sourceItemId":"6",
+                "kind":"manga","title":"Chapter 1","seriesTitle":"Lab Manga","number":"1",
+                "pageCount":3,"currentPage":1,"direction":"rtl",
+                "pages":[{"index":0,"width":1200,"height":1800},{"index":1,"width":2400,"height":1600,"isWide":true},{"index":2}],
+                "doublePairs":{"0":1},"nextSourceItemId":"7"
+            }""".trimIndent()
+        )
+
+        assertEquals("rtl", manifest.direction)
+        assertEquals(1, manifest.currentPage)
+        assertEquals(3, manifest.pages.size)
+        assertTrue(manifest.pages[1].isWide)
+        assertEquals(1, manifest.doublePairs["0"])
+        assertEquals("7", manifest.nextSourceItemId)
+        assertEquals("Page 2 of 3", manifest.positionLabel)
+    }
+
+    @Test
+    fun `publication progress encodes only zero based page index`() {
+        val encoded = json.encodeToString(
+            ReadingPublicationProgressBody.serializer(),
+            ReadingPublicationProgressBody(pageIndex = 17)
+        )
+
+        assertEquals("{\"pageIndex\":17}", encoded)
     }
 }

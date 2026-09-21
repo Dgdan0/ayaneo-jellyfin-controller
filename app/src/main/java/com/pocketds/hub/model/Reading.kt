@@ -78,7 +78,8 @@ data class ReadingSearchResponse(
 data class ReadingRequestMode(
     val id: String = "",
     val label: String = "",
-    val requiresTotalBooks: Boolean = false
+    val requiresTotalBooks: Boolean = false,
+    val requiresSeriesPreview: Boolean = false
 )
 
 @Serializable
@@ -108,6 +109,8 @@ data class ReadingCreateRequestBody(
     val key: String,
     val mode: String,
     val totalBooks: Int = 0,
+    val seriesId: String = "",
+    val bookIds: List<String> = emptyList(),
     val qualityProfileId: Int,
     val monitoring: String = "all"
 )
@@ -116,8 +119,45 @@ data class ReadingCreateRequestBody(
 data class ReadingRequestResponse(
     val requestId: String = "",
     val seriesId: Int = 0,
+    val parentSeriesId: Int = 0,
+    val requested: Int = 0,
+    val alreadyPresent: Int = 0,
+    val failed: Int = 0,
     val state: String = "",
     val message: String = ""
+)
+
+@Serializable
+data class ReadingSeriesPreviewBook(
+    val id: String = "",
+    val title: String = "",
+    val authorId: String = "",
+    val author: String = "",
+    val year: Int = 0,
+    val isbn: String = "",
+    val cover: String = "",
+    val position: Int = 0,
+    val inLibrary: Boolean = false,
+    val selected: Boolean = true
+)
+
+@Serializable
+data class ReadingSeriesPreview(
+    val key: String = "",
+    val seriesId: String = "",
+    val name: String = "",
+    val description: String = "",
+    val authorId: String = "",
+    val author: String = "",
+    val authorImage: String = "",
+    val ordering: String = "publication",
+    val books: List<ReadingSeriesPreviewBook> = emptyList()
+)
+
+@Serializable
+data class ReadingSeriesPreviewResponse(
+    val key: String = "",
+    val scopes: List<ReadingSeriesPreview> = emptyList()
 )
 
 @Serializable
@@ -212,8 +252,11 @@ data class ReadingSectionItem(
     val artwork: String = "",
     val authors: List<String> = emptyList(),
     val pageCount: Int = 0,
-    val progress: ReadingProgress? = null
-)
+    val progress: ReadingProgress? = null,
+    val availability: String = "available"
+) {
+    val isAvailable: Boolean get() = availability.equals("available", ignoreCase = true) && workId.isNotBlank()
+}
 
 @Serializable
 data class ReadingSection(
@@ -225,11 +268,14 @@ data class ReadingSection(
 
 @Serializable
 data class ReadingContinue(
+    val workId: String = "",
     val source: String = "",
     val sourceItemId: String = "",
     val title: String = "",
     val number: String = "",
-    val percentage: Double = 0.0
+    val percentage: Double = 0.0,
+    val artwork: String = "",
+    val kind: String = "book"
 )
 
 @Serializable
@@ -281,3 +327,35 @@ data class ReadingLibraryItemsResponse(
     val partial: List<PartialFailure> = emptyList(),
     val cache: CacheInfo = CacheInfo()
 )
+
+@Serializable
+data class ReadingPublicationPage(
+    val index: Int = 0,
+    val width: Int = 0,
+    val height: Int = 0,
+    val isWide: Boolean = false
+)
+
+@Serializable
+data class ReadingPublicationManifest(
+    val workId: String = "",
+    val source: String = "",
+    val sourceItemId: String = "",
+    val kind: String = "comic",
+    val title: String = "",
+    val seriesTitle: String = "",
+    val number: String = "",
+    val pageCount: Int = 0,
+    val currentPage: Int = 0,
+    val direction: String = "ltr",
+    val pages: List<ReadingPublicationPage> = emptyList(),
+    val doublePairs: Map<String, Int> = emptyMap(),
+    val previousSourceItemId: String = "",
+    val nextSourceItemId: String = ""
+) {
+    val positionLabel: String
+        get() = if (pageCount <= 0) "" else "Page ${(currentPage + 1).coerceAtMost(pageCount)} of $pageCount"
+}
+
+@Serializable
+data class ReadingPublicationProgressBody(val pageIndex: Int)

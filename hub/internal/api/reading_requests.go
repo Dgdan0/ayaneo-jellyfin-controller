@@ -55,9 +55,10 @@ func (s *readingCandidateStore) get(key string) (bookkeeprr.Item, bool) {
 }
 
 type ReadingRequestMode struct {
-	ID                 string `json:"id"`
-	Label              string `json:"label"`
-	RequiresTotalBooks bool   `json:"requiresTotalBooks"`
+	ID                    string `json:"id"`
+	Label                 string `json:"label"`
+	RequiresTotalBooks    bool   `json:"requiresTotalBooks"`
+	RequiresSeriesPreview bool   `json:"requiresSeriesPreview"`
 }
 
 type ReadingQualityProfile struct {
@@ -78,18 +79,24 @@ type ReadingRequestOptions struct {
 }
 
 type readingCreateRequestBody struct {
-	Key              string `json:"key"`
-	Mode             string `json:"mode"`
-	TotalBooks       int    `json:"totalBooks,omitempty"`
-	QualityProfileID int    `json:"qualityProfileId"`
-	Monitoring       string `json:"monitoring,omitempty"`
+	Key              string   `json:"key"`
+	Mode             string   `json:"mode"`
+	TotalBooks       int      `json:"totalBooks,omitempty"`
+	BookIDs          []string `json:"bookIds,omitempty"`
+	SeriesID         string   `json:"seriesId,omitempty"`
+	QualityProfileID int      `json:"qualityProfileId"`
+	Monitoring       string   `json:"monitoring,omitempty"`
 }
 
 type ReadingRequestResponse struct {
-	RequestID string `json:"requestId"`
-	SeriesID  int    `json:"seriesId"`
-	State     string `json:"state"`
-	Message   string `json:"message"`
+	RequestID      string `json:"requestId"`
+	SeriesID       int    `json:"seriesId,omitempty"`
+	ParentSeriesID int    `json:"parentSeriesId,omitempty"`
+	Requested      int    `json:"requested,omitempty"`
+	AlreadyPresent int    `json:"alreadyPresent,omitempty"`
+	Failed         int    `json:"failed,omitempty"`
+	State          string `json:"state"`
+	Message        string `json:"message"`
 }
 
 type ReadingDownloadItem struct {
@@ -203,7 +210,7 @@ func readingRequestModes(kind bookkeeprr.ContentType) []ReadingRequestMode {
 	case bookkeeprr.TypeEbook:
 		return []ReadingRequestMode{
 			{ID: "single", Label: "This book"},
-			{ID: "series", Label: "Entire series", RequiresTotalBooks: true},
+			{ID: "series", Label: "Choose books from series", RequiresSeriesPreview: true},
 		}
 	case bookkeeprr.TypeAudiobook:
 		return []ReadingRequestMode{{ID: "single", Label: "This audiobook"}}
@@ -227,7 +234,14 @@ func (s *Server) handleReadingCreateRequest(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	payload, err := readingCreatePayload(item, body)
+	var payload bookkeeprr.CreateSeriesRequest
+	var preview ReadingSeriesPreview
+	var err error
+	if item.ContentType == bookkeeprr.TypeEbook && body.Mode == "series" {
+		preview, err = s.readingSeriesPreviews.selected(strings.TrimSpace(body.Key), strings.TrimSpace(body.SeriesID), body.BookIDs)
+	} else {
+		payload, err = readingCreatePayload(item, body)
+	}
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: err.Error()})
 		return
@@ -248,6 +262,10 @@ func (s *Server) handleReadingCreateRequest(w http.ResponseWriter, r *http.Reque
 	}
 	if !validProfile {
 		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "unknown BookKeeprr quality profile"})
+		return
+	}
+	if item.ContentType == bookkeeprr.TypeEbook && body.Mode == "series" {
+		s.handleReadingGroupedEbookRequest(w, r, ctx, body, preview)
 		return
 	}
 	created, err := s.bookkeeprr.CreateSeries(ctx, payload)
@@ -288,8 +306,8 @@ func readingCreatePayload(item bookkeeprr.Item, body readingCreateRequestBody) (
 		if body.Mode != "single" && body.Mode != "series" {
 			return request, fmt.Errorf("mode must be single or series for an ebook")
 		}
-		if body.Mode == "series" && (body.TotalBooks < 1 || body.TotalBooks > 200) {
-			return request, fmt.Errorf("totalBooks must be between 1 and 200 for a series")
+		if body.Mode == "series" {
+			return request, fmt.Errorf("series requests require a verified book selection")
 		}
 		request.Flow = body.Mode
 		request.OLID = item.Sources.OpenLibrary

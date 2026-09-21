@@ -16,7 +16,7 @@ class ReadingRequestFormTest {
         title = "Red Rising",
         modes = listOf(
             ReadingRequestMode("single", "This book"),
-            ReadingRequestMode("series", "Entire series", requiresTotalBooks = true)
+            ReadingRequestMode("series", "Choose books from series", requiresSeriesPreview = true)
         ),
         qualityProfiles = listOf(
             ReadingQualityProfile(3, "Any"),
@@ -35,16 +35,16 @@ class ReadingRequestFormTest {
     }
 
     @Test
-    fun `series mode exposes a bounded book count and preserves chosen profile`() {
-        val rows = ReadingRequestForm.rows(options, modeIndex = 1, profileIndex = 1, totalBooks = 6)
-        assertEquals(listOf("mode", "totalBooks", "profile", "monitoring", "submit"), rows.map { it.id })
+    fun `series mode requests a roster review and preserves chosen profile`() {
+        val rows = ReadingRequestForm.rows(options, modeIndex = 1, profileIndex = 1)
+        assertEquals(listOf("mode", "profile", "monitoring", "submit"), rows.map { it.id })
         val model = FormModel(rows)
-        assertEquals(5, model.selectedIndex("totalBooks"))
         assertEquals(1, model.selectedIndex("profile"))
+		assertEquals("Review books", (rows.last() as com.pocketds.hub.state.FormRow.Action).label)
 
         val body = ReadingRequestForm.body(options, model)
         assertEquals("series", body.mode)
-        assertEquals(6, body.totalBooks)
+        assertTrue(body.bookIds.isEmpty())
         assertEquals(7, body.qualityProfileId)
         assertEquals("all", body.monitoring)
     }

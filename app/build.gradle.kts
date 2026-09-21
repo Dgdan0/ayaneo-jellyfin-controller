@@ -77,4 +77,7 @@ dependencies {
     // OkHttpClient in one line; Glide would need an extra artifact and an
     // annotation processor in a build that has no KSP or kapt at all.
     implementation("io.coil-kt:coil:2.6.0")
+    // Comic and manga scans routinely exceed the bitmap memory budget. This
+    // view decodes only visible tiles while retaining native pinch/pan support.
+    implementation("com.davemorrissey.labs:subsampling-scale-image-view-androidx:3.10.0")
 }

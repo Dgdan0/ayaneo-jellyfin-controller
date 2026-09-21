@@ -62,6 +62,7 @@ services:
       - "${READING_STATE_ROOT}/bookkeeprr:/config"
       - "${READING_MANAGED_ROOT}:/media:rw"
       - "${READING_DOWNLOAD_ROOT}:/downloads:rw"
+      - "${READING_DOWNLOAD_ROOT}:/media/downloads:rw"
     networks:
       - reading
     healthcheck:
@@ -100,6 +101,7 @@ services:
     volumes:
       - "${READING_STATE_ROOT}/qbittorrent:/config"
       - "${READING_DOWNLOAD_ROOT}:/downloads:rw"
+      - "${READING_DOWNLOAD_ROOT}:/media/downloads:rw"
     networks:
       - reading
     healthcheck:

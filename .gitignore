@@ -29,6 +29,7 @@ scripts/dev.env
 /hub/data/
 /hub/logs/
 /hub/.gocache/
+/hub/.tmp/
 
 # scripts/dev.sh keys off stashes the original accessibility list here
 /.dev-a11y-backup

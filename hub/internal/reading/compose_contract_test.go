@@ -84,6 +84,7 @@ func TestReadingProductionComposeSeparatesLegacyManagedAndDownloads(t *testing.T
 	for _, required := range []string{
 		"${READING_MANAGED_ROOT}:/media:rw",
 		"${READING_DOWNLOAD_ROOT}:/downloads:rw",
+		"${READING_DOWNLOAD_ROOT}:/media/downloads:rw",
 	} {
 		if !strings.Contains(bookkeeprr, required) {
 			t.Errorf("bookkeeprr is missing %q: %s", required, bookkeeprr)
@@ -94,8 +95,13 @@ func TestReadingProductionComposeSeparatesLegacyManagedAndDownloads(t *testing.T
 	}
 
 	qbit := strings.Join(document.Services["qbittorrent-backend"].Volumes, "\n")
-	if !strings.Contains(qbit, "${READING_DOWNLOAD_ROOT}:/downloads:rw") {
-		t.Errorf("qBittorrent is missing its download root: %s", qbit)
+	for _, required := range []string{
+		"${READING_DOWNLOAD_ROOT}:/downloads:rw",
+		"${READING_DOWNLOAD_ROOT}:/media/downloads:rw",
+	} {
+		if !strings.Contains(qbit, required) {
+			t.Errorf("qBittorrent is missing its shared download path %q: %s", required, qbit)
+		}
 	}
 	if strings.Contains(qbit, "READING_LEGACY_ROOT") || strings.Contains(qbit, "READING_MANAGED_ROOT") {
 		t.Errorf("qBittorrent must not see any library root: %s", qbit)

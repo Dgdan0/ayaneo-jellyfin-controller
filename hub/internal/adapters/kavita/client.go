@@ -17,7 +17,10 @@ import (
 	"ayaneohub/internal/httpx"
 )
 
-type Client struct{ base *httpx.Base }
+type Client struct {
+	base   *httpx.Base
+	apiKey string
+}
 
 func New(cfg config.ServiceConfig) (*Client, error) {
 	base, err := httpx.New(httpx.Options{
@@ -28,7 +31,7 @@ func New(cfg config.ServiceConfig) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{base: base}, nil
+	return &Client{base: base, apiKey: cfg.APIKey.Reveal()}, nil
 }
 
 type Library struct {
@@ -95,6 +98,45 @@ type Detail struct {
 	Metadata Metadata
 	Volumes  []Volume
 	Continue Chapter
+}
+
+// ChapterInfo is the stable subset of Kavita's reader manifest needed by the
+// Hub. File names deliberately stay adapter-private because clients receive
+// only opaque Hub page routes.
+type ChapterInfo struct {
+	ChapterNumber  string          `json:"chapterNumber"`
+	VolumeNumber   string          `json:"volumeNumber"`
+	VolumeID       int             `json:"volumeId"`
+	SeriesName     string          `json:"seriesName"`
+	SeriesFormat   int             `json:"seriesFormat"`
+	SeriesID       int             `json:"seriesId"`
+	LibraryID      int             `json:"libraryId"`
+	LibraryType    int             `json:"libraryType"`
+	ChapterTitle   string          `json:"chapterTitle"`
+	Pages          int             `json:"pages"`
+	IsSpecial      bool            `json:"isSpecial"`
+	Subtitle       string          `json:"subtitle"`
+	Title          string          `json:"title"`
+	PageDimensions []FileDimension `json:"pageDimensions"`
+	DoublePairs    map[string]int  `json:"doublePairs"`
+}
+
+type FileDimension struct {
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	PageNumber int    `json:"pageNumber"`
+	FileName   string `json:"fileName"`
+	IsWide     bool   `json:"isWide"`
+}
+
+type Progress struct {
+	VolumeID        int    `json:"volumeId"`
+	ChapterID       int    `json:"chapterId"`
+	PageNum         int    `json:"pageNum"`
+	SeriesID        int    `json:"seriesId"`
+	LibraryID       int    `json:"libraryId"`
+	BookScrollID    string `json:"bookScrollId"`
+	LastModifiedUTC string `json:"lastModifiedUtc,omitempty"`
 }
 
 type Sort string
@@ -227,6 +269,72 @@ func (c *Client) Detail(ctx context.Context, seriesID int) (*Detail, error) {
 	return &Detail{Series: series, Metadata: metadata, Volumes: volumes, Continue: continueAt}, nil
 }
 
+func (c *Client) ChapterInfo(ctx context.Context, chapterID int) (*ChapterInfo, error) {
+	if chapterID <= 0 {
+		return nil, fmt.Errorf("kavita: invalid chapter id")
+	}
+	query := url.Values{
+		"chapterId":         []string{strconv.Itoa(chapterID)},
+		"extractPdf":        []string{"false"},
+		"includeDimensions": []string{"true"},
+	}
+	var out ChapterInfo
+	// The first call may extract and cache a large archive. Kavita documents it
+	// as the reader bootstrap, so the short catalog deadline is inappropriate.
+	if err := c.base.WithTimeout(2*time.Minute).GetJSON(ctx, "/api/Reader/chapter-info", query, &out); err != nil {
+		return nil, err
+	}
+	if out.SeriesID <= 0 || out.LibraryID <= 0 || out.VolumeID <= 0 || out.Pages <= 0 {
+		return nil, fmt.Errorf("kavita: incomplete chapter info")
+	}
+	if out.DoublePairs == nil {
+		out.DoublePairs = map[string]int{}
+	}
+	return &out, nil
+}
+
+func (c *Client) Progress(ctx context.Context, chapterID int) (*Progress, error) {
+	if chapterID <= 0 {
+		return nil, fmt.Errorf("kavita: invalid chapter id")
+	}
+	var out Progress
+	if err := c.base.GetJSON(ctx, "/api/Reader/get-progress", url.Values{"chapterId": []string{strconv.Itoa(chapterID)}}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) OpenPage(ctx context.Context, chapterID, page int) (*http.Response, error) {
+	if chapterID <= 0 || page < 0 {
+		return nil, fmt.Errorf("kavita: invalid page request")
+	}
+	response, err := c.base.Open(ctx, http.MethodGet, "/api/Reader/image", url.Values{
+		"chapterId":  []string{strconv.Itoa(chapterID)},
+		"page":       []string{strconv.Itoa(page)},
+		"extractPdf": []string{"false"},
+		// Kavita's image action authenticates with this query value rather than
+		// the controller-wide X-Api-Key filter. This URL remains loopback-only
+		// inside the adapter and is never returned by the Hub.
+		"apiKey": []string{c.apiKey},
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode != http.StatusOK {
+		response.Body.Close()
+		return nil, &httpx.Error{Service: "kavita", Status: response.StatusCode, Kind: statusKind(response.StatusCode)}
+	}
+	return response, nil
+}
+
+func (c *Client) SaveProgress(ctx context.Context, progress Progress) error {
+	if progress.VolumeID <= 0 || progress.ChapterID <= 0 || progress.PageNum < 0 ||
+		progress.SeriesID <= 0 || progress.LibraryID <= 0 {
+		return fmt.Errorf("kavita: invalid reader progress")
+	}
+	return c.base.PostJSON(ctx, "/api/Reader/progress", progress, nil)
+}
+
 func (c *Client) Cover(ctx context.Context, seriesID int) ([]byte, string, error) {
 	if seriesID <= 0 {
 		return nil, "", fmt.Errorf("kavita: invalid series id")
@@ -259,6 +367,8 @@ func statusKind(status int) httpx.Kind {
 		return httpx.KindAuth
 	case http.StatusNotFound:
 		return httpx.KindNotFound
+	case http.StatusTooManyRequests:
+		return httpx.KindRateLimited
 	default:
 		if status >= 500 {
 			return httpx.KindUpstream5xx

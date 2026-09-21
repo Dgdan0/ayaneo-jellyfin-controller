@@ -531,19 +531,33 @@ content cannot be canceled from this view. Imported transfers now trigger the
 applicable Kavita and Storyteller scans automatically, with durable per-reader
 receipts keyed to BookKeeprr's exact import timestamp. Partial failure retries
 only the failed reader, and Manage exposes scoped manual reader scans.
-Production canonical paths and the deferred
-Red Rising acceptance run remain open. Pause remains absent because BookKeeprr
-1.1.1 cannot model it correctly. See
+Production canonical paths and the real six-book Red Rising acceptance run are
+complete. Pause remains absent because BookKeeprr 1.1.1 cannot model it
+correctly. See
 `deploy/reading/M3_ACQUISITION_EVIDENCE.md`.
+
+Acquisition addendum on 2026-09-21: whole-series ebook requests no longer send
+an assumed book count to BookKeeprr. The Hub resolves verified Open Library
+scopes, presents the exact ordered covers, marks books already owned, and sends
+one concrete BookKeeprr child request per selected missing book under one
+parent. When a title belongs to several useful scopes, the Pocket DS first asks
+which collection is intended; Red Rising currently offers the six-book Saga
+and three-book Trilogy. A durable manifest makes retries idempotent and repairs
+weak imported series metadata before Storyteller grouping. The app also shows
+the Open Library author portrait in the selection view.
 
 Production storage addendum on 2026-09-21: inventory found 9,638 readable
 legacy assets totaling about 215 GB under `D:\Bookshelf`, far beyond the first
 7 GB migration subset. The production contract therefore mounts that catalog
 read-only and sends every new acquisition to `D:\Media\Reading`; qBittorrent
 uses the separate `E:\Downloads\Reading` workspace and cannot see either
-library. The concrete Compose model and root contract tests pass, and empty
-host roots are prepared. Service-state promotion and the disposable import
-gate remain before Red Rising.
+library. The concrete Compose model and root contract tests pass. Service-state
+promotion, disposable import, and real Red Rising acquisition have passed. The
+real run exposed BookKeeprr's `/media/downloads` compatibility path; both
+acquisition containers now map that alias to the isolated download root while
+qBittorrent remains unable to see any library root. All six books imported,
+their embedded and Storyteller series metadata was normalized to positions
+1-6, and the current Hub code returns one ordered collection.
 
 ### M4 — Hub reading catalog
 
@@ -567,7 +581,10 @@ Status addendum on 2026-09-21: Storyteller series now collapse into one stable
 collection entry while standalone books remain independent. Collection details
 return their available books in series order with child work IDs. Library sort
 semantics now include series, author, and true last-read time; Kavita advertises
-only the sorts its API can honor.
+only the sorts its API can honor. Storyteller is the canonical book and
+audiobook shelf, so the Hub suppresses Kavita's duplicate Books library while
+Storyteller is healthy. Kavita Books remains available automatically as a
+degraded fallback when Storyteller cannot answer.
 
 ### M5 — Pocket DS browsing
 
@@ -581,9 +598,15 @@ read-only discovery metadata page. Library shares that global switch and now
 browses real Kavita/Storyteller libraries, paged and sortable normalized work
 grids, progress, canonical work details, editions, Continue data, and available
 sections. Reading discovery details now offer the tested BookKeeprr request
-form, and Transfers shares the Media/Books switch. Kotlin tests and the debug
-build pass. Series collections now open into a horizontal row of available
-books, and sort menus expose Title, Series, Author, Date added, and Last read
+form. Ebook series requests include a scope chooser and exact poster roster,
+with owned books disabled and missing books selected by default. Transfers
+shares the Media/Books switch. Kotlin tests and the debug build pass. Series
+collections now open into a horizontal series row. The Hub retains the complete
+verified acquisition roster separately from the requested subset, so locally
+available books stay in full colour while missing or still-arriving books keep
+their correct position as disabled desaturated covers. Collection details use
+a collapsed expandable description, and Continue reading includes the current
+book cover. Sort menus expose Title, Series, Author, Date added, and Last read
 according to each source's capabilities. Recent activity defaults to newest
 first. Books transfers now expose the Hub-provided Retry and Cancel actions
 with confirmation for cancellation. Media and Books Discover rows now survive
@@ -598,12 +621,24 @@ Home/Offline Books views remain open.
 - Add ReaderSession, source/cache/progress interfaces, overlay, controller map,
   lifecycle, focus return, and download hooks using fake renderers.
 - Gate: pure state tests and hardware shell behavior.
+- Status: complete. The test-first fake comic, manga, book, and read-along shell
+  passed unit and live Pocket DS controller/touch acceptance on 2026-09-21.
 
 ### M7 — Comic and manga reader
 
 - Add paged-image engine, profiles, spreads, RTL, webtoon, zoom/pan, viewport
   thirds, issue navigation, progress, and offline.
 - Gate: image fixtures and Pocket DS/phone controller/touch acceptance.
+
+Status on 2026-09-21: the first production reader slice is accepted. The Hub
+provides scoped Kavita page manifests, authenticated bounded page streaming,
+progress writes, source validation, and secret-free URLs. The Pocket DS uses a
+tiled large-image view with zoom/pan, LTR/RTL page flow, overlapping thirds,
+scrubbing, adjacent prefetch, a bounded temporary cache, issue navigation, and
+save/resume. Live tests passed a 24-page comic and the 376-page Chainsaw Man
+manga and caught and fixed Kavita's unnumbered `-100000` sentinel. Double-page
+rendering, continuous/webtoon layout, thumbnails, visual filters/crop/rotation,
+and pinned offline publications remain in a later M7 enhancement slice.
 
 ### M8 — EPUB and PDF readers
 
@@ -651,21 +686,24 @@ Home/Offline Books views remain open.
 
 ## 14. Immediate implementation boundary
 
-M0 and M1A are complete. M1B is still open for the iOS and client-download
-isolation rows. M2 read-only inventory tooling may proceed in parallel because
-it does not select the catalog or mutate media. It may add tests, scanners,
-metadata readers, per-user Komga exports, ignored report bundles, and
-documentation. It must not:
+M0-M5 now have working service, acquisition, catalog, and Pocket DS browsing
+slices. The tested Hub is installed and running under FireDaemon with the
+reading reconciler and series grouping active. M6's reference review,
+test-first shared reader state, fake engines, and Pocket DS hardware acceptance
+are complete. The remaining M5 gate is Pocket DS hardware navigation against
+the production Hub.
 
-- copy, move, rename, or delete production media;
-- run a production scan until `migration.local.yml` has been reviewed;
-- import progress or lists into another service;
-- connect bookkeeprr to qBittorrent;
-- begin M3 acquisition work;
-- remove Komga or select Kavita before the M1B decision gate;
-- edit Jellyfin, Caddy, Tailscale, FireDaemon, or Docker Desktop for M2;
-- deploy a Hub or APK;
-- commit credentials or device-specific absolute paths.
+The next reader milestone is M8/R3a: test and integrate the real EPUB engine,
+including stable locators, themes and typography, one/two-column layout,
+TOC/search, dictionary routing, temporary cache, progress, and lifecycle
+restoration. Mistborn is reserved as its real end-to-end acquisition,
+series/author grouping, metadata/cover, open, and resume acceptance run. PDF is
+the following R3b slice. Advanced image modes remain an M7 enhancement; audio,
+read/listen handoff, and synchronized highlighting remain M9/M12 work. M1B's
+remaining iPhone rows can be completed when that device is available.
+
+The accepted interaction contract, controller map, reference-app audit, and
+test-first R0-R6 delivery gates are in `READER_DESIGN_PLAN.md`.
 
 ## 15. Primary references
 

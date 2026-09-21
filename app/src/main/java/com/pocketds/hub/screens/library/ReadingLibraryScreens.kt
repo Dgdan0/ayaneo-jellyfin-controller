@@ -2,6 +2,8 @@ package com.pocketds.hub.screens.library
 
 import android.graphics.Bitmap
 import android.graphics.drawable.ColorDrawable
+import android.text.TextUtils
+import android.view.KeyEvent
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -18,11 +20,13 @@ import coil.request.ImageRequest
 import com.pocketds.hub.input.HorizontalMode
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.ReadingEdition
+import com.pocketds.hub.model.ReadingContinue
 import com.pocketds.hub.model.ReadingLibrary
 import com.pocketds.hub.model.ReadingProgress
 import com.pocketds.hub.model.ReadingSection
 import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.model.ReadingWork
+import com.pocketds.hub.reader.PagedImageReaderScreen
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
@@ -386,6 +390,14 @@ class ReadingWorkScreen(
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
     private var hasChildLinks = false
+    private var presentation = ReadingWorkPresentation.initial("")
+    private var descriptionBox: ScrollView? = null
+    private var descriptionText: TextView? = null
+    private var descriptionToggle: TextView? = null
+    private var descriptionHasOverflow = false
+    private val actionViews = linkedMapOf<String, View>()
+    @Volatile private var refreshOnShow = false
+    @Volatile private var visible = false
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -414,10 +426,23 @@ class ReadingWorkScreen(
     }
 
     override fun onShow() {
-        if (content.childCount == 0 && loadJob?.isActive != true) load()
+        visible = true
+        if (presentation.descriptionExpanded) {
+            presentation = ReadingWorkPresentation.initial(presentation.description)
+            applyDescriptionPresentation(requestReadingFocus = false)
+        }
+        if (refreshOnShow && loadJob?.isActive != true) {
+            refreshOnShow = false
+            load(force = true)
+        } else if (content.childCount == 0 && loadJob?.isActive != true) {
+            load()
+        }
     }
 
     override fun onHide() {
+        visible = false
+        presentation = ReadingWorkPresentation.initial(presentation.description)
+        applyDescriptionPresentation(requestReadingFocus = false)
         scope.coroutineContext.cancelChildren()
         loadJob = null
     }
@@ -430,7 +455,7 @@ class ReadingWorkScreen(
     override fun requestInitialFocus(): Boolean = ::scroll.isInitialized && scroll.requestFocus()
 
     override fun hints() = buildList {
-        if (hasChildLinks) add(ButtonHint.activate("Open book"))
+        if (hasChildLinks) add(ButtonHint.activate("Open"))
         add(ButtonHint.back())
         add(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
     }
@@ -460,18 +485,19 @@ class ReadingWorkScreen(
     }
 
     private fun render(work: ReadingWork) {
+        val previouslyFocusedSource = actionViews.entries.firstOrNull { it.value.hasFocus() }?.key
         content.removeAllViews()
+        actionViews.clear()
         hasChildLinks = false
+        presentation = ReadingWorkPresentation.initial(work.overview)
+        descriptionBox = null
+        descriptionText = null
+        descriptionToggle = null
+        descriptionHasOverflow = false
         content.addView(hero(work))
         work.continueAt?.let { point ->
             content.addView(sectionTitle("Continue reading"))
-            content.addView(infoCard(
-                point.title,
-                buildList {
-                    if (point.number.isNotBlank()) add("#${point.number}")
-                    if (point.percentage > 0) add("${(point.percentage * 100).roundToInt()}% read")
-                }.joinToString(" · ")
-            ))
+            content.addView(continueCard(work, point))
         }
         if (work.editions.isNotEmpty()) {
             content.addView(sectionTitle("Available editions"))
@@ -479,19 +505,32 @@ class ReadingWorkScreen(
         }
         work.sections.forEach { section ->
             content.addView(sectionTitle(section.title))
-            if (work.entityType == "collection" && section.items.any { it.workId.isNotBlank() }) {
-                hasChildLinks = true
+            if (work.entityType == "collection" && section.items.isNotEmpty()) {
+                hasChildLinks = hasChildLinks || section.items.any(ReadingWorkPresentation::canOpen)
                 content.addView(bookRow(section))
             } else {
-                section.items.forEach { content.addView(sectionItemCard(it)) }
+                section.items.forEach { content.addView(sectionItemCard(work, it)) }
             }
+        }
+        val preferredSource = ReadingWorkPresentation.preferredActionSource(
+            continueSourceItemId = work.continueAt?.sourceItemId.orEmpty(),
+            readableSourceItemIds = actionViews.keys.toList(),
+            previouslyFocusedSourceItemId = previouslyFocusedSource
+        )
+        content.post {
+            if (visible) actionViews[preferredSource]?.requestFocus()
         }
         status.setTextColor(if (work.partial.isEmpty()) colors.mutedText else colors.badgePending)
         status.text = when {
             work.partial.isNotEmpty() -> work.partial.joinToString(" · ") { it.message }
             work.cache.stale -> "Showing cached details"
-            work.entityType == "collection" ->
-                "${work.bookCount} book${if (work.bookCount == 1) "" else "s"} available"
+            work.entityType == "collection" -> {
+                val missing = work.sections.sumOf { section -> section.items.count { !it.isAvailable } }
+                buildList {
+                    add("${work.bookCount} book${if (work.bookCount == 1) "" else "s"} available")
+                    if (missing > 0) add("$missing missing")
+                }.joinToString(" · ")
+            }
             else -> "${work.editions.size} edition${if (work.editions.size == 1) "" else "s"} available"
         }
         scroll.scrollTo(0, 0)
@@ -541,14 +580,133 @@ class ReadingWorkScreen(
                 setTextColor(colors.mutedText)
                 setPadding(0, dp(5), 0, 0)
             })
-            if (work.overview.isNotBlank()) addView(TextView(context).apply {
-                text = work.overview
-                textSize = 13f
-                setTextColor(colors.primaryText)
-                setPadding(0, dp(9), 0, 0)
-            })
+            if (work.overview.isNotBlank()) addView(descriptionPanel(work.overview))
         }, LinearLayout.LayoutParams(0, WRAP, 1f))
     }
+
+    private fun descriptionPanel(overview: String): View = LinearLayout(requireNotNull(host).viewContext).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(0, dp(9), 0, 0)
+        descriptionBox = ScrollView(context).apply box@{
+            isFillViewport = false
+            isVerticalScrollBarEnabled = true
+            isFocusable = false
+            isFocusableInTouchMode = false
+            descriptionText = TextView(context).apply {
+                text = overview
+                textSize = 13f
+                setTextColor(colors.primaryText)
+                maxLines = DESCRIPTION_COLLAPSED_LINES
+                ellipsize = TextUtils.TruncateAt.END
+                post {
+                    val currentLayout = layout
+                    descriptionHasOverflow = currentLayout != null && currentLayout.lineCount > 0 &&
+                        currentLayout.getEllipsisCount(currentLayout.lineCount - 1) > 0
+                    descriptionToggle?.visibility = if (descriptionHasOverflow) View.VISIBLE else View.GONE
+                }
+            }
+            addView(descriptionText, ViewGroup.LayoutParams(MATCH, WRAP))
+            setOnKeyListener { _, keyCode, event ->
+                if (event.action != KeyEvent.ACTION_DOWN || !presentation.descriptionExpanded) {
+                    return@setOnKeyListener false
+                }
+                val direction = when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> -1
+                    KeyEvent.KEYCODE_DPAD_DOWN -> 1
+                    else -> 0
+                }
+                if (direction == 0 || !canScrollVertically(direction)) return@setOnKeyListener false
+                smoothScrollBy(0, direction * dp(DESCRIPTION_SCROLL_STEP_DP))
+                true
+            }
+        }
+        addView(descriptionBox, LinearLayout.LayoutParams(MATCH, WRAP))
+        descriptionToggle = TextView(context).apply {
+            textSize = 11f
+            setTextColor(colors.mutedText)
+            setPadding(dp(8), dp(5), dp(8), dp(5))
+            background = Styler.cardBackground(context, colors, cornerDp = 7f)
+            Styler.makeFocusable(this)
+            FocusDecorator.attach(this, ringVisible, scale = false)
+            activateOnTap {
+                presentation = presentation.toggleDescription()
+                applyDescriptionPresentation(requestReadingFocus = presentation.descriptionExpanded)
+            }
+            visibility = View.INVISIBLE
+        }
+        addView(descriptionToggle, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = dp(5) })
+        applyDescriptionPresentation(requestReadingFocus = false)
+    }
+
+    private fun applyDescriptionPresentation(requestReadingFocus: Boolean) {
+        val box = descriptionBox ?: return
+        val copy = descriptionText ?: return
+        val toggle = descriptionToggle ?: return
+        val expanded = presentation.descriptionExpanded
+        copy.maxLines = if (expanded) Int.MAX_VALUE else DESCRIPTION_COLLAPSED_LINES
+        copy.ellipsize = if (expanded) null else TextUtils.TruncateAt.END
+        box.layoutParams = (box.layoutParams ?: LinearLayout.LayoutParams(MATCH, WRAP)).apply {
+            width = MATCH
+            height = if (expanded) dp(DESCRIPTION_EXPANDED_DP) else WRAP
+        }
+        box.isFocusable = expanded
+        box.isFocusableInTouchMode = expanded
+        toggle.text = if (expanded) "Collapse" else "Read more…"
+        toggle.visibility = if (descriptionHasOverflow || expanded) View.VISIBLE else View.INVISIBLE
+        box.scrollTo(0, 0)
+        box.requestLayout()
+        if (requestReadingFocus) box.post { box.requestFocus() }
+    }
+
+    private fun continueCard(work: ReadingWork, point: ReadingContinue): View =
+        LinearLayout(requireNotNull(host).viewContext).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = Styler.cardBackground(context, colors)
+            setPadding(dp(8), dp(8), dp(12), dp(8))
+            val cover = ImageView(context).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setImageDrawable(ColorDrawable(colors.posterPlaceholder))
+                contentDescription = "${point.title} cover"
+            }
+            addView(cover, LinearLayout.LayoutParams(dp(CONTINUE_COVER_WIDTH_DP), dp(CONTINUE_COVER_HEIGHT_DP)).apply {
+                marginEnd = dp(12)
+            })
+            val artwork = ReadingWorkPresentation.continueArtwork(work)
+            val url = api.imageUrl(artwork)
+            if (url.isNotEmpty()) {
+                ((api as? HubClient)?.imageLoader ?: ImageLoader(context)).enqueue(
+                    ImageRequest.Builder(context).data(url).target(cover)
+                        .bitmapConfig(Bitmap.Config.RGB_565).build()
+                )
+            }
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(context).apply {
+                    text = point.title
+                    textSize = 15f
+                    setTextColor(colors.primaryText)
+                    maxLines = 2
+                    ellipsize = TextUtils.TruncateAt.END
+                })
+                addView(TextView(context).apply {
+                    text = buildList {
+                        if (point.number.isNotBlank()) add("Book ${point.number}")
+                        if (point.percentage > 0) add("${(point.percentage * 100).roundToInt()}% read")
+                    }.joinToString(" · ")
+                    textSize = 12f
+                    setTextColor(colors.mutedText)
+                    setPadding(0, dp(5), 0, 0)
+                })
+            }, LinearLayout.LayoutParams(0, WRAP, 1f))
+            if (canReadPublication(work.kind, point.sourceItemId) && point.source == "kavita") {
+                hasChildLinks = true
+                Styler.makeFocusable(this)
+                FocusDecorator.attach(this, ringVisible)
+                activateOnTap { openPublication(work, point.sourceItemId, point.title) }
+                actionViews.putIfAbsent(point.sourceItemId, this)
+            }
+        }
 
     private fun editionCard(edition: ReadingEdition): View = infoCard(
         edition.kind.replaceFirstChar { it.uppercase() },
@@ -561,7 +719,7 @@ class ReadingWorkScreen(
         }.joinToString(" · ")
     )
 
-    private fun sectionItemCard(item: ReadingSectionItem): View = infoCard(
+    private fun sectionItemCard(work: ReadingWork, item: ReadingSectionItem): View = infoCard(
         buildString {
             if (item.number.isNotBlank()) append(item.number).append(" · ")
             append(item.title)
@@ -570,7 +728,41 @@ class ReadingWorkScreen(
             if (item.pageCount > 0) add("${item.pageCount} pages")
             progressText(item.progress)?.let(::add)
         }.joinToString(" · ")
-    )
+    ).apply {
+        if (canReadPublication(item.kind.ifBlank { work.kind }, item.sourceItemId)) {
+            hasChildLinks = true
+            Styler.makeFocusable(this)
+            FocusDecorator.attach(this, ringVisible)
+            activateOnTap { openPublication(work, item.sourceItemId, item.title) }
+            actionViews.putIfAbsent(item.sourceItemId, this)
+        }
+    }
+
+    private fun canReadPublication(kind: String, sourceItemId: String): Boolean =
+        sourceItemId.isNotBlank() && kind in setOf("comic", "manga")
+
+    private fun openPublication(work: ReadingWork, sourceItemId: String, publicationTitle: String) {
+        host?.push(
+            PagedImageReaderScreen(
+                api = api,
+                workId = work.id,
+                initialSourceItemId = sourceItemId,
+                initialTitle = publicationTitle.ifBlank { work.title },
+                ringVisible = ringVisible,
+                onProgressChanged = ::requestRefreshAfterReading
+            )
+        )
+    }
+
+    private fun requestRefreshAfterReading() {
+        refreshOnShow = true
+        scope.launch {
+            if (visible && loadJob?.isActive != true) {
+                refreshOnShow = false
+                load(force = true)
+            }
+        }
+    }
 
     private fun bookRow(section: ReadingSection): View =
         HorizontalScrollView(requireNotNull(host).viewContext).apply {
@@ -584,7 +776,9 @@ class ReadingWorkScreen(
                         layoutParams = LinearLayout.LayoutParams(dp(CHILD_CARD_DP), WRAP).apply {
                             marginEnd = dp(10)
                         }
-                        FocusDecorator.attach(this, ringVisible)
+                        if (ReadingWorkPresentation.canOpen(item)) {
+                            FocusDecorator.attach(this, ringVisible)
+                        }
                         bindReadingWork(
                             ReadingWork(
                                 id = item.workId,
@@ -598,10 +792,13 @@ class ReadingWorkScreen(
                             (api as? HubClient)?.imageLoader ?: ImageLoader(context),
                             api::imageUrl
                         )
-                        activateOnTap {
-                            if (item.workId.isNotBlank()) {
+                        setReadingAvailability(item.isAvailable)
+                        if (ReadingWorkPresentation.canOpen(item)) {
+                            activateOnTap {
                                 host?.push(ReadingWorkScreen(api, item.workId, item.title, ringVisible))
                             }
+                        } else {
+                            contentDescription = "${item.title}, missing"
                         }
                     })
                 }
@@ -647,5 +844,10 @@ class ReadingWorkScreen(
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val CHILD_CARD_DP = 100
         const val CHILD_POSTER_DP = 145f
+        const val DESCRIPTION_COLLAPSED_LINES = 3
+        const val DESCRIPTION_EXPANDED_DP = 118
+        const val DESCRIPTION_SCROLL_STEP_DP = 44
+        const val CONTINUE_COVER_WIDTH_DP = 68
+        const val CONTINUE_COVER_HEIGHT_DP = 102
     }
 }

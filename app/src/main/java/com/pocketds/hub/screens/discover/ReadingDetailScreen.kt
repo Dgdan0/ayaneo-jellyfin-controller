@@ -23,6 +23,7 @@ import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.FormOverlay
 import com.pocketds.hub.ui.PocketColors
+import com.pocketds.hub.ui.ReadingSeriesSelectionOverlay
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import kotlinx.coroutines.CoroutineScope
@@ -44,6 +45,7 @@ class ReadingDetailScreen(
     private var host: ScreenHost? = null
     private lateinit var colors: PocketColors
     private lateinit var form: FormOverlay
+    private lateinit var seriesForm: ReadingSeriesSelectionOverlay
     private lateinit var status: TextView
     private lateinit var flow: ReadingRequestFlow
     private var requestButton: TextView? = null
@@ -138,9 +140,9 @@ class ReadingDetailScreen(
         content.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
         cover.setImageDrawable(ColorDrawable(colors.posterPlaceholder))
+        val loader = (api as? HubClient)?.imageLoader ?: ImageLoader(context)
         val url = api.imageUrl(item.cover)
         if (url.isNotEmpty()) {
-            val loader = (api as? HubClient)?.imageLoader ?: ImageLoader(context)
             loader.enqueue(
                 ImageRequest.Builder(context).data(url).target(cover)
                     .bitmapConfig(Bitmap.Config.RGB_565).build()
@@ -154,10 +156,15 @@ class ReadingDetailScreen(
         )
         form = FormOverlay(context, colors, ringVisible)
         frame.addView(form, FrameLayout.LayoutParams(MATCH, MATCH))
+        seriesForm = ReadingSeriesSelectionOverlay(
+            context, colors, ringVisible, loader, api::imageUrl
+        )
+        frame.addView(seriesForm, FrameLayout.LayoutParams(MATCH, MATCH))
         flow = ReadingRequestFlow(
             api = api,
             scope = scope,
             overlay = { form },
+            seriesOverlay = { seriesForm },
             onStatus = { message, failed ->
                 status.setTextColor(if (failed) colors.dangerText else colors.mutedText)
                 status.text = message
@@ -177,6 +184,8 @@ class ReadingDetailScreen(
     }
 
     override fun hints(): List<ButtonHint> = when {
+        ::seriesForm.isInitialized && seriesForm.isOpen ->
+            listOf(ButtonHint.activate("Select"), ButtonHint.secondary("All missing"), ButtonHint.back("Cancel"))
         ::form.isInitialized && form.isOpen ->
             listOf(ButtonHint.activate("Change"), ButtonHint.back("Cancel"))
         requestButton != null && !requested ->
@@ -185,6 +194,10 @@ class ReadingDetailScreen(
     }
 
     override fun onPad(action: PadAction): Boolean {
+        if (::seriesForm.isInitialized && seriesForm.onPad(action)) {
+            host?.refreshHints()
+            return true
+        }
         if (::form.isInitialized && form.onPad(action)) {
             host?.refreshHints()
             return true
@@ -193,6 +206,11 @@ class ReadingDetailScreen(
     }
 
     override fun onSystemBack(): Boolean {
+        if (::seriesForm.isInitialized && seriesForm.isOpen) {
+            seriesForm.onPad(PadAction.Back)
+            host?.refreshHints()
+            return true
+        }
         if (::form.isInitialized && form.isOpen) {
             form.onPad(PadAction.Back)
             host?.refreshHints()
@@ -207,6 +225,7 @@ class ReadingDetailScreen(
 
     override fun onHide() {
         if (::form.isInitialized && form.isOpen) form.dismiss()
+        if (::seriesForm.isInitialized && seriesForm.isOpen) seriesForm.dismiss()
         scope.coroutineContext.cancelChildren()
     }
 

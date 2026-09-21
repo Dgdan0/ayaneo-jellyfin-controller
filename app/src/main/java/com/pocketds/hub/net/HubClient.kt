@@ -26,10 +26,13 @@ import com.pocketds.hub.model.ReadingSearchResponse
 import com.pocketds.hub.model.ReadingLibrariesResponse
 import com.pocketds.hub.model.ReadingLibraryItemsResponse
 import com.pocketds.hub.model.ReadingWork
+import com.pocketds.hub.model.ReadingPublicationManifest
+import com.pocketds.hub.model.ReadingPublicationProgressBody
 import com.pocketds.hub.model.ReadingCreateRequestBody
 import com.pocketds.hub.model.ReadingDownloadsResponse
 import com.pocketds.hub.model.ReadingRequestOptions
 import com.pocketds.hub.model.ReadingRequestResponse
+import com.pocketds.hub.model.ReadingSeriesPreviewResponse
 import com.pocketds.hub.model.LibraryResponse
 import com.pocketds.hub.model.LibraryItemsResponse
 import com.pocketds.hub.model.LibraryItemResponse
@@ -149,7 +152,18 @@ interface HubApi {
         direction: String = "asc"
     ): HubResult<ReadingLibraryItemsResponse>
     suspend fun readingWork(workId: String): HubResult<ReadingWork>
+    suspend fun readingPublication(
+        workId: String,
+        sourceItemId: String
+    ): HubResult<ReadingPublicationManifest>
+    fun readingPublicationPageUrl(workId: String, sourceItemId: String, pageIndex: Int): String
+    suspend fun saveReadingPublicationProgress(
+        workId: String,
+        sourceItemId: String,
+        pageIndex: Int
+    ): HubResult<ActionAck>
     suspend fun readingRequestOptions(key: String): HubResult<ReadingRequestOptions>
+    suspend fun readingSeriesPreview(key: String): HubResult<ReadingSeriesPreviewResponse>
     suspend fun requestReading(body: ReadingCreateRequestBody): HubResult<ReadingRequestResponse>
     suspend fun readingDownloads(): HubResult<ReadingDownloadsResponse>
     suspend fun retryReadingDownload(id: String): HubResult<ActionAck>
@@ -285,6 +299,17 @@ class HubClient(private val context: Context) : HubApi {
         .dispatcher(Dispatcher().apply { maxRequestsPerHost = 8 })
         .cache(null)
         .readTimeout(20, TimeUnit.SECONDS)
+        .build()
+
+    /** Reader archives can be cold-extracted by Kavita and pages can be large. */
+    val readerHttp: OkHttpClient = api.newBuilder()
+        .dispatcher(Dispatcher().apply {
+            maxRequests = 3
+            maxRequestsPerHost = 3
+        })
+        .cache(null)
+        .readTimeout(90, TimeUnit.SECONDS)
+        .callTimeout(120, TimeUnit.SECONDS)
         .build()
 
     val imageLoader: ImageLoader by lazy {
@@ -671,9 +696,40 @@ class HubClient(private val context: Context) : HubApi {
             json.decodeFromString<ReadingWork>(it)
         }
 
+    override suspend fun readingPublication(
+        workId: String,
+        sourceItemId: String
+    ): HubResult<ReadingPublicationManifest> =
+        get(HubEndpoints.readingPublication(base(), workId, sourceItemId), noCache = true, slow = true) {
+            json.decodeFromString<ReadingPublicationManifest>(it)
+        }
+
+    override fun readingPublicationPageUrl(
+        workId: String,
+        sourceItemId: String,
+        pageIndex: Int
+    ): String = HubEndpoints.readingPublicationPage(base(), workId, sourceItemId, pageIndex)
+
+    override suspend fun saveReadingPublicationProgress(
+        workId: String,
+        sourceItemId: String,
+        pageIndex: Int
+    ): HubResult<ActionAck> = postOnce(
+        HubEndpoints.readingPublicationProgress(base(), workId, sourceItemId),
+        json.encodeToString(
+            ReadingPublicationProgressBody.serializer(),
+            ReadingPublicationProgressBody(pageIndex)
+        )
+    ) { json.decodeFromString<ActionAck>(it) }
+
     override suspend fun readingRequestOptions(key: String): HubResult<ReadingRequestOptions> =
         get(HubEndpoints.readingRequestOptions(base(), key), noCache = true) {
             json.decodeFromString<ReadingRequestOptions>(it)
+        }
+
+    override suspend fun readingSeriesPreview(key: String): HubResult<ReadingSeriesPreviewResponse> =
+        get(HubEndpoints.readingSeriesPreview(base(), key), noCache = true) {
+            json.decodeFromString<ReadingSeriesPreviewResponse>(it)
         }
 
     override suspend fun requestReading(

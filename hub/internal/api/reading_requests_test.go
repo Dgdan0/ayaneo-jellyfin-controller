@@ -32,7 +32,7 @@ func readingJSONRequest(handler http.Handler, method, path, body string) *httpte
 	return recorder
 }
 
-func TestReadingRequestOptionsAndSeriesRequest(t *testing.T) {
+func TestReadingRequestOptionsAndSingleRequest(t *testing.T) {
 	createCalls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -56,7 +56,7 @@ func TestReadingRequestOptionsAndSeriesRequest(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if body["contentType"] != "ebook" || body["flow"] != "series" || body["olid"] != "OL123W" || body["title"] != "Red Rising" || body["totalVolumes"] != float64(6) || body["qualityProfileId"] != float64(7) {
+			if body["contentType"] != "ebook" || body["flow"] != "single" || body["olid"] != "OL123W" || body["title"] != "Red Rising" || body["qualityProfileId"] != float64(7) {
 				t.Fatalf("create body = %#v", body)
 			}
 			w.WriteHeader(http.StatusCreated)
@@ -89,12 +89,12 @@ func TestReadingRequestOptionsAndSeriesRequest(t *testing.T) {
 	if err := json.Unmarshal(optionsResponse.Body.Bytes(), &options); err != nil {
 		t.Fatal(err)
 	}
-	if options.Key != key || options.Title != "Red Rising" || len(options.Modes) != 2 || options.Modes[1].ID != "series" || !options.Modes[1].RequiresTotalBooks || len(options.QualityProfiles) != 1 || !options.QualityProfiles[0].Default {
+	if options.Key != key || options.Title != "Red Rising" || len(options.Modes) != 2 || options.Modes[1].ID != "series" || !options.Modes[1].RequiresSeriesPreview || options.Modes[1].RequiresTotalBooks || len(options.QualityProfiles) != 1 || !options.QualityProfiles[0].Default {
 		t.Fatalf("options = %+v", options)
 	}
 
 	createdResponse := readingJSONRequest(handler, http.MethodPost, "/v1/reading/requests",
-		`{"key":"`+key+`","mode":"series","totalBooks":6,"qualityProfileId":7,"monitoring":"all"}`)
+		`{"key":"`+key+`","mode":"single","qualityProfileId":7,"monitoring":"all"}`)
 	if createdResponse.Code != http.StatusAccepted {
 		t.Fatalf("create = %d: %s", createdResponse.Code, createdResponse.Body.String())
 	}

@@ -415,6 +415,56 @@ type CreatedSeries struct {
 	ID int `json:"id"`
 }
 
+type BookSeriesSummary struct {
+	ID          int         `json:"id"`
+	Name        string      `json:"name"`
+	ContentType ContentType `json:"contentType"`
+	CoverURL    string      `json:"coverUrl,omitempty"`
+	TotalBooks  *int        `json:"totalBooks,omitempty"`
+	MemberCount int         `json:"memberCount"`
+	Source      string      `json:"source"`
+}
+
+type BookSeriesList struct {
+	BookSeries []BookSeriesSummary `json:"bookSeries"`
+}
+
+type BookSeriesEntry struct {
+	Position    *float64 `json:"position"`
+	Title       string   `json:"title"`
+	ExternalRef string   `json:"externalRef,omitempty"`
+	CoverURL    string   `json:"coverUrl,omitempty"`
+	Owned       bool     `json:"owned"`
+	SeriesID    *int     `json:"seriesId"`
+}
+
+type BookSeriesDetail struct {
+	BookSeriesSummary
+	Description string            `json:"description,omitempty"`
+	Books       []BookSeriesEntry `json:"books"`
+}
+
+type CreateBookSeriesRequest struct {
+	Name        string      `json:"name"`
+	ContentType ContentType `json:"contentType"`
+	Description string      `json:"description,omitempty"`
+	CoverURL    string      `json:"coverUrl,omitempty"`
+}
+
+type SeriesRecord struct {
+	ID            int         `json:"id"`
+	ContentType   ContentType `json:"contentType"`
+	TitleEnglish  string      `json:"titleEnglish"`
+	OpenLibraryID string      `json:"openlibraryId"`
+}
+
+type SeriesList struct {
+	Rows  []SeriesRecord `json:"rows"`
+	Total int            `json:"total"`
+	Page  int            `json:"page"`
+	Limit int            `json:"limit"`
+}
+
 type GrabbedRelease struct {
 	DownloadID int    `json:"downloadId"`
 	QBTHash    string `json:"qbtHash"`
@@ -451,6 +501,85 @@ func (c *Client) CreateSeries(ctx context.Context, request CreateSeriesRequest) 
 		return nil, err
 	}
 	return out, nil
+}
+
+func (c *Client) BookSeries(ctx context.Context, contentType ContentType) (*BookSeriesList, error) {
+	query := url.Values{}
+	if contentType != "" {
+		kind, err := ParseContentType(string(contentType), false)
+		if err != nil || (kind != TypeEbook && kind != TypeAudiobook) {
+			return nil, fmt.Errorf("bookkeeprr: book series only support ebooks and audiobooks")
+		}
+		query.Set("contentType", string(kind))
+	}
+	out := &BookSeriesList{BookSeries: []BookSeriesSummary{}}
+	if err := c.base.GetJSON(ctx, "/api/book-series", query, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) BookSeriesDetail(ctx context.Context, id int) (*BookSeriesDetail, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("bookkeeprr: invalid book series id")
+	}
+	out := &BookSeriesDetail{Books: []BookSeriesEntry{}}
+	if err := c.base.GetJSON(ctx, "/api/book-series/"+strconv.Itoa(id), nil, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) CreateBookSeries(ctx context.Context, request CreateBookSeriesRequest) (*BookSeriesSummary, error) {
+	if c == nil || c.admin == nil {
+		return nil, &httpx.Error{Service: "bookkeeprr", Kind: httpx.KindAuth, Err: fmt.Errorf("admin username and password are not configured")}
+	}
+	request.Name = strings.TrimSpace(request.Name)
+	if request.Name == "" || request.ContentType != TypeEbook && request.ContentType != TypeAudiobook {
+		return nil, fmt.Errorf("bookkeeprr: invalid book series")
+	}
+	out := &BookSeriesSummary{}
+	if err := c.admin.PostJSON(ctx, "/api/book-series", request, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) AddBookSeriesMember(ctx context.Context, bookSeriesID, seriesID int, position int) (*BookSeriesDetail, error) {
+	if c == nil || c.admin == nil {
+		return nil, &httpx.Error{Service: "bookkeeprr", Kind: httpx.KindAuth, Err: fmt.Errorf("admin username and password are not configured")}
+	}
+	if bookSeriesID <= 0 || seriesID <= 0 || position <= 0 {
+		return nil, fmt.Errorf("bookkeeprr: invalid book series member")
+	}
+	out := &BookSeriesDetail{}
+	path := "/api/book-series/" + strconv.Itoa(bookSeriesID) + "/members"
+	if err := c.admin.PostJSON(ctx, path, map[string]int{"seriesId": seriesID, "position": position}, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) FindSeriesByOpenLibraryID(ctx context.Context, workID, title string) (*SeriesRecord, error) {
+	workID = strings.TrimSpace(strings.TrimPrefix(workID, "/works/"))
+	if workID == "" {
+		return nil, fmt.Errorf("bookkeeprr: open library work id is required")
+	}
+	query := url.Values{"page": []string{"1"}, "limit": []string{"100"}}
+	if title = strings.TrimSpace(title); title != "" {
+		query.Set("q", title)
+	}
+	out := &SeriesList{Rows: []SeriesRecord{}}
+	if err := c.base.GetJSON(ctx, "/api/series", query, out); err != nil {
+		return nil, err
+	}
+	for index := range out.Rows {
+		if strings.TrimPrefix(strings.TrimSpace(out.Rows[index].OpenLibraryID), "/works/") == workID {
+			row := out.Rows[index]
+			return &row, nil
+		}
+	}
+	return nil, nil
 }
 
 func (c *Client) CancelDownload(ctx context.Context, qbtHash string) error {

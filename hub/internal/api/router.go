@@ -14,6 +14,7 @@ import (
 	"ayaneohub/internal/adapters/jellyfin"
 	"ayaneohub/internal/adapters/jellyseerr"
 	"ayaneohub/internal/adapters/kavita"
+	"ayaneohub/internal/adapters/openlibrary"
 	"ayaneohub/internal/adapters/qbittorrent"
 	"ayaneohub/internal/adapters/storyteller"
 	"ayaneohub/internal/auth"
@@ -45,6 +46,7 @@ type Server struct {
 	bookkeeprr  *bookkeeprr.Client
 	kavita      *kavita.Client
 	storyteller *storyteller.Client
+	openlibrary *openlibrary.Client
 	arrs        map[string]*arr.Client
 
 	// The provider-id index, because Jellyfin has no provider-id query. A map
@@ -52,12 +54,14 @@ type Server struct {
 	// takes 362ms here. See internal/index.
 	index *index.Index
 
-	cache             *cache.Store
-	images            *imageProxy
-	offline           *offlineStore
-	readingCatalog    *readingdomain.CatalogStore
-	readingCandidates *readingCandidateStore
-	readingTransfers  *readingTransferStore
+	cache                 *cache.Store
+	images                *imageProxy
+	offline               *offlineStore
+	readingCatalog        *readingdomain.CatalogStore
+	readingCandidates     *readingCandidateStore
+	readingTransfers      *readingTransferStore
+	readingSeriesPreviews *readingSeriesPreviewStore
+	readingAcquisitions   *readingAcquisitionStore
 
 	playbackMu       sync.Mutex
 	playbackSessions map[string]*playbackSession
@@ -81,18 +85,21 @@ func NewServer(cfg *config.Config) *Server {
 			cfg.Auth.AuthFailureBan.Window.OrDefault(time.Minute),
 			cfg.Auth.AuthFailureBan.Ban.OrDefault(15*time.Minute),
 		),
-		prober:            NewProber(cfg),
-		cache:             cache.New(),
-		index:             index.New(),
-		images:            newImageProxy(),
-		offline:           newOfflineStore(cfg.Server.OfflineRegistry),
-		readingCatalog:    readingdomain.NewCatalogStore(cfg.Server.ReadingCatalog),
-		readingCandidates: newReadingCandidateStore(2000),
-		readingTransfers:  newReadingTransferStore(cfg.Server.ReadingTransfers),
-		playbackSessions:  make(map[string]*playbackSession),
-		playbackTTL:       30 * time.Minute,
-		previewFrame:      extractPreviewFrame,
-		startedAt:         time.Now(),
+		prober:                NewProber(cfg),
+		cache:                 cache.New(),
+		index:                 index.New(),
+		images:                newImageProxy(),
+		offline:               newOfflineStore(cfg.Server.OfflineRegistry),
+		readingCatalog:        readingdomain.NewCatalogStore(cfg.Server.ReadingCatalog),
+		readingCandidates:     newReadingCandidateStore(2000),
+		readingTransfers:      newReadingTransferStore(cfg.Server.ReadingTransfers),
+		readingSeriesPreviews: newReadingSeriesPreviewStore(250),
+		readingAcquisitions:   newReadingAcquisitionStore(readingAcquisitionPath(cfg.Server.ReadingTransfers)),
+		openlibrary:           openlibrary.New(""),
+		playbackSessions:      make(map[string]*playbackSession),
+		playbackTTL:           30 * time.Minute,
+		previewFrame:          extractPreviewFrame,
+		startedAt:             time.Now(),
 	}
 	for _, cidr := range cfg.Server.TrustProxyCIDRs {
 		if _, network, err := net.ParseCIDR(cidr); err == nil {
@@ -239,7 +246,11 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/libraries", s.handleReadingLibraries)
 	authed.HandleFunc("GET /v1/reading/libraries/{libraryId}/items", s.handleReadingLibraryItems)
 	authed.HandleFunc("GET /v1/reading/works/{workId}", s.handleReadingWork)
+	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}", s.handleReadingPublication)
+	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/pages/{page}", s.handleReadingPublicationPage)
+	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/progress", s.handleReadingPublicationProgress)
 	authed.HandleFunc("GET /v1/reading/requests/options", s.handleReadingRequestOptions)
+	authed.HandleFunc("GET /v1/reading/requests/series-preview", s.handleReadingSeriesPreview)
 	authed.HandleFunc("POST /v1/reading/requests", s.handleReadingCreateRequest)
 	authed.HandleFunc("GET /v1/reading/downloads", s.handleReadingDownloads)
 	authed.HandleFunc("POST /v1/reading/downloads/{transferId}/retry", s.handleReadingDownloadRetry)

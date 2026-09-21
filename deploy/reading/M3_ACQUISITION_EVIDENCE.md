@@ -2,11 +2,11 @@
 
 Date: 2026-09-21
 Branch: `feature/reading-library`
-Status: request/status/retry/cancel/import-scan integration implemented and automated; production storage gate passed
+Status: passed, including the real six-book Red Rising acceptance run
 
 ## Scope and safety
 
-This run used only generated files below `deploy/reading/lab-acquisition` and
+The initial fixture run used only generated files below `deploy/reading/lab-acquisition` and
 `deploy/reading/lab-acquisition-source`. BookKeeprr and its dedicated
 qBittorrent backend did not mount production reading media, the M1 reader
 fixtures, or the production movie/TV qBittorrent data. No indexer, tracker,
@@ -126,19 +126,91 @@ across Hub restarts.
 Kotlin tests cover endpoints, wire models, action parsing, and
 single-versus-series form state.
 
+Whole-series ebook acquisition now has an explicit roster boundary. The Hub
+uses the selected Open Library work or ISBN to resolve every verified series
+scope, deduplicates scopes with identical children, and presents the broadest
+scope first. Publication-date consensus corrects misleading Open Library
+`first_publish_year` values before ordering. The live Red Rising check returns
+exactly two choices: the six-book `Red Rising Saga` and the three-book
+`Red Rising Trilogy`.
+
+The Pocket DS chooses the scope, then shows an author portrait and horizontal
+book covers. Owned books are disabled, missing books start selected, and the
+request contains the chosen scope plus exact work IDs. The Hub creates or
+reuses one BookKeeprr parent, creates or reuses one child per selected work, and
+links canonical positions. `reading-acquisitions.json` records the parent,
+children, positions, and per-child result atomically. Exact request replay does
+not recreate or relink accepted children; partial child and link failures can
+resume. The same manifest supplies canonical series metadata during catalog
+reconciliation when imported EPUB metadata is incomplete.
+
+Additional automated coverage verifies series scopes, misleading publication
+years, exact child selection, outside-roster rejection, durable manifests,
+catalog repair, and idempotent grouped replay. Kotlin coverage verifies the
+scope form, exact selections, and controller selection state.
+
 The production reading roots and dedicated reading download client are now
-active. No real title, production movie/TV downloader, indexer configuration,
-or legacy source media was changed. The full Red Rising run remains deferred.
+active. The production movie/TV downloader and legacy source media were not
+changed. A private BookKeeprr-to-Prowlarr connection was added because the
+pinned BookKeeprr instance otherwise had only its built-in Nyaa source and no
+usable releases for this acceptance title.
+
+## Real Red Rising acceptance run
+
+The production workflow acquired all six currently requested core novels:
+
+| Position | Storyteller title | Imported formats |
+| ---: | --- | --- |
+| 1 | Red Rising | EPUB, AZW3, MOBI |
+| 2 | Golden Son | EPUB |
+| 3 | Morning Star: Book III of the Red Rising Trilogy | EPUB, MOBI |
+| 4 | Iron Gold | EPUB |
+| 5 | Dark Age | EPUB, MOBI |
+| 6 | Light Bringer | EPUB |
+
+The run also exercised two failure paths before acceptance. A release described
+as a complete series contained only books 1-3 plus duplicates and an advert;
+its qBittorrent file list was inspected and the grab was cancelled before
+import. The first Iron Gold candidate was a ZIP whose extracted temporary file
+was lost by BookKeeprr 1.1.1 before import; it was cancelled and replaced by a
+verified direct-EPUB release.
+
+The first real download exposed a production-only path mismatch. BookKeeprr
+requests `/media/downloads/incomplete`, while the production acquisition root
+was mounted only at `/downloads`; qBittorrent therefore downloaded bytes that
+BookKeeprr could not see. A failing Compose contract test was added first. Both
+acquisition containers now mount the same dedicated
+`E:\Downloads\Reading` root at `/downloads` and the compatibility alias
+`/media/downloads`. No qBittorrent container receives a managed or legacy
+library mount. The corrected Compose model was applied, all five containers
+returned healthy, and all six books imported successfully.
+
+Downloaded files arrived with inconsistent or missing embedded series names.
+All ten ebook files were backed up, then normalized to series `Red Rising` with
+positions 1-6 using Calibre's metadata tool. Storyteller's supported metadata
+API was updated with the same values and an API rollback snapshot was retained.
+The current Hub code was then exercised directly against the production
+Storyteller catalog: it returned one `Red Rising` collection with six children,
+ordered Red Rising, Golden Son, Morning Star, Iron Gold, Dark Age, and Light
+Bringer. Reader scans were also accepted by Storyteller and Kavita. Because
+Kavita scans the same ebook root for external-client compatibility, the Hub now
+hides Kavita's duplicate Books shelf while Storyteller is healthy and restores
+it automatically as a degraded fallback if Storyteller is unavailable.
+
+The tested Hub binary was installed through the existing FireDaemon service on
+2026-09-21. FireDaemon restarted `AyaneoHub`, the loopback live endpoint returned
+HTTP 200, and the reconciler created its durable production transfer registry.
+Pocket DS visual and controller validation remains open until the handheld is
+reachable.
 
 ## Remaining gate
 
 The service-side acquisition slice and Hub control contract are reproducible:
 local fixture acquisition, category routing, import naming, byte integrity,
 idempotent upstream cancel, scoped Hub cancel, and durable Hub retry all have
-automated coverage. Production path cutover is complete. The complete M3 gate
-remains open only for the deferred Red Rising acceptance run. Pause is outside
-the gate because the pinned BookKeeprr API cannot represent that state
-accurately.
+automated coverage. Production path cutover and the real six-book Red Rising
+acceptance run are complete. Pause is outside the gate because the pinned
+BookKeeprr API cannot represent that state accurately.
 
 The ownership alternatives considered were:
 
@@ -153,6 +225,6 @@ The ownership alternatives considered were:
 Option 1 is implemented for request creation, status, cancel, durable retry,
 uncertain-response reconciliation, and idempotent reader scans. Production
 BookKeeprr destinations and Kavita/Storyteller watched folders now point at the
-same canonical roots. The full Red Rising acceptance run remains open. Pause is
+same canonical roots. The real Red Rising acceptance run is closed. Pause is
 still intentionally absent because the pinned BookKeeprr version cannot
 represent its state accurately.

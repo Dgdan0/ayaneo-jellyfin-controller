@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,6 +69,7 @@ type ReadingSectionItem struct {
 	Authors      []string         `json:"authors,omitempty"`
 	PageCount    int              `json:"pageCount,omitempty"`
 	Progress     *ReadingProgress `json:"progress,omitempty"`
+	Availability string           `json:"availability"`
 }
 
 type ReadingSection struct {
@@ -77,11 +80,14 @@ type ReadingSection struct {
 }
 
 type ReadingContinue struct {
+	WorkID       string  `json:"workId,omitempty"`
 	Source       string  `json:"source"`
 	SourceItemID string  `json:"sourceItemId"`
 	Title        string  `json:"title"`
 	Number       string  `json:"number,omitempty"`
 	Percentage   float64 `json:"percentage,omitempty"`
+	Artwork      string  `json:"artwork,omitempty"`
+	Kind         string  `json:"kind,omitempty"`
 }
 
 type ReadingWork struct {
@@ -131,20 +137,16 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 	out := ReadingLibrariesResponse{Libraries: []ReadingLibrary{}, Partial: []Partial{}}
 	allHits := true
 	var oldest time.Duration
+	var kavitaLibraries []kavita.Library
+	var storytellerLibrary *ReadingLibrary
+	storytellerAvailable := false
 
 	if s.kavita != nil {
 		libraries, meta, err := cache.Fetch(ctx, s.cache, "reading:kavita:libraries", cache.LibraryPage, s.kavita.Libraries)
 		if err != nil {
 			out.Partial = append(out.Partial, readingPartial("kavita", "libraries"))
 		} else {
-			for _, library := range libraries {
-				out.Libraries = append(out.Libraries, ReadingLibrary{
-					ID: "kavita:" + strconv.Itoa(library.ID), Source: "kavita", Kind: kavitaLibraryKind(library.Type),
-					Title: library.Name, Capabilities: []string{
-						"browse", "details", "progress", "sort:title", "sort:series", "sort:added", "sort:last_read",
-					},
-				})
-			}
+			kavitaLibraries = libraries
 			allHits = allHits && meta.Hit
 			if meta.Age > oldest {
 				oldest = meta.Age
@@ -156,19 +158,40 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			out.Partial = append(out.Partial, readingPartial("storyteller", "libraries"))
 		} else {
-			out.Libraries = append(out.Libraries, ReadingLibrary{
+			entry := ReadingLibrary{
 				ID: "storyteller:books", Source: "storyteller", Kind: "book", Title: "Books & Audiobooks",
 				Capabilities: []string{
 					"browse", "details", "ebook", "audiobook", "readaloud", "progress",
 					"sort:title", "sort:series", "sort:author", "sort:added", "sort:last_read",
 				},
-			})
+			}
+			storytellerLibrary = &entry
+			storytellerAvailable = true
 			_ = books
 			allHits = allHits && meta.Hit
 			if meta.Age > oldest {
 				oldest = meta.Age
 			}
 		}
+	}
+	for _, library := range kavitaLibraries {
+		// Storyteller is the canonical book/audiobook catalog. Kavita's book
+		// library scans the same files for external-client compatibility, so
+		// showing both produces duplicate and sometimes stale shelves. Keep it
+		// as a useful fallback when Storyteller cannot answer.
+		if library.Type == 2 && storytellerAvailable {
+			continue
+		}
+		entry := ReadingLibrary{
+			ID: "kavita:" + strconv.Itoa(library.ID), Source: "kavita", Kind: kavitaLibraryKind(library.Type),
+			Title: library.Name, Capabilities: []string{
+				"browse", "details", "progress", "sort:title", "sort:series", "sort:added", "sort:last_read",
+			},
+		}
+		out.Libraries = append(out.Libraries, entry)
+	}
+	if storytellerLibrary != nil {
+		out.Libraries = append(out.Libraries, *storytellerLibrary)
 	}
 	if len(out.Libraries) == 0 && len(out.Partial) > 0 {
 		writeError(w, r, http.StatusServiceUnavailable, Error{Code: CodeUpstreamDown, Service: "reading", Message: "Reading libraries are unavailable", Retryable: true})
@@ -492,7 +515,12 @@ func (s *Server) kavitaWork(ctx context.Context, workID string, detail *kavita.D
 				identities = append(identities, "isbn:"+value)
 				identifiers["isbn"] = value
 			}
-			section.Items = append(section.Items, ReadingSectionItem{SourceItemID: strconv.Itoa(chapter.ID), Title: chapter.Title, Number: kavitaChapterNumber(chapter.Number), Kind: kind, PageCount: chapter.Pages, Progress: pageProgress(chapter.PagesRead, chapter.Pages)})
+			section.Items = append(section.Items, ReadingSectionItem{
+				SourceItemID: strconv.Itoa(chapter.ID),
+				Title:        kavitaChapterTitle(chapter.Title, chapter.Number, kavitaVolumeTitle(volume)),
+				Number:       kavitaChapterNumber(chapter.Number), Kind: kind,
+				PageCount: chapter.Pages, Progress: pageProgress(chapter.PagesRead, chapter.Pages),
+			})
 		}
 		sections = append(sections, section)
 	}
@@ -514,14 +542,15 @@ func (s *Server) kavitaWork(ctx context.Context, workID string, detail *kavita.D
 		languages = append(languages, detail.Metadata.Language)
 	}
 	edition := ReadingEdition{ID: editionID("kavita", strconv.Itoa(detail.Series.ID), kind), WorkID: workID, Source: "kavita", SourceItemID: strconv.Itoa(detail.Series.ID), Kind: kind, Format: kavitaFormat(detail.Series.Format), Identifiers: identifiers, PageCount: detail.Series.Pages, Availability: "available"}
-	work := ReadingWork{ID: workID, LibraryID: "kavita:" + strconv.Itoa(detail.Series.LibraryID), Kind: kind, Title: detail.Series.Name, SortTitle: detail.Series.SortName, Authors: authors, Overview: detail.Metadata.Summary, Artwork: "/v1/img/reading/kavita/" + strconv.Itoa(detail.Series.ID), Genres: genres, Year: detail.Metadata.ReleaseYear, Languages: languages, Editions: []ReadingEdition{edition}, Progress: pageProgress(detail.Series.PagesRead, detail.Series.Pages), Availability: []string{kind}, Sections: sections, Partial: []Partial{}}
+	work := ReadingWork{ID: workID, LibraryID: "kavita:" + strconv.Itoa(detail.Series.LibraryID), Kind: kind, Title: detail.Series.Name, SortTitle: detail.Series.SortName, Authors: authors, Overview: readingDescriptionText(detail.Metadata.Summary), Artwork: "/v1/img/reading/kavita/" + strconv.Itoa(detail.Series.ID), Genres: genres, Year: detail.Metadata.ReleaseYear, Languages: languages, Editions: []ReadingEdition{edition}, Progress: pageProgress(detail.Series.PagesRead, detail.Series.Pages), Availability: []string{kind}, Sections: sections, Partial: []Partial{}}
 	if detail.Continue.ID > 0 {
-		work.Continue = &ReadingContinue{Source: "kavita", SourceItemID: strconv.Itoa(detail.Continue.ID), Title: detail.Continue.Title, Number: kavitaChapterNumber(detail.Continue.Number), Percentage: percentage(detail.Continue.PagesRead, detail.Continue.Pages)}
+		work.Continue = &ReadingContinue{Source: "kavita", SourceItemID: strconv.Itoa(detail.Continue.ID), Title: kavitaContinueTitle(detail.Continue, detail.Volumes, detail.Series.Name), Number: kavitaChapterNumber(detail.Continue.Number), Percentage: percentage(detail.Continue.PagesRead, detail.Continue.Pages)}
 	}
 	return work, nil
 }
 
 func (s *Server) storytellerWork(libraryID string, book storyteller.Book, includeEditions bool) (ReadingWork, error) {
+	book = s.reconcileStorytellerBook(book)
 	authors := creatorNames(book.Authors)
 	seriesName := ""
 	seriesIndex := 0.0
@@ -542,7 +571,7 @@ func (s *Server) storytellerWork(libraryID string, book storyteller.Book, includ
 	work := ReadingWork{
 		ID: id, LibraryID: libraryID, EntityType: "work", Kind: kind, Title: book.Title,
 		SortTitle: book.Title, Authors: authors, Series: seriesName, SeriesIndex: seriesIndex,
-		Overview: book.Description, Artwork: "/v1/img/reading/storyteller/" + strconv.FormatInt(book.ID, 10),
+		Overview: readingDescriptionText(book.Description), Artwork: "/v1/img/reading/storyteller/" + strconv.FormatInt(book.ID, 10),
 		Genres: []string{}, Languages: []string{}, Editions: []ReadingEdition{},
 		Progress: storytellerProgress(book.Position), Availability: availability, AddedAt: book.CreatedAt,
 		BookCount: 1, Partial: []Partial{},
@@ -570,7 +599,8 @@ type storytellerSeriesGroup struct {
 func (s *Server) storytellerShelf(libraryID string, books []storyteller.Book) ([]ReadingWork, error) {
 	groups := map[string]*storytellerSeriesGroup{}
 	standalone := make([]storyteller.Book, 0, len(books))
-	for _, book := range books {
+	for _, rawBook := range books {
+		book := s.reconcileStorytellerBook(rawBook)
 		sourceID, title, grouped := storytellerSeriesSource(book)
 		if !grouped {
 			standalone = append(standalone, book)
@@ -625,6 +655,36 @@ func storytellerSeriesSource(book storyteller.Book) (string, string, bool) {
 	return hex.EncodeToString(simpleDigest(identity)), strings.TrimSpace(series.Name), true
 }
 
+func (s *Server) reconcileStorytellerBook(book storyteller.Book) storyteller.Book {
+	if s == nil || s.readingAcquisitions == nil {
+		return book
+	}
+	identifiers := map[string]string{}
+	for _, identifier := range book.Identifiers {
+		kind := strings.ToLower(strings.TrimSpace(identifier.Type))
+		if kind == "" {
+			kind = strings.ToLower(strings.TrimSpace(identifier.Scheme))
+		}
+		value := identifier.Value
+		if value == "" {
+			value = identifier.Identifier
+		}
+		if strings.Contains(kind, "isbn") && value != "" {
+			identifiers["isbn"] = value
+		}
+	}
+	match, ok := s.readingAcquisitions.matchBook(book.Title, creatorNames(book.Authors), identifiers)
+	if !ok {
+		return book
+	}
+	book.Series = []storyteller.Series{{
+		UUID:     "hub-openlibrary:" + match.SeriesID,
+		Name:     match.SeriesName,
+		Position: float64(match.Position),
+	}}
+	return book
+}
+
 func (s *Server) storytellerCollection(
 	libraryID string, group *storytellerSeriesGroup, includeChildren bool,
 ) (ReadingWork, error) {
@@ -640,6 +700,7 @@ func (s *Server) storytellerCollection(
 	availability := []string{}
 	addedAt := ""
 	year := 0
+	overview := ""
 	allAudioOnly := len(books) > 0
 	for _, book := range books {
 		authors = mergeUnique(authors, creatorNames(book.Authors))
@@ -649,6 +710,9 @@ func (s *Server) storytellerCollection(
 		}
 		if value := readingYear(book.PublicationDate); value > 0 && (year == 0 || value < year) {
 			year = value
+		}
+		if overview == "" {
+			overview = readingDescriptionText(book.Description)
 		}
 		if book.Ebook != nil || book.Readaloud != nil || book.Audiobook == nil {
 			allAudioOnly = false
@@ -661,16 +725,28 @@ func (s *Server) storytellerCollection(
 	work := ReadingWork{
 		ID: id, LibraryID: libraryID, EntityType: "collection", Kind: kind,
 		Title: group.title, SortTitle: group.title, Authors: authors,
-		Artwork: "/v1/img/reading/storyteller/" + strconv.FormatInt(books[0].ID, 10),
-		Genres:  []string{}, Languages: []string{}, Editions: []ReadingEdition{},
+		Overview: overview,
+		Artwork:  "/v1/img/reading/storyteller/" + strconv.FormatInt(books[0].ID, 10),
+		Genres:   []string{}, Languages: []string{}, Editions: []ReadingEdition{},
 		Progress: storytellerCollectionProgress(books), Availability: availability,
 		Year: year, AddedAt: addedAt, BookCount: len(books), Partial: []Partial{},
+	}
+	seriesID := storytellerAcquisitionSeriesID(books)
+	manifest, hasManifest := s.readingAcquisitions.seriesRoster(seriesID, group.title, authors)
+	if hasManifest {
+		if description := readingDescriptionText(manifest.Description); description != "" {
+			work.Overview = description
+		}
+		if len(work.Authors) == 0 && manifest.Author != "" {
+			work.Authors = []string{manifest.Author}
+		}
 	}
 	if !includeChildren {
 		return work, nil
 	}
 	section := ReadingSection{ID: "storyteller-series:" + group.sourceID, Title: "Books", Items: []ReadingSectionItem{}}
 	var continueBook *storyteller.Book
+	availableItems := make([]ReadingSectionItem, 0, len(books))
 	for i := range books {
 		book := books[i]
 		child, bindErr := s.storytellerWork(libraryID, book, false)
@@ -681,26 +757,93 @@ func (s *Server) storytellerCollection(
 		if pageCount == 0 && book.Ebook != nil {
 			pageCount = book.Ebook.PageCount
 		}
-		section.Items = append(section.Items, ReadingSectionItem{
+		availableItems = append(availableItems, ReadingSectionItem{
 			SourceItemID: strconv.FormatInt(book.ID, 10), WorkID: child.ID,
 			Title: book.Title, Number: storytellerSeriesNumber(book), Kind: child.Kind,
 			Artwork: child.Artwork, Authors: child.Authors, PageCount: pageCount, Progress: child.Progress,
+			Availability: "available",
 		})
 		if book.Position != nil && (continueBook == nil || storytellerLastRead(book) > storytellerLastRead(*continueBook)) {
 			candidate := book
 			continueBook = &candidate
 		}
 	}
+	section.Items = mergeStorytellerRoster(s.images, availableItems, manifest, hasManifest)
 	work.Sections = []ReadingSection{section}
 	if continueBook != nil {
 		position := storytellerProgress(continueBook.Position)
+		continued := ReadingSectionItem{}
+		continuedSourceID := strconv.FormatInt(continueBook.ID, 10)
+		for _, item := range section.Items {
+			if item.SourceItemID == continuedSourceID {
+				continued = item
+				break
+			}
+		}
 		work.Continue = &ReadingContinue{
-			Source: "storyteller", SourceItemID: strconv.FormatInt(continueBook.ID, 10),
+			WorkID: continued.WorkID, Source: "storyteller", SourceItemID: continuedSourceID,
 			Title: continueBook.Title, Number: storytellerSeriesNumber(*continueBook),
-			Percentage: position.Percentage,
+			Percentage: position.Percentage, Artwork: continued.Artwork, Kind: continued.Kind,
 		}
 	}
 	return work, nil
+}
+
+func storytellerAcquisitionSeriesID(books []storyteller.Book) string {
+	for _, book := range books {
+		for _, series := range book.Series {
+			if strings.HasPrefix(series.UUID, "hub-openlibrary:") {
+				return strings.TrimPrefix(series.UUID, "hub-openlibrary:")
+			}
+		}
+	}
+	return ""
+}
+
+func mergeStorytellerRoster(
+	images *imageProxy,
+	available []ReadingSectionItem,
+	manifest readingAcquisitionManifest,
+	hasManifest bool,
+) []ReadingSectionItem {
+	if !hasManifest || len(manifest.Roster) == 0 {
+		return available
+	}
+	consumed := make([]bool, len(available))
+	out := make([]ReadingSectionItem, 0, len(manifest.Roster)+len(available))
+	for _, expected := range manifest.Roster {
+		match := -1
+		for index, item := range available {
+			if consumed[index] {
+				continue
+			}
+			positionMatch := expected.Position > 0 && item.Number == strconv.Itoa(expected.Position)
+			titleMatch := normalizeReadingIdentity(item.Title) == normalizeReadingIdentity(expected.Title)
+			if positionMatch || titleMatch {
+				match = index
+				break
+			}
+		}
+		if match >= 0 {
+			consumed[match] = true
+			out = append(out, available[match])
+			continue
+		}
+		artwork := ""
+		if token := images.registerReadingCover(expected.CoverURL); token != "" {
+			artwork = "/v1/img/reading/" + token
+		}
+		out = append(out, ReadingSectionItem{
+			Title: expected.Title, Number: strconv.Itoa(expected.Position), Kind: "book",
+			Artwork: artwork, Authors: []string{expected.Author}, Availability: "missing",
+		})
+	}
+	for index, item := range available {
+		if !consumed[index] {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func storytellerSeriesNumber(book storyteller.Book) string {
@@ -747,7 +890,8 @@ func (s *Server) storytellerCollectionBySourceID(
 	libraryID, sourceID string, books []storyteller.Book,
 ) (ReadingWork, error) {
 	group := &storytellerSeriesGroup{sourceID: sourceID}
-	for _, book := range books {
+	for _, rawBook := range books {
+		book := s.reconcileStorytellerBook(rawBook)
 		candidateID, title, grouped := storytellerSeriesSource(book)
 		if grouped && candidateID == sourceID {
 			if group.title == "" {
@@ -819,6 +963,39 @@ func normalizeISBN(value string) string {
 	}, value)
 }
 
+var (
+	readingLineBreakTag = regexp.MustCompile(`(?is)<\s*br\s*/?\s*>`)
+	readingBlockEndTag  = regexp.MustCompile(`(?is)<\s*/\s*(p|div|li|h[1-6])\s*>`)
+	readingHTMLTag      = regexp.MustCompile(`(?is)<[^>]*>`)
+)
+
+// Reading providers commonly return an HTML fragment even though the Hub's
+// normalized model promises display-ready metadata. Preserve paragraph and
+// line boundaries, discard markup, decode entities, and collapse provider
+// indentation so every client receives the same readable synopsis.
+func readingDescriptionText(value string) string {
+	value = readingLineBreakTag.ReplaceAllString(value, "\n")
+	value = readingBlockEndTag.ReplaceAllString(value, "\n\n")
+	value = readingHTMLTag.ReplaceAllString(value, "")
+	value = strings.ReplaceAll(html.UnescapeString(value), "\u00a0", " ")
+	lines := strings.Split(strings.ReplaceAll(value, "\r", ""), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.Join(strings.Fields(line), " ")
+		if line == "" {
+			if len(out) > 0 && out[len(out)-1] != "" {
+				out = append(out, "")
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return strings.Join(out, "\n")
+}
+
 func storytellerAvailability(book storyteller.Book) []string {
 	out := []string{}
 	if book.Ebook != nil && !book.Ebook.Missing {
@@ -834,8 +1011,16 @@ func storytellerAvailability(book storyteller.Book) []string {
 }
 func creatorNames(values []storyteller.Creator) []string {
 	out := []string{}
+	seen := map[string]bool{}
 	for _, value := range values {
-		if name := strings.TrimSpace(value.Name); name != "" {
+		name := strings.TrimSpace(value.Name)
+		parts := strings.Split(name, ",")
+		if len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" {
+			name = strings.TrimSpace(parts[1]) + " " + strings.TrimSpace(parts[0])
+		}
+		identity := normalizeReadingIdentity(name)
+		if identity != "" && !seen[identity] {
+			seen[identity] = true
 			out = append(out, name)
 		}
 	}
@@ -909,6 +1094,35 @@ func kavitaChapterNumber(value string) string {
 		return ""
 	}
 	return value
+}
+func kavitaChapterTitle(title, number, volumeTitle string) string {
+	title = strings.TrimSpace(title)
+	if title != "" && title != "-100000" && title != "100000" {
+		return title
+	}
+	if normalized := kavitaChapterNumber(number); normalized != "" {
+		return "Chapter " + normalized
+	}
+	if volumeTitle = strings.TrimSpace(volumeTitle); volumeTitle != "" && volumeTitle != "Issues" {
+		return volumeTitle
+	}
+	return "Publication"
+}
+func kavitaContinueTitle(chapter kavita.Chapter, volumes []kavita.Volume, seriesTitle string) string {
+	for _, volume := range volumes {
+		for _, candidate := range volume.Chapters {
+			if candidate.ID == chapter.ID {
+				return kavitaChapterTitle(candidate.Title, candidate.Number, kavitaVolumeTitle(volume))
+			}
+		}
+	}
+	if title := kavitaChapterTitle(chapter.Title, chapter.Number, ""); title != "Publication" {
+		return title
+	}
+	if title := strings.TrimSpace(seriesTitle); title != "" {
+		return title
+	}
+	return "Publication"
 }
 func editionID(source, sourceID, kind string) string {
 	return fmt.Sprintf("re_%x", simpleDigest(source+"\x00"+sourceID+"\x00"+kind))

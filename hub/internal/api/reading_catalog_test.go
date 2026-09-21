@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"ayaneohub/internal/adapters/kavita"
 	"ayaneohub/internal/adapters/storyteller"
 	"ayaneohub/internal/config"
 )
@@ -103,6 +104,65 @@ func TestReadingLibrariesCombineKavitaAndStoryteller(t *testing.T) {
 	if len(body.Partial) != 0 {
 		t.Fatalf("partial = %+v", body.Partial)
 	}
+}
+
+func TestReadingLibrariesPreferStorytellerBooksAndKeepKavitaFallback(t *testing.T) {
+	storyAvailable := true
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/token":
+			_, _ = io.WriteString(w, `{"access_token":"story-token","token_type":"Bearer","expires_in":3600}`)
+		case "/api/v2/books":
+			if !storyAvailable {
+				http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = io.WriteString(w, `[{"id":1,"title":"Red Rising","ebook":{"uuid":"epub-1"}}]`)
+		case "/api/Library/libraries":
+			_, _ = io.WriteString(w, `[{"id":1,"name":"Books","type":2},{"id":2,"name":"Comics","type":1}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	configured := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})).Handler()
+	response := libraryRequest(configured, "/v1/reading/libraries")
+	if response.Code != http.StatusOK {
+		t.Fatalf("preferred libraries = %d: %s", response.Code, response.Body.String())
+	}
+	var preferred ReadingLibrariesResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &preferred); err != nil {
+		t.Fatal(err)
+	}
+	if got := readingLibraryIDs(preferred.Libraries); strings.Join(got, ",") != "kavita:2,storyteller:books" {
+		t.Fatalf("preferred library ids = %v", got)
+	}
+
+	storyAvailable = false
+	fallback := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "fallback-catalog.json"), []string{"reading"})).Handler()
+	response = libraryRequest(fallback, "/v1/reading/libraries")
+	if response.Code != http.StatusOK {
+		t.Fatalf("fallback libraries = %d: %s", response.Code, response.Body.String())
+	}
+	var degraded ReadingLibrariesResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &degraded); err != nil {
+		t.Fatal(err)
+	}
+	if got := readingLibraryIDs(degraded.Libraries); strings.Join(got, ",") != "kavita:1,kavita:2" {
+		t.Fatalf("fallback library ids = %v", got)
+	}
+	if len(degraded.Partial) != 1 || degraded.Partial[0].Service != "storyteller" {
+		t.Fatalf("fallback partial = %+v", degraded.Partial)
+	}
+}
+
+func readingLibraryIDs(libraries []ReadingLibrary) []string {
+	ids := make([]string, 0, len(libraries))
+	for _, library := range libraries {
+		ids = append(ids, library.ID)
+	}
+	return ids
 }
 
 func TestReadingLibraryItemsAndDetailsUseStableHubWorkIDs(t *testing.T) {
@@ -255,6 +315,114 @@ func TestStorytellerLibraryGroupsSeriesAndOpensOrderedBooks(t *testing.T) {
 	}
 }
 
+func TestStorytellerShelfRepairsMissingSeriesFromAcquisitionManifest(t *testing.T) {
+	temporary := t.TempDir()
+	cfg := readingCatalogConfig("http://127.0.0.1:1", filepath.Join(temporary, "catalog.json"), []string{"reading"})
+	cfg.Server.ReadingTransfers = filepath.Join(temporary, "reading-transfers.json")
+	server := NewServer(cfg)
+	preview := ReadingSeriesPreview{
+		SeriesID: "OL100L", Name: "Red Rising Saga", Author: "Pierce Brown",
+		Books: []ReadingSeriesPreviewBook{
+			{ID: "OL1W", Title: "Red Rising", Author: "Pierce Brown", ISBN: "9780345539786", Position: 1},
+			{ID: "OL2W", Title: "Golden Son", Author: "Pierce Brown", ISBN: "9780345539816", Position: 2},
+		},
+	}
+	manifest, err := server.readingAcquisitions.begin("reading:key", preview, preview.Books, 7, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, book := range preview.Books {
+		if err := server.readingAcquisitions.setBook(manifest.ID, book.ID, 20+index, "accepted", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := server.storytellerShelf("storyteller:books", []storyteller.Book{
+		{ID: 1, Title: "Red Rising", Authors: []storyteller.Creator{{Name: "Pierce Brown"}}, Identifiers: []storyteller.Identifier{{Type: "ISBN", Value: "9780345539786"}}, Ebook: &storyteller.Ebook{UUID: "one"}},
+		{ID: 2, Title: "Golden Son", Authors: []storyteller.Creator{{Name: "Pierce Brown"}}, Identifiers: []storyteller.Identifier{{Type: "ISBN", Value: "9780345539816"}}, Ebook: &storyteller.Ebook{UUID: "two"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].EntityType != "collection" || items[0].Title != "Red Rising Saga" || items[0].BookCount != 2 {
+		t.Fatalf("items = %+v", items)
+	}
+}
+
+func TestStorytellerCollectionIncludesMissingManifestBooksAndContinueArtwork(t *testing.T) {
+	temporary := t.TempDir()
+	cfg := readingCatalogConfig("http://127.0.0.1:1", filepath.Join(temporary, "catalog.json"), []string{"reading"})
+	cfg.Server.ReadingTransfers = filepath.Join(temporary, "reading-transfers.json")
+	server := NewServer(cfg)
+	fullRoster := []ReadingSeriesPreviewBook{
+		{ID: "OL1W", Title: "Red Rising", Author: "Pierce Brown", Position: 1, CoverURL: "https://covers.example/one.jpg"},
+		{ID: "OL2W", Title: "Golden Son", Author: "Pierce Brown", Position: 2, CoverURL: "https://covers.example/two.jpg"},
+		{ID: "OL3W", Title: "Morning Star", Author: "Pierce Brown", Position: 3, CoverURL: "https://covers.example/three.jpg"},
+	}
+	preview := ReadingSeriesPreview{
+		SeriesID: "OL100L", Name: "Red Rising Saga", Author: "Pierce Brown",
+		Description: "Humanity reached the stars.", Books: fullRoster[:2], FullBooks: fullRoster,
+	}
+	manifest, err := server.readingAcquisitions.begin("reading:key", preview, preview.Books, 7, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.readingAcquisitions.setBook(manifest.ID, "OL1W", 20, "accepted", ""); err != nil {
+		t.Fatal(err)
+	}
+	available := server.reconcileStorytellerBook(storyteller.Book{
+		ID: 1, Title: "Red Rising", Authors: []storyteller.Creator{{Name: "Pierce Brown"}},
+		Identifiers: []storyteller.Identifier{{Type: "ISBN", Value: ""}}, Ebook: &storyteller.Ebook{UUID: "one"},
+		Position: &storyteller.Position{Timestamp: 10, Locator: storyteller.Locator{Locations: storyteller.Locations{TotalProgression: .25}}},
+	})
+	sourceID, title, grouped := storytellerSeriesSource(available)
+	if !grouped {
+		t.Fatal("available book was not reconciled into its requested series")
+	}
+	detail, err := server.storytellerCollection("storyteller:books", &storytellerSeriesGroup{
+		sourceID: sourceID, title: title, books: []storyteller.Book{available},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Overview != preview.Description || detail.BookCount != 1 || len(detail.Sections) != 1 || len(detail.Sections[0].Items) != 3 {
+		t.Fatalf("detail = %+v", detail)
+	}
+	items := detail.Sections[0].Items
+	if items[0].Availability != "available" || items[0].WorkID == "" || items[0].Artwork == "" {
+		t.Fatalf("available item = %+v", items[0])
+	}
+	if items[1].Availability != "missing" || items[1].WorkID != "" || items[1].Artwork == "" || items[2].Availability != "missing" {
+		t.Fatalf("missing items = %+v", items[1:])
+	}
+	if detail.Continue == nil || detail.Continue.WorkID != items[0].WorkID || detail.Continue.Artwork != items[0].Artwork {
+		t.Fatalf("continue = %+v, item = %+v", detail.Continue, items[0])
+	}
+}
+
+func TestStorytellerCollectionFallsBackToCleanFirstBookDescription(t *testing.T) {
+	server := NewServer(readingCatalogConfig("http://127.0.0.1:1", filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"}))
+	detail, err := server.storytellerCollection("storyteller:books", &storytellerSeriesGroup{
+		sourceID: "series-one", title: "Red Rising", books: []storyteller.Book{{
+			ID: 1, Title: "Red Rising", Description: `<div><p><strong>NEW YORK TIMES</strong></p><p>Darrow &amp; his people.<br>Rise.</p></div>`,
+			Authors: []storyteller.Creator{{Name: "Pierce Brown"}},
+			Series:  []storyteller.Series{{Name: "Red Rising", Position: 1}}, Ebook: &storyteller.Ebook{UUID: "one"},
+		}},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Overview != "NEW YORK TIMES\n\nDarrow & his people.\nRise." {
+		t.Fatalf("overview = %q", detail.Overview)
+	}
+}
+
+func TestReadingDescriptionTextRemovesMarkupAndKeepsParagraphs(t *testing.T) {
+	got := readingDescriptionText(`<p><em>Hello</em> &amp; goodbye.</p><p>Next&nbsp;line<br/>Now</p>`)
+	if got != "Hello & goodbye.\n\nNext line\nNow" {
+		t.Fatalf("description = %q", got)
+	}
+}
+
 func TestStorytellerAuthorSortUsesFirstAuthorThenSeriesPosition(t *testing.T) {
 	books := []storyteller.Book{
 		{ID: 3, Title: "B", Authors: []storyteller.Creator{{Name: "Zed"}}},
@@ -269,6 +437,16 @@ func TestStorytellerAuthorSortUsesFirstAuthorThenSeriesPosition(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("author order = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestCreatorNamesCollapsesDisplayAndFileAsDuplicates(t *testing.T) {
+	got := creatorNames([]storyteller.Creator{
+		{Name: "Pierce Brown"},
+		{Name: "Brown, Pierce"},
+	})
+	if len(got) != 1 || got[0] != "Pierce Brown" {
+		t.Fatalf("creator names = %v", got)
 	}
 }
 
@@ -297,6 +475,25 @@ func TestKavitaUnnumberedChapterSentinelIsNotExposed(t *testing.T) {
 		if got := kavitaChapterNumber(input); got != want {
 			t.Errorf("kavitaChapterNumber(%q) = %q, want %q", input, got, want)
 		}
+	}
+	if got := kavitaChapterTitle("-100000", "-100000", "Volume 1"); got != "Volume 1" {
+		t.Fatalf("sentinel title = %q", got)
+	}
+	if got := kavitaChapterTitle("", "4", "Volume 1"); got != "Chapter 4" {
+		t.Fatalf("numbered title = %q", got)
+	}
+}
+
+func TestKavitaContinueTitleResolvesSentinelFromOwningVolume(t *testing.T) {
+	chapter := kavita.Chapter{ID: 42, Title: "-100000", Number: "-100000"}
+	volumes := []kavita.Volume{{
+		ID: 7, Name: "1", Chapters: []kavita.Chapter{chapter},
+	}}
+	if got := kavitaContinueTitle(chapter, volumes, "Chainsaw Man"); got != "Volume 1" {
+		t.Fatalf("continue title = %q", got)
+	}
+	if got := kavitaContinueTitle(kavita.Chapter{ID: 99, Title: "-100000", Number: "-100000"}, volumes, "Chainsaw Man"); got != "Chainsaw Man" {
+		t.Fatalf("unmatched continue title = %q", got)
 	}
 }
 
