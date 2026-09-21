@@ -577,7 +577,11 @@ build pass. Series collections now open into a horizontal row of available
 books, and sort menus expose Title, Series, Author, Date added, and Last read
 according to each source's capabilities. Recent activity defaults to newest
 first. Books transfers now expose the Hub-provided Retry and Cancel actions
-with confirmation for cancellation. Pocket DS hardware acceptance and the
+with confirmation for cancellation. Media and Books Discover rows now survive
+app and Hub restarts in a bounded per-identity device cache: 30 minutes fresh,
+14 days as a network-failure fallback, 128 MB for JSON, and 256 MB for poster
+HTTP data. Progress, transfers, notifications, health, and Manage remain live.
+Pocket DS hardware acceptance and the
 Home/Offline Books views remain open.
 
 ### M6 — Shared reader shell

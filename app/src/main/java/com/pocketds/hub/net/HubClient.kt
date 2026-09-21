@@ -6,6 +6,7 @@ import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.model.ActionAck
 import com.pocketds.hub.model.ActivityResponse
 import com.pocketds.hub.model.CreateRequestBody
+import com.pocketds.hub.model.CacheInfo
 import com.pocketds.hub.model.DiscoverResponse
 import com.pocketds.hub.model.GrabBody
 import com.pocketds.hub.model.GrabResponse
@@ -131,9 +132,9 @@ interface HubApi {
         serverId: Int? = null,
         seasons: kotlinx.serialization.json.JsonElement? = null
     ): HubResult<CreateRequestResponse>
-    suspend fun discover(): HubResult<DiscoverResponse>
+    suspend fun discover(force: Boolean = false): HubResult<DiscoverResponse>
     suspend fun discoverRow(row: String, page: Int): HubResult<DiscoverResponse>
-    suspend fun readingDiscover(type: String): HubResult<ReadingDiscoverResponse>
+    suspend fun readingDiscover(type: String, force: Boolean = false): HubResult<ReadingDiscoverResponse>
     suspend fun readingDiscoverRow(
         row: String,
         type: String,
@@ -212,7 +213,7 @@ class HubClient(private val context: Context) : HubApi {
         // A hard ceiling the retry loop must fit inside.
         .callTimeout(45, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
-        .cache(okhttp3.Cache(File(context.cacheDir, "hub-http"), 32L * 1024 * 1024))
+        .cache(okhttp3.Cache(File(context.cacheDir, "hub-http"), 256L * 1024 * 1024))
         .addInterceptor { chain ->
             val token = HubSettings.token(context)
             val request = if (token.isEmpty()) {
@@ -250,6 +251,8 @@ class HubClient(private val context: Context) : HubApi {
             response
         }
         .build()
+
+    private val discoverCache = PersistentResponseCache(File(context.cacheDir, "discover-responses"))
 
     /**
      * For calls that are slow because of what they do, not because something is
@@ -605,27 +608,43 @@ class HubClient(private val context: Context) : HubApi {
      * succeeded leaves a duplicate for someone to unpick by hand, which is
      * worse than making the user press the button again.
      */
-    override suspend fun discover(): HubResult<DiscoverResponse> =
-        get(HubEndpoints.discover(base())) { json.decodeFromString<DiscoverResponse>(it) }
+    override suspend fun discover(force: Boolean): HubResult<DiscoverResponse> =
+        persistentDiscoverGet(
+            request = HubEndpoints.discover(base()),
+            force = force,
+            decode = { json.decodeFromString<DiscoverResponse>(it) },
+            markCached = { value, age, degraded -> value.copy(cache = localCacheInfo(value.cache, age, degraded)) },
+            shouldStore = { it.rows.isNotEmpty() && it.partial.isEmpty() }
+        )
 
     override suspend fun discoverRow(row: String, page: Int): HubResult<DiscoverResponse> =
-        get(HubEndpoints.discoverRow(base(), row, page)) {
-            json.decodeFromString<DiscoverResponse>(it)
-        }
+        persistentDiscoverGet(
+            request = HubEndpoints.discoverRow(base(), row, page),
+            decode = { json.decodeFromString<DiscoverResponse>(it) },
+            markCached = { value, age, degraded -> value.copy(cache = localCacheInfo(value.cache, age, degraded)) },
+            shouldStore = { it.rows.isNotEmpty() && it.partial.isEmpty() }
+        )
 
-    override suspend fun readingDiscover(type: String): HubResult<ReadingDiscoverResponse> =
-        get(HubEndpoints.readingDiscover(base(), type)) {
-            json.decodeFromString<ReadingDiscoverResponse>(it)
-        }
+    override suspend fun readingDiscover(type: String, force: Boolean): HubResult<ReadingDiscoverResponse> =
+        persistentDiscoverGet(
+            request = HubEndpoints.readingDiscover(base(), type),
+            force = force,
+            decode = { json.decodeFromString<ReadingDiscoverResponse>(it) },
+            markCached = { value, age, degraded -> value.copy(cache = localCacheInfo(value.cache, age, degraded)) },
+            shouldStore = { it.rows.isNotEmpty() && it.partial.isEmpty() }
+        )
 
     override suspend fun readingDiscoverRow(
         row: String,
         type: String,
         page: Int
     ): HubResult<ReadingDiscoverResponse> =
-        get(HubEndpoints.readingDiscoverRow(base(), row, type, page)) {
-            json.decodeFromString<ReadingDiscoverResponse>(it)
-        }
+        persistentDiscoverGet(
+            request = HubEndpoints.readingDiscoverRow(base(), row, type, page),
+            decode = { json.decodeFromString<ReadingDiscoverResponse>(it) },
+            markCached = { value, age, degraded -> value.copy(cache = localCacheInfo(value.cache, age, degraded)) },
+            shouldStore = { it.rows.isNotEmpty() && it.partial.isEmpty() }
+        )
 
     override suspend fun readingSearch(query: String, type: String): HubResult<ReadingSearchResponse> =
         get(HubEndpoints.readingSearch(base(), query, type)) {
@@ -806,6 +825,66 @@ class HubClient(private val context: Context) : HubApi {
 
     private val noStore = okhttp3.CacheControl.Builder().noStore().noCache().build()
 
+    /**
+     * Discover is the only screen persisted as JSON on the device. Its rows are
+     * slow-changing recommendations, unlike progress, transfers, notifications,
+     * and service health where an old answer would actively mislead the user.
+     */
+    private suspend fun <T> persistentDiscoverGet(
+        request: HubRequest,
+        force: Boolean = false,
+        decode: (String) -> T,
+        markCached: (T, Long, Boolean) -> T,
+        shouldStore: (T) -> Boolean
+    ): HubResult<T> {
+        connectionFailure()?.let { return it }
+        val key = buildString {
+            append("discover-v1\n")
+            append(request.url).append('\n')
+            append(HubSettings.baseUrl(context)).append('\n')
+            append(HubSettings.token(context)).append('\n')
+            append(HubSettings.userId(context))
+        }
+
+        fun readCached(maxAgeMillis: Long, degraded: Boolean): HubResult<T>? {
+            val entry = discoverCache.read(key, maxAgeMillis) ?: return null
+            return try {
+                HubResult.Ok(markCached(decode(entry.body), entry.ageMillis, degraded))
+            } catch (_: Exception) {
+                discoverCache.remove(key)
+                null
+            }
+        }
+
+        if (!force) {
+            readCached(DISCOVER_FRESH_MILLIS, degraded = false)?.let { return it }
+        }
+
+        val network = get(
+            request = request,
+            noCache = true,
+            decode = decode,
+            onSuccess = { body, value ->
+                if (shouldStore(value)) discoverCache.put(key, body)
+            }
+        )
+        if (network is HubResult.Ok) return network
+        return readCached(DISCOVER_FALLBACK_MILLIS, degraded = true) ?: network
+    }
+
+    private fun localCacheInfo(upstream: CacheInfo, ageMillis: Long, degraded: Boolean): CacheInfo {
+        val localAge = ageMillis / 1_000L
+        val totalAge = (upstream.ageSeconds.toLong() + localAge)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+        return upstream.copy(
+            hit = true,
+            ageSeconds = totalAge,
+            stale = upstream.stale || degraded,
+            degraded = upstream.degraded || degraded
+        )
+    }
+
     /** Pulls the hub's own wording out of an error envelope, if it sent one. */
     private fun hubMessage(body: String): String? = try {
         json.decodeFromString<HubErrorBody>(body).error.message.takeIf { it.isNotBlank() }
@@ -817,13 +896,14 @@ class HubClient(private val context: Context) : HubApi {
         request: HubRequest,
         noCache: Boolean = false,
         slow: Boolean = false,
+        onSuccess: ((String, T) -> Unit)? = null,
         decode: (String) -> T
     ): HubResult<T> {
         connectionFailure()?.let { return it }
 
         var attempt = 1
         while (true) {
-            val outcome = attemptOnce(request, noCache, slow, decode)
+            val outcome = attemptOnce(request, noCache, slow, decode, onSuccess)
             if (outcome is HubResult.Ok) return outcome
 
             val failure = outcome as HubResult.Failed
@@ -839,7 +919,8 @@ class HubClient(private val context: Context) : HubApi {
         request: HubRequest,
         noCache: Boolean,
         slow: Boolean,
-        decode: (String) -> T
+        decode: (String) -> T,
+        onSuccess: ((String, T) -> Unit)?
     ): HubResult<T> = try {
         // The whole call runs off the main thread. await() resumes on whatever
         // dispatcher the caller is on -- which is Main.immediate for a screen --
@@ -862,7 +943,9 @@ class HubClient(private val context: Context) : HubApi {
                     val kind = HubFailures.classify(null, it.code)
                     HubResult.Failed(kind, hubMessage(body) ?: HubFailures.message(kind))
                 } else {
-                    HubResult.Ok(decode(body))
+                    val value = decode(body)
+                    onSuccess?.invoke(body, value)
+                    HubResult.Ok(value)
                 }
             }
         }
@@ -884,6 +967,8 @@ class HubClient(private val context: Context) : HubApi {
 private val EMPTY_BODY = ByteArray(0).toRequestBody(null, 0, 0)
 private const val JELLYFIN_USER_HEADER = "X-Jellyfin-User"
 private const val MAX_PLAYBACK_TEXT_BYTES = 8 * 1024 * 1024
+private const val DISCOVER_FRESH_MILLIS = 30L * 60L * 1_000L
+private const val DISCOVER_FALLBACK_MILLIS = 14L * 24L * 60L * 60L * 1_000L
 
 /**
  * Bridges OkHttp to coroutines.

@@ -643,7 +643,7 @@ class DiscoverScreen(
         focusTarget = rowsList
         rowsJob?.cancel()
         rowsJob = scope.launch {
-            when (val result = api.discover()) {
+            when (val result = api.discover(force)) {
                 is HubResult.Ok -> {
                     val body = result.value
                     rowsAdapter.submit(body.rows)
@@ -653,6 +653,7 @@ class DiscoverScreen(
                             if (body.cache.hit && body.cache.ageSeconds > 0) {
                                 append(" · cached ").append(body.cache.ageSeconds).append("s ago")
                             }
+                            if (body.cache.degraded) append(" · offline cache")
                             if (body.partial.isNotEmpty()) {
                                 append(" · ").append(body.partial.joinToString(", ") { it.message })
                             }
@@ -707,7 +708,7 @@ class DiscoverScreen(
         focusTarget = readingRowsList
         readingRowsJob?.cancel()
         readingRowsJob = scope.launch {
-            when (val result = api.readingDiscover(requestedType)) {
+            when (val result = api.readingDiscover(requestedType, force)) {
                 is HubResult.Ok -> {
                     if (requestedType != readingType) return@launch
                     val body = result.value
@@ -719,6 +720,7 @@ class DiscoverScreen(
                             if (body.cache.hit && body.cache.ageSeconds > 0) {
                                 append(" · cached ").append(body.cache.ageSeconds).append("s ago")
                             }
+                            if (body.cache.degraded) append(" · offline cache")
                             if (body.partial.isNotEmpty()) {
                                 append(" · ").append(body.partial.joinToString(", ") { it.message })
                             }
