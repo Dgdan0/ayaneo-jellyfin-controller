@@ -1,10 +1,35 @@
 package httpx
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestWithTimeoutExtendsHTTPClientCeiling(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(30 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+	base, err := New(Options{Name: "slow-test", BaseURL: upstream.URL, Timeout: 5 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		OK bool `json:"ok"`
+	}
+	if err := base.WithTimeout(200*time.Millisecond).GetJSON(context.Background(), "/", nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.OK {
+		t.Fatal("extended-timeout response was not decoded")
+	}
+}
 
 func TestEncodeQuerySpacesAsPercent20(t *testing.T) {
 	// Jellyseerr answers a bare 400 to the plus form. Every single-word search

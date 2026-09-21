@@ -97,6 +97,13 @@ class HubEndpointsTest {
     }
 
     @Test
+    fun `reading scan targets one configured reader`() {
+        val request = HubEndpoints.scanReadingLibrary(base, "storyteller")
+        assertEquals("$base/v1/manage/reading/scan?service=storyteller", request.url)
+        assertEquals("POST", request.method)
+    }
+
+    @Test
     fun `users is one authenticated top-level request`() {
         assertEquals("$base/v1/users", HubEndpoints.users(base).url)
     }

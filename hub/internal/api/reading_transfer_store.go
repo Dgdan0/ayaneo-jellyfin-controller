@@ -34,7 +34,16 @@ type readingTransferRecord struct {
 	RetryPending         bool                `json:"retryPending,omitempty"`
 	AwaitingUpstream     bool                `json:"awaitingUpstream,omitempty"`
 	Canceled             bool                `json:"canceled,omitempty"`
-	UpdatedAt            int64               `json:"updatedAt"`
+	// ScannedImports records the exact BookKeeprr importedAt value each reader
+	// has already indexed. Keeping the timestamp, rather than a boolean, makes a
+	// later re-import of the same transfer a new piece of work.
+	ScannedImports map[string]string `json:"scannedImports,omitempty"`
+	UpdatedAt      int64             `json:"updatedAt"`
+}
+
+type readingImportTicket struct {
+	ID         string
+	ImportedAt string
 }
 
 type readingTransferFile struct {
@@ -263,6 +272,71 @@ func (s *readingTransferStore) markCanceled(id string) error {
 	record.UpdatedAt = time.Now().UnixMilli()
 	s.items[id] = record
 	return s.saveLocked()
+}
+
+// pendingImported returns imported transfers relevant to one reader that have
+// not yet been acknowledged by a successful scan.
+func (s *readingTransferStore) pendingImported(service string) []readingImportTicket {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tickets := make([]readingImportTicket, 0)
+	for id, record := range s.items {
+		if record.Canceled || record.Public.ImportedAt == "" || !readerHandles(service, record.Public.ContentType) {
+			continue
+		}
+		if record.ScannedImports != nil && record.ScannedImports[service] == record.Public.ImportedAt {
+			continue
+		}
+		tickets = append(tickets, readingImportTicket{ID: id, ImportedAt: record.Public.ImportedAt})
+	}
+	sort.Slice(tickets, func(i, j int) bool { return tickets[i].ID < tickets[j].ID })
+	return tickets
+}
+
+// markImportedScanned acknowledges only the import version that was actually
+// scanned. If BookKeeprr reports a newer importedAt while a scan is in flight,
+// that newer import remains pending for the next pass.
+func (s *readingTransferStore) markImportedScanned(service string, tickets []readingImportTicket) error {
+	if len(tickets) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for _, ticket := range tickets {
+		record, ok := s.items[ticket.ID]
+		if !ok || record.Canceled || record.Public.ImportedAt != ticket.ImportedAt {
+			continue
+		}
+		if record.ScannedImports == nil {
+			record.ScannedImports = map[string]string{}
+		}
+		if record.ScannedImports[service] == ticket.ImportedAt {
+			continue
+		}
+		record.ScannedImports[service] = ticket.ImportedAt
+		record.UpdatedAt = time.Now().UnixMilli()
+		s.items[ticket.ID] = record
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveLocked()
+}
+
+func readerHandles(service, contentType string) bool {
+	switch service {
+	case "kavita":
+		return contentType == string(bookkeeprr.TypeEbook) ||
+			contentType == string(bookkeeprr.TypeComic) ||
+			contentType == string(bookkeeprr.TypeManga) ||
+			contentType == string(bookkeeprr.TypeLightNovel)
+	case "storyteller":
+		return contentType == string(bookkeeprr.TypeEbook) || contentType == string(bookkeeprr.TypeAudiobook)
+	default:
+		return false
+	}
 }
 
 func (s *readingTransferStore) pruneLocked(cutoff int64) {

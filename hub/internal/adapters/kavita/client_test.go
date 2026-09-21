@@ -109,3 +109,28 @@ func TestDetailVolumesAndCoverStayAuthenticated(t *testing.T) {
 		t.Fatalf("requests = %d", requests)
 	}
 }
+
+func TestScanAllUsesAuthenticatedInstalledRoute(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/api/Library/scan-all" || r.Method != http.MethodPost {
+			t.Fatalf("scan request = %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("X-Api-Key") != "kavita-key" {
+			t.Fatalf("scan auth = %q", r.Header.Get("X-Api-Key"))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	client, err := New(config.ServiceConfig{BaseURL: upstream.URL, APIKey: config.Secret("kavita-key")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ScanAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("scan calls = %d", calls)
+	}
+}

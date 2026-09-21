@@ -132,7 +132,7 @@ class ManageScreen(
                 else -> "Open"
             }
         ))
-        if (selectedService == "jellyfin") add(ButtonHint.primary("Scan libraries"))
+        if (selectedService in scannableServices) add(ButtonHint.primary("Scan library"))
         add(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
     }
 
@@ -142,8 +142,8 @@ class ManageScreen(
             Direction.DOWN -> { moveService(1); true }
             else -> false
         }
-        PadAction.Primary -> if (selectedService == "jellyfin") {
-            scanLibraries()
+        PadAction.Primary -> if (selectedService in scannableServices) {
+            scanLibrary(selectedService)
             true
         } else false
         PadAction.Refresh -> {
@@ -171,19 +171,25 @@ class ManageScreen(
         }
     }
 
-    private fun scanLibraries() {
+    private fun scanLibrary(service: String) {
+        val label = displayNames[service] ?: service.replaceFirstChar { it.uppercase() }
         if (scanJob?.isActive == true) {
-            host.notify("Jellyfin library scan is already starting")
+            host.notify("A library scan is already running")
             return
         }
         status.setTextColor(colors.mutedText)
-        status.text = "Starting Jellyfin library scan…"
+        status.text = "Scanning $label library…"
         scanJob = scope.launch {
-            when (val result = api.scanJellyfinLibrary()) {
+            val result = if (service == "jellyfin") {
+                api.scanJellyfinLibrary()
+            } else {
+                api.scanReadingLibrary(service)
+            }
+            when (result) {
                 is HubResult.Ok -> {
                     status.setTextColor(colors.accent)
-                    status.text = "Jellyfin library scan started · new files may take a moment to appear"
-                    host.notify("Jellyfin library scan started")
+                    status.text = "$label library scan accepted · new files may take a moment to appear"
+                    host.notify("$label library scan accepted")
                 }
                 is HubResult.Failed -> {
                     status.setTextColor(colors.dangerText)
@@ -411,7 +417,6 @@ class ManageScreen(
                 isClickable = true
                 isFocusable = false
                 contentDescription = "Scan Jellyfin libraries"
-                setOnClickListener { scanLibraries() }
                 visibility = View.GONE
             }
             addView(scan, LayoutParams(WRAP, WRAP).apply { marginStart = dp(12) })
@@ -433,13 +438,15 @@ class ManageScreen(
                 setColor(stateColor(row.state))
             }
             detail.text = row.detail.ifEmpty { "No additional information" }
-            scan.visibility = if (row.id == "jellyfin") View.VISIBLE else View.GONE
+            scan.visibility = if (row.id in scannableServices) View.VISIBLE else View.GONE
+            scan.contentDescription = "Scan ${row.name} library"
+            scan.setOnClickListener { scanLibrary(row.id) }
             contentDescription = buildString {
                 append(row.name).append(", ").append(stateLabel(row.state))
                 if (row.detail.isNotEmpty()) append(", ").append(row.detail)
                 when {
                     row.id == "hub" -> append(", edits Hub connection")
-                    row.id == "jellyfin" -> append(", X scans libraries, A opens service dashboard")
+                    row.id in scannableServices -> append(", X scans library, A opens service dashboard")
                     row.dashboardUrl.isNotEmpty() -> append(", opens service dashboard")
                 }
             }
@@ -541,11 +548,16 @@ class ManageScreen(
             "radarr" to "Radarr",
             "readarr" to "Readarr",
             "qbittorrent" to "qBittorrent",
-            "bazarr" to "Bazarr"
+            "bazarr" to "Bazarr",
+            "bookkeeprr" to "BookKeeprr",
+            "kavita" to "Kavita",
+            "storyteller" to "Storyteller"
         )
         val serviceOrder = listOf(
-            "jellyfin", "jellyseerr", "prowlarr", "sonarr", "radarr", "readarr", "qbittorrent", "bazarr"
+            "jellyfin", "jellyseerr", "prowlarr", "sonarr", "radarr", "readarr", "qbittorrent", "bazarr",
+            "bookkeeprr", "kavita", "storyteller"
         ).withIndex().associate { it.value to it.index }
+        val scannableServices = setOf("jellyfin", "kavita", "storyteller")
     }
 }
 

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"ayaneohub/internal/config"
 	"ayaneohub/internal/httpx"
@@ -149,6 +150,13 @@ func (c *Client) Libraries(ctx context.Context) ([]Library, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// ScanAll asks Kavita to rescan every configured library. A scan can take
+// longer than an ordinary catalog lookup, so it gets its own bounded timeout
+// without weakening the short timeout used by screen requests.
+func (c *Client) ScanAll(ctx context.Context) error {
+	return c.base.WithTimeout(2*time.Minute).PostJSON(ctx, "/api/Library/scan-all", nil, nil)
 }
 
 func (c *Client) Series(ctx context.Context, libraryID, page, pageSize int, sortBy Sort, direction Direction) (*SeriesPage, error) {

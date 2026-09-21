@@ -54,6 +54,9 @@ The running Windows service uses:
 - `C:\ProgramData\AyaneoHub\offline-grants.json` for durable offline download
   grants and watch-progress receipts. This is application state, not a password
   file.
+- `C:\ProgramData\AyaneoHub\reading-transfers.json` for opaque reading transfer
+  bindings, retry tickets, and per-reader import-scan receipts. It contains no
+  service credentials or canonical filesystem paths.
 
 `hub.secrets.yaml` is ignored by the repository. The Hub merges it over
 `hub.yaml` at startup. After changing a service API key or password, update the
@@ -86,13 +89,15 @@ BookKeeprr credential.
 The normalized reading catalog has two additional server-side credentials:
 
 - `services.kavita.api_key` is a revocable Kavita authentication key. Create it
-  for a dedicated read-only account where possible and store it only in
+  for a dedicated service account allowed to read the catalog and start library
+  scans, and store it only in
   `hub.secrets.yaml`. The Hub sends it to Kavita as `X-Api-Key`.
 - `services.storyteller.username` and `services.storyteller.password` identify
   a dedicated Storyteller account. The Hub exchanges them at Storyteller's
   token endpoint, keeps the short-lived bearer token in memory, and renews it
   when needed. Put the password only in `hub.secrets.yaml` or the referenced
-  environment variable.
+  environment variable. This account needs Storyteller's `bookProcess`
+  permission so the Hub can call the installed full-book scan route.
 
 `C:\ProgramData\AyaneoHub\reading-catalog.json` stores opaque Hub work IDs and
 source record bindings. It contains no service passwords, API keys, raw media

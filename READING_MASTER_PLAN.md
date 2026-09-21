@@ -527,7 +527,11 @@ personal-key reads remain separate. The Pocket DS has the request form and a
 Books transfer view. Hub-owned Cancel and Retry use durable opaque transfer
 capabilities; a failed replacement grab survives restart as an actionable
 ticket, and an uncertain response is reconciled before another grab. Imported
-content cannot be canceled from this view. Production paths and the deferred
+content cannot be canceled from this view. Imported transfers now trigger the
+applicable Kavita and Storyteller scans automatically, with durable per-reader
+receipts keyed to BookKeeprr's exact import timestamp. Partial failure retries
+only the failed reader, and Manage exposes scoped manual reader scans.
+Production canonical paths and the deferred
 Red Rising acceptance run remain open. Pause remains absent because BookKeeprr
 1.1.1 cannot model it correctly. See
 `deploy/reading/M3_ACQUISITION_EVIDENCE.md`.

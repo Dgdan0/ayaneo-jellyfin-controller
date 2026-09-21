@@ -28,6 +28,12 @@ object HubEndpoints {
     fun scanJellyfinLibrary(base: String): HubRequest =
         HubRequest(join(base, "/v1/manage/jellyfin/scan"), method = "POST")
 
+    fun scanReadingLibrary(base: String, service: String): HubRequest =
+        HubRequest(
+            join(base, "/v1/manage/reading/scan") + "?service=" + encode(service),
+            method = "POST"
+        )
+
     fun users(base: String): HubRequest = HubRequest(join(base, "/v1/users"))
 
     fun home(base: String): HubRequest = HubRequest(join(base, "/v1/home"))

@@ -95,3 +95,41 @@ func TestBookAndCoverRetryOnceAfterExpiredToken(t *testing.T) {
 		t.Fatalf("token calls = %d", tokenCalls)
 	}
 }
+
+func TestScanAllUsesBookProcessRouteAndRenewsExpiredToken(t *testing.T) {
+	tokenCalls := 0
+	scanCalls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/token":
+			tokenCalls++
+			_, _ = io.WriteString(w, `{"access_token":"token-`+string(rune('0'+tokenCalls))+`","token_type":"Bearer","expires_in":3600}`)
+		case "/api/v2/books/scan":
+			scanCalls++
+			if r.Method != http.MethodPost {
+				t.Fatalf("scan method = %s", r.Method)
+			}
+			if r.Header.Get("Authorization") == "Bearer token-1" {
+				http.Error(w, "expired", http.StatusUnauthorized)
+				return
+			}
+			if r.Header.Get("Authorization") != "Bearer token-2" {
+				t.Fatalf("scan auth = %q", r.Header.Get("Authorization"))
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	client, err := New(config.ServiceConfig{BaseURL: upstream.URL, Username: "reader", Password: config.Secret("secret")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ScanAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if tokenCalls != 2 || scanCalls != 2 {
+		t.Fatalf("token calls = %d, scan calls = %d", tokenCalls, scanCalls)
+	}
+}

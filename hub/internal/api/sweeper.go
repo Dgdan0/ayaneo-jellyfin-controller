@@ -18,11 +18,36 @@ import (
 // up within five minutes, which is well inside the time it takes anything to
 // finish downloading.
 const sweepInterval = 5 * time.Minute
+const readingImportInterval = time.Minute
 
 // StartBackground kicks off the work that runs on a timer rather than on a
 // request. Cancelled with the context when the hub shuts down.
 func (s *Server) StartBackground(ctx context.Context) {
 	s.startIndexSweeper(ctx)
+	s.startReadingImportSweeper(ctx)
+}
+
+func (s *Server) startReadingImportSweeper(ctx context.Context) {
+	if s.bookkeeprr == nil || (s.kavita == nil && s.storyteller == nil) {
+		return
+	}
+	go func() {
+		if err := s.reconcileReadingImports(ctx); err != nil {
+			slog.Warn("reading import reconciliation failed", "error", err)
+		}
+		ticker := time.NewTicker(readingImportInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := s.reconcileReadingImports(ctx); err != nil {
+					slog.Warn("reading import reconciliation failed", "error", err)
+				}
+			}
+		}
+	}()
 }
 
 // startIndexSweeper keeps the Jellyfin provider-id index current.

@@ -22,6 +22,7 @@ import (
 type Client struct {
 	base     *url.URL
 	http     *http.Client
+	scanHTTP *http.Client
 	username string
 	password string
 
@@ -41,7 +42,8 @@ func New(cfg config.ServiceConfig) (*Client, error) {
 	}
 	return &Client{
 		base: parsed, username: strings.TrimSpace(cfg.Username), password: cfg.Password.Reveal(),
-		http: &http.Client{Transport: transport, Timeout: cfg.Timeout.OrDefault(8 * time.Second)},
+		http:     &http.Client{Transport: transport, Timeout: cfg.Timeout.OrDefault(8 * time.Second)},
+		scanHTTP: &http.Client{Transport: transport, Timeout: 2 * time.Minute},
 	}, nil
 }
 
@@ -155,6 +157,19 @@ func (c *Client) Book(ctx context.Context, id int64) (*Book, error) {
 	return &out, nil
 }
 
+// ScanAll runs Storyteller's installed v2 book processing route. The service
+// account needs bookProcess permission; token renewal is handled exactly like
+// every other authenticated Storyteller request.
+func (c *Client) ScanAll(ctx context.Context) error {
+	resp, err := c.request(ctx, c.scanHTTP, http.MethodPost, "/api/v2/books/scan")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, httpx.MaxBodyBytes))
+	return nil
+}
+
 func (c *Client) Cover(ctx context.Context, id int64) ([]byte, string, error) {
 	if id <= 0 {
 		return nil, "", fmt.Errorf("storyteller: invalid book id")
@@ -195,6 +210,10 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 }
 
 func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
+	return c.request(ctx, c.http, http.MethodGet, path)
+}
+
+func (c *Client) request(ctx context.Context, client *http.Client, method, path string) (*http.Response, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		token, err := c.accessToken(ctx)
 		if err != nil {
@@ -202,13 +221,13 @@ func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
 		}
 		target := *c.base
 		target.Path = strings.TrimRight(c.base.Path, "/") + "/" + strings.TrimLeft(path, "/")
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+		req, err := http.NewRequestWithContext(ctx, method, target.String(), nil)
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("Accept", "application/json, image/*")
 		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := c.http.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			return nil, &httpx.Error{Service: "storyteller", Kind: transportKind(err), Err: err}
 		}

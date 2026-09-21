@@ -2,7 +2,7 @@
 
 Date: 2026-09-21
 Branch: `feature/reading-library`
-Status: request/status/retry/cancel integration implemented and automated; production storage gate open
+Status: request/status/retry/cancel/import-scan integration implemented and automated; production storage gate open
 
 ## Scope and safety
 
@@ -90,18 +90,29 @@ Imported rows remain read-only.
 
 The Hub stores random public transfer IDs in `reading-transfers.json`. The
 private registry binds each ID to its BookKeeprr row, release, and transport
-hash. A retry ticket is written before the failed row is removed. If the new
+hash. It also records the exact `importedAt` value successfully scanned by each
+applicable reader. A retry ticket is written before the failed row is removed. If the new
 grab fails, or the Hub restarts while the response is uncertain, the ticket
 continues to appear as `retry_pending`. Before another grab the Hub reconciles
 the live BookKeeprr list so a successful request with a lost response is not
 submitted twice. Neither the private release ID nor qBittorrent hash appears in
 the Android contract.
 
+The background reconciler polls BookKeeprr once per minute. A newly imported
+ebook triggers both Kavita and Storyteller; comics, manga, and light novels
+trigger Kavita; audiobooks trigger Storyteller. Successful readers receive a
+durable receipt, so a Hub restart does not repeat their scan. A failed reader
+stays pending and is retried without repeating readers that succeeded. Manage
+also exposes scoped manual Kavita and Storyteller scan actions. The Android app
+receives only the result and never sees a canonical filesystem path.
+
 Automated adapter/API tests cover the installed search shape, read bearer,
 mobile exchange, one-time renewal, missing admin credentials, scope isolation,
 opaque candidate expiry, series payload mapping, quality-profile validation,
 transport-identity redaction, retry ordering, durable failed-grab recovery,
-active cancellation, unknown capabilities, and imported-row protection.
+active cancellation, unknown capabilities, imported-row protection, installed
+reader scan routes, per-content reader routing, partial retry, and scan receipts
+across Hub restarts.
 Kotlin tests cover endpoints, wire models, action parsing, and
 single-versus-series form state.
 
@@ -129,6 +140,8 @@ The ownership alternatives considered were:
    pause/retry after upstream support exists.
 
 Option 1 is implemented for request creation, status, cancel, durable retry,
-and uncertain-response reconciliation. Production path cutover and the full
-Red Rising acceptance run remain open. Pause is still intentionally absent
+uncertain-response reconciliation, and idempotent reader scans. Production path
+cutover and the full Red Rising acceptance run remain open. Production
+BookKeeprr destinations and Kavita/Storyteller watched folders must first point
+at the same canonical roots. Pause is still intentionally absent
 because the pinned BookKeeprr version cannot represent its state accurately.

@@ -78,6 +78,7 @@ import kotlin.coroutines.resumeWithException
 interface HubApi {
     suspend fun health(): HubResult<HealthResponse>
     suspend fun scanJellyfinLibrary(): HubResult<ActionAck>
+    suspend fun scanReadingLibrary(service: String): HubResult<ActionAck>
     suspend fun users(): HubResult<UsersResponse>
     suspend fun home(): HubResult<HomeResponse>
     suspend fun library(): HubResult<LibraryResponse>
@@ -385,6 +386,9 @@ class HubClient(private val context: Context) : HubApi {
     override suspend fun scanJellyfinLibrary(): HubResult<ActionAck> =
         mutate(HubEndpoints.scanJellyfinLibrary(base()))
 
+    override suspend fun scanReadingLibrary(service: String): HubResult<ActionAck> =
+        mutate(HubEndpoints.scanReadingLibrary(base(), service), slow = true)
+
     override suspend fun users(): HubResult<UsersResponse> =
         get(HubEndpoints.users(base()), noCache = true) { json.decodeFromString<UsersResponse>(it) }
 
@@ -560,7 +564,11 @@ class HubClient(private val context: Context) : HubApi {
      * not mean the delete did not happen, and a retried "remove and blocklist"
      * that actually succeeded the first time would blocklist a second release.
      */
-    private suspend fun mutate(request: HubRequest, userId: String = ""): HubResult<ActionAck> {
+    private suspend fun mutate(
+        request: HubRequest,
+        userId: String = "",
+        slow: Boolean = false
+    ): HubResult<ActionAck> {
         connectionFailure()?.let { return it }
         return try {
             withContext(Dispatchers.IO) {
@@ -572,7 +580,7 @@ class HubClient(private val context: Context) : HubApi {
                     "DELETE" -> builder.delete()
                     else -> builder.get()
                 }
-                api.newCall(builder.build()).await().use { response ->
+                (if (slow) slowApi else api).newCall(builder.build()).await().use { response ->
                     val body = response.body?.string().orEmpty()
                     if (response.isSuccessful) {
                         HubResult.Ok(json.decodeFromString<ActionAck>(body))

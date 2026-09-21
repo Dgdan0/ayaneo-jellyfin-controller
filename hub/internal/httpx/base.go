@@ -164,6 +164,12 @@ func (b *Base) Name() string { return b.name }
 func (b *Base) WithTimeout(d time.Duration) *Base {
 	copied := *b
 	copied.timeout = d
+	// http.Client.Timeout is a second hard ceiling in addition to the request
+	// context. Copy it as well, otherwise a caller asking for a two-minute scan
+	// still gets cut off by the original eight-second service client.
+	client := *b.client
+	client.Timeout = d
+	copied.client = &client
 	return &copied
 }
 

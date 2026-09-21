@@ -65,6 +65,9 @@ type Server struct {
 	previewFrame     func(context.Context, string, int64) ([]byte, error)
 	libraryScanMu    sync.Mutex
 	libraryScanWatch bool
+	readingScanMu    sync.Mutex
+	readingWatchMu   sync.Mutex
+	readingScanWatch bool
 }
 
 func NewServer(cfg *config.Config) *Server {
@@ -254,6 +257,7 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/activity", s.handleActivity)
 	authed.HandleFunc("GET /v1/notifications", s.handleNotifications)
 	authed.HandleFunc("POST /v1/manage/jellyfin/scan", s.handleJellyfinLibraryScan)
+	authed.HandleFunc("POST /v1/manage/reading/scan", s.handleReadingLibraryScan)
 	authed.HandleFunc("POST /v1/downloads/{id}/stop", s.handleDownloadStop)
 	authed.HandleFunc("POST /v1/downloads/{id}/start", s.handleDownloadStart)
 	authed.HandleFunc("DELETE /v1/downloads/{id}", s.handleDownloadDelete)
