@@ -2,7 +2,7 @@
 
 Date: 2026-09-21
 Branch: `feature/reading-library`
-Status: request/status/retry/cancel/import-scan integration implemented and automated; production storage gate open
+Status: request/status/retry/cancel/import-scan integration implemented and automated; production storage gate passed
 
 ## Scope and safety
 
@@ -113,8 +113,8 @@ qBittorrent only the `E:\Downloads\Reading` acquisition workspace. Contract
 tests reject reader write access, any legacy mount in BookKeeprr, and any
 library mount in qBittorrent. The expanded Compose model validates, all six host
 roots have been prepared, and the existing 9,638 readable legacy assets remain
-untouched. Consistent service-state promotion and the disposable acquisition
-gate remain pending before the Red Rising run.
+untouched. Consistent service-state promotion, reader paths, qBittorrent paths,
+and initial production scans passed. See `PRODUCTION_CUTOVER_EVIDENCE.md`.
 
 Automated adapter/API tests cover the installed search shape, read bearer,
 mobile exchange, one-time renewal, missing admin credentials, scope isolation,
@@ -126,18 +126,19 @@ across Hub restarts.
 Kotlin tests cover endpoints, wire models, action parsing, and
 single-versus-series form state.
 
-No production media root, indexer, download client, or real title was changed.
-The full Red Rising run remains deferred until production storage, import roots,
-and reader scans are configured together.
+The production reading roots and dedicated reading download client are now
+active. No real title, production movie/TV downloader, indexer configuration,
+or legacy source media was changed. The full Red Rising run remains deferred.
 
 ## Remaining gate
 
 The service-side acquisition slice and Hub control contract are reproducible:
 local fixture acquisition, category routing, import naming, byte integrity,
 idempotent upstream cancel, scoped Hub cancel, and durable Hub retry all have
-automated coverage. The complete M3 gate remains open for production path
-cutover and the deferred Red Rising acceptance run. Pause is outside the gate
-because the pinned BookKeeprr API cannot represent that state accurately.
+automated coverage. Production path cutover is complete. The complete M3 gate
+remains open only for the deferred Red Rising acceptance run. Pause is outside
+the gate because the pinned BookKeeprr API cannot represent that state
+accurately.
 
 The ownership alternatives considered were:
 
@@ -150,8 +151,8 @@ The ownership alternatives considered were:
    pause/retry after upstream support exists.
 
 Option 1 is implemented for request creation, status, cancel, durable retry,
-uncertain-response reconciliation, and idempotent reader scans. Production path
-cutover and the full Red Rising acceptance run remain open. Production
-BookKeeprr destinations and Kavita/Storyteller watched folders must first point
-at the same canonical roots. Pause is still intentionally absent
-because the pinned BookKeeprr version cannot represent its state accurately.
+uncertain-response reconciliation, and idempotent reader scans. Production
+BookKeeprr destinations and Kavita/Storyteller watched folders now point at the
+same canonical roots. The full Red Rising acceptance run remains open. Pause is
+still intentionally absent because the pinned BookKeeprr version cannot
+represent its state accurately.

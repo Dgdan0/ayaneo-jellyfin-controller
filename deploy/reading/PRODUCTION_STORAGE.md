@@ -32,9 +32,39 @@ light-novels/
 ```
 
 qBittorrent uses `/downloads/incomplete` while receiving data and
-`/downloads/complete` after completion. BookKeeprr validates and imports from
-that workspace into `/media`; qBittorrent never receives a mount for either
-library root.
+`/downloads` after completion. The qBittorrent `temp_path_enabled` preference
+must be enabled; setting only the temp path is not sufficient. BookKeeprr
+validates and imports from that workspace into `/media`; qBittorrent never
+receives a mount for either library root.
+
+Kavita aborts a library scan when any configured root contains no supported
+media. Add a managed root to an active Kavita library only after its first
+valid file exists. The initial production configuration therefore uses:
+
+- Books: `/reading/books` and `/legacy/Ebooks`
+- Comics: `/reading/comics` and `/legacy/Comics`
+- Manga: `/reading/manga` and `/legacy/Manga`
+
+`/reading/light-novels` remains reserved until the first light novel is
+imported. It can then be added to Books or promoted to its own Kavita library.
+
+Storyteller cannot convert EPUB 2 files beside a read-only source. Ebook watch
+rules use `copy` plus `backup-and-convert`, which copies the source into
+Storyteller's writable state before conversion. Audiobook watch rules use
+`reference` because they do not need EPUB conversion:
+
+| Watch path | Import mode |
+| --- | --- |
+| `/library/books` | `copy` |
+| `/library/light-novels` | `copy` |
+| `/legacy/Ebooks` | `copy` |
+| `/library/audiobooks` | `reference` |
+| `/legacy/Audiobooks` | `reference` |
+
+The disposable qualification files copied into the managed roots are recorded
+by hash in `D:\Media\Reading\.pocketds-qualification-fixtures.json`. Use that
+manifest for deliberate cleanup after real acquisitions have populated each
+active root; do not delete files by directory pattern.
 
 ## Promotion sequence
 
@@ -55,14 +85,14 @@ library root.
 6. Start production and confirm every container is healthy. The lab and
    production projects use the same loopback ports and therefore cannot run at
    the same time.
-7. In Kavita, retain `/reading/*` for new managed libraries and add the
-   applicable `/legacy/Comics`, `/legacy/Manga`, and `/legacy/Ebooks` folders.
-8. In Storyteller, retain `/library/books` and `/library/audiobooks`, then add
-   `/legacy/Ebooks` and `/legacy/Audiobooks`. Storyteller is not used for comic
-   and manga rendering.
+7. In Kavita, configure the active roots listed above. Seed each empty managed
+   root with the qualified disposable fixture before the first scan. Add the
+   reserved light-novel root only after it contains supported media.
+8. In Storyteller, configure the five watch rules and import modes listed
+   above. Storyteller is not used for comic and manga rendering.
 9. Confirm qBittorrent's default path is `/downloads/`, its incomplete path is
-   `/downloads/incomplete/`, and BookKeeprr connects to Docker host
-   `qbittorrent:18080`.
+   `/downloads/incomplete/`, `temp_path_enabled` is true, and BookKeeprr
+   connects to Docker host `qbittorrent:18080`.
 10. Confirm BookKeeprr roots remain under `/media`, run a disposable generated
     EPUB acquisition, and verify the source is removed from neither legacy nor
     managed media unexpectedly.
