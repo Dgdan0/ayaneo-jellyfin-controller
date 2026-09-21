@@ -524,9 +524,12 @@ byte-identical import, and idempotent cancel. The Hub now exposes tested opaque
 request options, single-book/whole-series creation, and normalized BookKeeprr
 transfer status. Admin writes use BookKeeprr's mobile login/exchange flow;
 personal-key reads remain separate. The Pocket DS has the request form and a
-Books transfer view. Production paths, Hub-owned retry/cancel reconciliation,
-and the deferred Red Rising acceptance run remain open. Pause remains absent
-because BookKeeprr 1.1.1 cannot model it correctly. See
+Books transfer view. Hub-owned Cancel and Retry use durable opaque transfer
+capabilities; a failed replacement grab survives restart as an actionable
+ticket, and an uncertain response is reconciled before another grab. Imported
+content cannot be canceled from this view. Production paths and the deferred
+Red Rising acceptance run remain open. Pause remains absent because BookKeeprr
+1.1.1 cannot model it correctly. See
 `deploy/reading/M3_ACQUISITION_EVIDENCE.md`.
 
 ### M4 — Hub reading catalog
@@ -569,8 +572,9 @@ form, and Transfers shares the Media/Books switch. Kotlin tests and the debug
 build pass. Series collections now open into a horizontal row of available
 books, and sort menus expose Title, Series, Author, Date added, and Last read
 according to each source's capabilities. Recent activity defaults to newest
-first. Pocket DS hardware acceptance and the Home/Offline Books views remain
-open.
+first. Books transfers now expose the Hub-provided Retry and Cancel actions
+with confirmation for cancellation. Pocket DS hardware acceptance and the
+Home/Offline Books views remain open.
 
 ### M6 — Shared reader shell
 

@@ -180,6 +180,11 @@ func (b *Base) PostJSON(ctx context.Context, path string, body, out any) error {
 	return err
 }
 
+func (b *Base) DeleteJSON(ctx context.Context, path string, out any) error {
+	_, err := b.do(ctx, http.MethodDelete, path, nil, nil, out)
+	return err
+}
+
 // PostJSONHeaders is PostJSON plus a copy of the successful response headers.
 // Kavita carries pagination in a response header rather than its JSON body.
 func (b *Base) PostJSONHeaders(ctx context.Context, path string, query url.Values, body, out any) (http.Header, error) {

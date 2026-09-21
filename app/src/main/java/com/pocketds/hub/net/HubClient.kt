@@ -150,6 +150,8 @@ interface HubApi {
     suspend fun readingRequestOptions(key: String): HubResult<ReadingRequestOptions>
     suspend fun requestReading(body: ReadingCreateRequestBody): HubResult<ReadingRequestResponse>
     suspend fun readingDownloads(): HubResult<ReadingDownloadsResponse>
+    suspend fun retryReadingDownload(id: String): HubResult<ActionAck>
+    suspend fun cancelReadingDownload(id: String): HubResult<ActionAck>
     suspend fun requestOptions(key: String): HubResult<RequestOptions>
     suspend fun releaseTargets(key: String, season: Int): HubResult<ReleaseTargetsResponse>
     suspend fun releases(key: String, season: Int = 0, episode: Int = 0): HubResult<ReleasesResponse>
@@ -658,6 +660,12 @@ class HubClient(private val context: Context) : HubApi {
         get(HubEndpoints.readingDownloads(base()), noCache = true) {
             json.decodeFromString<ReadingDownloadsResponse>(it)
         }
+
+    override suspend fun retryReadingDownload(id: String): HubResult<ActionAck> =
+        mutate(HubEndpoints.retryReadingDownload(base(), id))
+
+    override suspend fun cancelReadingDownload(id: String): HubResult<ActionAck> =
+        mutate(HubEndpoints.cancelReadingDownload(base(), id))
 
     override suspend fun requestOptions(key: String): HubResult<RequestOptions> =
         get(HubEndpoints.requestOptions(base(), key)) {

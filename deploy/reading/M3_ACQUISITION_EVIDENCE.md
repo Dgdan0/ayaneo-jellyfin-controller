@@ -2,7 +2,7 @@
 
 Date: 2026-09-21
 Branch: `feature/reading-library`
-Status: request/status integration implemented and automated; production storage gate open
+Status: request/status/retry/cancel integration implemented and automated; production storage gate open
 
 ## Scope and safety
 
@@ -52,7 +52,7 @@ had no available payload so controls and failure isolation could be observed.
 | Cancel | Pass | First cancel returned 200, removed the qBittorrent transfer and BookKeeprr row; a repeated cancel also returned 200 |
 | qBittorrent 5 route compatibility | Pass with shim | Direct old pause/resume routes returned 404; direct stop/start returned 200; the internal proxy made BookKeeprr pause/resume calls return 200 |
 | Pause semantics | Not accepted | BookKeeprr keeps no paused download state. Its watcher maps an incomplete stopped/paused torrent to `downloading` and can classify it as stalled after five minutes |
-| Retry contract | Not accepted | BookKeeprr 1.1.1 exposes pause, resume, cancel, queue, and manual grab, but no failed-download retry endpoint |
+| Native retry contract | Not supplied upstream | BookKeeprr 1.1.1 has no failed-download retry endpoint. The Hub now implements retry as an authenticated cancel followed by a re-grab of the same release, with a durable recovery ticket. |
 | Personal API key controls | Not accepted | The admin personal bearer key read authenticated data, but admin download controls returned 401; those routes independently accept a browser session or mobile bearer token instead |
 
 ## Compatibility findings
@@ -63,9 +63,8 @@ client. The internal proxy preserves the otherwise-compatible current
 qBittorrent backend without modifying BookKeeprr or downgrading the downloader.
 
 The proxy fixes the request names only. It does not invent a pause state in
-BookKeeprr, suppress its stall detector, or provide retry. Presenting pause or
-retry in the Pocket DS before those state rules are designed would claim
-behavior the service does not provide.
+BookKeeprr or suppress its stall detector. Pause remains hidden. Retry is owned
+by the Hub and does not depend on a fictional upstream paused state.
 
 BookKeeprr's request middleware recognizes personal API keys, but its admin
 download routes call a second authorization helper that validates session or
@@ -85,13 +84,26 @@ BookKeeprr search parsing now accepts the installed 1.1.1 error object as well
 as legacy array and null forms. Acquisition writes use a dedicated admin mobile
 bearer obtained through the documented login/exchange flow and renew once after
 401. The Pocket DS reading detail page has an explicit controller form, and
-Transfers now has a Media/Books switch with BookKeeprr status rows.
+Transfers now has a Media/Books switch with BookKeeprr status rows. A scoped
+token receives Cancel on active transfers and Retry/Cancel on failed transfers.
+Imported rows remain read-only.
+
+The Hub stores random public transfer IDs in `reading-transfers.json`. The
+private registry binds each ID to its BookKeeprr row, release, and transport
+hash. A retry ticket is written before the failed row is removed. If the new
+grab fails, or the Hub restarts while the response is uncertain, the ticket
+continues to appear as `retry_pending`. Before another grab the Hub reconciles
+the live BookKeeprr list so a successful request with a lost response is not
+submitted twice. Neither the private release ID nor qBittorrent hash appears in
+the Android contract.
 
 Automated adapter/API tests cover the installed search shape, read bearer,
 mobile exchange, one-time renewal, missing admin credentials, scope isolation,
 opaque candidate expiry, series payload mapping, quality-profile validation,
-and transport-identity redaction. Kotlin tests cover endpoints, wire models,
-and single-versus-series form state.
+transport-identity redaction, retry ordering, durable failed-grab recovery,
+active cancellation, unknown capabilities, and imported-row protection.
+Kotlin tests cover endpoints, wire models, action parsing, and
+single-versus-series form state.
 
 No production media root, indexer, download client, or real title was changed.
 The full Red Rising run remains deferred until production storage, import roots,
@@ -99,11 +111,12 @@ and reader scans are configured together.
 
 ## Remaining gate
 
-The service-side acquisition slice is reproducible and safe enough to proceed
-to adapter design: local fixture acquisition, category routing, import naming,
-byte integrity, and idempotent cancel work. The complete M3 gate remains open
-because retry and durable pause semantics are not supplied by the pinned
-BookKeeprr API.
+The service-side acquisition slice and Hub control contract are reproducible:
+local fixture acquisition, category routing, import naming, byte integrity,
+idempotent upstream cancel, scoped Hub cancel, and durable Hub retry all have
+automated coverage. The complete M3 gate remains open for production path
+cutover and the deferred Red Rising acceptance run. Pause is outside the gate
+because the pinned BookKeeprr API cannot represent that state accurately.
 
 The ownership alternatives considered were:
 
@@ -115,7 +128,7 @@ The ownership alternatives considered were:
 3. initially expose request, queue, diagnostics, and cancel only, then add
    pause/retry after upstream support exists.
 
-Option 1 is now implemented for request creation and status. Hub-owned retry,
-cancel/reconciliation, production path cutover, and the full Red Rising
-acceptance run remain open. Pause is still intentionally absent because the
-pinned BookKeeprr version cannot represent its state accurately.
+Option 1 is implemented for request creation, status, cancel, durable retry,
+and uncertain-response reconciliation. Production path cutover and the full
+Red Rising acceptance run remain open. Pause is still intentionally absent
+because the pinned BookKeeprr version cannot represent its state accurately.

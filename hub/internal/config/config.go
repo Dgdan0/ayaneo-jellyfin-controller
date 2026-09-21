@@ -60,6 +60,9 @@ type ServerConfig struct {
 	// ReadingCatalog persists stable Hub work IDs and their source bindings.
 	// Relative paths are resolved beside the main config file.
 	ReadingCatalog string `yaml:"reading_catalog"`
+	// ReadingTransfers persists opaque BookKeeprr transfer capabilities and
+	// retry tickets. It contains no service credential or indexer URL.
+	ReadingTransfers string `yaml:"reading_transfers"`
 }
 
 type AuthConfig struct {
@@ -191,6 +194,11 @@ func Load(path string) (*Config, error) {
 		cfg.Server.ReadingCatalog = filepath.Join(filepath.Dir(path), "reading-catalog.json")
 	} else if !filepath.IsAbs(cfg.Server.ReadingCatalog) {
 		cfg.Server.ReadingCatalog = filepath.Join(filepath.Dir(path), cfg.Server.ReadingCatalog)
+	}
+	if cfg.Server.ReadingTransfers == "" {
+		cfg.Server.ReadingTransfers = filepath.Join(filepath.Dir(path), "reading-transfers.json")
+	} else if !filepath.IsAbs(cfg.Server.ReadingTransfers) {
+		cfg.Server.ReadingTransfers = filepath.Join(filepath.Dir(path), cfg.Server.ReadingTransfers)
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err

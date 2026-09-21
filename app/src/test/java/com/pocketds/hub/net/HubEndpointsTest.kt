@@ -50,6 +50,14 @@ class HubEndpointsTest {
         assertEquals("$base/v1/reading/requests", HubEndpoints.readingRequests(base).url)
         assertEquals("POST", HubEndpoints.readingRequests(base).method)
         assertEquals("$base/v1/reading/downloads", HubEndpoints.readingDownloads(base).url)
+        assertEquals(
+            HubRequest("$base/v1/reading/downloads/rt_abc/retry", method = "POST"),
+            HubEndpoints.retryReadingDownload(base, "rt_abc")
+        )
+        assertEquals(
+            HubRequest("$base/v1/reading/downloads/rt_abc", method = "DELETE"),
+            HubEndpoints.cancelReadingDownload(base, "rt_abc")
+        )
     }
 
     @Test

@@ -173,6 +173,12 @@ object HubEndpoints {
     fun readingDownloads(base: String): HubRequest =
         HubRequest(join(base, "/v1/reading/downloads"))
 
+    fun retryReadingDownload(base: String, id: String): HubRequest =
+        HubRequest(join(base, "/v1/reading/downloads/" + encode(id) + "/retry"), method = "POST")
+
+    fun cancelReadingDownload(base: String, id: String): HubRequest =
+        HubRequest(join(base, "/v1/reading/downloads/" + encode(id)), method = "DELETE")
+
     fun requestOptions(base: String, key: String): HubRequest =
         HubRequest(join(base, "/v1/requests/options") + "?key=" + encode(key))
 

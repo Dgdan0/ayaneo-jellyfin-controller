@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -145,7 +146,9 @@ func TestReadingDownloadsAreNormalizedAndHideTorrentHash(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	handler := NewServer(readingAcquisitionConfig(upstream.URL, []string{"reading"}, false)).Handler()
+	cfg := readingAcquisitionConfig(upstream.URL, []string{"reading", "request"}, true)
+	cfg.Server.ReadingTransfers = filepath.Join(t.TempDir(), "reading-transfers.json")
+	handler := NewServer(cfg).Handler()
 	got := libraryRequest(handler, "/v1/reading/downloads")
 	if got.Code != http.StatusOK {
 		t.Fatalf("downloads = %d: %s", got.Code, got.Body.String())
@@ -157,8 +160,209 @@ func TestReadingDownloadsAreNormalizedAndHideTorrentHash(t *testing.T) {
 	if err := json.Unmarshal(got.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Items) != 1 || body.Items[0].ID != "reading:download:9" || body.Items[0].Title != "Red Rising" || body.Items[0].ProgressPercent != 25 || body.Items[0].Status != "downloading" {
+	if len(body.Items) != 1 || !strings.HasPrefix(body.Items[0].ID, "rt_") || body.Items[0].Title != "Red Rising" || body.Items[0].ProgressPercent != 25 || body.Items[0].Status != "downloading" {
 		t.Fatalf("body = %+v", body)
+	}
+	if body.Items[0].ID == "reading:download:9" || len(body.Items[0].Actions) != 1 || body.Items[0].Actions[0] != "cancel" {
+		t.Fatalf("public transfer capability = %+v", body.Items[0])
+	}
+}
+
+func TestReadingFailedTransferRetriesThroughDurableOpaqueCapability(t *testing.T) {
+	var sequence []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/downloads":
+			sequence = append(sequence, "list")
+			_, _ = w.Write([]byte(`{"downloads":[{"id":9,"qbtHash":"0123456789abcdef0123456789abcdef01234567","status":"failed","addedAt":"2026-09-21T10:00:00Z","error":"stalled","release":{"id":3,"title":"Red Rising EPUB"},"series":{"id":4,"title":"Red Rising","contentType":"ebook"}}]}`))
+		case "/api/auth/login":
+			_, _ = w.Write([]byte(`{"redirect_to":"bookkeeprr://hub/auth?exchange=one"}`))
+		case "/api/mobile/exchange":
+			_, _ = w.Write([]byte(`{"token":"admin-token"}`))
+		case "/api/downloads/0123456789abcdef0123456789abcdef01234567":
+			if r.Method != http.MethodDelete || r.Header.Get("Authorization") != "Bearer admin-token" {
+				t.Fatalf("cancel = %s auth %q", r.Method, r.Header.Get("Authorization"))
+			}
+			sequence = append(sequence, "cancel")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/releases/3/grab":
+			if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer admin-token" {
+				t.Fatalf("grab = %s auth %q", r.Method, r.Header.Get("Authorization"))
+			}
+			sequence = append(sequence, "grab")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"downloadId":12,"qbtHash":"abcdefabcdefabcdefabcdefabcdefabcdefabcd","status":"queued"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	cfg := readingAcquisitionConfig(upstream.URL, []string{"reading", "request"}, true)
+	cfg.Server.ReadingTransfers = filepath.Join(t.TempDir(), "reading-transfers.json")
+	handler := NewServer(cfg).Handler()
+	listed := libraryRequest(handler, "/v1/reading/downloads")
+	var body ReadingDownloadsResponse
+	if err := json.Unmarshal(listed.Body.Bytes(), &body); err != nil || len(body.Items) != 1 {
+		t.Fatalf("list = %d %s, decode %v", listed.Code, listed.Body.String(), err)
+	}
+	item := body.Items[0]
+	if !item.Failed || strings.Join(item.Actions, ",") != "retry,cancel" {
+		t.Fatalf("failed actions = %+v", item)
+	}
+	got := readingJSONRequest(handler, http.MethodPost, "/v1/reading/downloads/"+item.ID+"/retry", `{}`)
+	if got.Code != http.StatusOK {
+		t.Fatalf("retry = %d: %s", got.Code, got.Body.String())
+	}
+	if strings.Join(sequence, ",") != "list,cancel,grab" {
+		t.Fatalf("sequence = %v", sequence)
+	}
+	// BookKeeprr may still serve its previous list for one poll. The Hub keeps
+	// the accepted replacement visible instead of making the row blink away.
+	afterRetry := libraryRequest(handler, "/v1/reading/downloads")
+	var optimistic ReadingDownloadsResponse
+	if err := json.Unmarshal(afterRetry.Body.Bytes(), &optimistic); err != nil || len(optimistic.Items) != 1 {
+		t.Fatalf("optimistic retry = %d %s, decode %v", afterRetry.Code, afterRetry.Body.String(), err)
+	}
+	if optimistic.Items[0].ID != item.ID || optimistic.Items[0].Status != "queued" {
+		t.Fatalf("optimistic row = %+v", optimistic.Items[0])
+	}
+}
+
+func TestReadingRetryTicketSurvivesFailedGrabAndHubRestart(t *testing.T) {
+	showFailed := true
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/downloads":
+			if showFailed {
+				_, _ = w.Write([]byte(`{"downloads":[{"id":9,"qbtHash":"0123456789abcdef0123456789abcdef01234567","status":"failed","addedAt":"2026-09-21T10:00:00Z","release":{"id":3,"title":"Red Rising EPUB"},"series":{"id":4,"title":"Red Rising","contentType":"ebook"}}]}`))
+			} else {
+				_, _ = w.Write([]byte(`{"downloads":[]}`))
+			}
+		case "/api/auth/login":
+			_, _ = w.Write([]byte(`{"redirect_to":"bookkeeprr://hub/auth?exchange=one"}`))
+		case "/api/mobile/exchange":
+			_, _ = w.Write([]byte(`{"token":"admin-token"}`))
+		case "/api/downloads/0123456789abcdef0123456789abcdef01234567":
+			showFailed = false
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/releases/3/grab":
+			http.Error(w, "indexer unavailable", http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	registry := filepath.Join(t.TempDir(), "reading-transfers.json")
+	cfg := readingAcquisitionConfig(upstream.URL, []string{"reading", "request"}, true)
+	cfg.Server.ReadingTransfers = registry
+	handler := NewServer(cfg).Handler()
+	listed := libraryRequest(handler, "/v1/reading/downloads")
+	var first ReadingDownloadsResponse
+	_ = json.Unmarshal(listed.Body.Bytes(), &first)
+	id := first.Items[0].ID
+	failed := readingJSONRequest(handler, http.MethodPost, "/v1/reading/downloads/"+id+"/retry", `{}`)
+	if failed.Code != http.StatusServiceUnavailable {
+		t.Fatalf("failed retry = %d: %s", failed.Code, failed.Body.String())
+	}
+
+	restarted := NewServer(cfg).Handler()
+	after := libraryRequest(restarted, "/v1/reading/downloads")
+	var restored ReadingDownloadsResponse
+	if err := json.Unmarshal(after.Body.Bytes(), &restored); err != nil || len(restored.Items) != 1 {
+		t.Fatalf("restored = %d %s, decode %v", after.Code, after.Body.String(), err)
+	}
+	if restored.Items[0].ID != id || restored.Items[0].Status != "retry_pending" || strings.Join(restored.Items[0].Actions, ",") != "retry,cancel" {
+		t.Fatalf("restored ticket = %+v", restored.Items[0])
+	}
+}
+
+func TestReadingTransferWritesNeedScopeAndRejectImportedRows(t *testing.T) {
+	deleteCalls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/downloads" {
+			_, _ = w.Write([]byte(`{"downloads":[{"id":9,"qbtHash":"0123456789abcdef0123456789abcdef01234567","status":"imported","addedAt":"2026-09-21T10:00:00Z","release":{"id":3,"title":"Book"},"series":{"id":4,"title":"Book","contentType":"ebook"}}]}`))
+			return
+		}
+		if r.Method == http.MethodDelete {
+			deleteCalls++
+		}
+		http.NotFound(w, r)
+	}))
+	defer upstream.Close()
+
+	registry := filepath.Join(t.TempDir(), "reading-transfers.json")
+	readOnly := readingAcquisitionConfig(upstream.URL, []string{"reading"}, true)
+	readOnly.Server.ReadingTransfers = registry
+	readHandler := NewServer(readOnly).Handler()
+	var body ReadingDownloadsResponse
+	listed := libraryRequest(readHandler, "/v1/reading/downloads")
+	_ = json.Unmarshal(listed.Body.Bytes(), &body)
+	if len(body.Items[0].Actions) != 0 {
+		t.Fatalf("read-only actions = %v", body.Items[0].Actions)
+	}
+	if got := readingJSONRequest(readHandler, http.MethodDelete, "/v1/reading/downloads/"+body.Items[0].ID, ""); got.Code != http.StatusForbidden {
+		t.Fatalf("read-only cancel = %d", got.Code)
+	}
+
+	controller := readingAcquisitionConfig(upstream.URL, []string{"reading", "request"}, true)
+	controller.Server.ReadingTransfers = registry
+	controlHandler := NewServer(controller).Handler()
+	if got := readingJSONRequest(controlHandler, http.MethodDelete, "/v1/reading/downloads/"+body.Items[0].ID, ""); got.Code != http.StatusConflict {
+		t.Fatalf("imported cancel = %d: %s", got.Code, got.Body.String())
+	}
+	if deleteCalls != 0 {
+		t.Fatalf("imported row made %d destructive upstream calls", deleteCalls)
+	}
+}
+
+func TestReadingActiveTransferCanBeCanceledWithoutExposingItsHash(t *testing.T) {
+	deleteCalls := 0
+	show := true
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/downloads":
+			if show {
+				_, _ = w.Write([]byte(`{"downloads":[{"id":9,"qbtHash":"0123456789abcdef0123456789abcdef01234567","status":"downloading","addedAt":"2026-09-21T10:00:00Z","release":{"id":3,"title":"Book"},"series":{"id":4,"title":"Book","contentType":"ebook"}}]}`))
+			} else {
+				_, _ = w.Write([]byte(`{"downloads":[]}`))
+			}
+		case "/api/auth/login":
+			_, _ = w.Write([]byte(`{"redirect_to":"bookkeeprr://hub/auth?exchange=one"}`))
+		case "/api/mobile/exchange":
+			_, _ = w.Write([]byte(`{"token":"admin-token"}`))
+		case "/api/downloads/0123456789abcdef0123456789abcdef01234567":
+			deleteCalls++
+			show = false
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	cfg := readingAcquisitionConfig(upstream.URL, []string{"reading", "request"}, true)
+	cfg.Server.ReadingTransfers = filepath.Join(t.TempDir(), "reading-transfers.json")
+	handler := NewServer(cfg).Handler()
+	listed := libraryRequest(handler, "/v1/reading/downloads")
+	var before ReadingDownloadsResponse
+	_ = json.Unmarshal(listed.Body.Bytes(), &before)
+	id := before.Items[0].ID
+	if got := readingJSONRequest(handler, http.MethodDelete, "/v1/reading/downloads/"+id, ""); got.Code != http.StatusOK {
+		t.Fatalf("cancel = %d: %s", got.Code, got.Body.String())
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("delete calls = %d", deleteCalls)
+	}
+	after := libraryRequest(handler, "/v1/reading/downloads")
+	var empty ReadingDownloadsResponse
+	_ = json.Unmarshal(after.Body.Bytes(), &empty)
+	if len(empty.Items) != 0 {
+		t.Fatalf("canceled transfer returned: %+v", empty.Items)
+	}
+	if got := readingJSONRequest(handler, http.MethodPost, "/v1/reading/downloads/rt_00000000000000000000000000000000/retry", `{}`); got.Code != http.StatusNotFound {
+		t.Fatalf("unknown retry = %d: %s", got.Code, got.Body.String())
 	}
 }
 

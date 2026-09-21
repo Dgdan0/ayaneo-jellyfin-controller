@@ -93,20 +93,21 @@ type ReadingRequestResponse struct {
 }
 
 type ReadingDownloadItem struct {
-	ID               string `json:"id"`
-	SeriesID         int    `json:"seriesId,omitempty"`
-	ContentType      string `json:"contentType,omitempty"`
-	Title            string `json:"title"`
-	ReleaseTitle     string `json:"releaseTitle,omitempty"`
-	Status           string `json:"status"`
-	ProgressPercent  int    `json:"progressPercent"`
-	DownloadSpeedBPS int64  `json:"downloadSpeedBytesPerSecond,omitempty"`
-	ETASeconds       int64  `json:"etaSeconds,omitempty"`
-	SizeBytes        int64  `json:"sizeBytes,omitempty"`
-	AddedAt          string `json:"addedAt,omitempty"`
-	CompletedAt      string `json:"completedAt,omitempty"`
-	ImportedAt       string `json:"importedAt,omitempty"`
-	Failed           bool   `json:"failed"`
+	ID               string   `json:"id"`
+	SeriesID         int      `json:"seriesId,omitempty"`
+	ContentType      string   `json:"contentType,omitempty"`
+	Title            string   `json:"title"`
+	ReleaseTitle     string   `json:"releaseTitle,omitempty"`
+	Status           string   `json:"status"`
+	ProgressPercent  int      `json:"progressPercent"`
+	DownloadSpeedBPS int64    `json:"downloadSpeedBytesPerSecond,omitempty"`
+	ETASeconds       int64    `json:"etaSeconds,omitempty"`
+	SizeBytes        int64    `json:"sizeBytes,omitempty"`
+	AddedAt          string   `json:"addedAt,omitempty"`
+	CompletedAt      string   `json:"completedAt,omitempty"`
+	ImportedAt       string   `json:"importedAt,omitempty"`
+	Failed           bool     `json:"failed"`
+	Actions          []string `json:"actions"`
 }
 
 type ReadingDownloadsResponse struct {
@@ -401,43 +402,182 @@ func (s *Server) handleReadingDownloads(w http.ResponseWriter, r *http.Request) 
 		writeUpstreamError(w, r, "bookkeeprr", err)
 		return
 	}
-	out := ReadingDownloadsResponse{Items: make([]ReadingDownloadItem, 0, len(downloads.Downloads))}
-	for _, download := range downloads.Downloads {
-		item := ReadingDownloadItem{
-			ID: fmt.Sprintf("reading:download:%d", download.ID), Status: download.Status,
-			AddedAt: download.AddedAt, Failed: download.Status == "failed" || download.Error != nil,
-		}
-		if download.Progress != nil {
-			item.ProgressPercent = int(math.Round(math.Max(0, math.Min(1, *download.Progress)) * 100))
-		}
-		if download.DownloadSpeed != nil {
-			item.DownloadSpeedBPS = *download.DownloadSpeed
-		}
-		if download.ETA != nil {
-			item.ETASeconds = *download.ETA
-		}
-		if download.SizeBytes != nil {
-			item.SizeBytes = *download.SizeBytes
-		}
-		if download.CompletedAt != nil {
-			item.CompletedAt = *download.CompletedAt
-		}
-		if download.ImportedAt != nil {
-			item.ImportedAt = *download.ImportedAt
-		}
-		if download.Release != nil {
-			item.ReleaseTitle = download.Release.Title
-			item.Title = download.Release.Title
-		}
-		if download.Series != nil {
-			item.SeriesID = download.Series.ID
-			item.ContentType = string(download.Series.ContentType)
-			item.Title = download.Series.Title
-		}
-		if item.Title == "" {
-			item.Title = "Reading download"
-		}
-		out.Items = append(out.Items, item)
+	items, err := s.readingTransfers.reconcile(downloads.Downloads)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "could not save reading transfer state"})
+		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	canControl := TokenFrom(r.Context()).HasScope("request") && s.bookkeeprr.CanRequest()
+	for i := range items {
+		items[i].Actions = readingTransferActions(items[i], canControl)
+	}
+	writeJSON(w, http.StatusOK, ReadingDownloadsResponse{Items: items})
+}
+
+func readingDownloadItem(id string, download bookkeeprr.Download) ReadingDownloadItem {
+	item := ReadingDownloadItem{
+		ID: id, Status: download.Status, AddedAt: download.AddedAt,
+		Failed: download.Status == "failed" || download.Error != nil, Actions: []string{},
+	}
+	if download.Progress != nil {
+		item.ProgressPercent = int(math.Round(math.Max(0, math.Min(1, *download.Progress)) * 100))
+	}
+	if download.DownloadSpeed != nil {
+		item.DownloadSpeedBPS = *download.DownloadSpeed
+	}
+	if download.ETA != nil {
+		item.ETASeconds = *download.ETA
+	}
+	if download.SizeBytes != nil {
+		item.SizeBytes = *download.SizeBytes
+	}
+	if download.CompletedAt != nil {
+		item.CompletedAt = *download.CompletedAt
+	}
+	if download.ImportedAt != nil {
+		item.ImportedAt = *download.ImportedAt
+	}
+	if download.Release != nil {
+		item.ReleaseTitle = download.Release.Title
+		item.Title = download.Release.Title
+	}
+	if download.Series != nil {
+		item.SeriesID = download.Series.ID
+		item.ContentType = string(download.Series.ContentType)
+		item.Title = download.Series.Title
+	}
+	if item.Title == "" {
+		item.Title = "Reading download"
+	}
+	return item
+}
+
+func readingTransferActions(item ReadingDownloadItem, canControl bool) []string {
+	if !canControl {
+		return []string{}
+	}
+	if item.Failed || item.Status == "retry_pending" {
+		return []string{"retry", "cancel"}
+	}
+	switch item.Status {
+	case "queued", "downloading":
+		return []string{"cancel"}
+	default:
+		return []string{}
+	}
+}
+
+func validReadingTransferID(id string) bool {
+	digest, ok := strings.CutPrefix(id, "rt_")
+	if !ok || len(digest) != 32 {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil
+}
+
+func (s *Server) readingTransferForAction(w http.ResponseWriter, r *http.Request) (string, readingTransferRecord, bool) {
+	if !s.requireReadingRequest(w, r) || !s.requireBookKeeprrRequests(w, r) {
+		return "", readingTransferRecord{}, false
+	}
+	id := strings.TrimSpace(r.PathValue("transferId"))
+	if !validReadingTransferID(id) {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "invalid reading transfer id"})
+		return "", readingTransferRecord{}, false
+	}
+	record, err := s.readingTransfers.get(id)
+	if errors.Is(err, errReadingTransferNotFound) {
+		writeError(w, r, http.StatusNotFound, Error{Code: CodeNotFound, Message: "reading transfer not found"})
+		return "", readingTransferRecord{}, false
+	}
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "could not load reading transfer state"})
+		return "", readingTransferRecord{}, false
+	}
+	return id, record, true
+}
+
+func (s *Server) handleReadingDownloadCancel(w http.ResponseWriter, r *http.Request) {
+	id, record, ok := s.readingTransferForAction(w, r)
+	if !ok {
+		return
+	}
+	if record.Public.Status == "retrying" {
+		writeError(w, r, http.StatusConflict, Error{Code: CodeInvalidRequest, Message: "this transfer is already retrying"})
+		return
+	}
+	if !record.Public.Failed && record.Public.Status != "retry_pending" && record.Public.Status != "queued" && record.Public.Status != "downloading" {
+		writeError(w, r, http.StatusConflict, Error{Code: CodeInvalidRequest, Message: "completed or imported reading transfers cannot be canceled"})
+		return
+	}
+	ctx, cancel := timeoutFor(r, s.cfg.Server.RequestTimeout.OrDefault(20*time.Second))
+	defer cancel()
+	if record.QBTHash != "" {
+		if err := s.bookkeeprr.CancelDownload(ctx, record.QBTHash); err != nil {
+			writeUpstreamError(w, r, "bookkeeprr", err)
+			return
+		}
+	}
+	if err := s.readingTransfers.markCanceled(id); err != nil {
+		writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "could not save reading transfer state"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "action": "cancel"})
+}
+
+func (s *Server) handleReadingDownloadRetry(w http.ResponseWriter, r *http.Request) {
+	id, record, ok := s.readingTransferForAction(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := timeoutFor(r, s.cfg.Server.RequestTimeout.OrDefault(25*time.Second))
+	defer cancel()
+
+	// Before repeating a pending grab, reconcile an earlier response that may
+	// have been lost after BookKeeprr accepted it.
+	if record.RetryPending && record.QBTHash == "" {
+		if downloads, err := s.bookkeeprr.Downloads(ctx); err == nil {
+			_, _ = s.readingTransfers.reconcile(downloads.Downloads)
+			if current, getErr := s.readingTransfers.get(id); getErr == nil && !current.RetryPending {
+				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "action": "retry", "state": "reconciled"})
+				return
+			}
+		}
+	}
+	record, err := s.readingTransfers.beginRetry(id)
+	if errors.Is(err, errReadingTransferBusy) || errors.Is(err, errReadingTransferState) {
+		writeError(w, r, http.StatusConflict, Error{Code: CodeInvalidRequest, Message: err.Error()})
+		return
+	}
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "could not save retry state"})
+		return
+	}
+	if record.ReleaseID <= 0 {
+		_ = s.readingTransfers.abortRetry(id)
+		writeError(w, r, http.StatusConflict, Error{Code: CodeInvalidRequest, Message: "this failed transfer has no release to retry"})
+		return
+	}
+	if record.QBTHash != "" {
+		if err := s.bookkeeprr.CancelDownload(ctx, record.QBTHash); err != nil {
+			_ = s.readingTransfers.abortRetry(id)
+			writeUpstreamError(w, r, "bookkeeprr", err)
+			return
+		}
+		if err := s.readingTransfers.markRetryPending(id, record.UpstreamID); err != nil {
+			writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "could not save retry state"})
+			return
+		}
+	}
+	grabbed, err := s.bookkeeprr.GrabRelease(ctx, record.ReleaseID)
+	if err != nil {
+		_ = s.readingTransfers.markRetryPending(id, record.UpstreamID)
+		writeUpstreamError(w, r, "bookkeeprr", err)
+		return
+	}
+	if err := s.readingTransfers.completeRetry(id, grabbed); err != nil {
+		writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "the release was grabbed but its transfer state could not be saved"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "action": "retry", "state": "queued"})
 }

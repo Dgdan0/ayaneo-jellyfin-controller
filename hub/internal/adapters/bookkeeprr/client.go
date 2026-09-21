@@ -415,6 +415,12 @@ type CreatedSeries struct {
 	ID int `json:"id"`
 }
 
+type GrabbedRelease struct {
+	DownloadID int    `json:"downloadId"`
+	QBTHash    string `json:"qbtHash"`
+	Status     string `json:"status"`
+}
+
 func (c *Client) CanRequest() bool { return c != nil && c.admin != nil }
 
 func (c *Client) QualityProfiles(ctx context.Context) ([]QualityProfile, error) {
@@ -442,6 +448,34 @@ func (c *Client) CreateSeries(ctx context.Context, request CreateSeriesRequest) 
 	}
 	out := &CreatedSeries{}
 	if err := c.admin.PostJSON(ctx, "/api/series", request, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) CancelDownload(ctx context.Context, qbtHash string) error {
+	if c == nil || c.admin == nil {
+		return &httpx.Error{Service: "bookkeeprr", Kind: httpx.KindAuth, Err: fmt.Errorf("admin username and password are not configured")}
+	}
+	qbtHash = strings.TrimSpace(qbtHash)
+	if qbtHash == "" {
+		return fmt.Errorf("bookkeeprr: download hash is required")
+	}
+	var out struct {
+		OK bool `json:"ok"`
+	}
+	return c.admin.DeleteJSON(ctx, "/api/downloads/"+url.PathEscape(qbtHash), &out)
+}
+
+func (c *Client) GrabRelease(ctx context.Context, releaseID int) (*GrabbedRelease, error) {
+	if c == nil || c.admin == nil {
+		return nil, &httpx.Error{Service: "bookkeeprr", Kind: httpx.KindAuth, Err: fmt.Errorf("admin username and password are not configured")}
+	}
+	if releaseID <= 0 {
+		return nil, fmt.Errorf("bookkeeprr: release id must be positive")
+	}
+	out := &GrabbedRelease{}
+	if err := c.admin.PostJSON(ctx, "/api/releases/"+strconv.Itoa(releaseID)+"/grab", map[string]any{}, out); err != nil {
 		return nil, err
 	}
 	return out, nil

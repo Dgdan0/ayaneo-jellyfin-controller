@@ -57,6 +57,7 @@ type Server struct {
 	offline           *offlineStore
 	readingCatalog    *readingdomain.CatalogStore
 	readingCandidates *readingCandidateStore
+	readingTransfers  *readingTransferStore
 
 	playbackMu       sync.Mutex
 	playbackSessions map[string]*playbackSession
@@ -84,6 +85,7 @@ func NewServer(cfg *config.Config) *Server {
 		offline:           newOfflineStore(cfg.Server.OfflineRegistry),
 		readingCatalog:    readingdomain.NewCatalogStore(cfg.Server.ReadingCatalog),
 		readingCandidates: newReadingCandidateStore(2000),
+		readingTransfers:  newReadingTransferStore(cfg.Server.ReadingTransfers),
 		playbackSessions:  make(map[string]*playbackSession),
 		playbackTTL:       30 * time.Minute,
 		previewFrame:      extractPreviewFrame,
@@ -237,6 +239,8 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/requests/options", s.handleReadingRequestOptions)
 	authed.HandleFunc("POST /v1/reading/requests", s.handleReadingCreateRequest)
 	authed.HandleFunc("GET /v1/reading/downloads", s.handleReadingDownloads)
+	authed.HandleFunc("POST /v1/reading/downloads/{transferId}/retry", s.handleReadingDownloadRetry)
+	authed.HandleFunc("DELETE /v1/reading/downloads/{transferId}", s.handleReadingDownloadCancel)
 	authed.HandleFunc("GET /v1/img/reading/kavita/{seriesId}", s.handleKavitaReadingImage)
 	authed.HandleFunc("GET /v1/img/reading/storyteller/{bookId}", s.handleStorytellerReadingImage)
 	authed.HandleFunc("GET /v1/img/reading/{token}", s.handleReadingImage)

@@ -92,12 +92,13 @@ class ReadingTest {
         assertEquals(0, options.defaultProfileIndex)
 
         val transfers = json.decodeFromString<ReadingDownloadsResponse>(
-            """{"items":[{"id":"reading:download:9","seriesId":4,"contentType":"ebook","title":"Red Rising","releaseTitle":"Red Rising EPUB","status":"downloading","progressPercent":25,"downloadSpeedBytesPerSecond":4096,"etaSeconds":90,"sizeBytes":12345,"failed":false}]}"""
+            """{"items":[{"id":"rt_abc","seriesId":4,"contentType":"ebook","title":"Red Rising","releaseTitle":"Red Rising EPUB","status":"failed","progressPercent":25,"downloadSpeedBytesPerSecond":4096,"etaSeconds":90,"sizeBytes":12345,"failed":true,"actions":["retry","cancel"]}]}"""
         )
         val transfer = transfers.items.single()
         assertEquals("Red Rising", transfer.title)
         assertEquals(0.25, transfer.progress, 0.0001)
-        assertTrue(transfer.isActive)
+        assertEquals(listOf("retry", "cancel"), transfer.actions)
+        assertEquals(listOf(ReadingTransferAction.RETRY, ReadingTransferAction.CANCEL), transfer.availableActions)
     }
 
     @Test

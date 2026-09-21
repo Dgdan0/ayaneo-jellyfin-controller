@@ -178,6 +178,9 @@ func TestReadingCatalogPathDefaultsAndResolvesBesideConfig(t *testing.T) {
 	if want := filepath.Join(dir, "reading-catalog.json"); cfg.Server.ReadingCatalog != want {
 		t.Fatalf("default reading catalog = %q, want %q", cfg.Server.ReadingCatalog, want)
 	}
+	if want := filepath.Join(dir, "reading-transfers.json"); cfg.Server.ReadingTransfers != want {
+		t.Fatalf("default reading transfers = %q, want %q", cfg.Server.ReadingTransfers, want)
+	}
 
 	body = strings.Replace(body, "server:\n", "server:\n  reading_catalog: state/catalog.json\n", 1)
 	path = writeFile(t, dir, "hub.yaml", body)

@@ -13,6 +13,7 @@ import com.pocketds.hub.model.ActivityItem
 import com.pocketds.hub.model.ActivityResponse
 import com.pocketds.hub.model.ReadingDownloadItem
 import com.pocketds.hub.model.ReadingDownloadsResponse
+import com.pocketds.hub.model.ReadingTransferAction
 import com.pocketds.hub.model.Stages
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
@@ -185,7 +186,11 @@ class DownloadsScreen(
             return listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
         }
         if (mode == ContentMode.BOOKS) {
-            return listOf(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
+            return listOfNotNull(
+                focusedReadingItem()?.takeIf { it.availableActions.isNotEmpty() }
+                    ?.let { ButtonHint.activate("Actions") },
+                ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh)
+            )
         }
         val item = focusedItem()
         val toggle = when {
@@ -217,7 +222,11 @@ class DownloadsScreen(
             return true
         }
         return when (action) {
-            PadAction.Activate -> mode == ContentMode.MEDIA && focusedItem()?.let { openActions(it) } != null
+            PadAction.Activate -> if (mode == ContentMode.MEDIA) {
+                focusedItem()?.let { openActions(it) } != null
+            } else {
+                focusedReadingItem()?.let { openReadingActions(it) } != null
+            }
             PadAction.Primary -> {
                 if (mode == ContentMode.BOOKS) return false
                 val item = focusedItem()
@@ -436,6 +445,83 @@ class DownloadsScreen(
             else -> null
         }
 
+    private fun openReadingActions(item: ReadingDownloadItem) {
+        val choices = item.availableActions.map { action ->
+            when (action) {
+                ReadingTransferAction.RETRY -> ChoiceOverlay.Choice(
+                    action.wire, "Retry", "Remove the failed attempt and grab the same release again"
+                )
+                ReadingTransferAction.CANCEL -> ChoiceOverlay.Choice(
+                    action.wire, "Cancel transfer", "Stop this transfer and delete its incomplete files", danger = true
+                )
+            }
+        }
+        if (choices.isEmpty()) {
+            host?.notify("This transfer has no available actions")
+            return
+        }
+        overlay.show(
+            title = item.title,
+            subtitle = item.status.replace('_', ' '),
+            choices = choices,
+            startIndex = choices.indexOfFirst { !it.danger }.coerceAtLeast(0),
+            onCancel = { host?.refreshHints() }
+        ) { picked ->
+            host?.refreshHints()
+            val choice = choices.first { it.id == picked }
+            if (choice.danger) confirmReading(item, choice) else runReading(item, picked)
+        }
+        host?.refreshHints()
+    }
+
+    private fun confirmReading(item: ReadingDownloadItem, choice: ChoiceOverlay.Choice) {
+        overlay.show(
+            title = choice.label + "?",
+            subtitle = item.title + "\n" + choice.detail,
+            choices = listOf(
+                ChoiceOverlay.Choice("dismiss", "Keep transfer"),
+                ChoiceOverlay.Choice(choice.id, choice.label, danger = true)
+            ),
+            startIndex = 0,
+            onCancel = { host?.refreshHints() }
+        ) { picked ->
+            host?.refreshHints()
+            if (picked != "dismiss") runReading(item, picked)
+        }
+        host?.refreshHints()
+    }
+
+    private fun runReading(item: ReadingDownloadItem, action: String) {
+        acting = true
+        statusLine.setTextColor(colors.mutedText)
+        statusLine.text = if (action == "retry") "Retrying…" else "Canceling…"
+        scope.launch {
+            val result = when (action) {
+                "retry" -> api.retryReadingDownload(item.id)
+                "cancel" -> api.cancelReadingDownload(item.id)
+                else -> null
+            }
+            acting = false
+            when (result) {
+                null -> host?.notify("Unknown action $action")
+                is HubResult.Ok -> {
+                    host?.notify(if (action == "retry") "Retrying ${item.title}" else "Canceled ${item.title}")
+                    settleUntilMs = android.os.SystemClock.uptimeMillis() + PollSchedule.SETTLE_MS
+                    refreshNow()
+                }
+                is HubResult.Failed -> {
+                    statusLine.setTextColor(colors.dangerText)
+                    statusLine.text = result.message
+                    host?.notify(result.message)
+                    // A failed re-grab leaves a durable retry ticket. Refresh
+                    // immediately so the user sees that actionable state.
+                    settleUntilMs = android.os.SystemClock.uptimeMillis() + PollSchedule.SETTLE_MS
+                    refreshNow()
+                }
+            }
+        }
+    }
+
     private fun summarySuffix(item: ActivityItem): String = buildString {
         if (item.sizeBytes > 0) append(" · ").append(Fmt.bytes(item.sizeBytes))
         item.arr?.problem?.takeIf { it.isNotEmpty() }?.let { append(" · ").append(it) }
@@ -648,8 +734,9 @@ class DownloadsScreen(
         }
 
         override fun onBindViewHolder(holder: RowHolder, position: Int) {
-            (holder.itemView as ReadingDownloadRowView).bind(items[position])
-            holder.itemView.setOnClickListener(null)
+            val item = items[position]
+            (holder.itemView as ReadingDownloadRowView).bind(item)
+            holder.itemView.setOnClickListener { openReadingActions(item) }
         }
 
         override fun onBindViewHolder(holder: RowHolder, position: Int, payloads: MutableList<Any>) =

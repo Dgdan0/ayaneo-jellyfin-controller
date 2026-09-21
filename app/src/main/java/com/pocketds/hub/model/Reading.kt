@@ -135,11 +135,23 @@ data class ReadingDownloadItem(
     val addedAt: String = "",
     val completedAt: String = "",
     val importedAt: String = "",
-    val failed: Boolean = false
+    val failed: Boolean = false,
+    val actions: List<String> = emptyList()
 ) {
     val progress: Double get() = progressPercent.coerceIn(0, 100) / 100.0
     val isActive: Boolean
-        get() = status == "queued" || status == "downloading" || status == "importing"
+        get() = status == "queued" || status == "downloading" || status == "importing" || status == "retrying"
+    val availableActions: List<ReadingTransferAction>
+        get() = actions.mapNotNull(ReadingTransferAction::fromWire)
+}
+
+enum class ReadingTransferAction(val wire: String) {
+    RETRY("retry"),
+    CANCEL("cancel");
+
+    companion object {
+        fun fromWire(value: String): ReadingTransferAction? = entries.firstOrNull { it.wire == value }
+    }
 }
 
 @Serializable
