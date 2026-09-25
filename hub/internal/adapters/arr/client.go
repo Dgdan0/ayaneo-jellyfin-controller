@@ -89,11 +89,12 @@ type StatusMessage struct {
 }
 
 type Movie struct {
-	ID     int    `json:"id"`
-	Title  string `json:"title"`
-	Year   int    `json:"year"`
-	TmdbID int    `json:"tmdbId"`
-	ImdbID string `json:"imdbId"`
+	MovieFileID int    `json:"movieFileId"`
+	ID          int    `json:"id"`
+	Title       string `json:"title"`
+	Year        int    `json:"year"`
+	TmdbID      int    `json:"tmdbId"`
+	ImdbID      string `json:"imdbId"`
 	// Filled by a direct lookup; absent from the copy embedded in a queue row.
 	HasFile          bool   `json:"hasFile"`
 	Monitored        bool   `json:"monitored"`
@@ -113,6 +114,7 @@ type Series struct {
 }
 
 type Episode struct {
+	EpisodeFileID int    `json:"episodeFileId"`
 	ID            int    `json:"id"`
 	SeriesID      int    `json:"seriesId"`
 	SeasonNumber  int    `json:"seasonNumber"`

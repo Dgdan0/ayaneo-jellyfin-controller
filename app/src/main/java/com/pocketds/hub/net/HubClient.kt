@@ -89,6 +89,9 @@ import kotlin.coroutines.coroutineContext
  * what let phases A1 and A3 proceed independently of the Go work.
  */
 interface HubApi {
+    suspend fun subtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleState>
+    suspend fun searchSubtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleSearch>
+    suspend fun downloadSubtitle(itemId: String, ticket: String): HubResult<ActionAck>
     suspend fun calendar(start: String, end: String, timezone: String): HubResult<com.pocketds.hub.model.CalendarResponse>
     suspend fun health(): HubResult<HealthResponse>
     suspend fun scanJellyfinLibrary(): HubResult<ActionAck>
@@ -627,6 +630,13 @@ class HubClient(private val context: Context, private val connection: HubConnect
 
     override suspend fun bandwidth(): HubResult<com.pocketds.hub.model.BandwidthState> =
         get(HubEndpoints.bandwidth(base()), noCache = true) { json.decodeFromString<com.pocketds.hub.model.BandwidthState>(it) }
+
+    override suspend fun subtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleState> =
+        get(HubEndpoints.subtitles(base(),itemId),noCache=true) {json.decodeFromString<com.pocketds.hub.model.SubtitleState>(it)}
+    override suspend fun searchSubtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleSearch> =
+        postOnce(HubEndpoints.subtitles(base(),itemId,"search"),"{}",slow=true) {json.decodeFromString<com.pocketds.hub.model.SubtitleSearch>(it)}
+    override suspend fun downloadSubtitle(itemId: String,ticket: String): HubResult<ActionAck> =
+        postOnce(HubEndpoints.subtitles(base(),itemId,"download"),json.encodeToString(com.pocketds.hub.model.SubtitleDownload.serializer(),com.pocketds.hub.model.SubtitleDownload(ticket)),slow=true) {json.decodeFromString<ActionAck>(it)}
 
     override suspend fun setBandwidth(change: com.pocketds.hub.model.BandwidthChange): HubResult<com.pocketds.hub.model.BandwidthState> =
         postOnce(HubEndpoints.bandwidth(base()), json.encodeToString(com.pocketds.hub.model.BandwidthChange.serializer(), change)) {

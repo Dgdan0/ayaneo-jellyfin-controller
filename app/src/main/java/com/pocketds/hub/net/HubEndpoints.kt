@@ -22,6 +22,7 @@ data class HubRequest(
  * of those should work.
  */
 object HubEndpoints {
+    fun subtitles(base: String,itemId: String,action: String=""): HubRequest = HubRequest(join(base,"/v1/library/items/"+encode(itemId)+"/subtitles"+(if(action.isEmpty()) "" else "/"+encode(action))))
     fun bandwidth(base: String): HubRequest = HubRequest(join(base, "/v1/downloads/bandwidth"))
     fun calendar(base: String, start: String, end: String, timezone: String): HubRequest =
         HubRequest(join(base, "/v1/calendar") + "?start=" + encode(start) +

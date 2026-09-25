@@ -624,7 +624,7 @@ class LibraryDetailScreen(
                         ACTION_OPTIONS -> "Playback options"
                         else -> if (value.played) "Mark unwatched" else "Mark watched"
                     })
-                }
+                } + if (value.type in setOf("movie", "episode")) listOf(ChoiceOverlay.Choice("subtitles", "Subtitles", "Installed tracks, match scores and search")) else emptyList()
                 overlay.show("More actions", value.title, choices,
                     onCancel = { moreAction.requestFocus(); host?.refreshHints() },
                     onPick = { moreAction.requestFocus(); performAction(it); host?.refreshHints() })
@@ -640,6 +640,7 @@ class LibraryDetailScreen(
                 }
             }
             ACTION_RESTART -> host?.playItem(itemId, "restart")
+            "subtitles" -> host?.push(SubtitleScreen(api,itemId,item?.title.orEmpty(),ringVisible))
             ACTION_OPTIONS -> host?.openPlaybackOptions(itemId, if (canResume(item)) "resume" else "restart")
             ACTION_WATCHED -> item?.let { updateState(played = !it.played) }
             ACTION_FAVORITE -> item?.let { updateState(favorite = !it.favorite) }

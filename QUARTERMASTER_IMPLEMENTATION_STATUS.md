@@ -1,46 +1,63 @@
-# Quartermaster feature implementation — 25 September 2026
+# Quartermaster feature checkpoint — 25 September 2026
 
 ## Active source
 
-Work in `C:/Users/Dgdan/.codex/worktrees/quartermaster-features/Ayaneo Jellyfin Controler`, branch `codex/quartermaster-features`.
+Feature worktree: `C:/Users/Dgdan/.codex/worktrees/quartermaster-features/Ayaneo Jellyfin Controler`, branch `codex/quartermaster-features`.
 
-The original project root was older than the installed reading-enabled app. Commit `04b7c1f` snapshots the current source from `.worktrees/reading-library` (including its uncommitted reading/UI work) so the feature builds preserve that functionality. Neither original checkout was modified by implementation. Do not build the old root and install it over the daily APK.
+`04b7c1f` snapshots the newer reading/UI checkout used by the installed app. The original project root and `.worktrees/reading-library` were not changed by this feature work. Do not install a build from the older original root.
 
-## Implemented
+## Installed and verified
 
-- `b0f70a5`: Upcoming under Media > Discover; authenticated Sonarr/Radarr calendar and poster routes, chronological date groups, series/season episode batches, right-side detail, local episode times, civil movie dates, partial-source errors, weekly navigation, title links.
-- `2590792`: complete Monday–Sunday ranges, contiguous in both directions; prefer today's or the next release for initial selection.
-- `bca0d1a`: Hub-owned transfer diagnoses from observed queue/client evidence; Needs attention filter; explanation, evidence and next step in the existing side panel; scoped resume; no automated repair or deletion.
-- `3d8b2dd`: failed download/import stages link to Transfers needing attention.
+- Upcoming: Discover > Upcoming; real posters and titles grouped by every date; episode batches; right-side details; contiguous Monday–Sunday weeks; local episode times and civil movie dates; title links; partial-source errors. Commits `b0f70a5`, `2590792`.
+- Download diagnostics: Transfers > Needs attention; explanation, source evidence and next step; optional scoped resume. Failed title pipelines link to the attention list. Commits `bca0d1a`, `3d8b2dd`.
+- Discover cached-pagination crash fixed and device regression covered. Commits `77956a6`, `727973d`.
 
-Diagnostics distinguish missing files, client errors, import/queue problems, unmatched queues, client outage, paused, stalled data, queued, checking/moving, importing, downloading and completed transfers. Client completion is not presented as Jellyfin availability. A missing client response does not establish that a transfer disappeared. Old Hub responses retain existing warning behavior.
+Production Hub is `0.3.1-diagnostics`; daily Android app v0.3.1/code16 includes the above. Diagnostics deployment passed service health and binary hash verification after explicit authorization to reopen UAC. AYANEO ADB: `100.97.20.86:36813`.
 
-## Validation and deployment
+Live calendar posters, week navigation and title open/back passed. Production transfers are currently empty, so failed-transfer UI is tested with deterministic fixtures in the isolated `.uitest` app. No daily app data was cleared.
 
-**Latest checkpoint:** the user supplied ADB `100.97.20.86:36813` and explicitly authorized reopening the Windows administrator prompt. Diagnostics production deployment completed with health and binary verification. The latest daily APK, including diagnostics, complete calendar weeks and the Discover pagination fix, is installed. Three isolated device tests pass (calendar grouping/navigation, diagnostics filtering/modal navigation, and synchronous cached Discover pagination). Live next-week posters and title open/back were checked. Production Transfers shows the correct empty state. Screenshots: `.local-backups/upcoming-next.png` (real calendar) and `.local-backups/diagnostics-fixture.png` (synthetic failure in `.uitest`). Earlier blockers below are historical and resolved.
+## Built and tested, deployment pending
 
-Hardware testing exposed an existing immediate-coroutine pagination crash in Discover; `77956a6` defers media/reading page fetches to the next main-loop dispatch so cached responses cannot notify adapters during layout. The regression fixture specifically uses immediate responses.
+### Bandwidth and queue priority (`007bc6c`)
 
-- `go test ./...` and `go vet ./...` passed; targeted diagnostics tests passed after adding scoped-action integration coverage.
-- Final `gradlew.bat testDebugUnitTest assembleDebug` passed: **548 tests, zero failures/errors**.
-- Live production calendar returned five releases for 25 Sep–2 Oct. Poster proxy returned HTTP 200, `image/jpeg`, 129,980 bytes.
-- Initial calendar was opened and captured on the AYANEO with real posters and date/detail panels. Screenshot: `.local-backups/hub-upcoming.png` (before final spacing changes).
-- Upcoming APK v0.3.1/code16 was installed with `adb install -r`; reading/media Home still loaded. A second Upcoming build removing the duplicate heading/excess bottom padding was installed successfully. **The later backward-week correction and diagnostics are built but not installed.**
-- Production Hub was updated to `0.3.1-upcoming` with binary hash and service health verification. Its config and credentials were retained.
-- Diagnostics candidate on loopback8793 returned HTTP200 with an empty queue, matching production. This verifies connectivity, not a live failed-download diagnosis; those cases are fixture-tested.
-- The Windows administrator prompt for the diagnostics production update was canceled. **Diagnostics are not deployed to production.** No retry of that elevation was attempted.
-- ADB `100.97.20.86:39705` disconnected and now refuses connections. An asynchronous question asks for the current Wireless debugging IP:port. No current mDNS endpoint was discovered.
-- Temporary candidate Hub processes were stopped; production remains the Upcoming build.
+Transfers > Bandwidth reads normal/alternative limits, current mode, scheduler and queueing state. Explicit mode selection, KiB/s editing with byte-preserving conversion, scope enforcement and readback verification. Supported priority actions appear for queued torrents; disabled queueing is not automatically enabled.
 
-Backups, candidate configs and deployment scripts are gitignored under `.local-backups/`. That directory contains secrets copied for local candidate execution; never commit or share it. Prior daily APK: `installed-before-features.apk`. Prior Hub: `hub-before-upcoming-deploy.exe`. Diagnostics deployment script: `deploy-diagnostics.ps1` with config validation, backup, health/hash checks and rollback. Final pending APK: `app/build/outputs/apk/debug/app-debug.apk`.
+Installed qBittorrent is 5.0.4. Live candidate test changed only inactive alternative limits, verified them, and restored the exact original values (10 KiB/s each). Normal mode, unlimited normal limits, scheduler off and queueing off remain unchanged. Mode switching and priority rejection/adapter behavior are fixture-tested; no live priority change was possible with queueing disabled.
 
-## Required next steps
+### Subtitles
 
-1. Reconnect to the user-provided current ADB endpoint. Do not uninstall or clear daily app data. Install the pending APK with `-r`.
-2. Complete diagnostics Hub deployment when the Windows administrator prompt can be approved. Its script is ready; the prior canceled prompt did not deploy it.
-3. Inspect final Upcoming layout on the real display; test previous/next week, dates at boundaries, title open/back, focus restoration, touch and controller navigation. ADB key events are not a physical-stick test.
-4. Inspect diagnostics UI and Needs attention filter. Use deterministic fixtures when the live queue is empty; do not create broken real downloads for testing. Check modal scrolling/focus, refresh, read-only permissions, and preservation of existing transfer confirmations.
-5. Run a short regression of Media/Books navigation and existing playback/download flows. Device testing so far was silent and did not start playback.
-6. The first two features are now device-verified; work has moved to subtitles with retained match scores and personal feedback, and bandwidth/priority. Remaining approved backlog: server metrics and supported restarts, actionable alerts, Home customization, connection routing. These have **not** been implemented yet.
+Movie/episode > More actions > Subtitles. Installed tracks and history, recorded Bazarr match scores, explicit provider search, language filtering, match/mismatch evidence and reviewed download selection. Personal Good / Out of sync / Wrong translation ratings and up to 100 provenance records per title are saved on this device, partitioned by Hub URL and profile. Cached history never asserts that a subtitle remains installed. Match score is separate from translation quality.
 
-Known first-slice limits: Upcoming covers scheduled monitored releases from Arr calendars; no separate undated-library inventory. Its downloaded state is the Arr file flag, not a fresh Jellyfin availability join. The diagnostics title link opens the Needs attention list, not a preselected exact transfer. Alerts/deep links will be expanded in their own milestone.
+Hub resolves the selected Jellyfin item through TMDB/TVDB to an actual downloaded Arr/Bazarr file. Search results are bounded and retained only in short-lived Hub tickets bound to token, profile, item and file identity. The app never supplies serialized provider objects. Download requires control scope, revalidates file identity, consumes the ticket before writing and does not automatically replay uncertain results.
+
+Live reads: 100 English/Hebrew candidates for 10 Things I Hate About You; The Avengers installed Hebrew subtitle correctly joins its recorded 91.11% match score. No real subtitle was replaced for testing. Movie/episode wire contracts, forged/expired/profile-mismatched/duplicate tickets and changed paths are tested. Real acquisition and Jellyfin/player refresh still need a selected title/language; they are not claimed as live-verified.
+
+## Validation
+
+- `go test ./...` and `go vet ./...` passed after subtitle implementation; additional episode contract test passed afterward.
+- `gradlew.bat testDebugUnitTest assembleDebug assembleUitest assembleUitestAndroidTest` passed; 548 JVM tests.
+- Five isolated device tests passed: calendar, diagnostics, synchronous Discover pagination, bandwidth unit/mode preservation, subtitle rating/history retention and explicit candidate selection.
+- Subtitle screenshot capture was corrected to wait for a rendered frame; the focused test passed again and the screenshot was visually inspected.
+- Screenshots in gitignored `.local-backups/`: `upcoming-next.png` (real calendar), `diagnostics-fixture.png`, `bandwidth-fixture.png`, `subtitles-fixture.png` (synthetic UI fixtures).
+
+## Deployment state and pending approval
+
+Windows canceled the bandwidth UAC prompt. It was not silently retried. A new asynchronous question requests permission to reopen UAC for the combined subtitles/bandwidth update. Script `.local-backups/deploy-subtitles.ps1` validates configuration, backs up the current binary, replaces the service binary, verifies health/hash and rolls back on failure.
+
+Pending daily APK: `app/build/outputs/apk/debug/app-debug.apk`. Install only with `adb install -r`, after the matching Hub deployment. The isolated test app already includes the new features.
+
+Candidate Hub processes: bandwidth PID 153804 on 8793; subtitles PID 145848 on 8794. Stop only after verifying each executable path. Production runs on 8791. Candidate configuration and secrets, backups and deployment scripts are inside `.local-backups/`; never commit or share that directory.
+
+Automatic approval review rejected a combined command that would switch the test app to the candidate Hub through ADB reverse. That route was not retried. Direct local API validation and isolated device fixtures succeeded. A real daily-app navigation check remains after approved deployment.
+
+## Next slices
+
+1. Finish the pending combined deployment and daily-app checks. Verify a user-selected real subtitle acquisition and subsequent player track refresh.
+2. Server monitoring: Windows host/disk usage, configured container status and Jellyfin sessions. Then narrowly configured restarts with review, audit and health verification. Actual management mechanisms must be inspected; unmanaged processes must not advertise restart.
+3. Actionable alerts with persistent deduplication and exact destinations, followed by background delivery and quiet hours.
+4. Home shortcuts and configurable shelves.
+5. Verified local/remote routing for the same Hub identity, preserving sessions and authentication/cache isolation.
+
+These remaining slices are approved backlog, not completed features. No family mode, new reading scope or multi-Arr instances have been added.
+
+Known first-slice limits: Upcoming includes dated monitored calendar releases, with no undated inventory; Arr file availability is labeled Downloaded, not asserted Jellyfin availability. A failed title pipeline opens the attention list rather than an exact selected transfer. Subtitle feedback is local to the device; live replacement and player refresh are still unverified.

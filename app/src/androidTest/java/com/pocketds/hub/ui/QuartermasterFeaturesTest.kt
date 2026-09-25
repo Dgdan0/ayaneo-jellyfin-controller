@@ -27,6 +27,41 @@ import org.junit.runner.RunWith
 /** Runs only in .uitest: synthetic failures never touch the user's real queue. */
 @RunWith(AndroidJUnit4::class)
 class QuartermasterFeaturesTest {
+    @Test fun subtitlesKeepScoresSeparateFromPersonalRatingsAndRequireSelection() {
+        val ins=InstrumentationRegistry.getInstrumentation()
+        val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val item="subtitle-fixture-${System.nanoTime()}"
+        val record=SubtitleRecord(id="history-1",language="Hebrew",provider="Example provider",score="91.11%",date="17 Sep 2026",installed=true)
+        val candidate=SubtitleCandidate(ticket="opaque-hub-ticket",language="he",provider="Example provider",score=95.0,release="Example Movie 1080p BluRay",matches=listOf("title","year","release group"),mismatches=listOf("hash"))
+        var downloaded="";var records=listOf(record)
+        val api=Proxy.newProxyInstance(HubApi::class.java.classLoader,arrayOf(HubApi::class.java)){_,method,args->when(method.name){
+            "subtitles"->HubResult.Ok(SubtitleState(records=records,canDownload=true))
+            "searchSubtitles"->HubResult.Ok(SubtitleSearch(listOf(candidate)))
+            "downloadSubtitle"->{downloaded=args!![1] as String;HubResult.Ok(ActionAck(ok=true))}
+            else->error("Unexpected ${method.name}")
+        }} as HubApi
+        val host=Proxy.newProxyInstance(ScreenHost::class.java.classLoader,arrayOf(ScreenHost::class.java)){_,method,_->if(method.name=="getViewContext")activity else null} as ScreenHost
+        val screen=com.pocketds.hub.screens.library.SubtitleScreen(api,item,"Example movie — subtitle fixture"){true}
+        lateinit var root:View
+        fun click(text:String) {var v:View=all(root).filterIsInstance<TextView>().first{it.text.toString().startsWith(text)};while(!v.isClickable)v=v.parent as View;v.performClick()}
+        try {
+            ins.runOnMainSync{root=screen.onCreateView(host,FrameLayout(activity));activity.setContentView(root);screen.onShow()};ins.waitForIdleSync()
+            ins.runOnMainSync{
+                click("Hebrew · Example provider");click("Out of sync")
+                assertTrue(all(root).filterIsInstance<TextView>().any{it.text.contains("91.11% match · You: Out of sync")})
+                // A server history retention change must preserve the score, without claiming installation.
+                records=emptyList();screen.onPad(PadAction.Refresh)
+                assertTrue(all(root).filterIsInstance<TextView>().any{it.text.contains("91.11% match · You: Out of sync")})
+                click("Search subtitle providers");click("Hebrew · 95% match")
+                assertEquals("",downloaded)
+                assertTrue(all(root).filterIsInstance<TextView>().any{it.text.contains("Doesn't match: hash")})
+            };ins.waitForIdleSync()
+            // Wait for a rendered frame as well as an idle UI queue before visual capture.
+            android.os.SystemClock.sleep(500)
+            val shot=ins.uiAutomation.takeScreenshot();File(activity.externalCacheDir,"subtitles-fixture.png").outputStream().use{shot.compress(Bitmap.CompressFormat.PNG,100,it)};shot.recycle()
+            ins.runOnMainSync{click("Download this subtitle");assertEquals("opaque-hub-ticket",downloaded)}
+        } finally {ins.runOnMainSync{screen.onHide();screen.onDestroyView();activity.finish()}}
+    }
     private fun all(view: View): List<View> = listOf(view) + (view as? ViewGroup)?.let { group ->
         (0 until group.childCount).flatMap { all(group.getChildAt(it)) }
     }.orEmpty()
