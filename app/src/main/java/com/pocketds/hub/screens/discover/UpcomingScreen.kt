@@ -142,7 +142,7 @@ class UpcomingScreen(private val api:HubApi,private val ringVisible:()->Boolean)
     rows.add(row to group)
    }
   }
-  val selected=grouped.firstOrNull{it.id==selectedId}?:grouped.firstOrNull()
+  val selected=grouped.firstOrNull{it.id==selectedId}?:grouped.firstOrNull{week==0&&it.first.date>=LocalDate.now().toString()}?:grouped.firstOrNull()
   if(selected!=null){select(selected);agenda.post{requestInitialFocus()}}
   else{details.addView(label("No scheduled releases this week",17f));details.addView(label("Use Previous or Next to explore another week.",13f,true))}
  }

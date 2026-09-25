@@ -16,7 +16,7 @@ object UpcomingPresentation {
  }
  fun range(today:LocalDate,week:Int):Range {
   val monday=today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).plusWeeks(week.toLong())
-  return Range(if(week==0)today else monday,monday.plusWeeks(1))
+  return Range(monday,monday.plusWeeks(1))
  }
  fun days(range:Range):List<LocalDate> =
   generateSequence(range.start){it.plusDays(1)}.takeWhile{it<range.endExclusive}.toList()

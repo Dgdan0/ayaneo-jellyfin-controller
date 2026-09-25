@@ -12,6 +12,8 @@ class UpcomingPresentationTest {
   val next=UpcomingPresentation.range(LocalDate.of(2026,9,25),1)
   assertEquals(LocalDate.of(2026,9,28),first.endExclusive)
   assertEquals(first.endExclusive,next.start)
+  assertEquals(UpcomingPresentation.range(LocalDate.of(2026,9,25),-1).endExclusive,first.start)
+  assertEquals(7,UpcomingPresentation.days(first).size)
   assertEquals(7,UpcomingPresentation.days(next).size)
   val year=UpcomingPresentation.range(LocalDate.of(2026,12,31),1)
   assertEquals(LocalDate.of(2027,1,4),year.start)
