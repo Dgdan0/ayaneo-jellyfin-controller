@@ -742,7 +742,9 @@ class DiscoverScreen(
         val next = row.page + 1
         if (next <= (requestedPages[row.id] ?: 0)) return
         requestedPages[row.id] = next
-        rowLoads[row.id] = scope.launch {
+        // Scroll callbacks can run during RecyclerView layout. A cached response
+        // must still wait until that layout finishes before notifying adapters.
+        rowLoads[row.id] = scope.launch(Dispatchers.Main) {
             DebugLog.log("net", "discover ${row.id} page $next")
             when (val result = api.discoverRow(row.id, next)) {
                 is HubResult.Ok -> {
@@ -802,7 +804,7 @@ class DiscoverScreen(
         val next = row.page + 1
         if (next <= (readingRequestedPages[loadKey] ?: 0)) return
         readingRequestedPages[loadKey] = next
-        readingRowLoads[loadKey] = scope.launch {
+        readingRowLoads[loadKey] = scope.launch(Dispatchers.Main) {
             when (val result = api.readingDiscoverRow(row.id, row.contentType, next)) {
                 is HubResult.Ok -> {
                     val fetched = result.value.rows.firstOrNull() ?: return@launch
