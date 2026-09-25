@@ -80,6 +80,7 @@ class DiscoverScreen(
     private lateinit var colors: PocketColors
     private lateinit var searchBox: EditText
     private lateinit var readingFilters: HorizontalScrollView
+    private lateinit var upcomingButton: TextView
     private val readingFilterButtons = mutableMapOf<String, ReadingCategoryTabView>()
     private lateinit var statusLine: TextView
     private lateinit var broaderSearchButton: TextView
@@ -167,6 +168,22 @@ class DiscoverScreen(
             addView(buildReadingFilters())
         }
         root.addView(readingFilters, LinearLayout.LayoutParams(MATCH, WRAP))
+
+        upcomingButton = TextView(context).apply {
+            text = "Upcoming · release calendar"
+            textSize = 13f
+            setTextColor(colors.primaryText)
+            minHeight = Styler.dpInt(context, 40f)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(Styler.dpInt(context, 14f), 0, Styler.dpInt(context, 14f), 0)
+            background = Styler.chipBackground(context, colors)
+            Styler.makeFocusable(this)
+            FocusDecorator.attach(this, ringVisible, false)
+            setOnClickListener { host.push(UpcomingScreen(api, ringVisible)) }
+        }
+        root.addView(upcomingButton, LinearLayout.LayoutParams(MATCH, WRAP).apply {
+            setMargins(Styler.dpInt(context, 10f), Styler.dpInt(context, 4f), Styler.dpInt(context, 10f), 0)
+        })
 
         searchBox = EditText(context).apply {
             hint = if (mode == ContentMode.BOOKS) "Search books, comics and audio" else "Search films and series"
@@ -438,6 +455,7 @@ class DiscoverScreen(
     override fun selectContentMode(mode: ContentMode) = switchMode(mode)
 
     private fun applyModeVisibility() {
+        upcomingButton.visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
         rowsList.visibility = if (mode == ContentMode.MEDIA && !searching) View.VISIBLE else View.GONE
         resultsGrid.visibility = if (mode == ContentMode.MEDIA && searching) View.VISIBLE else View.GONE
         readingRowsList.visibility = if (mode == ContentMode.BOOKS && !searching) View.VISIBLE else View.GONE

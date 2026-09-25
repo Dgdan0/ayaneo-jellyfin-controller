@@ -256,6 +256,8 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("POST /v1/offline/progress/sync", s.handleOfflineProgressSync)
 	authed.HandleFunc("GET /v1/img/jf/{itemId}/{imageType}", s.handleJellyfinImage)
 	authed.HandleFunc("GET /v1/discover", s.handleDiscover)
+	authed.HandleFunc("GET /v1/calendar", s.handleCalendar)
+	authed.HandleFunc("GET /v1/img/arr/{service}/{id}", s.handleArrPoster)
 	authed.HandleFunc("GET /v1/discover/{row}", s.handleDiscoverRow)
 	authed.HandleFunc("GET /v1/reading/discover", s.handleReadingDiscover)
 	authed.HandleFunc("GET /v1/reading/discover/{row}", s.handleReadingDiscoverRow)

@@ -89,6 +89,7 @@ import kotlin.coroutines.coroutineContext
  * what let phases A1 and A3 proceed independently of the Go work.
  */
 interface HubApi {
+    suspend fun calendar(start: String, end: String, timezone: String): HubResult<com.pocketds.hub.model.CalendarResponse>
     suspend fun health(): HubResult<HealthResponse>
     suspend fun scanJellyfinLibrary(): HubResult<ActionAck>
     suspend fun scanReadingLibrary(service: String): HubResult<ActionAck>
@@ -596,6 +597,11 @@ class HubClient(private val context: Context, private val connection: HubConnect
     override suspend fun search(query: String, page: Int): HubResult<SearchResponse> =
         get(HubEndpoints.search(base(), query, page)) {
             json.decodeFromString<SearchResponse>(it)
+        }
+
+    override suspend fun calendar(start: String, end: String, timezone: String): HubResult<com.pocketds.hub.model.CalendarResponse> =
+        get(HubEndpoints.calendar(base(), start, end, timezone), noCache = true) {
+            json.decodeFromString<com.pocketds.hub.model.CalendarResponse>(it)
         }
 
     override suspend fun mediaDetail(key: String): HubResult<MediaDetail> =
