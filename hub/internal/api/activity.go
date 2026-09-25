@@ -60,9 +60,11 @@ type ActivityItem struct {
 	// ClientStage stays independent from the combined displayed stage. Sonarr
 	// can make a completed transfer "stuck" at import time, but qBittorrent may
 	// still be stopped and therefore needs a Start action.
-	ClientStage string `json:"clientStage,omitempty"`
-	Category    string `json:"category,omitempty"`
-	Indexer     string `json:"indexer,omitempty"`
+	ClientStage string             `json:"clientStage,omitempty"`
+	ClientState string             `json:"clientState,omitempty"`
+	Diagnosis   *ActivityDiagnosis `json:"diagnosis,omitempty"`
+	Category    string             `json:"category,omitempty"`
+	Indexer     string             `json:"indexer,omitempty"`
 
 	Arr         *ArrRef `json:"arr,omitempty"`
 	TorrentHash string  `json:"torrentHash,omitempty"`
@@ -239,7 +241,9 @@ func buildActivity(sources *activitySources, showAll bool, scopes []string) Acti
 		out.Items = append(out.Items, itemFromTorrent(t, canControl))
 	}
 
-	for _, item := range out.Items {
+	for i := range out.Items {
+		item := &out.Items[i]
+		item.Diagnosis = diagnoseActivity(*item, out.Partial)
 		switch item.Stage {
 		case ActDownloading:
 			out.Summary.Downloading++
@@ -338,6 +342,7 @@ func itemFromQueue(
 		item.Peers = torrent.Leechers
 		item.Category = torrent.Category
 		item.ClientStage = stageForTorrent(torrent)
+		item.ClientState = torrent.State
 		item.Stage = item.ClientStage
 		if torrent.IsFinished() && stageForArr(record) == ActImporting {
 			item.Stage = ActImporting
@@ -443,6 +448,7 @@ func itemFromTorrent(t *qbittorrent.Torrent, canControl bool) ActivityItem {
 		Protocol:        "torrent",
 		Client:          "qBittorrent",
 		ClientStage:     stageForTorrent(t),
+		ClientState:     t.State,
 		TorrentHash:     strings.ToLower(t.Hash),
 		MatchConfidence: "none",
 	}

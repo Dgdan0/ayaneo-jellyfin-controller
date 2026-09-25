@@ -42,6 +42,8 @@ data class ActivityItem(
     val protocol: String = "",
     val client: String = "",
     val clientStage: String = "",
+    val clientState: String = "",
+    val diagnosis: ActivityDiagnosis? = null,
     val category: String = "",
     val indexer: String = "",
     val arr: ArrRef? = null,
@@ -61,7 +63,7 @@ data class ActivityItem(
 
     fun can(action: String): Boolean = actions.contains(action)
 
-    val isBroken: Boolean get() = stage == Stages.STUCK || warnings.isNotEmpty()
+    val isBroken: Boolean get() = diagnosis?.needsAttention ?: (stage == Stages.STUCK || warnings.isNotEmpty())
 
     /**
      * Whether this item is moving.
@@ -72,6 +74,17 @@ data class ActivityItem(
     val isActive: Boolean
         get() = stage == Stages.DOWNLOADING || stage == Stages.IMPORTING
 }
+
+@Serializable
+data class ActivityDiagnosis(
+    val code: String = "",
+    val title: String = "",
+    val explanation: String = "",
+    val evidence: List<String> = emptyList(),
+    val nextStep: String = "",
+    val needsAttention: Boolean = false,
+    val action: String = ""
+)
 
 /**
  * The hub's stage vocabulary.

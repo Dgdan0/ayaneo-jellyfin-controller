@@ -73,6 +73,9 @@ class DownloadsScreen(
     private val adapter = ItemAdapter()
     private val readingAdapter = ReadingItemAdapter()
     private lateinit var deviceTransfers: TextView
+    private lateinit var attentionFilter: TextView
+    private var attentionOnly = false
+    private var latestActivity: ActivityResponse? = null
     private var mode = ContentMode.MEDIA
 
     private var host: ScreenHost? = null
@@ -112,6 +115,23 @@ class DownloadsScreen(
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(Styler.dpInt(context, 12f), Styler.dpInt(context, 7f),
                 Styler.dpInt(context, 12f), 0)
+            attentionFilter = TextView(context).apply {
+                text = "Needs attention"
+                textSize = 12f
+                gravity = android.view.Gravity.CENTER
+                setTextColor(colors.primaryText)
+                minimumHeight = Styler.dpInt(context, 48f)
+                setPadding(Styler.dpInt(context, 12f), 0, Styler.dpInt(context, 12f), 0)
+                background = Styler.chipBackground(context, colors)
+                Styler.makeFocusable(this)
+                FocusDecorator.attach(this, ringVisible, scale = false)
+                visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
+                activateOnTap {
+                    attentionOnly = !attentionOnly
+                    latestActivity?.let(::render)
+                }
+            }
+            addView(attentionFilter)
             addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
             deviceTransfers = TextView(context).apply {
                 text = "To this device"
@@ -203,6 +223,9 @@ class DownloadsScreen(
         if (::deviceTransfers.isInitialized && deviceTransfers.hasFocus()) {
             return listOf(ButtonHint.activate("Device downloads"), ButtonHint.back())
         }
+        if (::attentionFilter.isInitialized && attentionFilter.hasFocus()) {
+            return listOf(ButtonHint.activate(if (attentionOnly) "All transfers" else "Needs attention"), ButtonHint.back())
+        }
         if (mode == ContentMode.BOOKS) {
             return listOfNotNull(
                 focusedReadingItem()?.takeIf { it.availableActions.isNotEmpty() }
@@ -237,6 +260,10 @@ class DownloadsScreen(
         // would walk the selection out from behind a confirmation.
         if (overlay.onPad(action)) {
             host?.refreshHints()
+            return true
+        }
+        if (action == PadAction.Activate && attentionFilter.hasFocus()) {
+            attentionFilter.performClick()
             return true
         }
         return when (action) {
@@ -301,6 +328,7 @@ class DownloadsScreen(
         mode = next
         val context = host?.viewContext ?: return
         ContentModeSettings.set(context, mode)
+        attentionFilter.visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
         list.adapter = activeAdapter()
         summaryLine.text = ""
         statusLine.setTextColor(colors.mutedText)
@@ -350,8 +378,13 @@ class DownloadsScreen(
     }
 
     private fun render(body: ActivityResponse) {
+        latestActivity = body
         anyActive = body.anyActive
-        adapter.submit(body.items)
+        val displayed = if (attentionOnly) body.items.filter { it.isBroken } else body.items
+        adapter.submit(displayed)
+        val attentionCount = body.items.count { it.isBroken }
+        attentionFilter.text = if (attentionOnly) "All transfers · $attentionCount need attention" else "Needs attention · $attentionCount"
+        attentionFilter.isSelected = attentionOnly
 
         val s = body.summary
         summaryLine.setTextColor(colors.primaryText)
@@ -375,6 +408,8 @@ class DownloadsScreen(
             // naming the missing one beats a silently shorter list.
             body.partial.isNotEmpty() ->
                 body.partial.joinToString(" · ") { it.service + " " + it.reason }
+            attentionOnly && displayed.isEmpty() -> "No transfers need attention."
+            attentionOnly -> "${displayed.size} transfers need attention"
             body.items.isEmpty() && includeFinished -> "Nothing in the queues."
             body.items.isEmpty() -> "Nothing running. Ⓨ shows finished items."
             else -> "${body.items.size} items" + if (includeFinished) " · including finished" else ""
@@ -416,7 +451,8 @@ class DownloadsScreen(
     }
 
     private fun openActions(item: ActivityItem) {
-        val choices = item.actions.mapNotNull { action -> choiceFor(item, action) } + ChoiceOverlay.Choice("details", "Transfer details")
+        val choices = listOf(ChoiceOverlay.Choice("diagnosis", if (item.isBroken) "Why is this stuck?" else "Check transfer status", item.diagnosis?.title.orEmpty())) +
+            item.actions.mapNotNull { action -> choiceFor(item, action) } + ChoiceOverlay.Choice("details", "Transfer details")
         if (choices.isEmpty()) {
             host?.notify("This token cannot control downloads")
             return
@@ -432,7 +468,9 @@ class DownloadsScreen(
             onCancel = { host?.refreshHints() }
         ) { picked ->
             host?.refreshHints()
-            if (picked == "details") {
+            if (picked == "diagnosis") {
+                openDiagnosis(item)
+            } else if (picked == "details") {
                 overlay.resetBody()
                 overlay.open("Transfer details")
                 overlay.body.addView(TextView(requireNotNull(host).viewContext).apply {
@@ -447,6 +485,41 @@ class DownloadsScreen(
         }
         // A and B now mean something else. Without this the bar still reads
         // "Actions / Show all" while a confirmation is on screen.
+        host?.refreshHints()
+    }
+
+    private fun openDiagnosis(item: ActivityItem) {
+        val context = host?.viewContext ?: return
+        val diagnosis = item.diagnosis
+        overlay.resetBody()
+        overlay.open(if (item.isBroken) "Why is this stuck?" else "Transfer status", item.headline) { host?.refreshHints() }
+        fun paragraph(value: String, heading: Boolean = false) {
+            if (value.isBlank()) return
+            overlay.body.addView(TextView(context).apply {
+                text = value
+                textSize = if (heading) 15f else 13f
+                setTextColor(if (heading) colors.primaryText else colors.mutedText)
+                setPadding(0, Styler.dpInt(context, 5f), 0, Styler.dpInt(context, 5f))
+                if (heading) setTypeface(null, android.graphics.Typeface.BOLD)
+                Styler.makeFocusable(this)
+                FocusDecorator.attach(this, ringVisible, scale = false)
+            })
+        }
+        paragraph(diagnosis?.title ?: "Detailed diagnosis unavailable", true)
+        paragraph(diagnosis?.explanation ?: "This Hub does not provide a diagnosis yet. The latest transfer stage is ${Stages.label(item.stage)}.")
+        paragraph("Suggested next step", true)
+        paragraph(diagnosis?.nextStep ?: "Review the source queue and service health in Manage.")
+        if (!diagnosis?.evidence.isNullOrEmpty()) {
+            paragraph("Service evidence", true)
+            diagnosis?.evidence?.forEach { paragraph(it) }
+        }
+        paragraph("Snapshot from the last refresh. Refresh to check for changes.")
+        overlay.choice("Refresh status") { closeOverlay(); refreshNow() }
+        // Only offer the non-destructive action explicitly authorized by the Hub.
+        if (diagnosis?.action == "start" && item.can("start")) {
+            overlay.choice("Resume transfer") { closeOverlay(); run(item, "start") }
+        }
+        overlay.focusBody()
         host?.refreshHints()
     }
 
@@ -671,6 +744,7 @@ class DownloadsScreen(
         private fun settleFocus(id: String?) {
             val position = if (id == null) -1 else items.indexOfFirst { it.id == id }
             list.post {
+                if (overlay.isOpen || attentionFilter.hasFocus() || deviceTransfers.hasFocus()) return@post
                 val target = if (position >= 0) {
                     list.findViewHolderForAdapterPosition(position)?.itemView
                 } else {
