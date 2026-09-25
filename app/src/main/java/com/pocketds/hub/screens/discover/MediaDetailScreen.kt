@@ -564,6 +564,11 @@ class MediaDetailScreen(
      */
     private fun buildActions(d: MediaDetail) {
         actionRow.removeAllViews()
+        if (d.pipeline.stages.any { it.id in listOf("download", "import") && it.state in listOf("failed", "stuck") }) {
+            actionRow.addView(actionButton("Transfers needing attention") {
+                host?.push(com.pocketds.hub.screens.downloads.DownloadsScreen(api, ringVisible, startWithAttention = true))
+            })
+        }
         if (d.canRequest) {
             actionRow.addView(
                 actionButton(if (flow.busy) "Requesting…" else "Request") {

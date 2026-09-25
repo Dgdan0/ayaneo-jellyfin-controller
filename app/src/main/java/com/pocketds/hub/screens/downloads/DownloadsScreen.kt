@@ -58,7 +58,8 @@ import kotlinx.coroutines.launch
  */
 class DownloadsScreen(
     private val api: HubApi,
-    private val ringVisible: () -> Boolean
+    private val ringVisible: () -> Boolean,
+    startWithAttention: Boolean = false
 ) : Screen, ContentModeScreen {
 
     override val title: String = "Transfers"
@@ -74,7 +75,7 @@ class DownloadsScreen(
     private val readingAdapter = ReadingItemAdapter()
     private lateinit var deviceTransfers: TextView
     private lateinit var attentionFilter: TextView
-    private var attentionOnly = false
+    private var attentionOnly = startWithAttention
     private var latestActivity: ActivityResponse? = null
     private var mode = ContentMode.MEDIA
 
