@@ -42,6 +42,13 @@ The full plan lives at `~/.claude/plans/hey-claude-i-know-shiny-boole.md`.
 The 2026-09-08 Findroid 1.1.0 hardware audit, screenshot index, side-by-side feature matrix,
 and recommended next milestones are in `FINDROID_COMPARISON.md`.
 
+The shared detail/focus redesign and remaining visual milestones are in `VISUAL_POLISH.md`.
+The durable reader checkpoint candidate and acceptance status are in `READING_CHECKPOINTS.md`.
+`IMPLEMENTATION_HANDOFF.md` breaks the remaining product features into tests-first tasks.
+Native UI tests run only against the isolated `.uitest` application with `scripts/dev.sh test-ui`.
+Gradle uninstalls instrumentation targets after testing: never target the user's normal app,
+uninstall it, or clear its data as part of device verification. Use `adb install -r` for updates.
+
 Offline opens on the durable downloaded catalog, grouped as one alphabetized poster per movie or
 series across all libraries. A local series screen derives its season and episode rows only from
 completed files. The manager is a secondary tab, and repository broadcasts replaced its former

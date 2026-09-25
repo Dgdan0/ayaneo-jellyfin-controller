@@ -251,7 +251,7 @@ class ReadingSeriesSelectionOverlay(
         isClickable = true
         contentDescription = buildString {
             append("Book ${book.position}, ${book.title}")
-            append(if (book.inLibrary) ", in library" else if (state.isSelected(index)) ", selected" else ", not selected")
+            append(if (book.inLibrary) ", tracked in BookKeeprr" else if (state.isSelected(index)) ", selected" else ", not selected")
         }
         setOnClickListener {
             state.focusBook(index)
@@ -266,7 +266,7 @@ class ReadingSeriesSelectionOverlay(
         load(book.cover, poster)
         addView(TextView(context).apply {
             text = when {
-                book.inLibrary -> "✓ In library"
+                book.inLibrary -> "✓ Tracked"
                 state.isSelected(index) -> "☑ Book ${book.position}"
                 else -> "☐ Book ${book.position}"
             }
@@ -299,7 +299,7 @@ class ReadingSeriesSelectionOverlay(
         setOnClickListener { click() }
     }
 
-    private fun face(focused: Boolean) = GradientDrawable().apply {
+    private fun face(focused: Boolean) = ThemeGradientDrawable().apply {
         cornerRadius = Styler.dp(context, 10f)
         setColor(
             if (focused && ringVisible()) this@ReadingSeriesSelectionOverlay.colors.focusFill

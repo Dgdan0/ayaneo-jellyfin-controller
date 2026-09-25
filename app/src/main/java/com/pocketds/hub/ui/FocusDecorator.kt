@@ -7,7 +7,7 @@ import androidx.dynamicanimation.animation.SpringForce
 /**
  * How a focused thing looks, at arm's length on a 7" screen.
  *
- * A 2dp outline is not enough. Four things together are, and none of them cost
+ * A 2dp outline is not enough. Three things together are, and none of them cost
  * much:
  *
  *  * the accent ring, which lives in the background drawable's `state_focused`
@@ -20,7 +20,7 @@ import androidx.dynamicanimation.animation.SpringForce
  */
 object FocusDecorator {
 
-    private const val FOCUSED_SCALE = 1.08f
+    private const val FOCUSED_SCALE = DetailLayout.POSTER_FOCUS_SCALE
     private const val TAG_SCALE_X = -0x7ffffff1
     private const val TAG_SCALE_Y = -0x7ffffff2
     private const val TAG_SCALE_ENABLED = -0x7ffffff3
@@ -34,7 +34,7 @@ object FocusDecorator {
         // Most screens also need focus changes to update their selected item or
         // hint bar, so they replace this listener and call [refresh] themselves.
         // Keep the scale choice on the view so refresh cannot accidentally turn
-        // a deliberately non-scaling full-width row back into an 8% larger one.
+        // a deliberately non-scaling full-width row back into a growing one.
         view.setTag(TAG_SCALE_ENABLED, scale)
         // Keep artwork fully opaque. Fading the whole card blends posters into
         // the page background and makes them look grey in the light theme.
@@ -54,10 +54,17 @@ object FocusDecorator {
 
     private fun apply(view: View, decorate: Boolean, scale: Boolean) {
         val target = if (decorate && scale) FOCUSED_SCALE else 1f
-        spring(view, TAG_SCALE_X, SpringAnimation.SCALE_X).animateToFinalPosition(target)
-        spring(view, TAG_SCALE_Y, SpringAnimation.SCALE_Y).animateToFinalPosition(target)
-        // Above its neighbours, or the ring is clipped by the next card.
-        view.translationZ = if (decorate) Styler.dp(view.context, 8f) else 0f
+        if (android.animation.ValueAnimator.areAnimatorsEnabled()) {
+            spring(view, TAG_SCALE_X, SpringAnimation.SCALE_X).animateToFinalPosition(target)
+            spring(view, TAG_SCALE_Y, SpringAnimation.SCALE_Y).animateToFinalPosition(target)
+        } else {
+            (view.getTag(TAG_SCALE_X) as? SpringAnimation)?.cancel()
+            (view.getTag(TAG_SCALE_Y) as? SpringAnimation)?.cancel()
+            view.scaleX=target;view.scaleY=target
+        }
+        // Lift growing posters above neighbours. Stationary controls need no
+        // elevation: their shadow is clipped into a rectangle by the action strip.
+        view.translationZ = if (decorate && scale) Styler.dp(view.context, 8f) else 0f
     }
 
     /**
@@ -73,7 +80,8 @@ object FocusDecorator {
         (view.getTag(tag) as? SpringAnimation)?.let { return it }
         val animation = SpringAnimation(view, property).apply {
             spring = SpringForce().apply {
-                dampingRatio = 0.75f
+                // Focus must fit the clearance reserved by the shelf, including mid-animation.
+                dampingRatio = 1f
                 stiffness = SpringForce.STIFFNESS_MEDIUM
             }
         }

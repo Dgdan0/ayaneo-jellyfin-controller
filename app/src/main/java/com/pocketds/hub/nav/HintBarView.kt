@@ -4,6 +4,7 @@ import android.content.Context
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.pocketds.hub.input.PadAction
@@ -28,17 +29,25 @@ import com.pocketds.hub.ui.Styler
  * the "Ⓐ Open" chip, so that pressing A activates a picture of the A button,
  * is a small maze; the physical button is already the gamepad path.
  */
-class HintBarView(context: Context, private val colors: PocketColors) : LinearLayout(context) {
+class HintBarView(context: Context, private val colors: PocketColors) : HorizontalScrollView(context) {
 
     var onAction: ((PadAction) -> Unit)? = null
 
-    init {
-        orientation = HORIZONTAL
+    private val row = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
+        val inset = Styler.dpInt(context, 8f)
+        setPadding(inset, 0, inset, 0)
+    }
+
+    init {
         setBackgroundColor(colors.stripBackground)
-        val pad = Styler.dpInt(context, 8f)
-        setPadding(pad, pad / 2, pad, pad / 2)
-        minimumHeight = Styler.dpInt(context, 48f)
+        isFocusable = false
+        isHorizontalScrollBarEnabled = false
+        val height = Styler.dpInt(context, 48f)
+        minimumHeight = height
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
+        addView(row, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, height))
     }
 
     fun setHints(hints: List<ButtonHint>) {
@@ -46,10 +55,10 @@ class HintBarView(context: Context, private val colors: PocketColors) : LinearLa
         // every child from a focus callback can leave the bar empty for the
         // rest of that layout pass. Updating the small stable row also avoids
         // allocating views on every D-pad move.
-        while (childCount > hints.size) removeViewAt(childCount - 1)
+        while (row.childCount > hints.size) row.removeViewAt(row.childCount - 1)
         hints.forEachIndexed { index, hint ->
-            val view = if (index < childCount) getChildAt(index) as TextView
-            else chip().also(::addView)
+            val view = if (index < row.childCount) row.getChildAt(index) as TextView
+            else chip().also(row::addView)
             bind(view, hint)
         }
         requestLayout()
@@ -62,14 +71,17 @@ class HintBarView(context: Context, private val colors: PocketColors) : LinearLa
         // consistent, and these read fine at this size.
         textSize = 13f
         isAllCaps = false
+        setSingleLine(true)
+        minimumHeight = Styler.dpInt(context, 48f)
         background = Styler.chipBackground(context, colors)
         val padH = Styler.dpInt(context, 12f)
         val padV = Styler.dpInt(context, 7f)
         setPadding(padH, padV, padH, padV)
         isFocusable = false
-        layoutParams = LayoutParams(
+        gravity = Gravity.CENTER_VERTICAL
+        layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
+            ViewGroup.LayoutParams.MATCH_PARENT
         ).apply { rightMargin = Styler.dpInt(context, 8f) }
     }
 

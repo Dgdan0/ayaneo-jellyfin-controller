@@ -14,8 +14,8 @@ object LibraryGridSizing {
     ): Int {
         if (widthPx <= 0 || density <= 0f) return maxColumns.coerceAtLeast(1)
         val maximum = maxColumns.coerceAtLeast(1)
-        val minimum = minOf(2, maximum)
         val availablePx = (widthPx - horizontalPaddingPx).coerceAtLeast(1)
+        val minimum = minOf(if (availablePx / density < 180) 1 else 2, maximum)
         val measured = floor(availablePx / (TARGET_CELL_DP * density)).toInt()
         return measured.coerceIn(minimum, maximum)
     }

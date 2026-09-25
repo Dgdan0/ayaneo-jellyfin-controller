@@ -4,20 +4,14 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.graphics.Bitmap
-import android.graphics.drawable.ColorDrawable
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
@@ -27,15 +21,24 @@ import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.offline.OfflineCatalog
 import com.pocketds.hub.offline.OfflineCatalogPlayTarget
 import com.pocketds.hub.offline.OfflineCatalogSeason
+import com.pocketds.hub.offline.OfflineDetailPresentation
 import com.pocketds.hub.offline.OfflineDownload
 import com.pocketds.hub.offline.OfflineRepository
+import com.pocketds.hub.ui.ContinuationCardView
+import com.pocketds.hub.ui.DetailArtworkCardView
+import com.pocketds.hub.ui.DetailHeaderView
+import com.pocketds.hub.ui.DetailLayout
+import com.pocketds.hub.ui.DetailSnapshotStore
+import com.pocketds.hub.ui.DetailStyler
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.MediaActionIcon
+import com.pocketds.hub.ui.MediaActionIconDrawable
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
 
-/** Offline series detail: a local Continue/Next action followed by downloaded seasons only. */
+/** Shared online detail anatomy, backed only by downloaded files and scoped display snapshots. */
 class OfflineSeriesScreen(
     private val api: HubApi,
     private val seriesId: String,
@@ -44,12 +47,12 @@ class OfflineSeriesScreen(
 ) : Screen {
     override val title = seriesTitle
     override val focusOnShow = true
-
     private lateinit var host: ScreenHost
     private lateinit var colors: PocketColors
     private lateinit var repository: OfflineRepository
     private lateinit var content: LinearLayout
-    private lateinit var summary: TextView
+    private lateinit var scroll: ScrollView
+    private var header: DetailHeaderView? = null
     private var selectedKey = ""
     private var renderedSignature = ""
     private var receiverRegistered = false
@@ -61,24 +64,14 @@ class OfflineSeriesScreen(
         this.host = host
         colors = Theme.colors(host.viewContext)
         repository = OfflineRepository.get(host.viewContext)
-        return FrameLayout(host.viewContext).apply {
-            setBackgroundColor(colors.background)
-            addView(LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(18), dp(11), dp(18), 0)
-                addView(TextView(context).apply {
-                    text = seriesTitle; textSize = 23f; maxLines = 1; setTextColor(colors.primaryText)
-                })
-                summary = TextView(context).apply {
-                    textSize = 11f; setTextColor(colors.mutedText); setPadding(0, dp(3), 0, dp(7))
-                }
-                addView(summary)
-                content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-                addView(ScrollView(context).apply {
-                    isFocusable = false; clipToPadding = false; setPadding(0, 0, 0, dp(78)); addView(content)
-                }, LinearLayout.LayoutParams(MATCH, 0, 1f))
-            }, FrameLayout.LayoutParams(MATCH, MATCH))
-        }.also { render(force = true) }
+        content = LinearLayout(host.viewContext).apply { orientation = LinearLayout.VERTICAL; clipChildren = false }
+        scroll = ScrollView(host.viewContext).apply {
+            setBackgroundColor(colors.background); isFocusable = false; isFillViewport = true
+            clipToPadding = false; clipChildren = false; setPadding(0, 0, 0, dp(18))
+            addView(content, ViewGroup.LayoutParams(MATCH, WRAP))
+        }
+        render(force = true)
+        return scroll
     }
 
     override fun onShow() {
@@ -87,32 +80,37 @@ class OfflineSeriesScreen(
                 IntentFilter(OfflineRepository.ACTION_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
             receiverRegistered = true
         }
-        render(force = true)
+        header?.overview?.collapse()
+        render()
+        scroll.post { if (scroll.isShown) requestInitialFocus() }
     }
-
-    override fun onHide() = unregister()
+    override fun onHide() {
+        ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedKey)?.let { selectedKey = it.key }
+        unregister()
+    }
     override fun onDestroyView() = unregister()
-
     override fun requestInitialFocus(): Boolean =
         findTagged(content, selectedKey)?.requestFocus() == true || firstFocusable(content)?.requestFocus() == true
 
     override fun hints(): List<ButtonHint> = buildList {
+        if (header?.overview?.hasFocus() == true) {
+            header?.overview?.actionHint?.let { add(ButtonHint.activate(it)) }
+            add(ButtonHint.back(if (header?.overview?.expanded == true) "Collapse description" else "Back"))
+            return@buildList
+        }
         when ((host.viewContext as? android.app.Activity)?.currentFocus?.tag) {
             is TaggedTarget -> add(ButtonHint.activate("Play"))
             is TaggedSeason -> add(ButtonHint.activate("Open season"))
         }
         add(ButtonHint.back())
     }
-
     override fun onPad(action: PadAction): Boolean {
+        if (header?.overview?.onPad(action) == true) return true
         if (action == PadAction.Refresh) { render(force = true); return true }
+        if (action != PadAction.Activate) return false
         return when (val tag = (host.viewContext as? android.app.Activity)?.currentFocus?.tag) {
-            is TaggedTarget -> if (action == PadAction.Activate) {
-                host.playItem(tag.target.row.manifest.item.id, resumeMode(tag.target)); true
-            } else false
-            is TaggedSeason -> if (action == PadAction.Activate) {
-                host.push(OfflineSeasonScreen(api, seriesTitle, tag.season, ringVisible)); true
-            } else false
+            is TaggedTarget -> { host.playItem(tag.target.row.manifest.item.id, resumeMode(tag.target)); true }
+            is TaggedSeason -> { host.push(OfflineSeasonScreen(api, seriesTitle, tag.season, ringVisible)); true }
             else -> false
         }
     }
@@ -122,115 +120,97 @@ class OfflineSeriesScreen(
         val seasons = OfflineCatalog.seasons(seriesId, repository.completed())
         val rows = seasons.flatMap { it.rows }
         val progress = repository.playbackProgress(rows.map { it.manifest.item.id })
-        val signature = rows.joinToString("|") { row ->
+        val snapshot = DetailSnapshotStore.read(host.viewContext, seriesId)
+        val signature = snapshot.hashCode().toString() + rows.joinToString("|") { row ->
             val value = progress[row.manifest.item.id]
             "${row.id}:${row.updatedAt}:${value?.positionMillis}:${value?.durationMillis}"
         }
         if (!force && signature == renderedSignature) return
         renderedSignature = signature
         ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedKey)?.key?.let { selectedKey = it }
+        val oldScroll = scroll.scrollY
         content.removeAllViews()
-        summary.text = "${rows.size} downloaded episode${if (rows.size == 1) "" else "s"} · " +
-            "${fileSize(rows.sumOf { it.totalBytes })} · available offline"
+        val detail = DetailHeaderView(host.viewContext, colors, ringVisible)
+        header = detail
+        detail.overview.onChanged = { host.refreshHints() }
+        detail.titleView.text = snapshot?.item?.title?.ifBlank { seriesTitle } ?: seriesTitle
+        detail.metadataView.text = "${rows.size} downloaded episodes · ${fileSize(rows.sumOf { it.totalBytes })} · Offline"
+        detail.overview.bind(snapshot?.item?.overview.orEmpty())
+        detail.bindArtwork("series", null, rows.firstOrNull()?.let { artwork(it, "poster") }, imageLoader())
+        content.addView(detail, LinearLayout.LayoutParams(MATCH, WRAP))
         if (rows.isEmpty()) {
-            content.addView(emptyMessage("No episodes from this series remain on the device."))
+            content.addView(message("No episodes from this series remain on the device."))
             return
         }
-        OfflineCatalog.playTarget(rows, progress)?.let { content.addView(playTargetCard(it)) }
+        val presentation = OfflineDetailPresentation.resolve(rows, progress, snapshot)
+        presentation.playable?.let { target ->
+            detail.actions.addView(TextView(host.viewContext).apply {
+                DetailStyler.action(this, colors, primary = true)
+                text = if (target.kind == OfflineCatalogPlayTarget.Kind.RESUME) time(target.positionMillis) else ""
+                setCompoundDrawablesRelativeWithIntrinsicBounds(MediaActionIconDrawable(context, MediaActionIcon.PLAY, colors.accentText), null, null, null)
+                compoundDrawablePadding = dp(8); setPadding(dp(16), 0, dp(16), 0)
+                layoutParams = LinearLayout.LayoutParams(WRAP, dp(48)); tag = TaggedTarget(target)
+                contentDescription = "${targetLabel(target)}, ${target.row.manifest.item.title}"
+                FocusDecorator.attach(this, ringVisible, scale = false)
+                activateOnTap { host.playItem(target.row.manifest.item.id, resumeMode(target)) }
+            })
+            content.addView(ContinuationCardView(host.viewContext, colors, ringVisible).apply {
+                val item = target.row.manifest.item
+                bind(targetLabel(target), buildList {
+                    add(item.title)
+                    if (target.positionMillis > 0) add(time(target.positionMillis))
+                    if (presentation.localSuggestion) add("On this device")
+                }.joinToString(" · "), if (item.runtimeSeconds > 0) target.positionMillis / (item.runtimeSeconds * 1000.0) else 0.0, false)
+                tag = TaggedTarget(target, "continue")
+                onFocused = { selectedKey = "continue"; host.refreshHints() }
+                DetailStyler.image(image, artwork(target.row, "thumb"), imageLoader())
+                activateOnTap { host.playItem(item.id, resumeMode(target)) }
+            }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(24), dp(8), dp(24), 0) })
+        }
+        presentation.missing?.let { item ->
+            content.addView(message("Last known next episode: ${episodeCode(item)} · ${item.title}\nNot downloaded. Choose from the available seasons below."))
+        }
+        if (presentation.playable == null && presentation.missing == null) {
+            content.addView(message("You have finished the downloaded episodes. Choose a season to watch again."))
+        }
         content.addView(TextView(host.viewContext).apply {
             text = "Downloaded seasons"; textSize = 17f; setTextColor(colors.primaryText)
-            setPadding(dp(2), dp(16), dp(2), dp(5))
+            setPadding(dp(24), dp(16), dp(24), dp(2))
         })
-        val seasonRow = LinearLayout(host.viewContext).apply {
-            orientation = LinearLayout.HORIZONTAL; setPadding(dp(2), dp(2), dp(16), dp(12))
-            seasons.forEach { addView(seasonCard(it)) }
-        }
         content.addView(HorizontalScrollView(host.viewContext).apply {
-            isFocusable = false; isHorizontalScrollBarEnabled = false; clipToPadding = false; addView(seasonRow)
-        }, LinearLayout.LayoutParams(MATCH, dp(230)))
-        content.post { findTagged(content, selectedKey)?.requestFocus() }
-    }
-
-    private fun playTargetCard(target: OfflineCatalogPlayTarget): View {
-        val item = target.row.manifest.item
-        val heading = when (target.kind) {
-            OfflineCatalogPlayTarget.Kind.RESUME -> "Resume ${episodeCode(item)}"
-            OfflineCatalogPlayTarget.Kind.NEXT -> "Play next ${episodeCode(item)}"
-            OfflineCatalogPlayTarget.Kind.START -> "Start series · ${episodeCode(item)}"
-        }
-        return LinearLayout(host.viewContext).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            background = Styler.cardBackground(context, colors, cornerDp = 11f); setPadding(dp(14), dp(10), dp(14), dp(10))
-            tag = TaggedTarget(target); Styler.makeFocusable(this); descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-            addView(TextView(context).apply {
-                text = "▶"; textSize = 22f; gravity = Gravity.CENTER; setTextColor(colors.accent)
-            }, LinearLayout.LayoutParams(dp(34), dp(42)))
+            isFocusable = false; isHorizontalScrollBarEnabled = false; clipToPadding = false; clipChildren = false
+            val clearance = DetailLayout.focusClearance(DetailLayout.posterCardHeight(156, resources.configuration.fontScale)).coerceAtLeast(10)
+            setPadding(dp(24), dp(clearance), dp(24), dp(clearance))
             addView(LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(TextView(context).apply { text = heading; textSize = 15f; maxLines = 1; setTextColor(colors.primaryText) })
-                addView(TextView(context).apply {
-                    text = buildList { add(item.title); if (target.kind == OfflineCatalogPlayTarget.Kind.RESUME) add(time(target.positionMillis)) }.joinToString(" · ")
-                    textSize = 11f; maxLines = 1; setTextColor(colors.mutedText)
-                })
-            }, LinearLayout.LayoutParams(0, WRAP, 1f))
-            layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(5) }
-            contentDescription = "$heading, ${item.title}"
-            FocusDecorator.attach(this, ringVisible, scale = false)
-            setOnFocusChangeListener { view, hasFocus ->
-                FocusDecorator.refresh(view, ringVisible())
-                if (hasFocus) { selectedKey = (view.tag as TaggedKey).key; host.refreshHints() }
-            }
-            activateOnTap { host.playItem(item.id, resumeMode(target)) }
-        }
+                orientation = LinearLayout.HORIZONTAL; clipChildren = false
+                seasons.forEach { addView(seasonCard(it)) }
+            })
+        }, LinearLayout.LayoutParams(MATCH, WRAP))
+        content.post { scroll.scrollTo(0, oldScroll); findTagged(content, selectedKey)?.requestFocus() }
     }
 
-    private fun seasonCard(season: OfflineCatalogSeason): View {
-        val first = season.rows.first()
-        lateinit var image: ImageView
-        return LinearLayout(host.viewContext).apply {
-            orientation = LinearLayout.VERTICAL; background = Styler.cardBackground(context, colors, cornerDp = 10f)
-            setPadding(dp(5), dp(5), dp(5), dp(5)); tag = TaggedSeason(season)
-            Styler.makeFocusable(this); descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-            image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-            addView(image, LinearLayout.LayoutParams(MATCH, dp(152)))
-            addView(TextView(context).apply {
-                text = seasonName(season.number); textSize = 13f; maxLines = 1; setTextColor(colors.primaryText)
-                setPadding(dp(2), dp(5), dp(2), 0)
-            })
-            addView(TextView(context).apply {
-                text = "${season.rows.size} downloaded episode${if (season.rows.size == 1) "" else "s"}"
-                textSize = 9f; maxLines = 1; setTextColor(colors.mutedText); setPadding(dp(2), 0, dp(2), 0)
-            })
-            layoutParams = LinearLayout.LayoutParams(dp(166), dp(214)).apply { marginEnd = dp(9) }
+    private fun seasonCard(season: OfflineCatalogSeason): View =
+        DetailArtworkCardView(host.viewContext, colors, ringVisible).apply {
+            titleView.text = seasonName(season.number)
+            subtitleView.text = "${season.rows.size} downloaded episodes"
+            tag = TaggedSeason(season)
+            layoutParams = LinearLayout.LayoutParams(dp(112), WRAP).apply { marginEnd = dp(12) }
             contentDescription = "${seasonName(season.number)}, ${season.rows.size} downloaded episodes"
-            FocusDecorator.attach(this, ringVisible)
-            setOnFocusChangeListener { view, hasFocus ->
+            setOnFocusChangeListener { view, focused ->
                 FocusDecorator.refresh(view, ringVisible())
-                if (hasFocus) { selectedKey = (view.tag as TaggedKey).key; host.refreshHints() }
+                if (focused) { selectedKey = (view.tag as TaggedKey).key; host.refreshHints() }
             }
             activateOnTap { host.push(OfflineSeasonScreen(api, seriesTitle, season, ringVisible)) }
-            loadArtwork(image, first)
+            DetailStyler.image(image, artwork(season.rows.first(), "season"), imageLoader())
         }
-    }
 
-    private fun loadArtwork(view: ImageView, row: OfflineDownload) {
-        view.setImageDrawable(ColorDrawable(colors.posterPlaceholder))
-        val local = sequenceOf("poster", "thumb", "backdrop").map { repository.artworkFile(row, it) }
-            .firstOrNull { it.isFile && it.length() > 0 } ?: return
-        ((api as? HubClient)?.imageLoader ?: ImageLoader(view.context)).enqueue(
-            ImageRequest.Builder(view.context).data(local).target(view).bitmapConfig(Bitmap.Config.RGB_565).build()
-        )
+    private fun artwork(row: OfflineDownload, preferred: String) = sequenceOf(preferred, "poster", "thumb", "backdrop")
+        .map { repository.artworkFile(row, it) }.firstOrNull { it.isFile && it.length() > 0 }
+    private fun imageLoader() = (api as? HubClient)?.imageLoader ?: ImageLoader(host.viewContext)
+    private fun message(text: String) = TextView(host.viewContext).apply {
+        this.text = text; textSize = 13f; setTextColor(colors.mutedText); setPadding(dp(24), dp(12), dp(24), dp(8))
     }
-
-    private fun emptyMessage(message: String) = TextView(host.viewContext).apply {
-        text = message; textSize = 14f; gravity = Gravity.CENTER; setTextColor(colors.mutedText)
-        setPadding(dp(30), dp(80), dp(30), dp(30))
-    }
-
-    private fun unregister() {
-        if (receiverRegistered) { host.viewContext.unregisterReceiver(changedReceiver); receiverRegistered = false }
-    }
-
+    private fun unregister() { if (receiverRegistered) { host.viewContext.unregisterReceiver(changedReceiver); receiverRegistered = false } }
     private fun findTagged(root: ViewGroup, key: String): View? {
         for (index in 0 until root.childCount) {
             val child = root.getChildAt(index)
@@ -240,27 +220,27 @@ class OfflineSeriesScreen(
         return null
     }
     private fun firstFocusable(root: ViewGroup): View? {
+        findTagged(root, "play")?.let { return it }
         for (index in 0 until root.childCount) {
             val child = root.getChildAt(index)
-            if (child.isFocusable && child.visibility == View.VISIBLE) return child
+            if (child.tag is TaggedSeason) return child
             if (child is ViewGroup) firstFocusable(child)?.let { return it }
         }
         return null
     }
+    private fun targetLabel(target: OfflineCatalogPlayTarget) = when (target.kind) {
+        OfflineCatalogPlayTarget.Kind.RESUME -> "Resume ${episodeCode(target.row.manifest.item)}"
+        else -> "Play ${episodeCode(target.row.manifest.item)}"
+    }
     private fun resumeMode(target: OfflineCatalogPlayTarget) = if (target.kind == OfflineCatalogPlayTarget.Kind.RESUME) "resume" else "restart"
     private fun episodeCode(item: com.pocketds.hub.model.LibraryItem) =
-        if (item.seasonNumber > 0 && item.indexNumber > 0) "S${item.seasonNumber}E${item.indexNumber}" else item.title
+        if (item.indexNumber > 0) "S${item.seasonNumber} E${item.indexNumber}" else item.title
     private fun seasonName(number: Int) = if (number == 0) "Specials" else "Season $number"
-    private fun time(millis: Long) = "%d:%02d".format(millis / 60_000L, millis / 1_000L % 60L)
-    private fun fileSize(bytes: Long) = when {
-        bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824.0)
-        bytes >= 1_048_576L -> "%.0f MB".format(bytes / 1_048_576.0)
-        else -> "%.0f KB".format(bytes / 1024.0)
-    }
+    private fun time(millis: Long) = "%d:%02d".format(millis / 60_000, millis / 1000 % 60)
+    private fun fileSize(bytes: Long) = if (bytes >= 1_073_741_824L) "%.1f GB".format(bytes / 1_073_741_824.0) else "%.0f MB".format(bytes / 1_048_576.0)
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
-
     private sealed interface TaggedKey { val key: String }
-    private data class TaggedTarget(val target: OfflineCatalogPlayTarget) : TaggedKey { override val key = "play" }
+    private data class TaggedTarget(val target: OfflineCatalogPlayTarget, override val key: String = "play") : TaggedKey
     private data class TaggedSeason(val season: OfflineCatalogSeason) : TaggedKey { override val key = "season:${season.key}" }
     private companion object { const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT; const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT }
 }

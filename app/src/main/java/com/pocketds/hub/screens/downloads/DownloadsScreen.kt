@@ -17,6 +17,7 @@ import com.pocketds.hub.model.ReadingTransferAction
 import com.pocketds.hub.model.Stages
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
+import com.pocketds.hub.nav.ContentModeScreen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.FailureKind
 import com.pocketds.hub.net.HubApi
@@ -25,8 +26,8 @@ import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.state.Fmt
 import com.pocketds.hub.state.PollSchedule
+import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.ChoiceOverlay
-import com.pocketds.hub.ui.ContentModeToggleView
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
@@ -58,7 +59,7 @@ import kotlinx.coroutines.launch
 class DownloadsScreen(
     private val api: HubApi,
     private val ringVisible: () -> Boolean
-) : Screen {
+) : Screen, ContentModeScreen {
 
     override val title: String = "Transfers"
 
@@ -71,7 +72,7 @@ class DownloadsScreen(
     private lateinit var overlay: ChoiceOverlay
     private val adapter = ItemAdapter()
     private val readingAdapter = ReadingItemAdapter()
-    private lateinit var modeToggle: ContentModeToggleView
+    private lateinit var deviceTransfers: TextView
     private var mode = ContentMode.MEDIA
 
     private var host: ScreenHost? = null
@@ -106,14 +107,26 @@ class DownloadsScreen(
         root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
 
         mode = ContentModeSettings.get(context)
-        modeToggle = ContentModeToggleView(context, colors).apply {
-            select(mode)
-            onModeSelected = ::switchMode
-        }
-        content.addView(modeToggle, LinearLayout.LayoutParams(WRAP, WRAP).apply {
-            leftMargin = Styler.dpInt(context, 12f)
-            topMargin = Styler.dpInt(context, 7f)
-        })
+        content.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(Styler.dpInt(context, 12f), Styler.dpInt(context, 7f),
+                Styler.dpInt(context, 12f), 0)
+            addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+            deviceTransfers = TextView(context).apply {
+                text = "To this device"
+                textSize = 12f
+                gravity = android.view.Gravity.CENTER
+                setTextColor(colors.primaryText)
+                minimumHeight = Styler.dpInt(context, 48f)
+                setPadding(Styler.dpInt(context, 12f), 0, Styler.dpInt(context, 12f), 0)
+                background = Styler.chipBackground(context, colors)
+                Styler.makeFocusable(this)
+                FocusDecorator.attach(this, ringVisible, scale = false)
+                activateOnTap { host?.openOfflineManager() }
+            }
+            addView(deviceTransfers)
+        }, LinearLayout.LayoutParams(MATCH, WRAP))
 
         summaryLine = TextView(context).apply {
             textSize = 13f
@@ -146,13 +159,13 @@ class DownloadsScreen(
             clipToPadding = false
             setPadding(
                 Styler.dpInt(context, 8f), 0,
-                Styler.dpInt(context, 8f), Styler.dpInt(context, 90f)
+                Styler.dpInt(context, 8f), Styler.dpInt(context, 20f)
             )
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
         }
         content.addView(list)
 
-        overlay = ChoiceOverlay(context, colors, ringVisible)
+        overlay = ChoiceOverlay(context, colors, ringVisible, sidePanel = true)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
 
         return root
@@ -160,6 +173,8 @@ class DownloadsScreen(
 
     override fun onShow() {
         visible = true
+        val stored = host?.viewContext?.let(ContentModeSettings::get) ?: mode
+        if (stored != mode) switchMode(stored)
         failures = 0
         if (activeAdapter().itemCount == 0) statusLine.text = "Asking the hub…"
         startPolling()
@@ -184,6 +199,9 @@ class DownloadsScreen(
     override fun hints(): List<ButtonHint> {
         if (overlay.isOpen) {
             return listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
+        }
+        if (::deviceTransfers.isInitialized && deviceTransfers.hasFocus()) {
+            return listOf(ButtonHint.activate("Device downloads"), ButtonHint.back())
         }
         if (mode == ContentMode.BOOKS) {
             return listOfNotNull(
@@ -212,7 +230,7 @@ class DownloadsScreen(
 
     override fun requestInitialFocus(): Boolean =
         (::list.isInitialized && list.getChildAt(0)?.requestFocus() == true) ||
-            (::modeToggle.isInitialized && modeToggle.focus(mode))
+            (::deviceTransfers.isInitialized && deviceTransfers.requestFocus())
 
     override fun onPad(action: PadAction): Boolean {
         // Everything is consumed while the menu is open, or a directional press
@@ -283,18 +301,16 @@ class DownloadsScreen(
         mode = next
         val context = host?.viewContext ?: return
         ContentModeSettings.set(context, mode)
-        modeToggle.select(mode)
         list.adapter = activeAdapter()
         summaryLine.text = ""
         statusLine.setTextColor(colors.mutedText)
         statusLine.text = "Asking the hub…"
         failures = 0
         refreshNow()
-        list.post {
-            if (list.getChildAt(0)?.requestFocus() != true) modeToggle.focus(mode)
-            host?.refreshHints()
-        }
+        host?.refreshHints()
     }
+
+    override fun selectContentMode(mode: ContentMode) = switchMode(mode)
 
     private suspend fun fetchOnce() {
         if (mode == ContentMode.BOOKS) {
@@ -368,7 +384,7 @@ class DownloadsScreen(
 
     private fun renderReading(body: ReadingDownloadsResponse) {
         anyActive = body.anyActive
-        readingAdapter.submit(body.items)
+        readingAdapter.submit(ReadingTransferSummary.grouped(body.items))
         val downloading = body.items.count { it.status == "downloading" }
         val queued = body.items.count { it.status == "queued" }
         val importing = body.items.count { it.status == "importing" }
@@ -400,7 +416,7 @@ class DownloadsScreen(
     }
 
     private fun openActions(item: ActivityItem) {
-        val choices = item.actions.mapNotNull { action -> choiceFor(item, action) }
+        val choices = item.actions.mapNotNull { action -> choiceFor(item, action) } + ChoiceOverlay.Choice("details", "Transfer details")
         if (choices.isEmpty()) {
             host?.notify("This token cannot control downloads")
             return
@@ -416,8 +432,18 @@ class DownloadsScreen(
             onCancel = { host?.refreshHints() }
         ) { picked ->
             host?.refreshHints()
-            val choice = choices.first { it.id == picked }
-            if (choice.danger) confirm(item, choice) else run(item, picked)
+            if (picked == "details") {
+                overlay.resetBody()
+                overlay.open("Transfer details")
+                overlay.body.addView(TextView(requireNotNull(host).viewContext).apply {
+                    text = item.headline + "\n\n" + Stages.label(item.stage) + summarySuffix(item) + "\n\n" + item.warnings.joinToString("\n")
+                    textSize=14f;setTextColor(colors.primaryText);setTextIsSelectable(true)
+                })
+                overlay.focusBody()
+            } else {
+                val choice = choices.first { it.id == picked }
+                if (choice.danger) confirm(item, choice) else run(item, picked)
+            }
         }
         // A and B now mean something else. Without this the bar still reads
         // "Actions / Show all" while a confirmation is on screen.
@@ -681,7 +707,7 @@ class DownloadsScreen(
         override fun onBindViewHolder(holder: RowHolder, position: Int) {
             val item = items[position]
             (holder.itemView as DownloadRowView).bind(item)
-            holder.itemView.setOnClickListener { openActions(item) }
+            holder.itemView.activateOnTap { openActions(item) }
         }
 
         override fun onBindViewHolder(
@@ -735,8 +761,10 @@ class DownloadsScreen(
 
         override fun onBindViewHolder(holder: RowHolder, position: Int) {
             val item = items[position]
-            (holder.itemView as ReadingDownloadRowView).bind(item)
-            holder.itemView.setOnClickListener { openReadingActions(item) }
+            (holder.itemView as ReadingDownloadRowView).bind(item,
+                position == 0 || ReadingTransferSummary.groupLabel(items[position - 1].contentType) !=
+                    ReadingTransferSummary.groupLabel(item.contentType))
+            holder.itemView.activateOnTap { openReadingActions(item) }
         }
 
         override fun onBindViewHolder(holder: RowHolder, position: Int, payloads: MutableList<Any>) =

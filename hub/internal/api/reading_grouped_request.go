@@ -40,6 +40,7 @@ func (s *Server) handleReadingGroupedEbookRequest(
 	}
 
 	requested, alreadyPresent, failed := 0, 0, 0
+	targets := []ReadingRequestTarget{}
 	for _, book := range manifest.Books {
 		seriesID := book.BookKeeprrSeriesID
 		state := book.State
@@ -48,10 +49,16 @@ func (s *Server) handleReadingGroupedEbookRequest(
 		// not create or relink anything.
 		if state == "accepted" {
 			requested++
+			if seriesID > 0 {
+				targets = append(targets, ReadingRequestTarget{SeriesID: seriesID, Title: book.Title})
+			}
 			continue
 		}
 		if state == "present" {
 			alreadyPresent++
+			if seriesID > 0 {
+				targets = append(targets, ReadingRequestTarget{SeriesID: seriesID, Title: book.Title})
+			}
 			continue
 		}
 		if strings.HasPrefix(state, "link_failed_") {
@@ -117,10 +124,11 @@ func (s *Server) handleReadingGroupedEbookRequest(
 			continue
 		}
 		_ = s.readingAcquisitions.setBook(manifest.ID, book.ID, seriesID, state, "")
+		targets = append(targets, ReadingRequestTarget{SeriesID: seriesID, Title: book.Title})
 	}
 
 	state := "accepted"
-	message := fmt.Sprintf("BookKeeprr is searching for %d selected books", requested)
+	message := fmt.Sprintf("Choose releases for %d selected books", requested)
 	if alreadyPresent > 0 {
 		message += fmt.Sprintf("; %d already in BookKeeprr", alreadyPresent)
 	}
@@ -134,7 +142,7 @@ func (s *Server) handleReadingGroupedEbookRequest(
 	}
 	writeJSON(w, status, ReadingRequestResponse{
 		RequestID: manifest.ID, ParentSeriesID: parentID, Requested: requested,
-		AlreadyPresent: alreadyPresent, Failed: failed, State: state, Message: message,
+		AlreadyPresent: alreadyPresent, Failed: failed, State: state, Message: message, Targets: targets,
 	})
 }
 

@@ -248,3 +248,24 @@ func newWorkID() (string, error) {
 	}
 	return "rw_" + hex.EncodeToString(raw), nil
 }
+
+// FindIdentity is read-only and refuses ambiguous or weak keys.
+func (s *CatalogStore) FindIdentity(key string) (string, bool) {
+	keys := normalizeIdentityKeys([]string{key})
+	if len(keys) != 1 || !strongIdentity(keys[0]) {
+		return "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.loadErr != nil {
+		return "", false
+	}
+	matches := s.identityIndexLocked()[keys[0]]
+	if len(matches) != 1 {
+		return "", false
+	}
+	for id := range matches {
+		return id, true
+	}
+	return "", false
+}

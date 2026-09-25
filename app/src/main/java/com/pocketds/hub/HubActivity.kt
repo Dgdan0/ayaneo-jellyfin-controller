@@ -33,11 +33,14 @@ import com.pocketds.hub.input.PadTicker
 import com.pocketds.hub.nav.HintBarView
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
+import com.pocketds.hub.nav.ContentModeScreen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.nav.SectionStacks
 import com.pocketds.hub.nav.StatusStripView
 import com.pocketds.hub.nav.SectionRailItem
 import com.pocketds.hub.nav.SectionRailView
+import com.pocketds.hub.ui.UtilityHeaderView
+import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.model.PlaybackPrepareResponse
@@ -59,6 +62,7 @@ import com.pocketds.hub.screens.manage.ManageScreen
 import com.pocketds.hub.screens.notifications.NotificationsScreen
 import com.pocketds.hub.screens.settings.SettingsScreen
 import com.pocketds.hub.settings.HubSettings
+import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.settings.HapticSettings
 import com.pocketds.hub.settings.NotificationReadStore
 import com.pocketds.hub.settings.NotificationSettings
@@ -114,7 +118,10 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private var enteringPictureInPicture = false
     private var pictureInPictureSessionActive = false
     private lateinit var statusStrip: StatusStripView
+    private lateinit var utilityHeader: UtilityHeaderView
     private lateinit var content: FrameLayout
+    private var lastContentSection = 0
+    private var utilityReturnFocus: View? = null
 
     private val focusTick = KeyHaptics.RepeatGate(80L)
 
@@ -127,6 +134,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private val views = HashMap<Screen, View>()
 
     private lateinit var api: HubApi
+    private lateinit var offlineRoot: OfflineScreen
     private val chromeScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var notificationBadgeJob: Job? = null
 
@@ -186,11 +194,12 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         sections.push(HomeScreen(api, ::ringVisible).also { attach(it) })
         sections.select(1); sections.push(DiscoverScreen(api, ::ringVisible).also { attach(it) })
         sections.select(2); sections.push(LibraryScreen(api, ::ringVisible).also { attach(it) })
-        sections.select(3); sections.push(OfflineScreen(api, ::ringVisible).also { attach(it) })
+        offlineRoot = OfflineScreen(api, ::ringVisible).also { attach(it) }
+        sections.select(3); sections.push(offlineRoot)
         sections.select(4); sections.push(DownloadsScreen(api, ::ringVisible).also { attach(it) })
         sections.select(NOTIFICATIONS_SECTION); sections.push(
             NotificationsScreen(api, ::ringVisible) { count ->
-                if (::sectionRail.isInitialized) sectionRail.setBadge(NOTIFICATIONS_SECTION, count)
+                if (::utilityHeader.isInitialized) utilityHeader.setBadge(count)
             }.also { attach(it) }
         )
         sections.select(6); sections.push(ManageScreen(api, ::ringVisible).also { attach(it) })
@@ -263,7 +272,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
 
         sectionRail = SectionRailView(this, colors).apply {
             setExpanded(HubSettings.navigationExpanded(this@HubActivity), animate = false)
-            setSections(sectionItems)
+            setSections(sectionItems.take(CONTENT_SECTION_COUNT))
             onSelect = { index ->
                 router.onPointer()
                 if (sections.select(index)) showCurrent()
@@ -282,6 +291,23 @@ class HubActivity : AppCompatActivity(), ScreenHost {
 
         statusStrip = StatusStripView(this, colors)
         main.addView(statusStrip)
+
+        utilityHeader = UtilityHeaderView(this, colors).apply {
+            onModeSelected = { mode ->
+                ContentModeSettings.set(this@HubActivity, mode)
+                refreshAppearance()
+                (sections.stack().peek() as? ContentModeScreen)?.selectContentMode(mode)
+                setMode(mode)
+                post { focusMode(mode) }
+                refreshHints()
+            }
+            onSelect = { index ->
+                router.onPointer()
+                if (sections.select(index)) showCurrent()
+            }
+            onFocused = { refreshHints() }
+        }
+        main.addView(utilityHeader, LinearLayout.LayoutParams(MATCH, Styler.dpInt(this, 48f)))
 
         content = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
@@ -395,6 +421,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         // Views are created eagerly so a section switch is instant. The screens
         // hold no data yet, so this costs nothing; A2 moves it to on-first-show.
         val view = screen.onCreateView(this, content)
+        com.pocketds.hub.ui.AccentRebinder.track(view,colors)
         view.visibility = View.GONE
         content.addView(view, FrameLayout.LayoutParams(MATCH, MATCH))
         views[screen] = view
@@ -404,8 +431,14 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         views.remove(screen)?.let { content.removeView(it) }
     }
 
+    override fun refreshAppearance() {
+        if (::overlay.isInitialized) Theme.refresh(this, overlay, (sections.stack().peek() as? Screen)?.contentDomain ?: ContentModeSettings.get(this))
+    }
+
     private fun showCurrent() {
+        refreshAppearance()
         val top = sections.stack().peek() as? Screen ?: return
+        if (sections.current < CONTENT_SECTION_COUNT) lastContentSection = sections.current
         applyImmersive(top.immersive)
         // Clear focus before hiding: a GONE view can keep window focus, and the
         // next directional press then searches outward from something invisible
@@ -418,6 +451,9 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         val view = views[top]
         view?.visibility = View.VISIBLE
         sectionRail.setCurrent(sections.current)
+        utilityHeader.setCurrent(sections.current)
+        utilityHeader.setTitle(top.title)
+        utilityHeader.setMode(if (top is ContentModeScreen) ContentModeSettings.get(this) else null)
         hintBar.setHints(top.hints())
         view?.post {
             if (top.focusOnShow && view.findFocus() == null) {
@@ -433,6 +469,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
 
     private fun applyImmersive(active: Boolean) {
         sectionRail.visibility = if (active) View.GONE else View.VISIBLE
+        utilityHeader.visibility = if (active) View.GONE else View.VISIBLE
         statusStrip.setChromeVisible(!active)
         hintBar.visibility = if (active) View.GONE else View.VISIBLE
         WindowCompat.setDecorFitsSystemWindows(window, !active)
@@ -559,13 +596,25 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             refreshHints()
             return
         }
+        if (utilityHeader.hasFocus()) {
+            when (action) {
+                is PadAction.Step -> { moveFocus(action.direction); return }
+                PadAction.Activate -> { currentFocus?.performClick(); return }
+                PadAction.Back -> { returnFocusFromUtilities(); return }
+                is PadAction.Section -> {
+                    if (sections.switchWithin(action.delta, CONTENT_SECTION_COUNT)) showCurrent()
+                    return
+                }
+                else -> Unit
+            }
+        }
         val screen = sections.stack().peek() as? Screen
         if (screen?.onPad(action) == true) return
 
         when (action) {
             is PadAction.Step -> moveFocus(action.direction)
             is PadAction.Page -> page(action.direction)
-            is PadAction.Section -> if (sections.switch(action.delta)) showCurrent()
+            is PadAction.Section -> if (sections.switchWithin(action.delta, CONTENT_SECTION_COUNT)) showCurrent()
             PadAction.Activate -> currentFocus?.performClick()
             PadAction.Back -> if (!back()) DebugLog.log("nav", "back at section root")
             PadAction.Primary -> notify("X does nothing yet")
@@ -579,7 +628,12 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     }
 
     private fun handleSystemBack() {
+        if (::utilityHeader.isInitialized && utilityHeader.hasFocus()) {
+            returnFocusFromUtilities()
+            return
+        }
         val screen = sections.stack().peek() as? Screen
+        if (screen != null && views[screen]?.let(com.pocketds.hub.ui.SidePanelView::dismissTopIn) == true) { refreshHints(); return }
         if (screen?.onSystemBack() == true) return
         if (trailerMode && player.isOpen) {
             closeTrailer()
@@ -589,6 +643,15 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     }
 
     private fun moveFocus(direction: Direction) {
+        if (utilityHeader.hasFocus()) {
+            when (direction) {
+                Direction.LEFT -> utilityHeader.moveHorizontal(-1)
+                Direction.RIGHT -> utilityHeader.moveHorizontal(1)
+                Direction.DOWN -> returnFocusFromUtilities()
+                Direction.UP -> Unit
+            }
+            return
+        }
         // A focused view that is no longer on screen is not somewhere to search
         // from. Belt and braces alongside clearing focus on a screen switch.
         val from = (currentFocus ?: content.findFocus())?.takeIf { it.isShown }
@@ -624,6 +687,13 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             return
         }
         val candidate = from.focusSearch(direction.toFocusConstant())
+        if (direction == Direction.UP && candidate != null &&
+            generateSequence(candidate) { it.parent as? View }.any { it === utilityHeader }
+        ) {
+            utilityReturnFocus = from
+            if (utilityHeader.focusFirst()) refreshHints()
+            return
+        }
         val next = candidate?.takeIf {
             FocusGuard.accepts(direction, screenRect(from), screenRect(it), mode)
         }
@@ -648,6 +718,18 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             // "Stop" after the cursor moves onto an item that is already stopped.
             refreshHints()
         }
+    }
+
+    private fun returnFocusFromUtilities() {
+        val remembered = utilityReturnFocus
+        if (remembered != null && remembered.isShown && remembered.requestFocus()) {
+            utilityReturnFocus = null
+            refreshHints()
+            return
+        }
+        utilityReturnFocus = null
+        (sections.stack().peek() as? Screen)?.requestInitialFocus()
+        refreshHints()
     }
 
     /**
@@ -694,14 +776,24 @@ class HubActivity : AppCompatActivity(), ScreenHost {
 
     override fun back(): Boolean {
         val leaving = sections.stack().peek() as? Screen
-        if (!sections.back()) return false
+        if (!sections.back()) {
+            if (sections.current < CONTENT_SECTION_COUNT) return false
+            if (sections.select(lastContentSection)) showCurrent()
+            return true
+        }
         leaving?.let { detach(it) }
         showCurrent()
         return true
     }
 
     override fun switchSection(delta: Int) {
-        if (sections.switch(delta)) showCurrent()
+        if (sections.switchWithin(delta, CONTENT_SECTION_COUNT)) showCurrent()
+    }
+
+    override fun openOfflineManager() {
+        if (sections.select(3)) showCurrent()
+        while (sections.depth > 1) back()
+        offlineRoot.openManager()
     }
 
     override fun selectJellyfinUser(id: String, name: String) {
@@ -814,6 +906,12 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             hintBar.setHints(emptyList())
             return
         }
+        if (utilityHeader.hasFocus()) {
+            val action = currentFocus?.contentDescription?.toString().orEmpty()
+            hintBar.setHints(listOf(ButtonHint.activate(action.ifBlank { "Open" }),
+                ButtonHint.back("Return to content")))
+            return
+        }
         val hints = (top?.hints() ?: emptyList()).toMutableList()
         if (player.isOpen) hints.add(ButtonHint("⏵", "Trailer", PadAction.Menu))
         else hints.add(
@@ -830,6 +928,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
 
     override fun onResume() {
         super.onResume()
+        com.pocketds.hub.reader.ReadingProgress.get(this).requestSync(immediate = true)
         if (!isInPictureInPictureMode) pictureInPictureSessionActive = false
         if (::player.isInitialized) player.resumePlayback()
         (sections.stack().peek() as? Screen)?.onShow()
@@ -866,7 +965,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
                 when (val result = api.notifications(NotificationSettings.limits(this@HubActivity))) {
                     is com.pocketds.hub.net.HubResult.Ok -> {
                         val unread = NotificationReadStore(this@HubActivity).observe(result.value.sections)
-                        sectionRail.setBadge(NOTIFICATIONS_SECTION, unread.size)
+                        utilityHeader.setBadge(unread.size)
                     }
                     is com.pocketds.hub.net.HubResult.Failed -> Unit
                 }
@@ -899,6 +998,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val NOTIFICATIONS_SECTION = 5
+        const val CONTENT_SECTION_COUNT = 5
         const val NOTIFICATION_BADGE_POLL_MS = 60_000L
         const val STATE_SECTION = "current_section"
     }

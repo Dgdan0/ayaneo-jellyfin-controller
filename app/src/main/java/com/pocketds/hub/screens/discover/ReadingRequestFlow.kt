@@ -3,6 +3,7 @@ package com.pocketds.hub.screens.discover
 import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.model.ReadingItem
 import com.pocketds.hub.model.ReadingRequestOptions
+import com.pocketds.hub.model.ReadingRequestResponse
 import com.pocketds.hub.model.ReadingSeriesPreview
 import com.pocketds.hub.model.ReadingSeriesPreviewResponse
 import com.pocketds.hub.net.HubApi
@@ -22,7 +23,7 @@ class ReadingRequestFlow(
     private val onStatus: (String, Boolean) -> Unit,
     private val onNotify: (String) -> Unit,
     private val onHintsChanged: () -> Unit,
-    private val onRequested: () -> Unit = {}
+    private val onRequested: (ReadingRequestResponse) -> Unit = {}
 ) {
     var busy = false
         private set
@@ -57,7 +58,8 @@ class ReadingRequestFlow(
         val model = FormModel(ReadingRequestForm.rows(options))
         form.show(
             title = "Download ${options.title.ifEmpty { item.title }}",
-            subtitle = options.author,
+            subtitle = listOf(options.author, "You choose the torrent next; automatic grabbing stays off.")
+                .filter(String::isNotBlank).joinToString(" · "),
             model = model,
             onCancel = onHintsChanged,
             onChanged = { current ->
@@ -66,8 +68,7 @@ class ReadingRequestFlow(
                     ReadingRequestForm.rows(
                         options = options,
                         modeIndex = modeIndex,
-                        profileIndex = current.selectedIndex("profile"),
-                        monitoringIndex = current.selectedIndex("monitoring")
+                        profileIndex = current.selectedIndex("profile")
                     )
                 )
                 form.refresh()
@@ -173,7 +174,7 @@ class ReadingRequestFlow(
                 is HubResult.Ok -> {
                     onStatus(result.value.message, false)
                     onNotify(result.value.message.ifEmpty { "BookKeeprr is searching for ${item.title}" })
-                    onRequested()
+                    onRequested(result.value)
                 }
                 is HubResult.Failed -> {
                     onStatus(result.message, true)

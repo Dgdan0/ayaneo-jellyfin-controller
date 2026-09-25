@@ -46,6 +46,16 @@ class SectionStacks(val sectionCount: Int) {
         return true
     }
 
+    /** Shoulder navigation visits content destinations; utility pages retain their stacks. */
+    fun switchWithin(delta: Int, contentCount: Int): Boolean {
+        require(contentCount in 1..sectionCount)
+        if (delta == 0 || contentCount == 1) return false
+        val next = if (current >= contentCount) {
+            if (delta > 0) 0 else contentCount - 1
+        } else Math.floorMod(current + delta, contentCount)
+        return select(next)
+    }
+
     /** Jump straight to a section, for tapping a tab. */
     fun select(index: Int): Boolean {
         require(index in 0 until sectionCount) { "no section $index" }

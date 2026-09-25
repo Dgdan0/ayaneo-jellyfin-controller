@@ -77,7 +77,7 @@ class FloatingPlayerView(
         // Above every screen; floating geometry keeps it inside the content.
         elevation = Styler.dp(context, 18f)
 
-        shellBackground = android.graphics.drawable.GradientDrawable().apply {
+        shellBackground = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 12f)
             setColor(Color.BLACK)
             setStroke(Styler.dpInt(context, 1f), Color.TRANSPARENT)

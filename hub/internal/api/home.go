@@ -244,6 +244,8 @@ type LibraryView struct {
 	// The view's own Primary image when one exists; otherwise one contained
 	// title selected deterministically for the media PC's current day.
 	Image string `json:"image,omitempty"`
+	// banner is intentional folder artwork; poster is a daily contained title.
+	ImageStyle string `json:"imageStyle,omitempty"`
 }
 
 type LibraryResponse struct {
@@ -305,7 +307,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(i int, view jellyfin.Item) {
 			defer wg.Done()
-			out.Views[i].Image, errs[i] = s.libraryViewArtwork(ctx, jellyfinClient, view, day)
+			out.Views[i].Image, out.Views[i].ImageStyle, errs[i] = s.libraryViewArtwork(ctx, jellyfinClient, view, day)
 		}(i, view)
 	}
 	wg.Wait()
@@ -324,7 +326,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) libraryViewArtwork(
 	ctx context.Context, client *jellyfin.Client, view jellyfin.Item, day string,
-) (string, error) {
+) (string, string, error) {
 	if tag := view.PosterTag(); tag != "" {
 		images, _, err := cache.Fetch(ctx, s.cache, "library:view-images:"+view.ID, cache.Metadata,
 			func(ctx context.Context) ([]jellyfin.ImageInfo, error) {
@@ -333,7 +335,7 @@ func (s *Server) libraryViewArtwork(
 		// If Jellyfin cannot describe the source, retaining its current art is
 		// safer than throwing away a possible user choice.
 		if err != nil || hasExplicitLibraryArtwork(images) {
-			return jellyfinImagePrefix + "/" + view.ID + "/Primary?tag=" + tag, nil
+			return jellyfinImagePrefix + "/" + view.ID + "/Primary?tag=" + tag, "banner", nil
 		}
 	}
 
@@ -382,12 +384,12 @@ func (s *Server) libraryViewArtwork(
 			return &first.Items[0], nil
 		})
 	if err != nil || item == nil {
-		return "", err
+		return "", "", err
 	}
 	if tag := item.PosterTag(); tag != "" {
-		return jellyfinImagePrefix + "/" + item.PosterItemID() + "/Primary?tag=" + tag, nil
+		return jellyfinImagePrefix + "/" + item.PosterItemID() + "/Primary?tag=" + tag, "poster", nil
 	}
-	return "", nil
+	return "", "", nil
 }
 
 func hasExplicitLibraryArtwork(images []jellyfin.ImageInfo) bool {

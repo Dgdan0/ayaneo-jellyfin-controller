@@ -28,7 +28,7 @@ class ReadingRequestFormTest {
     @Test
     fun `single book starts safe and hides series count`() {
         val rows = ReadingRequestForm.rows(options)
-        assertEquals(listOf("mode", "profile", "monitoring", "submit"), rows.map { it.id })
+        assertEquals(listOf("mode", "profile", "submit"), rows.map { it.id })
         val model = FormModel(rows)
         assertEquals(0, model.index)
         assertFalse(rows.any { it.id == "totalBooks" })
@@ -37,7 +37,7 @@ class ReadingRequestFormTest {
     @Test
     fun `series mode requests a roster review and preserves chosen profile`() {
         val rows = ReadingRequestForm.rows(options, modeIndex = 1, profileIndex = 1)
-        assertEquals(listOf("mode", "profile", "monitoring", "submit"), rows.map { it.id })
+        assertEquals(listOf("mode", "profile", "submit"), rows.map { it.id })
         val model = FormModel(rows)
         assertEquals(1, model.selectedIndex("profile"))
 		assertEquals("Review books", (rows.last() as com.pocketds.hub.state.FormRow.Action).label)
@@ -46,7 +46,7 @@ class ReadingRequestFormTest {
         assertEquals("series", body.mode)
         assertTrue(body.bookIds.isEmpty())
         assertEquals(7, body.qualityProfileId)
-        assertEquals("all", body.monitoring)
+        assertEquals("none", body.monitoring)
     }
 
     @Test

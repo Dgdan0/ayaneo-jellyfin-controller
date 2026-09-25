@@ -188,7 +188,14 @@ func TestReadingSeriesPreviewRepairsPartialOpenLibraryTrilogyWithWikidata(t *tes
 	search := libraryRequest(handler, "/v1/reading/search?q=Mistborn&type=ebook")
 	var found ReadingSearchResponse
 	_ = json.Unmarshal(search.Body.Bytes(), &found)
-	previewResponse := libraryRequest(handler, "/v1/reading/requests/series-preview?key="+found.Results[0].Key)
+	items := found.Results
+	if len(items) == 0 {
+		items = found.BroaderResults
+	}
+	if len(items) == 0 {
+		t.Fatal("Mistborn search returned no results to preview")
+	}
+	previewResponse := libraryRequest(handler, "/v1/reading/requests/series-preview?key="+items[0].Key)
 	if previewResponse.Code != http.StatusOK {
 		t.Fatalf("preview = %d: %s", previewResponse.Code, previewResponse.Body.String())
 	}

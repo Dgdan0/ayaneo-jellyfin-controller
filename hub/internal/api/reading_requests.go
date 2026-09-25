@@ -89,14 +89,20 @@ type readingCreateRequestBody struct {
 }
 
 type ReadingRequestResponse struct {
-	RequestID      string `json:"requestId"`
-	SeriesID       int    `json:"seriesId,omitempty"`
-	ParentSeriesID int    `json:"parentSeriesId,omitempty"`
-	Requested      int    `json:"requested,omitempty"`
-	AlreadyPresent int    `json:"alreadyPresent,omitempty"`
-	Failed         int    `json:"failed,omitempty"`
-	State          string `json:"state"`
-	Message        string `json:"message"`
+	RequestID      string                 `json:"requestId"`
+	SeriesID       int                    `json:"seriesId,omitempty"`
+	ParentSeriesID int                    `json:"parentSeriesId,omitempty"`
+	Requested      int                    `json:"requested,omitempty"`
+	AlreadyPresent int                    `json:"alreadyPresent,omitempty"`
+	Failed         int                    `json:"failed,omitempty"`
+	State          string                 `json:"state"`
+	Message        string                 `json:"message"`
+	Targets        []ReadingRequestTarget `json:"targets,omitempty"`
+}
+
+type ReadingRequestTarget struct {
+	SeriesID int    `json:"seriesId"`
+	Title    string `json:"title"`
 }
 
 type ReadingDownloadItem struct {
@@ -282,7 +288,8 @@ func (s *Server) handleReadingCreateRequest(w http.ResponseWriter, r *http.Reque
 	}
 	writeJSON(w, http.StatusAccepted, ReadingRequestResponse{
 		RequestID: fmt.Sprintf("bookkeeprr:series:%d", created.ID), SeriesID: created.ID,
-		State: "accepted", Message: "BookKeeprr is searching for releases",
+		State: "accepted", Message: "Choose a release to download",
+		Targets: []ReadingRequestTarget{{SeriesID: created.ID, Title: item.Title}},
 	})
 }
 

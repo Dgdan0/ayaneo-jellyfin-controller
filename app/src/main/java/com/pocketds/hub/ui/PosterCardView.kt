@@ -46,8 +46,9 @@ class PosterCardView(
     private var boundProgress = 0.0
 
     init {
+        foreground = Styler.focusOutline(context, colors)
         orientation = VERTICAL
-        background = Styler.cardBackground(context, colors)
+        background = Styler.cardBackground(context, colors, 8f, android.graphics.Color.TRANSPARENT, 2f)
         Styler.makeFocusable(this)
         isClickable = true
         // The whole card is one focus target. Without this the image, title and
@@ -56,13 +57,12 @@ class PosterCardView(
         // Padding and type scale with the card. A 6dp inset and 13sp title look
         // right at 190dp and waste a third of a 140dp card.
         val compact = posterHeightDp < 170f
-        val pad = Styler.dpInt(context, if (compact) 4f else 6f)
-        setPadding(pad, pad, pad, pad)
+        setPadding(0, 0, 0, Styler.dpInt(context, 6f))
 
-        val posterWrap = FrameLayout(context)
+        val posterWrap = ArtworkFrame(context, 2f / 3f)
         poster = ImageView(context).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            layoutParams = FrameLayout.LayoutParams(MATCH, Styler.dpInt(context, posterHeightDp))
+            layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
             setBackgroundColor(colors.posterPlaceholder)
         }
         posterWrap.addView(poster)
@@ -98,7 +98,7 @@ class PosterCardView(
         }
 
         title = TextView(context).apply {
-            textSize = if (compact) 11f else 13f
+            textSize = if (compact) 12f else 13f
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             setTextColor(colors.primaryText)
@@ -107,7 +107,7 @@ class PosterCardView(
         addView(title)
 
         subtitle = TextView(context).apply {
-            textSize = if (compact) 9f else 11f
+            textSize = 12f
             maxLines = 1
             setTextColor(colors.mutedText)
             // On a compact card the year alone is worth the line; anything
@@ -141,7 +141,7 @@ class PosterCardView(
         if (!showAvailability && libraryBadge.isNotEmpty()) {
             badge.visibility = VISIBLE
             badge.text = libraryBadge
-            badge.background = android.graphics.drawable.GradientDrawable().apply {
+            badge.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.OVAL
                 setColor(
                     if (hit.played) this@PosterCardView.colors.badgeAvailable
@@ -150,10 +150,12 @@ class PosterCardView(
             }
             badge.minWidth = Styler.dpInt(context, 24f)
             badge.gravity = Gravity.CENTER
+            badge.setTextColor(SemanticColor.foreground(if (badge.text == "✓") colors.badgeAvailable else colors.accent))
         } else if (showAvailability && availability.label.isNotEmpty()) {
             badge.visibility = VISIBLE
             badge.text = availability.label
             badge.setBackgroundColor(badgeColour(availability))
+            badge.setTextColor(SemanticColor.foreground(badgeColour(availability)))
         } else {
             badge.visibility = GONE
         }
@@ -181,8 +183,9 @@ class PosterCardView(
         progressBar.visibility = GONE
         if (item.inLibrary) {
             badge.visibility = VISIBLE
-            badge.text = "In library"
+            badge.text = "Tracked"
             badge.setBackgroundColor(colors.badgeAvailable)
+            badge.setTextColor(SemanticColor.foreground(colors.badgeAvailable))
         } else {
             badge.visibility = GONE
         }
@@ -191,28 +194,35 @@ class PosterCardView(
 
     fun bindReadingWork(work: ReadingWork, imageLoader: ImageLoader, imageUrl: (String) -> String) {
         title.text = work.title
-        subtitle.text = work.subtitle
-        subtitle.visibility = if (compactCard) GONE else VISIBLE
+        subtitle.text = work.byline.ifBlank { work.subtitle }
+        subtitle.visibility = VISIBLE
+        title.setBackgroundColor(colors.cardSurface)
+        subtitle.setBackgroundColor(colors.cardSurface)
+        title.setPadding(Styler.dpInt(context,8f),Styler.dpInt(context,8f),Styler.dpInt(context,8f),0)
+        subtitle.setPadding(Styler.dpInt(context,8f),Styler.dpInt(context,3f),Styler.dpInt(context,8f),Styler.dpInt(context,8f))
+        subtitle.ellipsize=android.text.TextUtils.TruncateAt.END
         boundProgress = if (work.progress?.completed == true) 0.0
         else work.progress?.percentage?.coerceIn(0.0, 1.0) ?: 0.0
         if (work.progress?.completed == true) {
             badge.visibility = VISIBLE
             badge.text = "✓"
-            badge.background = android.graphics.drawable.GradientDrawable().apply {
+            badge.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.OVAL
                 setColor(this@PosterCardView.colors.badgeAvailable)
             }
             badge.minWidth = Styler.dpInt(context, 24f)
             badge.gravity = Gravity.CENTER
+            badge.setTextColor(SemanticColor.foreground(if (badge.text == "✓") colors.badgeAvailable else colors.accent))
         } else if (work.entityType == "collection" && work.bookCount > 0) {
             badge.visibility = VISIBLE
             badge.text = work.bookCount.toString()
-            badge.background = android.graphics.drawable.GradientDrawable().apply {
+            badge.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.OVAL
                 setColor(this@PosterCardView.colors.accent)
             }
             badge.minWidth = Styler.dpInt(context, 24f)
             badge.gravity = Gravity.CENTER
+            badge.setTextColor(SemanticColor.foreground(if (badge.text == "✓") colors.badgeAvailable else colors.accent))
         } else {
             badge.visibility = GONE
         }
@@ -252,13 +262,13 @@ class PosterCardView(
         }
         poster.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
         poster.imageAlpha = 105
-        title.alpha = .62f
-        subtitle.alpha = .62f
+        title.alpha = 1f
+        subtitle.alpha = 1f
         boundProgress = 0.0
         progressBar.visibility = GONE
         badge.visibility = VISIBLE
         badge.text = "Missing"
-        badge.background = android.graphics.drawable.GradientDrawable().apply {
+        badge.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 8f)
             setColor(this@PosterCardView.colors.stripBackground)
         }
@@ -269,19 +279,9 @@ class PosterCardView(
     }
 
     private fun loadPoster(path: String, imageLoader: ImageLoader, imageUrl: (String) -> String) {
-        poster.setImageDrawable(ColorDrawable(colors.posterPlaceholder))
-        val url = imageUrl(path)
-        if (url.isNotEmpty()) {
-            imageLoader.enqueue(
-                ImageRequest.Builder(context)
-                    .data(url)
-                    .target(poster)
-                    // RGB_565 halves the memory of a grid thumbnail, and banding
-                    // is invisible on a photographic poster at this size.
-                    .bitmapConfig(Bitmap.Config.RGB_565)
-                    .build()
-            )
-        }
+        val url = imageUrl(path).takeIf { it.isNotEmpty() }
+        imageLoader.enqueue(ImageRequest.Builder(context).data(url).target(poster)
+            .bitmapConfig(Bitmap.Config.RGB_565).build())
     }
 
     private fun updateProgressWidth() {

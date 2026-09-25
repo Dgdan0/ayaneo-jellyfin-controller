@@ -339,7 +339,18 @@ func (c *Client) Cover(ctx context.Context, seriesID int) ([]byte, string, error
 	if seriesID <= 0 {
 		return nil, "", fmt.Errorf("kavita: invalid series id")
 	}
-	resp, err := c.base.Open(ctx, http.MethodGet, "/api/Image/series-cover", url.Values{"seriesId": []string{strconv.Itoa(seriesID)}}, nil)
+	return c.cover(ctx, "/api/Image/series-cover", url.Values{"seriesId": []string{strconv.Itoa(seriesID)}})
+}
+
+func (c *Client) LibraryCover(ctx context.Context, libraryID int) ([]byte, string, error) {
+	if libraryID <= 0 {
+		return nil, "", fmt.Errorf("kavita: invalid library id")
+	}
+	return c.cover(ctx, "/api/Image/library-cover", url.Values{"libraryId": []string{strconv.Itoa(libraryID)}})
+}
+
+func (c *Client) cover(ctx context.Context, path string, query url.Values) ([]byte, string, error) {
+	resp, err := c.base.Open(ctx, http.MethodGet, path, query, nil)
 	if err != nil {
 		return nil, "", err
 	}

@@ -741,6 +741,7 @@ func (s *Server) addPlaybackSession(session *playbackSession) {
 		current := s.playbackSessions[session.ID]
 		if current == session {
 			delete(s.playbackSessions, session.ID)
+			s.revokeCastGrantsLocked(session.ID)
 		}
 		s.playbackMu.Unlock()
 		if current == session {
@@ -919,6 +920,7 @@ func (s *Server) handlePlaybackDelete(w http.ResponseWriter, r *http.Request) {
 	s.playbackMu.Lock()
 	if current := s.playbackSessions[session.ID]; current == session {
 		delete(s.playbackSessions, session.ID)
+		s.revokeCastGrantsLocked(session.ID)
 	}
 	if session.Timer != nil {
 		session.Timer.Stop()
@@ -1305,13 +1307,28 @@ func (s *Server) proxyPlaybackResource(
 	w http.ResponseWriter, r *http.Request, client *jellyfin.Client, resource string,
 	rewriteHLS bool, itemID, sessionID string,
 ) {
+	s.proxyPlaybackResourceWithPrefix(w, r, client, resource, rewriteHLS, itemID,
+		"/v1/playback/sessions/"+sessionID+"/hls/")
+}
+
+func (s *Server) proxyPlaybackResourceWithPrefix(
+	w http.ResponseWriter, r *http.Request, client *jellyfin.Client, resource string,
+	rewriteHLS bool, itemID, hlsPrefix string,
+) {
+	// Authenticated media transfers (including offline range resumes) regularly
+	// outlive the JSON response budget. Keep request cancellation, but remove the
+	// server's absolute write deadline before opening the upstream stream.
+	if err := prepareLongStream(w); err != nil {
+		writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "could not start media transfer"})
+		return
+	}
 	headers := make(http.Header)
 	for _, name := range []string{"Range", "If-Range", "If-None-Match", "If-Modified-Since"} {
 		if value := r.Header.Get(name); value != "" {
 			headers.Set(name, value)
 		}
 	}
-	response, err := client.OpenResource(r.Context(), http.MethodGet, resource, headers)
+	response, err := client.OpenResource(r.Context(), r.Method, resource, headers)
 	if err != nil {
 		writeUpstreamError(w, r, "jellyfin", err)
 		return
@@ -1330,10 +1347,12 @@ func (s *Server) proxyPlaybackResource(
 		copyPlaybackResponseHeaders(w.Header(), response.Header)
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(response.StatusCode)
-		_, _ = io.Copy(w, response.Body)
+		if r.Method != http.MethodHead {
+			_, _ = io.Copy(w, response.Body)
+		}
 		return
 	}
-	rewritten, err := rewriteHLSManifest(response.Body, resource, itemID, sessionID)
+	rewritten, err := rewriteHLSManifestWithPrefix(response.Body, resource, itemID, hlsPrefix)
 	if err != nil {
 		writeError(w, r, http.StatusBadGateway, Error{Code: CodeUpstreamDown, Message: "Jellyfin returned an invalid HLS manifest"})
 		return
@@ -1361,6 +1380,13 @@ var hlsURIAttribute = regexp.MustCompile(`URI="([^"]+)"`)
 func rewriteHLSManifest(
 	reader io.Reader, baseResource, itemID, sessionID string,
 ) ([]byte, error) {
+	return rewriteHLSManifestWithPrefix(reader, baseResource, itemID,
+		"/v1/playback/sessions/"+sessionID+"/hls/")
+}
+
+func rewriteHLSManifestWithPrefix(
+	reader io.Reader, baseResource, itemID, hlsPrefix string,
+) ([]byte, error) {
 	baseURL, err := url.Parse(baseResource)
 	if err != nil {
 		return nil, err
@@ -1380,7 +1406,7 @@ func rewriteHLSManifest(
 		if !validPlaybackResource(resource, itemID) {
 			return "", fmt.Errorf("HLS resource escaped item")
 		}
-		return "/v1/playback/sessions/" + sessionID + "/hls/" + encodePlaybackResource(resource), nil
+		return hlsPrefix + encodePlaybackResource(resource), nil
 	}
 	var out strings.Builder
 	scanner := bufio.NewScanner(reader)

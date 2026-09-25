@@ -108,15 +108,21 @@ func parseNotificationLimits(r *http.Request) (notificationLimits, error) {
 }
 
 func (s *Server) gatherNotifications(ctx context.Context, limits notificationLimits) notificationsSnapshot {
-	sections := make([]NotificationSection, 3)
-	partials := make([][]Partial, 3)
 	services := []string{"sonarr", "radarr", "bazarr"}
+	for _, service := range []string{"bookkeeprr", "storyteller", "kavita"} {
+		if configured, ok := s.cfg.Services[service]; ok && configured.Enabled {
+			services = append(services, service)
+		}
+	}
+	sections := make([]NotificationSection, len(services))
+	partials := make([][]Partial, len(services))
 	var wait sync.WaitGroup
 	for index, service := range services {
 		wait.Add(1)
 		go func(index int, service string) {
 			defer wait.Done()
-			limit := map[string]int{"sonarr": limits.Sonarr, "radarr": limits.Radarr, "bazarr": limits.Bazarr}[service]
+			limit := map[string]int{"sonarr": limits.Sonarr, "radarr": limits.Radarr, "bazarr": limits.Bazarr,
+				"bookkeeprr": 40, "storyteller": 40, "kavita": 40}[service]
 			sections[index], partials[index] = s.notificationSection(ctx, service, limit)
 		}(index, service)
 	}
@@ -154,6 +160,24 @@ func (s *Server) notificationSection(ctx context.Context, service string, limit 
 			return section, []Partial{notificationPartial(service, "adapter unavailable")}
 		}
 		return loadBazarrNotifications(ctx, s.bazarr, limit)
+	}
+	if service == "bookkeeprr" {
+		if s.bookkeeprr == nil {
+			return NotificationSection{Service: service, State: "unavailable", Items: []NotificationItem{}}, []Partial{notificationPartial(service, "adapter unavailable")}
+		}
+		return loadBookKeeprrNotifications(ctx, s.bookkeeprr, limit)
+	}
+	if service == "storyteller" {
+		if s.storyteller == nil {
+			return NotificationSection{Service: service, State: "unavailable", Items: []NotificationItem{}}, []Partial{notificationPartial(service, "adapter unavailable")}
+		}
+		return loadStorytellerNotifications(ctx, s.storyteller, limit)
+	}
+	if service == "kavita" {
+		if s.kavita == nil {
+			return NotificationSection{Service: service, State: "unavailable", Items: []NotificationItem{}}, []Partial{notificationPartial(service, "adapter unavailable")}
+		}
+		return loadKavitaNotifications(ctx, s.kavita, limit)
 	}
 	client := s.arrs[service]
 	if client == nil {

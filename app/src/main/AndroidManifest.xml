@@ -3,6 +3,7 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
@@ -42,6 +43,10 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.PocketDSHub">
 
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="com.pocketds.hub.playback.HubCastOptionsProvider" />
+
         <!--
           One Activity for the whole app. The gamepad pipeline (dispatchKeyEvent,
           onGenericMotionEvent, the Choreographer ticker, dead-zone state, the
@@ -49,10 +54,10 @@
           separate Activities would rebuild the ticker and re-latch the D-pad
           source on every screen change.
 
-          uiMode is deliberately absent from configChanges: setDefaultNightMode
-          relies on the recreate to apply a theme change, and the sibling project
-          found that adding an explicit recreate() on top of it double-fires and
-          flickers. Display churn is frequent on this device; theme changes are not.
+          Appearance choices rebind retained Views in place. uiMode remains absent
+          from configChanges so an operating-system configuration change uses
+          normal Activity restoration. Manual accent/display choices do not
+          recreate the Activity or its media session.
         -->
         <activity
             android:name=".HubActivity"
@@ -76,6 +81,11 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+
+        <service
+            android:name=".reader.ReadingSyncJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="true" />
 
         <service
             android:name=".offline.OfflineDownloadService"

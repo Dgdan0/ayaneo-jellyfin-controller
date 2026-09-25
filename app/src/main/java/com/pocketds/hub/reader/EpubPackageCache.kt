@@ -44,6 +44,12 @@ class EpubPackageCache(private val root: File) {
     fun temporaryFile(workId: String, sourceItemId: String): File =
         File(root, temporaryName(workId, sourceItemId))
 
+    fun clearDownload(workId: String, sourceItemId: String) {
+        val temporary = temporaryFile(workId, sourceItemId)
+        temporary.delete()
+        File(temporary.path + ".meta").delete()
+    }
+
     fun isComplete(workId: String, sourceItemId: String): Boolean =
         completeFile(workId, sourceItemId).let { it.isFile && it.length() > 0L }
 
@@ -72,6 +78,7 @@ class EpubPackageCache(private val root: File) {
             Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
         target.setLastModified(System.currentTimeMillis())
+        File(temporary.path + ".meta").delete()
         return target
     }
 

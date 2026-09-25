@@ -7,6 +7,7 @@ import com.pocketds.hub.input.HorizontalMode
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.PlaybackPrepareResponse
 import com.pocketds.hub.model.LibraryItem
+import com.pocketds.hub.state.ContentMode
 
 /**
  * One screen in the app.
@@ -23,6 +24,7 @@ interface Screen : StackScreen {
 
     /** Shown in the tab bar and used as the [FocusMemory] key. */
     val title: String
+    val contentDomain: ContentMode? get() = null
 
     fun onCreateView(host: ScreenHost, container: ViewGroup): View
 
@@ -97,6 +99,11 @@ interface Screen : StackScreen {
     fun onRawMotionEvent(event: android.view.MotionEvent): Boolean = false
 }
 
+/** A root page whose content follows the shared Media / Books header switch. */
+interface ContentModeScreen {
+    fun selectContentMode(mode: ContentMode)
+}
+
 /**
  * What a screen is allowed to ask of the app around it.
  *
@@ -110,12 +117,16 @@ interface ScreenHost {
     fun push(screen: Screen)
     fun back(): Boolean
     fun switchSection(delta: Int)
+    /** Open the device's permanent-download queue from the server transfer view. */
+    fun openOfflineManager() { switchSection(-1) }
     /** Persist a Jellyfin profile and rebuild user-scoped screens and caches. */
     fun selectJellyfinUser(id: String, name: String)
     /** A transient message in the status strip, not a system Toast. */
     fun notify(message: String)
     /** Redraw the hint bar, after the contextual actions change. */
     fun refreshHints()
+    /** Rebind theme tokens without replacing retained screens or active playback. */
+    fun refreshAppearance() = Unit
 
     /**
      * Play a trailer in a floating window that survives navigation.

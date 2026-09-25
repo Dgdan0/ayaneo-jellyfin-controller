@@ -55,6 +55,38 @@ func TestEbookStreamsRangesWithoutBufferingAndKeepsSafeMetadata(t *testing.T) {
 	}
 }
 
+func TestStartReadaloudUsesAuthenticatedBookProcessRoute(t *testing.T) {
+	processes := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/token":
+			_, _ = io.WriteString(w, `{"access_token":"process-token","token_type":"Bearer","expires_in":3600}`)
+		case "/api/v2/books/42/process":
+			if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer process-token" || r.URL.RawQuery != "" {
+				t.Errorf("process request = %s %s auth=%q", r.Method, r.URL.String(), r.Header.Get("Authorization"))
+			}
+			processes++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	client, err := New(config.ServiceConfig{BaseURL: upstream.URL, Username: "worker", Password: config.Secret("secret")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.StartReadaloud(context.Background(), 0); err == nil {
+		t.Fatal("invalid id accepted")
+	}
+	if err := client.StartReadaloud(context.Background(), 42); err != nil {
+		t.Fatal(err)
+	}
+	if processes != 1 {
+		t.Fatalf("process calls = %d", processes)
+	}
+}
+
 func TestPositionPreservesReadiumLocatorAndRejectsOlderUpdate(t *testing.T) {
 	locator := json.RawMessage(`{"href":"chapter-4.xhtml","type":"application/xhtml+xml","locations":{"progression":0.4,"totalProgression":0.32,"position":44},"text":{"highlight":"Darrow"}}`)
 	var saved struct {

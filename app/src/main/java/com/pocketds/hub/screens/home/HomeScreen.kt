@@ -21,12 +21,17 @@ import com.pocketds.hub.model.JellyfinUser
 import com.pocketds.hub.model.SearchHit
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
+import com.pocketds.hub.nav.ContentModeScreen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.screens.library.LibraryDetailScreen
 import com.pocketds.hub.settings.HubSettings
+import com.pocketds.hub.settings.ContentModeSettings
+import com.pocketds.hub.state.ContentMode
+import com.pocketds.hub.ui.LandscapeCardView
+import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
@@ -46,7 +51,7 @@ import kotlinx.coroutines.launch
 class HomeScreen(
     private val api: HubApi,
     private val ringVisible: () -> Boolean
-) : Screen {
+) : Screen, ContentModeScreen {
 
     override val title = "Home"
     override val horizontalMode = HorizontalMode.CONFINED
@@ -58,6 +63,9 @@ class HomeScreen(
     private lateinit var heading: TextView
     private lateinit var rows: RecyclerView
     private lateinit var userOverlay: ChoiceOverlay
+    private lateinit var mediaContent: LinearLayout
+    private lateinit var readingHome: ReadingHomeView
+    private var mode = ContentMode.MEDIA
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
     private var userJob: Job? = null
@@ -72,6 +80,7 @@ class HomeScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
+        mode = ContentModeSettings.get(host.viewContext)
         val frame = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
         val content = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
@@ -79,20 +88,27 @@ class HomeScreen(
         }
         frame.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        heading = TextView(host.viewContext).apply {
-            text = HubSettings.userName(context).takeIf { it.isNotEmpty() }
-                ?.let { "Home · $it" } ?: "Home"
-            textSize = 18f
-            setTextColor(colors.primaryText)
-            setPadding(dp(14), dp(8), dp(14), 0)
+        mediaContent = LinearLayout(host.viewContext).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
         }
-        content.addView(heading)
+        content.addView(mediaContent, LinearLayout.LayoutParams(MATCH, 0, 1f))
+
+        heading = TextView(host.viewContext).apply {
+            text = HomeHeaderLabel.forUser(HubSettings.userName(context))
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            textSize = 20f
+            setTextColor(colors.primaryText)
+            setPadding(dp(24), dp(8), dp(24), dp(2))
+        }
+        mediaContent.addView(heading)
         status = TextView(host.viewContext).apply {
             textSize = 11f
             setTextColor(colors.mutedText)
             setPadding(dp(14), dp(2), dp(14), dp(2))
         }
-        content.addView(status)
+        mediaContent.addView(status)
 
         rows = RecyclerView(host.viewContext).apply {
             layoutManager = LinearLayoutManager(context)
@@ -100,7 +116,7 @@ class HomeScreen(
             clipToPadding = false
             clipChildren = false
             setItemViewCacheSize(HOME_ROW_ORDER.size)
-            setPadding(0, dp(28), 0, dp(84))
+            setPadding(0, dp(8), 0, dp(20))
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
             addOnChildAttachStateChangeListener(
                 object : RecyclerView.OnChildAttachStateChangeListener {
@@ -117,7 +133,13 @@ class HomeScreen(
                 }
             )
         }
-        content.addView(rows)
+        mediaContent.addView(rows)
+
+        readingHome = ReadingHomeView(host.viewContext, api, host, colors, ringVisible).apply {
+            onChooseProfile = { if (users.isEmpty()) loadUsers(openWhenReady = true) else showUsers() }
+            visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
+        }
+        content.addView(readingHome, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
         userOverlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
         frame.addView(userOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -125,6 +147,17 @@ class HomeScreen(
     }
 
     override fun onShow() {
+        if (users.isEmpty() && userJob?.isActive != true) loadUsers(openWhenReady=false)
+        val stored = host?.viewContext?.let(ContentModeSettings::get) ?: mode
+        if (stored != mode) {
+            switchMode(stored, persist = false)
+            return
+        }
+        if (mode == ContentMode.BOOKS) {
+            readingHome.onShow()
+            readingHome.requestInitialFocus()
+            return
+        }
         if (users.isEmpty() && userJob?.isActive != true) loadUsers(openWhenReady = false)
         if (adapter.itemCount == 0 && loadJob?.isActive != true) load()
         else {
@@ -140,6 +173,7 @@ class HomeScreen(
 
     override fun onHide() {
         loadGeneration++
+        if (::readingHome.isInitialized) readingHome.onHide()
         if (::userOverlay.isInitialized && userOverlay.isOpen) userOverlay.dismiss()
         scope.coroutineContext.cancelChildren()
         loadJob = null
@@ -148,13 +182,14 @@ class HomeScreen(
     }
 
     override fun onDestroyView() {
+        if (::readingHome.isInitialized) readingHome.destroy()
         scope.cancel()
         host = null
     }
 
     override fun hints() = if (::userOverlay.isInitialized && userOverlay.isOpen) {
         listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
-    } else {
+    } else if (mode == ContentMode.BOOKS) readingHome.hints() else {
         listOf(
             ButtonHint.activate("Details"),
             ButtonHint.secondary("Users"),
@@ -164,6 +199,7 @@ class HomeScreen(
 
     override fun onPad(action: PadAction): Boolean {
         if (::userOverlay.isInitialized && userOverlay.onPad(action)) return true
+        if (mode == ContentMode.BOOKS) return readingHome.onPad(action)
         return when (action) {
         PadAction.Activate -> focusedHit()?.let(::open) != null
         PadAction.Secondary -> {
@@ -179,6 +215,7 @@ class HomeScreen(
     }
 
     override fun requestInitialFocus(): Boolean {
+        if (mode == ContentMode.BOOKS) return readingHome.requestInitialFocus()
         if (!::rows.isInitialized || adapter.itemCount == 0) {
             wantsFocus = true
             return false
@@ -196,6 +233,25 @@ class HomeScreen(
         return true
     }
 
+    private fun switchMode(next: ContentMode, persist: Boolean = true) {
+        if (persist) host?.viewContext?.let { ContentModeSettings.set(it, next) }
+        if (next == mode) return
+        if (mode == ContentMode.BOOKS) readingHome.onHide()
+        else {
+            loadGeneration++
+            loadJob?.cancel()
+            returnRefreshJob?.cancel()
+        }
+        mode = next
+        mediaContent.visibility = if (next == ContentMode.MEDIA) View.VISIBLE else View.GONE
+        readingHome.visibility = if (next == ContentMode.BOOKS) View.VISIBLE else View.GONE
+        if (next == ContentMode.BOOKS) readingHome.onShow()
+        else if (adapter.itemCount == 0) load() else requestInitialFocus()
+        host?.refreshHints()
+    }
+
+    override fun selectContentMode(mode: ContentMode) = switchMode(mode)
+
     private fun loadUsers(openWhenReady: Boolean) {
         userJob?.cancel()
         if (openWhenReady) {
@@ -208,7 +264,9 @@ class HomeScreen(
                     users = result.value.users
                     val selected = users.firstOrNull { it.selected }
                         ?: users.firstOrNull { it.id == HubSettings.userId(heading.context) }
-                    heading.text = selected?.name?.let { "Home · $it" } ?: "Home · Choose user"
+                    heading.text = HomeHeaderLabel.forUser(selected?.name)
+                    readingHome.setUserName(selected?.name)
+                    if(selected==null) {status.text="Choose a profile with Y";status.contentDescription="Choose a Jellyfin profile with Y"}
                     if (openWhenReady) showUsers()
                 }
                 is HubResult.Failed -> if (openWhenReady) {
@@ -285,8 +343,9 @@ class HomeScreen(
                 append(body.partial.joinToString(" · ") { it.message })
             }
             body.cache.stale -> "${adapter.itemCount} rows · cached"
-            else -> "${adapter.itemCount} personal rows"
+            else -> ""
         }
+        status.visibility = if (status.text.isNullOrBlank()) View.GONE else View.VISIBLE
         requestInitialFocus()
         host?.refreshHints()
     }
@@ -353,9 +412,9 @@ class HomeScreen(
             orientation = VERTICAL
             clipChildren = false
             label = TextView(context).apply {
-                textSize = 13f
+                textSize = 18f
                 setTextColor(colors.primaryText)
-                setPadding(dp(12), dp(6), dp(12), dp(1))
+                setPadding(dp(24), dp(6), dp(24), dp(4))
             }
             addView(label)
             strip = RecyclerView(context).apply {
@@ -415,6 +474,7 @@ class HomeScreen(
             fun indexOf(itemId: String) = items.indexOfFirst { it.jellyfinItemId == itemId }
 
             fun submit(next: List<SearchHit>) {
+                if (items == next) return
                 items.clear()
                 items.addAll(next)
                 notifyDataSetChanged()
@@ -430,7 +490,7 @@ class HomeScreen(
 
             override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder {
                 val card: View = if (viewType == CARD_LANDSCAPE) {
-                    HomeMediaCardView(parent.context).apply {
+                    LandscapeCardView(parent.context, colors).apply {
                         layoutParams = RecyclerView.LayoutParams(dp(LANDSCAPE_CARD_DP), WRAP).apply {
                             val margin = dp(8)
                             setMargins(margin, margin, margin, margin)
@@ -461,10 +521,10 @@ class HomeScreen(
                 val loader = client?.imageLoader ?: ImageLoader(card.context)
                 when (card) {
                     is PosterCardView -> card.bind(hit, loader, api::imageUrl, showAvailability = false)
-                    is HomeMediaCardView -> card.bind(hit, loader)
+                    is LandscapeCardView -> card.bind(hit, loader, api::imageUrl)
                 }
                 card.setTag(TAG_HIT, hit)
-                card.setOnClickListener { open(hit) }
+                card.activateOnTap { open(hit) }
                 card.setOnFocusChangeListener { _, focused ->
                     FocusDecorator.refresh(card, ringVisible())
                     if (focused) {
@@ -477,87 +537,6 @@ class HomeScreen(
                     }
                 }
             }
-        }
-    }
-
-    /** Findroid-style landscape card for a concrete episode or movie action. */
-    private inner class HomeMediaCardView(context: android.content.Context) : LinearLayout(context) {
-        private val image: ImageView
-        private val progress: View
-        private val titleView: TextView
-        private val subtitleView: TextView
-        private var boundProgress = 0.0
-
-        init {
-            orientation = VERTICAL
-            background = Styler.cardBackground(context, colors)
-            Styler.makeFocusable(this)
-            isClickable = true
-            descendantFocusability = FOCUS_BLOCK_DESCENDANTS
-            setPadding(dp(5), dp(5), dp(5), dp(7))
-
-            val artwork = FrameLayout(context)
-            image = ImageView(context).apply {
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                setBackgroundColor(colors.posterPlaceholder)
-            }
-            artwork.addView(image, FrameLayout.LayoutParams(MATCH, dp(LANDSCAPE_IMAGE_DP)))
-            progress = View(context).apply {
-                setBackgroundColor(colors.accent)
-                visibility = GONE
-            }
-            artwork.addView(
-                progress,
-                FrameLayout.LayoutParams(0, dp(4), Gravity.BOTTOM or Gravity.START)
-            )
-            addView(artwork, LayoutParams(MATCH, dp(LANDSCAPE_IMAGE_DP)))
-            image.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateProgress() }
-
-            titleView = TextView(context).apply {
-                textSize = 14f
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                setTextColor(colors.primaryText)
-                setPadding(dp(2), dp(6), dp(2), 0)
-            }
-            addView(titleView, LayoutParams(MATCH, WRAP))
-            subtitleView = TextView(context).apply {
-                textSize = 11f
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                setTextColor(colors.mutedText)
-                setPadding(dp(2), dp(2), dp(2), 0)
-            }
-            addView(subtitleView, LayoutParams(MATCH, WRAP))
-        }
-
-        fun bind(hit: SearchHit, loader: ImageLoader) {
-            titleView.text = hit.media.title
-            subtitleView.text = hit.subtitle
-            boundProgress = if (hit.played) 0.0 else hit.progress.coerceIn(0.0, 1.0)
-            progress.visibility = if (boundProgress > 0) VISIBLE else GONE
-            updateProgress()
-            contentDescription = buildString {
-                append(hit.media.title)
-                if (hit.subtitle.isNotBlank()) append(", ").append(hit.subtitle)
-                if (boundProgress > 0) append(", ").append((boundProgress * 100).toInt()).append(" percent watched")
-            }
-            image.setImageDrawable(ColorDrawable(colors.posterPlaceholder))
-            val path = hit.media.backdrop.ifEmpty { hit.media.poster }
-            val url = api.imageUrl(path)
-            if (url.isNotEmpty()) {
-                loader.enqueue(
-                    ImageRequest.Builder(context).data(url).target(image)
-                        .bitmapConfig(Bitmap.Config.RGB_565).build()
-                )
-            }
-        }
-
-        private fun updateProgress() {
-            if (boundProgress <= 0 || image.width <= 0) return
-            val params = progress.layoutParams as FrameLayout.LayoutParams
-            params.width = (image.width * boundProgress).toInt().coerceAtLeast(dp(2))
-            progress.layoutParams = params
         }
     }
 

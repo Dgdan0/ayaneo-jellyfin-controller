@@ -87,8 +87,17 @@ type Audiobook struct {
 }
 
 type Readaloud struct {
-	UUID    string `json:"uuid"`
-	Missing bool   `json:"missing"`
+	UUID          string  `json:"uuid"`
+	Missing       bool    `json:"missing"`
+	Status        string  `json:"status,omitempty"`
+	CurrentStage  string  `json:"currentStage,omitempty"`
+	StageProgress float64 `json:"stageProgress,omitempty"`
+	QueuePosition int     `json:"queuePosition,omitempty"`
+}
+
+func (r *Readaloud) Available() bool {
+	// Older servers/fixtures omit status; current servers create the row before alignment starts.
+	return r != nil && r.UUID != "" && !r.Missing && (r.Status == "" || r.Status == "ALIGNED")
 }
 
 type Locations struct {
@@ -185,6 +194,21 @@ func (c *Client) ScanAll(ctx context.Context) error {
 	return nil
 }
 
+// StartReadaloud asks Storyteller to queue its existing alignment pipeline.
+// Its installed v2 route returns 204 before the background job finishes.
+func (c *Client) StartReadaloud(ctx context.Context, id int64) error {
+	if id <= 0 {
+		return fmt.Errorf("storyteller: invalid book id")
+	}
+	resp, err := c.request(ctx, c.http, http.MethodPost, "/api/v2/books/"+strconv.FormatInt(id, 10)+"/process")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, httpx.MaxBodyBytes))
+	return nil
+}
+
 func (c *Client) Cover(ctx context.Context, id int64) ([]byte, string, error) {
 	if id <= 0 {
 		return nil, "", fmt.Errorf("storyteller: invalid book id")
@@ -211,10 +235,26 @@ func (c *Client) Cover(ctx context.Context, id int64) ([]byte, string, error) {
 // OpenEbook returns the streaming response owned by the caller. Range and
 // If-Range are the only client headers forwarded to Storyteller.
 func (c *Client) OpenEbook(ctx context.Context, id int64, byteRange, ifRange string) (*http.Response, error) {
+	return c.openPublication(ctx, id, "ebook", byteRange, ifRange)
+}
+
+func (c *Client) OpenReadaloud(ctx context.Context, id int64, byteRange, ifRange string) (*http.Response, error) {
+	return c.openPublication(ctx, id, "readaloud", byteRange, ifRange)
+}
+
+func (c *Client) OpenAudiobook(ctx context.Context, id int64, byteRange, ifRange string) (*http.Response, error) {
+	return c.openPublication(ctx, id, "audiobook", byteRange, ifRange)
+}
+
+func (c *Client) openPublication(ctx context.Context, id int64, format, byteRange, ifRange string) (*http.Response, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("storyteller: invalid book id")
 	}
-	headers := http.Header{"Accept": []string{"application/epub+zip, application/octet-stream"}}
+	accept := "application/epub+zip, application/octet-stream"
+	if format == "audiobook" {
+		accept = "application/zip, application/octet-stream"
+	}
+	headers := http.Header{"Accept": []string{accept}}
 	if byteRange != "" {
 		headers.Set("Range", byteRange)
 	}
@@ -223,7 +263,7 @@ func (c *Client) OpenEbook(ctx context.Context, id int64, byteRange, ifRange str
 	}
 	return c.requestWith(ctx, c.streamHTTP, http.MethodGet,
 		"/api/v2/books/"+strconv.FormatInt(id, 10)+"/files",
-		url.Values{"format": []string{"ebook"}}, headers, nil)
+		url.Values{"format": []string{format}}, headers, nil)
 }
 
 func (c *Client) Position(ctx context.Context, id int64) (*PositionRecord, error) {

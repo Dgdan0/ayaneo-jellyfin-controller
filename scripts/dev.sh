@@ -4,6 +4,7 @@
 #   scripts/dev.sh              build, install, relaunch, then print state
 #   scripts/dev.sh test         JVM unit tests -- the one that runs fifty times
 #                               a feature, so it gets the short name
+#   scripts/dev.sh test-ui      native View tests in the isolated .uitest app
 #   scripts/dev.sh pad          what the kernel and framework think the gamepad
 #                               is: sources, axes, and their declared dead zones
 #   scripts/dev.sh display      screen size and density; every dp number in the
@@ -104,6 +105,12 @@ case "${1:-deploy}" in
     adbx shell am start -n "$ACTIVITY" >/dev/null
     sleep 1
     "$0" state
+    ;;
+
+  test-ui)
+    # Gradle uninstalls instrumentation targets after testing. This build has
+    # its own applicationId: never run connected tests against the everyday app.
+    (cd "$ROOT" && ./gradlew.bat :app:connectedUitestAndroidTest --console=plain)
     ;;
 
   test)

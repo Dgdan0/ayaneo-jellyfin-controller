@@ -20,6 +20,7 @@ import com.pocketds.hub.net.HubEndpoints
 object HubSettings {
 
     private const val KEY_URL = "hub_url"
+    private const val KEY_CAST_URL = "cast_hub_url"
     private const val KEY_TOKEN = "hub_token"
     private const val KEY_USER_ID = "jellyfin_user_id"
     private const val KEY_USER_NAME = "jellyfin_user_name"
@@ -28,6 +29,14 @@ object HubSettings {
 
     fun baseUrl(context: Context): String =
         debugBaseUrlOverride ?: Prefs.of(context).getString(KEY_URL, "").orEmpty()
+
+    /** Public HTTPS address fetched by a Chromecast/Google TV directly. */
+    fun castBaseUrl(context: Context): String =
+        Prefs.of(context).getString(KEY_CAST_URL, "").orEmpty().ifEmpty { baseUrl(context) }
+
+    fun setCastBaseUrl(context: Context, url: String) {
+        Prefs.of(context).edit().putString(KEY_CAST_URL, HubEndpoints.normaliseBase(url)).apply()
+    }
 
     /** Process-local address used by debug builds and adb reverse hardware tests. */
     fun setDebugBaseUrl(url: String) {
@@ -72,6 +81,7 @@ object HubSettings {
         debugBaseUrlOverride = null
         Prefs.of(context).edit()
             .remove(KEY_URL).remove(KEY_TOKEN)
+            .remove(KEY_CAST_URL)
             .remove(KEY_USER_ID).remove(KEY_USER_NAME)
             .apply()
     }

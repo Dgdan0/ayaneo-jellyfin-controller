@@ -12,11 +12,14 @@ import (
 )
 
 type epubUpstreamState struct {
-	fileCalls int
-	rangeSeen string
-	saved     json.RawMessage
-	timestamp int64
-	conflict  bool
+	fileCalls  int
+	rangeSeen  string
+	saved      json.RawMessage
+	timestamp  int64
+	conflict   bool
+	readaloud  bool
+	audiobook  bool
+	formatSeen string
 }
 
 func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
@@ -28,14 +31,27 @@ func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
 		case "/api/v2/books":
 			_, _ = io.WriteString(w, `[{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":{"uuid":"ebook-12","pageCount":400}}]`)
 		case "/api/v2/books/12":
+			if state.readaloud {
+				_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","ebook":{"uuid":"ebook-12"},"audiobook":{"uuid":"audio-12"},"readaloud":{"uuid":"aligned-12"}}`)
+				return
+			}
+			if state.audiobook {
+				_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","ebook":{"uuid":"ebook-12"},"audiobook":{"uuid":"audio-12"}}`)
+				return
+			}
 			_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":{"uuid":"ebook-12","pageCount":400}}`)
 		case "/api/v2/books/12/files":
 			state.fileCalls++
 			state.rangeSeen = r.Header.Get("Range")
-			if r.URL.Query().Get("format") != "ebook" || r.Header.Get("Authorization") != "Bearer story-token" {
+			state.formatSeen = r.URL.Query().Get("format")
+			if (state.formatSeen != "ebook" && !(state.readaloud && state.formatSeen == "readaloud") && !(state.audiobook && state.formatSeen == "audiobook")) || r.Header.Get("Authorization") != "Bearer story-token" {
 				t.Fatalf("file request = %s auth=%q", r.URL.String(), r.Header.Get("Authorization"))
 			}
-			w.Header().Set("Content-Type", "application/epub+zip")
+			if state.formatSeen == "audiobook" {
+				w.Header().Set("Content-Type", "application/zip")
+			} else {
+				w.Header().Set("Content-Type", "application/epub+zip")
+			}
 			w.Header().Set("Content-Range", "bytes 4-7/12")
 			w.Header().Set("Content-Length", "4")
 			w.Header().Set("Accept-Ranges", "bytes")
@@ -69,6 +85,48 @@ func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
 			http.NotFound(w, r)
 		}
 	}))
+}
+
+func TestReadingReadaloudRequiresAvailableEditionAndForwardsOnlyAllowedFormat(t *testing.T) {
+	for _, available := range []bool{false, true} {
+		state := &epubUpstreamState{readaloud: available}
+		upstream := newEpubUpstream(t, state)
+		handler := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})).Handler()
+		_, child := bindEpubWork(t, handler)
+		path := "/v1/reading/works/" + child + "/publications/12/file"
+		got := libraryRequest(handler, path+"?format=readaloud")
+		if available {
+			if got.Code != 206 || state.formatSeen != "readaloud" {
+				t.Fatalf("readaloud = %d, format %q", got.Code, state.formatSeen)
+			}
+		} else if got.Code != 404 || state.fileCalls != 0 {
+			t.Fatalf("unavailable = %d calls %d", got.Code, state.fileCalls)
+		}
+		for _, format := range []string{"audio", "../../secret", "http://example.org"} {
+			if got := libraryRequest(handler, path+"?format="+format); got.Code != 400 {
+				t.Fatalf("format %s = %d", format, got.Code)
+			}
+		}
+		upstream.Close()
+	}
+}
+
+func TestReadingAudiobookArchiveRequiresAvailableEdition(t *testing.T) {
+	for _, available := range []bool{false, true} {
+		state := &epubUpstreamState{audiobook: available}
+		upstream := newEpubUpstream(t, state)
+		handler := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})).Handler()
+		_, child := bindEpubWork(t, handler)
+		got := libraryRequest(handler, "/v1/reading/works/"+child+"/publications/12/file?format=audiobook")
+		if available {
+			if got.Code != 206 || got.Header().Get("Content-Type") != "application/zip" || state.formatSeen != "audiobook" {
+				t.Fatalf("audio archive = %d type=%q format=%q", got.Code, got.Header().Get("Content-Type"), state.formatSeen)
+			}
+		} else if got.Code != 404 || state.fileCalls != 0 {
+			t.Fatalf("unavailable = %d calls %d", got.Code, state.fileCalls)
+		}
+		upstream.Close()
+	}
 }
 
 func bindEpubWork(t *testing.T, handler http.Handler) (string, string) {
@@ -178,5 +236,27 @@ func TestReadingEpubRejectsWrongBindingInvalidRangeLocatorAndMissingScope(t *tes
 	denied := libraryRequest(withoutScope, "/v1/reading/works/"+childID+"/publications/12/file")
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("missing scope = %d: %s", denied.Code, denied.Body.String())
+	}
+}
+
+func TestReadingEpubConditionalCheckpointRejectsChangedBase(t *testing.T) {
+	state := &epubUpstreamState{}
+	upstream := newEpubUpstream(t, state)
+	defer upstream.Close()
+	handler := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})).Handler()
+	_, child := bindEpubWork(t, handler)
+	path := "/v1/reading/works/" + child + "/publications/12/position"
+	var current ReadingEpubPosition
+	if err := json.Unmarshal(publicationRequest(handler, http.MethodGet, path, "").Body.Bytes(), &current); err != nil {
+		t.Fatal(err)
+	}
+	local := `{"href":"chapter-5.xhtml","locations":{"position":51}}`
+	bad := publicationRequest(handler, http.MethodPost, path, `{"locator":`+local+`,"timestamp":1700000001234,"checkBase":true,"expectedLocator":null}`)
+	if bad.Code != http.StatusConflict || state.saved != nil {
+		t.Fatalf("stale base: %d, saved=%s", bad.Code, state.saved)
+	}
+	good := publicationRequest(handler, http.MethodPost, path, `{"locator":`+local+`,"timestamp":1700000001234,"checkBase":true,"expectedLocator":`+string(current.Locator)+`}`)
+	if good.Code != http.StatusOK || state.saved == nil {
+		t.Fatalf("matching base: %d %s", good.Code, good.Body.String())
 	}
 }

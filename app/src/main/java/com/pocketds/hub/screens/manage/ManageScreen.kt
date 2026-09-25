@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.manage
 
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Typeface
@@ -30,6 +31,7 @@ import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
+import com.pocketds.hub.ui.SemanticColor
 import com.pocketds.hub.ui.activateOnTap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -87,7 +89,7 @@ class ManageScreen(
                 adapter = this@ManageScreen.adapter
                 itemAnimator = null
                 clipToPadding = false
-                setPadding(dp(10), 0, dp(10), dp(88))
+                setPadding(dp(10), 0, dp(10), dp(16))
                 addOnChildAttachStateChangeListener(
                     object : RecyclerView.OnChildAttachStateChangeListener {
                         override fun onChildViewAttachedToWindow(view: View) {
@@ -362,17 +364,17 @@ class ManageScreen(
         init {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(78)
-            setPadding(dp(18), dp(12), dp(18), dp(12))
+            minimumHeight = dp(64)
+            setPadding(dp(14), dp(8), dp(14), dp(8))
             background = cardBackground()
-            isFocusable = true
+            Styler.makeFocusable(this)
             isClickable = true
 
             icon = ImageView(context).apply {
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            addView(icon, LayoutParams(dp(46), dp(46)).apply {
+            addView(icon, LayoutParams(dp(36), dp(36)).apply {
                 marginEnd = dp(14)
             })
 
@@ -383,7 +385,7 @@ class ManageScreen(
                 orientation = HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 name = TextView(context).apply {
-                    textSize = 17f
+                    textSize = 15f
                     setTypeface(typeface, Typeface.BOLD)
                     setTextColor(colors.primaryText)
                 }
@@ -412,7 +414,7 @@ class ManageScreen(
                 setTextColor(colors.primaryText)
                 background = Styler.chipBackground(context, colors)
                 minWidth = dp(78)
-                minHeight = dp(44)
+                minHeight = dp(48)
                 setPadding(dp(12), dp(8), dp(12), dp(8))
                 isClickable = true
                 isFocusable = false
@@ -423,8 +425,8 @@ class ManageScreen(
         }
 
         fun bind(row: ServiceRow) {
-            icon.setImageResource(serviceLogo(row.icon))
-            icon.background = if (row.icon == "hub") GradientDrawable().apply {
+            com.pocketds.hub.ui.ServiceLogo.bind(icon,serviceLogo(row.icon))
+            icon.background = if (row.icon == "hub") ThemeGradientDrawable().apply {
                 cornerRadius = Styler.dp(context, 12f)
                 setColor(0xFF0FADA0.toInt())
             } else null
@@ -432,15 +434,15 @@ class ManageScreen(
             icon.setPadding(inset, inset, inset, inset)
             name.text = row.name
             state.text = stateLabel(row.state)
-            state.setTextColor(if (row.state == "up") colors.accentText else colors.primaryText)
-            state.background = GradientDrawable().apply {
+            state.setTextColor(SemanticColor.foreground(stateColor(row.state)))
+            state.background = ThemeGradientDrawable().apply {
                 cornerRadius = Styler.dp(context, 12f)
                 setColor(stateColor(row.state))
             }
             detail.text = row.detail.ifEmpty { "No additional information" }
             scan.visibility = if (row.id in scannableServices) View.VISIBLE else View.GONE
             scan.contentDescription = "Scan ${row.name} library"
-            scan.setOnClickListener { scanLibrary(row.id) }
+            scan.activateOnTap { scanLibrary(row.id) }
             contentDescription = buildString {
                 append(row.name).append(", ").append(stateLabel(row.state))
                 if (row.detail.isNotEmpty()) append(", ").append(row.detail)
@@ -466,7 +468,7 @@ class ManageScreen(
     }
 
     private fun cardBackground(): StateListDrawable {
-        fun face(color: Int, stroke: Int = 0) = GradientDrawable().apply {
+        fun face(color: Int, stroke: Int = 0) = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(host.viewContext, 14f)
             setColor(color)
             if (stroke > 0) setStroke(stroke, this@ManageScreen.colors.focusRing)

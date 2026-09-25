@@ -17,12 +17,12 @@ import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 
 /** Authenticated, bounded disk cache feeding the tiled image decoder. */
-class ReaderPageRepository(context: Context, private val client: HubClient) {
+class ReaderPageRepository(context: Context, private val client: HubClient, private val identity: String = "") {
     private val directory = File(context.cacheDir, "reader-pages").apply { mkdirs() }
     private val locks = ConcurrentHashMap<String, Mutex>()
 
     suspend fun obtain(url: String): File {
-        val name = ReaderPageCachePolicy.fileName(url)
+        val name = ReaderPageCachePolicy.fileName(identity + "\u0000" + url)
         val target = File(directory, name)
         return locks.getOrPut(name) { Mutex() }.withLock {
             if (target.isFile && target.length() > 0) {

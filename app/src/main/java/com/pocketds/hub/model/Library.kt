@@ -7,7 +7,8 @@ data class LibraryView(
     val id: String = "",
     val name: String = "",
     val kind: String = "",
-    val image: String = ""
+    val image: String = "",
+    val imageStyle: String = ""
 )
 
 @Serializable

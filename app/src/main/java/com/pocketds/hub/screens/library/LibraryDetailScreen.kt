@@ -1,10 +1,14 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.graphics.Bitmap
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
@@ -34,9 +38,19 @@ import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.screens.discover.ReleaseTargetsScreen
 import com.pocketds.hub.settings.HubSettings
 import com.pocketds.hub.state.PagedLoadState
+import com.pocketds.hub.ui.ChoiceOverlay
+import com.pocketds.hub.ui.DetailHeaderView
+import com.pocketds.hub.ui.DetailOverviewView
+import com.pocketds.hub.ui.ContinuationCardView
+import com.pocketds.hub.ui.DetailArtworkCardView
+import com.pocketds.hub.ui.DetailStyler
+import com.pocketds.hub.ui.DetailActions
+import com.pocketds.hub.ui.DetailLayout
+import com.pocketds.hub.ui.DetailSnapshotStore
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.MediaActionIcon
 import com.pocketds.hub.ui.MediaActionIconDrawable
+import com.pocketds.hub.ui.CenteredIconTextView
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
@@ -58,6 +72,7 @@ class LibraryDetailScreen(
     private val expectedType: String,
     private val ringVisible: () -> Boolean
 ) : Screen {
+    override val contentDomain = com.pocketds.hub.state.ContentMode.MEDIA
     override val title = fallbackTitle
     override val focusOnShow = true
 
@@ -69,12 +84,16 @@ class LibraryDetailScreen(
     private lateinit var originalTitle: TextView
     private lateinit var meta: TextView
     private lateinit var progress: TextView
-    private lateinit var overview: TextView
+    private lateinit var overview: DetailOverviewView
+    private lateinit var header: DetailHeaderView
+    private lateinit var overlay: ChoiceOverlay
+    private lateinit var moreAction: TextView
+    private var lastFocusKey: String? = null
     private lateinit var credits: TextView
     private lateinit var mediaInfo: TextView
     private lateinit var status: TextView
     private lateinit var episodePreviewLabel: TextView
-    private lateinit var episodePreview: LinearLayout
+    private lateinit var episodePreview: ContinuationCardView
     private lateinit var episodePreviewImage: ImageView
     private lateinit var episodePreviewTitle: TextView
     private lateinit var episodePreviewMeta: TextView
@@ -103,197 +122,88 @@ class LibraryDetailScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
-        return ScrollView(host.viewContext).apply {
-            isFocusable = false
-            isFillViewport = true
-            setBackgroundColor(colors.background)
-            clipChildren = false
+        val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
+        root.addView(ScrollView(host.viewContext).apply {
+            isFocusable = false; isFillViewport = true; clipChildren = false
             addView(LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                clipChildren = false
-                setPadding(dp(16), dp(12), dp(16), dp(90))
-                backdrop = ImageView(context).apply {
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    alpha = .35f
-                    setBackgroundColor(colors.posterPlaceholder)
-                    layoutParams = LinearLayout.LayoutParams(MATCH, dp(112))
+                orientation = LinearLayout.VERTICAL; clipChildren = false
+                header = DetailHeaderView(context, colors, ringVisible)
+                heading = header.titleView; heading.text = fallbackTitle
+                backdrop = header.landscape; poster = header.poster
+                originalTitle = header.subtitleView; meta = header.metadataView; progress = header.stateView
+                overview = header.overview; actions = header.actions
+                playAction = actionButton("Play", ACTION_PLAY)
+                favoriteAction = actionButton("Favourite", ACTION_FAVORITE)
+                downloadAction = actionButton("Download", ACTION_DOWNLOAD)
+                moreAction = actionButton("More actions", ACTION_MORE)
+                restartAction = actionButton("Start over", ACTION_RESTART)
+                optionsAction = actionButton("Playback options", ACTION_OPTIONS)
+                watchedAction = actionButton("Mark watched", ACTION_WATCHED)
+                listOf(playAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
+                    .forEach { actions.addView(it) }
+                playAction.layoutParams = LinearLayout.LayoutParams(dp(54), dp(54)).apply { marginEnd = dp(18) }
+                fun playFace(fill: Int, focused: Boolean) = ThemeGradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(fill)
+                    if (focused) setStroke(dp(2), this@LibraryDetailScreen.colors.primaryText)
                 }
-                addView(backdrop)
+                playAction.background = StateListDrawable().apply {
+                    addState(intArrayOf(android.R.attr.state_focused), playFace(colors.accent, true))
+                    addState(intArrayOf(), playFace(colors.accent, false))
+                }
+                actions.visibility = View.GONE
+                addView(header, LinearLayout.LayoutParams(MATCH, WRAP))
                 addView(LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    setPadding(0, dp(12), 0, 0)
-                    poster = ImageView(context).apply {
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        setBackgroundColor(colors.posterPlaceholder)
-                        layoutParams = LinearLayout.LayoutParams(dp(96), dp(144))
+                    orientation = LinearLayout.VERTICAL; clipChildren = false
+                    setPadding(dp(24), 0, dp(24), dp(18))
+                    status = TextView(context).apply { textSize = 11f; setTextColor(colors.mutedText) }
+                    addView(status)
+                    episodePreviewLabel = TextView(context).apply { visibility = View.GONE }
+                    episodePreview = ContinuationCardView(context, colors, ringVisible).apply {
+                        visibility = View.GONE
+                        onFocused = { lastFocusKey = "continue"; host.refreshHints() }
+                        activateOnTap { openSeriesTargetDetails() }
                     }
-                    addView(poster)
-                    addView(LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(dp(14), 0, 0, 0)
-                        heading = TextView(context).apply {
-                            text = fallbackTitle
-                            textSize = 25f
-                            setTextColor(colors.primaryText)
-                        }
-                        addView(heading)
-                        originalTitle = TextView(context).apply {
-                            textSize = 12f
-                            setTextColor(colors.mutedText)
-                            setPadding(0, dp(2), 0, 0)
-                            visibility = View.GONE
-                        }
-                        addView(originalTitle)
-                        meta = TextView(context).apply {
-                            textSize = 13f
-                            setTextColor(colors.mutedText)
-                            setPadding(0, dp(4), 0, 0)
-                        }
-                        addView(meta)
-                        progress = TextView(context).apply {
-                            textSize = 12f
-                            setTextColor(colors.accent)
-                            setPadding(0, dp(8), 0, 0)
-                        }
-                        addView(progress)
-                        status = TextView(context).apply {
-                            text = "Asking Jellyfin…"
-                            textSize = 11f
-                            setTextColor(colors.mutedText)
-                            setPadding(0, dp(8), 0, 0)
-                        }
-                        addView(status)
-                    }, LinearLayout.LayoutParams(0, WRAP, 1f))
-                })
-                actions = LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.START
-                    setPadding(dp(8), dp(12), dp(8), dp(4))
-                    playAction = actionButton("Play", ACTION_PLAY)
-                    addView(playAction)
-                    restartAction = actionButton("Start over", ACTION_RESTART)
-                    addView(restartAction)
-                    optionsAction = actionButton("Playback options", ACTION_OPTIONS)
-                    addView(optionsAction)
-                    watchedAction = actionButton("Mark watched", ACTION_WATCHED)
-                    addView(watchedAction)
-                    favoriteAction = actionButton("Favourite", ACTION_FAVORITE)
-                    addView(favoriteAction)
-                    downloadAction = actionButton("Download", ACTION_DOWNLOAD)
-                    addView(downloadAction)
-                    visibility = View.GONE
-                }
-                addView(HorizontalScrollView(context).apply {
-                    isHorizontalScrollBarEnabled = false
-                    isFillViewport = false
-                    addView(actions, ViewGroup.LayoutParams(WRAP, WRAP))
+                    episodePreviewImage = episodePreview.image
+                    episodePreviewTitle = episodePreview.titleView
+                    episodePreviewMeta = episodePreview.metadataView
+                    episodePreviewProgress = episodePreview.progressView
+                    addView(episodePreview, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(8) })
+                    seasonLabel = TextView(context).apply {
+                        text = "Seasons"; textSize = 17f; setTextColor(colors.primaryText)
+                        setPadding(0, dp(16), 0, dp(2)); visibility = View.GONE
+                    }
+                    addView(seasonLabel)
+                    seasons = RecyclerView(context).apply {
+                        layoutManager = LinearLayoutManager(context, RecyclerView.HORIZONTAL, false)
+                        adapter = seasonAdapter; isFocusable = false
+                        clipToPadding = false; clipChildren = false; visibility = View.GONE
+                        setItemViewCacheSize(8)
+                        val clearance = DetailLayout.focusClearance(DetailLayout.posterCardHeight(156, resources.configuration.fontScale)).coerceAtLeast(10)
+                        setPadding(dp(8), dp(clearance), dp(8), dp(clearance))
+                    }
+                    addView(seasons, LinearLayout.LayoutParams(MATCH, WRAP))
+                    credits = TextView(context).apply {
+                        textSize = 12f; setTextColor(colors.mutedText); setLineSpacing(0f, 1.12f)
+                        setPadding(0, dp(16), 0, dp(6)); visibility = View.GONE
+                    }
+                    addView(credits)
+                    mediaInfo = TextView(context).apply {
+                        textSize = 12f; setTextColor(colors.mutedText); setLineSpacing(0f, 1.16f)
+                        setPadding(0, dp(12), 0, dp(8)); visibility = View.GONE
+                    }
+                    addView(mediaInfo)
                 }, LinearLayout.LayoutParams(MATCH, WRAP))
-                overview = TextView(context).apply {
-                    textSize = 15f
-                    setTextColor(colors.primaryText)
-                    setLineSpacing(0f, 1.12f)
-                    setPadding(0, dp(14), 0, dp(8))
-                }
-                addView(overview)
-                credits = TextView(context).apply {
-                    textSize = 12f
-                    setTextColor(colors.mutedText)
-                    setLineSpacing(0f, 1.12f)
-                    setPadding(0, dp(5), 0, dp(6))
-                    visibility = View.GONE
-                }
-                addView(credits)
-                mediaInfo = TextView(context).apply {
-                    textSize = 12f
-                    setTextColor(colors.primaryText)
-                    setLineSpacing(0f, 1.16f)
-                    setPadding(0, dp(9), 0, dp(8))
-                    visibility = View.GONE
-                }
-                addView(mediaInfo)
-                episodePreviewLabel = TextView(context).apply {
-                    textSize = 17f
-                    setTextColor(colors.primaryText)
-                    setPadding(0, dp(10), 0, dp(5))
-                    visibility = View.GONE
-                }
-                addView(episodePreviewLabel)
-                episodePreview = LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    background = Styler.cardBackground(context, colors, cornerDp = 12f)
-                    Styler.makeFocusable(this)
-                    descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-                    setPadding(dp(7), dp(7), dp(14), dp(7))
-                    visibility = View.GONE
-                    layoutParams = LinearLayout.LayoutParams(dp(390), dp(124))
-                    episodePreviewImage = ImageView(context).apply {
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        setBackgroundColor(colors.posterPlaceholder)
-                    }
-                    addView(episodePreviewImage, LinearLayout.LayoutParams(dp(184), dp(104)))
-                    addView(LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(dp(12), 0, 0, 0)
-                        episodePreviewTitle = TextView(context).apply {
-                            textSize = 15f
-                            maxLines = 2
-                            setTextColor(colors.primaryText)
-                        }
-                        addView(episodePreviewTitle)
-                        episodePreviewMeta = TextView(context).apply {
-                            textSize = 11f
-                            maxLines = 2
-                            setTextColor(colors.mutedText)
-                            setPadding(0, dp(5), 0, 0)
-                        }
-                        addView(episodePreviewMeta)
-                        episodePreviewProgress = ProgressBar(
-                            context,
-                            null,
-                            android.R.attr.progressBarStyleHorizontal
-                        ).apply {
-                            max = 1_000
-                            visibility = View.GONE
-                        }
-                        addView(episodePreviewProgress, LinearLayout.LayoutParams(MATCH, dp(8)).apply {
-                            topMargin = dp(7)
-                        })
-                    }, LinearLayout.LayoutParams(0, WRAP, 1f))
-                    // The resume/next preview spans the detail pane; keep its
-                    // ring but never grow it beneath the navigation rail.
-                    FocusDecorator.attach(this, ringVisible, scale = false)
-                    setOnFocusChangeListener { view, focused ->
-                        FocusDecorator.refresh(view, ringVisible())
-                        if (focused) host.refreshHints()
-                    }
-                    activateOnTap { openSeriesTargetDetails() }
-                }
-                addView(episodePreview)
-                seasonLabel = TextView(context).apply {
-                    text = "Seasons"
-                    textSize = 17f
-                    setTextColor(colors.primaryText)
-                    setPadding(0, dp(10), 0, dp(5))
-                    visibility = View.GONE
-                }
-                addView(seasonLabel)
-                seasons = RecyclerView(context).apply {
-                    layoutManager = LinearLayoutManager(context, RecyclerView.HORIZONTAL, false)
-                    adapter = seasonAdapter
-                    clipChildren = false
-                    clipToPadding = false
-                    visibility = View.GONE
-                    setItemViewCacheSize(8)
-                    setPadding(dp(16), dp(12), dp(16), dp(12))
-                    layoutParams = LinearLayout.LayoutParams(MATCH, dp(226))
-                }
-                addView(seasons)
-            })
-        }
+            }, ViewGroup.LayoutParams(MATCH, WRAP))
+        }, FrameLayout.LayoutParams(MATCH, MATCH))
+        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
+        root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
+        overview.onChanged = { host.refreshHints() }
+        return root
     }
 
     override fun onShow() {
+        overview.collapse()
         val returning = item != null
         if (!returning && itemJob?.isActive != true) loadItem()
         if (expectedType == "series" && seasonAdapter.itemCount == 0 && seasonsJob?.isActive != true) {
@@ -301,6 +211,9 @@ class LibraryDetailScreen(
         }
         if (item?.type == "series" && seriesTarget == null && targetJob?.isActive != true) loadPlayTarget()
         if (returning) {
+            // Android can auto-focus the nearest continuation while the retained
+            // ScrollView becomes visible. Restore the user's explicit selection.
+            header.post { if (header.isShown) requestInitialFocus() }
             applyPendingPlaybackProgress()
             invalidateFinishedSeriesTarget()
             returnRefreshJob?.cancel()
@@ -317,6 +230,12 @@ class LibraryDetailScreen(
     }
 
     override fun onHide() {
+        when {
+            seasons.hasFocus() -> focusedSeason()?.let { lastFocusKey = "season:${it.id}" }
+            episodePreview.hasFocus() -> lastFocusKey = "continue"
+            else -> listOf(playAction, favoriteAction, downloadAction, moreAction).firstOrNull { it.hasFocus() }
+                ?.let { lastFocusKey = it.tag as? String }
+        }
         selectedSeason = focusedSeasonPosition().takeIf { it >= 0 } ?: selectedSeason
         scope.coroutineContext.cancelChildren()
         itemJob = null
@@ -329,6 +248,18 @@ class LibraryDetailScreen(
     override fun onDestroyView() { scope.cancel(); host = null }
 
     override fun requestInitialFocus(): Boolean {
+        if (lastFocusKey == "continue" && episodePreview.visibility == View.VISIBLE) return episodePreview.requestFocus()
+        if (lastFocusKey?.startsWith("season:") == true) {
+            val index = seasonAdapter.positionOf(lastFocusKey.orEmpty().removePrefix("season:"))
+            if (index >= 0) {
+                seasons.scrollToPosition(index)
+                seasons.post { seasons.findViewHolderForAdapterPosition(index)?.itemView?.requestFocus() }
+                return true
+            }
+        }
+        listOf(playAction, favoriteAction, downloadAction, moreAction)
+            .firstOrNull { it.tag == lastFocusKey && it.visibility == View.VISIBLE && it.isEnabled }
+            ?.let { return it.requestFocus() }
         if (::playAction.isInitialized && playAction.visibility == View.VISIBLE && playAction.isEnabled) {
             return playAction.requestFocus()
         }
@@ -340,8 +271,21 @@ class LibraryDetailScreen(
     }
 
     override fun hints(): List<ButtonHint> = buildList {
+        if (overlay.isOpen) { add(ButtonHint.activate("Choose")); add(ButtonHint.back("Close menu")); return@buildList }
+        if (overview.hasFocus()) {
+            overview.actionHint?.let { add(ButtonHint.activate(it)) }
+            add(ButtonHint.back(if (overview.expanded) "Collapse description" else "Back"))
+            return@buildList
+        }
+        if (seasons.hasFocus() || episodePreview.hasFocus()) {
+            add(ButtonHint.activate(if (seasons.hasFocus()) "Episodes" else "Episode details"))
+            if (seasons.hasFocus() && !item?.mediaKey.isNullOrEmpty()) add(ButtonHint.secondary("Find releases"))
+            add(ButtonHint.back())
+            add(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
+            return@buildList
+        }
         val value = item
-        val focusedAction = listOf(playAction, restartAction, optionsAction, watchedAction, favoriteAction, downloadAction)
+        val focusedAction = listOf(playAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
             .firstOrNull { it.visibility == View.VISIBLE && it.hasFocus() }
         if (focusedAction != null) {
             add(ButtonHint.activate(focusedAction.contentDescription.toString()))
@@ -365,7 +309,9 @@ class LibraryDetailScreen(
         add(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
     }
 
-    override fun onPad(action: PadAction): Boolean = when (action) {
+    override fun onPad(action: PadAction): Boolean {
+        if (overlay.onPad(action) || overview.onPad(action)) return true
+        return when (action) {
         is PadAction.Step -> when {
             !actions.hasFocus() -> false
             action.direction == Direction.LEFT -> { moveActionFocus(-1); true }
@@ -379,8 +325,9 @@ class LibraryDetailScreen(
             watchedAction.hasFocus() -> { watchedAction.performClick(); true }
             favoriteAction.hasFocus() -> { favoriteAction.performClick(); true }
             downloadAction.hasFocus() -> { downloadAction.performClick(); true }
+            moreAction.hasFocus() -> { moreAction.performClick(); true }
             episodePreview.hasFocus() -> { episodePreview.performClick(); true }
-            else -> focusedSeason()?.let(::openSeason) != null
+            else -> seasons.hasFocus() && focusedSeason()?.let(::openSeason) != null
         }
         PadAction.Primary -> if (item?.type == "movie" || item?.type == "episode") {
             host?.openPlaybackOptions(itemId, if (canResume(item)) "resume" else "restart")
@@ -407,8 +354,10 @@ class LibraryDetailScreen(
         else -> false
     }
 
+    }
+
     private fun moveActionFocus(delta: Int) {
-        val available = listOf(playAction, restartAction, optionsAction, watchedAction, favoriteAction, downloadAction)
+        val available = listOf(playAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
             .filter { it.visibility == View.VISIBLE && it.isEnabled && it.isFocusable }
         val current = available.indexOfFirst { it.hasFocus() }
         if (current < 0) return
@@ -423,6 +372,7 @@ class LibraryDetailScreen(
             when (val result = api.libraryItem(itemId)) {
                 is HubResult.Ok -> render(result.value)
                 is HubResult.Failed -> {
+                    status.visibility = View.VISIBLE
                     status.setTextColor(colors.dangerText)
                     status.text = if (item == null) result.message + " · Select retries"
                         else result.message + " · showing previous details"
@@ -440,6 +390,7 @@ class LibraryDetailScreen(
             body.item
         )
         item = value
+        DetailSnapshotStore.saveItem(context, value)
         heading.text = value.title.ifEmpty { fallbackTitle }
         originalTitle.text = value.originalTitle
         originalTitle.visibility = if (
@@ -461,9 +412,11 @@ class LibraryDetailScreen(
                 value.progress > 0 -> add("${(value.progress * 100).toInt()}% watched")
                 value.unplayedCount > 0 -> add("${value.unplayedCount} unwatched")
             }
+            if (canResume(value)) add("Continue at ${playTime(value.positionSeconds.toLong() * 1_000)}")
             if (value.favorite) add("★ Favourite")
         }.joinToString(" · ")
-        overview.text = value.overview.ifEmpty { "No description available." }
+        progress.visibility = if (progress.text.isNullOrBlank()) View.GONE else View.VISIBLE
+        overview.bind(value.overview)
         credits.text = creditText(value)
         credits.visibility = if (credits.text.isNullOrBlank()) View.GONE else View.VISIBLE
         mediaInfo.text = mediaInfoText(value)
@@ -474,8 +427,10 @@ class LibraryDetailScreen(
             body.cache.stale -> "Showing cached watch state"
             else -> ""
         }
-        loadImage(backdrop, value.backdrop.ifEmpty { value.thumb })
-        loadImage(poster, value.poster.ifEmpty { value.thumb })
+        status.visibility = if (status.text.isNullOrBlank()) View.GONE else View.VISIBLE
+        val landscapePath = value.backdrop.ifBlank { if (value.type == "episode") value.thumb else "" }
+        header.bindArtwork(value.type, landscapePath.takeIf { it.isNotBlank() }?.let(api::imageUrl),
+            value.poster.ifBlank { value.thumb }.takeIf { it.isNotBlank() }?.let(api::imageUrl), imageLoader())
         renderActions(value)
         if (value.type == "series" && seasonAdapter.itemCount == 0 && seasonsJob?.isActive != true) {
             loadSeasons()
@@ -486,14 +441,12 @@ class LibraryDetailScreen(
     private fun renderActions(value: LibraryItem) {
         actions.visibility = if (value.type in setOf("movie", "episode", "series")) View.VISIBLE else View.GONE
         val playable = value.type == "movie" || value.type == "episode"
-        restartAction.visibility = if (playable) View.VISIBLE else View.GONE
-        optionsAction.visibility = if (playable) View.VISIBLE else View.GONE
-        watchedAction.visibility = View.VISIBLE
-        favoriteAction.visibility = View.VISIBLE
-        downloadAction.visibility = View.VISIBLE
-        val waitingForSeriesTarget = value.type == "series" && seriesTarget == null
-        watchedAction.isFocusable = !waitingForSeriesTarget
-        favoriteAction.isFocusable = !waitingForSeriesTarget
+        val visibleActions = DetailActions.forType(value.type).visible
+        listOf(playAction, restartAction, optionsAction, watchedAction, moreAction, favoriteAction, downloadAction).forEach {
+            it.visibility = if (it.tag in visibleActions) View.VISIBLE else View.GONE
+        }
+        watchedAction.isFocusable = true
+        favoriteAction.isFocusable = true
         watchedAction.text = ""
         watchedAction.contentDescription = if (value.played) "Mark unwatched" else "Mark watched"
         setActionIcon(
@@ -530,15 +483,10 @@ class LibraryDetailScreen(
             seriesTarget == null -> "Finding next episode…"
             else -> seriesActionLabel(requireNotNull(seriesTarget))
         }
-        playAction.text = when {
-            playable && canResume(value) -> playTime(value.positionSeconds.toLong() * 1_000)
-            value.type == "series" && seriesTarget?.kind == "resume" -> {
-                playTime(requireNotNull(seriesTarget).item.positionSeconds.toLong() * 1_000)
-            }
-            else -> ""
-        }
+        playAction.text = ""
         playAction.contentDescription = playLabel
         resizeActionForText(playAction)
+        setActionIcon(playAction, MediaActionIcon.PLAY)
         restartAction.text = ""
         restartAction.contentDescription = "Start over"
         optionsAction.text = ""
@@ -552,7 +500,7 @@ class LibraryDetailScreen(
         targetJob = scope.launch {
             when (val result = api.seriesPlayTarget(itemId)) {
                 is HubResult.Ok -> {
-                    val alreadyFocusedContent = actions.hasFocus() || seasons.hasFocus() || episodePreview.hasFocus()
+                    val alreadyFocusedContent = header.hasFocus() || seasons.hasFocus() || episodePreview.hasFocus()
                     if (isFinishedCheckpoint(result.value.item.id)) {
                         // Jellyfin processes Stop asynchronously. Do not offer the just-finished
                         // episode as Resume while the server advances its Next Up state.
@@ -571,6 +519,7 @@ class LibraryDetailScreen(
                     staleTargetRetries = 0
                     val resolved = withPendingPlaybackProgress(result.value)
                     seriesTarget = resolved
+                    DetailSnapshotStore.saveTarget(requireNotNull(host).viewContext, itemId, resolved)
                     renderEpisodePreview(resolved)
                     item?.let(::renderActions)
                     if (!alreadyFocusedContent) playAction.post { playAction.requestFocus() }
@@ -646,9 +595,9 @@ class LibraryDetailScreen(
             "next" -> "Next episode"
             else -> "Start series"
         }
-        episodePreviewLabel.visibility = View.VISIBLE
+        episodePreviewLabel.visibility = View.GONE
         episodePreview.visibility = View.VISIBLE
-        episodePreviewTitle.text = episode.subtitle.ifEmpty { episode.title }
+        episodePreviewTitle.text = "${episodePreviewLabel.text} · " + episode.subtitle.ifEmpty { episode.title }
         episodePreviewMeta.text = buildList {
             if (episode.runtimeSeconds > 0) add(runtime(episode.runtimeSeconds))
             when {
@@ -667,6 +616,20 @@ class LibraryDetailScreen(
 
     private fun performAction(action: String) {
         when (action) {
+            ACTION_MORE -> {
+                val value = item ?: return
+                val choices = DetailActions.forType(value.type).overflow.map { key ->
+                    ChoiceOverlay.Choice(key, when (key) {
+                        ACTION_RESTART -> "Start over"
+                        ACTION_OPTIONS -> "Playback options"
+                        else -> if (value.played) "Mark unwatched" else "Mark watched"
+                    })
+                }
+                overlay.show("More actions", value.title, choices,
+                    onCancel = { moreAction.requestFocus(); host?.refreshHints() },
+                    onPick = { moreAction.requestFocus(); performAction(it); host?.refreshHints() })
+                host?.refreshHints()
+            }
             ACTION_PLAY -> {
                 val value = item ?: return
                 if (value.type == "series") {
@@ -784,18 +747,18 @@ class LibraryDetailScreen(
         return if (gib >= 1.0) "%.1f GB".format(gib) else "%.0f MB".format(bytes / 1_048_576.0)
     }
 
-    private fun actionButton(label: String, action: String) = TextView(requireNotNull(host).viewContext).apply {
+    private fun actionButton(label: String, action: String) = CenteredIconTextView(requireNotNull(host).viewContext).apply {
         text = ""
         textSize = 14f
         gravity = Gravity.CENTER
         setTextColor(colors.primaryText)
-        background = Styler.cardBackground(context, colors)
-        Styler.makeFocusable(this)
+        DetailStyler.action(this, colors, primary = action == ACTION_PLAY)
+        tag = action
         contentDescription = label
         setPadding(dp(12), dp(10), dp(12), dp(10))
         compoundDrawablePadding = 0
         setActionIcon(this, iconForAction(action))
-        layoutParams = LinearLayout.LayoutParams(dp(50), dp(50)).apply { marginEnd = dp(9) }
+        layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(8) }
         FocusDecorator.attach(this, ringVisible, scale = false)
         setOnFocusChangeListener { view, _ ->
             FocusDecorator.refresh(view, ringVisible())
@@ -806,7 +769,7 @@ class LibraryDetailScreen(
 
     private fun resizeActionForText(view: TextView) {
         val params = view.layoutParams as? LinearLayout.LayoutParams ?: return
-        params.width = if (view.text.isNullOrEmpty()) dp(50) else dp(92)
+        params.width = if (view == playActionOrNull()) dp(54) else if (view.text.isNullOrEmpty()) dp(50) else dp(92)
         view.layoutParams = params
     }
 
@@ -816,17 +779,18 @@ class LibraryDetailScreen(
         ACTION_WATCHED -> MediaActionIcon.UNWATCHED
         ACTION_FAVORITE -> MediaActionIcon.NOT_FAVOURITE
         ACTION_DOWNLOAD -> MediaActionIcon.DOWNLOAD
+        ACTION_MORE -> MediaActionIcon.MORE
         else -> MediaActionIcon.PLAY
     }
 
     private fun setActionIcon(view: TextView, icon: MediaActionIcon) {
-        view.setCompoundDrawablesRelativeWithIntrinsicBounds(
-            MediaActionIconDrawable(view.context, icon, colors.primaryText),
-            null,
-            null,
-            null
-        )
+        val drawable = MediaActionIconDrawable(view.context, icon,
+            if (view == playActionOrNull()) colors.accentText else colors.primaryText)
+        if (view is CenteredIconTextView) view.setCenteredIcon(drawable, dp(21))
+        else view.setCompoundDrawablesRelativeWithIntrinsicBounds(drawable, null, null, null)
     }
+
+    private fun playActionOrNull(): TextView? = if (::playAction.isInitialized) playAction else null
 
     private fun seriesActionLabel(target: SeriesPlayTargetResponse): String {
         val episode = target.item
@@ -865,11 +829,19 @@ class LibraryDetailScreen(
     }
 
     private fun renderSeasons(body: LibrarySeasonsResponse) {
+        val focusedId = if (seasons.hasFocus()) focusedSeason()?.id else null
         seasonAdapter.submit(body.items)
         seasonLabel.visibility = View.VISIBLE
         seasons.visibility = if (body.items.isEmpty()) View.GONE else View.VISIBLE
         seasonLabel.setTextColor(colors.primaryText)
         seasonLabel.text = if (body.items.isEmpty()) "No seasons found" else "Seasons"
+        if (focusedId != null) {
+            val position = seasonAdapter.positionOf(focusedId)
+            if (position >= 0) {
+                seasons.scrollToPosition(position)
+                seasons.post { seasons.findViewHolderForAdapterPosition(position)?.itemView?.requestFocus() }
+            } else playAction.post { playAction.requestFocus() }
+        }
         host?.refreshHints()
     }
 
@@ -919,53 +891,30 @@ class LibraryDetailScreen(
 
     private inner class SeasonAdapter : RecyclerView.Adapter<SeasonHolder>() {
         private val values = mutableListOf<LibraryItem>()
-        fun submit(next: List<LibraryItem>) { values.clear(); values.addAll(next); notifyDataSetChanged() }
+        private val stableIds = mutableMapOf<String, Long>()
+        init { setHasStableIds(true) }
+        override fun getItemId(position: Int) = stableIds.getOrPut(values[position].id) { stableIds.size.toLong() }
+        fun submit(next: List<LibraryItem>) {
+            if (values == next) return
+            values.clear(); values.addAll(next); notifyDataSetChanged()
+        }
         fun at(position: Int) = values.getOrNull(position)
+        fun positionOf(id: String) = values.indexOfFirst { it.id == id }
         override fun getItemCount() = values.size
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SeasonHolder {
-            lateinit var image: ImageView
-            lateinit var label: TextView
-            lateinit var detail: TextView
-            val card = LinearLayout(parent.context).apply {
-                orientation = LinearLayout.VERTICAL
-                background = Styler.cardBackground(context, colors)
-                Styler.makeFocusable(this)
-                descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-                setPadding(dp(6), dp(6), dp(6), dp(8))
-                layoutParams = RecyclerView.LayoutParams(dp(132), dp(216)).apply {
-                    setMargins(dp(8), dp(8), dp(8), dp(8))
-                }
-                image = ImageView(context).apply {
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    setBackgroundColor(colors.posterPlaceholder)
-                }
-                addView(image, LinearLayout.LayoutParams(MATCH, dp(168)))
-                label = TextView(context).apply {
-                    textSize = 14f
-                    maxLines = 1
-                    gravity = Gravity.CENTER
-                    setTextColor(colors.primaryText)
-                    setPadding(dp(4), dp(6), dp(4), 0)
-                }
-                addView(label, LinearLayout.LayoutParams(MATCH, WRAP))
-                detail = TextView(context).apply {
-                    textSize = 10f
-                    maxLines = 1
-                    gravity = Gravity.CENTER
-                    setTextColor(colors.mutedText)
-                }
-                addView(detail, LinearLayout.LayoutParams(MATCH, WRAP))
-                FocusDecorator.attach(this, ringVisible)
-                setOnFocusChangeListener { _, focused ->
-                    FocusDecorator.refresh(this, ringVisible())
+            val card = DetailArtworkCardView(parent.context, colors, ringVisible).apply {
+                layoutParams = RecyclerView.LayoutParams(dp(112), WRAP).apply { marginEnd = dp(12) }
+                setOnFocusChangeListener { view, focused ->
+                    FocusDecorator.refresh(view, ringVisible())
                     if (focused) {
-                        selectedSeason = seasons.getChildAdapterPosition(this)
+                        selectedSeason = seasons.getChildAdapterPosition(view)
+                        (view.getTag(TAG_SEASON) as? LibraryItem)?.let { lastFocusKey = "season:${it.id}" }
                         host?.refreshHints()
                     }
                 }
                 activateOnTap { (getTag(TAG_SEASON) as? LibraryItem)?.let(::openSeason) }
             }
-            return SeasonHolder(card, image, label, detail)
+            return SeasonHolder(card, card.image, card.titleView, card.subtitleView)
         }
         override fun onBindViewHolder(holder: SeasonHolder, position: Int) {
             val value = values[position]
@@ -979,6 +928,7 @@ class LibraryDetailScreen(
                 else -> ""
             }
             holder.itemView.setTag(TAG_SEASON, value)
+            holder.itemView.contentDescription = "${holder.title.text}, ${holder.meta.text}"
             loadImage(holder.image, value.poster.ifEmpty { value.thumb })
         }
     }
@@ -999,6 +949,7 @@ class LibraryDetailScreen(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val TAG_SEASON = -0x7fffffe3
+        const val ACTION_MORE = "more"
         const val ACTION_PLAY = "play"
         const val ACTION_RESTART = "restart"
         const val ACTION_OPTIONS = "options"

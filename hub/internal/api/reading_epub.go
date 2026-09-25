@@ -30,6 +30,11 @@ func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
 	if !s.requireReading(w, r) {
 		return
 	}
+	format := r.URL.Query().Get("format")
+	if format != "" && format != "ebook" && format != "readaloud" && format != "audiobook" {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "invalid publication format"})
+		return
+	}
 	byteRange := strings.TrimSpace(r.Header.Get("Range"))
 	if byteRange != "" && !singleByteRange.MatchString(byteRange) {
 		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "only one valid byte range may be requested"})
@@ -48,14 +53,24 @@ func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
 	}
 	// The file transfer uses the request context rather than the metadata
 	// timeout. Closing the Android request immediately cancels Storyteller.
-	response, err := s.storyteller.OpenEbook(r.Context(), bookID, byteRange, ifRange)
+	open := s.storyteller.OpenEbook
+	if format == "readaloud" {
+		open = s.storyteller.OpenReadaloud
+	} else if format == "audiobook" {
+		open = s.storyteller.OpenAudiobook
+	}
+	response, err := open(r.Context(), bookID, byteRange, ifRange)
 	if err != nil {
 		writeUpstreamError(w, r, "storyteller", err)
 		return
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusPartialContent {
-		writeError(w, r, http.StatusBadGateway, Error{Code: CodeUpstreamDown, Service: "storyteller", Message: "Storyteller returned an invalid EPUB response", Retryable: true})
+		writeError(w, r, http.StatusBadGateway, Error{Code: CodeUpstreamDown, Service: "storyteller", Message: "Storyteller returned an invalid publication response", Retryable: true})
+		return
+	}
+	if err := prepareLongStream(w); err != nil {
+		writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "the EPUB stream could not be prepared", Retryable: true})
 		return
 	}
 	for _, name := range []string{"Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified"} {
@@ -64,7 +79,11 @@ func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	contentType := strings.ToLower(strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0]))
-	if contentType != "application/epub+zip" && contentType != "application/octet-stream" {
+	if format == "audiobook" {
+		if contentType != "application/zip" && contentType != "application/octet-stream" {
+			contentType = "application/zip"
+		}
+	} else if contentType != "application/epub+zip" && contentType != "application/octet-stream" {
 		contentType = "application/epub+zip"
 	}
 	w.Header().Set("Content-Type", contentType)
@@ -107,8 +126,10 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 	}
 
 	var body struct {
-		Locator   json.RawMessage `json:"locator"`
-		Timestamp int64           `json:"timestamp"`
+		Locator         json.RawMessage `json:"locator"`
+		Timestamp       int64           `json:"timestamp"`
+		CheckBase       bool            `json:"checkBase"`
+		ExpectedLocator json.RawMessage `json:"expectedLocator"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	decoder.DisallowUnknownFields()
@@ -118,6 +139,25 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 	}
 	if body.Timestamp <= 0 {
 		body.Timestamp = time.Now().UnixMilli()
+	}
+	unlock := lockReadingCheckpoint("storyteller", strconv.FormatInt(bookID, 10))
+	defer unlock()
+	if body.CheckBase {
+		current, err := s.storyteller.Position(ctx, bookID)
+		var locator json.RawMessage
+		if err != nil {
+			var upstream *httpx.Error
+			if !errors.As(err, &upstream) || upstream.Status != http.StatusNotFound {
+				writeUpstreamError(w, r, "storyteller", err)
+				return
+			}
+		} else {
+			locator = current.Locator
+		}
+		if !sameReadingLocator(body.ExpectedLocator, locator) {
+			writeError(w, r, http.StatusConflict, Error{Code: "reading_position_conflict", Message: "Reading progress changed on another device. Choose which position to continue from."})
+			return
+		}
 	}
 	if err := s.storyteller.SavePosition(ctx, bookID, body.Locator, body.Timestamp); err != nil {
 		var upstream *httpx.Error
@@ -186,12 +226,45 @@ func (s *Server) resolveStorytellerEbook(w http.ResponseWriter, r *http.Request,
 			}
 		}
 	}
+	if book.ID != bookID && !direct && s.storyteller != nil {
+		books, _, loadErr := cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+		if loadErr == nil {
+			var requested storyteller.Book
+			for _, candidate := range books {
+				if candidate.ID == bookID {
+					requested = candidate
+					break
+				}
+			}
+			if requested.ID > 0 {
+				for _, source := range binding.Sources {
+					if source.Source != "storyteller" {
+						continue
+					}
+					for _, base := range books {
+						if strconv.FormatInt(base.ID, 10) == source.SourceID && sameStorytellerEditionWork(base, requested) {
+							book = requested
+							break
+						}
+					}
+				}
+			}
+		}
+	}
 	if book.ID != bookID {
 		writeError(w, r, http.StatusNotFound, Error{Code: CodeNotFound, Message: "publication does not belong to this work"})
 		return 0, false
 	}
 	book = s.reconcileStorytellerBook(book)
-	if book.Ebook == nil || book.Ebook.Missing {
+	available := book.Ebook != nil && !book.Ebook.Missing
+	if r.URL.Query().Get("format") == "readaloud" {
+		available = book.Readaloud.Available()
+	} else if r.URL.Query().Get("format") == "audiobook" {
+		available = book.Audiobook != nil && !book.Audiobook.Missing
+	} else if strings.HasSuffix(r.URL.Path, "/position") {
+		available = available || book.Readaloud.Available()
+	}
+	if !available {
 		writeError(w, r, http.StatusNotFound, Error{Code: CodeNotFound, Message: "this work has no available EPUB edition"})
 		return 0, false
 	}

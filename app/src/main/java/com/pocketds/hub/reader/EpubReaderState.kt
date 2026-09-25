@@ -36,18 +36,16 @@ object EpubLayoutPolicy {
             EpubColumns.AUTO -> if (viewportWidthDp >= AUTO_TWO_COLUMN_MIN_WIDTH_DP) 2 else 1
         }
     }
+
+    fun selectColumns(value: EpubReaderPreferences, columns: EpubColumns): EpubReaderPreferences =
+        value.copy(columns = columns, scroll = if (columns == EpubColumns.TWO) false else value.scroll)
+
+    fun selectScroll(value: EpubReaderPreferences, enabled: Boolean): EpubReaderPreferences =
+        value.copy(scroll = enabled, columns = if (enabled && value.columns == EpubColumns.TWO) EpubColumns.AUTO else value.columns)
 }
 
-data class EpubChromeInsets(val topDp: Int, val bottomDp: Int)
-
 object EpubChromePolicy {
-    private const val BAR_HEIGHT_DP = 58
-
-    fun insets(visible: Boolean) = if (visible) {
-        EpubChromeInsets(BAR_HEIGHT_DP, BAR_HEIGHT_DP)
-    } else {
-        EpubChromeInsets(0, 0)
-    }
+    fun handlesTap(horizontalFraction: Float, controlsVisible: Boolean) = controlsVisible || horizontalFraction in .3f.. .7f
 }
 
 object EpubPreferenceAdjuster {
@@ -75,7 +73,7 @@ object EpubPreferenceAdjuster {
     private fun rounded(value: Float): Float = kotlin.math.round(value * 10f) / 10f
 }
 
-/** Appearance is previewed live and persisted only after Done. */
+/** Appearance is applied live and committed with each change. Closing retains the last setting. */
 class EpubPreferenceState(initial: EpubReaderPreferences) {
     var visible: EpubReaderPreferences = initial
         private set

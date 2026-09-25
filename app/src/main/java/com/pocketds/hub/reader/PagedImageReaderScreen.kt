@@ -1,5 +1,6 @@
 package com.pocketds.hub.reader
 
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.graphics.Color
 import android.graphics.PointF
 import android.graphics.drawable.GradientDrawable
@@ -7,6 +8,11 @@ import android.graphics.drawable.StateListDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
+import coil.request.ImageRequest
+import com.pocketds.hub.ui.ChoiceOverlay
+import com.pocketds.hub.ui.AppIcon
+import com.pocketds.hub.ui.AppIconDrawable
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.SeekBar
@@ -46,6 +52,7 @@ class PagedImageReaderScreen(
     private val ringVisible: () -> Boolean,
     private val onProgressChanged: () -> Unit = {}
 ) : Screen {
+    override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val title: String = initialTitle
     override val immersive: Boolean = true
     override val focusOnShow: Boolean = false
@@ -61,13 +68,26 @@ class PagedImageReaderScreen(
     private lateinit var seek: SeekBar
     private lateinit var thirdsButton: TextView
     private lateinit var colors: PocketColors
+    private lateinit var options: ChoiceOverlay
+    private lateinit var pagePreview: ReaderPagePreviewController
+    private lateinit var previewImage: ImageView
+    private lateinit var previewLabel: TextView
+    private lateinit var previewCard: LinearLayout
+    private lateinit var regionHint: TextView
+    private var previewJob: Job? = null
+    private var previewRequest: coil.request.Disposable? = null
+    private var directionOverride: String? = null
+    private var fitWidth = false
     private var repository: ReaderPageRepository? = null
 
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val progressScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private lateinit var progress: ReadingProgress
+    private lateinit var readingSession: ReadingProgress.Session
+    private lateinit var manifestCache: ReadingManifestCache
+    private var visibleCheckpoint: Pair<ReadingCheckpointKey, ReadingLocation>? = null
+    private var checkpointErrorShown = false
     private var manifestJob: Job? = null
     private var pageJob: Job? = null
-    private var saveJob: Job? = null
     private var generation = 0L
     private var manifest: ReadingPublicationManifest? = null
     private var state: PagedImageState? = null
@@ -81,8 +101,11 @@ class PagedImageReaderScreen(
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
+        progress = ReadingProgress.get(host.viewContext)
+        readingSession = progress.session()
+        manifestCache = ReadingManifestCache(java.io.File(host.viewContext.cacheDir,"reading-manifests"))
         colors = Theme.colors(host.viewContext)
-        repository = (api as? HubClient)?.let { ReaderPageRepository(host.viewContext, it) }
+        repository = (api as? HubClient)?.let { ReaderPageRepository(host.viewContext, readingSession.api, readingSession.identity) }
         root = FrameLayout(host.viewContext).apply { setBackgroundColor(Color.BLACK) }
         image = SubsamplingScaleImageView(host.viewContext).apply {
             setBackgroundColor(Color.BLACK)
@@ -96,6 +119,10 @@ class PagedImageReaderScreen(
                 override fun onReady() {
                     loading.visibility = View.GONE
                     applyViewport()
+                    val publication = manifest ?: return
+                    val page = this@PagedImageReaderScreen.state?.pageIndex ?: return
+                    visibleCheckpoint = readingSession.key(workId, publication.sourceItemId, "pages") to ReadingLocation(pageIndex = page)
+                    saveCurrent(immediate = false)
                 }
 
                 override fun onImageLoadError(e: Exception) {
@@ -118,8 +145,24 @@ class PagedImageReaderScreen(
         root.addView(loading, FrameLayout.LayoutParams(MATCH, MATCH))
         buildTopBar()
         buildBottomBar()
+        previewCard = LinearLayout(host.viewContext).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; visibility = View.GONE
+            setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(0xEE141518.toInt())
+        }
+        previewImage = ImageView(host.viewContext).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+        previewLabel = TextView(host.viewContext).apply { textSize = 12f; setTextColor(Color.WHITE); gravity = Gravity.CENTER }
+        previewCard.addView(previewImage, LinearLayout.LayoutParams(dp(88),dp(112)))
+        previewCard.addView(previewLabel)
+        root.addView(previewCard, FrameLayout.LayoutParams(dp(104),WRAP,Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin=dp(72) })
+        regionHint = TextView(host.viewContext).apply {
+            textSize=12f;setTextColor(Color.WHITE);setPadding(dp(12),dp(6),dp(12),dp(6));setBackgroundColor(0xB3141518.toInt());visibility=View.GONE
+        }
+        root.addView(regionHint,FrameLayout.LayoutParams(WRAP,WRAP,Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply {bottomMargin=dp(80)})
+        options = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel=true)
+        root.addView(options,FrameLayout.LayoutParams(MATCH,MATCH))
+        pagePreview = ReaderPagePreviewController(root, image, topBar, bottomBar, listOf(options))
         focusedControl = ReaderControlFocusPolicy.initialIndex(focusables.size) ?: 0
-        setControlsVisible(true)
+        setControlsVisible(false)
         return root
     }
 
@@ -135,9 +178,16 @@ class PagedImageReaderScreen(
         saveCurrent(immediate = true)
         manifestJob?.cancel()
         pageJob?.cancel()
+        previewJob?.cancel()
+        previewRequest?.dispose()
+        regionHint.removeCallbacks(hideRegionHint)
+        options.dismiss()
+        previewCard.visibility=View.GONE
     }
 
     override fun onDestroyView() {
+        pagePreview.dispose()
+        saveCurrent(immediate = true)
         image.recycle()
         uiScope.cancel()
         repository = null
@@ -154,6 +204,7 @@ class PagedImageReaderScreen(
     )
 
     override fun onPad(action: PadAction): Boolean {
+        if(options.onPad(action)) return true
         when (action) {
             PadAction.Menu -> toggleControls()
             PadAction.Back -> if (controlsVisible) setControlsVisible(false) else host.back()
@@ -178,7 +229,7 @@ class PagedImageReaderScreen(
 
     // Android edge-back should leave the reader in one gesture. Physical B is
     // handled above and first dismisses chrome.
-    override fun onSystemBack(): Boolean = false
+    override fun onSystemBack(): Boolean { if(options.isOpen) { options.cancel(); return true }; return false }
 
     private fun buildTopBar() {
         topBar = LinearLayout(host.viewContext).apply {
@@ -201,6 +252,9 @@ class PagedImageReaderScreen(
         topBar.addView(titleView, LinearLayout.LayoutParams(0, MATCH, 1f))
         thirdsButton = control("⅓", "Toggle reading in thirds", ::toggleThirds)
         topBar.addView(thirdsButton)
+        topBar.addView(control("zoom-out", "Zoom out", { zoom(.8f) }))
+        topBar.addView(control("zoom-in", "Zoom in", { zoom(1.25f) }))
+        topBar.addView(control("options", "Reading options", ::showReadingOptions))
         topBar.addView(control("↷", "Next issue", { movePublication(1) }))
     }
 
@@ -226,10 +280,11 @@ class PagedImageReaderScreen(
                 override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
 
                 override fun onProgressChanged(seekBar: SeekBar, value: Int, fromUser: Boolean) {
-                    if (fromUser && !suppressSeek) positionView.text = "Page ${value + 1} of ${seekBar.max + 1}"
+                    if (fromUser && !suppressSeek) { positionView.text = "Page ${value + 1} of ${seekBar.max + 1}"; showPagePreview(value) }
                 }
 
                 override fun onStopTrackingTouch(seekBar: SeekBar) {
+                    previewJob?.cancel();previewRequest?.dispose();previewCard.visibility=View.GONE
                     state?.seek(seekBar.progress)
                     loadPage()
                     scheduleSave()
@@ -252,8 +307,9 @@ class PagedImageReaderScreen(
 
     private fun control(glyph: String, label: String, click: () -> Unit): TextView =
         TextView(host.viewContext).apply {
-            text = glyph
-            textSize = 24f
+            val icon=when(glyph){ "×"->AppIcon.CLOSE; "↶"->AppIcon.PREVIOUS_ITEM; "↷"->AppIcon.NEXT_ITEM; "⅓"->AppIcon.THIRDS; "‹"->AppIcon.PREVIOUS; "›"->AppIcon.NEXT; "zoom-in"->AppIcon.ZOOM_IN; "zoom-out"->AppIcon.ZOOM_OUT; else->AppIcon.SETTINGS }
+            setCompoundDrawables(AppIconDrawable(icon,Color.WHITE).apply{setBounds(0,0,dp(22),dp(22))},null,null,null)
+            setPadding(dp(15),0,dp(15),0)
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
             contentDescription = label
@@ -279,12 +335,38 @@ class PagedImageReaderScreen(
         loading.text = "Opening publication…"
         loading.visibility = View.VISIBLE
         manifestJob = uiScope.launch {
-            when (val result = api.readingPublication(workId, sourceItemId)) {
+            when (val result = readingSession.api.readingPublication(workId, sourceItemId)) {
                 is HubResult.Ok -> {
                     if (requestGeneration != generation) return@launch
-                    applyManifest(result.value, pendingStartAtEnd)
+                    val key = readingSession.key(workId, sourceItemId, "pages")
+                    runCatching { manifestCache.save(key,result.value) }
+                    try {
+                        val resume = progress.resume(readingSession, key)
+                        val completion = ReadingCompletionRepository.get(host.viewContext)
+                        val choice = if (completion.shouldStartAtBeginning(workId))
+                            ReadingResume(ReadingLocation(pageIndex = completion.pageResume(workId, result.value.currentPage)))
+                        else chooseReadingResume(options, progress, key, resume)
+                            ?: run { showPageError("Choose a reading position to continue"); return@launch }
+                        if (requestGeneration != generation) return@launch
+                        applyManifest(result.value.copy(currentPage = choice.location?.pageIndex ?: result.value.currentPage), pendingStartAtEnd)
+                    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (_: Exception) { showPageError("The saved reading position could not be read. It has been preserved.") }
                 }
                 is HubResult.Failed -> if (requestGeneration == generation) {
+                    val key=readingSession.key(workId,sourceItemId,"pages")
+                    val cached=manifestCache.read(key)
+                    val local=runCatching { progress.store.read(key) }.getOrNull()
+                    if(cached!=null && local?.local?.pageIndex!=null) {
+                        val completion = ReadingCompletionRepository.get(host.viewContext)
+                        val choice=if (completion.shouldStartAtBeginning(workId))
+                            ReadingResume(ReadingLocation(pageIndex = completion.pageResume(workId, local.local.pageIndex!!)))
+                        else chooseReadingResume(options,progress,key,ReadingResume(local.local,local.conflicted))
+                        if(choice!=null && requestGeneration==generation) {
+                            applyManifest(cached.copy(currentPage=choice.location?.pageIndex ?: cached.currentPage),pendingStartAtEnd)
+                            host.notify("Using cached pages · reading progress is saved on this device")
+                            return@launch
+                        }
+                    }
                     loading.text = result.message + "\nSelect retries"
                     loading.visibility = View.VISIBLE
                 }
@@ -310,7 +392,7 @@ class PagedImageReaderScreen(
         val value = manifest ?: return
         val position = state ?: return
         val page = position.pageIndex.coerceIn(0, value.pageCount - 1)
-        val pageUrl = api.readingPublicationPageUrl(workId, value.sourceItemId, page)
+        val pageUrl = readingSession.api.readingPublicationPageUrl(workId, value.sourceItemId, page)
         val pageRepository = repository
         if (pageRepository == null) {
             loading.text = "The real reader requires a configured Hub connection"
@@ -342,7 +424,7 @@ class PagedImageReaderScreen(
         listOf(page + 1, page - 1).filter { it in 0 until value.pageCount }.forEach { candidate ->
             uiScope.launch(Dispatchers.IO) {
                 runCatching {
-                    pageRepository.obtain(api.readingPublicationPageUrl(workId, value.sourceItemId, candidate))
+                    pageRepository.obtain(readingSession.api.readingPublicationPageUrl(workId, value.sourceItemId, candidate))
                 }
             }
         }
@@ -354,7 +436,7 @@ class PagedImageReaderScreen(
     }
 
     private fun navigate(direction: Direction) {
-        val rtl = manifest?.direction == "rtl"
+        val rtl = (directionOverride ?: manifest?.direction) == "rtl"
         when (direction) {
             Direction.LEFT -> if (rtl) advance() else retreat()
             Direction.RIGHT -> if (rtl) retreat() else advance()
@@ -410,21 +492,23 @@ class PagedImageReaderScreen(
         val page = state?.pageIndex ?: value.currentPage
         thirdsEnabled = !thirdsEnabled
         state = PagedImageState(value.pageCount, page, if (thirdsEnabled) 3 else 1)
-        thirdsButton.setTextColor(if (thirdsEnabled) colors.accent else Color.WHITE)
-        if (thirdsEnabled) applyViewport() else image.resetScaleAndCenter()
+        thirdsButton.setCompoundDrawables(AppIconDrawable(AppIcon.THIRDS,if(thirdsEnabled)colors.accent else Color.WHITE).apply{setBounds(0,0,dp(22),dp(22))},null,null,null)
+        thirdsButton.isSelected=thirdsEnabled
+        if (thirdsEnabled) applyViewport() else { image.resetScaleAndCenter();applyViewport() }
         updatePosition()
         host.refreshHints()
     }
 
     private fun applyViewport() {
-        if (!thirdsEnabled || !image.isReady) return
+        if (!image.isReady) return
+        if (!thirdsEnabled) { if(fitWidth) image.setScaleAndCenter((image.width.toFloat()/image.sWidth).coerceIn(image.minScale,image.maxScale),PointF(image.sWidth/2f,image.sHeight/2f));return }
         val value = manifest ?: return
         val position = state ?: return
         val page = value.pages.getOrNull(position.pageIndex) ?: ReadingPublicationPage(index = position.pageIndex)
         val sourceWidth = (if (page.width > 0) page.width else image.sWidth).coerceAtLeast(1)
         val sourceHeight = (if (page.height > 0) page.height else image.sHeight).coerceAtLeast(1)
         val axis = if (page.isWide || sourceWidth > sourceHeight) ViewportAxis.HORIZONTAL else ViewportAxis.VERTICAL
-        val direction = if (value.direction == "rtl") PageDirection.RTL else PageDirection.LTR
+        val direction = if ((directionOverride ?: value.direction) == "rtl") PageDirection.RTL else PageDirection.LTR
         val viewport = ViewportStepPlanner.steps(axis, direction)[position.viewportIndex]
         val center = PointF(
             ((viewport.left + viewport.right) * 0.5 * sourceWidth).toFloat(),
@@ -435,6 +519,47 @@ class PagedImageReaderScreen(
         val scale = max(image.minScale, if (axis == ViewportAxis.HORIZONTAL) widthScale else heightScale)
             .coerceAtMost(image.maxScale)
         image.setScaleAndCenter(scale, center)
+        regionHint.text="Region ${position.viewportIndex+1} of 3";regionHint.visibility=View.VISIBLE
+        regionHint.removeCallbacks(hideRegionHint);regionHint.postDelayed(hideRegionHint,1200)
+    }
+
+    private val hideRegionHint=Runnable { if(::regionHint.isInitialized)regionHint.visibility=View.GONE }
+
+    private fun showReadingOptions(tab:String="display") {
+        val rtl=(directionOverride ?: manifest?.direction)=="rtl"
+        options.resetBody()
+        options.open("Reading options")
+        options.tabs(listOf("display" to "Display", "flow" to "Flow"),tab,::showReadingOptions)
+        if(tab=="display") {
+            options.choice("Fit whole page",selected=!fitWidth && !thirdsEnabled){
+                if(thirdsEnabled)toggleThirds();fitWidth=false;image.resetScaleAndCenter();applyViewport();showReadingOptions(tab)
+            }
+            options.choice("Fit page width",selected=fitWidth && !thirdsEnabled){
+                if(thirdsEnabled)toggleThirds();fitWidth=true;image.resetScaleAndCenter();applyViewport();showReadingOptions(tab)
+            }
+            options.choice("Read in thirds",selected=thirdsEnabled){toggleThirds();showReadingOptions(tab)}
+        } else {
+            options.choice("Left to right",selected=!rtl){directionOverride="ltr";applyViewport();showReadingOptions(tab)}
+            options.choice("Right to left",selected=rtl){directionOverride="rtl";applyViewport();showReadingOptions(tab)}
+        }
+        options.focusBody()
+    }
+
+    private fun showPagePreview(page:Int) {
+        previewJob?.cancel()
+        previewRequest?.dispose()
+        previewImage.setImageDrawable(null);previewLabel.text="Page ${page+1}";previewCard.visibility=View.VISIBLE
+        val value=manifest ?: return
+        val repo=repository ?: return
+        previewJob=uiScope.launch {
+            delay(160)
+            try {
+                val file=repo.obtain(readingSession.api.readingPublicationPageUrl(workId,value.sourceItemId,page))
+                if (seek.progress!=page || previewCard.visibility!=View.VISIBLE) return@launch
+                previewRequest=(api as? HubClient)?.imageLoader?.enqueue(ImageRequest.Builder(host.viewContext).data(file).size(dp(88),dp(112)).target(previewImage).build())
+            } catch (_: kotlinx.coroutines.CancellationException) { /* A newer scrub target replaced this one. */ }
+            catch (_: Exception) { previewLabel.text="Page ${page+1} · preview unavailable" }
+        }
     }
 
     private fun zoom(factor: Float) {
@@ -444,28 +569,18 @@ class PagedImageReaderScreen(
     }
 
     private fun scheduleSave() {
-        saveJob?.cancel()
-        val value = manifest ?: return
-        val page = state?.pageIndex ?: return
-        saveJob = progressScope.launch {
-            delay(700)
-            persist(value.sourceItemId, page)
-        }
+        // The requested page may still be downloading. onReady saves the page actually displayed.
     }
 
     private fun saveCurrent(immediate: Boolean) {
-        saveJob?.cancel()
-        val value = manifest ?: return
-        val page = state?.pageIndex ?: return
-        saveJob = progressScope.launch {
-            if (!immediate) delay(700)
-            persist(value.sourceItemId, page)
-        }
-    }
-
-    private suspend fun persist(sourceItemId: String, page: Int) {
-        if (api.saveReadingPublicationProgress(workId, sourceItemId, page) is HubResult.Ok) {
+        val (key, location) = visibleCheckpoint ?: return
+        try {
+            progress.save(key, location)
+            if (immediate) progress.requestSync(immediate = true)
             onProgressChanged()
+        } catch (_: Exception) {
+            if (!checkpointErrorShown) host.notify("Reading position could not be saved on this device")
+            checkpointErrorShown = true
         }
     }
 
@@ -485,8 +600,7 @@ class PagedImageReaderScreen(
 
     private fun setControlsVisible(visible: Boolean) {
         controlsVisible = visible
-        topBar.visibility = if (visible) View.VISIBLE else View.GONE
-        bottomBar.visibility = if (visible) View.VISIBLE else View.GONE
+        pagePreview.setControlsVisible(visible)
         if (!visible) {
             root.findFocus()?.clearFocus()
         } else {
@@ -505,7 +619,7 @@ class PagedImageReaderScreen(
     }
 
     private fun controlBackground(): StateListDrawable {
-        fun face(fill: Int, stroke: Int = 0): GradientDrawable = GradientDrawable().apply {
+        fun face(fill: Int, stroke: Int = 0): GradientDrawable = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(host.viewContext, 9f)
             setColor(fill)
             if (stroke != 0) setStroke(dp(2), stroke)
@@ -520,6 +634,7 @@ class PagedImageReaderScreen(
     private fun dp(value: Int): Int = Styler.dpInt(host.viewContext, value.toFloat())
 
     private companion object {
+        const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
     }
 }

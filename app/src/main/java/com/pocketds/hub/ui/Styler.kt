@@ -1,6 +1,7 @@
 package com.pocketds.hub.ui
 
 import android.content.Context
+import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.view.View
@@ -14,6 +15,37 @@ import android.view.View
  * the state change has to be instant.
  */
 object Styler {
+    /** Persistent selection and temporary D-pad focus are independent visual states. */
+    fun selectionBackground(
+        context: Context,
+        colors: PocketColors,
+        selected: Boolean,
+        baseFill: Int = Color.TRANSPARENT,
+        selectedFill: Int = baseFill,
+        selectedStrokeDp: Float = 0f,
+        cornerDp: Float = 9f
+    ): StateListDrawable {
+        fun face(fill: Int, strokeDp: Float = 0f, strokeColor: Int = Color.TRANSPARENT) =
+            ThemeGradientDrawable().apply {
+                cornerRadius = dp(context, cornerDp)
+                setColor(fill)
+                if (strokeDp > 0f) setStroke(dpInt(context, strokeDp), strokeColor)
+            }
+        return StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_focused), face(
+                colors.focusFill, 2f, if (selected) colors.primaryText else colors.focusRing))
+            addState(intArrayOf(), face(if (selected) selectedFill else baseFill,
+                if (selected) selectedStrokeDp else 0f, colors.accent))
+        }
+    }
+
+    /** Above edge-to-edge artwork so the image cannot cover the focus outline. */
+    fun focusOutline(context: Context, colors: PocketColors) = StateListDrawable().apply {
+        addState(intArrayOf(android.R.attr.state_focused), ThemeGradientDrawable().apply {
+            cornerRadius=dp(context,8f);setColor(android.graphics.Color.TRANSPARENT);setStroke(dpInt(context,2f),colors.focusRing)
+        })
+        addState(intArrayOf(), android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+    }
 
     /**
      * Make a view focusable, correctly.
@@ -46,13 +78,14 @@ object Styler {
         context: Context,
         colors: PocketColors,
         cornerDp: Float = 10f,
-        baseFill: Int = colors.cardSurface
+        baseFill: Int = colors.cardSurface,
+        focusStrokeDp: Float = 3f
     ): StateListDrawable {
         val corner = dp(context, cornerDp)
         val dark = KeyPressTint.isDarkSurface(baseFill)
 
         fun face(fill: Int, strokeWidth: Int = 0, strokeColor: Int = 0) =
-            GradientDrawable().apply {
+            ThemeGradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = corner
                 setColor(fill)
@@ -66,7 +99,7 @@ object Styler {
             )
             addState(
                 intArrayOf(android.R.attr.state_focused),
-                face(colors.focusFill, dp(context, 3f).toInt(), colors.focusRing)
+                face(colors.focusFill, dp(context, focusStrokeDp).toInt(), colors.focusRing)
             )
             addState(intArrayOf(), face(baseFill))
         }
@@ -83,7 +116,7 @@ object Styler {
         val dark = KeyPressTint.isDarkSurface(base)
 
         fun face(fill: Int, strokeWidth: Int = 0, strokeColor: Int = 0) =
-            GradientDrawable().apply {
+            ThemeGradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = corner
                 setColor(fill)

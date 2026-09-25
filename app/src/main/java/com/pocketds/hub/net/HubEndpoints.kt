@@ -95,6 +95,9 @@ object HubEndpoints {
     fun selectPlayback(base: String, sessionId: String): HubRequest =
         HubRequest(join(base, "/v1/playback/sessions/" + encode(sessionId) + "/select"), method = "POST")
 
+    fun castGrant(base: String, sessionId: String): HubRequest =
+        HubRequest(join(base, "/v1/playback/sessions/" + encode(sessionId) + "/cast-grant"), method = "POST")
+
     fun playbackEvent(base: String, sessionId: String): HubRequest =
         HubRequest(join(base, "/v1/playback/sessions/" + encode(sessionId) + "/events"), method = "POST")
 
@@ -164,8 +167,13 @@ object HubEndpoints {
         direction: String = "asc"
     ): HubRequest = HubRequest(
         join(base, "/v1/reading/libraries/" + encode(libraryId) + "/items") +
-            "?page=$page&sort=" + encode(sort) + "&direction=" + encode(direction)
+            "?page=$page&sort=" + encode(sort) + "&direction=" + encode(direction) + (if(libraryId == "storyteller:books") "&view=" + (if(sort == "series") "collections" else "works") else "")
     )
+
+    fun readingAuthors(base:String,libraryId:String,page:Int,direction:String,authorId:String=""):HubRequest =
+        HubRequest(join(base,"/v1/reading/libraries/"+encode(libraryId)+"/authors")+"?page=$page&direction="+encode(direction)+"&authorId="+encode(authorId))
+    fun readingResolve(base:String,source:String,sourceId:String,isbn:String):HubRequest =
+        HubRequest(join(base,"/v1/reading/resolve")+"?source="+encode(source)+"&sourceId="+encode(sourceId)+"&isbn="+encode(isbn))
 
     fun readingWork(base: String, workId: String): HubRequest =
         HubRequest(join(base, "/v1/reading/works/" + encode(workId)))
@@ -194,12 +202,16 @@ object HubEndpoints {
             method = "POST"
         )
 
-    fun readingEpubFile(base: String, workId: String, sourceItemId: String): String =
+    fun readingEpubFile(base: String, workId: String, sourceItemId: String, readAlong: Boolean = false): String =
         join(
             base,
             "/v1/reading/works/" + encode(workId) + "/publications/" +
                 encode(sourceItemId) + "/file"
-        )
+        ) + if (readAlong) "?format=readaloud" else ""
+
+    fun readingAudiobookFile(base: String, workId: String, sourceItemId: String): String =
+        join(base, "/v1/reading/works/" + encode(workId) +
+            "/publications/" + encode(sourceItemId) + "/file?format=audiobook")
 
     fun readingEpubPosition(base: String, workId: String, sourceItemId: String): HubRequest =
         HubRequest(
@@ -215,6 +227,15 @@ object HubEndpoints {
 
     fun readingRequests(base: String): HubRequest =
         HubRequest(join(base, "/v1/reading/requests"), method = "POST")
+
+    fun readingReleases(base: String, seriesId: Int): HubRequest =
+        HubRequest(join(base, "/v1/reading/requests/$seriesId/releases"))
+
+    fun searchReadingReleases(base: String, seriesId: Int): HubRequest =
+        HubRequest(join(base, "/v1/reading/requests/$seriesId/search"), method = "POST")
+
+    fun grabReadingRelease(base: String, seriesId: Int): HubRequest =
+        HubRequest(join(base, "/v1/reading/requests/$seriesId/grab"), method = "POST")
 
     fun readingDownloads(base: String): HubRequest =
         HubRequest(join(base, "/v1/reading/downloads"))

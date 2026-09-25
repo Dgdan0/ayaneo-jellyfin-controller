@@ -1,5 +1,10 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.settings.DomainPreferences
+import com.pocketds.hub.settings.SortPreference
+import com.pocketds.hub.ui.LibrarySortPanel
+import com.pocketds.hub.ui.CenteredIconTextView
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -18,6 +23,7 @@ import com.pocketds.hub.model.ReadingLibrary
 import com.pocketds.hub.model.SearchHit
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
+import com.pocketds.hub.nav.ContentModeScreen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubClient
@@ -27,8 +33,9 @@ import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.state.PagedLoadState
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.settings.ContentModeSettings
-import com.pocketds.hub.ui.ContentModeToggleView
 import com.pocketds.hub.ui.LibraryCardView
+import com.pocketds.hub.ui.LibraryTileSizing
+import com.pocketds.hub.ui.LibraryArtworkRefresh
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.PosterCardView
 import com.pocketds.hub.ui.ChoiceOverlay
@@ -42,12 +49,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 /** Media and reading folders exactly as their servers name and order them. */
 class LibraryScreen(
     private val api: HubApi,
     private val ringVisible: () -> Boolean
-) : Screen {
+) : Screen, ContentModeScreen {
     override val title = "Library"
     override val horizontalMode = HorizontalMode.GRID
 
@@ -56,7 +64,6 @@ class LibraryScreen(
     private val readingAdapter = ReadingViewAdapter()
     private lateinit var colors: PocketColors
     private lateinit var heading: TextView
-    private lateinit var modeToggle: ContentModeToggleView
     private lateinit var mediaTools: LinearLayout
     private lateinit var status: TextView
     private lateinit var list: RecyclerView
@@ -68,6 +75,8 @@ class LibraryScreen(
     private var selectedMedia = 0
     private var selectedBooks = 0
     private var loadGeneration = 0
+    private var mediaArtworkDay = ""
+    private var readingArtworkDay = ""
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -76,20 +85,15 @@ class LibraryScreen(
         return LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(colors.background)
-            modeToggle = ContentModeToggleView(context, colors).apply {
-                select(mode)
-                onModeSelected = { switchMode(it, persist = true) }
-            }
-            addView(modeToggle, LinearLayout.LayoutParams(WRAP, WRAP).apply {
-                setMargins(dp(12), dp(6), dp(12), 0)
-            })
+            val header=LinearLayout(context).apply {orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(dp(24),dp(8),dp(24),0)}
+            addView(header)
             heading = TextView(context).apply {
                 text = headingText()
-                textSize = 18f
+                textSize = 22f
                 setTextColor(colors.primaryText)
-                setPadding(dp(16), dp(12), dp(16), dp(4))
+                setPadding(0,0,0,0)
             }
-            addView(heading)
+            header.addView(heading,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
             mediaTools = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(dp(12), dp(2), dp(12), dp(7))
@@ -124,7 +128,7 @@ class LibraryScreen(
                         host.refreshHints()
                     }
                 }
-                addView(searchBox, LinearLayout.LayoutParams(0, dp(43), 1f))
+                addView(searchBox, LinearLayout.LayoutParams(0, dp(48), 1f))
                 favourites = TextView(context).apply {
                     text = "★  Favourites"
                     textSize = 13f
@@ -140,7 +144,7 @@ class LibraryScreen(
                     }
                     activateOnTap { openFavourites() }
                 }
-                addView(favourites, LinearLayout.LayoutParams(WRAP, dp(43)).apply {
+                addView(favourites, LinearLayout.LayoutParams(WRAP, dp(48)).apply {
                     marginStart = dp(8)
                 })
             }
@@ -157,8 +161,13 @@ class LibraryScreen(
                 setItemViewCacheSize(LIBRARY_COLUMNS * 2)
                 clipToPadding = false
                 clipChildren = false
-                setPadding(dp(16), dp(12), dp(16), dp(84))
+                setPadding(dp(16), dp(12), dp(16), dp(20))
                 layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
+                addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
+                    val widthDp = ((right - left) / resources.displayMetrics.density).toInt()
+                    val columns = LibraryTileSizing.columnsFor(widthDp)
+                    (layoutManager as? GridLayoutManager)?.let { if (it.spanCount != columns) it.spanCount = columns }
+                }
             }
             addView(list)
         }
@@ -167,7 +176,10 @@ class LibraryScreen(
     override fun onShow() {
         val stored = host?.viewContext?.let(ContentModeSettings::get) ?: mode
         if (stored != mode) switchMode(stored, persist = false)
-        if (activeAdapter().itemCount == 0 && loadJob?.isActive != true) load()
+        if (loadJob?.isActive != true &&
+            (activeAdapter().itemCount == 0 || LibraryArtworkRefresh.needed(loadedArtworkDay(), LocalDate.now().toString()))) {
+            load(force = activeAdapter().itemCount > 0)
+        }
         else restoreFocus()
     }
 
@@ -251,6 +263,7 @@ class LibraryScreen(
 
     private fun renderMedia(body: LibraryResponse) {
         mediaAdapter.submit(body.views)
+        mediaArtworkDay = LocalDate.now().toString()
         status.setTextColor(if (body.partial.isEmpty()) colors.mutedText else colors.badgePending)
         status.text = when {
             body.views.isEmpty() -> "No movie or TV libraries were found."
@@ -267,6 +280,7 @@ class LibraryScreen(
 
     private fun renderReading(body: ReadingLibrariesResponse) {
         readingAdapter.submit(body.libraries)
+        readingArtworkDay = LocalDate.now().toString()
         status.setTextColor(if (body.partial.isEmpty()) colors.mutedText else colors.badgePending)
         status.text = when {
             body.libraries.isEmpty() -> "No reading libraries were found."
@@ -308,12 +322,13 @@ class LibraryScreen(
         loadGeneration++
         mode = next
         if (persist) ContentModeSettings.set(requireNotNull(host).viewContext, mode)
-        modeToggle.select(mode)
         heading.text = headingText()
         mediaTools.visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
         list.adapter = activeAdapter()
         status.setTextColor(colors.mutedText)
-        if (activeAdapter().itemCount == 0) load()
+        if (activeAdapter().itemCount == 0 || LibraryArtworkRefresh.needed(loadedArtworkDay(), LocalDate.now().toString())) {
+            load(force = activeAdapter().itemCount > 0)
+        }
         else {
             status.text = if (mode == ContentMode.MEDIA) "${mediaAdapter.itemCount} libraries"
             else "${readingAdapter.itemCount} reading libraries"
@@ -321,6 +336,8 @@ class LibraryScreen(
         }
         host?.refreshHints()
     }
+
+    override fun selectContentMode(mode: ContentMode) = switchMode(mode, persist = true)
 
     private fun headingText(): String = if (mode == ContentMode.MEDIA) {
         "Your Jellyfin libraries"
@@ -332,6 +349,8 @@ class LibraryScreen(
         ContentMode.MEDIA -> mediaAdapter
         ContentMode.BOOKS -> readingAdapter
     }
+
+    private fun loadedArtworkDay(): String = if (mode == ContentMode.MEDIA) mediaArtworkDay else readingArtworkDay
 
     private fun selectedIndex(): Int = if (mode == ContentMode.MEDIA) selectedMedia else selectedBooks
 
@@ -372,8 +391,8 @@ class LibraryScreen(
         override fun getItemCount() = values.size
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
             val row = LibraryCardView(parent.context, colors).apply {
-                layoutParams = RecyclerView.LayoutParams(dp(LIBRARY_CARD_DP), dp(LIBRARY_CARD_DP)).apply {
-                    setMargins(dp(8), dp(8), dp(8), dp(8))
+                layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
+                    setMargins(dp(12), dp(10), dp(12), dp(10))
                 }
                 FocusDecorator.attach(this, ringVisible)
                 setOnFocusChangeListener { _, focused ->
@@ -410,8 +429,8 @@ class LibraryScreen(
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
             val row = LibraryCardView(parent.context, colors).apply {
-                layoutParams = RecyclerView.LayoutParams(dp(LIBRARY_CARD_DP), dp(LIBRARY_CARD_DP)).apply {
-                    setMargins(dp(8), dp(8), dp(8), dp(8))
+                layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
+                    setMargins(dp(12), dp(10), dp(12), dp(10))
                 }
                 FocusDecorator.attach(this, ringVisible)
                 setOnFocusChangeListener { _, focused ->
@@ -446,7 +465,6 @@ class LibraryScreen(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val LIBRARY_COLUMNS = 3
-        const val LIBRARY_CARD_DP = 176
         const val TAG_VIEW = -0x7fffffe1
         const val TAG_READING_VIEW = -0x7fffffe0
     }
@@ -458,6 +476,7 @@ class LibraryGridScreen(
     private val library: LibraryView,
     private val ringVisible: () -> Boolean
 ) : Screen {
+    override val contentDomain = com.pocketds.hub.state.ContentMode.MEDIA
     override val title = library.name
     override val horizontalMode = HorizontalMode.GRID
 
@@ -465,6 +484,7 @@ class LibraryGridScreen(
     private val paging = PagedLoadState(PREFETCH_AHEAD)
     private val adapter = ItemAdapter()
     private lateinit var colors: PocketColors
+    private lateinit var sortControl: CenteredIconTextView
     private lateinit var status: TextView
     private lateinit var grid: RecyclerView
     private lateinit var overlay: ChoiceOverlay
@@ -480,6 +500,8 @@ class LibraryGridScreen(
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
+        val remembered=DomainPreferences.sort(host.viewContext,ContentMode.MEDIA,SORT_FIELDS.map { it.first },"name")
+        sortKey=remembered.field;sortAscending=remembered.ascending
         colors = Theme.colors(host.viewContext)
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
         val content = LinearLayout(host.viewContext).apply {
@@ -489,17 +511,26 @@ class LibraryGridScreen(
                 setTextColor(colors.mutedText)
                 setPadding(dp(12), dp(6), dp(12), dp(4))
             }
-            addView(status)
+            val toolbar=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(dp(16),dp(2),dp(20),dp(2)) }
+            toolbar.addView(status,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
+            sortControl=LibrarySortPanel.control(context,colors,::showSortPanel).apply {
+                text=LibrarySortPanel.label(SORT_FIELDS,SortPreference(sortKey,sortAscending))
+                contentDescription="Sort library, $text"
+            }
+            if(library.kind in setOf("search","favorites"))sortControl.visibility=View.GONE
+            toolbar.addView(sortControl)
+            addView(toolbar)
             grid = RecyclerView(context).apply {
                 layoutManager = GridLayoutManager(context, MAX_COLUMNS)
                 adapter = this@LibraryGridScreen.adapter
                 setItemViewCacheSize(MAX_COLUMNS * 3)
                 clipToPadding = false
                 clipChildren = false
-                setPadding(dp(16), dp(12), dp(16), dp(84))
+                setPadding(dp(16), dp(12), dp(16), dp(20))
                 layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
                 addOnScrollListener(object : RecyclerView.OnScrollListener() {
                     override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
+                        if(refreshing) return
                         val manager = view.layoutManager as GridLayoutManager
                         paging.next(
                             manager.findLastVisibleItemPosition(),
@@ -522,12 +553,14 @@ class LibraryGridScreen(
             addView(grid)
         }
         root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
-        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
+        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel=true)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         return root
     }
 
     override fun onShow() {
+        val saved=DomainPreferences.sort(requireNotNull(host).viewContext,ContentMode.MEDIA,SORT_FIELDS.map { it.first },"name")
+        if(saved!=SortPreference(sortKey,sortAscending)) { applySort(saved); return }
         if (refreshOnReturn && library.kind in setOf("search", "favorites")) {
             refreshOnReturn = false
             reload()
@@ -537,6 +570,7 @@ class LibraryGridScreen(
     }
 
     override fun onHide() {
+        loadGeneration++
         selected = focusedPosition().takeIf { it >= 0 } ?: selected
         selectedItemId = focusedHit()?.jellyfinItemId ?: selectedItemId
         if (::overlay.isInitialized && overlay.isOpen) overlay.dismiss()
@@ -548,7 +582,8 @@ class LibraryGridScreen(
     override fun onDestroyView() { scope.cancel(); host = null }
 
     override fun requestInitialFocus(): Boolean {
-        if (!::grid.isInitialized || adapter.itemCount == 0) return false
+        if (::overlay.isInitialized && overlay.isOpen) return true
+        if (!::grid.isInitialized || adapter.itemCount == 0) return if(::sortControl.isInitialized) sortControl.requestFocus() else false
         val target = selected.coerceIn(0, adapter.itemCount - 1)
         grid.scrollToPosition(target)
         grid.post { grid.findViewHolderForAdapterPosition(target)?.itemView?.requestFocus() }
@@ -575,7 +610,7 @@ class LibraryGridScreen(
             PadAction.Activate -> focusedHit()?.let(::open) != null
             PadAction.Secondary -> {
                 if (library.kind !in setOf("search", "favorites")) {
-                    showSortFields()
+                    showSortPanel()
                     true
                 } else false
             }
@@ -648,7 +683,7 @@ class LibraryGridScreen(
                         library.kind == "favorites" -> "${adapter.itemCount} of ${result.value.total} favourites"
                         else -> "${adapter.itemCount} of ${result.value.total} · ${sortLabel()}"
                     }
-                    if (page == 1) restoreFocus()
+                    if (page == 1 && !overlay.isOpen) restoreFocus()
                     host?.refreshHints()
                 }
                 is HubResult.Failed -> {
@@ -664,37 +699,15 @@ class LibraryGridScreen(
         }
     }
 
-    private fun showSortFields() {
-        overlay.show(
-            title = "Sort ${library.name}",
-            subtitle = "Choose what the library is ordered by",
-            choices = SORT_FIELDS.map { (id, label) ->
-                ChoiceOverlay.Choice(id, label, if (id == sortKey) "Currently selected" else "")
-            },
-            startIndex = SORT_FIELDS.indexOfFirst { it.first == sortKey }.coerceAtLeast(0),
-            onCancel = { host?.refreshHints() }
-        ) { picked -> showSortDirection(picked) }
-        host?.refreshHints()
+    private fun applySort(value:SortPreference) {
+        sortKey=value.field;sortAscending=value.ascending
+        DomainPreferences.setSort(requireNotNull(host).viewContext,ContentMode.MEDIA,value)
+        sortControl.text=LibrarySortPanel.label(SORT_FIELDS,value)
+        sortControl.contentDescription="Sort library, ${sortControl.text}"
+        reload(resetSelection=true)
     }
-
-    private fun showSortDirection(field: String) {
-        overlay.show(
-            title = "Sort direction",
-            subtitle = SORT_FIELDS.firstOrNull { it.first == field }?.second.orEmpty(),
-            choices = listOf(
-                ChoiceOverlay.Choice("asc", "Ascending", "A to Z, oldest or lowest first"),
-                ChoiceOverlay.Choice("desc", "Descending", "Z to A, newest or highest first")
-            ),
-            startIndex = if (sortAscending) 0 else 1,
-            onCancel = { host?.refreshHints() }
-        ) { direction ->
-            val ascending = direction == "asc"
-            val changed = field != sortKey || ascending != sortAscending
-            sortKey = field
-            sortAscending = ascending
-            if (changed) reload(resetSelection = true)
-            host?.refreshHints()
-        }
+    private fun showSortPanel() {
+        LibrarySortPanel.show(overlay,sortControl,SORT_FIELDS,SortPreference(sortKey,sortAscending),::applySort,{host?.refreshHints()})
         host?.refreshHints()
     }
 

@@ -19,12 +19,37 @@ import (
 // finish downloading.
 const sweepInterval = 5 * time.Minute
 const readingImportInterval = time.Minute
+const readingAlignmentInterval = time.Minute
 
 // StartBackground kicks off the work that runs on a timer rather than on a
 // request. Cancelled with the context when the hub shuts down.
 func (s *Server) StartBackground(ctx context.Context) {
 	s.startIndexSweeper(ctx)
 	s.startReadingImportSweeper(ctx)
+	s.startReadingAlignmentSweeper(ctx)
+}
+
+func (s *Server) startReadingAlignmentSweeper(ctx context.Context) {
+	if s.storyteller == nil {
+		return
+	}
+	go func() {
+		if err := s.reconcileReadingAlignments(ctx); err != nil {
+			slog.Warn("readaloud automation failed", "error", err)
+		}
+		ticker := time.NewTicker(readingAlignmentInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := s.reconcileReadingAlignments(ctx); err != nil {
+					slog.Warn("readaloud automation failed", "error", err)
+				}
+			}
+		}
+	}()
 }
 
 func (s *Server) startReadingImportSweeper(ctx context.Context) {

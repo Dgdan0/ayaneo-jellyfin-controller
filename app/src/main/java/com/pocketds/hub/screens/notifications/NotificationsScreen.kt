@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.notifications
 
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
@@ -18,15 +19,21 @@ import com.pocketds.hub.model.NotificationsResponse
 import com.pocketds.hub.model.ServiceNotice
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
+import com.pocketds.hub.nav.ContentModeScreen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.settings.NotificationReadStore
 import com.pocketds.hub.settings.NotificationSettings
+import com.pocketds.hub.state.ContentMode
+import com.pocketds.hub.ui.AppIcon
+import com.pocketds.hub.ui.AppIconDrawable
+import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
+import com.pocketds.hub.ui.SemanticColor
 import com.pocketds.hub.ui.activateOnTap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,7 +51,7 @@ class NotificationsScreen(
     private val api: HubApi,
     private val ringVisible: () -> Boolean,
     private val onUnreadChanged: (Int) -> Unit
-) : Screen {
+) : Screen, ContentModeScreen {
 
     override val title = "Notifications"
 
@@ -53,6 +60,9 @@ class NotificationsScreen(
     private lateinit var colors: PocketColors
     private lateinit var status: TextView
     private val columns = linkedMapOf<String, ServiceColumnView>()
+    private lateinit var mediaColumns: LinearLayout
+    private lateinit var bookColumns: LinearLayout
+    private var mode = ContentMode.MEDIA
     private var pollJob: Job? = null
     private var visible = false
     private var selectedID = ""
@@ -64,42 +74,51 @@ class NotificationsScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
+        mode = ContentModeSettings.get(host.viewContext)
         readStore = NotificationReadStore(host.viewContext)
         return LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(colors.background)
 
-            addView(TextView(context).apply {
-                text = "Notifications"
-                textSize = 21f
-                setTypeface(typeface, Typeface.BOLD)
-                setTextColor(colors.primaryText)
-                setPadding(dp(16), dp(11), dp(16), 0)
-            })
-
             status = TextView(context).apply {
-                text = "Loading Sonarr, Radarr and Bazarr…"
+                text = "Loading activity…"
                 textSize = 11f
                 setTextColor(colors.mutedText)
                 setPadding(dp(16), dp(2), dp(16), dp(8))
             }
             addView(status)
 
-            addView(LinearLayout(context).apply {
+            mediaColumns = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
-                setPadding(dp(8), 0, dp(8), dp(82))
-                SERVICES.forEach { service ->
+                visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
+                setPadding(dp(8), 0, dp(8), dp(16))
+                MEDIA_SERVICES.forEach { service ->
                     val column = ServiceColumnView(service)
                     columns[service] = column
                     addView(column, LinearLayout.LayoutParams(0, MATCH, 1f).apply {
                         setMargins(dp(5), 0, dp(5), 0)
                     })
                 }
-            }, LinearLayout.LayoutParams(MATCH, 0, 1f))
+            }
+            bookColumns = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(8), 0, dp(8), dp(16))
+                BOOK_SERVICES.forEach { service ->
+                    val column = ServiceColumnView(service)
+                    columns[service] = column
+                    addView(column, LinearLayout.LayoutParams(0, MATCH, 1f).apply {
+                        setMargins(dp(5), 0, dp(5), 0)
+                    })
+                }
+                visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
+            }
+            addView(mediaColumns, LinearLayout.LayoutParams(MATCH, 0, 1f))
+            addView(bookColumns, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }
     }
 
     override fun onShow() {
+        showMode(ContentModeSettings.get(host.viewContext))
         visible = true
         startPolling(showLoading = !hasContent)
         if (hasContent) requestInitialFocus()
@@ -137,24 +156,24 @@ class NotificationsScreen(
             true
         }
         is PadAction.Step -> action.direction == Direction.DOWN &&
-            columns.values.any { it.isLastItemFocused() }
+            visibleColumns().any { it.isLastItemFocused() }
         else -> false
     }
 
     override fun requestInitialFocus(): Boolean {
         if (selectedID.isNotEmpty()) {
-            columns.values.firstOrNull { it.contains(selectedID) }?.let {
+            visibleColumns().firstOrNull { it.contains(selectedID) }?.let {
                 return it.focus(selectedID)
             }
         }
-        return columns.values.firstOrNull { it.hasItems() }?.focus("") == true
+        return visibleColumns().firstOrNull { it.hasItems() }?.focus("") == true
     }
 
     private fun startPolling(showLoading: Boolean) {
         pollJob?.cancel()
         if (showLoading) {
             status.setTextColor(colors.mutedText)
-            status.text = "Loading Sonarr, Radarr and Bazarr…"
+            status.text = "Loading activity…"
         } else if (hasContent) {
             status.setTextColor(colors.mutedText)
             status.text = "Refreshing activity…"
@@ -182,17 +201,17 @@ class NotificationsScreen(
         latestResponse = response
         readStore.observe(response.sections)
         val byService = response.sections.associateBy { it.service }
-        SERVICES.forEach { service ->
+        (MEDIA_SERVICES + BOOK_SERVICES).forEach { service ->
             columns[service]?.bind(
                 byService[service] ?: NotificationSection(service = service, state = "disabled")
             )
         }
-        unreadIds = readStore.unread(columns.values.flatMap { it.itemIds() })
+        unreadIds = readStore.unread(response.sections.flatMap { it.items }.map { it.id })
         columns.values.forEach { it.updateUnreadCount() }
         onUnreadChanged(unreadIds.size)
         status.setTextColor(if (response.partial.isEmpty()) colors.mutedText else colors.badgePending)
         updateStatus(response)
-        if (columns.values.none { it.contains(selectedID) }) selectedID = ""
+        if (visibleColumns().none { it.contains(selectedID) }) selectedID = ""
         requestInitialFocus()
         host.refreshHints()
     }
@@ -235,7 +254,21 @@ class NotificationsScreen(
     }
 
     private fun selectedNotice(): ServiceNotice? =
-        columns.values.firstNotNullOfOrNull { it.focusedNotice() }
+        visibleColumns().firstNotNullOfOrNull { it.focusedNotice() }
+
+    private fun visibleColumns(): List<ServiceColumnView> =
+        (if (mode == ContentMode.MEDIA) MEDIA_SERVICES else BOOK_SERVICES).mapNotNull(columns::get)
+
+    private fun showMode(selected: ContentMode) {
+        if (mode == selected) return
+        mode = selected
+        mediaColumns.visibility = if (selected == ContentMode.MEDIA) View.VISIBLE else View.GONE
+        bookColumns.visibility = if (selected == ContentMode.BOOKS) View.VISIBLE else View.GONE
+        selectedID = ""
+        host.refreshHints()
+    }
+
+    override fun selectContentMode(mode: ContentMode) = showMode(mode)
 
     private inner class ServiceColumnView(private val service: String) : LinearLayout(host.viewContext) {
         private val count: TextView
@@ -246,7 +279,7 @@ class NotificationsScreen(
 
         init {
             orientation = VERTICAL
-            background = GradientDrawable().apply {
+            background = ThemeGradientDrawable().apply {
                 cornerRadius = Styler.dp(context, 14f)
                 setColor(this@NotificationsScreen.colors.stripBackground)
             }
@@ -256,7 +289,8 @@ class NotificationsScreen(
                 orientation = HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 addView(ImageView(context).apply {
-                    setImageResource(serviceLogo(service))
+                    if (service in BOOK_SERVICES) setImageDrawable(AppIconDrawable(if (service == "kavita") AppIcon.COMIC else AppIcon.BOOK, colors.primaryText))
+                    else com.pocketds.hub.ui.ServiceLogo.bind(this,serviceLogo(service))
                     scaleType = ImageView.ScaleType.CENTER_INSIDE
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 }, LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(9) })
@@ -342,6 +376,7 @@ class NotificationsScreen(
             val unread = adapter.unreadCount()
             count.text = unread.toString()
             count.background = pill(colors.badgeFailed)
+            count.setTextColor(SemanticColor.foreground(colors.badgeFailed))
             count.visibility = if (unread > 0) View.VISIBLE else View.GONE
             count.contentDescription = "$unread unread ${displayName(service)} notifications"
         }
@@ -365,6 +400,7 @@ class NotificationsScreen(
             init { setHasStableIds(true) }
 
             fun submit(values: List<ServiceNotice>) {
+                if (items == values) return
                 items.clear()
                 items.addAll(values)
                 notifyDataSetChanged()
@@ -378,7 +414,7 @@ class NotificationsScreen(
 
             override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): NoticeHolder {
                 val card = NoticeCardView(parent.context).apply {
-                    layoutParams = RecyclerView.LayoutParams(MATCH, dp(94)).apply {
+                    layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
                         setMargins(dp(2), dp(3), dp(2), dp(3))
                     }
                     FocusDecorator.attach(this, ringVisible, scale = false)
@@ -419,26 +455,27 @@ class NotificationsScreen(
             isFocusableInTouchMode = true
             isClickable = true
             background = Styler.cardBackground(context, colors, 10f)
+            minimumHeight=dp(76)
             setPadding(dp(10), dp(8), dp(10), dp(8))
             dot = View(context)
             addView(dot, LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(9) })
             addView(LinearLayout(context).apply {
                 orientation = VERTICAL
                 headline = TextView(context).apply {
-                    textSize = 12.5f
+                    textSize = 13f
                     setTypeface(typeface, Typeface.BOLD)
                     setTextColor(colors.primaryText)
                     maxLines = 2
                 }
                 addView(headline)
                 detail = TextView(context).apply {
-                    textSize = 10.5f
+                    textSize = 12f
                     setTextColor(colors.mutedText)
                     maxLines = 2
                 }
                 addView(detail)
                 meta = TextView(context).apply {
-                    textSize = 9.5f
+                    textSize = 11f
                     setTextColor(colors.mutedText)
                     maxLines = 1
                     setPadding(0, dp(3), 0, 0)
@@ -507,6 +544,9 @@ class NotificationsScreen(
         "sonarr" -> "Sonarr"
         "radarr" -> "Radarr"
         "bazarr" -> "Bazarr"
+        "bookkeeprr" -> "BookKeeprr"
+        "storyteller" -> "Storyteller"
+        "kavita" -> "Kavita"
         else -> service.replaceFirstChar { it.uppercase() }
     }
 
@@ -517,7 +557,7 @@ class NotificationsScreen(
         else -> R.drawable.ic_launcher_foreground
     }
 
-    private fun pill(color: Int) = GradientDrawable().apply {
+    private fun pill(color: Int) = ThemeGradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = Styler.dp(host.viewContext, 99f)
         setColor(color)
@@ -530,7 +570,8 @@ class NotificationsScreen(
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val TAG_NOTICE = -0x7ffffc01
         const val POLL_MS = 30_000L
-        val SERVICES = listOf("sonarr", "radarr", "bazarr")
+        val MEDIA_SERVICES = listOf("sonarr", "radarr", "bazarr")
+        val BOOK_SERVICES = listOf("bookkeeprr", "kavita", "storyteller")
         val HEALTH_WORD_BOUNDARY = Regex("(?<=[a-z0-9])(?=[A-Z])")
     }
 }

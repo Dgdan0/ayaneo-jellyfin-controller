@@ -5,6 +5,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ReadingSortFieldsTest {
+    @Test fun `one sort sheet labels recent activity direction honestly`() {
+        assertEquals("Most recently read first", ReadingSortFields.directionLabel("last_read", ascending = false))
+        assertEquals("Least recently read first", ReadingSortFields.directionLabel("last_read", ascending = true))
+        assertEquals("A to Z", ReadingSortFields.directionLabel("title", ascending = true))
+        assertEquals("Z to A", ReadingSortFields.directionLabel("title", ascending = false))
+    }
     @Test
     fun `storyteller exposes series author and last read sorts`() {
         val library = ReadingLibrary(

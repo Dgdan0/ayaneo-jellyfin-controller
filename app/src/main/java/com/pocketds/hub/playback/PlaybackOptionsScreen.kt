@@ -14,6 +14,7 @@ import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.settings.HubSettings
+import com.pocketds.hub.ui.TrackPresentation
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Theme
@@ -42,6 +43,7 @@ class PlaybackOptionsScreen(
     private var plan: PlaybackPrepareResponse? = null
     private var job: Job? = null
     private var handedOff = false
+    private var qualityCap = 0
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -142,9 +144,9 @@ class PlaybackOptionsScreen(
     }
 
     private fun showMain(value: PlaybackPrepareResponse) {
-        val audio = value.audioTracks.firstOrNull { it.index == value.selectedAudioIndex }?.label
+        val audio = value.audioTracks.firstOrNull { it.index == value.selectedAudioIndex }?.let { TrackPresentation.of(it).title }
             ?: "Jellyfin default"
-        val subtitle = value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }?.label
+        val subtitle = value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }?.let { TrackPresentation.of(it).title }
             ?: "Off"
         val source = value.sources.firstOrNull { it.id == value.selectedMediaSourceId }
         overlay.show(
@@ -176,24 +178,20 @@ class PlaybackOptionsScreen(
 
     private fun showSources(value: PlaybackPrepareResponse) = submenu(
         "Media version",
-        value.sources.map { ChoiceOverlay.Choice(it.id, it.name.ifEmpty { it.container.uppercase() }, sourceLabel("", it.container, it.bitrate)) },
+        value.sources.map { ChoiceOverlay.Choice(it.id, it.name.ifEmpty { it.container.uppercase() }, sourceLabel("", it.container, it.bitrate), selected = it.id == value.selectedMediaSourceId) },
         value.sources.indexOfFirst { it.id == value.selectedMediaSourceId }
     ) { source -> select(PlaybackSelectBody(value.positionMillis, mediaSourceId = source)) }
 
     private fun showAudio(value: PlaybackPrepareResponse) = submenu(
         "Audio",
-        value.audioTracks.map { ChoiceOverlay.Choice(it.index.toString(), it.label, trackDetail(it.codec, it.channels)) },
+        value.audioTracks.map { val copy=TrackPresentation.of(it);ChoiceOverlay.Choice(it.index.toString(), copy.title, copy.detail, selected=it.index==value.selectedAudioIndex) },
         value.audioTracks.indexOfFirst { it.index == value.selectedAudioIndex }
     ) { index -> select(PlaybackSelectBody(value.positionMillis, audioStreamIndex = index.toInt())) }
 
     private fun showSubtitles(value: PlaybackPrepareResponse) {
-        val choices = listOf(ChoiceOverlay.Choice("-1", "Off")) + value.subtitleTracks.map {
-            ChoiceOverlay.Choice(it.index.toString(), it.label, buildList {
-                if (it.forced) add("Forced")
-                if (it.hearingImpaired) add("Hearing impaired")
-                if (it.external) add("External")
-                if (it.codec.isNotEmpty()) add(it.codec.uppercase())
-            }.joinToString(" · "))
+        val choices = listOf(ChoiceOverlay.Choice("-1", "Off", selected = value.selectedSubtitleIndex == null || value.selectedSubtitleIndex == -1)) + value.subtitleTracks.map {
+            val copy=TrackPresentation.of(it)
+            ChoiceOverlay.Choice(it.index.toString(),copy.title,copy.detail,selected=it.index==value.selectedSubtitleIndex)
         }
         submenu("Subtitles", choices, choices.indexOfFirst { it.id.toInt() == value.selectedSubtitleIndex }) {
             select(PlaybackSelectBody(value.positionMillis, subtitleStreamIndex = it.toInt()))
@@ -202,8 +200,8 @@ class PlaybackOptionsScreen(
 
     private fun showQuality(value: PlaybackPrepareResponse) = submenu(
         "Quality",
-        PlaybackRules.qualities.map { ChoiceOverlay.Choice(it.bitrate.toString(), it.label) },
-        0
+        PlaybackRules.qualities.map { ChoiceOverlay.Choice(it.bitrate.toString(), it.label, selected=it.bitrate==qualityCap) },
+        PlaybackRules.qualities.indexOfFirst { it.bitrate==qualityCap }
     ) { bitrate -> select(PlaybackSelectBody(value.positionMillis, maxBitrate = bitrate.toInt())) }
 
     private fun submenu(
@@ -224,6 +222,7 @@ class PlaybackOptionsScreen(
         job = scope.launch {
             when (val result = api.selectPlayback(current.sessionId, body)) {
                 is HubResult.Ok -> {
+                    body.maxBitrate?.let { qualityCap=it }
                     plan = result.value
                     remember(result.value)
                     showMain(result.value)

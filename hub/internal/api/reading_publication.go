@@ -104,7 +104,8 @@ func (s *Server) handleReadingPublicationProgress(w http.ResponseWriter, r *http
 		return
 	}
 	var body struct {
-		PageIndex int `json:"pageIndex"`
+		PageIndex    int  `json:"pageIndex"`
+		ExpectedPage *int `json:"expectedPage"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
 	decoder.DisallowUnknownFields()
@@ -114,8 +115,14 @@ func (s *Server) handleReadingPublicationProgress(w http.ResponseWriter, r *http
 	}
 	ctx, cancel := timeoutFor(r, s.cfg.Server.RequestTimeout.OrDefault(25*time.Second))
 	defer cancel()
-	publication, ok := s.resolveReadingPublication(w, r, ctx, false)
+	unlock := lockReadingCheckpoint("kavita", r.PathValue("sourceItemId"))
+	defer unlock()
+	publication, ok := s.resolveReadingPublication(w, r, ctx, body.ExpectedPage != nil)
 	if !ok {
+		return
+	}
+	if body.ExpectedPage != nil && *body.ExpectedPage != publication.manifest.CurrentPage {
+		writeError(w, r, http.StatusConflict, Error{Code: "reading_position_conflict", Message: "Reading progress changed on another device. Choose which position to continue from."})
 		return
 	}
 	if body.PageIndex >= publication.manifest.PageCount {

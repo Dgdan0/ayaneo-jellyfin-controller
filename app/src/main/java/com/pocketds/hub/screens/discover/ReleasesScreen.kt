@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -417,7 +418,7 @@ private class ReleaseRowView(
         } else {
             this@ReleaseRowView.colors.badgeAvailable
         }
-        badge.background = android.graphics.drawable.GradientDrawable().apply {
+        badge.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 9f)
             setColor(badgeFill)
         }

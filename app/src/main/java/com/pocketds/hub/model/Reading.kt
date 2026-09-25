@@ -14,7 +14,7 @@ object ReadingType {
 
     val filters = listOf(
         ALL to "All",
-        EBOOK to "Books",
+        EBOOK to "Ebooks",
         AUDIOBOOK to "Audiobooks",
         COMIC to "Comics",
         MANGA to "Manga",
@@ -71,6 +71,7 @@ data class ReadingSearchResponse(
     val query: String = "",
     val contentType: String = ReadingType.ALL,
     val results: List<ReadingItem> = emptyList(),
+    val broaderResults: List<ReadingItem> = emptyList(),
     val partial: List<PartialFailure> = emptyList(),
     val cache: CacheInfo = CacheInfo()
 )
@@ -125,8 +126,46 @@ data class ReadingRequestResponse(
     val alreadyPresent: Int = 0,
     val failed: Int = 0,
     val state: String = "",
-    val message: String = ""
+    val message: String = "",
+    val targets: List<ReadingRequestTarget> = emptyList()
 )
+
+@Serializable
+data class ReadingRequestTarget(val seriesId: Int = 0, val title: String = "")
+
+@Serializable
+data class ReadingRelease(
+    val id: String = "",
+    val title: String = "",
+    val indexer: String = "",
+    val sizeBytes: Long = 0,
+    val seeders: Int = 0,
+    val leechers: Int = 0,
+    val score: Double = 0.0,
+    val ownership: String = "none",
+    val rejected: Boolean = false,
+    val reason: String = "",
+    val freeleech: Boolean = false,
+    val format: String = "",
+    val formatStatus: String = "unknown"
+) {
+    fun canGrab(): Boolean = formatStatus != "incompatible"
+    fun formatLabel(): String = when (formatStatus) {
+        "compatible" -> if (format.isBlank()) "Format matched" else "$format · matches request"
+        "incompatible" -> if (format.isBlank()) "Wrong format" else "$format · wrong format"
+        else -> "Format unverified"
+    }
+}
+
+@Serializable
+data class ReadingReleasesResponse(
+    val seriesId: Int = 0,
+    val releases: List<ReadingRelease> = emptyList(),
+    val errors: List<String> = emptyList()
+)
+
+@Serializable
+data class ReadingReleaseGrabBody(val id: String)
 
 @Serializable
 data class ReadingSeriesPreviewBook(
@@ -209,6 +248,7 @@ data class ReadingLibrary(
     val kind: String = "book",
     val title: String = "",
     val artwork: String = "",
+    val artworkStyle: String = "poster",
     val capabilities: List<String> = emptyList()
 )
 
@@ -359,7 +399,7 @@ data class ReadingPublicationManifest(
 }
 
 @Serializable
-data class ReadingPublicationProgressBody(val pageIndex: Int)
+data class ReadingPublicationProgressBody(val pageIndex: Int, val expectedPage: Int? = null)
 
 @Serializable
 data class EpubPositionResponse(
@@ -373,5 +413,16 @@ data class EpubPositionResponse(
 @Serializable
 data class EpubPositionBody(
     val locator: JsonObject,
-    val timestamp: Long
+    val timestamp: Long,
+    val checkBase: Boolean = false,
+    val expectedLocator: JsonObject? = null
 )
+
+@Serializable
+data class ReadingAuthor(val id:String="",val name:String="",val artwork:String="",val total:Int=0,
+    val page:Int=1,val totalPages:Int=0,val items:List<ReadingWork> = emptyList())
+@Serializable
+data class ReadingAuthorsResponse(val authors:List<ReadingAuthor> = emptyList(),val page:Int=1,
+    val total:Int=0,val totalPages:Int=0,val partial:List<PartialFailure> = emptyList(),val cache:CacheInfo=CacheInfo())
+@Serializable
+data class ReadingResolveResponse(val workId:String="",val resolved:Boolean=false)

@@ -6,6 +6,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SectionStacksTest {
+    @Test fun `shoulder buttons cycle five content sections without entering utility pages`() {
+        val s = SectionStacks(8)
+        assertTrue(s.switchWithin(+1, 5))
+        assertEquals(1, s.current)
+        s.select(4)
+        assertTrue(s.switchWithin(+1, 5))
+        assertEquals(0, s.current)
+        assertTrue(s.switchWithin(-1, 5))
+        assertEquals(4, s.current)
+        s.select(6)
+        assertTrue(s.switchWithin(+1, 5))
+        assertEquals(0, s.current)
+    }
+
 
     private val log = mutableListOf<String>()
     private fun screen(name: String) = FakeScreen(name, log)

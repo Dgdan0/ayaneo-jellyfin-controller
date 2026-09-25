@@ -61,12 +61,15 @@ type Server struct {
 	offline               *offlineStore
 	readingCatalog        *readingdomain.CatalogStore
 	readingCandidates     *readingCandidateStore
+	readingReleaseTickets *readingReleaseTickets
 	readingTransfers      *readingTransferStore
 	readingSeriesPreviews *readingSeriesPreviewStore
 	readingAcquisitions   *readingAcquisitionStore
+	readingAlignments     *readingAlignmentStore
 
 	playbackMu       sync.Mutex
 	playbackSessions map[string]*playbackSession
+	castGrants       map[string]*playbackCastGrant
 	playbackTTL      time.Duration
 	previewFrame     func(context.Context, string, int64) ([]byte, error)
 	libraryScanMu    sync.Mutex
@@ -94,12 +97,15 @@ func NewServer(cfg *config.Config) *Server {
 		offline:               newOfflineStore(cfg.Server.OfflineRegistry),
 		readingCatalog:        readingdomain.NewCatalogStore(cfg.Server.ReadingCatalog),
 		readingCandidates:     newReadingCandidateStore(2000),
+		readingReleaseTickets: newReadingReleaseTickets(),
 		readingTransfers:      newReadingTransferStore(cfg.Server.ReadingTransfers),
 		readingSeriesPreviews: newReadingSeriesPreviewStore(250),
 		readingAcquisitions:   newReadingAcquisitionStore(readingAcquisitionPath(cfg.Server.ReadingTransfers)),
+		readingAlignments:     newReadingAlignmentStore(readingAlignmentPath(cfg.Server.ReadingTransfers)),
 		openlibrary:           openlibrary.New(""),
 		wikidata:              wikidata.New(""),
 		playbackSessions:      make(map[string]*playbackSession),
+		castGrants:            make(map[string]*playbackCastGrant),
 		playbackTTL:           30 * time.Minute,
 		previewFrame:          extractPreviewFrame,
 		startedAt:             time.Now(),
@@ -212,6 +218,13 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	})
+	// Capability URLs for a Cast receiver. The TV has no hub bearer token; each
+	// URL is random, scoped to one playback session, and revoked on stop.
+	mux.HandleFunc("GET /v1/cast/{grantId}/stream", s.handleCastStream)
+	mux.HandleFunc("HEAD /v1/cast/{grantId}/stream", s.handleCastStream)
+	mux.HandleFunc("GET /v1/cast/{grantId}/hls/{resource}", s.handleCastHLS)
+	mux.HandleFunc("GET /v1/cast/{grantId}/subtitles/{trackId}", s.handleCastSubtitle)
+	mux.HandleFunc("OPTIONS /v1/cast/{grantId}/{resource...}", s.handleCastOptions)
 
 	authed := http.NewServeMux()
 	authed.HandleFunc("GET /v1/health", s.handleHealth)
@@ -232,6 +245,7 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/playback/sessions/{sessionId}/trickplay/{index}", s.handlePlaybackTrickplay)
 	authed.HandleFunc("GET /v1/playback/sessions/{sessionId}/preview", s.handlePlaybackPreview)
 	authed.HandleFunc("POST /v1/playback/sessions/{sessionId}/select", s.handlePlaybackSelect)
+	authed.HandleFunc("POST /v1/playback/sessions/{sessionId}/cast-grant", s.handleCastGrant)
 	authed.HandleFunc("POST /v1/playback/sessions/{sessionId}/events", s.handlePlaybackEvent)
 	authed.HandleFunc("DELETE /v1/playback/sessions/{sessionId}", s.handlePlaybackDelete)
 	authed.HandleFunc("GET /v1/offline/series/{seriesId}/selection", s.handleOfflineSelection)
@@ -248,6 +262,8 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/search", s.handleReadingSearch)
 	authed.HandleFunc("GET /v1/reading/libraries", s.handleReadingLibraries)
 	authed.HandleFunc("GET /v1/reading/libraries/{libraryId}/items", s.handleReadingLibraryItems)
+	authed.HandleFunc("GET /v1/reading/libraries/{libraryId}/authors", s.handleReadingAuthors)
+	authed.HandleFunc("GET /v1/reading/resolve", s.handleReadingResolve)
 	authed.HandleFunc("GET /v1/reading/works/{workId}", s.handleReadingWork)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}", s.handleReadingPublication)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/pages/{page}", s.handleReadingPublicationPage)
@@ -258,10 +274,14 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/requests/options", s.handleReadingRequestOptions)
 	authed.HandleFunc("GET /v1/reading/requests/series-preview", s.handleReadingSeriesPreview)
 	authed.HandleFunc("POST /v1/reading/requests", s.handleReadingCreateRequest)
+	authed.HandleFunc("GET /v1/reading/requests/{seriesId}/releases", s.handleReadingReleases)
+	authed.HandleFunc("POST /v1/reading/requests/{seriesId}/search", s.handleReadingReleaseSearch)
+	authed.HandleFunc("POST /v1/reading/requests/{seriesId}/grab", s.handleReadingReleaseGrab)
 	authed.HandleFunc("GET /v1/reading/downloads", s.handleReadingDownloads)
 	authed.HandleFunc("POST /v1/reading/downloads/{transferId}/retry", s.handleReadingDownloadRetry)
 	authed.HandleFunc("DELETE /v1/reading/downloads/{transferId}", s.handleReadingDownloadCancel)
 	authed.HandleFunc("GET /v1/img/reading/kavita/{seriesId}", s.handleKavitaReadingImage)
+	authed.HandleFunc("GET /v1/img/reading/kavita-library/{libraryId}", s.handleKavitaLibraryImage)
 	authed.HandleFunc("GET /v1/img/reading/storyteller/{bookId}", s.handleStorytellerReadingImage)
 	authed.HandleFunc("GET /v1/img/reading/{token}", s.handleReadingImage)
 	authed.HandleFunc("GET /v1/media/{key}", s.handleMediaDetail)

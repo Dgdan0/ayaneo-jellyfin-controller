@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.downloads
 
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.content.Context
 import android.view.Gravity
 import android.view.ViewGroup
@@ -10,6 +11,7 @@ import com.pocketds.hub.model.ActivityItem
 import com.pocketds.hub.model.Stages
 import com.pocketds.hub.state.Fmt
 import com.pocketds.hub.ui.PocketColors
+import com.pocketds.hub.ui.SemanticColor
 import com.pocketds.hub.ui.Styler
 
 /**
@@ -58,7 +60,7 @@ class DownloadRowView(
         })
 
         titleView = TextView(context).apply {
-            textSize = 15f
+            textSize = 14f
             setTextColor(colors.primaryText)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -75,7 +77,7 @@ class DownloadRowView(
         })
 
         subline = TextView(context).apply {
-            textSize = 11f
+            textSize = 12f
             setTextColor(colors.mutedText)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
@@ -86,22 +88,23 @@ class DownloadRowView(
             max = 1000
             isIndeterminate = false
         }
-        addView(bar, LayoutParams(MATCH, Styler.dpInt(context, 5f)).apply {
+        addView(bar, LayoutParams(MATCH, Styler.dpInt(context, 3f)).apply {
             topMargin = Styler.dpInt(context, 7f)
             bottomMargin = Styler.dpInt(context, 5f)
         })
 
         stats = TextView(context).apply {
-            textSize = 11f
+            textSize = 12f
             setTextColor(colors.mutedText)
             maxLines = 1
         }
         addView(stats, LayoutParams(MATCH, WRAP))
 
         problem = TextView(context).apply {
-            textSize = 11f
+            textSize = 12f
             setTextColor(colors.dangerText)
-            maxLines = 3
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
             visibility = GONE
         }
         addView(problem, LayoutParams(MATCH, WRAP).apply {
@@ -112,8 +115,8 @@ class DownloadRowView(
     fun bind(item: ActivityItem) {
         val stageColor = stageColor(item.stage)
         stageChip.text = Stages.label(item.stage).uppercase()
-        stageChip.setTextColor(colors.accentText)
-        stageChip.background = android.graphics.drawable.GradientDrawable().apply {
+        stageChip.setTextColor(SemanticColor.foreground(stageColor))
+        stageChip.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 9f)
             setColor(stageColor)
         }
@@ -148,6 +151,7 @@ class DownloadRowView(
                 append(warningLabel(warning))
             }
         }
+        contentDescription = listOf(item.headline, Stages.label(item.stage), stats.text, note).filter { it.isNotEmpty() }.joinToString(", ")
         problem.text = note
         problem.visibility = if (note.isEmpty()) GONE else VISIBLE
     }

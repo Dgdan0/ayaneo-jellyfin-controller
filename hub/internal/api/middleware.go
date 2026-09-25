@@ -81,6 +81,9 @@ type statusRecorder struct {
 	status int
 }
 
+// Keep net/http.ResponseController features available to long streaming routes.
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
 func (s *statusRecorder) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
@@ -93,13 +96,20 @@ func withLogging(next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 		slog.Info("request",
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", redactedRequestPath(r.URL.Path),
 			"status", rec.status,
 			"ms", time.Since(start).Milliseconds(),
 			"token", TokenFrom(r.Context()).Label,
 			"requestId", RequestIDFrom(r.Context()),
 		)
 	})
+}
+
+func redactedRequestPath(requestPath string) string {
+	if strings.HasPrefix(requestPath, "/v1/cast/") {
+		return "/v1/cast/[grant]"
+	}
+	return requestPath
 }
 
 // clientIP is the source to ban. X-Forwarded-For is honoured only from a proxy

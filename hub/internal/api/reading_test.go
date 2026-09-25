@@ -106,6 +106,29 @@ func TestReadingCategoryAndSearchUseNormalizedContracts(t *testing.T) {
 	}
 }
 
+func TestReadingSearchRetriesEmptyPartialProviderResult(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			_, _ = w.Write([]byte(`{"results":[],"errors":{"openlibrary":"temporarily unavailable"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"results":[{"contentType":"ebook","source":"openlibrary","sourceId":"OL1W","title":"Recursion","author":"Blake Crouch"}],"errors":{}}`))
+	}))
+	defer upstream.Close()
+	handler := NewServer(readingAPIConfig(upstream.URL, []string{"reading"})).Handler()
+	path := "/v1/reading/search?q=Recursion&type=ebook"
+	first := libraryRequest(handler, path)
+	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"provider_unavailable"`) {
+		t.Fatalf("first search = %d %s", first.Code, first.Body.String())
+	}
+	second := libraryRequest(handler, path)
+	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"Recursion"`) || calls != 2 {
+		t.Fatalf("second search = %d %s; upstream calls = %d", second.Code, second.Body.String(), calls)
+	}
+}
+
 func TestReadingRoutesRequireReadingScopeAndValidateInputs(t *testing.T) {
 	calls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++ }))

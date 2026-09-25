@@ -83,7 +83,7 @@ class OfflineScreen(
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
                 addView(TextView(context).apply {
-                    text = "Offline"; textSize = 23f; setTextColor(colors.primaryText)
+                    text = "On your Pocket"; textSize = 23f; setTextColor(colors.primaryText)
                 }, LinearLayout.LayoutParams(0, WRAP, 1f))
                 libraryTab = tab("Downloaded", MODE_LIBRARY)
                 queueTab = tab("Download manager", MODE_QUEUE)
@@ -95,7 +95,7 @@ class OfflineScreen(
             addView(summary)
             content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
             scroll = ScrollView(context).apply {
-                isFocusable = false; clipToPadding = false; setPadding(0, 0, 0, dp(80)); addView(content)
+                isFocusable = false; clipToPadding = false; setPadding(0, 0, 0, dp(20)); addView(content)
             }
             addView(scroll, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }
@@ -130,6 +130,15 @@ class OfflineScreen(
         }
         if (::overlay.isInitialized) overlay.dismiss()
     }
+
+    fun openManager() {
+        if (!::content.isInitialized) return
+        mode = MODE_QUEUE
+        selectedId = ""
+        scroll.scrollTo(0, 0)
+        render(force = true)
+        queueTab.post { requestInitialFocus() }
+    }
     override fun onDestroyView() {
         cancelScheduledRender()
         if (receiverRegistered) {
@@ -145,6 +154,8 @@ class OfflineScreen(
 
     override fun hints(): List<ButtonHint> {
         if (overlay.isOpen) return listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
+        if (libraryTab.hasFocus()) return listOf(ButtonHint.activate("Show downloads"), ButtonHint.back())
+        if (queueTab.hasFocus()) return listOf(ButtonHint.activate("Open download manager"), ButtonHint.back())
         val row = focusedRow()
         return buildList {
             when (row) {
@@ -231,6 +242,10 @@ class OfflineScreen(
         queueHeaders.clear()
         queueTab.background = tabBackground(mode == MODE_QUEUE)
         libraryTab.background = tabBackground(mode == MODE_LIBRARY)
+        queueTab.isSelected = mode == MODE_QUEUE
+        libraryTab.isSelected = mode == MODE_LIBRARY
+        queueTab.contentDescription = if (queueTab.isSelected) "Download manager, selected" else "Download manager"
+        libraryTab.contentDescription = if (libraryTab.isSelected) "Downloaded, selected" else "Downloaded"
         if (mode == MODE_QUEUE) renderQueue(batches) else renderLibrary(completed, batches)
         content.post {
             val restoredFocus = if (hadFocus != null &&
@@ -303,7 +318,20 @@ class OfflineScreen(
         val size = groups.sumOf { entry -> entry.rows.sumOf { it.totalBytes } }
         summary.text = "${groups.size} title${if (groups.size == 1) "" else "s"} · $complete file${if (complete == 1) "" else "s"} · ${fileSize(size)}"
         if (groups.isEmpty()) { empty("Downloaded movies and series will appear here and remain playable without a network."); return }
-        val grid = GridLayout(host.viewContext).apply {
+        val grid = object: GridLayout(host.viewContext) {
+            override fun onSizeChanged(w:Int,h:Int,oldw:Int,oldh:Int) {
+                super.onSizeChanged(w,h,oldw,oldh)
+                val columns=com.pocketds.hub.state.LibraryGridSizing.columns(w,paddingLeft+paddingRight,resources.displayMetrics.density)
+                if(columns!=columnCount) {
+                    columnCount=columns
+                    for(i in 0 until childCount) {
+                        getChildAt(i).layoutParams=(getChildAt(i).layoutParams as GridLayout.LayoutParams).apply {
+                            columnSpec=GridLayout.spec(i%columns,1f);rowSpec=GridLayout.spec(i/columns)
+                        }
+                    }
+                }
+            }
+        }.apply {
             columnCount = 5
             alignmentMode = GridLayout.ALIGN_BOUNDS
             useDefaultMargins = false
@@ -442,16 +470,17 @@ class OfflineScreen(
                 addView(TextView(context).apply {
                     text = episodeTitle(row); textSize = 14f; maxLines = 1; setTextColor(colors.primaryText)
                 })
-                state = TextView(context).apply { textSize = 10f }
+                state = TextView(context).apply { textSize = 12f; maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END }
                 addView(state)
                 progress = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
                     max = 1_000
                 }
-                addView(progress, LinearLayout.LayoutParams(MATCH, dp(7)).apply { topMargin = dp(4) })
+                addView(progress, LinearLayout.LayoutParams(MATCH, dp(3)).apply { topMargin = dp(4) })
             }, LinearLayout.LayoutParams(0, WRAP, 1f))
             percent = TextView(context).apply { textSize = 13f; gravity = Gravity.CENTER; setTextColor(colors.accent) }
             addView(percent, LinearLayout.LayoutParams(dp(58), MATCH))
-            layoutParams = LinearLayout.LayoutParams(MATCH, dp(78)).apply { bottomMargin = dp(5); marginStart = dp(10) }
+            minimumHeight=dp(76)
+            layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(5); marginStart = dp(10) }
             decorate(this)
             activateOnTap {
                 if (row.state == OfflineState.COMPLETE) host.playItem(row.manifest.item.id) else showDownloadDetails(row)
@@ -483,7 +512,7 @@ class OfflineScreen(
     private fun tab(label: String, target: Int) = TextView(host.viewContext).apply {
         text = label; textSize = 12f; gravity = Gravity.CENTER; setTextColor(colors.primaryText)
         setPadding(dp(14), dp(7), dp(14), dp(7)); Styler.makeFocusable(this)
-        layoutParams = LinearLayout.LayoutParams(WRAP, dp(42)).apply { marginStart = dp(7) }
+        layoutParams = LinearLayout.LayoutParams(WRAP, dp(48)).apply { marginStart = dp(7) }
         FocusDecorator.attach(this, ringVisible, scale = false)
         setOnFocusChangeListener { view, _ -> FocusDecorator.refresh(view, ringVisible()); host.refreshHints() }
         activateOnTap {
@@ -652,11 +681,9 @@ class OfflineScreen(
             )
         } else loadImage(view, row.manifest.item.thumb.ifEmpty { row.manifest.item.poster })
     }
-    private fun tabBackground(selected: Boolean) = android.graphics.drawable.GradientDrawable().apply {
-        cornerRadius = Styler.dp(host.viewContext, 10f)
-        setColor(if (selected) this@OfflineScreen.colors.focusFill else this@OfflineScreen.colors.cardSurface)
-        if (selected) setStroke(dp(1), this@OfflineScreen.colors.accent)
-    }
+    private fun tabBackground(selected: Boolean) = Styler.selectionBackground(
+        host.viewContext, colors, selected, baseFill = colors.cardSurface,
+        selectedFill = colors.focusFill, selectedStrokeDp = 1f, cornerDp = 10f)
     private fun fileSize(bytes: Long): String = when {
         bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824.0)
         bytes >= 1_048_576L -> "%.0f MB".format(bytes / 1_048_576.0)

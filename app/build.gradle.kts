@@ -16,9 +16,16 @@ android {
         // whose version code is lower than the APK already on the Pocket DS.
         versionCode = 15
         versionName = "0.3.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
+        create("uitest") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".uitest"
+            versionNameSuffix = "-uitest"
+            matchingFallbacks += listOf("debug")
+        }
         release {
             // Left off deliberately, as in the sibling project. kotlinx.serialization
             // needs R8 keep rules to survive shrinking, and this is a personal build
@@ -26,6 +33,10 @@ android {
             isMinifyEnabled = false
         }
     }
+
+    // Connected instrumentation uninstalls its target after the run. Never target
+    // the everyday app: its account settings and downloaded media must survive.
+    testBuildType = "uitest"
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
@@ -46,6 +57,8 @@ dependencies {
     // device or Robolectric. Verifying this app on hardware is slow enough that
     // anything decidable off-device should be.
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.5.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 
@@ -70,6 +83,8 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("androidx.media3:media3-session:1.4.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.4.1")
+    // 21.5 is the last Cast line compatible with this app's Kotlin 1.9 toolchain.
+    implementation("com.google.android.gms:play-services-cast-framework:21.5.0")
     // Pocket DS firmware has no platform AC-3/E-AC-3 decoder. This arm64-only
     // Media3 extension keeps Original offline files playable without converting
     // or discarding their audio tracks.

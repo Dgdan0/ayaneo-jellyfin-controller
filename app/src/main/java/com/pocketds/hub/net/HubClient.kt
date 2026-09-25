@@ -25,6 +25,8 @@ import com.pocketds.hub.model.ReadingDiscoverResponse
 import com.pocketds.hub.model.ReadingSearchResponse
 import com.pocketds.hub.model.ReadingLibrariesResponse
 import com.pocketds.hub.model.ReadingLibraryItemsResponse
+import com.pocketds.hub.model.ReadingAuthorsResponse
+import com.pocketds.hub.model.ReadingResolveResponse
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.model.ReadingPublicationManifest
 import com.pocketds.hub.model.ReadingPublicationProgressBody
@@ -34,6 +36,8 @@ import com.pocketds.hub.model.ReadingCreateRequestBody
 import com.pocketds.hub.model.ReadingDownloadsResponse
 import com.pocketds.hub.model.ReadingRequestOptions
 import com.pocketds.hub.model.ReadingRequestResponse
+import com.pocketds.hub.model.ReadingReleasesResponse
+import com.pocketds.hub.model.ReadingReleaseGrabBody
 import com.pocketds.hub.model.ReadingSeriesPreviewResponse
 import com.pocketds.hub.model.LibraryResponse
 import com.pocketds.hub.model.LibraryItemsResponse
@@ -45,6 +49,7 @@ import com.pocketds.hub.model.UsersResponse
 import com.pocketds.hub.model.PlaybackEventBody
 import com.pocketds.hub.model.PlaybackPrepareBody
 import com.pocketds.hub.model.PlaybackPrepareResponse
+import com.pocketds.hub.model.PlaybackCastGrantResponse
 import com.pocketds.hub.model.PlaybackSelectBody
 import com.pocketds.hub.model.SeriesPlayTargetResponse
 import com.pocketds.hub.model.OfflineManifest
@@ -69,11 +74,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 
 /**
  * Everything the app knows how to ask the hub.
@@ -118,6 +124,7 @@ interface HubApi {
         body: PlaybackSelectBody,
         userId: String = ""
     ): HubResult<PlaybackPrepareResponse>
+    suspend fun castGrant(sessionId: String, userId: String = ""): HubResult<PlaybackCastGrantResponse>
     suspend fun playbackEvent(
         sessionId: String,
         body: PlaybackEventBody,
@@ -154,6 +161,10 @@ interface HubApi {
         sort: String = "title",
         direction: String = "asc"
     ): HubResult<ReadingLibraryItemsResponse>
+    suspend fun readingAuthors(libraryId:String,page:Int=1,direction:String="asc",authorId:String=""):HubResult<ReadingAuthorsResponse> =
+        HubResult.Failed(FailureKind.UNKNOWN,"Author shelves are unavailable")
+    suspend fun readingResolve(source:String,sourceId:String,isbn:String):HubResult<ReadingResolveResponse> =
+        HubResult.Failed(FailureKind.UNKNOWN,"Library lookup is unavailable")
     suspend fun readingWork(workId: String): HubResult<ReadingWork>
     suspend fun readingPublication(
         workId: String,
@@ -165,6 +176,8 @@ interface HubApi {
         sourceItemId: String,
         pageIndex: Int
     ): HubResult<ActionAck>
+    suspend fun saveReadingPublicationCheckpoint(workId: String, sourceItemId: String, body: ReadingPublicationProgressBody): HubResult<ActionAck> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Conditional reading progress is unavailable")
     suspend fun readingEpubPosition(
         workId: String,
         sourceItemId: String
@@ -179,12 +192,21 @@ interface HubApi {
     suspend fun downloadReadingEpub(
         workId: String,
         sourceItemId: String,
-        destination: File
+        destination: File,
+        readAlong: Boolean = false
     ): HubResult<ReadingEpubDownload> =
         HubResult.Failed(FailureKind.UNKNOWN, "EPUB downloading is unavailable")
+    suspend fun downloadReadingAudiobook(
+        workId: String, sourceItemId: String, destination: File
+    ): HubResult<ReadingEpubDownload> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Audiobook downloading is unavailable")
     suspend fun readingRequestOptions(key: String): HubResult<ReadingRequestOptions>
     suspend fun readingSeriesPreview(key: String): HubResult<ReadingSeriesPreviewResponse>
     suspend fun requestReading(body: ReadingCreateRequestBody): HubResult<ReadingRequestResponse>
+    suspend fun readingReleases(seriesId: Int, search: Boolean): HubResult<ReadingReleasesResponse> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Reading releases are unavailable")
+    suspend fun grabReadingRelease(seriesId: Int, releaseId: String): HubResult<ActionAck> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Reading release selection is unavailable")
     suspend fun readingDownloads(): HubResult<ReadingDownloadsResponse>
     suspend fun retryReadingDownload(id: String): HubResult<ActionAck>
     suspend fun cancelReadingDownload(id: String): HubResult<ActionAck>
@@ -227,7 +249,13 @@ interface HubApi {
  * one TLS handshake -- but also shares the Dispatcher, so the image client has
  * to be given its own explicitly.
  */
-class HubClient(private val context: Context) : HubApi {
+class HubConnection(val baseUrl: String, val token: String, val userId: String) {
+    companion object {
+        fun capture(context: Context) = HubConnection(HubSettings.baseUrl(context), HubSettings.token(context), HubSettings.userId(context))
+    }
+}
+
+class HubClient(private val context: Context, private val connection: HubConnection? = null) : HubApi {
 
     @Volatile private var rejectedToken = ""
 
@@ -247,16 +275,16 @@ class HubClient(private val context: Context) : HubApi {
         // A hard ceiling the retry loop must fit inside.
         .callTimeout(45, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
-        .cache(okhttp3.Cache(File(context.cacheDir, "hub-http"), 256L * 1024 * 1024))
+        .cache(if (connection == null) okhttp3.Cache(File(context.cacheDir, "hub-http"), 256L * 1024 * 1024) else null)
         .addInterceptor { chain ->
-            val token = HubSettings.token(context)
+            val token = connection?.token ?: HubSettings.token(context)
             val request = if (token.isEmpty()) {
                 chain.request()
             } else {
                 chain.request().newBuilder()
                     .header("Authorization", "Bearer $token")
                     .apply {
-                        HubSettings.userId(context).takeIf {
+                        (connection?.userId ?: HubSettings.userId(context)).takeIf {
                             it.isNotEmpty() && chain.request().header(JELLYFIN_USER_HEADER) == null
                         }?.let {
                             header(JELLYFIN_USER_HEADER, it)
@@ -341,13 +369,13 @@ class HubClient(private val context: Context) : HubApi {
 
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
-    private fun base(): String = HubSettings.baseUrl(context)
+    private fun base(): String = connection?.baseUrl ?: HubSettings.baseUrl(context)
 
     private fun connectionFailure(): HubResult.Failed? {
         if (base().isEmpty()) {
             return HubResult.Failed(FailureKind.UNAUTHORIZED, "No Hub address is configured")
         }
-        val token = HubSettings.token(context)
+        val token = connection?.token ?: HubSettings.token(context)
         if (token.isEmpty()) {
             return HubResult.Failed(
                 FailureKind.UNAUTHORIZED,
@@ -515,6 +543,11 @@ class HubClient(private val context: Context) : HubApi {
         json.encodeToString(PlaybackSelectBody.serializer(), body),
         userId = userId
     ) { json.decodeFromString<PlaybackPrepareResponse>(it) }
+
+    override suspend fun castGrant(sessionId: String, userId: String): HubResult<PlaybackCastGrantResponse> =
+        postOnce(HubEndpoints.castGrant(base(), sessionId), "{}", userId = userId) {
+            json.decodeFromString<PlaybackCastGrantResponse>(it)
+        }
 
     override suspend fun playbackEvent(
         sessionId: String,
@@ -711,6 +744,10 @@ class HubClient(private val context: Context) : HubApi {
             json.decodeFromString<ReadingLibraryItemsResponse>(it)
         }
 
+    override suspend fun readingAuthors(libraryId:String,page:Int,direction:String,authorId:String):HubResult<ReadingAuthorsResponse> =
+        get(HubEndpoints.readingAuthors(base(),libraryId,page,direction,authorId)) { json.decodeFromString<ReadingAuthorsResponse>(it) }
+    override suspend fun readingResolve(source:String,sourceId:String,isbn:String):HubResult<ReadingResolveResponse> =
+        get(HubEndpoints.readingResolve(base(),source,sourceId,isbn),noCache=true) { json.decodeFromString<ReadingResolveResponse>(it) }
     override suspend fun readingWork(workId: String): HubResult<ReadingWork> =
         get(HubEndpoints.readingWork(base(), workId)) {
             json.decodeFromString<ReadingWork>(it)
@@ -750,6 +787,10 @@ class HubClient(private val context: Context) : HubApi {
             json.decodeFromString<EpubPositionResponse>(it)
         }
 
+    override suspend fun saveReadingPublicationCheckpoint(workId: String, sourceItemId: String, body: ReadingPublicationProgressBody): HubResult<ActionAck> =
+        postOnce(HubEndpoints.readingPublicationProgress(base(), workId, sourceItemId),
+            json.encodeToString(ReadingPublicationProgressBody.serializer(), body)) { json.decodeFromString<ActionAck>(it) }
+
     override suspend fun saveReadingEpubPosition(
         workId: String,
         sourceItemId: String,
@@ -762,51 +803,51 @@ class HubClient(private val context: Context) : HubApi {
     override suspend fun downloadReadingEpub(
         workId: String,
         sourceItemId: String,
-        destination: File
+        destination: File,
+        readAlong: Boolean
     ): HubResult<ReadingEpubDownload> {
         connectionFailure()?.let { return it }
         return try {
             withContext(Dispatchers.IO) {
                 destination.parentFile?.mkdirs()
                 val request = Request.Builder()
-                    .url(HubEndpoints.readingEpubFile(base(), workId, sourceItemId))
+                    .url(HubEndpoints.readingEpubFile(base(), workId, sourceItemId, readAlong))
                     .cacheControl(noStore)
                     .build()
-                offlineHttp.newCall(request).await().use { response ->
-                    if (!response.isSuccessful) {
-                        val body = response.body?.string().orEmpty()
-                        return@withContext HubResult.Failed(
-                            HubFailures.classify(null, response.code),
-                            hubMessage(body) ?: "The EPUB could not be downloaded"
-                        )
-                    }
-                    val body = response.body ?: return@withContext HubResult.Failed(
-                        FailureKind.BAD_RESPONSE, "The EPUB response was empty"
-                    )
-                    FileOutputStream(destination, false).use { output ->
-                        body.byteStream().use { input -> input.copyTo(output, 128 * 1024) }
-                        output.fd.sync()
-                    }
-                    if (destination.length() <= 0L) {
-                        destination.delete()
-                        return@withContext HubResult.Failed(FailureKind.BAD_RESPONSE, "The EPUB response was empty")
-                    }
-                    HubResult.Ok(
-                        ReadingEpubDownload(
-                            bytes = destination.length(),
-                            etag = response.header("ETag").orEmpty(),
-                            contentHash = response.header("X-Reading-Content-Hash").orEmpty()
-                        )
-                    )
-                }
+                HubResult.Ok(ResumableEpubTransfer.downloadWithRetry(offlineHttp, request, destination))
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
-            destination.delete()
             throw e
+        } catch (e: EpubTransferHttpException) {
+            HubResult.Failed(HubFailures.classify(null, e.status), hubMessage(e.responseText) ?: "The EPUB could not be downloaded")
         } catch (e: Exception) {
-            destination.delete()
             DebugLog.log("net", "epub download failed ${e.javaClass.name}: ${e.message?.take(160)}")
             HubResult.Failed(HubFailures.classify(e.javaClass.name, null), "The EPUB could not be downloaded")
+        }
+    }
+
+    override suspend fun downloadReadingAudiobook(
+        workId: String, sourceItemId: String, destination: File
+    ): HubResult<ReadingEpubDownload> {
+        connectionFailure()?.let { return it }
+        return try {
+            withContext(Dispatchers.IO) {
+                destination.parentFile?.mkdirs()
+                val request = Request.Builder()
+                    .url(HubEndpoints.readingAudiobookFile(base(), workId, sourceItemId))
+                    .cacheControl(noStore)
+                    .build()
+                HubResult.Ok(ResumableEpubTransfer.downloadWithRetry(
+                    offlineHttp, request, destination, requireEpubManifest = false
+                ))
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: EpubTransferHttpException) {
+            HubResult.Failed(HubFailures.classify(null, e.status), hubMessage(e.responseText) ?: "The audiobook could not be downloaded")
+        } catch (e: Exception) {
+            DebugLog.log("net", "audiobook download failed ${e.javaClass.name}: ${e.message?.take(160)}")
+            HubResult.Failed(HubFailures.classify(e.javaClass.name, null), "The audiobook could not be downloaded")
         }
     }
 
@@ -826,6 +867,19 @@ class HubClient(private val context: Context) : HubApi {
         HubEndpoints.readingRequests(base()),
         json.encodeToString(ReadingCreateRequestBody.serializer(), body)
     ) { json.decodeFromString<ReadingRequestResponse>(it) }
+
+    override suspend fun readingReleases(seriesId: Int, search: Boolean): HubResult<ReadingReleasesResponse> =
+        if (search) postOnce(HubEndpoints.searchReadingReleases(base(), seriesId), "{}", slow = true) {
+            json.decodeFromString<ReadingReleasesResponse>(it)
+        } else get(HubEndpoints.readingReleases(base(), seriesId), noCache = true) {
+            json.decodeFromString<ReadingReleasesResponse>(it)
+        }
+
+    override suspend fun grabReadingRelease(seriesId: Int, releaseId: String): HubResult<ActionAck> =
+        postOnce(HubEndpoints.grabReadingRelease(base(), seriesId),
+            json.encodeToString(ReadingReleaseGrabBody.serializer(), ReadingReleaseGrabBody(releaseId))) {
+            json.decodeFromString<ActionAck>(it)
+        }
 
     override suspend fun readingDownloads(): HubResult<ReadingDownloadsResponse> =
         get(HubEndpoints.readingDownloads(base()), noCache = true) {

@@ -134,8 +134,14 @@ func TestLibraryArtworkPrefersViewImageAndFallsBackToContainedTitle(t *testing.T
 	if body.Views[0].Image != "/v1/img/jf/"+explicitID+"/Primary?tag=custom" {
 		t.Fatalf("explicit artwork = %q", body.Views[0].Image)
 	}
+	if body.Views[0].ImageStyle != "banner" {
+		t.Fatalf("explicit artwork style = %q", body.Views[0].ImageStyle)
+	}
 	if body.Views[1].Image != "/v1/img/jf/"+movieID+"/Primary?tag=picked" {
 		t.Fatalf("fallback artwork = %q", body.Views[1].Image)
+	}
+	if body.Views[1].ImageStyle != "poster" {
+		t.Fatalf("fallback artwork style = %q", body.Views[1].ImageStyle)
 	}
 	if itemCalls != 1 {
 		t.Fatalf("fallback queried %d times", itemCalls)

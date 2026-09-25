@@ -1,5 +1,6 @@
 package com.pocketds.hub.playback
 
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
@@ -20,7 +21,7 @@ internal class PlayerLevelView(context: Context) : View(context) {
     init {
         visibility = GONE
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
-        background = android.graphics.drawable.GradientDrawable().apply {
+        background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 17f)
             setColor(Color.argb(220, 16, 18, 23))
             setStroke(Styler.dpInt(context, 1f), Color.argb(115, 255, 255, 255))

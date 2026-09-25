@@ -1,5 +1,10 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.settings.DomainPreferences
+import com.pocketds.hub.settings.SortPreference
+import com.pocketds.hub.ui.LibrarySortPanel
+import com.pocketds.hub.ui.CenteredIconTextView
+import com.pocketds.hub.state.ContentMode
 import android.graphics.Bitmap
 import android.graphics.drawable.ColorDrawable
 import android.text.TextUtils
@@ -8,6 +13,8 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.EditText
+import android.app.AlertDialog
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -26,8 +33,14 @@ import com.pocketds.hub.model.ReadingProgress
 import com.pocketds.hub.model.ReadingSection
 import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.model.ReadingWork
+import com.pocketds.hub.screens.home.ReadingListEntry
+import com.pocketds.hub.screens.home.ReadingListsRepository
+import com.pocketds.hub.screens.home.ReadingListsState
 import com.pocketds.hub.reader.PagedImageReaderScreen
 import com.pocketds.hub.reader.EpubReaderScreen
+import com.pocketds.hub.reader.AudiobookScreen
+import com.pocketds.hub.reader.ReadingCompletionRepository
+import com.pocketds.hub.reader.ReadingCompletionSession
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
@@ -37,6 +50,15 @@ import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.state.LibraryGridSizing
 import com.pocketds.hub.state.PagedLoadState
 import com.pocketds.hub.state.StableItemFocus
+import com.pocketds.hub.ui.DetailHeaderView
+import com.pocketds.hub.ui.DetailArtworkCardView
+import com.pocketds.hub.ui.ContinuationCardView
+import com.pocketds.hub.ui.DetailLayout
+import com.pocketds.hub.ui.DetailStyler
+import com.pocketds.hub.ui.AppIcon
+import com.pocketds.hub.ui.AppIconDrawable
+import com.pocketds.hub.ui.MediaActionIcon
+import com.pocketds.hub.ui.MediaActionIconDrawable
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
@@ -59,15 +81,18 @@ class ReadingLibraryGridScreen(
     private val library: ReadingLibrary,
     private val ringVisible: () -> Boolean
 ) : Screen {
+    override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val title = library.title
-    override val horizontalMode = HorizontalMode.GRID
+    override val horizontalMode get() = if(sortKey=="author") HorizontalMode.CONFINED else HorizontalMode.GRID
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val paging = PagedLoadState(PREFETCH_AHEAD)
     private val adapter = WorkAdapter()
     private lateinit var colors: PocketColors
+    private lateinit var sortControl: CenteredIconTextView
     private lateinit var status: TextView
     private lateinit var grid: RecyclerView
+    private lateinit var authorShelves:AuthorShelvesView
     private lateinit var overlay: ChoiceOverlay
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
@@ -80,6 +105,8 @@ class ReadingLibraryGridScreen(
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
+        val remembered=DomainPreferences.sort(host.viewContext,ContentMode.BOOKS,sortFields.map { it.first },if (sortFields.any { it.first == "series" }) "series" else "title")
+        sortKey=remembered.field;sortAscending=remembered.ascending
         colors = Theme.colors(host.viewContext)
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
         val content = LinearLayout(host.viewContext).apply {
@@ -89,7 +116,14 @@ class ReadingLibraryGridScreen(
                 setTextColor(colors.mutedText)
                 setPadding(dp(12), dp(6), dp(12), dp(4))
             }
-            addView(status)
+            val toolbar=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(dp(16),dp(2),dp(20),dp(2)) }
+            toolbar.addView(status,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
+            sortControl=LibrarySortPanel.control(context,colors,::showSortPanel).apply {
+                text=LibrarySortPanel.label(sortFields,SortPreference(sortKey,sortAscending))
+                contentDescription="Sort library, $text"
+            }
+            toolbar.addView(sortControl)
+            addView(toolbar)
             grid = RecyclerView(context).apply {
                 layoutManager = GridLayoutManager(context, MAX_COLUMNS)
                 adapter = this@ReadingLibraryGridScreen.adapter
@@ -100,6 +134,7 @@ class ReadingLibraryGridScreen(
                 layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
                 addOnScrollListener(object : RecyclerView.OnScrollListener() {
                     override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
+                        if(refreshing) return
                         val manager = view.layoutManager as GridLayoutManager
                         paging.next(
                             manager.findLastVisibleItemPosition(),
@@ -120,15 +155,26 @@ class ReadingLibraryGridScreen(
                     if (manager.spanCount != columns) manager.spanCount = columns
                 }
             }
-            addView(grid)
+            val shelfArea=FrameLayout(context)
+            shelfArea.addView(grid,FrameLayout.LayoutParams(MATCH,MATCH))
+            authorShelves=AuthorShelvesView(context,api,library.id,colors,ringVisible,
+                {message,failed->status.text=message;status.setTextColor(if(failed)colors.dangerText else colors.mutedText)},
+                {if(sortKey=="author"){grid.visibility=View.GONE;authorShelves.visibility=View.VISIBLE}},
+                {work->host.push(ReadingWorkScreen(api,work.id,work.title,ringVisible))}).apply {visibility=View.GONE}
+            shelfArea.addView(authorShelves,FrameLayout.LayoutParams(MATCH,MATCH))
+            addView(shelfArea,LinearLayout.LayoutParams(MATCH,0,1f))
         }
         root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
-        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
+        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         return root
     }
 
     override fun onShow() {
+        val saved=DomainPreferences.sort(requireNotNull(host).viewContext,ContentMode.BOOKS,sortFields.map { it.first },if (sortFields.any { it.first == "series" }) "series" else "title")
+        if(saved!=SortPreference(sortKey,sortAscending)) { applySort(saved); return }
+        if(sortKey=="author"){authorShelves.show(sortAscending);return}
+        if (paging.loadedPage > 0 && ::grid.isInitialized) adapter.notifyDataSetChanged()
         if (paging.loadedPage == 0 && loadJob?.isActive != true) {
             (paging.retry() ?: paging.initial())?.let(::loadPage)
         } else {
@@ -137,6 +183,8 @@ class ReadingLibraryGridScreen(
     }
 
     override fun onHide() {
+        loadGeneration++
+        if(::authorShelves.isInitialized)authorShelves.hide()
         val position = focusedPosition()
         focusedWork()?.let { focusState.remember(position, it.id) }
         if (::overlay.isInitialized && overlay.isOpen) overlay.dismiss()
@@ -146,12 +194,15 @@ class ReadingLibraryGridScreen(
     }
 
     override fun onDestroyView() {
+        if(::authorShelves.isInitialized)authorShelves.destroy()
         scope.cancel()
         host = null
     }
 
     override fun requestInitialFocus(): Boolean {
-        if (!::grid.isInitialized || adapter.itemCount == 0) return false
+        if (::overlay.isInitialized && overlay.isOpen) return true
+        if(::authorShelves.isInitialized && authorShelves.visibility==View.VISIBLE)return authorShelves.restoreFocus()
+        if (!::grid.isInitialized || adapter.itemCount == 0) return if(::sortControl.isInitialized) sortControl.requestFocus() else false
         val target = focusState.resolve(adapter.ids())
         if (target < 0) return false
         grid.scrollToPosition(target)
@@ -176,12 +227,13 @@ class ReadingLibraryGridScreen(
             return true
         }
         return when (action) {
-            PadAction.Activate -> focusedWork()?.let(::open) != null
+            PadAction.Activate -> if(authorShelves.visibility==View.VISIBLE) false else focusedWork()?.let(::open) != null
             PadAction.Secondary -> {
-                showSortFields()
+                showSortPanel()
                 true
             }
             PadAction.Refresh -> {
+                if(sortKey=="author"){authorShelves.show(sortAscending,force=true);return true}
                 if (loadJob?.isActive != true) paging.retry()?.let(::loadPage) ?: reload()
                 true
             }
@@ -201,7 +253,7 @@ class ReadingLibraryGridScreen(
             focusedWork()?.let { focusState.remember(position, it.id) }
         }
         refreshing = true
-        paging.initial()?.let(::loadPage)
+        if(sortKey=="author")authorShelves.show(sortAscending,force=true) else {authorShelves.hide();paging.initial()?.let(::loadPage)}
     }
 
     private fun loadPage(page: Int) {
@@ -223,6 +275,7 @@ class ReadingLibraryGridScreen(
                 is HubResult.Ok -> {
                     if (generation != loadGeneration) return@launch
                     paging.complete(page, result.value.totalPages)
+                    if(page==1){authorShelves.visibility=View.GONE;grid.visibility=View.VISIBLE}
                     if (page == 1 && refreshing) {
                         adapter.replace(result.value.items)
                         refreshing = false
@@ -239,7 +292,7 @@ class ReadingLibraryGridScreen(
                         result.value.cache.stale -> "${adapter.itemCount} of ${result.value.total} · cached"
                         else -> "${adapter.itemCount} of ${result.value.total} · ${sortLabel()}"
                     }
-                    if (page == 1) restoreFocus()
+                    if (page == 1 && !overlay.isOpen) restoreFocus()
                     host?.refreshHints()
                 }
                 is HubResult.Failed -> {
@@ -255,45 +308,21 @@ class ReadingLibraryGridScreen(
         }
     }
 
-    private fun showSortFields() {
-        overlay.show(
-            title = "Sort ${library.title}",
-            subtitle = "Choose what the library is ordered by",
-            choices = sortFields.map { (id, label) ->
-                ChoiceOverlay.Choice(id, label, if (id == sortKey) "Currently selected" else "")
-            },
-            startIndex = sortFields.indexOfFirst { it.first == sortKey }.coerceAtLeast(0),
-            onCancel = { host?.refreshHints() }
-        ) { showSortDirection(it) }
-        host?.refreshHints()
+    private fun applySort(value:SortPreference) {
+        sortKey=value.field;sortAscending=value.ascending
+        DomainPreferences.setSort(requireNotNull(host).viewContext,ContentMode.BOOKS,value)
+        sortControl.text=LibrarySortPanel.label(sortFields,value)
+        sortControl.contentDescription="Sort library, ${sortControl.text}"
+        reload(resetSelection=true)
     }
-
-    private fun showSortDirection(field: String) {
-        val suggestedAscending = if (field == sortKey) sortAscending
-        else ReadingSortFields.defaultAscending(field)
-        overlay.show(
-            title = "Sort direction",
-            subtitle = sortFields.firstOrNull { it.first == field }?.second.orEmpty(),
-            choices = listOf(
-                ChoiceOverlay.Choice("asc", "Ascending", "A to Z, oldest or lowest first"),
-                ChoiceOverlay.Choice("desc", "Descending", "Z to A, newest or highest first")
-            ),
-            startIndex = if (suggestedAscending) 0 else 1,
-            onCancel = { host?.refreshHints() }
-        ) { direction ->
-            val ascending = direction == "asc"
-            val changed = field != sortKey || ascending != sortAscending
-            sortKey = field
-            sortAscending = ascending
-            if (changed) reload(resetSelection = true)
-            host?.refreshHints()
-        }
+    private fun showSortPanel() {
+        LibrarySortPanel.show(overlay,sortControl,sortFields,SortPreference(sortKey,sortAscending),::applySort,{host?.refreshHints()})
         host?.refreshHints()
     }
 
     private fun sortLabel(): String {
         val field = sortFields.firstOrNull { it.first == sortKey }?.second ?: "Title"
-        return "$field ${if (sortAscending) "ascending" else "descending"}"
+        return "$field · ${ReadingSortFields.directionLabel(sortKey, sortAscending)}"
     }
 
     private fun focusedPosition(): Int {
@@ -353,7 +382,7 @@ class ReadingLibraryGridScreen(
             card.setTag(TAG_WORK, work)
             val client = api as? HubClient
             card.bindReadingWork(
-                work,
+                ReadingCompletionRepository.get(card.context).project(work),
                 client?.imageLoader ?: ImageLoader(card.context),
                 api::imageUrl
             )
@@ -380,8 +409,9 @@ class ReadingWorkScreen(
     initialTitle: String,
     private val ringVisible: () -> Boolean
 ) : Screen {
+    override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val title = initialTitle
-    override val focusOnShow = false
+    override val focusOnShow = true
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var colors: PocketColors
@@ -391,19 +421,21 @@ class ReadingWorkScreen(
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
     private var hasChildLinks = false
-    private var presentation = ReadingWorkPresentation.initial("")
-    private var descriptionBox: ScrollView? = null
-    private var descriptionText: TextView? = null
-    private var descriptionToggle: TextView? = null
-    private var descriptionHasOverflow = false
+    private lateinit var detailHeader: DetailHeaderView
+    private lateinit var listOverlay: ChoiceOverlay
+    private var lastActionKey: String? = null
     private val actionViews = linkedMapOf<String, View>()
     @Volatile private var refreshOnShow = false
+    private var lastWork: ReadingWork? = null
+    private var previewFormatWorkId = ""
+    private var previewFormat: ReadingEntryChoice? = null
+    private val completionSession = ReadingCompletionSession()
     @Volatile private var visible = false
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
-        return LinearLayout(host.viewContext).apply {
+        val main = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(colors.background)
             status = TextView(context).apply {
@@ -415,23 +447,31 @@ class ReadingWorkScreen(
             scroll = ScrollView(context).apply {
                 isFillViewport = true
                 clipToPadding = false
-                setPadding(dp(16), dp(8), dp(16), dp(84))
-                Styler.makeFocusable(this)
+                setPadding(0, 0, 0, dp(16))
+                isFocusable = false
+                isFocusableInTouchMode = false
+                clipChildren = false
                 content = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
+                    clipChildren = false
                 }
                 addView(content, ViewGroup.LayoutParams(MATCH, WRAP))
             }
             addView(scroll, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }
+        return FrameLayout(host.viewContext).apply {
+            addView(main, FrameLayout.LayoutParams(MATCH, MATCH))
+            listOverlay = ChoiceOverlay(context, colors, ringVisible, sidePanel = true)
+            addView(listOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
+        }
     }
 
     override fun onShow() {
         visible = true
-        if (presentation.descriptionExpanded) {
-            presentation = ReadingWorkPresentation.initial(presentation.description)
-            applyDescriptionPresentation(requestReadingFocus = false)
-        }
+        if (::detailHeader.isInitialized) detailHeader.overview.collapse()
+        if (::listOverlay.isInitialized && listOverlay.isOpen) listOverlay.dismiss()
+        lastWork?.let(::render)
+        if (actionViews.isNotEmpty()) scroll.post { if (scroll.isShown) requestInitialFocus() }
         if (refreshOnShow && loadJob?.isActive != true) {
             refreshOnShow = false
             load(force = true)
@@ -442,8 +482,9 @@ class ReadingWorkScreen(
 
     override fun onHide() {
         visible = false
-        presentation = ReadingWorkPresentation.initial(presentation.description)
-        applyDescriptionPresentation(requestReadingFocus = false)
+        completionSession.leave()
+        actionViews.entries.firstOrNull { it.value.hasFocus() }?.key?.let { lastActionKey = it }
+        if (::detailHeader.isInitialized) detailHeader.overview.collapse()
         scope.coroutineContext.cancelChildren()
         loadJob = null
     }
@@ -453,24 +494,66 @@ class ReadingWorkScreen(
         host = null
     }
 
-    override fun requestInitialFocus(): Boolean = ::scroll.isInitialized && scroll.requestFocus()
+    override fun requestInitialFocus(): Boolean =
+        actionViews[DetailLayout.restoreFocus(lastActionKey,
+            actionViews.keys.filterNot { it.startsWith("list:") } + actionViews.keys.filter { it.startsWith("list:") })]?.requestFocus() == true
 
     override fun hints() = buildList {
-        if (hasChildLinks) add(ButtonHint.activate("Open"))
+        if (::listOverlay.isInitialized && listOverlay.isOpen) {
+            add(ButtonHint.activate("Choose")); add(ButtonHint.back("Cancel")); return@buildList
+        }
+        if (::detailHeader.isInitialized && detailHeader.overview.hasFocus()) {
+            detailHeader.overview.actionHint?.let { add(ButtonHint.activate(it)) }
+            add(ButtonHint.back(if (detailHeader.overview.expanded) "Collapse description" else "Back"))
+            return@buildList
+        }
+        val focusedAction = actionViews.entries.firstOrNull { it.value.isShown && it.value.hasFocus() }
+        if (focusedAction != null) {
+            val view = focusedAction.value
+            add(ButtonHint.activate(ReadingActionHint.label(focusedAction.key,
+                text = (view as? TextView)?.text?.toString().orEmpty(),
+                description = view.contentDescription?.toString().orEmpty())))
+        } else if (hasChildLinks) add(ButtonHint.activate("Open"))
         add(ButtonHint.back())
         add(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
     }
 
-    override fun onPad(action: PadAction): Boolean = when (action) {
+    private fun attachActionFocus(view: TextView) {
+        FocusDecorator.attach(view, ringVisible, scale = false)
+        view.setOnFocusChangeListener { focused, _ ->
+            FocusDecorator.refresh(focused, ringVisible())
+            host?.refreshHints()
+        }
+    }
+
+    override fun onPad(action: PadAction): Boolean {
+        if (::listOverlay.isInitialized && listOverlay.isOpen) {
+            val handled = listOverlay.onPad(action)
+            if (handled) host?.refreshHints()
+            return handled
+        }
+        if (::detailHeader.isInitialized && detailHeader.overview.onPad(action)) return true
+        return when (action) {
         PadAction.Refresh -> {
             load(force = true)
             true
         }
         else -> false
     }
+    }
+
+    override fun onSystemBack(): Boolean {
+        if (::listOverlay.isInitialized && listOverlay.isOpen) {
+            listOverlay.dismiss()
+            host?.refreshHints()
+            return true
+        }
+        return false
+    }
 
     private fun load(force: Boolean = false) {
         if (loadJob?.isActive == true) return
+        status.visibility = View.VISIBLE
         status.setTextColor(colors.mutedText)
         status.text = if (force) "Refreshing…" else "Loading details…"
         loadJob = scope.launch {
@@ -485,23 +568,24 @@ class ReadingWorkScreen(
         }
     }
 
-    private fun render(work: ReadingWork) {
-        val previouslyFocusedSource = actionViews.entries.firstOrNull { it.value.hasFocus() }?.key
+    private fun render(source: ReadingWork) {
+        lastWork = source
+        val checkpoints = com.pocketds.hub.reader.ReadingProgress.get(requireNotNull(host).viewContext)
+        val work = ReadingCompletionRepository.get(requireNotNull(host).viewContext).project(
+            com.pocketds.hub.reader.ReadingProgressPresentation.project(source,
+                checkpoints.store.pending(checkpoints.session().identity)))
+        val previouslyFocusedSource = actionViews.entries.firstOrNull { it.value.hasFocus() }?.key ?: lastActionKey
+        val previousScrollY = scroll.scrollY
         content.removeAllViews()
         actionViews.clear()
         hasChildLinks = false
-        presentation = ReadingWorkPresentation.initial(work.overview)
-        descriptionBox = null
-        descriptionText = null
-        descriptionToggle = null
-        descriptionHasOverflow = false
         content.addView(hero(work))
-        work.continueAt?.let { point ->
-            content.addView(sectionTitle("Continue reading"))
-            content.addView(continueCard(work, point))
+        val primaryRead = ReadingWorkPresentation.primaryRead(work)
+        if (work.entityType == "collection") work.continueAt?.let { point ->
+            detailHeader.continuation.addView(continueCard(work, point))
         }
-        if (work.editions.isNotEmpty()) {
-            content.addView(sectionTitle("Available editions"))
+        if (work.editions.isNotEmpty() && primaryRead == null) {
+            content.addView(sectionTitle("Editions"))
             work.editions.forEach { content.addView(editionCard(work, it)) }
         }
         work.sections.forEach { section ->
@@ -513,200 +597,275 @@ class ReadingWorkScreen(
                 section.items.forEach { content.addView(sectionItemCard(work, it)) }
             }
         }
-        val preferredSource = ReadingWorkPresentation.preferredActionSource(
+        val preferredSource = previouslyFocusedSource?.takeIf { it.startsWith("list:") && it in actionViews }
+            ?: ReadingWorkPresentation.preferredActionSource(
             continueSourceItemId = work.continueAt?.sourceItemId.orEmpty(),
-            readableSourceItemIds = actionViews.keys.toList(),
+            readableSourceItemIds = actionViews.keys.filterNot { it.startsWith("list:") },
             previouslyFocusedSourceItemId = previouslyFocusedSource
-        )
+        ) ?: previouslyFocusedSource?.takeIf { it in actionViews }
         content.post {
-            if (visible) actionViews[preferredSource]?.requestFocus()
+            if (visible) {
+                scroll.scrollTo(0, previousScrollY)
+                actionViews[preferredSource]?.requestFocus()
+            }
         }
         status.setTextColor(if (work.partial.isEmpty()) colors.mutedText else colors.badgePending)
         status.text = when {
             work.partial.isNotEmpty() -> work.partial.joinToString(" · ") { it.message }
             work.cache.stale -> "Showing cached details"
-            work.entityType == "collection" -> {
-                val missing = work.sections.sumOf { section -> section.items.count { !it.isAvailable } }
-                buildList {
-                    add("${work.bookCount} book${if (work.bookCount == 1) "" else "s"} available")
-                    if (missing > 0) add("$missing missing")
-                }.joinToString(" · ")
-            }
-            else -> "${work.editions.size} edition${if (work.editions.size == 1) "" else "s"} available"
+            else -> ""
         }
-        scroll.scrollTo(0, 0)
+        status.visibility = if (status.text.isNullOrBlank()) View.GONE else View.VISIBLE
         host?.refreshHints()
     }
 
-    private fun hero(work: ReadingWork): View = LinearLayout(requireNotNull(host).viewContext).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.TOP
-        val cover = ImageView(context).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setImageDrawable(ColorDrawable(colors.posterPlaceholder))
-            contentDescription = "${work.title} cover"
-        }
-        addView(cover, LinearLayout.LayoutParams(dp(118), dp(177)).apply { marginEnd = dp(18) })
-        val client = api as? HubClient
-        val url = api.imageUrl(work.artwork)
-        if (url.isNotEmpty()) {
-            (client?.imageLoader ?: ImageLoader(context)).enqueue(
-                ImageRequest.Builder(context)
-                    .data(url)
-                    .target(cover)
-                    .bitmapConfig(Bitmap.Config.RGB_565)
-                    .build()
-            )
-        }
-        addView(LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(TextView(context).apply {
-                text = work.title
-                textSize = 25f
-                setTextColor(colors.primaryText)
-            })
-            if (work.subtitle.isNotBlank()) addView(TextView(context).apply {
-                text = work.subtitle
-                textSize = 14f
-                setTextColor(colors.accent)
-            })
-            val metadata = buildList {
-                if (work.year > 0) add(work.year.toString())
-                if (work.genres.isNotEmpty()) add(work.genres.joinToString(", "))
-                progressText(work.progress)?.let(::add)
-            }.joinToString(" · ")
-            if (metadata.isNotBlank()) addView(TextView(context).apply {
-                text = metadata
-                textSize = 12f
-                setTextColor(colors.mutedText)
-                setPadding(0, dp(5), 0, 0)
-            })
-            if (work.overview.isNotBlank()) addView(descriptionPanel(work.overview))
-        }, LinearLayout.LayoutParams(0, WRAP, 1f))
-    }
-
-    private fun descriptionPanel(overview: String): View = LinearLayout(requireNotNull(host).viewContext).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(0, dp(9), 0, 0)
-        descriptionBox = ScrollView(context).apply box@{
-            isFillViewport = false
-            isVerticalScrollBarEnabled = true
-            isFocusable = false
-            isFocusableInTouchMode = false
-            descriptionText = TextView(context).apply {
-                text = overview
+    private fun hero(work: ReadingWork): View = DetailHeaderView(requireNotNull(host).viewContext, colors, ringVisible).apply {
+        detailHeader = this
+        compact = true
+        overview.onChanged = { host?.refreshHints() }
+        titleView.text = work.title
+        subtitleView.visibility = View.GONE
+        metadataView.text = buildList {
+            if (work.authors.isNotEmpty()) add(work.authors.joinToString(", "))
+            if (work.entityType == "collection") {
+                add("${work.bookCount} available")
+                val missing = work.sections.sumOf { section -> section.items.count { !it.isAvailable } }
+                if (missing > 0) add("$missing missing")
+            } else if (work.year > 0) add(work.year.toString())
+            if (work.genres.isNotEmpty()) add(work.genres.joinToString(", "))
+            progressText(work.progress)?.let(::add)
+        }.joinToString(" · ")
+        overview.bind(work.overview)
+        bindArtwork("book", null, work.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
+            (api as? HubClient)?.imageLoader ?: ImageLoader(context))
+        if (work.entityType != "collection") {
+            val remembered = ReadingEntryPreferences.get(context, work.id)
+            val formatMenu = ReadingFormatMenu.forWork(work, remembered)
+            if (previewFormatWorkId != work.id) {
+                previewFormatWorkId = work.id
+                previewFormat = null
+            }
+            val previewKey = previewFormat?.let { ReadingFormatMenu.Option(it, "", "").key }
+            val selectedOption = formatMenu.options.firstOrNull { it.key == previewKey }
+            val entry = selectedOption?.choice ?: formatMenu.defaultChoice.also { previewFormat = null }
+            formatStatus.bind(ReadingFormatStatus.forWork(work))
+            stateView.visibility = View.GONE
+            stateView.isFocusable = false
+            entry?.let { choice ->
+                val modeName = when (choice.mode) {
+                    ReadingEntryMode.READ -> "reading"
+                    ReadingEntryMode.LISTEN -> "listening"
+                    ReadingEntryMode.READ_ALONG -> "read along"
+                }
+                val primary = CenteredIconTextView(context).apply {
+                    text = if (remembered != null && previewFormat == null) "Continue" else when (choice.mode) {
+                        ReadingEntryMode.READ -> choice.text?.label?.takeUnless { it == "Read book" }
+                            ?: selectedOption?.label ?: "Read"
+                        ReadingEntryMode.LISTEN -> if (previewFormat != null) "Listen · ${selectedOption?.detail.orEmpty()}" else "Listen"
+                        ReadingEntryMode.READ_ALONG -> if (previewFormat != null) "Read along · ${selectedOption?.narration.orEmpty()}" else "Read along"
+                    }
+                    contentDescription = "$text ${work.title}, $modeName"
+                    textSize = 14f
+                    DetailStyler.action(this, colors, primary = true)
+                    setCenteredIcon(
+                        AppIconDrawable(when (choice.mode) {
+                            ReadingEntryMode.READ -> AppIcon.BOOK
+                            ReadingEntryMode.LISTEN -> AppIcon.HEADPHONES
+                            ReadingEntryMode.READ_ALONG -> AppIcon.READ_ALONG
+                        }, colors.accentText), dp(20), dp(8))
+                    setPadding(dp(16), 0, dp(16), 0)
+                    attachActionFocus(this)
+                    activateOnTap { launchEntry(work, previewFormat ?: choice) }
+                }
+                actions.addView(primary, LinearLayout.LayoutParams(WRAP, dp(48)).apply { marginEnd = dp(8) })
+                actionViews["entry"] = primary
+                hasChildLinks = true
+            }
+            if (formatMenu.options.size > 1) {
+                val changeFormat = TextView(context).apply {
+                    text = "Change format"
+                    textSize = 12f
+                    contentDescription = "Change reading format or narration"
+                    DetailStyler.action(this, colors)
+                    setPadding(dp(12), 0, dp(12), 0)
+                    attachActionFocus(this)
+                    activateOnTap { showFormatMenu(work, formatMenu) }
+                }
+                actions.addView(changeFormat, LinearLayout.LayoutParams(WRAP, dp(48)).apply { marginEnd = dp(8) })
+                actionViews["format"] = changeFormat
+            }
+            val read = CenteredIconTextView(context).apply {
+                text = ""
+                contentDescription = if (work.progress?.completed == true) "Mark ${work.title} unread" else "Mark ${work.title} read"
                 textSize = 13f
-                setTextColor(colors.primaryText)
-                maxLines = DESCRIPTION_COLLAPSED_LINES
-                ellipsize = TextUtils.TruncateAt.END
-                post {
-                    val currentLayout = layout
-                    descriptionHasOverflow = currentLayout != null && currentLayout.lineCount > 0 &&
-                        currentLayout.getEllipsisCount(currentLayout.lineCount - 1) > 0
-                    descriptionToggle?.visibility = if (descriptionHasOverflow) View.VISIBLE else View.GONE
+                DetailStyler.action(this, colors, primary = false)
+                setCenteredIcon(
+                    MediaActionIconDrawable(context,
+                        if (work.progress?.completed == true) MediaActionIcon.WATCHED else MediaActionIcon.UNWATCHED,
+                        colors.primaryText), dp(21))
+                setPadding(dp(12), 0, dp(12), 0)
+                attachActionFocus(this)
+                activateOnTap {
+                    val context = requireNotNull(host).viewContext
+                    val changed = ReadingCompletionRepository.update(context) { current ->
+                        if (work.progress?.completed == true) completionSession.unmark(current, work.id)
+                        else completionSession.markRead(current, work.id)
+                    }
+                    ReadingListsRepository.update(context) { state ->
+                        state.recordProgress(work.id, changed.project(requireNotNull(lastWork)).progress?.percentage ?: 0.0)
+                    }
+                    render(requireNotNull(lastWork))
+                    host?.notify(when {
+                        changed.isRead(work.id) -> "Marked as read"
+                        changed.shouldStartAtBeginning(work.id) -> "Marked unread · next read starts at the beginning"
+                        else -> "Previous reading position restored"
+                    })
                 }
             }
-            addView(descriptionText, ViewGroup.LayoutParams(MATCH, WRAP))
-            setOnKeyListener { _, keyCode, event ->
-                if (event.action != KeyEvent.ACTION_DOWN || !presentation.descriptionExpanded) {
-                    return@setOnKeyListener false
+            val wanted = ReadingListsRepository.get(context).wantToRead.any { it.workId == work.id }
+            val want = CenteredIconTextView(context).apply {
+                text = ""
+                contentDescription = if (wanted) "Remove ${work.title} from Want to Read" else "Add ${work.title} to Want to Read"
+                textSize = 13f
+                DetailStyler.action(this, colors, primary = false)
+                setCenteredIcon(
+                    AppIconDrawable(if (wanted) AppIcon.BOOKMARK_FILLED else AppIcon.BOOKMARK,
+                        colors.primaryText), dp(21))
+                setPadding(dp(12), 0, dp(12), 0)
+                attachActionFocus(this)
+                activateOnTap {
+                    val next = ReadingListsRepository.update(context) { state ->
+                        if (state.wantToRead.any { it.workId == work.id }) state.remove(ReadingListsState.WANT_TO_READ, work.id)
+                        else state.add(ReadingListsState.WANT_TO_READ, ReadingListEntry.from(work))
+                    }
+                    val selected = next.wantToRead.any { it.workId == work.id }
+                    contentDescription = if (selected) "Remove ${work.title} from Want to Read"
+                        else "Add ${work.title} to Want to Read"
+                    setCenteredIcon(
+                        AppIconDrawable(if (selected) AppIcon.BOOKMARK_FILLED else AppIcon.BOOKMARK,
+                            colors.primaryText), dp(21))
+                    host?.notify(if (selected) "Added to Want to Read" else "Removed from Want to Read")
+                    host?.refreshHints()
                 }
-                val direction = when (keyCode) {
-                    KeyEvent.KEYCODE_DPAD_UP -> -1
-                    KeyEvent.KEYCODE_DPAD_DOWN -> 1
-                    else -> 0
+            }
+            actions.addView(want, LinearLayout.LayoutParams(WRAP, dp(48)).apply { marginEnd = dp(8) })
+            actionViews["list:want"] = want
+            val lists = CenteredIconTextView(context).apply {
+                text = ""
+                contentDescription = "Add ${work.title} to a reading list"
+                textSize = 13f
+                DetailStyler.action(this, colors, primary = false)
+                setCenteredIcon(AppIconDrawable(AppIcon.CONTENTS, colors.primaryText), dp(21))
+                setPadding(dp(12), 0, dp(12), 0)
+                FocusDecorator.attach(this, ringVisible, scale = false)
+                activateOnTap { showReadingLists(work) }
+            }
+            run {
+                val editions = CenteredIconTextView(context).apply {
+                    text = ""
+                    contentDescription = "More actions for ${work.title}"
+                    textSize = 21f
+                    DetailStyler.action(this, colors)
+                    setCenteredIcon(MediaActionIconDrawable(context,
+                        MediaActionIcon.MORE, colors.primaryText), dp(21))
+                    attachActionFocus(this)
+                    activateOnTap {
+                        listOverlay.show("More actions", work.title, buildList {
+                            add(ChoiceOverlay.Choice("read", read.contentDescription.toString()))
+                            add(ChoiceOverlay.Choice("lists", "Reading lists"))
+                        }, onCancel = { actionViews["list:more"]?.requestFocus(); host?.refreshHints() }) { selected ->
+                            when (selected) {
+                                "read" -> read.performClick()
+                                "lists" -> lists.performClick()
+                            }
+                            host?.refreshHints()
+                        }
+                        host?.refreshHints()
+                    }
                 }
-                if (direction == 0 || !canScrollVertically(direction)) return@setOnKeyListener false
-                smoothScrollBy(0, direction * dp(DESCRIPTION_SCROLL_STEP_DP))
-                true
+                actions.addView(editions, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(8) })
+                actionViews["list:more"] = editions
             }
         }
-        addView(descriptionBox, LinearLayout.LayoutParams(MATCH, WRAP))
-        descriptionToggle = TextView(context).apply {
-            textSize = 11f
-            setTextColor(colors.mutedText)
-            setPadding(dp(8), dp(5), dp(8), dp(5))
-            background = Styler.cardBackground(context, colors, cornerDp = 7f)
-            Styler.makeFocusable(this)
-            FocusDecorator.attach(this, ringVisible, scale = false)
-            activateOnTap {
-                presentation = presentation.toggleDescription()
-                applyDescriptionPresentation(requestReadingFocus = presentation.descriptionExpanded)
-            }
-            visibility = View.INVISIBLE
-        }
-        addView(descriptionToggle, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = dp(5) })
-        applyDescriptionPresentation(requestReadingFocus = false)
     }
 
-    private fun applyDescriptionPresentation(requestReadingFocus: Boolean) {
-        val box = descriptionBox ?: return
-        val copy = descriptionText ?: return
-        val toggle = descriptionToggle ?: return
-        val expanded = presentation.descriptionExpanded
-        copy.maxLines = if (expanded) Int.MAX_VALUE else DESCRIPTION_COLLAPSED_LINES
-        copy.ellipsize = if (expanded) null else TextUtils.TruncateAt.END
-        box.layoutParams = (box.layoutParams ?: LinearLayout.LayoutParams(MATCH, WRAP)).apply {
-            width = MATCH
-            height = if (expanded) dp(DESCRIPTION_EXPANDED_DP) else WRAP
+    private fun showFormatMenu(work: ReadingWork, menu: ReadingFormatMenu) {
+        val selected = previewFormat ?: menu.defaultChoice
+        val selectedKey = selected?.let { ReadingFormatMenu.Option(it, "", "").key }
+        listOverlay.show("Choose format", work.title,
+            menu.options.map { option ->
+                ChoiceOverlay.Choice(option.key, option.label, option.detail, selected = option.key == selectedKey)
+            },
+            startIndex = menu.options.indexOfFirst { it.key == selectedKey }.coerceAtLeast(0),
+            onCancel = { actionViews["format"]?.requestFocus(); host?.refreshHints() }
+        ) { key ->
+            previewFormat = menu.options.firstOrNull { it.key == key }?.choice
+            render(work)
+            actionViews["entry"]?.post { actionViews["entry"]?.requestFocus() }
+            host?.refreshHints()
         }
-        box.isFocusable = expanded
-        box.isFocusableInTouchMode = expanded
-        toggle.text = if (expanded) "Collapse" else "Read more…"
-        toggle.visibility = if (descriptionHasOverflow || expanded) View.VISIBLE else View.INVISIBLE
-        box.scrollTo(0, 0)
-        box.requestLayout()
-        if (requestReadingFocus) box.post { box.requestFocus() }
+        host?.refreshHints()
+    }
+
+    private fun launchEntry(work: ReadingWork, choice: ReadingEntryChoice) {
+        when (choice.mode) {
+            ReadingEntryMode.READ -> choice.text?.let { openPublication(work, it.sourceItemId, work.title, it.source) }
+            ReadingEntryMode.LISTEN -> choice.audio?.let { openAudiobook(work, it) }
+            ReadingEntryMode.READ_ALONG -> choice.aligned?.let {
+                openPublication(work, it.sourceItemId, work.title, it.source, readAlong = true)
+            }
+        }
+    }
+
+    private fun showReadingLists(work: ReadingWork) {
+        val state = ReadingListsRepository.get(requireNotNull(host).viewContext)
+        listOverlay.show("Reading lists", "Choose a list for ${work.title}",
+            state.lists.map { list ->
+                val included = list.items.any { it.workId == work.id }
+                ChoiceOverlay.Choice(list.id, list.name, if (included) "In list · select to remove" else "${list.items.size} books", selected = included)
+            } + ChoiceOverlay.Choice("create", "＋  Create new list"),
+            onCancel = { host?.refreshHints() }) { id ->
+            if (id == "create") {
+                val input = EditText(requireNotNull(host).viewContext).apply { hint = "List name"; setSingleLine() }
+                AlertDialog.Builder(requireNotNull(host).viewContext).setTitle("New reading list").setView(input)
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Create") { _, _ ->
+                        val name = input.text.toString().trim()
+                        if (name.isBlank()) { host?.notify("Enter a list name"); return@setPositiveButton }
+                        val newId = java.util.UUID.randomUUID().toString()
+                        ReadingListsRepository.update(input.context) {
+                            it.create(name, newId).add(newId, ReadingListEntry.from(work))
+                        }
+                        host?.notify("Added to $name")
+                    }.show()
+            } else {
+                val list = state.lists.firstOrNull { it.id == id } ?: return@show
+                val included = list.items.any { it.workId == work.id }
+                ReadingListsRepository.update(requireNotNull(host).viewContext) {
+                    if (included) it.remove(id, work.id) else it.add(id, ReadingListEntry.from(work))
+                }
+                host?.notify(if (included) "Removed from ${list.name}" else "Added to ${list.name}")
+            }
+            host?.refreshHints()
+        }
+        host?.refreshHints()
     }
 
     private fun continueCard(work: ReadingWork, point: ReadingContinue): View =
-        LinearLayout(requireNotNull(host).viewContext).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = Styler.cardBackground(context, colors)
-            setPadding(dp(8), dp(8), dp(12), dp(8))
-            val cover = ImageView(context).apply {
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                setImageDrawable(ColorDrawable(colors.posterPlaceholder))
-                contentDescription = "${point.title} cover"
-            }
-            addView(cover, LinearLayout.LayoutParams(dp(CONTINUE_COVER_WIDTH_DP), dp(CONTINUE_COVER_HEIGHT_DP)).apply {
-                marginEnd = dp(12)
-            })
-            val artwork = ReadingWorkPresentation.continueArtwork(work)
-            val url = api.imageUrl(artwork)
-            if (url.isNotEmpty()) {
-                ((api as? HubClient)?.imageLoader ?: ImageLoader(context)).enqueue(
-                    ImageRequest.Builder(context).data(url).target(cover)
-                        .bitmapConfig(Bitmap.Config.RGB_565).build()
-                )
-            }
-            addView(LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(TextView(context).apply {
-                    text = point.title
-                    textSize = 15f
-                    setTextColor(colors.primaryText)
-                    maxLines = 2
-                    ellipsize = TextUtils.TruncateAt.END
-                })
-                addView(TextView(context).apply {
-                    text = buildList {
-                        if (point.number.isNotBlank()) add("Book ${point.number}")
-                        if (point.percentage > 0) add("${(point.percentage * 100).roundToInt()}% read")
-                    }.joinToString(" · ")
-                    textSize = 12f
-                    setTextColor(colors.mutedText)
-                    setPadding(0, dp(5), 0, 0)
-                })
-            }, LinearLayout.LayoutParams(0, WRAP, 1f))
+        ContinuationCardView(requireNotNull(host).viewContext, colors, ringVisible, portrait = true).apply {
+            bind("Continue reading", buildList {
+                add(point.title)
+                if (point.number.isNotBlank()) add("Book ${point.number}")
+                if (point.percentage > 0) add("${(point.percentage * 100).roundToInt()}% read")
+            }.joinToString(" · "), point.percentage, point.percentage >= 1.0)
+            val url = ReadingWorkPresentation.continueArtwork(work).takeIf { it.isNotBlank() }?.let(api::imageUrl)
+            DetailStyler.image(image, url, (api as? HubClient)?.imageLoader ?: ImageLoader(context))
+            onFocused = { lastActionKey = point.sourceItemId; host?.refreshHints() }
             if (canReadPublication(work.kind, point.sourceItemId)) {
                 hasChildLinks = true
-                Styler.makeFocusable(this)
-                FocusDecorator.attach(this, ringVisible)
                 activateOnTap { openPublication(work, point.sourceItemId, point.title, point.source) }
                 actionViews.putIfAbsent(point.sourceItemId, this)
-            }
+            } else { isFocusable = false; isClickable = false }
         }
 
     private fun editionCard(work: ReadingWork, edition: ReadingEdition): View = infoCard(
@@ -719,10 +878,10 @@ class ReadingWorkScreen(
             add(edition.source.replaceFirstChar { it.uppercase() })
         }.joinToString(" · ")
     ).apply {
-        if (edition.source == "storyteller" && edition.kind == "ebook" && edition.sourceItemId.isNotBlank()) {
+        if (edition.source == "storyteller" && edition.kind == "ebook" && edition.availability == "available" && edition.sourceItemId.isNotBlank()) {
             hasChildLinks = true
             Styler.makeFocusable(this)
-            FocusDecorator.attach(this, ringVisible)
+            FocusDecorator.attach(this, ringVisible, scale = false)
             activateOnTap { openPublication(work, edition.sourceItemId, work.title, edition.source) }
             actionViews.putIfAbsent(edition.sourceItemId, this)
         }
@@ -741,7 +900,7 @@ class ReadingWorkScreen(
         if (canReadPublication(item.kind.ifBlank { work.kind }, item.sourceItemId)) {
             hasChildLinks = true
             Styler.makeFocusable(this)
-            FocusDecorator.attach(this, ringVisible)
+            FocusDecorator.attach(this, ringVisible, scale = false)
             activateOnTap { openPublication(work, item.sourceItemId, item.title, "kavita") }
             actionViews.putIfAbsent(item.sourceItemId, this)
         }
@@ -750,7 +909,13 @@ class ReadingWorkScreen(
     private fun canReadPublication(kind: String, sourceItemId: String): Boolean =
         sourceItemId.isNotBlank() && kind in setOf("comic", "manga", "book", "ebook")
 
-    private fun openPublication(work: ReadingWork, sourceItemId: String, publicationTitle: String, source: String) {
+    private fun openPublication(work: ReadingWork, sourceItemId: String, publicationTitle: String, source: String, readAlong: Boolean = false) {
+        host?.viewContext?.let { context ->
+            val rememberedAudio = ReadingEntryPreferences.get(context, work.id)?.audioSourceItemId.orEmpty()
+            ReadingEntryPreferences.put(context, work.id,
+                if (readAlong) ReadingEntryMode.READ_ALONG else ReadingEntryMode.READ,
+                if (readAlong) sourceItemId else rememberedAudio)
+        }
         host?.push(
             if (source == "storyteller" || work.kind in setOf("book", "ebook")) EpubReaderScreen(
                 api = api,
@@ -758,7 +923,12 @@ class ReadingWorkScreen(
                 sourceItemId = sourceItemId,
                 title = publicationTitle.ifBlank { work.title },
                 ringVisible = ringVisible,
-                onProgressChanged = ::requestRefreshAfterReading
+                onProgressChanged = ::requestRefreshAfterReading,
+                readAlong = readAlong,
+                readAlongAvailable = ReadingWorkPresentation.readAlongEditions(work).any { it.sourceItemId == sourceItemId },
+                alignedEditions = ReadingWorkPresentation.readAlongEditions(work),
+                audioEditions = ReadingWorkPresentation.audiobooks(work),
+                ebookSourceItemId = work.editions.firstOrNull { it.kind == "ebook" }?.sourceItemId ?: sourceItemId
             ) else PagedImageReaderScreen(
                 api = api,
                 workId = work.id,
@@ -770,7 +940,19 @@ class ReadingWorkScreen(
         )
     }
 
+    private fun openAudiobook(work: ReadingWork, edition: com.pocketds.hub.model.ReadingEdition) {
+        host?.viewContext?.let { ReadingEntryPreferences.put(it, work.id, ReadingEntryMode.LISTEN, edition.sourceItemId) }
+        host?.push(AudiobookScreen(
+            api = api, workId = work.id, edition = edition, title = work.title, ringVisible = ringVisible,
+            narrations = ReadingWorkPresentation.audiobooks(work),
+            ebook = work.editions.firstOrNull { it.kind == "ebook" && it.availability == "available" },
+            alignedOptions = ReadingWorkPresentation.readAlongEditions(work),
+            onProgressChanged = ::requestRefreshAfterReading
+        ))
+    }
+
     private fun requestRefreshAfterReading() {
+        host?.let { ReadingCompletionRepository.update(it.viewContext) { state -> state.clear(workId) } }
         refreshOnShow = true
         scope.launch {
             if (visible && loadJob?.isActive != true) {
@@ -782,39 +964,40 @@ class ReadingWorkScreen(
 
     private fun bookRow(section: ReadingSection): View =
         HorizontalScrollView(requireNotNull(host).viewContext).apply {
-            isHorizontalScrollBarEnabled = false
-            clipToPadding = false
+            isFocusable = false; isFocusableInTouchMode = false
+            isHorizontalScrollBarEnabled = false; clipToPadding = false; clipChildren = false
+            val clearance = DetailLayout.focusClearance(DetailLayout.posterCardHeight(120, resources.configuration.fontScale)).coerceAtLeast(10)
+            setPadding(dp(24), dp(clearance), dp(24), dp(clearance))
             descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
             addView(LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
+                orientation = LinearLayout.HORIZONTAL; clipChildren = false
                 section.items.forEach { item ->
-                    addView(PosterCardView(context, colors, CHILD_POSTER_DP).apply {
-                        layoutParams = LinearLayout.LayoutParams(dp(CHILD_CARD_DP), WRAP).apply {
-                            marginEnd = dp(10)
-                        }
+                    addView(DetailArtworkCardView(context, colors, ringVisible).apply {
+                        artworkHeight(120)
+                        layoutParams = LinearLayout.LayoutParams(dp(88), WRAP).apply { marginEnd = dp(14) }
+                        titleView.text = item.title; titleView.minLines = 2
+                        subtitleView.text = buildList {
+                            if (item.number.isNotBlank()) add("Book ${item.number}")
+                            if (!item.isAvailable) add("Missing") else progressText(item.progress)?.removeSuffix(" read")?.let(::add)
+                        }.joinToString(" · ")
+                        subtitleView.maxLines = 1
+                        available(item.isAvailable)
+                        contentDescription = "${item.title}, ${subtitleView.text}"
+                        DetailStyler.image(image, item.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
+                            (api as? HubClient)?.imageLoader ?: ImageLoader(context))
                         if (ReadingWorkPresentation.canOpen(item)) {
-                            FocusDecorator.attach(this, ringVisible)
-                        }
-                        bindReadingWork(
-                            ReadingWork(
-                                id = item.workId,
-                                kind = item.kind,
-                                title = item.title,
-                                authors = item.authors,
-                                artwork = item.artwork,
-                                progress = item.progress,
-                                bookCount = 1
-                            ),
-                            (api as? HubClient)?.imageLoader ?: ImageLoader(context),
-                            api::imageUrl
-                        )
-                        setReadingAvailability(item.isAvailable)
-                        if (ReadingWorkPresentation.canOpen(item)) {
-                            activateOnTap {
-                                host?.push(ReadingWorkScreen(api, item.workId, item.title, ringVisible))
+                            val key = "book:${item.workId}"
+                            actionViews[key] = this
+                            setOnFocusChangeListener { view, focused ->
+                                FocusDecorator.refresh(view, ringVisible())
+                                if (focused) { lastActionKey = key; host?.refreshHints() }
                             }
+                            activateOnTap { host?.push(ReadingWorkScreen(api, item.workId, item.title, ringVisible)) }
                         } else {
-                            contentDescription = "${item.title}, missing"
+                            val key="missing:${item.number}:${item.title}"
+                            actionViews[key]=this;hasChildLinks=true
+                            setOnFocusChangeListener { view,focused->FocusDecorator.refresh(view,ringVisible());if(focused){lastActionKey=key;host?.refreshHints()} }
+                            activateOnTap { host?.push(MissingReadingItemScreen(api,item,ringVisible)) }
                         }
                     })
                 }
@@ -825,7 +1008,7 @@ class ReadingWorkScreen(
         this.text = text
         textSize = 17f
         setTextColor(colors.primaryText)
-        setPadding(0, dp(18), 0, dp(7))
+        setPadding(dp(24), dp(14), dp(24), dp(2))
     }
 
     private fun infoCard(title: String, subtitle: String): TextView =
@@ -835,7 +1018,7 @@ class ReadingWorkScreen(
             setTextColor(colors.primaryText)
             background = Styler.cardBackground(context, colors)
             setPadding(dp(12), dp(9), dp(12), dp(9))
-            layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(6) }
+            layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(24), dp(6), dp(24), dp(6)) }
         }
 
     private fun progressText(progress: ReadingProgress?): String? = progress?.let {
@@ -858,12 +1041,5 @@ class ReadingWorkScreen(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-        const val CHILD_CARD_DP = 100
-        const val CHILD_POSTER_DP = 145f
-        const val DESCRIPTION_COLLAPSED_LINES = 3
-        const val DESCRIPTION_EXPANDED_DP = 118
-        const val DESCRIPTION_SCROLL_STEP_DP = 44
-        const val CONTINUE_COVER_WIDTH_DP = 68
-        const val CONTINUE_COVER_HEIGHT_DP = 102
     }
 }

@@ -1,6 +1,9 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.view.Gravity
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -20,6 +23,7 @@ import com.pocketds.hub.model.ReadingItem
 import com.pocketds.hub.model.ReadingType
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
+import com.pocketds.hub.nav.ContentModeScreen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.FailureKind
 import com.pocketds.hub.net.HubApi
@@ -28,10 +32,15 @@ import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.state.ContentModeMemory
-import com.pocketds.hub.ui.ContentModeToggleView
+import com.pocketds.hub.ui.DiscoverFeatureCardView
+import com.pocketds.hub.ui.ReadingCategoryTabView
+import com.pocketds.hub.ui.AppIcon
+import com.pocketds.hub.ui.AppIconDrawable
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.FormOverlay
 import com.pocketds.hub.ui.PocketColors
+import com.pocketds.hub.ui.useResponsivePosterColumns
+import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.PosterCardView
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
@@ -62,7 +71,7 @@ import kotlinx.coroutines.launch
 class DiscoverScreen(
     private val api: HubApi,
     private val ringVisible: () -> Boolean
-) : Screen {
+) : Screen, ContentModeScreen {
 
     override val title: String = "Discover"
 
@@ -70,10 +79,10 @@ class DiscoverScreen(
 
     private lateinit var colors: PocketColors
     private lateinit var searchBox: EditText
-    private lateinit var modeToggle: ContentModeToggleView
     private lateinit var readingFilters: HorizontalScrollView
-    private val readingFilterButtons = mutableMapOf<String, TextView>()
+    private val readingFilterButtons = mutableMapOf<String, ReadingCategoryTabView>()
     private lateinit var statusLine: TextView
+    private lateinit var broaderSearchButton: TextView
     private lateinit var rowsList: RecyclerView
     private lateinit var resultsGrid: RecyclerView
     private lateinit var readingRowsList: RecyclerView
@@ -82,6 +91,8 @@ class DiscoverScreen(
     private val resultsAdapter = HitAdapter()
     private val readingRowsAdapter = ReadingRowsAdapter()
     private val readingResultsAdapter = ReadingHitAdapter()
+    private var readingSearchPresentation = ReadingSearchPresentation()
+    private var readingSearchExtra = ""
     private lateinit var form: FormOverlay
     private lateinit var flow: RequestFlow
 
@@ -149,16 +160,6 @@ class DiscoverScreen(
         }
         frame.addView(root, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
 
-        modeToggle = ContentModeToggleView(context, colors).apply {
-            select(mode)
-            onModeSelected = ::switchMode
-            layoutParams = LinearLayout.LayoutParams(WRAP, WRAP).apply {
-                val horizontal = Styler.dpInt(context, 10f)
-                setMargins(horizontal, Styler.dpInt(context, 5f), horizontal, 0)
-            }
-        }
-        root.addView(modeToggle)
-
         readingFilters = HorizontalScrollView(context).apply {
             isFocusable = false
             isHorizontalScrollBarEnabled = false
@@ -168,11 +169,19 @@ class DiscoverScreen(
         root.addView(readingFilters, LinearLayout.LayoutParams(MATCH, WRAP))
 
         searchBox = EditText(context).apply {
-            hint = "Search"
+            hint = if (mode == ContentMode.BOOKS) "Search books, comics and audio" else "Search films and series"
             textSize = 14f
             setTextColor(colors.primaryText)
             setHintTextColor(colors.mutedText)
-            background = Styler.chipBackground(context, colors)
+            background = InsetDrawable(ThemeGradientDrawable().apply {
+                cornerRadius = Styler.dp(context, 12f)
+                setColor(this@DiscoverScreen.colors.cardSurface)
+                setStroke(Styler.dpInt(context, 1f), this@DiscoverScreen.colors.stripBackground)
+            }, 0, Styler.dpInt(context, 4f), 0, Styler.dpInt(context, 4f))
+            setCompoundDrawablesRelative(AppIconDrawable(AppIcon.SEARCH, colors.mutedText).apply {
+                setBounds(0, 0, Styler.dpInt(context, 18f), Styler.dpInt(context, 18f))
+            }, null, null, null)
+            compoundDrawablePadding = Styler.dpInt(context, 9f)
             setSingleLine()
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             val h = Styler.dpInt(context, 12f)
@@ -208,8 +217,16 @@ class DiscoverScreen(
                 setMargins(m, Styler.dpInt(context, 6f), m, 0)
             }
         }
-        root.addView(searchBox)
+        searchBox.minimumHeight=Styler.dpInt(context,48f)
+        root.addView(searchBox, LinearLayout.LayoutParams(MATCH, WRAP).apply {
+            setMargins(Styler.dpInt(context, 24f), Styler.dpInt(context, 6f),
+                Styler.dpInt(context, 24f), 0)
+        })
 
+        val searchStatusRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         statusLine = TextView(context).apply {
             textSize = 11f
             setTextColor(colors.mutedText)
@@ -219,7 +236,22 @@ class DiscoverScreen(
                 Styler.dpInt(context, 12f), Styler.dpInt(context, 3f)
             )
         }
-        root.addView(statusLine)
+        searchStatusRow.addView(statusLine, LinearLayout.LayoutParams(0, WRAP, 1f))
+        broaderSearchButton = TextView(context).apply {
+            textSize = 11f
+            setTextColor(colors.primaryText)
+            setPadding(Styler.dpInt(context, 9f), Styler.dpInt(context, 5f),
+                Styler.dpInt(context, 9f), Styler.dpInt(context, 5f))
+            background = Styler.chipBackground(context, colors)
+            Styler.makeFocusable(this)
+            FocusDecorator.attach(this, ringVisible, scale = false)
+            activateOnTap { toggleBroaderReadingResults() }
+            visibility = View.GONE
+        }
+        searchStatusRow.addView(broaderSearchButton, LinearLayout.LayoutParams(WRAP, WRAP).apply {
+            marginEnd = Styler.dpInt(context, 10f)
+        })
+        root.addView(searchStatusRow)
 
         rowsList = RecyclerView(context).apply {
             layoutManager = LinearLayoutManager(context)
@@ -243,7 +275,7 @@ class DiscoverScreen(
             // the position in requestChildFocus did work, but only after
             // RecyclerView had already scrolled: two scrolls per press, the
             // second an instant jump, which is the stutter you noticed.
-            setPadding(0, Styler.dpInt(context, 28f), 0, Styler.dpInt(context, 84f))
+            setPadding(0, Styler.dpInt(context, 10f), 0, Styler.dpInt(context, 20f))
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
             addOnChildAttachStateChangeListener(claimFocusOnFirstChild(this))
         }
@@ -251,6 +283,7 @@ class DiscoverScreen(
 
         resultsGrid = RecyclerView(context).apply {
             layoutManager = GridLayoutManager(context, SEARCH_COLUMNS)
+            useResponsivePosterColumns(SEARCH_COLUMNS)
             adapter = resultsAdapter
             setHasFixedSize(true)
             // Recycling the focused view loses focus to the void, and the next
@@ -261,7 +294,7 @@ class DiscoverScreen(
             visibility = View.GONE
             setPadding(
                 Styler.dpInt(context, 6f), 0,
-                Styler.dpInt(context, 6f), Styler.dpInt(context, 84f)
+                Styler.dpInt(context, 6f), Styler.dpInt(context, 20f)
             )
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
             addOnScrollListener(object : RecyclerView.OnScrollListener() {
@@ -279,7 +312,7 @@ class DiscoverScreen(
             clipToPadding = false
             clipChildren = false
             setItemViewCacheSize(6)
-            setPadding(0, Styler.dpInt(context, 28f), 0, Styler.dpInt(context, 84f))
+            setPadding(0, Styler.dpInt(context, 10f), 0, Styler.dpInt(context, 20f))
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
             visibility = View.GONE
             addOnChildAttachStateChangeListener(claimFocusOnFirstChild(this))
@@ -288,6 +321,7 @@ class DiscoverScreen(
 
         readingResultsGrid = RecyclerView(context).apply {
             layoutManager = GridLayoutManager(context, SEARCH_COLUMNS)
+            useResponsivePosterColumns(SEARCH_COLUMNS)
             adapter = readingResultsAdapter
             setHasFixedSize(true)
             setItemViewCacheSize(SEARCH_COLUMNS * 3)
@@ -296,7 +330,7 @@ class DiscoverScreen(
             visibility = View.GONE
             setPadding(
                 Styler.dpInt(context, 6f), 0,
-                Styler.dpInt(context, 6f), Styler.dpInt(context, 84f)
+                Styler.dpInt(context, 6f), Styler.dpInt(context, 20f)
             )
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
             addOnChildAttachStateChangeListener(claimFocusOnFirstChild(this))
@@ -332,18 +366,8 @@ class DiscoverScreen(
             )
         }
         ReadingType.filters.forEach { (wire, label) ->
-            val chip = TextView(bar.context).apply {
-                text = label
-                textSize = 11f
-                gravity = Gravity.CENTER
-                setTextColor(colors.primaryText)
-                val horizontal = Styler.dpInt(context, 11f)
-                val vertical = Styler.dpInt(context, 5f)
-                setPadding(horizontal, vertical, horizontal, vertical)
-                contentDescription = "Show $label"
-                Styler.makeFocusable(this)
-                isClickable = true
-                setOnClickListener { selectReadingType(wire) }
+            val chip = ReadingCategoryTabView(bar.context, colors, label).apply {
+                activateOnTap { selectReadingType(wire) }
             }
             readingFilterButtons[wire] = chip
             bar.addView(chip, LinearLayout.LayoutParams(WRAP, WRAP).apply {
@@ -357,8 +381,7 @@ class DiscoverScreen(
     private fun updateReadingFilterStyles() {
         readingFilterButtons.forEach { (wire, button) ->
             val selected = wire == readingType
-            button.background = Styler.chipBackground(button.context, colors, selected)
-            button.setTextColor(if (selected) colors.accentText else colors.primaryText)
+            button.select(selected)
         }
     }
 
@@ -389,14 +412,15 @@ class DiscoverScreen(
         if (mode == next) return
         mode = next
         ContentModeSettings.set(host?.viewContext ?: return, mode)
-        modeToggle.select(mode)
+        searchBox.hint = if (mode == ContentMode.BOOKS) "Search books, comics and audio" else "Search films and series"
         searchBox.setText(lastQuery)
         readingFilters.visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
         applyModeVisibility()
         statusLine.setTextColor(colors.mutedText)
         if (searching) {
             val count = if (mode == ContentMode.MEDIA) resultsAdapter.itemCount else readingResultsAdapter.itemCount
-            statusLine.text = "$count results"
+            statusLine.text = if (mode == ContentMode.BOOKS) readingSearchPresentation.summary() + readingSearchExtra
+                else "$count results"
             if (count == 0 && lastQuery.isNotBlank()) runSearch(lastQuery, force = true)
         } else if (mode == ContentMode.MEDIA) {
             statusLine.text = "${rowsAdapter.itemCount} rows"
@@ -411,11 +435,18 @@ class DiscoverScreen(
         }
     }
 
+    override fun selectContentMode(mode: ContentMode) = switchMode(mode)
+
     private fun applyModeVisibility() {
         rowsList.visibility = if (mode == ContentMode.MEDIA && !searching) View.VISIBLE else View.GONE
         resultsGrid.visibility = if (mode == ContentMode.MEDIA && searching) View.VISIBLE else View.GONE
         readingRowsList.visibility = if (mode == ContentMode.BOOKS && !searching) View.VISIBLE else View.GONE
         readingResultsGrid.visibility = if (mode == ContentMode.BOOKS && searching) View.VISIBLE else View.GONE
+        broaderSearchButton.visibility = if (mode == ContentMode.BOOKS && searching && readingSearchPresentation.canToggle)
+            View.VISIBLE else View.GONE
+        broaderSearchButton.text = if (readingSearchPresentation.showBroader) "Close matches" else "Show broader"
+        broaderSearchButton.contentDescription = if (readingSearchPresentation.showBroader) "Show close book matches only"
+            else "Show broader book search results"
         if (::readingFilters.isInitialized) {
             readingFilters.visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
         }
@@ -525,6 +556,9 @@ class DiscoverScreen(
         )
         if (mode == ContentMode.BOOKS) {
             hints.add(ButtonHint.secondary("Search box"))
+            if (searching && readingSearchPresentation.canToggle) {
+                hints.add(ButtonHint.primary(if (readingSearchPresentation.showBroader) "Close matches" else "Broader results"))
+            }
             if (searching) hints.add(ButtonHint.back("Browse"))
             return hints
         }
@@ -573,6 +607,10 @@ class DiscoverScreen(
             runSearch(searchBox.text.toString())
             true
         }
+        action == PadAction.Activate && broaderSearchButton.hasFocus() -> {
+            toggleBroaderReadingResults()
+            true
+        }
         action == PadAction.Secondary -> {
             searchBox.requestFocus()
             host?.refreshHints()
@@ -584,7 +622,10 @@ class DiscoverScreen(
         // either, which is what it used to be.
         action == PadAction.Primary -> {
             if (mode == ContentMode.BOOKS) {
-                false
+                if (searching && readingSearchPresentation.canToggle) {
+                    toggleBroaderReadingResults()
+                    true
+                } else false
             } else {
                 val hit = focusedHit()
                 when {
@@ -737,6 +778,7 @@ class DiscoverScreen(
 
     private fun loadMoreReadingRow(row: ReadingDiscoverRow) {
         if (!row.hasMore) return
+        val requestedType = readingType
         val loadKey = row.contentType + ":" + row.id
         if (readingRowLoads[loadKey]?.isActive == true) return
         val next = row.page + 1
@@ -746,8 +788,16 @@ class DiscoverScreen(
             when (val result = api.readingDiscoverRow(row.id, row.contentType, next)) {
                 is HubResult.Ok -> {
                     val fetched = result.value.rows.firstOrNull() ?: return@launch
-                    readingRowsAdapter.append(loadKey, fetched)
-                    readingRowsByType[readingType] = readingRowsAdapter.snapshot()
+                    // A cached response can complete inline from onScrolled during
+                    // RecyclerView layout. Adapter notifications must run later.
+                    readingRowsList.post {
+                        if (host == null || mode != ContentMode.BOOKS || searching || readingType != requestedType) {
+                            readingRequestedPages[loadKey] = next - 1
+                            return@post
+                        }
+                        readingRowsAdapter.append(loadKey, fetched)
+                        readingRowsByType[requestedType] = readingRowsAdapter.snapshot()
+                    }
                 }
                 is HubResult.Failed -> {
                     readingRequestedPages[loadKey] = next - 1
@@ -782,6 +832,10 @@ class DiscoverScreen(
         if (trimmed == lastQuery && !force && searching) return
         val requestedMode = mode
         val requestedType = readingType
+        if (requestedMode == ContentMode.BOOKS) {
+            readingSearchPresentation = ReadingSearchPresentation()
+            readingSearchExtra = ""
+        }
         lastQuery = trimmed
         searching = true
         searchPage = 1
@@ -805,13 +859,15 @@ class DiscoverScreen(
                             return@launch
                         }
                         val body = result.value
-                        readingResultsAdapter.submit(body.results)
+                        readingSearchPresentation = ReadingSearchPresentation.forResults(body.results, body.broaderResults)
+                        readingSearchExtra = buildString {
+                            if (body.cache.hit) append(" · cached")
+                            if (body.partial.isNotEmpty()) append(" · some sources unavailable")
+                        }
+                        readingResultsAdapter.submit(readingSearchPresentation.visibleResults())
                         if (mode == ContentMode.BOOKS) {
-                            statusLine.text = buildString {
-                                append(body.results.size).append(" results")
-                                if (body.cache.hit) append(" · cached")
-                                if (body.partial.isNotEmpty()) append(" · some sources unavailable")
-                            }
+                            statusLine.text = readingSearchPresentation.summary() + readingSearchExtra
+                            applyModeVisibility()
                             host?.refreshHints()
                         }
                     }
@@ -846,6 +902,19 @@ class DiscoverScreen(
                     showFailure(result.kind, result.message)
                 }
             }
+        }
+    }
+
+    private fun toggleBroaderReadingResults() {
+        if (mode != ContentMode.BOOKS || !searching || !readingSearchPresentation.canToggle) return
+        val buttonHadFocus = broaderSearchButton.hasFocus()
+        readingSearchPresentation = readingSearchPresentation.toggleBroader()
+        readingResultsAdapter.submit(readingSearchPresentation.visibleResults())
+        statusLine.text = readingSearchPresentation.summary() + readingSearchExtra
+        applyModeVisibility()
+        readingResultsGrid.post {
+            if (buttonHadFocus) broaderSearchButton.requestFocus() else restoreContentFocus()
+            host?.refreshHints()
         }
     }
 
@@ -902,7 +971,7 @@ class DiscoverScreen(
             client?.imageLoader ?: coil.ImageLoader(card.context)
         ) { path -> api.imageUrl(path) }
         card.setTag(TAG_HIT, hit)
-        card.setOnClickListener { openDetail(hit) }
+        card.activateOnTap { openDetail(hit) }
         card.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) {
                 modeStates.recall(ContentMode.MEDIA)?.focusedKey = hit.media.key
@@ -918,7 +987,7 @@ class DiscoverScreen(
             client?.imageLoader ?: coil.ImageLoader(card.context)
         ) { path -> api.imageUrl(path) }
         card.setTag(TAG_READING_ITEM, item)
-        card.setOnClickListener { openReadingDetail(item) }
+        card.activateOnTap { openReadingDetail(item) }
         card.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) {
                 modeStates.recall(ContentMode.BOOKS)?.focusedKey = item.key
@@ -956,7 +1025,7 @@ class DiscoverScreen(
             ReadingRowHolder(ReadingPosterRowView(parent.context, colors))
 
         override fun onBindViewHolder(holder: ReadingRowHolder, position: Int) {
-            (holder.itemView as ReadingPosterRowView).bind(rows[position])
+            (holder.itemView as ReadingPosterRowView).bind(rows[position], position == 0)
         }
 
         override fun onBindViewHolder(
@@ -980,14 +1049,22 @@ class DiscoverScreen(
         context: android.content.Context,
         colors: PocketColors
     ) : LinearLayout(context) {
+        private val feature = DiscoverFeatureCardView(context, colors, ringVisible)
         private val label: TextView
         private val strip: RecyclerView
         private val stripAdapter = ReadingStripAdapter()
         private var current: ReadingDiscoverRow? = null
+        private var featuredRow = false
+        private val featureWidthDp get() = (resources.configuration.screenWidthDp - 180).coerceAtLeast(0)
 
         init {
             orientation = VERTICAL
             clipChildren = false
+            feature.visibility = View.GONE
+            addView(feature, LayoutParams(MATCH, WRAP).apply {
+                setMargins(Styler.dpInt(context, 18f), Styler.dpInt(context, 5f),
+                    Styler.dpInt(context, 18f), Styler.dpInt(context, 9f))
+            })
             label = TextView(context).apply {
                 textSize = 13f
                 setTextColor(colors.primaryText)
@@ -1018,16 +1095,28 @@ class DiscoverScreen(
             addView(strip, LayoutParams(MATCH, WRAP))
         }
 
-        fun bind(row: ReadingDiscoverRow) {
+        fun bind(row: ReadingDiscoverRow, first: Boolean) {
             current = row
+            featuredRow = first
+            val selected = if (first) DiscoverFeaturePolicy.readingFeature(row, featureWidthDp) else null
+            feature.visibility = if (selected == null) View.GONE else View.VISIBLE
+            selected?.let { item ->
+                feature.bind(item.title, item.subtitle, item.description, api.imageUrl(item.cover),
+                    landscape = false, loader = (api as? HubClient)?.imageLoader ?: coil.ImageLoader(context))
+                feature.setTag(TAG_READING_ITEM, item)
+                feature.activateOnTap { openReadingDetail(item) }
+                feature.setOnFocusChangeListener { _, focused ->
+                    if (focused) { modeStates.recall(ContentMode.BOOKS)?.focusedKey = item.key; host?.refreshHints() }
+                }
+            }
             label.text = row.title
-            stripAdapter.submit(row.items)
+            stripAdapter.submit(if (selected == null) row.items else row.items.drop(1))
             strip.scrollToPosition(0)
         }
 
         fun appendOnly(row: ReadingDiscoverRow) {
             current = row
-            stripAdapter.submit(row.items)
+            stripAdapter.submit(if (featuredRow) DiscoverFeaturePolicy.readingShelf(row, featureWidthDp) else row.items)
         }
 
         private inner class ReadingStripAdapter : RecyclerView.Adapter<CardHolder>() {
@@ -1112,7 +1201,7 @@ class DiscoverScreen(
             RowHolder(PosterRowView(parent.context, colors))
 
         override fun onBindViewHolder(holder: RowHolder, position: Int) {
-            (holder.itemView as PosterRowView).bind(rows[position])
+            (holder.itemView as PosterRowView).bind(rows[position], position == 0)
         }
 
         override fun onBindViewHolder(
@@ -1139,14 +1228,22 @@ class DiscoverScreen(
         context: android.content.Context,
         colors: PocketColors
     ) : LinearLayout(context) {
+        private val feature = DiscoverFeatureCardView(context, colors, ringVisible)
 
         private val label: TextView
         private val strip: RecyclerView
         private val stripAdapter = StripAdapter()
+        private var featuredRow = false
+        private val featureWidthDp get() = (resources.configuration.screenWidthDp - 180).coerceAtLeast(0)
 
         init {
             orientation = VERTICAL
             clipChildren = false
+            feature.visibility = View.GONE
+            addView(feature, LayoutParams(MATCH, WRAP).apply {
+                setMargins(Styler.dpInt(context, 18f), Styler.dpInt(context, 5f),
+                    Styler.dpInt(context, 18f), Styler.dpInt(context, 9f))
+            })
             label = TextView(context).apply {
                 textSize = 13f
                 setTextColor(colors.primaryText)
@@ -1185,16 +1282,30 @@ class DiscoverScreen(
 
         private var current: DiscoverRow? = null
 
-        fun bind(row: DiscoverRow) {
+        fun bind(row: DiscoverRow, first: Boolean) {
             current = row
+            featuredRow = first
+            val selected = if (first) DiscoverFeaturePolicy.mediaFeature(row, featureWidthDp) else null
+            feature.visibility = if (selected == null) View.GONE else View.VISIBLE
+            selected?.let { hit ->
+                val image = hit.media.backdrop.ifBlank { hit.media.poster }
+                feature.bind(hit.media.title, hit.subtitle.ifBlank { hit.media.year.takeIf { it > 0 }?.toString().orEmpty() },
+                    hit.overview, api.imageUrl(image), hit.media.backdrop.isNotBlank(),
+                    (api as? HubClient)?.imageLoader ?: coil.ImageLoader(context))
+                feature.setTag(TAG_HIT, hit)
+                feature.activateOnTap { openDetail(hit) }
+                feature.setOnFocusChangeListener { _, focused ->
+                    if (focused) { modeStates.recall(ContentMode.MEDIA)?.focusedKey = hit.media.key; host?.refreshHints() }
+                }
+            }
             label.text = row.title
-            stripAdapter.submit(row.items)
+            stripAdapter.submit(if (selected == null) row.items else row.items.drop(1))
             strip.scrollToPosition(0)
         }
 
         fun appendOnly(row: DiscoverRow) {
             current = row
-            stripAdapter.submit(row.items)
+            stripAdapter.submit(if (featuredRow) DiscoverFeaturePolicy.mediaShelf(row, featureWidthDp) else row.items)
         }
 
         private inner class StripAdapter : RecyclerView.Adapter<CardHolder>() {

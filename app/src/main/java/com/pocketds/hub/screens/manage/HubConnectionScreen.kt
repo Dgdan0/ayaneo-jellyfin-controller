@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.manage
 
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.InputType
@@ -238,7 +239,7 @@ class HubConnectionScreen(
         }
     }
 
-    private fun fieldBackground() = GradientDrawable().apply {
+    private fun fieldBackground() = ThemeGradientDrawable().apply {
         cornerRadius = Styler.dp(host.viewContext, 10f)
         setColor(this@HubConnectionScreen.colors.stripBackground)
         setStroke(dp(2), this@HubConnectionScreen.colors.focusRing)

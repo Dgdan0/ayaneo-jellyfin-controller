@@ -11,6 +11,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EpubReaderStateTest {
+    @Test fun `centre tap reveals chrome and a page tap dismisses open chrome`() {
+        assertTrue(EpubChromePolicy.handlesTap(.5f, controlsVisible = false))
+        assertFalse(EpubChromePolicy.handlesTap(.1f, controlsVisible = false))
+        assertFalse(EpubChromePolicy.handlesTap(.9f, controlsVisible = false))
+        assertTrue(EpubChromePolicy.handlesTap(.1f, controlsVisible = true))
+    }
     private val json = Json { ignoreUnknownKeys = true }
 
     @Test
@@ -45,29 +51,31 @@ class EpubReaderStateTest {
         assertEquals(2, EpubLayoutPolicy.columnCount(auto.copy(columns = EpubColumns.TWO), viewportWidthDp = 800, publicationAllowsSpreads = true))
     }
 
+    @Test fun `choosing two columns exits continuous mode and scrolling exits two columns`() {
+        val scrolling = EpubReaderPreferences(scroll = true, columns = EpubColumns.ONE)
+        val two = EpubLayoutPolicy.selectColumns(scrolling, EpubColumns.TWO)
+        assertFalse(two.scroll)
+        assertEquals(2, EpubLayoutPolicy.columnCount(two, 800, true))
+        val continuous = EpubLayoutPolicy.selectScroll(two, true)
+        assertTrue(continuous.scroll)
+        assertEquals(EpubColumns.AUTO, continuous.columns)
+    }
+
     @Test
-    fun `preference changes remain previews until done`() {
+    fun `appearance changes persist immediately and closing retains them`() {
         val initial = EpubReaderPreferences(theme = EpubTheme.SEPIA, fontScale = 1.0f)
         val state = EpubPreferenceState(initial)
 
         state.preview(initial.copy(theme = EpubTheme.DARK, fontScale = 1.2f))
         assertEquals(EpubTheme.DARK, state.visible.theme)
-        assertEquals(EpubTheme.SEPIA, state.saved.theme)
-        assertFalse(state.dirty)
-
-        state.cancel()
-        assertEquals(initial, state.visible)
-        state.preview(initial.copy(fontScale = 1.1f))
         assertTrue(state.commit())
-        assertEquals(1.1f, state.saved.fontScale)
+        assertEquals(EpubTheme.DARK, state.saved.theme)
+        assertEquals(1.2f, state.saved.fontScale)
         assertTrue(state.dirty)
+        state.markPersisted()
+        state.cancel()
+        assertEquals(state.saved, state.visible)
         assertFalse(state.commit())
-    }
-
-    @Test
-    fun `reader chrome reserves its own viewport and disappears cleanly`() {
-        assertEquals(EpubChromeInsets(topDp = 58, bottomDp = 58), EpubChromePolicy.insets(visible = true))
-        assertEquals(EpubChromeInsets(topDp = 0, bottomDp = 0), EpubChromePolicy.insets(visible = false))
     }
 
     @Test

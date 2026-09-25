@@ -1,5 +1,6 @@
 package com.pocketds.hub.nav
 
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.ColorStateList
@@ -11,6 +12,8 @@ import android.widget.ImageView
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.ScrollView
+import com.pocketds.hub.ui.SemanticColor
 import androidx.annotation.DrawableRes
 import com.pocketds.hub.R
 import com.pocketds.hub.ui.PocketColors
@@ -37,6 +40,7 @@ class SectionRailView(context: Context, private val colors: PocketColors) : Line
     private val labels = mutableListOf<TextView>()
     private val badges = mutableListOf<TextView>()
     private var current = 0
+    private var expandButton:TextView?=null
     private var animator: ValueAnimator? = null
     var isExpanded: Boolean = false
         private set
@@ -56,12 +60,25 @@ class SectionRailView(context: Context, private val colors: PocketColors) : Line
         icons.clear()
         labels.clear()
         badges.clear()
-        addView(buildHeader(), LayoutParams(MATCH, dp(42)).apply { bottomMargin = dp(3) })
+        addView(buildHeader(), LayoutParams(MATCH, dp(48)).apply { bottomMargin = dp(4) })
+        val destinations=LinearLayout(context).apply {orientation=VERTICAL}
+        addView(ScrollView(context).apply {
+            isFocusable=false;isFocusableInTouchMode=false;isVerticalScrollBarEnabled=false
+            addView(destinations,FrameLayout.LayoutParams(MATCH,WRAP))
+        },LayoutParams(MATCH,0,1f))
         items.forEachIndexed { index, item ->
             val row = buildRow(item, index)
             rows += row
-            addView(row, LayoutParams(MATCH, dp(40)).apply { bottomMargin = dp(2) })
+            destinations.addView(row, LayoutParams(MATCH, dp(48)).apply { bottomMargin = dp(1) })
         }
+        expandButton=com.pocketds.hub.ui.CenteredIconTextView(context).apply {
+            text=if(isExpanded) "Collapse" else ""
+            setTextColor(colors.mutedText);textSize=12f;gravity=Gravity.CENTER
+            setCenteredIcon(com.pocketds.hub.ui.AppIconDrawable(com.pocketds.hub.ui.AppIcon.PANEL,colors.mutedText),dp(22),dp(8))
+            contentDescription=if(isExpanded) "Collapse navigation" else "Expand navigation"
+            isClickable=true;setOnClickListener {toggle()}
+            background=Styler.chipBackground(context,colors)
+        }.also {addView(it,LayoutParams(MATCH,dp(48)))}
         setCurrent(current.coerceIn(0, (items.size - 1).coerceAtLeast(0)))
         applyExpandedVisuals()
     }
@@ -105,7 +122,7 @@ class SectionRailView(context: Context, private val colors: PocketColors) : Line
         if (expanded) applyExpandedVisuals()
         val target = preferredWidth
         val params = layoutParams
-        if (!animate || params == null || width <= 0) {
+        if (!animate || !ValueAnimator.areAnimatorsEnabled() || params == null || width <= 0) {
             params?.let {
                 it.width = target
                 layoutParams = it
@@ -143,7 +160,7 @@ class SectionRailView(context: Context, private val colors: PocketColors) : Line
         addView(ImageView(context).apply {
             setImageResource(R.drawable.ic_launcher_foreground)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
-            background = rounded(0xFF0FADA0.toInt())
+            background = rounded(colors.accent)
             setPadding(dp(2), dp(2), dp(2), dp(2))
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LayoutParams(dp(30), dp(30)))
@@ -191,7 +208,7 @@ class SectionRailView(context: Context, private val colors: PocketColors) : Line
                     textSize = 7f
                     gravity = Gravity.CENTER
                     setTypeface(typeface, android.graphics.Typeface.BOLD)
-                    setTextColor(0xFFFFFFFF.toInt())
+                    setTextColor(SemanticColor.foreground(colors.badgeFailed))
                     background = rounded(colors.badgeFailed)
                     visibility = View.GONE
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -219,23 +236,19 @@ class SectionRailView(context: Context, private val colors: PocketColors) : Line
         }
 
     private fun applyExpandedVisuals() {
-        for (i in 0 until childCount) {
-            val child = getChildAt(i) as? ViewGroup ?: continue
-            for (j in 0 until child.childCount) {
-                val nested = child.getChildAt(j)
-                if (nested is TextView && (nested.getTag(TAG_HEADER_LABEL) == true ||
-                        nested.getTag(TAG_HEADER_ARROW) == true || child !== getChildAt(0))) {
-                    nested.visibility = if (isExpanded) View.VISIBLE else View.GONE
-                }
+        labels.forEach { it.visibility=if(isExpanded)View.VISIBLE else View.GONE }
+        (getChildAt(0) as? ViewGroup)?.let { header->
+            for(j in 0 until header.childCount) {
+                val child=header.getChildAt(j)
+                if(child.getTag(TAG_HEADER_LABEL)==true || child.getTag(TAG_HEADER_ARROW)==true)child.visibility=if(isExpanded)View.VISIBLE else View.GONE
             }
-            if (i == 0) {
-                child.contentDescription = if (isExpanded) "Collapse navigation" else "Expand navigation"
-            }
+            header.contentDescription=if(isExpanded)"Collapse navigation" else "Expand navigation"
         }
+        expandButton?.apply {text=if(isExpanded) "Collapse" else "";contentDescription=if(isExpanded) "Collapse navigation" else "Expand navigation"}
         requestLayout()
     }
 
-    private fun rounded(color: Int) = android.graphics.drawable.GradientDrawable().apply {
+    private fun rounded(color: Int) = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
         cornerRadius = Styler.dp(context, 10f)
         setColor(color)
     }

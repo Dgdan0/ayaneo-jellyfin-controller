@@ -47,11 +47,12 @@ type ReadingDiscoverResponse struct {
 }
 
 type ReadingSearchResponse struct {
-	Query       string        `json:"query"`
-	ContentType string        `json:"contentType"`
-	Results     []ReadingItem `json:"results"`
-	Partial     []Partial     `json:"partial"`
-	Cache       CacheInfo     `json:"cache"`
+	Query          string        `json:"query"`
+	ContentType    string        `json:"contentType"`
+	Results        []ReadingItem `json:"results"`
+	BroaderResults []ReadingItem `json:"broaderResults"`
+	Partial        []Partial     `json:"partial"`
+	Cache          CacheInfo     `json:"cache"`
 }
 
 func (s *Server) requireReading(w http.ResponseWriter, r *http.Request) bool {
@@ -230,16 +231,23 @@ func (s *Server) handleReadingSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	out := ReadingSearchResponse{
 		Query: query, ContentType: string(kind), Results: make([]ReadingItem, 0, len(body.Results)),
-		Partial: []Partial{}, Cache: cacheInfoFrom(meta),
+		BroaderResults: []ReadingItem{}, Partial: []Partial{}, Cache: cacheInfoFrom(meta),
 	}
 	for _, item := range body.Results {
 		out.Results = append(out.Results, s.readingItem(item, kind))
 	}
+	out.Results, out.BroaderResults = rankReadingSearch(query, out.Results)
 	for _, providerErr := range body.Errors {
 		out.Partial = append(out.Partial, Partial{
 			Service: providerErr.Source, Reason: "provider_unavailable", Affects: []string{"results"},
 			Message: providerErr.Message,
 		})
+	}
+	// A provider outage can return HTTP 200 with no books and an error list.
+	// Show that partial response, but retry the next search instead of keeping
+	// an empty answer after the provider recovers.
+	if len(out.Results)+len(out.BroaderResults) == 0 && len(out.Partial) > 0 {
+		s.cache.Invalidate(cacheKey)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

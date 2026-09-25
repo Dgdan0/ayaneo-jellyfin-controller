@@ -10,8 +10,7 @@ object ReadingRequestForm {
     fun rows(
         options: ReadingRequestOptions,
         modeIndex: Int = 0,
-        profileIndex: Int = -1,
-        monitoringIndex: Int = 0
+        profileIndex: Int = -1
     ): List<FormRow> {
         val rows = mutableListOf<FormRow>()
         if (options.modes.isNotEmpty()) {
@@ -35,24 +34,10 @@ object ReadingRequestForm {
                 selected = selected.coerceIn(0, options.qualityProfiles.lastIndex)
             )
         }
-        if (options.monitoring.isNotEmpty()) {
-            rows += FormRow.Choice(
-                id = "monitoring",
-                label = "Monitoring",
-                options = options.monitoring.map {
-                    when (it) {
-                        "all" -> "All missing books"
-                        "none" -> "Only this request"
-                        else -> it.replace('_', ' ').replaceFirstChar(Char::uppercase)
-                    }
-                },
-                selected = monitoringIndex.coerceIn(0, options.monitoring.lastIndex)
-            )
-        }
         if (options.qualityProfiles.isNotEmpty() && options.modes.isNotEmpty()) {
             rows += FormRow.Action(
                 "submit",
-                if (selectedMode?.requiresSeriesPreview == true) "Review books" else "Start search"
+                if (selectedMode?.requiresSeriesPreview == true) "Review books" else "Choose release"
             )
         }
         return rows
@@ -63,12 +48,11 @@ object ReadingRequestForm {
             ?: error("request mode is unavailable")
         val profile = options.qualityProfiles.getOrNull(model.selectedIndex("profile"))
             ?: error("quality profile is unavailable")
-        val monitoring = options.monitoring.getOrNull(model.selectedIndex("monitoring")) ?: "all"
         return ReadingCreateRequestBody(
             key = options.key,
             mode = mode.id,
             qualityProfileId = profile.id,
-            monitoring = monitoring
+            monitoring = "none"
         )
     }
 }

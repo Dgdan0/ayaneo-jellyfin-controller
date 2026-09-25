@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"ayaneohub/internal/config"
 )
@@ -147,6 +148,36 @@ func TestCreateSeriesUsesMobileAdminTokenAndRenewsOnce(t *testing.T) {
 	}
 	if created.ID != 42 || loginCalls != 2 || exchangeCalls != 2 || createCalls != 2 {
 		t.Fatalf("created=%+v login=%d exchange=%d create=%d", created, loginCalls, exchangeCalls, createCalls)
+	}
+}
+
+func TestInteractiveSearchOutlivesRoutineServiceTimeout(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/auth/login":
+			_, _ = w.Write([]byte(`{"redirect_to":"bookkeeprr://hub/auth?exchange=one"}`))
+		case "/api/mobile/exchange":
+			_, _ = w.Write([]byte(`{"token":"admin-token"}`))
+		case "/api/search/interactive":
+			time.Sleep(80 * time.Millisecond)
+			_, _ = w.Write([]byte(`{"results":[],"errors":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	client, err := New(config.ServiceConfig{
+		BaseURL: upstream.URL, APIKey: config.Secret("read-key"),
+		Username: "hub-admin", Password: config.Secret("secret"),
+		Timeout: config.Duration(15 * time.Millisecond),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := client.InteractiveSearch(ctx, 18); err != nil {
+		t.Fatalf("interactive search was cut off by routine timeout: %v", err)
 	}
 }
 

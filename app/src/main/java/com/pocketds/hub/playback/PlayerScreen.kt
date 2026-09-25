@@ -1,5 +1,6 @@
 package com.pocketds.hub.playback
 
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
@@ -12,7 +13,6 @@ import android.media.AudioManager
 import android.media.audiofx.AudioEffect
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -31,6 +31,11 @@ import androidx.media3.session.MediaController
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
+import androidx.mediarouter.app.MediaRouteButton
+import com.google.android.gms.cast.framework.CastButtonFactory
+import com.google.android.gms.cast.framework.CastContext
+import com.google.android.gms.cast.framework.CastState
+import com.google.android.gms.cast.framework.CastStateListener
 import com.google.common.util.concurrent.ListenableFuture
 import coil.ImageLoader
 import coil.request.Disposable
@@ -48,6 +53,7 @@ import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.settings.HubSettings
 import com.pocketds.hub.settings.PlaybackSettings
+import com.pocketds.hub.ui.TrackPresentation
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
@@ -71,6 +77,7 @@ class PlayerScreen(
     initialPlan: PlaybackPrepareResponse? = null,
     private val ringVisible: () -> Boolean
 ) : Screen {
+    override val contentDomain = com.pocketds.hub.state.ContentMode.MEDIA
     override val title = initialPlan?.item?.title ?: "Player"
     override val immersive = true
     override val focusOnShow = false
@@ -81,6 +88,7 @@ class PlayerScreen(
     private lateinit var colors: PocketColors
     private lateinit var root: FrameLayout
     private lateinit var playerView: PlayerView
+    private lateinit var videoDimmer: View
     private lateinit var dynamicSubtitleView: SubtitleView
     private lateinit var topPanel: LinearLayout
     private lateinit var controllerPanel: LinearLayout
@@ -90,10 +98,10 @@ class PlayerScreen(
     private lateinit var duration: TextView
     private lateinit var seekBar: SeekBar
     private lateinit var playButton: PlayerIconButton
-    private lateinit var audioButton: PlayerIconButton
-    private lateinit var effectsButton: PlayerIconButton
-    private lateinit var subtitleButton: PlayerIconButton
+    private lateinit var tracksButton: PlayerIconButton
+    private val menuState = PlayerMenuState()
     private lateinit var optionsButton: PlayerIconButton
+    private lateinit var castButton: MediaRouteButton
     private lateinit var pipButton: PlayerIconButton
     private lateinit var closeButton: PlayerIconButton
     private lateinit var previousButton: PlayerIconButton
@@ -126,7 +134,8 @@ class PlayerScreen(
     private var scrubTargetMillis = 0L
     private var scrubWasPlaying = false
     private var timelineWasPlaying = false
-    private var brightnessStart = 0.5f
+    private var brightnessStart = 1f
+    private var videoBrightness = 1f
     private var volumeStart = 0
     private var lastGestureVolume: Int? = null
     private var subtitleOffsetMillis = 0L
@@ -142,6 +151,19 @@ class PlayerScreen(
     private val countdown = NextEpisodeCountdown(15)
     private var selectedQuality = 0
     private var padTimelineSeeking = false
+    private var castTransferJob: Job? = null
+    private var castContext: CastContext? = null
+    private val castStateListener = CastStateListener { state ->
+        if (state == CastState.CONNECTED && !CastPlaybackCoordinator.isActive) startCastTransfer()
+        if (state == CastState.NOT_CONNECTED && CastPlaybackCoordinator.isActive) {
+            CastPlaybackCoordinator.stop()
+            status.visibility = View.VISIBLE
+            status.text = "TV disconnected · press Select to resume here"
+            pipButton.visibility = View.VISIBLE
+            plan = null
+            serviceLoaded = false
+        }
+    }
 
     private val uiTick = object : Runnable {
         override fun run() {
@@ -205,6 +227,13 @@ class PlayerScreen(
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
         root.addView(dynamicSubtitleView, FrameLayout.LayoutParams(MATCH, MATCH))
+        videoDimmer = View(host.viewContext).apply {
+            setBackgroundColor(Color.BLACK)
+            alpha = 0f
+            isClickable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        root.addView(videoDimmer, FrameLayout.LayoutParams(MATCH, MATCH))
 
         status = TextView(host.viewContext).apply {
             text = if (plan == null) "Negotiating playback with Jellyfin…" else "Opening player…"
@@ -259,10 +288,10 @@ class PlayerScreen(
             }
         )
 
-        choiceOverlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
+        choiceOverlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
         root.addView(choiceOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
         subtitleOffsetOverlay = SubtitleOffsetOverlay(host.viewContext, colors, ringVisible)
-        root.addView(subtitleOffsetOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
+        root.addView(subtitleOffsetOverlay, FrameLayout.LayoutParams(dp(320), WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(16) })
         nextPanel = buildNextPanel()
         root.addView(
             nextPanel,
@@ -274,15 +303,23 @@ class PlayerScreen(
     }
 
     override fun onShow() {
+        castContext = runCatching { CastContext.getSharedInstance(host.viewContext) }.getOrNull()
+        castContext?.addCastStateListener(castStateListener)
         handler.removeCallbacks(uiTick)
         handler.post(uiTick)
         handler.removeCallbacks(subtitleTick)
         handler.post(subtitleTick)
-        if (plan == null) prepare() else beginPlayback()
+        val remote = CastPlaybackCoordinator.activePlan?.takeIf { it.item.id == itemId }
+        if (remote != null) {
+            plan = remote
+            showRemotePlayback()
+        } else if (plan == null) prepare() else beginPlayback()
         root.post { playButton.requestFocus() }
     }
 
     override fun onHide() {
+        castContext?.removeCastStateListener(castStateListener)
+        castContext = null
         persistSubtitleOffset()
         rememberPlaybackPosition()
         handler.removeCallbacks(uiTick)
@@ -298,6 +335,7 @@ class PlayerScreen(
         releaseController()
         prepareJob?.cancel()
         selectionJob?.cancel()
+        castTransferJob?.cancel()
         subtitleJob?.cancel()
         prepareJob = null
         selectionJob = null
@@ -310,11 +348,15 @@ class PlayerScreen(
     }
 
     override fun onAppBackgrounded() {
-        PlaybackService.pause(host.viewContext)
+        if (!CastPlaybackCoordinator.isActive) PlaybackService.pause(host.viewContext)
     }
 
     /** Android system Back includes the AYANEO edge-swipe gesture. */
     override fun onSystemBack(): Boolean {
+        if (subtitleOffsetOverlay.onPad(PadAction.Back)) return true
+        if (choiceOverlay.onPad(PadAction.Back)) return true
+        if (nextPanel.visibility == View.VISIBLE) { cancelNext(); return true }
+        if (controlsVisible) { setControls(false); return true }
         host.back()
         return true
     }
@@ -345,10 +387,16 @@ class PlayerScreen(
             PadAction.Activate -> {
                 val focused = root.findFocus()
                 if (controlsVisible && focused is PlayerIconButton) focused.performClick()
+                else if (controlsVisible && focused === castButton) castButton.performClick()
                 else togglePlay()
                 true
             }
-            is PadAction.Step -> { moveControllerFocus(action.direction); true }
+            is PadAction.Step -> {
+                if (subtitleOffsetOverlay.isOpen && action.direction == Direction.UP && topPanel.hasFocus())
+                    subtitleOffsetOverlay.focusTiming()
+                else moveControllerFocus(action.direction)
+                true
+            }
             is PadAction.Page -> {
                 val seek = configuredSeekMillis()
                 seekBy(if (action.direction == Direction.UP) -seek else seek)
@@ -427,6 +475,7 @@ class PlayerScreen(
 
     private fun beginPlayback() {
         val current = plan ?: return
+        pipButton.visibility = View.VISIBLE
         restoreSubtitleOffset(current)
         prepareDynamicSubtitle(current)
         updateControlLabels(current)
@@ -438,6 +487,78 @@ class PlayerScreen(
             PlaybackService.load(host.viewContext, current, subtitleOffsetMillis = subtitleOffsetMillis)
         }
         connectController()
+        if (castContext?.castState == CastState.CONNECTED && !CastPlaybackCoordinator.isActive) {
+            startCastTransfer()
+        }
+    }
+
+    private fun startCastTransfer() {
+        if (castTransferJob?.isActive == true || CastPlaybackCoordinator.isActive) return
+        val current = plan ?: return
+        status.visibility = View.VISIBLE
+        status.setTextColor(Color.WHITE)
+        status.text = "Preparing TV playback…"
+        val position = controller?.currentPosition?.coerceAtLeast(0) ?: current.positionMillis
+        castTransferJob = scope.launch {
+            val error = CastPlaybackCoordinator.transfer(host.viewContext, api, current, position)
+            if (error != null) {
+                status.visibility = View.GONE
+                host.notify(error)
+            } else {
+                if (serviceLoaded) PlaybackService.stop(host.viewContext)
+                serviceLoaded = false
+                releaseController()
+                plan = CastPlaybackCoordinator.activePlan
+                showRemotePlayback()
+                host.notify("Playing on ${CastPlaybackCoordinator.deviceName}")
+            }
+            castTransferJob = null
+        }
+    }
+
+    private fun showRemotePlayback() {
+        titleView.text = plan?.item?.displayTitle().orEmpty()
+        status.visibility = View.VISIBLE
+        status.setTextColor(Color.WHITE)
+        status.text = "Playing on ${CastPlaybackCoordinator.deviceName}"
+        pipButton.visibility = View.GONE
+        previousButton.isEnabled = plan?.previousItem != null
+        nextButton.isEnabled = plan?.nextItem != null
+        updateTimeline()
+        showControls()
+    }
+
+    private fun showCastTracks(tab: String) {
+        val current = CastPlaybackCoordinator.activePlan ?: return
+        menuState.selectTrackTab(tab)
+        choiceOverlay.resetBody()
+        choiceOverlay.open("TV audio & subtitles", onDismiss = ::showControls)
+        choiceOverlay.tabs(listOf("audio" to "Audio", "subtitles" to "Subtitles"), tab, ::showCastTracks)
+        var selected: View? = null
+        if (tab == "audio") {
+            val track = current.audioTracks.firstOrNull { it.index == current.selectedAudioIndex }
+            selected = choiceOverlay.choice(
+                track?.label ?: "Jellyfin default",
+                "Audio is chosen before the TV stream starts",
+                selected = true
+            ) { choiceOverlay.dismiss() }
+        } else {
+            selected = choiceOverlay.choice("Off", selected = current.selectedSubtitleIndex == null) {
+                CastPlaybackCoordinator.selectSubtitle(null)
+                choiceOverlay.dismiss()
+            }
+            current.subtitleTracks.filter { it.external &&
+                (it.codec.equals("srt", true) || it.codec.equals("subrip", true) ||
+                    it.codec.equals("vtt", true) || it.codec.equals("webvtt", true))
+            }.forEach { track ->
+                val row = choiceOverlay.choice(track.label, "WebVTT on TV", selected = track.index == current.selectedSubtitleIndex) {
+                    CastPlaybackCoordinator.selectSubtitle(track.index)
+                    choiceOverlay.dismiss()
+                }
+                if (track.index == current.selectedSubtitleIndex) selected = row
+            }
+        }
+        choiceOverlay.focusBody(selected)
     }
 
     private fun connectController() {
@@ -505,26 +626,13 @@ class PlayerScreen(
     }
 
     private fun togglePlay() {
-        val value = controller ?: return
-        if (value.isPlaying) value.pause() else value.play()
-        showControls()
-    }
-
-    /** Opens Android's installed effect panel for this exact Media3 audio session. */
-    private fun openAudioEffects() {
-        val sessionId = PlaybackService.audioSessionId()
-        if (sessionId <= 0) {
-            host.notify("Audio effects are available once playback starts")
+        if (CastPlaybackCoordinator.isActive) {
+            CastPlaybackCoordinator.togglePlay()
             showControls()
             return
         }
-        val panel = Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
-            putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
-            putExtra(AudioEffect.EXTRA_PACKAGE_NAME, host.viewContext.packageName)
-            putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MOVIE)
-        }
-        runCatching { host.viewContext.startActivity(panel) }
-            .onFailure { host.notify("No Android audio-effects panel is available") }
+        val value = controller ?: return
+        if (value.isPlaying) value.pause() else value.play()
         showControls()
     }
 
@@ -535,9 +643,9 @@ class PlayerScreen(
             return
         }
         val focused = root.findFocus()
-        val top = listOf(audioButton, effectsButton, subtitleButton, optionsButton, pipButton, closeButton)
+        val top = listOf<View>(tracksButton, castButton, optionsButton, pipButton, closeButton)
             .filter { it.visibility == View.VISIBLE && it.isEnabled }
-        val playback = listOf(previousButton, rewindButton, playButton, forwardButton, nextButton)
+        val playback = listOf<View>(previousButton, rewindButton, playButton, forwardButton, nextButton)
             .filter { it.visibility == View.VISIBLE && it.isEnabled }
         when {
             focused === seekBar -> when (direction) {
@@ -560,7 +668,7 @@ class PlayerScreen(
         scheduleHide()
     }
 
-    private fun moveWithin(buttons: List<PlayerIconButton>, focused: View?, direction: Direction) {
+    private fun moveWithin(buttons: List<View>, focused: View?, direction: Direction) {
         if (buttons.isEmpty()) return
         val current = buttons.indexOf(focused).coerceAtLeast(0)
         val delta = if (direction == Direction.LEFT) -1 else 1
@@ -568,6 +676,18 @@ class PlayerScreen(
     }
 
     private fun seekTimeline(direction: Direction) {
+        if (CastPlaybackCoordinator.isActive) {
+            val end = plan?.durationMillis ?: return
+            val base = if (padTimelineSeeking) pendingPreviewPosition else CastPlaybackCoordinator.positionMillis
+            val target = PlaybackRules.clampSeek(base + if (direction == Direction.LEFT) -configuredSeekMillis() else configuredSeekMillis(), end)
+            padTimelineSeeking = true
+            CastPlaybackCoordinator.seekTo(target)
+            setSeekBarTarget(target, end)
+            showSeekPreview(target, showDelta = false)
+            handler.removeCallbacks(hideSeekPreview)
+            handler.postDelayed(hideSeekPreview, 900L)
+            return
+        }
         val value = controller ?: return
         val end = value.duration.takeIf { it > 0 } ?: plan?.durationMillis ?: return
         val base = if (padTimelineSeeking) pendingPreviewPosition else value.currentPosition.coerceAtLeast(0)
@@ -582,6 +702,12 @@ class PlayerScreen(
     }
 
     private fun seekBy(delta: Long, showChrome: Boolean = true) {
+        if (CastPlaybackCoordinator.isActive) {
+            val end = plan?.durationMillis ?: Long.MAX_VALUE
+            CastPlaybackCoordinator.seekTo(PlaybackRules.clampSeek(CastPlaybackCoordinator.positionMillis + delta, end))
+            if (showChrome) showControls()
+            return
+        }
         val value = controller ?: return
         val end = value.duration.takeIf { it > 0 } ?: plan?.durationMillis ?: Long.MAX_VALUE
         value.seekTo(PlaybackRules.clampSeek(value.currentPosition + delta, end))
@@ -636,7 +762,7 @@ class PlayerScreen(
     private fun beginVerticalGesture(side: PlayerGestureView.Side) {
         handler.removeCallbacks(hideControls)
         if (side == PlayerGestureView.Side.LEFT) {
-            brightnessStart = currentBrightness()
+            brightnessStart = videoBrightness
         } else {
             volumeStart = audioManager().getStreamVolume(AudioManager.STREAM_MUSIC)
             lastGestureVolume = volumeStart
@@ -646,8 +772,8 @@ class PlayerScreen(
     private fun updateVerticalGesture(side: PlayerGestureView.Side, fraction: Float) {
         if (side == PlayerGestureView.Side.LEFT) {
             val next = (brightnessStart + fraction).coerceIn(0.02f, 1f)
-            val activity = host.viewContext as? Activity ?: return
-            activity.window.attributes = activity.window.attributes.apply { screenBrightness = next }
+            videoBrightness = next
+            videoDimmer.alpha = PlayerBrightnessPolicy.overlayAlpha(next)
             showLevelFeedback(PlayerLevelView.Kind.BRIGHTNESS, next, side)
         } else {
             val manager = audioManager()
@@ -672,15 +798,6 @@ class PlayerScreen(
         handler.removeCallbacks(hideLevelFeedback)
         handler.postDelayed(hideLevelFeedback, 700L)
         scheduleHide()
-    }
-
-    private fun currentBrightness(): Float {
-        val activity = host.viewContext as? Activity ?: return 0.5f
-        val windowValue = activity.window.attributes.screenBrightness
-        if (windowValue >= 0f) return windowValue.coerceIn(0.02f, 1f)
-        return runCatching {
-            Settings.System.getInt(activity.contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f
-        }.getOrDefault(0.5f).coerceIn(0.02f, 1f)
     }
 
     private fun audioManager(): AudioManager =
@@ -844,6 +961,16 @@ class PlayerScreen(
     }
 
     private fun updateTimeline() {
+        if (CastPlaybackCoordinator.isActive) {
+            val current = CastPlaybackCoordinator.positionMillis
+            val end = CastPlaybackCoordinator.activePlan?.durationMillis ?: 0
+            position.text = time(current)
+            duration.text = time(end)
+            playButton.setIcon(if (CastPlaybackCoordinator.isPlaying) PlayerControlIcon.PAUSE else PlayerControlIcon.PLAY)
+            playButton.contentDescription = if (CastPlaybackCoordinator.isPlaying) "Pause on TV" else "Play on TV"
+            if (!seekingByTouch && !padTimelineSeeking && end > 0) setSeekBarTarget(current, end)
+            return
+        }
         val value = controller ?: return
         val current = value.currentPosition.coerceAtLeast(0)
         val end = value.duration.takeIf { it > 0 } ?: plan?.durationMillis ?: 0
@@ -865,97 +992,47 @@ class PlayerScreen(
         duration.text = time(active.durationMillis)
     }
 
-    private fun showTrackSheet() {
-        val current = plan ?: return
-        val choices = mutableListOf<ChoiceOverlay.Choice>()
-        current.audioTracks.forEach {
-            choices += ChoiceOverlay.Choice(
-                "audio:${it.index}",
-                "Audio · ${it.label}",
-                selectedDetail(trackDetail(it.codec, it.channels), it.index == current.selectedAudioIndex)
-            )
-        }
-        choices += ChoiceOverlay.Choice(
-            "subtitle:-1",
-            "Subtitles · Off",
-            if (current.selectedSubtitleIndex == null || current.selectedSubtitleIndex == -1) "Selected" else ""
-        )
-        current.subtitleTracks.forEach {
-            choices += ChoiceOverlay.Choice(
-                "subtitle:${it.index}",
-                "Subtitles · ${it.label}",
-                selectedDetail(trackDetail(it.codec, 0), it.index == current.selectedSubtitleIndex)
-            )
-        }
-        if (selectedSubtitleSupportsOffset(current)) {
-            choices += ChoiceOverlay.Choice("offset", "Subtitle timing", subtitleOffsetLabel(subtitleOffsetMillis))
-        }
-        val selected = choices.indexOfFirst {
-            it.id == "audio:${current.selectedAudioIndex}" || it.id == "subtitle:${current.selectedSubtitleIndex}"
-        }.coerceAtLeast(0)
-        choiceOverlay.show("Audio and subtitles", "Changing a track resumes from the current position.", choices, selected, ::showControls) { id ->
-            if (id == "offset") {
-                showSubtitleOffsetSheet()
-                return@show
-            }
-            val pieces = id.split(':')
-            if (pieces.first() == "audio") changeSelection(audio = pieces.last().toInt())
-            else changeSelection(subtitle = pieces.last().toInt())
-        }
-        handler.removeCallbacks(hideControls)
-    }
+    private fun showTrackSheet() = showTracks(menuState.trackTab)
 
-    private fun showAudioSheet() {
-        val current = plan ?: return
-        if (current.audioTracks.isEmpty()) {
-            host.notify("No selectable audio tracks")
+    private fun showTracks(tab: String) {
+        if (CastPlaybackCoordinator.isActive) {
+            showCastTracks(tab)
             return
         }
-        val choices = current.audioTracks.map {
-            ChoiceOverlay.Choice(
-                it.index.toString(),
-                it.label,
-                selectedDetail(trackDetail(it.codec, it.channels), it.index == current.selectedAudioIndex)
-            )
-        }
-        val selected = current.audioTracks.indexOfFirst { it.index == current.selectedAudioIndex }.coerceAtLeast(0)
-        choiceOverlay.show(
-            "Audio",
-            "Choose the audio track for this playback.",
-            choices,
-            selected,
-            ::showControls
-        ) { changeSelection(audio = it.toInt()) }
-        handler.removeCallbacks(hideControls)
-    }
-
-    private fun showSubtitleSheet() {
+        if (subtitleOffsetOverlay.isOpen) subtitleOffsetOverlay.onPad(PadAction.Back)
         val current = plan ?: return
-        val off = current.selectedSubtitleIndex == null || current.selectedSubtitleIndex == -1
-        val choices = mutableListOf(
-            ChoiceOverlay.Choice("-1", "Off", if (off) "Selected" else "")
-        )
-        choices += current.subtitleTracks.map {
-            ChoiceOverlay.Choice(
-                it.index.toString(),
-                it.label,
-                selectedDetail(trackDetail(it.codec, 0), it.index == current.selectedSubtitleIndex)
-            )
+        menuState.selectTrackTab(tab)
+        choiceOverlay.resetBody()
+        choiceOverlay.open("Audio & subtitles", onDismiss = ::showControls)
+        choiceOverlay.tabs(listOf("audio" to "Audio", "subtitles" to "Subtitles"), menuState.trackTab, ::showTracks)
+        var selected: View? = null
+        if (tab == "subtitles") {
+            val off = current.selectedSubtitleIndex == null || current.selectedSubtitleIndex == -1
+            val row = choiceOverlay.choice("Off", selected = off) { choiceOverlay.dismiss(); changeSelection(subtitle = -1) }
+            if (off) selected = row
         }
-        if (selectedSubtitleSupportsOffset(current)) {
-            choices += ChoiceOverlay.Choice("offset", "Timing", subtitleOffsetLabel(subtitleOffsetMillis))
+        val tracks = if (tab == "audio") current.audioTracks else current.subtitleTracks
+        tracks.forEach { track ->
+            val copy = TrackPresentation.of(track)
+            val active = track.index == if (tab == "audio") current.selectedAudioIndex else current.selectedSubtitleIndex
+            val row = choiceOverlay.choice(copy.title, copy.detail, selected = active) {
+                choiceOverlay.dismiss()
+                if (tab == "audio") changeSelection(audio = track.index) else changeSelection(subtitle = track.index)
+            }
+            if (active) selected = row
         }
-        val selected = if (off) 0 else choices.indexOfFirst { it.id == current.selectedSubtitleIndex.toString() }.coerceAtLeast(0)
-        choiceOverlay.show(
-            "Subtitles",
-            "Choose a subtitle track or turn subtitles off.",
-            choices,
-            selected,
-            ::showControls
-        ) {
-            if (it == "offset") showSubtitleOffsetSheet()
-            else changeSelection(subtitle = it.toInt())
+        if (tab == "audio" && tracks.isEmpty()) choiceOverlay.choice("No selectable audio tracks") { choiceOverlay.cancel() }
+        if (tab == "subtitles" && selectedSubtitleSupportsOffset(current)) {
+            choiceOverlay.body.addView(TextView(host.viewContext).apply {
+                text = "TIMING"
+                textSize = 11f
+                letterSpacing = 0.12f
+                setTextColor(colors.mutedText)
+                setPadding(dp(10), dp(20), dp(10), dp(6))
+            })
+            choiceOverlay.choice("Adjust subtitle timing", subtitleOffsetLabel(subtitleOffsetMillis)) { showSubtitleOffsetSheet() }
         }
+        choiceOverlay.focusBody(selected)
         handler.removeCallbacks(hideControls)
     }
 
@@ -966,7 +1043,6 @@ class PlayerScreen(
             return
         }
         choiceOverlay.dismiss()
-        setControls(false)
         subtitleOffsetOverlay.show(
             subtitleOffsetMillis,
             onChange = { value ->
@@ -988,9 +1064,10 @@ class PlayerScreen(
                     pendingFallbackSubtitleOffset = false
                 }
                 showControls()
+                if (!topPanel.hasFocus() && !controllerPanel.hasFocus()) playButton.requestFocus()
             }
         )
-        handler.removeCallbacks(hideControls)
+        scheduleHide()
     }
 
     private fun restoreSubtitleOffset(value: PlaybackPrepareResponse) {
@@ -1115,31 +1192,92 @@ class PlayerScreen(
         else -> "%.1f seconds later".format(offsetMillis / 1_000.0)
     }
 
-    private fun showPlaybackSheet() {
+    private fun showPlaybackSheet() = showPlaybackPanel("quality")
+
+    private fun showPlaybackPanel(tab: String) {
+        if (CastPlaybackCoordinator.isActive) {
+            choiceOverlay.resetBody()
+            choiceOverlay.open("Playing on ${CastPlaybackCoordinator.deviceName}", onDismiss = ::showControls)
+            choiceOverlay.choice("Move to Pocket DS", "Continue here at the TV position") {
+                choiceOverlay.dismiss()
+                moveCastToDevice()
+            }
+            choiceOverlay.choice("Stop on TV", "End playback on the receiver") {
+                choiceOverlay.dismiss()
+                CastPlaybackCoordinator.stop()
+                host.back()
+            }
+            choiceOverlay.choice("TV stream", "H.264/AAC · up to 20 Mbps") { choiceOverlay.dismiss() }
+            choiceOverlay.focusBody()
+            return
+        }
         val current = plan ?: return
-        val choices = mutableListOf(
-            ChoiceOverlay.Choice("info", "Playback information", diagnostic(current))
-        )
-        current.sources.forEach { source ->
-            choices += ChoiceOverlay.Choice("source:${source.id}", "Version · ${source.name.ifEmpty { source.container.uppercase() }}", sourceDetail(source.container, source.bitrate))
-        }
-        if (!current.offline) PlaybackRules.qualities.forEach { quality ->
-            choices += ChoiceOverlay.Choice("quality:${quality.bitrate}", "Quality · ${quality.label}", if (quality.bitrate == selectedQuality) "Selected" else "")
-        }
-        choiceOverlay.show("Playback", diagnostic(current), choices, 0, ::showControls) { id ->
-            when {
-                id == "info" -> {
-                    host.notify(diagnostic(current))
-                    showControls()
-                }
-                id.startsWith("source:") -> changeSelection(source = id.removePrefix("source:"))
-                id.startsWith("quality:") -> {
-                    selectedQuality = id.removePrefix("quality:").toInt()
+        choiceOverlay.resetBody()
+        choiceOverlay.open("Playback", onDismiss = ::showControls)
+        choiceOverlay.tabs(listOf("quality" to "Quality", "source" to "Version", "info" to "Info"), tab, ::showPlaybackPanel)
+        var selected: View? = null
+        when (tab) {
+            "quality" -> if (current.offline) {
+                selected = choiceOverlay.choice("Original", "Downloaded file · no network required", selected = true) { choiceOverlay.cancel() }
+            } else PlaybackRules.qualities.forEach { quality ->
+                val active = quality.bitrate == selectedQuality
+                val row = choiceOverlay.choice(quality.label, selected = active) {
+                    choiceOverlay.dismiss()
+                    selectedQuality = quality.bitrate
                     changeSelection(quality = selectedQuality)
                 }
+                if (active) selected = row
             }
+            "source" -> current.sources.forEach { source ->
+                val active = source.id == current.selectedMediaSourceId
+                val row = choiceOverlay.choice(source.name.ifEmpty { source.container.uppercase() }, sourceDetail(source.container, source.bitrate), selected = active) {
+                    choiceOverlay.dismiss(); changeSelection(source = source.id)
+                }
+                if (active) selected = row
+            }
+            else -> choiceOverlay.body.addView(TextView(host.viewContext).apply {
+                text = diagnostic(current); textSize = 14f; setTextColor(colors.primaryText)
+                setPadding(dp(10), dp(12), dp(10), dp(16)); setTextIsSelectable(true)
+            })
         }
+        choiceOverlay.focusBody(selected)
         handler.removeCallbacks(hideControls)
+    }
+
+    private fun moveCastToDevice() {
+        val remote = CastPlaybackCoordinator.activePlan ?: return
+        if (selectionJob?.isActive == true) return
+        val at = CastPlaybackCoordinator.positionMillis
+        status.visibility = View.VISIBLE
+        status.text = "Preparing playback on Pocket DS…"
+        selectionJob = scope.launch {
+            val body = PlaybackCapabilitiesProbe.prepare(host.viewContext, "resume", at).copy(
+                mediaSourceId = remote.selectedMediaSourceId.takeIf { it.isNotEmpty() },
+                audioStreamIndex = remote.selectedAudioIndex,
+                subtitleStreamIndex = remote.selectedSubtitleIndex
+            )
+            when (val result = api.preparePlayback(remote.item.id, body)) {
+                is HubResult.Ok -> {
+                    val local = result.value.copy(positionMillis = at)
+                    plan = local
+                    serviceLoaded = true
+                    pipButton.visibility = View.VISIBLE
+                    PlaybackService.load(host.viewContext, local, subtitleOffsetMillis = subtitleOffsetMillis)
+                    connectController()
+                    restoreSubtitleOffset(local)
+                    prepareDynamicSubtitle(local)
+                    updateControlLabels(local)
+                    CastPlaybackCoordinator.stop()
+                    status.visibility = View.GONE
+                    host.notify("Playing on Pocket DS")
+                }
+                is HubResult.Failed -> {
+                    status.visibility = View.GONE
+                    host.notify(result.message)
+                }
+            }
+            selectionJob = null
+        }
     }
 
     private fun changeSelection(
@@ -1244,6 +1382,29 @@ class PlayerScreen(
     private fun playAdjacent(target: com.pocketds.hub.model.PlaybackItem?, direction: String) {
         val old = plan ?: return
         val adjacent = target ?: return
+        if (CastPlaybackCoordinator.isActive) {
+            status.visibility = View.VISIBLE
+            status.text = "Opening $direction episode on TV…"
+            val candidate = old.copy(
+                item = adjacent, selectedMediaSourceId = "",
+                selectedAudioIndex = null, selectedSubtitleIndex = null
+            )
+            selectionJob?.cancel()
+            selectionJob = scope.launch {
+                val error = CastPlaybackCoordinator.transfer(
+                    host.viewContext, api, candidate, 0L, startMode = "restart"
+                )
+                if (error == null) {
+                    plan = CastPlaybackCoordinator.activePlan
+                    showRemotePlayback()
+                } else {
+                    status.visibility = View.GONE
+                    host.notify(error)
+                }
+                selectionJob = null
+            }
+            return
+        }
         handler.removeCallbacks(nextTick)
         countdown.cancel()
         nextPanel.visibility = View.GONE
@@ -1294,7 +1455,7 @@ class PlayerScreen(
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(22), dp(14), dp(16), dp(18))
-        background = GradientDrawable(
+        background = ThemeGradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
             intArrayOf(Color.argb(225, 0, 0, 0), Color.TRANSPARENT)
         )
@@ -1306,14 +1467,15 @@ class PlayerScreen(
             setTypeface(typeface, Typeface.BOLD)
         }
         addView(titleView, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginEnd = dp(10) })
-        audioButton = control(PlayerControlIcon.AUDIO, "Choose audio track") { showAudioSheet() }
-        addView(audioButton)
-        effectsButton = control(PlayerControlIcon.AUDIO_EFFECTS, "Open Android audio effects") {
-            openAudioEffects()
+        tracksButton = control(PlayerControlIcon.TRACKS, "Audio and subtitles") { showTrackSheet() }
+        addView(tracksButton)
+        castButton = MediaRouteButton(context).apply {
+            contentDescription = "Play on a TV"
+            isFocusable = true
+            isFocusableInTouchMode = true
+            CastButtonFactory.setUpMediaRouteButton(context, this)
         }
-        addView(effectsButton)
-        subtitleButton = control(PlayerControlIcon.SUBTITLES, "Choose subtitles") { showSubtitleSheet() }
-        addView(subtitleButton)
+        addView(castButton, LinearLayout.LayoutParams(dp(48), dp(48)))
         optionsButton = control(
             PlayerControlIcon.OPTIONS, "Quality, version and stream information"
         ) { showPlaybackSheet() }
@@ -1332,7 +1494,7 @@ class PlayerScreen(
     private fun buildController(): LinearLayout = LinearLayout(host.viewContext).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(26), dp(18), dp(26), dp(20))
-        background = GradientDrawable(
+        background = ThemeGradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
             intArrayOf(Color.TRANSPARENT, Color.argb(225, 0, 0, 0))
         )
@@ -1350,6 +1512,11 @@ class PlayerScreen(
                     override fun onStartTrackingTouch(seekBar: SeekBar) {
                         seekingByTouch = true
                         suppressPlaybackChrome = true
+                        if (CastPlaybackCoordinator.isActive) {
+                            scrubStartMillis = CastPlaybackCoordinator.positionMillis
+                            showSeekPreview(scrubStartMillis, showDelta = false)
+                            return
+                        }
                         timelineWasPlaying = controller?.isPlaying == true
                         controller?.pause()
                         val current = controller?.currentPosition?.coerceAtLeast(0) ?: 0
@@ -1365,7 +1532,9 @@ class PlayerScreen(
 
                     override fun onStopTrackingTouch(seekBar: SeekBar) {
                         val end = controller?.duration?.takeIf { it > 0 } ?: plan?.durationMillis ?: 0
-                        controller?.seekTo((end * seekBar.progress) / 10_000L)
+                        if (CastPlaybackCoordinator.isActive) {
+                            CastPlaybackCoordinator.seekTo((end * seekBar.progress) / 10_000L)
+                        } else controller?.seekTo((end * seekBar.progress) / 10_000L)
                         seekingByTouch = false
                         if (timelineWasPlaying) controller?.play()
                         suppressPlaybackChrome = false
@@ -1404,7 +1573,7 @@ class PlayerScreen(
         gravity = Gravity.CENTER_HORIZONTAL
         visibility = View.GONE
         isClickable = false
-        background = GradientDrawable().apply {
+        background = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 12f)
             setColor(Color.argb(235, 22, 24, 29))
             setStroke(dp(1), Color.argb(120, 255, 255, 255))
@@ -1448,7 +1617,7 @@ class PlayerScreen(
         setTextColor(Color.WHITE)
         setTypeface(typeface, Typeface.BOLD)
         setPadding(dp(18), dp(12), dp(18), dp(12))
-        background = GradientDrawable().apply {
+        background = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 18f)
             setColor(Color.argb(225, 22, 24, 29))
             setStroke(dp(1), Color.argb(110, 255, 255, 255))
@@ -1458,7 +1627,7 @@ class PlayerScreen(
     private fun buildNextPanel(): LinearLayout = LinearLayout(host.viewContext).apply {
         orientation = LinearLayout.VERTICAL
         visibility = View.GONE
-        background = GradientDrawable().apply {
+        background = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 14f)
             setColor(Color.argb(235, 25, 25, 30))
             setStroke(dp(2), this@PlayerScreen.colors.accent)
@@ -1484,15 +1653,15 @@ class PlayerScreen(
             // a thin, high-contrast ring but never becomes an opaque blue tile.
             background = playerBareButtonBackground()
             Styler.makeFocusable(this)
-            minimumWidth = dp(46)
-            minimumHeight = dp(42)
+            minimumWidth = dp(48)
+            minimumHeight = dp(48)
             activateOnTap(action)
             setOnFocusChangeListener { _, focused -> if (focused) showControls() }
             layoutParams = LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(7) }
         }
 
     private fun playerBareButtonBackground(): StateListDrawable {
-        fun face(fill: Int, strokeWidth: Int = 0, strokeColor: Int = 0) = GradientDrawable().apply {
+        fun face(fill: Int, strokeWidth: Int = 0, strokeColor: Int = 0) = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(host.viewContext, 11f)
             setColor(fill)
             if (strokeWidth > 0) setStroke(strokeWidth, strokeColor)
@@ -1512,10 +1681,9 @@ class PlayerScreen(
         titleView.text = if (value.offline) "${value.item.displayTitle()}  ·  Offline" else value.item.displayTitle()
         val audio = value.audioTracks.firstOrNull { it.index == value.selectedAudioIndex }
         val subtitle = value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }
-        audioButton.contentDescription = audio?.let { "Audio, ${it.label}" } ?: "Choose audio track"
-        subtitleButton.contentDescription = subtitle?.let {
-            "Subtitles, ${it.label}, ${subtitleOffsetLabel(subtitleOffsetMillis)}"
-        } ?: "Subtitles off"
+        tracksButton.contentDescription = "Audio and subtitles. " +
+            (audio?.let { "Audio ${it.label}. " } ?: "") +
+            (subtitle?.let { "Subtitles ${it.label}, ${subtitleOffsetLabel(subtitleOffsetMillis)}" } ?: "Subtitles off")
         previousButton.visibility = if (value.previousItem == null) View.GONE else View.VISIBLE
         previousButton.contentDescription = value.previousItem?.let { "Play previous episode, ${it.displayTitle()}" }
             ?: "Previous episode unavailable"

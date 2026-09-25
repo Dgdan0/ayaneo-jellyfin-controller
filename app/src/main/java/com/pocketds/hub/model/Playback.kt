@@ -71,6 +71,14 @@ data class PlaybackPrepareResponse(
 )
 
 @Serializable
+data class PlaybackCastGrantResponse(
+    val mediaUrl: String = "",
+    val mimeType: String = "",
+    val subtitleUrls: Map<String, String> = emptyMap(),
+    val expiresAt: String = ""
+)
+
+@Serializable
 data class PlaybackTrickplay(
     val tileUrl: String = "",
     val width: Int = 0,

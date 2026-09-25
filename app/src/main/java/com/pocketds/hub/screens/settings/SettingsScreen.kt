@@ -8,7 +8,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.appcompat.app.AppCompatDelegate
+import android.widget.EditText
+import androidx.appcompat.app.AlertDialog
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
@@ -18,6 +19,10 @@ import com.pocketds.hub.screens.system.PadTestScreen
 import com.pocketds.hub.settings.NotificationSettings
 import com.pocketds.hub.settings.PlaybackSettings
 import com.pocketds.hub.settings.ThemeSettings
+import com.pocketds.hub.settings.HubSettings
+import com.pocketds.hub.playback.CastTransferPolicy
+import com.pocketds.hub.ui.UtilityRowView
+import com.pocketds.hub.ui.AppIcon
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
@@ -31,7 +36,7 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
     private lateinit var host: ScreenHost
     private lateinit var colors: PocketColors
     private lateinit var overlay: ChoiceOverlay
-    private val rows = linkedMapOf<String, SettingRow>()
+    private val rows = linkedMapOf<String, UtilityRowView>()
     private var selected = "appearance"
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
@@ -54,19 +59,30 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
                 setTextColor(colors.mutedText)
                 setPadding(0, dp(3), 0, dp(10))
             })
-            addSetting("appearance", "Appearance") { showThemeChoices() }
+            addGroup("General")
+            addSetting("appearance", "Appearance") { host.push(AppearanceScreen(ringVisible)) }
             addSetting("notifications", "Notifications") {
                 host.push(NotificationSettingsScreen(ringVisible))
             }
+            addGroup("Playback & storage")
             addSetting("playback", "Playback") { showSeekChoices() }
+            addSetting("cast", "TV playback address", "Public HTTPS address used by Chromecast") { editCastAddress() }
             addSetting("offline", "Offline downloads", "Wi-Fi, charging and storage rules") {
                 host.push(OfflineSettingsScreen(ringVisible))
             }
+            addGroup("Tools")
             addSetting("controller", "Controller test", "Inspect buttons, sticks and triggers") {
                 host.push(PadTestScreen())
             }
             addSetting("reader", "Reader lab", "Test comic, manga, book and read-along controls") {
                 host.push(ReaderLabScreen(ringVisible))
+            }
+            addSetting("dictionary", "Offline dictionary", "Open English WordNet 2025 · CC BY 4.0") {
+                this@SettingsScreen.overlay.show("Offline dictionary", "Available without an internet connection", listOf(
+                    ChoiceOverlay.Choice("source", "Open English WordNet 2025", "https://en-word.net/downloads/"),
+                    ChoiceOverlay.Choice("license", "Creative Commons Attribution 4.0", "https://creativecommons.org/licenses/by/4.0/"),
+                    ChoiceOverlay.Choice("changes", "App index", "Converted to a local headword and definition database")
+                )) { }
             }
         }
         root.addView(ScrollView(host.viewContext).apply {
@@ -74,7 +90,7 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
             clipToPadding = false
             addView(page, FrameLayout.LayoutParams(MATCH, WRAP))
         }, FrameLayout.LayoutParams(MATCH, MATCH))
-        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
+        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         updateDetails()
         return root
@@ -105,7 +121,14 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
         initialDetail: String = "",
         activate: () -> Unit
     ) {
-        val row = SettingRow(label, initialDetail).apply {
+        val row = UtilityRowView(host.viewContext, colors, label, initialDetail,
+            when(id){"appearance"->AppIcon.APPEARANCE;"playback"->AppIcon.TV;"reader"->AppIcon.BOOK;else->AppIcon.SETTINGS}).apply {
+            when(id) {
+                "notifications"->setIconResource(com.pocketds.hub.R.drawable.ic_nav_notifications)
+                "offline"->setIconResource(com.pocketds.hub.R.drawable.ic_nav_offline)
+                "controller"->setIconResource(com.pocketds.hub.R.drawable.ic_nav_pad)
+            }
+            FocusDecorator.attach(this, ringVisible, scale = false)
             setOnFocusChangeListener { view, focused ->
                 FocusDecorator.refresh(view, ringVisible())
                 if (focused) {
@@ -115,9 +138,8 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
             }
             activateOnTap(activate)
         }
-        FocusDecorator.attach(row, ringVisible, scale = false)
         rows[id] = row
-        addView(row, LinearLayout.LayoutParams(MATCH, dp(64)).apply { bottomMargin = dp(8) })
+        addView(row, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(2) })
     }
 
     private fun updateDetails() {
@@ -131,42 +153,12 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
             rows["notifications"]?.detail = "Sonarr ${it.sonarr} · Radarr ${it.radarr} · Bazarr ${it.bazarr}"
         }
         rows["playback"]?.detail = "Seek ${PlaybackSettings.seekSeconds(host.viewContext)} seconds"
+        rows["cast"]?.detail = HubSettings.castBaseUrl(host.viewContext).ifEmpty { "Use Hub address" }
         rows["offline"]?.detail = buildList {
             add(if (com.pocketds.hub.settings.OfflineSettings.wifiOnly(host.viewContext)) "Wi-Fi only" else "Any network")
             if (com.pocketds.hub.settings.OfflineSettings.chargingOnly(host.viewContext)) add("while charging")
             add("keep ${com.pocketds.hub.settings.OfflineSettings.minimumFreeMb(host.viewContext)} MB free")
         }.joinToString(" · ")
-    }
-
-    private fun showThemeChoices() {
-        val current = ThemeSettings.getMode(host.viewContext)
-        val values = listOf(
-            ThemeSettings.Mode.SYSTEM to "Follow system",
-            ThemeSettings.Mode.LIGHT to "Light",
-            ThemeSettings.Mode.DARK to "Dark"
-        )
-        overlay.show(
-            title = "Appearance",
-            subtitle = "Choose how the whole app and service logos are displayed.",
-            choices = values.map { ChoiceOverlay.Choice(it.first.name, it.second) },
-            startIndex = values.indexOfFirst { it.first == current }.coerceAtLeast(0),
-            onCancel = host::refreshHints
-        ) { picked ->
-            val mode = ThemeSettings.Mode.valueOf(picked)
-            ThemeSettings.setMode(host.viewContext, mode)
-            AppCompatDelegate.setDefaultNightMode(
-                when (mode) {
-                    ThemeSettings.Mode.SYSTEM -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-                    ThemeSettings.Mode.LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
-                    ThemeSettings.Mode.DARK -> AppCompatDelegate.MODE_NIGHT_YES
-                }
-            )
-            // Switching Dark -> Follow system may not recreate when Android is
-            // already dark, so refresh the row and hints in the current view too.
-            updateDetails()
-            host.refreshHints()
-        }
-        host.refreshHints()
     }
 
     private fun showSeekChoices() {
@@ -175,7 +167,7 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
         overlay.show(
             title = "Seek distance",
             subtitle = "Used by double-tap and the skip buttons in the player.",
-            choices = values.map { ChoiceOverlay.Choice(it.toString(), "$it seconds") },
+            choices = values.map { ChoiceOverlay.Choice(it.toString(), "$it seconds", selected = it == current) },
             startIndex = values.indexOf(current).coerceAtLeast(0),
             onCancel = host::refreshHints
         ) { picked ->
@@ -186,46 +178,36 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
         host.refreshHints()
     }
 
-    private inner class SettingRow(private val label: String, initialDetail: String) : LinearLayout(host.viewContext) {
-        private val detailView: TextView
-        var detail: String
-            get() = detailView.text.toString()
-            set(value) {
-                detailView.text = value
-                contentDescription = "$label, $value"
-            }
-
-        init {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            isFocusable = true
-            isFocusableInTouchMode = true
-            isClickable = true
-            background = Styler.cardBackground(context, colors, 11f)
-            setPadding(dp(16), dp(8), dp(14), dp(8))
-            addView(LinearLayout(context).apply {
-                orientation = VERTICAL
-                addView(TextView(context).apply {
-                    text = label
-                    textSize = 15f
-                    setTypeface(typeface, Typeface.BOLD)
-                    setTextColor(colors.primaryText)
-                })
-                detailView = TextView(context).apply {
-                    text = initialDetail
-                    textSize = 11f
-                    setTextColor(colors.mutedText)
-                }
-                addView(detailView)
-            }, LayoutParams(0, WRAP, 1f))
-            addView(TextView(context).apply {
-                text = "›"
-                textSize = 25f
-                setTextColor(colors.mutedText)
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            })
-            contentDescription = "$label, $initialDetail"
+    private fun editCastAddress() {
+        val field = EditText(host.viewContext).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            setSingleLine(true)
+            setText(HubSettings.castBaseUrl(host.viewContext))
+            selectAll()
+            contentDescription = "Public HTTPS Hub address for TV playback"
         }
+        AlertDialog.Builder(host.viewContext)
+            .setTitle("TV playback address")
+            .setMessage("The Chromecast fetches video from this address. Use your public HTTPS Hub address, including its port.")
+            .setView(field)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val entered = field.text.toString().trim()
+                if (CastTransferPolicy.receiverUrl(entered, "/v1/cast/check/stream") == null) {
+                    host.notify("Enter a public HTTPS Hub address")
+                } else {
+                    HubSettings.setCastBaseUrl(host.viewContext, entered)
+                    updateDetails()
+                    host.notify("TV playback address saved")
+                }
+            }
+            .show()
+    }
+
+    private fun LinearLayout.addGroup(label: String) {
+        addView(TextView(context).apply {
+            text=label;textSize=12f;setTextColor(colors.mutedText);setPadding(dp(12),dp(16),dp(12),dp(4))
+        })
     }
 
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())

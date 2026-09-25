@@ -11,6 +11,7 @@ import kotlin.math.min
 
 /** Media control icons drawn in-app so their appearance does not depend on device fonts. */
 internal enum class PlayerControlIcon {
+    TRACKS,
     AUDIO,
     AUDIO_EFFECTS,
     SUBTITLES,
@@ -71,6 +72,7 @@ internal class PlayerIconButton(
         paint.strokeWidth = 0.075f
 
         when (icon) {
+            PlayerControlIcon.TRACKS -> drawTracks(canvas)
             PlayerControlIcon.AUDIO -> drawAudio(canvas)
             PlayerControlIcon.AUDIO_EFFECTS -> drawAudioEffects(canvas)
             PlayerControlIcon.SUBTITLES -> drawSubtitles(canvas)
@@ -125,6 +127,15 @@ internal class PlayerIconButton(
         canvas.drawLine(0.05f, 0.04f, 0.27f, 0.04f, paint)
         canvas.drawLine(-0.27f, 0.17f, 0.02f, 0.17f, paint)
         canvas.drawLine(0.12f, 0.17f, 0.27f, 0.17f, paint)
+    }
+
+    private fun drawTracks(canvas: Canvas) {
+        paint.style = Paint.Style.STROKE
+        canvas.drawRoundRect(RectF(-0.38f, -0.29f, 0.38f, 0.22f), 0.1f, 0.1f, paint)
+        canvas.drawLine(-0.2f, 0.22f, -0.3f, 0.36f, paint)
+        paint.strokeWidth = 0.065f
+        canvas.drawLine(-0.23f, -0.1f, 0.23f, -0.1f, paint)
+        canvas.drawLine(-0.23f, 0.06f, 0.13f, 0.06f, paint)
     }
 
     private fun drawOptions(canvas: Canvas) {

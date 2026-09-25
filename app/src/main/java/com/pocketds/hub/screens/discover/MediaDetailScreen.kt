@@ -59,6 +59,7 @@ class MediaDetailScreen(
     private val ringVisible: () -> Boolean
 ) : Screen {
 
+    override val contentDomain = com.pocketds.hub.state.ContentMode.MEDIA
     override val title: String = fallbackTitle
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

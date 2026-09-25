@@ -23,7 +23,8 @@ enum class MediaActionIcon {
     FAVOURITE,
     NOT_FAVOURITE,
     DOWNLOAD,
-    DOWNLOADED
+    DOWNLOADED,
+    MORE
 }
 
 class MediaActionIconDrawable(
@@ -38,6 +39,8 @@ class MediaActionIconDrawable(
         strokeJoin = Paint.Join.ROUND
     }
     private val path = Path()
+
+    fun recolor(replacements:Map<Int,Int>) { replacements[paint.color]?.let {paint.color=it;invalidateSelf()} }
 
     override fun draw(canvas: Canvas) {
         val scale = min(bounds.width(), bounds.height()) / 24f
@@ -55,6 +58,10 @@ class MediaActionIconDrawable(
             MediaActionIcon.NOT_FAVOURITE -> star(canvas, filled = false)
             MediaActionIcon.DOWNLOAD -> download(canvas, complete = false)
             MediaActionIcon.DOWNLOADED -> download(canvas, complete = true)
+            MediaActionIcon.MORE -> {
+                paint.style = Paint.Style.FILL
+                for (x in listOf(-7f, 0f, 7f)) canvas.drawCircle(x, 0f, 1.6f, paint)
+            }
         }
         canvas.restore()
     }

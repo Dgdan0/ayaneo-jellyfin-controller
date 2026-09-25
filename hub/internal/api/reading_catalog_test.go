@@ -98,11 +98,137 @@ func TestReadingLibrariesCombineKavitaAndStoryteller(t *testing.T) {
 	if len(body.Libraries) != 2 || body.Libraries[0].ID != "kavita:2" || body.Libraries[0].Kind != "comic" || body.Libraries[1].ID != "storyteller:books" {
 		t.Fatalf("libraries = %+v", body.Libraries)
 	}
+	if body.Libraries[0].Artwork != "/v1/img/reading/kavita/9" || body.Libraries[0].ArtworkStyle != "poster" {
+		t.Fatalf("Kavita library artwork = %+v", body.Libraries[0])
+	}
+	if body.Libraries[1].Artwork != "/v1/img/reading/storyteller/12" || body.Libraries[1].ArtworkStyle != "poster" {
+		t.Fatalf("Storyteller library artwork = %+v", body.Libraries[1])
+	}
 	if containsString(body.Libraries[0].Capabilities, "sort:author") || !containsString(body.Libraries[0].Capabilities, "sort:last_read") || !containsString(body.Libraries[1].Capabilities, "sort:author") {
 		t.Fatalf("sort capabilities = %+v / %+v", body.Libraries[0].Capabilities, body.Libraries[1].Capabilities)
 	}
 	if len(body.Partial) != 0 {
 		t.Fatalf("partial = %+v", body.Partial)
+	}
+}
+
+func TestStorytellerNarrationsWithSameBookIdentityShareOneShelfWork(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		book1 := `{"id":11,"uuid":"book-11","title":"Example Book","authors":[{"name":"Author"},{"name":"Narrator A"}],"narrators":[{"name":"Narrator A"}],"ebook":{"uuid":"ebook-11"},"audiobook":{"uuid":"audio-11"},"readaloud":{"uuid":"aligned-11","status":"ALIGNED"}}`
+		book2 := `{"id":12,"uuid":"book-12","title":"Example Book: A Novel","authors":[{"name":"Narrator A"}],"narrators":[{"name":"Narrator B"}],"audiobook":{"uuid":"audio-12"}}`
+		switch r.URL.Path {
+		case "/api/v2/token":
+			_, _ = io.WriteString(w, `{"access_token":"story-token","token_type":"Bearer","expires_in":3600}`)
+		case "/api/v2/books":
+			_, _ = io.WriteString(w, `[`+book1+`,`+book2+`]`)
+		case "/api/v2/books/11":
+			_, _ = io.WriteString(w, book1)
+		case "/api/v2/books/12":
+			_, _ = io.WriteString(w, book2)
+		case "/api/v2/books/12/files":
+			if r.URL.Query().Get("format") != "audiobook" {
+				t.Errorf("format = %q", r.URL.Query().Get("format"))
+			}
+			w.Header().Set("Content-Type", "application/zip")
+			_, _ = io.WriteString(w, "audio archive")
+		case "/api/Library/libraries":
+			_, _ = io.WriteString(w, `[]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	handler := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})).Handler()
+	page := libraryRequest(handler, "/v1/reading/libraries/storyteller:books/items?page=1")
+	var shelf ReadingLibraryItemsResponse
+	if page.Code != http.StatusOK || json.Unmarshal(page.Body.Bytes(), &shelf) != nil || len(shelf.Items) != 1 {
+		t.Fatalf("shelf = %d %s", page.Code, page.Body.String())
+	}
+	response := libraryRequest(handler, "/v1/reading/works/"+shelf.Items[0].ID)
+	var work ReadingWork
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &work) != nil {
+		t.Fatalf("detail = %d %s", response.Code, response.Body.String())
+	}
+	audio := 0
+	for _, edition := range work.Editions {
+		if edition.Kind == "audiobook" {
+			audio++
+		}
+	}
+	if audio != 2 {
+		t.Fatalf("narrations = %d, editions = %+v", audio, work.Editions)
+	}
+	archive := libraryRequest(handler, "/v1/reading/works/"+shelf.Items[0].ID+"/publications/12/file?format=audiobook")
+	if archive.Code != http.StatusOK || archive.Body.String() != "audio archive" {
+		t.Fatalf("alternate narration stream = %d: %s", archive.Code, archive.Body.String())
+	}
+}
+
+func TestStorytellerEditionMatchRequiresSharedPersonAndSpecificTitle(t *testing.T) {
+	base := storyteller.Book{ID: 1, Title: "Dark Matter", Authors: []storyteller.Creator{{Name: "Blake Crouch"}}, Narrators: []storyteller.Creator{{Name: "Jon Lindstrom"}}}
+	if !sameStorytellerEditionWork(base, storyteller.Book{ID: 2, Title: "Dark Matter: A Novel", Authors: []storyteller.Creator{{Name: "Jon Lindstrom"}}}) {
+		t.Fatal("matching title and narrator should link editions")
+	}
+	if sameStorytellerEditionWork(base, storyteller.Book{ID: 3, Title: "Dark Matter: A Novel", Authors: []storyteller.Creator{{Name: "Different Author"}}}) {
+		t.Fatal("same title alone must not link editions")
+	}
+	if sameStorytellerEditionWork(base, storyteller.Book{ID: 4, Title: "Other Book: A Novel", Authors: []storyteller.Creator{{Name: "Jon Lindstrom"}}}) {
+		t.Fatal("same narrator alone must not link editions")
+	}
+}
+
+func TestReadingLibraryExplicitCoverWinsAndIsProxied(t *testing.T) {
+	seriesCalls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Api-Key") != "kavita-key" {
+			t.Error("missing Kavita API key")
+		}
+		switch r.URL.Path {
+		case "/api/Library/libraries":
+			_, _ = io.WriteString(w, `[{"id":2,"name":"Comics","type":1,"coverImage":"custom.webp"}]`)
+		case "/api/Series/v2":
+			seriesCalls++
+			http.Error(w, "explicit cover should win", http.StatusInternalServerError)
+		case "/api/Image/library-cover":
+			if r.URL.Query().Get("libraryId") != "2" {
+				t.Errorf("library-cover query = %s", r.URL.RawQuery)
+			}
+			w.Header().Set("Content-Type", "image/webp")
+			_, _ = w.Write([]byte("cover-bytes"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	cfg := readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})
+	delete(cfg.Services, "storyteller")
+	handler := NewServer(cfg).Handler()
+	got := libraryRequest(handler, "/v1/reading/libraries")
+	if got.Code != http.StatusOK {
+		t.Fatalf("libraries = %d: %s", got.Code, got.Body.String())
+	}
+	var body ReadingLibrariesResponse
+	if err := json.Unmarshal(got.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Libraries) != 1 || body.Libraries[0].Artwork != "/v1/img/reading/kavita-library/2" || body.Libraries[0].ArtworkStyle != "icon" {
+		t.Fatalf("explicit library artwork = %+v", body.Libraries)
+	}
+	if seriesCalls != 0 {
+		t.Fatalf("queried %d series despite explicit cover", seriesCalls)
+	}
+	image := libraryRequest(handler, body.Libraries[0].Artwork)
+	if image.Code != http.StatusOK || image.Body.String() != "cover-bytes" {
+		t.Fatalf("proxied cover = %d %q", image.Code, image.Body.String())
+	}
+	invalid := libraryRequest(handler, "/v1/img/reading/kavita-library/not-an-id")
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid library image id = %d", invalid.Code)
+	}
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, body.Libraries[0].Artwork, nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized library image = %d", unauthorized.Code)
 	}
 }
 

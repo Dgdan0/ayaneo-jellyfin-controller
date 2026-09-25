@@ -289,12 +289,12 @@ class FormOverlay(
 
     // Qualified: GradientDrawable has its own `colors`, and an unqualified
     // reference inside apply{} silently resolves to that one instead.
-    private fun plainFace() = android.graphics.drawable.GradientDrawable().apply {
+    private fun plainFace() = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
         cornerRadius = Styler.dp(context, 10f)
         setColor(this@FormOverlay.colors.stripBackground)
     }
 
-    private fun selectedFace() = android.graphics.drawable.GradientDrawable().apply {
+    private fun selectedFace() = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
         cornerRadius = Styler.dp(context, 10f)
         setColor(this@FormOverlay.colors.focusFill)
         setStroke(Styler.dpInt(context, 3f), this@FormOverlay.colors.focusRing)

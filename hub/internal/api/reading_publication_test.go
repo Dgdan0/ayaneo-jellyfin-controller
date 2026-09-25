@@ -163,6 +163,28 @@ func TestReadingPublicationProgressUsesServerValidatedKavitaIdentifiers(t *testi
 	}
 }
 
+func TestReadingPublicationConditionalCheckpointDoesNotOverwriteAnotherReader(t *testing.T) {
+	state := &publicationUpstreamState{}
+	upstream := newReadingPublicationUpstream(t, state)
+	defer upstream.Close()
+	handler := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})).Handler()
+	work := bindPublicationWork(t, handler)
+	path := "/v1/reading/works/" + work + "/publications/6"
+	var current ReadingPublicationManifest
+	if err := json.Unmarshal(libraryRequest(handler, path).Body.Bytes(), &current); err != nil {
+		t.Fatal(err)
+	}
+	bad := publicationRequest(handler, http.MethodPost, path+"/progress", `{"pageIndex":2,"expectedPage":99}`)
+	if bad.Code != http.StatusConflict || state.saved.ChapterID != 0 {
+		t.Fatalf("stale page: %d, saved=%+v", bad.Code, state.saved)
+	}
+	body, _ := json.Marshal(map[string]int{"pageIndex": 2, "expectedPage": current.CurrentPage})
+	good := publicationRequest(handler, http.MethodPost, path+"/progress", string(body))
+	if good.Code != http.StatusOK || state.saved.PageNum != 2 {
+		t.Fatalf("matching page: %d %s", good.Code, good.Body.String())
+	}
+}
+
 func TestReadingPublicationRejectsWrongWorkChapterInvalidIDsAndMissingScope(t *testing.T) {
 	state := &publicationUpstreamState{}
 	upstream := newReadingPublicationUpstream(t, state)

@@ -24,7 +24,7 @@ class ReadingTest {
 
     @Test
     fun `reading type labels are stable and unknown values remain visible`() {
-        assertEquals("Books", ReadingType.label("ebook"))
+        assertEquals("Ebooks", ReadingType.label("ebook"))
         assertEquals("Light novels", ReadingType.label("light_novel"))
         assertEquals("Future type", ReadingType.label("future_type"))
     }

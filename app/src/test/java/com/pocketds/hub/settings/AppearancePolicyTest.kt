@@ -1,0 +1,41 @@
+package com.pocketds.hub.settings
+
+import com.pocketds.hub.state.ContentMode
+import org.junit.Assert.*
+import org.junit.Test
+
+class AppearancePolicyTest {
+    @Test fun `ten stable presets each have accessible light and dark variants`() {
+        assertEquals(10, AccentPreset.entries.size)
+        assertEquals(10, AccentPreset.entries.map { it.id }.distinct().size)
+        fun luminance(rgb: Int): Double = listOf(16,8,0).map { shift ->
+            val v = ((rgb shr shift) and 255) / 255.0
+            if (v <= .04045) v / 12.92 else Math.pow((v + .055) / 1.055, 2.4)
+        }.let { it[0]*.2126 + it[1]*.7152 + it[2]*.0722 }
+        fun contrast(a: Int, b: Int): Double = (maxOf(luminance(a), luminance(b))+.05)/(minOf(luminance(a),luminance(b))+.05)
+        AccentPreset.entries.forEach {
+            assertTrue(it.id, contrast(it.dark, 0xff151c23.toInt()) >= 4.5)
+            assertTrue(it.id, contrast(it.light, 0xfff5f6f4.toInt()) >= 4.5)
+            assertTrue(it.id, contrast(it.light, -1) >= 4.5)
+            assertTrue(it.id, contrast(it.dark, 0xff132c32.toInt()) >= 4.5)
+        }
+        assertEquals(AccentPreset.TEAL, AccentPreset.fromStored("retired"))
+    }
+    @Test fun `profile and domain scope is isolated and normalizes hub address`() {
+        val scope = PreferenceScope.key("HTTPS://HOST:443/", "alice", ContentMode.BOOKS)
+        assertEquals(scope, PreferenceScope.key("https://host", "alice", ContentMode.BOOKS))
+        assertNotEquals(scope, PreferenceScope.key("https://host", "bob", ContentMode.BOOKS))
+        assertNotEquals(scope, PreferenceScope.key("https://host", "alice", ContentMode.MEDIA))
+        assertNotEquals(scope, PreferenceScope.key("https://other", "alice", ContentMode.BOOKS))
+    }
+    @Test fun `sort decode survives corrupt values and unsupported choice is only a projection`() {
+        val preferred = SortPreference("author", false)
+        assertEquals(SortPreference("title", true), preferred.supported(listOf("title"), "title"))
+        assertEquals(preferred, preferred.supported(listOf("title", "author"), "title"))
+        assertEquals(SortPreference("name", true), SortPreference.decode("garbage", "name"))
+        assertEquals(preferred, SortPreference.decode(preferred.encode(), "title"))
+        assertFalse(SortPreference.forField("played").ascending)
+        assertFalse(SortPreference.forField("rating").ascending)
+        assertTrue(SortPreference.forField("author").ascending)
+    }
+}

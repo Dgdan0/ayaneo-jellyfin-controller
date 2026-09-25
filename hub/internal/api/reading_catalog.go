@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -28,6 +29,7 @@ type ReadingLibrary struct {
 	Kind         string   `json:"kind"`
 	Title        string   `json:"title"`
 	Artwork      string   `json:"artwork,omitempty"`
+	ArtworkStyle string   `json:"artworkStyle,omitempty"`
 	Capabilities []string `json:"capabilities"`
 }
 
@@ -167,7 +169,10 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 			}
 			storytellerLibrary = &entry
 			storytellerAvailable = true
-			_ = books
+			if selected := dailyStorytellerLibraryBook(books, time.Now().Format("2006-01-02")); selected > 0 {
+				storytellerLibrary.Artwork = "/v1/img/reading/storyteller/" + strconv.FormatInt(selected, 10)
+				storytellerLibrary.ArtworkStyle = "poster"
+			}
 			allHits = allHits && meta.Hit
 			if meta.Age > oldest {
 				oldest = meta.Age
@@ -188,8 +193,33 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 				"browse", "details", "progress", "sort:title", "sort:series", "sort:added", "sort:last_read",
 			},
 		}
+		if strings.TrimSpace(library.CoverImage) != "" {
+			entry.Artwork = "/v1/img/reading/kavita-library/" + strconv.Itoa(library.ID)
+			entry.ArtworkStyle = "icon"
+		}
 		out.Libraries = append(out.Libraries, entry)
 	}
+	// Missing artwork never makes a valid library disappear. Query independent
+	// folders concurrently so one slow server-side series search does not hold
+	// up all three selector cards.
+	day := time.Now().Format("2006-01-02")
+	var artworkWait sync.WaitGroup
+	for i := range out.Libraries {
+		entry := &out.Libraries[i]
+		if entry.Source != "kavita" || entry.Artwork != "" {
+			continue
+		}
+		id, _ := strconv.Atoi(strings.TrimPrefix(entry.ID, "kavita:"))
+		artworkWait.Add(1)
+		go func(entry *ReadingLibrary, libraryID int) {
+			defer artworkWait.Done()
+			if selected := s.dailyKavitaLibrarySeries(ctx, libraryID, day); selected > 0 {
+				entry.Artwork = "/v1/img/reading/kavita/" + strconv.Itoa(selected)
+				entry.ArtworkStyle = "poster"
+			}
+		}(entry, id)
+	}
+	artworkWait.Wait()
 	if storytellerLibrary != nil {
 		out.Libraries = append(out.Libraries, *storytellerLibrary)
 	}
@@ -199,6 +229,46 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 	}
 	out.Cache = CacheInfo{Hit: allHits, AgeSeconds: int(oldest.Seconds())}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func dailyStorytellerLibraryBook(books []storyteller.Book, day string) int64 {
+	available := make([]int64, 0, len(books))
+	for _, book := range books {
+		if book.ID > 0 {
+			available = append(available, book.ID)
+		}
+	}
+	if len(available) == 0 {
+		return 0
+	}
+	sort.Slice(available, func(i, j int) bool { return available[i] < available[j] })
+	return available[dailyLibraryArtworkIndex(day, "storyteller:books", len(available))]
+}
+
+func (s *Server) dailyKavitaLibrarySeries(ctx context.Context, libraryID int, day string) int {
+	if libraryID <= 0 || s.kavita == nil {
+		return 0
+	}
+	key := fmt.Sprintf("reading:kavita:library-art:%d:%s", libraryID, day)
+	id, _, err := cache.Fetch(ctx, s.cache, key, cache.Metadata, func(ctx context.Context) (int, error) {
+		first, err := s.kavita.Series(ctx, libraryID, 1, 1, kavita.SortTitle, kavita.Ascending)
+		if err != nil || first.Total == 0 || len(first.Items) == 0 {
+			return 0, err
+		}
+		index := dailyLibraryArtworkIndex(day, "kavita:"+strconv.Itoa(libraryID), first.Total)
+		if index == 0 {
+			return first.Items[0].ID, nil
+		}
+		selected, err := s.kavita.Series(ctx, libraryID, index+1, 1, kavita.SortTitle, kavita.Ascending)
+		if err != nil || len(selected.Items) == 0 {
+			return first.Items[0].ID, nil
+		}
+		return selected.Items[0].ID, nil
+	})
+	if err != nil {
+		return 0
+	}
+	return id
 }
 
 func (s *Server) handleReadingLibraryItems(w http.ResponseWriter, r *http.Request) {
@@ -267,7 +337,7 @@ func (s *Server) handleReadingLibraryItems(w http.ResponseWriter, r *http.Reques
 			writeUpstreamError(w, r, "storyteller", err)
 			return
 		}
-		items, bindErr := s.storytellerShelf("storyteller:books", books)
+		items, bindErr := s.storytellerShelfWithGrouping("storyteller:books", books, r.URL.Query().Get("view") != "works")
 		if bindErr != nil {
 			writeReadingCatalogError(w, r, bindErr)
 			return
@@ -311,6 +381,7 @@ func (s *Server) handleReadingWork(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var combined *ReadingWork
 	var partial []Partial
+	storytellerBases := []storyteller.Book{}
 	for _, source := range binding.Sources {
 		var mapped ReadingWork
 		var err error
@@ -334,6 +405,9 @@ func (s *Server) handleReadingWork(w http.ResponseWriter, r *http.Request) {
 			book, _, err = cache.Fetch(ctx, s.cache, "reading:storyteller:work:"+source.SourceID, cache.Metadata, func(fetchCtx context.Context) (*storyteller.Book, error) { return s.storyteller.Book(fetchCtx, id) })
 			if err == nil {
 				mapped, err = s.storytellerWork("storyteller:books", *book, true)
+				if err == nil {
+					storytellerBases = append(storytellerBases, *book)
+				}
 			}
 		case "storyteller-series":
 			if s.storyteller == nil {
@@ -356,6 +430,20 @@ func (s *Server) handleReadingWork(w http.ResponseWriter, r *http.Request) {
 			mergeReadingWork(combined, mapped)
 		}
 	}
+	if len(storytellerBases) > 0 && s.storyteller != nil {
+		books, _, err := cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+		if err == nil {
+			for _, candidate := range books {
+				if !anyStorytellerEditionMatch(candidate, storytellerBases) || containsStorytellerBookID(storytellerBases, candidate.ID) {
+					continue
+				}
+				mapped, mapErr := s.storytellerWork("storyteller:books", candidate, true)
+				if mapErr == nil && combined != nil {
+					mergeReadingWork(combined, mapped)
+				}
+			}
+		}
+	}
 	if combined == nil {
 		writeError(w, r, http.StatusServiceUnavailable, Error{Code: CodeUpstreamDown, Service: "reading", Message: "Reading work is unavailable", Retryable: true})
 		return
@@ -375,6 +463,18 @@ func (s *Server) handleKavitaReadingImage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.writeReadingServiceImage(w, r, "kavita", strconv.Itoa(id), func(ctx context.Context) ([]byte, string, error) { return s.kavita.Cover(ctx, id) })
+}
+
+func (s *Server) handleKavitaLibraryImage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireReading(w, r) {
+		return
+	}
+	id, err := strconv.Atoi(r.PathValue("libraryId"))
+	if err != nil || id <= 0 || s.kavita == nil {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "invalid Kavita library cover"})
+		return
+	}
+	s.writeReadingServiceImage(w, r, "kavita-library", strconv.Itoa(id), func(ctx context.Context) ([]byte, string, error) { return s.kavita.LibraryCover(ctx, id) })
 }
 
 func (s *Server) handleStorytellerReadingImage(w http.ResponseWriter, r *http.Request) {
@@ -597,12 +697,16 @@ type storytellerSeriesGroup struct {
 // stable upstream metadata, then bound through the durable catalog like every
 // other Hub work id.
 func (s *Server) storytellerShelf(libraryID string, books []storyteller.Book) ([]ReadingWork, error) {
+	return s.storytellerShelfWithGrouping(libraryID, books, true)
+}
+
+func (s *Server) storytellerShelfWithGrouping(libraryID string, books []storyteller.Book, groupSeries bool) ([]ReadingWork, error) {
 	groups := map[string]*storytellerSeriesGroup{}
 	standalone := make([]storyteller.Book, 0, len(books))
 	for _, rawBook := range books {
 		book := s.reconcileStorytellerBook(rawBook)
 		sourceID, title, grouped := storytellerSeriesSource(book)
-		if !grouped {
+		if !grouped || !groupSeries {
 			standalone = append(standalone, book)
 			continue
 		}
@@ -615,11 +719,28 @@ func (s *Server) storytellerShelf(libraryID string, books []storyteller.Book) ([
 	}
 
 	out := make([]ReadingWork, 0, len(standalone)+len(groups))
+	byID := map[string]int{}
+	standaloneBases := make([]storyteller.Book, 0, len(standalone))
 	for _, book := range standalone {
 		work, err := s.storytellerWork(libraryID, book, false)
 		if err != nil {
 			return nil, err
 		}
+		index, found := byID[work.ID]
+		if !found {
+			for candidateIndex, previous := range standaloneBases {
+				if sameStorytellerEditionWork(previous, book) {
+					index, found = candidateIndex, true
+					break
+				}
+			}
+		}
+		if found {
+			mergeReadingWork(&out[index], work)
+			continue
+		}
+		byID[work.ID] = len(out)
+		standaloneBases = append(standaloneBases, book)
 		out = append(out, work)
 	}
 	keys := make([]string, 0, len(groups))
@@ -635,6 +756,56 @@ func (s *Server) storytellerShelf(libraryID string, books []storyteller.Book) ([
 		out = append(out, work)
 	}
 	return out, nil
+}
+
+func containsStorytellerBookID(books []storyteller.Book, id int64) bool {
+	for _, book := range books {
+		if book.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func anyStorytellerEditionMatch(candidate storyteller.Book, bases []storyteller.Book) bool {
+	for _, base := range bases {
+		if sameStorytellerEditionWork(base, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameStorytellerEditionWork(left, right storyteller.Book) bool {
+	if left.ID <= 0 || right.ID <= 0 || left.ID == right.ID {
+		return false
+	}
+	title := func(value string) string {
+		value = strings.TrimSpace(strings.ToLower(value))
+		for _, suffix := range []string{": a novel", " (unabridged)", ": an audiobook"} {
+			value = strings.TrimSuffix(value, suffix)
+		}
+		return normalizeReadingIdentity(value)
+	}
+	if title(left.Title) == "" || title(left.Title) != title(right.Title) {
+		return false
+	}
+	people := func(book storyteller.Book) map[string]bool {
+		out := map[string]bool{}
+		for _, name := range append(creatorNames(book.Authors), creatorNames(book.Narrators)...) {
+			if normalized := normalizeReadingIdentity(name); normalized != "" {
+				out[normalized] = true
+			}
+		}
+		return out
+	}
+	first, second := people(left), people(right)
+	for person := range first {
+		if second[person] {
+			return true
+		}
+	}
+	return false
 }
 
 func storytellerSeriesSource(book storyteller.Book) (string, string, bool) {
@@ -914,8 +1085,8 @@ func storytellerEditions(workID string, book storyteller.Book) []ReadingEdition 
 	if book.Audiobook != nil && !book.Audiobook.Missing {
 		out = append(out, ReadingEdition{ID: editionID("storyteller", book.Audiobook.UUID, "audiobook"), WorkID: workID, Source: "storyteller", SourceItemID: strconv.FormatInt(book.ID, 10), Kind: "audiobook", Format: "audio", Narrator: strings.Join(creatorNames(book.Narrators), ", "), DurationMS: int64(book.Audiobook.Duration * 1000), Availability: "available"})
 	}
-	if book.Readaloud != nil && !book.Readaloud.Missing {
-		out = append(out, ReadingEdition{ID: editionID("storyteller", book.Readaloud.UUID, "readaloud"), WorkID: workID, Source: "storyteller", SourceItemID: strconv.FormatInt(book.ID, 10), Kind: "readaloud", Format: "epub-media-overlay", Availability: "available"})
+	if book.Readaloud.Available() {
+		out = append(out, ReadingEdition{ID: editionID("storyteller", book.Readaloud.UUID, "readaloud"), WorkID: workID, Source: "storyteller", SourceItemID: strconv.FormatInt(book.ID, 10), Kind: "readaloud", Format: "epub-media-overlay", Narrator: strings.Join(creatorNames(book.Narrators), ", "), Availability: "available"})
 	}
 	return out
 }
@@ -1004,7 +1175,7 @@ func storytellerAvailability(book storyteller.Book) []string {
 	if book.Audiobook != nil && !book.Audiobook.Missing {
 		out = append(out, "audiobook")
 	}
-	if book.Readaloud != nil && !book.Readaloud.Missing {
+	if book.Readaloud.Available() {
 		out = append(out, "readaloud")
 	}
 	return out
@@ -1317,6 +1488,12 @@ func progressValue(position *storyteller.Position) float64 {
 }
 
 func mergeReadingWork(target *ReadingWork, source ReadingWork) {
+	if target.Kind == "audiobook" && source.Kind == "book" {
+		target.Kind = source.Kind
+		if source.Artwork != "" {
+			target.Artwork = source.Artwork
+		}
+	}
 	target.Editions = append(target.Editions, source.Editions...)
 	target.Availability = mergeUnique(target.Availability, source.Availability)
 	if target.EntityType == "" {

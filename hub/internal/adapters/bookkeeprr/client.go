@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"ayaneohub/internal/config"
 	"ayaneohub/internal/httpx"
@@ -77,9 +78,13 @@ func New(cfg config.ServiceConfig) (*Client, error) {
 		auth := &mobileAdminAuth{
 			base: unauthenticated, username: strings.TrimSpace(cfg.Username), password: cfg.Password.Reveal(),
 		}
+		adminTimeout := cfg.Timeout.OrDefault(0)
+		if adminTimeout < 40*time.Second {
+			adminTimeout = 40 * time.Second
+		}
 		admin, err := httpx.New(httpx.Options{
 			Name: "bookkeeprr", BaseURL: cfg.BaseURL, Auth: auth,
-			Timeout: cfg.Timeout.OrDefault(0), InsecureSkipVerify: cfg.InsecureSkipVerify,
+			Timeout: adminTimeout, InsecureSkipVerify: cfg.InsecureSkipVerify,
 		})
 		if err != nil {
 			return nil, err
@@ -454,8 +459,14 @@ type CreateBookSeriesRequest struct {
 type SeriesRecord struct {
 	ID            int         `json:"id"`
 	ContentType   ContentType `json:"contentType"`
+	Title         string      `json:"title,omitempty"`
 	TitleEnglish  string      `json:"titleEnglish"`
 	OpenLibraryID string      `json:"openlibraryId"`
+	Monitoring    string      `json:"monitoring,omitempty"`
+	Monitored     bool        `json:"monitored,omitempty"`
+	Downloaded    int         `json:"downloaded,omitempty"`
+	Health        string      `json:"health,omitempty"`
+	AddedAt       string      `json:"addedAt,omitempty"`
 }
 
 type SeriesList struct {
@@ -471,6 +482,63 @@ type GrabbedRelease struct {
 	Status     string `json:"status"`
 }
 
+type ReleaseCandidate struct {
+	ID              int     `json:"id"`
+	Title           string  `json:"title"`
+	IndexerGUID     string  `json:"indexerGuid,omitempty"`
+	IndexerName     string  `json:"indexerName,omitempty"`
+	Seeders         int     `json:"seeders"`
+	Leechers        int     `json:"leechers"`
+	SizeBytes       int64   `json:"sizeBytes"`
+	Score           float64 `json:"score"`
+	Ownership       string  `json:"ownership"`
+	RejectionReason string  `json:"rejectionReason,omitempty"`
+	RejectedAt      *string `json:"rejectedAt,omitempty"`
+}
+
+type ReleaseList struct {
+	Releases []ReleaseCandidate `json:"releases"`
+}
+
+type InteractiveItem struct {
+	GUID        string `json:"guid"`
+	Title       string `json:"title"`
+	Link        string `json:"link"`
+	Seeders     int    `json:"seeders"`
+	Leechers    int    `json:"leechers"`
+	SizeBytes   int64  `json:"sizeBytes"`
+	PublishedAt string `json:"publishedAt,omitempty"`
+	IndexerID   int    `json:"indexerId"`
+	IndexerName string `json:"indexerName,omitempty"`
+	IndexerKind string `json:"indexerKind,omitempty"`
+	Freeleech   bool   `json:"freeleech,omitempty"`
+	VIP         bool   `json:"vip,omitempty"`
+}
+
+type InteractiveMatch struct {
+	Matches bool    `json:"matches"`
+	Score   float64 `json:"score"`
+	Reason  string  `json:"reason,omitempty"`
+}
+
+type InteractiveResult struct {
+	Item        InteractiveItem  `json:"item"`
+	Parsed      json.RawMessage  `json:"parsed"`
+	MatchResult InteractiveMatch `json:"matchResult"`
+	Ownership   string           `json:"ownership"`
+	ReleaseID   int              `json:"releaseId"`
+}
+
+type InteractiveError struct {
+	IndexerID int    `json:"indexerId"`
+	Message   string `json:"message"`
+}
+
+type InteractiveSearchResponse struct {
+	Results []InteractiveResult `json:"results"`
+	Errors  []InteractiveError  `json:"errors"`
+}
+
 func (c *Client) CanRequest() bool { return c != nil && c.admin != nil }
 
 func (c *Client) QualityProfiles(ctx context.Context) ([]QualityProfile, error) {
@@ -484,6 +552,29 @@ func (c *Client) QualityProfiles(ctx context.Context) ([]QualityProfile, error) 
 func (c *Client) Downloads(ctx context.Context) (*DownloadsResponse, error) {
 	out := &DownloadsResponse{Downloads: []Download{}}
 	if err := c.base.GetJSON(ctx, "/api/downloads", nil, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) Series(ctx context.Context, page, limit int) (*SeriesList, error) {
+	if page < 1 || limit < 1 || limit > 100 {
+		return nil, fmt.Errorf("bookkeeprr: invalid series page or limit")
+	}
+	query := url.Values{"page": {strconv.Itoa(page)}, "limit": {strconv.Itoa(limit)}}
+	out := &SeriesList{Rows: []SeriesRecord{}}
+	if err := c.base.GetJSON(ctx, "/api/series", query, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) SeriesByID(ctx context.Context, id int) (*SeriesRecord, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("bookkeeprr: invalid series id")
+	}
+	out := &SeriesRecord{}
+	if err := c.base.GetJSON(ctx, "/api/series/"+strconv.Itoa(id), nil, out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -605,6 +696,46 @@ func (c *Client) GrabRelease(ctx context.Context, releaseID int) (*GrabbedReleas
 	}
 	out := &GrabbedRelease{}
 	if err := c.admin.PostJSON(ctx, "/api/releases/"+strconv.Itoa(releaseID)+"/grab", map[string]any{}, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) Releases(ctx context.Context, seriesID int) (*ReleaseList, error) {
+	if seriesID <= 0 {
+		return nil, fmt.Errorf("bookkeeprr: invalid series id")
+	}
+	out := &ReleaseList{Releases: []ReleaseCandidate{}}
+	if err := c.base.GetJSON(ctx, "/api/series/"+strconv.Itoa(seriesID)+"/releases", nil, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) InteractiveSearch(ctx context.Context, seriesID int) (*InteractiveSearchResponse, error) {
+	if c == nil || c.admin == nil {
+		return nil, fmt.Errorf("bookkeeprr: interactive search needs the admin service account")
+	}
+	if seriesID <= 0 {
+		return nil, fmt.Errorf("bookkeeprr: invalid series id")
+	}
+	out := &InteractiveSearchResponse{Results: []InteractiveResult{}, Errors: []InteractiveError{}}
+	if err := c.admin.PostJSON(ctx, "/api/search/interactive", map[string]int{"seriesId": seriesID}, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) InteractiveGrab(ctx context.Context, seriesID int, result InteractiveResult) (*GrabbedRelease, error) {
+	if c == nil || c.admin == nil {
+		return nil, fmt.Errorf("bookkeeprr: interactive grab needs the admin service account")
+	}
+	if seriesID <= 0 || result.Item.GUID == "" || result.Item.Link == "" || len(result.Parsed) == 0 {
+		return nil, fmt.Errorf("bookkeeprr: invalid interactive release")
+	}
+	out := &GrabbedRelease{}
+	body := map[string]any{"seriesId": seriesID, "item": result.Item, "parsed": result.Parsed, "score": nil}
+	if err := c.admin.PostJSON(ctx, "/api/search/interactive/grab", body, out); err != nil {
 		return nil, err
 	}
 	return out, nil

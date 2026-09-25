@@ -1,5 +1,6 @@
 package com.pocketds.hub.reader
 
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -488,7 +489,7 @@ class ReaderScreen(
                 gravity = Gravity.CENTER
                 setTextColor(Color.WHITE)
                 setPadding(dp(14), dp(6), dp(14), dp(6))
-                this.background = GradientDrawable().apply {
+                this.background = ThemeGradientDrawable().apply {
                     cornerRadius = Styler.dp(context, 14f)
                     setColor(0xCC6B442D.toInt())
                 }
@@ -688,7 +689,7 @@ class ReaderScreen(
         (locator.progression * 1_000).roundToInt().coerceIn(0, 1_000)
 
     private fun readerControlBackground(): StateListDrawable {
-        fun face(fill: Int, stroke: Int = 0): GradientDrawable = GradientDrawable().apply {
+        fun face(fill: Int, stroke: Int = 0): GradientDrawable = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(host.viewContext, 10f)
             setColor(fill)
             if (stroke > 0) setStroke(dp(2), stroke)
@@ -701,7 +702,7 @@ class ReaderScreen(
     }
 
     private fun darkCardBackground(): StateListDrawable {
-        fun face(fill: Int, stroke: Int = 0): GradientDrawable = GradientDrawable().apply {
+        fun face(fill: Int, stroke: Int = 0): GradientDrawable = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(host.viewContext, 10f)
             setColor(fill)
             if (stroke > 0) setStroke(dp(3), stroke)
