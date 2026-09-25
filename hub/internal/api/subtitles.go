@@ -152,13 +152,18 @@ func (s *Server) handleSubtitles(w http.ResponseWriter, r *http.Request) {
 	records := []subtitleRecord{}
 	// Bazarr returns newest first. Only acquisition events can supply an installed score.
 	matched := map[string]bool{}
+	seenPath := map[string]bool{}
 	for _, h := range history {
-		if h.Action != 1 && h.Action != 2 {
+		if h.Action == 0 {
+			seenPath[h.Path] = true
+			continue
+		}
+		if h.Action != 1 && h.Action != 2 && h.Action != 3 && h.Action != 4 && h.Action != 6 && h.Action != 7 {
 			continue
 		}
 		record := subtitleRecord{ID: subtitleHash(fmt.Sprint(target.Movie, target.ID), h.ParsedTimestamp, h.Path, h.Provider, h.Score), Language: h.Language.Name, Provider: h.Provider, Score: h.Score, Date: h.ParsedTimestamp, Description: h.Description}
 		for _, track := range media.Subtitles {
-			if track.Path != nil && *track.Path == h.Path && h.Path != "" && !matched[h.Path] {
+			if track.Path != nil && *track.Path == h.Path && h.Path != "" && !seenPath[h.Path] {
 				record.Installed = true
 				record.Forced = track.Forced
 				record.HI = track.HI
@@ -166,6 +171,7 @@ func (s *Server) handleSubtitles(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
+		seenPath[h.Path] = true
 		records = append(records, record)
 	}
 	for i, track := range media.Subtitles {

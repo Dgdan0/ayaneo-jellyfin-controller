@@ -88,7 +88,7 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
                 }
             }
         }
-        body.post { if(focus==null||body.findViewWithTag<View>(focus)?.requestFocus()!=true) requestInitialFocus();host?.refreshHints() }
+        body.post { if(!panel.isOpen && (focus==null||body.findViewWithTag<View>(focus)?.requestFocus()!=true)) requestInitialFocus();host?.refreshHints() }
     }
     private fun inspect(record: SubtitleRecord) {
         panel.resetBody();panel.open(record.language,if(record.installed) "Installed subtitle" else "Download history · installation not confirmed") {render(record.id)}

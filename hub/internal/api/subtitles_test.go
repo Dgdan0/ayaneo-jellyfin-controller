@@ -14,6 +14,7 @@ func TestSubtitleSearchBindsSelectionAndConsumesOnce(t *testing.T) {
 	const itemID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	path := "/media/movie.mkv"
 	writes := 0
+	historyAction := 2
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/Items/"+itemID):
@@ -26,7 +27,7 @@ func TestSubtitleSearchBindsSelectionAndConsumesOnce(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"radarrId": 7, "path": path, "subtitles": []any{map[string]any{"name": "Hebrew", "path": "/media/movie.he.srt"}}}}})
 		case r.URL.Path == "/api/movies/history":
-			w.Write([]byte(`{"data":[{"radarrId":7,"action":2,"timestamp":"last week","parsed_timestamp":"09/17/26 14:12:34","subtitles_path":"/media/movie.he.srt","score":"91.11%","provider":"example","language":{"name":"Hebrew"}}]}`))
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"radarrId": 7, "action": historyAction, "parsed_timestamp": "09/17/26 14:12:34", "subtitles_path": "/media/movie.he.srt", "score": "91.11%", "provider": "example", "language": map[string]string{"name": "Hebrew"}}}})
 		case r.URL.Path == "/api/providers/movies" && r.Method == "GET":
 			w.Write([]byte(`{"data":[{"provider":"example","language":"he","score":91,"subtitle":"private-serialized-provider-selection","hearing_impaired":"False","forced":"False","original_format":"True"}]}`))
 		case r.URL.Path == "/api/providers/movies" && r.Method == "POST":
@@ -62,6 +63,26 @@ func TestSubtitleSearchBindsSelectionAndConsumesOnce(t *testing.T) {
 	if state.Code != 200 || !strings.Contains(state.Body.String(), `"score":"91.11%"`) || !strings.Contains(state.Body.String(), `"installed":true`) {
 		t.Fatalf("state: %d %s", state.Code, state.Body.String())
 	}
+	for _, action := range []int{3, 4, 6, 7, 0} {
+		historyAction = action
+		response := call("GET", base, "", "")
+		var result struct {
+			Records []subtitleRecord `json:"records"`
+		}
+		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &result) != nil || len(result.Records) != 1 {
+			t.Fatalf("history action %d: %s", action, response.Body.String())
+		}
+		if !result.Records[0].Installed {
+			t.Fatalf("current track lost for action %d", action)
+		}
+		if action == 0 && result.Records[0].Score != "" {
+			t.Fatal("deleted event must not supply a current file's score")
+		}
+		if action != 0 && result.Records[0].Score != "91.11%" {
+			t.Fatalf("score lost for action %d", action)
+		}
+	}
+	historyAction = 2
 	search := func() string {
 		w := call("POST", base+"/search", "{}", "")
 		if w.Code != 200 {
