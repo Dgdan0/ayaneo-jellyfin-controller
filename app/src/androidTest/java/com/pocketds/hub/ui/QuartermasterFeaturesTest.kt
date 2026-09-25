@@ -27,6 +27,28 @@ import org.junit.runner.RunWith
 /** Runs only in .uitest: synthetic failures never touch the user's real queue. */
 @RunWith(AndroidJUnit4::class)
 class QuartermasterFeaturesTest {
+    @Test fun serverMonitorShowsUnknownValuesAndPreservesFocusOnRefresh() {
+        val ins=InstrumentationRegistry.getInstrumentation()
+        val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val snapshot=ServerMonitor(host=HostSnapshot(os="Windows",cpuPercent=null,memoryTotalBytes=32L*1073741824,memoryAvailableBytes=12L*1073741824,uptimeSeconds=172800,
+            disks=listOf(HostDisk("C:\\",100L*1073741824,5L*1073741824))),containers=listOf(HostContainer("jellyseerr","jellyseerr:latest","running","Up 2 days (healthy)")),sessionWarning="Jellyfin sessions unavailable",checkedAt="2026-09-25T18:00:00Z")
+        val api=Proxy.newProxyInstance(HubApi::class.java.classLoader,arrayOf(HubApi::class.java)){_,method,_->when(method.name){"serverMonitor"->HubResult.Ok(snapshot);else->error("Unexpected ${method.name}")}} as HubApi
+        val host=Proxy.newProxyInstance(ScreenHost::class.java.classLoader,arrayOf(ScreenHost::class.java)){_,method,_->if(method.name=="getViewContext")activity else null} as ScreenHost
+        val screen=com.pocketds.hub.screens.manage.ServerMonitorScreen(api){true}
+        lateinit var root:View
+        try {
+            ins.runOnMainSync{root=screen.onCreateView(host,FrameLayout(activity));activity.setContentView(root);screen.onShow()};ins.waitForIdleSync()
+            ins.runOnMainSync{
+                assertTrue(all(root).filterIsInstance<TextView>().any{it.text=="Unavailable"})
+                assertTrue(all(root).filterIsInstance<TextView>().any{it.text.contains("Low space (<10%)")})
+                assertTrue(all(root).filterIsInstance<TextView>().any{it.text=="Jellyfin sessions unavailable"})
+                root.findViewWithTag<View>("disk:C:\\").requestFocus();screen.onPad(PadAction.Refresh)
+            };ins.waitForIdleSync()
+            ins.runOnMainSync{assertEquals("disk:C:\\",root.findFocus()?.tag)}
+            android.os.SystemClock.sleep(500)
+            val shot=ins.uiAutomation.takeScreenshot();File(activity.externalCacheDir,"monitor-fixture.png").outputStream().use{shot.compress(Bitmap.CompressFormat.PNG,100,it)};shot.recycle()
+        } finally {ins.runOnMainSync{screen.onHide();screen.onDestroyView();activity.finish()}}
+    }
     @Test fun subtitlesKeepScoresSeparateFromPersonalRatingsAndRequireSelection() {
         val ins=InstrumentationRegistry.getInstrumentation()
         val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

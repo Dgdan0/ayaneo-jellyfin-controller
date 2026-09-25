@@ -89,6 +89,7 @@ import kotlin.coroutines.coroutineContext
  * what let phases A1 and A3 proceed independently of the Go work.
  */
 interface HubApi {
+    suspend fun serverMonitor(): HubResult<com.pocketds.hub.model.ServerMonitor>
     suspend fun subtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleState>
     suspend fun searchSubtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleSearch>
     suspend fun downloadSubtitle(itemId: String, ticket: String): HubResult<ActionAck>
@@ -630,6 +631,9 @@ class HubClient(private val context: Context, private val connection: HubConnect
 
     override suspend fun bandwidth(): HubResult<com.pocketds.hub.model.BandwidthState> =
         get(HubEndpoints.bandwidth(base()), noCache = true) { json.decodeFromString<com.pocketds.hub.model.BandwidthState>(it) }
+
+    override suspend fun serverMonitor(): HubResult<com.pocketds.hub.model.ServerMonitor> =
+        get(HubRequest(base().trimEnd('/')+"/v1/manage/monitor"),noCache=true) {json.decodeFromString<com.pocketds.hub.model.ServerMonitor>(it)}
 
     override suspend fun subtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleState> =
         get(HubEndpoints.subtitles(base(),itemId),noCache=true) {json.decodeFromString<com.pocketds.hub.model.SubtitleState>(it)}

@@ -108,6 +108,7 @@ class ManageScreen(
 
     override fun onShow() {
         adapter.showHub(configuredHubRow())
+        adapter.showHub(monitorRow())
         refresh()
     }
 
@@ -129,6 +130,7 @@ class ManageScreen(
     override fun hints(): List<ButtonHint> = buildList {
         add(ButtonHint.activate(
             when {
+                selectedService == "monitor" -> "Open"
                 selectedService == "hub" -> "Edit"
                 adapter.find(selectedService)?.dashboardUrl.isNullOrEmpty() -> "Details"
                 else -> "Open"
@@ -212,7 +214,7 @@ class ManageScreen(
                 is HubResult.Ok -> render(result.value)
                 is HubResult.Failed -> {
                     status.setTextColor(colors.dangerText)
-                    status.text = if (adapter.itemCount <= 1) {
+                    status.text = if (adapter.itemCount <= 2) {
                         adapter.showHub(configuredHubRow(state = "down"))
                         "Ayaneo Hub is not reachable · open it to edit the address"
                     } else {
@@ -227,6 +229,7 @@ class ManageScreen(
     private fun render(value: HealthResponse) {
         val rows = buildList {
             add(configuredHubRow(value.hub))
+            add(monitorRow())
             value.services.sortedBy { serviceOrder[it.name] ?: Int.MAX_VALUE }.forEach {
                 add(it.toRow())
             }
@@ -275,6 +278,7 @@ class ManageScreen(
 
     private fun activate(row: ServiceRow) {
         selectedService = row.id
+        if (row.id == "monitor") {host.push(ServerMonitorScreen(api,ringVisible));return}
         if (row.id == "hub") {
             host.push(HubConnectionScreen(api, ringVisible))
             return
@@ -481,6 +485,7 @@ class ManageScreen(
     }
 
     private fun stateColor(value: String): Int = when (value) {
+        "overview" -> colors.stripBackground
         "up" -> colors.badgeAvailable
         "checking" -> colors.stripBackground
         "disabled" -> colors.posterPlaceholder
@@ -489,6 +494,7 @@ class ManageScreen(
     }
 
     private fun stateLabel(value: String): String = when (value) {
+        "overview" -> "View"
         "up" -> "Running"
         "checking" -> "Checking"
         "disabled" -> "Disabled"
@@ -526,6 +532,8 @@ class ManageScreen(
             }
         }.joinToString(" · ")
     )
+
+    private fun monitorRow() = ServiceRow("monitor", "Server monitor", "overview", "hub", detail="CPU, memory, disk space, containers and current playback")
 
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
 

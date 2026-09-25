@@ -300,6 +300,7 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/person/{id}", s.handlePerson)
 	authed.HandleFunc("GET /v1/activity", s.handleActivity)
 	authed.HandleFunc("GET /v1/downloads/bandwidth", s.handleBandwidth)
+	authed.HandleFunc("GET /v1/manage/monitor", s.handleMonitor)
 	authed.HandleFunc("POST /v1/downloads/bandwidth", s.handleSetBandwidth)
 	authed.HandleFunc("POST /v1/downloads/{id}/priority_up", s.handlePriority)
 	authed.HandleFunc("POST /v1/downloads/{id}/priority_down", s.handlePriority)
