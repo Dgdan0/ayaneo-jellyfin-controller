@@ -43,6 +43,7 @@ data class ActivityItem(
     val client: String = "",
     val clientStage: String = "",
     val clientState: String = "",
+    val priority: Int = 0,
     val diagnosis: ActivityDiagnosis? = null,
     val category: String = "",
     val indexer: String = "",

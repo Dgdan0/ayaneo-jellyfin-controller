@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	"ayaneohub/internal/config"
 	"ayaneohub/internal/httpx"
@@ -29,6 +30,7 @@ type Client struct {
 	// Resolved by Probe. Older builds want pause/resume instead.
 	usesStopStart bool
 	apiVersion    string
+	controlMu     sync.Mutex
 }
 
 func New(cfg config.ServiceConfig) (*Client, error) {
@@ -63,6 +65,7 @@ type Torrent struct {
 	InfohashV2  string  `json:"infohash_v2"`
 	Name        string  `json:"name"`
 	State       string  `json:"state"`
+	Priority    int     `json:"priority"`
 	Progress    float64 `json:"progress"`
 	Size        int64   `json:"size"`
 	AmountLeft  int64   `json:"amount_left"`

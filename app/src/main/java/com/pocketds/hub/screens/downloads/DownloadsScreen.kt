@@ -75,6 +75,7 @@ class DownloadsScreen(
     private val readingAdapter = ReadingItemAdapter()
     private lateinit var deviceTransfers: TextView
     private lateinit var attentionFilter: TextView
+    private lateinit var bandwidthButton: TextView
     private var attentionOnly = startWithAttention
     private var latestActivity: ActivityResponse? = null
     private var mode = ContentMode.MEDIA
@@ -133,6 +134,20 @@ class DownloadsScreen(
                 }
             }
             addView(attentionFilter)
+            bandwidthButton = TextView(context).apply {
+                text = "Bandwidth"
+                textSize = 12f
+                setTextColor(colors.primaryText)
+                gravity = android.view.Gravity.CENTER
+                minimumHeight = Styler.dpInt(context, 48f)
+                setPadding(Styler.dpInt(context, 12f), 0, Styler.dpInt(context, 12f), 0)
+                background = Styler.chipBackground(context, colors)
+                Styler.makeFocusable(this)
+                FocusDecorator.attach(this, ringVisible, scale = false)
+                visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
+                activateOnTap { host.push(BandwidthScreen(api, ringVisible)) }
+            }
+            addView(bandwidthButton, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = Styler.dpInt(context, 8f) })
             addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
             deviceTransfers = TextView(context).apply {
                 text = "To this device"
@@ -227,6 +242,9 @@ class DownloadsScreen(
         if (::attentionFilter.isInitialized && attentionFilter.hasFocus()) {
             return listOf(ButtonHint.activate(if (attentionOnly) "All transfers" else "Needs attention"), ButtonHint.back())
         }
+        if (::bandwidthButton.isInitialized && bandwidthButton.hasFocus()) {
+            return listOf(ButtonHint.activate("Bandwidth"), ButtonHint.back())
+        }
         if (mode == ContentMode.BOOKS) {
             return listOfNotNull(
                 focusedReadingItem()?.takeIf { it.availableActions.isNotEmpty() }
@@ -265,6 +283,10 @@ class DownloadsScreen(
         }
         if (action == PadAction.Activate && attentionFilter.hasFocus()) {
             attentionFilter.performClick()
+            return true
+        }
+        if (action == PadAction.Activate && bandwidthButton.hasFocus()) {
+            bandwidthButton.performClick()
             return true
         }
         return when (action) {
@@ -330,6 +352,7 @@ class DownloadsScreen(
         val context = host?.viewContext ?: return
         ContentModeSettings.set(context, mode)
         attentionFilter.visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
+        bandwidthButton.visibility = attentionFilter.visibility
         list.adapter = activeAdapter()
         summaryLine.text = ""
         statusLine.setTextColor(colors.mutedText)
@@ -526,6 +549,8 @@ class DownloadsScreen(
 
     private fun choiceFor(item: ActivityItem, action: String): ChoiceOverlay.Choice? =
         when (action) {
+            "priority_up" -> ChoiceOverlay.Choice(action, "Move up queue", "Current queue position: ${item.priority}")
+            "priority_down" -> ChoiceOverlay.Choice(action, "Move down queue", "Current queue position: ${item.priority}")
             "stop" -> ChoiceOverlay.Choice(action, "Stop", "Leaves the files and the queue row")
             "start" -> ChoiceOverlay.Choice(action, "Start", "Resume this transfer")
             "delete" -> ChoiceOverlay.Choice(
@@ -657,7 +682,7 @@ class DownloadsScreen(
         statusLine.text = "Working…"
         scope.launch {
             val result = when (action) {
-                "stop", "start" -> api.downloadAction(item.id, action)
+                "stop", "start", "priority_up", "priority_down" -> api.downloadAction(item.id, action)
                 "delete" -> api.deleteDownload(item.id, deleteFiles = false)
                 "delete_with_data" -> api.deleteDownload(item.id, deleteFiles = true)
                 "arr_remove" -> queueCall(item, blocklist = false, search = false)
@@ -695,6 +720,7 @@ class DownloadsScreen(
     private fun pastTense(action: String): String = when (action) {
         "stop" -> "Stopped"
         "start" -> "Started"
+        "priority_up", "priority_down" -> "Updated queue priority for"
         "delete" -> "Removed"
         "delete_with_data" -> "Deleted"
         "arr_remove" -> "Removed from queue"
@@ -745,7 +771,7 @@ class DownloadsScreen(
         private fun settleFocus(id: String?) {
             val position = if (id == null) -1 else items.indexOfFirst { it.id == id }
             list.post {
-                if (overlay.isOpen || attentionFilter.hasFocus() || deviceTransfers.hasFocus()) return@post
+                if (overlay.isOpen || attentionFilter.hasFocus() || deviceTransfers.hasFocus() || bandwidthButton.hasFocus()) return@post
                 val target = if (position >= 0) {
                     list.findViewHolderForAdapterPosition(position)?.itemView
                 } else {

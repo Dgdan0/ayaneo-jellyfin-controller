@@ -221,6 +221,8 @@ interface HubApi {
         episode: Int = 0
     ): HubResult<GrabResponse>
     suspend fun activity(includeFinished: Boolean = false): HubResult<ActivityResponse>
+    suspend fun bandwidth(): HubResult<com.pocketds.hub.model.BandwidthState>
+    suspend fun setBandwidth(change: com.pocketds.hub.model.BandwidthChange): HubResult<com.pocketds.hub.model.BandwidthState>
     suspend fun notifications(limits: NotificationLimits = NotificationLimits()): HubResult<NotificationsResponse>
     suspend fun downloadAction(id: String, action: String): HubResult<ActionAck>
     suspend fun deleteDownload(id: String, deleteFiles: Boolean): HubResult<ActionAck>
@@ -621,6 +623,14 @@ class HubClient(private val context: Context, private val connection: HubConnect
     override suspend fun activity(includeFinished: Boolean): HubResult<ActivityResponse> =
         get(HubEndpoints.activity(base(), includeFinished), noCache = true) {
             json.decodeFromString<ActivityResponse>(it)
+        }
+
+    override suspend fun bandwidth(): HubResult<com.pocketds.hub.model.BandwidthState> =
+        get(HubEndpoints.bandwidth(base()), noCache = true) { json.decodeFromString<com.pocketds.hub.model.BandwidthState>(it) }
+
+    override suspend fun setBandwidth(change: com.pocketds.hub.model.BandwidthChange): HubResult<com.pocketds.hub.model.BandwidthState> =
+        postOnce(HubEndpoints.bandwidth(base()), json.encodeToString(com.pocketds.hub.model.BandwidthChange.serializer(), change)) {
+            json.decodeFromString<com.pocketds.hub.model.BandwidthState>(it)
         }
 
     override suspend fun notifications(limits: NotificationLimits): HubResult<NotificationsResponse> =

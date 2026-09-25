@@ -22,6 +22,7 @@ data class HubRequest(
  * of those should work.
  */
 object HubEndpoints {
+    fun bandwidth(base: String): HubRequest = HubRequest(join(base, "/v1/downloads/bandwidth"))
     fun calendar(base: String, start: String, end: String, timezone: String): HubRequest =
         HubRequest(join(base, "/v1/calendar") + "?start=" + encode(start) +
             "&end=" + encode(end) + "&timezone=" + encode(timezone))

@@ -77,6 +77,7 @@ type ActivityItem struct {
 	// pack into an episode row for every file. The transfer is still one thing
 	// in qBittorrent, so the API and app keep it as one controllable row.
 	QueueItems int `json:"queueItems,omitempty"`
+	Priority   int `json:"priority,omitempty"`
 }
 
 type ActivitySummary struct {
@@ -343,6 +344,7 @@ func itemFromQueue(
 		item.Category = torrent.Category
 		item.ClientStage = stageForTorrent(torrent)
 		item.ClientState = torrent.State
+		item.Priority = torrent.Priority
 		item.Stage = item.ClientStage
 		if torrent.IsFinished() && stageForArr(record) == ActImporting {
 			item.Stage = ActImporting
@@ -449,6 +451,7 @@ func itemFromTorrent(t *qbittorrent.Torrent, canControl bool) ActivityItem {
 		Client:          "qBittorrent",
 		ClientStage:     stageForTorrent(t),
 		ClientState:     t.State,
+		Priority:        t.Priority,
 		TorrentHash:     strings.ToLower(t.Hash),
 		MatchConfidence: "none",
 	}
@@ -505,6 +508,9 @@ func actionsForActivity(item ActivityItem, canControl bool) []string {
 	}
 	actions := make([]string, 0, 4)
 	if item.TorrentHash != "" {
+		if item.Priority > 0 {
+			actions = append(actions, "priority_up", "priority_down")
+		}
 		if item.ClientStage == ActStopped {
 			actions = append(actions, "start")
 		} else {

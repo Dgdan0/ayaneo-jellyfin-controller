@@ -31,6 +31,39 @@ class QuartermasterFeaturesTest {
         (0 until group.childCount).flatMap { all(group.getChildAt(it)) }
     }.orEmpty()
 
+    @Test fun bandwidthEditsUseKiBAndPreserveTheSelectedMode() {
+        val ins=InstrumentationRegistry.getInstrumentation()
+        val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        var sent:BandwidthChange?=null
+        val state=BandwidthState(mode="normal",alternativeDownloadBps=10240,alternativeUploadBps=10240,canControl=true,modeSwitchSupported=true)
+        val api=Proxy.newProxyInstance(HubApi::class.java.classLoader,arrayOf(HubApi::class.java)) { _,method,args -> when(method.name) {
+            "bandwidth" -> HubResult.Ok(state)
+            "setBandwidth" -> {sent=args!![0] as BandwidthChange;HubResult.Ok(state.copy(alternativeDownloadBps=sent!!.downloadBps!!,alternativeUploadBps=sent!!.uploadBps!!))}
+            else -> error("Unexpected operation ${method.name}")
+        }} as HubApi
+        val host=Proxy.newProxyInstance(ScreenHost::class.java.classLoader,arrayOf(ScreenHost::class.java)){_,method,_->if(method.name=="getViewContext")activity else null} as ScreenHost
+        val screen=com.pocketds.hub.screens.downloads.BandwidthScreen(api){true}
+        lateinit var root:View
+        try {
+            ins.runOnMainSync {root=screen.onCreateView(host,FrameLayout(activity));activity.setContentView(root);screen.onShow()}
+            ins.waitForIdleSync()
+            ins.runOnMainSync {
+                all(root).filterIsInstance<TextView>().first{it.text=="Edit alternative limits"}.performClick()
+                val fields=all(root).filterIsInstance<android.widget.EditText>()
+                assertEquals(2,fields.size);assertEquals("10",fields[0].text.toString())
+                fields[0].setText("32");fields[1].setText("16")
+                var target:View=all(root).filterIsInstance<TextView>().first{it.text=="Apply limits"}
+                while(!target.isClickable)target=target.parent as View
+                target.performClick()
+                assertEquals("alternative",sent?.limitsFor);assertEquals("",sent?.mode)
+                assertEquals(32768L,sent?.downloadBps);assertEquals(16384L,sent?.uploadBps)
+            }
+            ins.waitForIdleSync()
+            val shot=ins.uiAutomation.takeScreenshot()
+            File(activity.externalCacheDir,"bandwidth-fixture.png").outputStream().use{shot.compress(Bitmap.CompressFormat.PNG,100,it)};shot.recycle()
+        } finally {ins.runOnMainSync{screen.onHide();screen.onDestroyView();activity.finish()}}
+    }
+
     @Test fun cachedDiscoverPageCanArriveDuringInitialLayout() {
         val ins=InstrumentationRegistry.getInstrumentation()
         val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
