@@ -17,6 +17,10 @@ Diagnostics distinguish missing files, client errors, import/queue problems, unm
 
 ## Validation and deployment
 
+**Latest checkpoint:** the user supplied ADB `100.97.20.86:36813` and explicitly authorized reopening the Windows administrator prompt. Diagnostics production deployment completed with health and binary verification. The latest daily APK, including diagnostics, complete calendar weeks and the Discover pagination fix, is installed. Three isolated device tests pass (calendar grouping/navigation, diagnostics filtering/modal navigation, and synchronous cached Discover pagination). Live next-week posters and title open/back were checked. Production Transfers shows the correct empty state. Screenshots: `.local-backups/upcoming-next.png` (real calendar) and `.local-backups/diagnostics-fixture.png` (synthetic failure in `.uitest`). Earlier blockers below are historical and resolved.
+
+Hardware testing exposed an existing immediate-coroutine pagination crash in Discover; `77956a6` defers media/reading page fetches to the next main-loop dispatch so cached responses cannot notify adapters during layout. The regression fixture specifically uses immediate responses.
+
 - `go test ./...` and `go vet ./...` passed; targeted diagnostics tests passed after adding scoped-action integration coverage.
 - Final `gradlew.bat testDebugUnitTest assembleDebug` passed: **548 tests, zero failures/errors**.
 - Live production calendar returned five releases for 25 Sep–2 Oct. Poster proxy returned HTTP 200, `image/jpeg`, 129,980 bytes.
@@ -37,6 +41,6 @@ Backups, candidate configs and deployment scripts are gitignored under `.local-b
 3. Inspect final Upcoming layout on the real display; test previous/next week, dates at boundaries, title open/back, focus restoration, touch and controller navigation. ADB key events are not a physical-stick test.
 4. Inspect diagnostics UI and Needs attention filter. Use deterministic fixtures when the live queue is empty; do not create broken real downloads for testing. Check modal scrolling/focus, refresh, read-only permissions, and preservation of existing transfer confirmations.
 5. Run a short regression of Media/Books navigation and existing playback/download flows. Device testing so far was silent and did not start playback.
-6. Only after this first milestone is verified, continue subtitles with retained match scores and personal feedback, then bandwidth/priority. Remaining approved backlog: server metrics and supported restarts, actionable alerts, Home customization, connection routing. These have **not** been implemented yet.
+6. The first two features are now device-verified; work has moved to subtitles with retained match scores and personal feedback, and bandwidth/priority. Remaining approved backlog: server metrics and supported restarts, actionable alerts, Home customization, connection routing. These have **not** been implemented yet.
 
 Known first-slice limits: Upcoming covers scheduled monitored releases from Arr calendars; no separate undated-library inventory. Its downloaded state is the Arr file flag, not a fresh Jellyfin availability join. The diagnostics title link opens the Needs attention list, not a preselected exact transfer. Alerts/deep links will be expanded in their own milestone.

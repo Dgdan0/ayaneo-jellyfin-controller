@@ -31,6 +31,32 @@ class QuartermasterFeaturesTest {
         (0 until group.childCount).flatMap { all(group.getChildAt(it)) }
     }.orEmpty()
 
+    @Test fun cachedDiscoverPageCanArriveDuringInitialLayout() {
+        val ins=InstrumentationRegistry.getInstrumentation()
+        val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        var pages=0
+        fun row(page:Int)=DiscoverRow(id="fixture",title="Fixture row",page=page,totalPages=2,
+            items=listOf(SearchHit(media=MediaRef(key="tmdb:movie:$page",title="Example $page"))))
+        val api=Proxy.newProxyInstance(HubApi::class.java.classLoader,arrayOf(HubApi::class.java)) { _,method,_ ->
+            when(method.name) {
+                "discover" -> HubResult.Ok(DiscoverResponse(rows=listOf(row(1))))
+                "discoverRow" -> {pages++;HubResult.Ok(DiscoverResponse(rows=listOf(row(2))))}
+                "imageUrl" -> ""
+                else -> error("Unexpected operation ${method.name}")
+            }
+        } as HubApi
+        val host=Proxy.newProxyInstance(ScreenHost::class.java.classLoader,arrayOf(ScreenHost::class.java)) { _,method,_ -> if(method.name=="getViewContext") activity else null } as ScreenHost
+        val screen=com.pocketds.hub.screens.discover.DiscoverScreen(api){true}
+        try {
+            ins.runOnMainSync {
+                ContentModeSettings.set(activity,ContentMode.MEDIA)
+                val root=screen.onCreateView(host,FrameLayout(activity));activity.setContentView(root);screen.onShow()
+            }
+            ins.waitForIdleSync()
+            ins.runOnMainSync { assertEquals("Immediate page two must be safely appended",1,pages) }
+        } finally { ins.runOnMainSync { screen.onHide();screen.onDestroyView();activity.finish() } }
+    }
+
     @Test fun attentionFilterAndDiagnosisAreReadableWithoutPerformingRepairs() {
         val ins = InstrumentationRegistry.getInstrumentation()
         val activity = ins.startActivitySync(Intent(ins.targetContext, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
