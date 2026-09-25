@@ -52,7 +52,7 @@ Windows canceled the bandwidth UAC prompt. It was not silently retried. A new as
 
 Latest ready Hub binary: `.local-backups/hub-monitor-ready.exe`, version `0.3.1-monitor`, with production config validation passed. Pending daily APK: `app/build/outputs/apk/debug/app-debug.apk`. Install only with `adb install -r`, after the matching Hub deployment. The isolated test app already includes the new features.
 
-Candidate Hub processes used: bandwidth PID 153804 on 8793; subtitles PID 145848 on 8794; monitor PID 151516 on 8795. Stop only after verifying each executable path. Production runs on 8791. Candidate configuration and secrets, backups and deployment scripts are inside `.local-backups/`; never commit or share that directory.
+Candidate Hub processes used: bandwidth PID 153804 on 8793; subtitles PID 145848 on 8794; monitor PID 151516 on 8795. All three candidate processes were stopped after executable-path verification at the final checkpoint. Production remains running on 8791. Candidate configuration and secrets, backups and deployment scripts are inside `.local-backups/`; never commit or share that directory.
 
 Automatic approval review rejected a combined command that would switch the test app to the candidate Hub through ADB reverse. That route was not retried. Direct local API validation and isolated device fixtures succeeded. A real daily-app navigation check remains after approved deployment.
 
@@ -67,3 +67,5 @@ Automatic approval review rejected a combined command that would switch the test
 These remaining slices are approved backlog, not completed features. No family mode, new reading scope or multi-Arr instances have been added.
 
 Known first-slice limits: Upcoming includes dated monitored calendar releases, with no undated inventory; Arr file availability is labeled Downloaded, not asserted Jellyfin availability. A failed title pipeline opens the attention list rather than an exact selected transfer. Subtitle feedback is local to the device; live replacement and player refresh are still unverified.
+
+Final verification: the two affected device tests (subtitle history/selection and monitor focus/missing data) passed again against the final APK. Production configuration validation passed for the ready Hub binary. Commits: `7e55a8b` subtitles, `2b46036` history provenance, `5f5409b` monitoring. The daily app was reopened without changing its connection or data. Deployment approval remains pending.
