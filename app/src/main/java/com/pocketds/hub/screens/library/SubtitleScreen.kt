@@ -26,6 +26,7 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
     private var host: ScreenHost? = null
     private lateinit var colors: PocketColors
     private lateinit var status: TextView
+    private lateinit var locations: TextView
     private lateinit var body: LinearLayout
     private lateinit var panel: ChoiceOverlay
     private lateinit var memory: SubtitleMemory
@@ -36,6 +37,8 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
     private var candidates: List<SubtitleCandidate>? = null
     private var selectedLanguage: String? = null
     private var receiverRegistered = false
+    private var lastUpdateMessage = ""
+    private var awaitingDeviceUpdate = false
     private val changedReceiver = object: BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if(candidates==null && ::body.isInitialized) render()
@@ -49,6 +52,12 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
             setBackgroundColor(colors.background)
             val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18),dp(8),dp(18),dp(10)) }
             column.addView(label(itemTitle,18f))
+            locations = label("Library · checking subtitles…",13f).apply {
+                setPadding(dp(12),dp(9),dp(12),dp(9))
+                background=Styler.chipBackground(context,colors)
+                layoutParams=LinearLayout.LayoutParams(-1,-2).apply {topMargin=dp(7);bottomMargin=dp(7)}
+            }
+            column.addView(locations)
             status = label("Loading installed subtitles…",12f);column.addView(status)
             body = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
             column.addView(ScrollView(context).apply { isFocusable=false;addView(body) },LinearLayout.LayoutParams(-1,0,1f))
@@ -96,8 +105,28 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
         }
     }
     private fun render(focus: String? = null) {
+        val restore = focus ?: body.findFocus()?.tag as? String
         body.removeAllViews()
-        status.text=state.warning.ifEmpty { "Bazarr match score = release compatibility · Your rating = your experience" }
+        val saved=offline.playbackPlan(itemId,"resume")
+        val update=offline.subtitleSyncForItem(itemId)
+        if(awaitingDeviceUpdate && update?.retryAt?.let {it<0}==true) {
+            lastUpdateMessage="Library updated · copying to this AYANEO needs attention. Your video and saved tracks were kept."
+        }
+        if(awaitingDeviceUpdate && saved!=null && update==null) {
+            lastUpdateMessage="Library updated · subtitles are now available on this AYANEO. Your video was kept."
+            awaitingDeviceUpdate=false
+        }
+        status.text=listOf(lastUpdateMessage,state.warning).filter(String::isNotBlank).joinToString("\n")
+            .ifEmpty { "Match score: release compatibility · Your rating: your viewing experience" }
+        locations.text=buildList {
+            add(if(onlineAvailable) "Library · ${state.records.count { it.installed }} installed subtitle tracks" else "Library · connection unavailable")
+            add(when {
+                saved==null -> "This AYANEO · video not downloaded"
+                update?.retryAt?.let { it<0 }==true -> "This AYANEO · subtitle update needs attention"
+                update!=null -> "This AYANEO · subtitle update pending · saved tracks still available"
+                else -> "This AYANEO · ${saved.subtitleTracks.size} subtitle tracks available offline"
+            })
+        }.joinToString("\n")
         val results=candidates
         if(results!=null) {
             body.addView(button("← Installed subtitles and history"){candidates=null;render()})
@@ -140,7 +169,7 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
                 }
             }
         }
-        body.post { if(!panel.isOpen && (focus==null||body.findViewWithTag<View>(focus)?.requestFocus()!=true)) requestInitialFocus();host?.refreshHints() }
+        body.post { if(!panel.isOpen && (restore==null||body.findViewWithTag<View>(restore)?.requestFocus()!=true)) requestInitialFocus();host?.refreshHints() }
     }
     private fun inspect(record: SubtitleRecord) {
         panel.resetBody();panel.open(record.language,if(record.installed) "Installed subtitle" else "Download history · installation not confirmed") {render(record.id)}
@@ -172,8 +201,10 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
             when(result) {
                 is HubResult.Ok -> {
                     val queued=offline.queueSubtitleSync(itemId,candidate.language)
+                    awaitingDeviceUpdate=queued
                     if(queued) OfflineDownloadService.start(checkNotNull(host).viewContext)
                     val warning=result.value.warning.ifEmpty { if(!result.value.jellyfinRefreshStarted) "Saved online, but Jellyfin did not accept the subtitle refresh. Try Refresh subtitles later." else "" }
+                    lastUpdateMessage=warning.ifEmpty { if(queued) "Library updated · waiting for this AYANEO to finish copying subtitles. Your video stays in place." else "Library updated · refreshing installed tracks." }
                     host?.notify(warning.ifEmpty { if(queued) "Saved online · updating this AYANEO's subtitles" else "Saved online · refreshing installed tracks" })
                     load()
                 }
@@ -183,6 +214,8 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
     }
     private fun queueOfflineSync(language: String = "") {
         if(offline.queueSubtitleSync(itemId,language)) {
+            awaitingDeviceUpdate=true
+            lastUpdateMessage="Copying library subtitles to this AYANEO. Your video stays in place."
             OfflineDownloadService.start(checkNotNull(host).viewContext)
             host?.notify("Updating offline subtitles without downloading the video")
             render()
@@ -203,6 +236,7 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
     private fun language(code:String)=Locale.forLanguageTag(code).getDisplayLanguage(Locale.ENGLISH).ifEmpty{code}
     private fun label(value:String,size:Float)=TextView(checkNotNull(host).viewContext).apply {text=value;textSize=size;setTextColor(colors.primaryText);setPadding(dp(4),dp(5),dp(4),dp(5))}
     private fun button(value:String,maxLines:Int=2,action:()->Unit)=label(value,14f).apply {
+        tag=value;contentDescription=value
         minHeight=dp(46);this.maxLines=maxLines;ellipsize=android.text.TextUtils.TruncateAt.END
         setPadding(dp(12),dp(8),dp(12),dp(8));background=Styler.chipBackground(context,colors)
         layoutParams=LinearLayout.LayoutParams(-1,-2).apply {topMargin=dp(5)}

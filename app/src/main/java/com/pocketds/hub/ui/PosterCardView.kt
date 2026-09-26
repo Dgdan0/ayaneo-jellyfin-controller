@@ -131,6 +131,7 @@ class PosterCardView(
         showAvailability: Boolean
     ) {
         title.text = hit.media.title
+        contentDescription = listOf(hit.media.title, hit.subtitle).filter { it.isNotBlank() }.joinToString(", ")
         subtitle.text = hit.subtitle
         if (compactCard) subtitle.visibility = GONE
 
@@ -180,6 +181,7 @@ class PosterCardView(
 
     fun bindReading(item: ReadingItem, imageLoader: ImageLoader, imageUrl: (String) -> String) {
         title.text = item.title
+        contentDescription = listOf(item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(", ")
         subtitle.text = item.subtitle
         subtitle.visibility = if (compactCard) GONE else VISIBLE
         boundProgress = 0.0

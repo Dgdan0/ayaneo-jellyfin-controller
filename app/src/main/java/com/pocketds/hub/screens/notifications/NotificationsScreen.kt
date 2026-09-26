@@ -59,6 +59,7 @@ class NotificationsScreen(
     private lateinit var host: ScreenHost
     private lateinit var colors: PocketColors
     private lateinit var status: TextView
+    private lateinit var deviceAlerts: TextView
     private val columns = linkedMapOf<String, ServiceColumnView>()
     private lateinit var mediaColumns: LinearLayout
     private lateinit var bookColumns: LinearLayout
@@ -87,6 +88,14 @@ class NotificationsScreen(
                 setPadding(dp(16), dp(2), dp(16), dp(8))
             }
             addView(status)
+            deviceAlerts=TextView(context).apply {
+                textSize=13f;setTextColor(colors.primaryText);minHeight=dp(44)
+                setPadding(dp(12),dp(8),dp(12),dp(8));gravity=Gravity.CENTER_VERTICAL
+                background=Styler.chipBackground(context,colors)
+                Styler.makeFocusable(this);FocusDecorator.attach(this,ringVisible,false)
+                activateOnTap { host.push(LocalAlertsScreen(api,ringVisible)) }
+            }
+            addView(deviceAlerts,LinearLayout.LayoutParams(MATCH,WRAP).apply {setMargins(dp(14),dp(2),dp(14),dp(8))})
 
             mediaColumns = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -118,6 +127,7 @@ class NotificationsScreen(
     }
 
     override fun onShow() {
+        deviceAlerts.text="Downloads & subtitles on this AYANEO · ${com.pocketds.hub.settings.LocalAlerts.unread(host.viewContext)} new"
         showMode(ContentModeSettings.get(host.viewContext))
         visible = true
         startPolling(showLoading = !hasContent)
@@ -166,7 +176,7 @@ class NotificationsScreen(
                 return it.focus(selectedID)
             }
         }
-        return visibleColumns().firstOrNull { it.hasItems() }?.focus("") == true
+        return visibleColumns().firstOrNull { it.hasItems() }?.focus("") == true || deviceAlerts.requestFocus()
     }
 
     private fun startPolling(showLoading: Boolean) {
@@ -208,7 +218,7 @@ class NotificationsScreen(
         }
         unreadIds = readStore.unread(response.sections.flatMap { it.items }.map { it.id })
         columns.values.forEach { it.updateUnreadCount() }
-        onUnreadChanged(unreadIds.size)
+        onUnreadChanged(unreadIds.size + com.pocketds.hub.settings.LocalAlerts.unread(host.viewContext))
         status.setTextColor(if (response.partial.isEmpty()) colors.mutedText else colors.badgePending)
         updateStatus(response)
         if (visibleColumns().none { it.contains(selectedID) }) selectedID = ""
@@ -222,7 +232,7 @@ class NotificationsScreen(
         unreadIds = unreadIds - id
         card.setUnread(false)
         columns.values.forEach { it.updateUnreadCount() }
-        onUnreadChanged(unreadIds.size)
+        onUnreadChanged(unreadIds.size + com.pocketds.hub.settings.LocalAlerts.unread(host.viewContext))
         latestResponse?.let(::updateStatus)
         host.refreshHints()
     }
@@ -236,7 +246,7 @@ class NotificationsScreen(
         readStore.markAllSeen(ids)
         unreadIds = emptySet()
         columns.values.forEach { it.refreshUnread() }
-        onUnreadChanged(0)
+        onUnreadChanged(com.pocketds.hub.settings.LocalAlerts.unread(host.viewContext))
         latestResponse?.let(::updateStatus)
         host.notify("All notifications marked as seen")
         host.refreshHints()

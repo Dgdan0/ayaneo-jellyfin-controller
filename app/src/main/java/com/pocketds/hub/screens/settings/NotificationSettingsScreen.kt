@@ -24,6 +24,7 @@ class NotificationSettingsScreen(private val ringVisible: () -> Boolean) : Scree
     private lateinit var host: ScreenHost
     private lateinit var colors: PocketColors
     private lateinit var overlay: ChoiceOverlay
+    private lateinit var alerts: TextView
     private val rows = linkedMapOf<String, LimitRow>()
     private var selected = "sonarr"
 
@@ -46,6 +47,16 @@ class NotificationSettingsScreen(private val ringVisible: () -> Boolean) : Scree
                 setTextColor(colors.mutedText)
                 setPadding(0, dp(3), 0, dp(10))
             })
+            alerts=TextView(context).apply {
+                textSize=14f;setTextColor(colors.primaryText);setPadding(dp(14),dp(12),dp(14),dp(12))
+                background=Styler.chipBackground(context,colors);minimumHeight=dp(48)
+                Styler.makeFocusable(this);FocusDecorator.attach(this,ringVisible,false)
+                activateOnTap {
+                    NotificationSettings.setAlertsEnabled(context,!NotificationSettings.alertsEnabled(context))
+                    refreshValues();host.refreshHints()
+                }
+            }
+            addView(alerts,LinearLayout.LayoutParams(MATCH,WRAP).apply {bottomMargin=dp(12)})
             listOf("sonarr" to "Sonarr", "radarr" to "Radarr", "bazarr" to "Bazarr").forEach { (id, label) ->
                 val row = LimitRow(label).apply {
                     FocusDecorator.attach(this, ringVisible, scale = false)
@@ -62,7 +73,7 @@ class NotificationSettingsScreen(private val ringVisible: () -> Boolean) : Scree
                 addView(row, LinearLayout.LayoutParams(MATCH, dp(64)).apply { bottomMargin = dp(8) })
             }
         }
-        root.addView(page, FrameLayout.LayoutParams(MATCH, MATCH))
+        root.addView(android.widget.ScrollView(host.viewContext).apply {isFocusable=false;addView(page)}, FrameLayout.LayoutParams(MATCH, MATCH))
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         refreshValues()
@@ -101,6 +112,7 @@ class NotificationSettingsScreen(private val ringVisible: () -> Boolean) : Scree
     private fun refreshValues() {
         if (!::host.isInitialized) return
         val limits = NotificationSettings.limits(host.viewContext)
+        alerts.text="Download & subtitle alerts · ${if(NotificationSettings.alertsEnabled(host.viewContext)) "On" else "Off"}\nHistory stays available in Notifications."
         rows["sonarr"]?.value = "${limits.sonarr} entries"
         rows["radarr"]?.value = "${limits.radarr} entries"
         rows["bazarr"]?.value = "${limits.bazarr} entries"

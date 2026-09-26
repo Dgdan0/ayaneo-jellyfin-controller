@@ -37,6 +37,9 @@ import com.pocketds.hub.ui.ReadingCategoryTabView
 import com.pocketds.hub.ui.AppIcon
 import com.pocketds.hub.ui.AppIconDrawable
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.ShelfFocusNavigator
+import com.pocketds.hub.ui.ShelfFocusLane
+import com.pocketds.hub.ui.ShelfFocusRow
 import com.pocketds.hub.ui.FormOverlay
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.useResponsivePosterColumns
@@ -89,6 +92,7 @@ class DiscoverScreen(
     private lateinit var readingRowsList: RecyclerView
     private lateinit var readingResultsGrid: RecyclerView
     private val rowsAdapter = RowsAdapter()
+    private val shelfNavigation = ShelfFocusNavigator()
     private val resultsAdapter = HitAdapter()
     private val readingRowsAdapter = ReadingRowsAdapter()
     private val readingResultsAdapter = ReadingHitAdapter()
@@ -170,7 +174,7 @@ class DiscoverScreen(
         root.addView(readingFilters, LinearLayout.LayoutParams(MATCH, WRAP))
 
         upcomingButton = TextView(context).apply {
-            text = "Upcoming · release calendar"
+            text = "Upcoming"
             textSize = 13f
             setTextColor(colors.primaryText)
             minHeight = Styler.dpInt(context, 40f)
@@ -181,9 +185,6 @@ class DiscoverScreen(
             FocusDecorator.attach(this, ringVisible, false)
             setOnClickListener { host.push(UpcomingScreen(api, ringVisible)) }
         }
-        root.addView(upcomingButton, LinearLayout.LayoutParams(MATCH, WRAP).apply {
-            setMargins(Styler.dpInt(context, 10f), Styler.dpInt(context, 4f), Styler.dpInt(context, 10f), 0)
-        })
 
         searchBox = EditText(context).apply {
             hint = if (mode == ContentMode.BOOKS) "Search books, comics and audio" else "Search films and series"
@@ -235,10 +236,16 @@ class DiscoverScreen(
             }
         }
         searchBox.minimumHeight=Styler.dpInt(context,48f)
-        root.addView(searchBox, LinearLayout.LayoutParams(MATCH, WRAP).apply {
-            setMargins(Styler.dpInt(context, 24f), Styler.dpInt(context, 6f),
-                Styler.dpInt(context, 24f), 0)
-        })
+        root.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            clipChildren = false
+            setPadding(Styler.dpInt(context, 16f), Styler.dpInt(context, 4f), Styler.dpInt(context, 16f), 0)
+            addView(searchBox, LinearLayout.LayoutParams(0, WRAP, 1f))
+            addView(upcomingButton, LinearLayout.LayoutParams(WRAP, WRAP).apply {
+                marginStart = Styler.dpInt(context, 12f)
+            })
+        }, LinearLayout.LayoutParams(MATCH, WRAP))
 
         val searchStatusRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -426,6 +433,7 @@ class DiscoverScreen(
     }
 
     private fun switchMode(next: ContentMode) {
+        shelfNavigation.cancel()
         if (mode == next) return
         mode = next
         ContentModeSettings.set(host?.viewContext ?: return, mode)
@@ -477,10 +485,19 @@ class DiscoverScreen(
         else -> readingRowsList
     }
 
+    private fun focusLanes(): List<ShelfFocusLane> {
+        val width = (host!!.viewContext.resources.configuration.screenWidthDp - 180).coerceAtLeast(0)
+        return if (mode == ContentMode.MEDIA) rowsAdapter.focusLanes(width) else readingRowsAdapter.focusLanes(width)
+    }
+
     private fun restoreContentFocus(): Boolean {
         val key = activeState.focusedKey
         if (key.isNotEmpty()) {
             findContentKey(activeList(), key)?.let { if (it.requestFocus()) return true }
+            if (!searching) focusLanes().firstOrNull { key in it.keys }?.let {
+                shelfNavigation.focus(activeList(), it, key)
+                return true
+            }
         }
         return activeList().getChildAt(0)?.requestFocus() == true
     }
@@ -543,6 +560,7 @@ class DiscoverScreen(
     }
 
     override fun onHide() {
+        shelfNavigation.cancel()
         if (form.isOpen) {
             form.dismiss()
             host?.refreshHints()
@@ -610,8 +628,7 @@ class DiscoverScreen(
         }
 
     override fun requestInitialFocus(): Boolean {
-        val list = activeList()
-        return list.getChildAt(0)?.requestFocus() == true
+        return restoreContentFocus()
     }
 
     override fun onPad(action: PadAction): Boolean = when {
@@ -619,6 +636,13 @@ class DiscoverScreen(
             host?.refreshHints()
             true
         }
+        action is PadAction.Step && !searching &&
+            shelfNavigation.step(activeList(), focusLanes(), action.direction, searchBox) -> true
+        action is PadAction.Step && !searching && action.direction == com.pocketds.hub.input.Direction.DOWN &&
+            (searchBox.hasFocus() || upcomingButton.hasFocus()) -> {
+                focusLanes().firstOrNull()?.let { shelfNavigation.focus(activeList(), it) }
+                true
+            }
         // A on the search box submits. Without this, Activate calls performClick
         // on an EditText, which does nothing visible and looks like a dead button.
         action == PadAction.Activate && searchBox.hasFocus() -> {
@@ -696,6 +720,7 @@ class DiscoverScreen(
     // ---- browse ------------------------------------------------------------
 
     private fun loadRows(force: Boolean = false) {
+        shelfNavigation.cancel()
         statusLine.setTextColor(colors.mutedText)
         statusLine.text = "Loading…"
         if (force) rowsAdapter.submit(emptyList())
@@ -762,6 +787,7 @@ class DiscoverScreen(
     }
 
     private fun loadReadingRows(force: Boolean = false) {
+        shelfNavigation.cancel()
         val requestedType = readingType
         statusLine.setTextColor(colors.mutedText)
         statusLine.text = "Loading ${ReadingType.label(requestedType).lowercase()}…"
@@ -1021,6 +1047,16 @@ class DiscoverScreen(
     private inner class ReadingRowsAdapter : RecyclerView.Adapter<ReadingRowHolder>() {
         private val rows = mutableListOf<ReadingDiscoverRow>()
 
+        fun focusLanes(width: Int): List<ShelfFocusLane> = rows.flatMapIndexed { index, row ->
+            val feature = if (index == 0) DiscoverFeaturePolicy.readingFeature(row, width) else null
+            val id = "books:${row.contentType}:${row.id}"
+            buildList {
+                if (feature != null) add(ShelfFocusLane("$id:feature", index, true, listOf(feature.key)))
+                val items = if (feature != null) row.items.drop(1) else row.items
+                if (items.isNotEmpty()) add(ShelfFocusLane(id, index, false, items.map { it.key }))
+            }
+        }
+
         fun submit(next: List<ReadingDiscoverRow>) {
             rows.clear()
             rows.addAll(next)
@@ -1070,10 +1106,13 @@ class DiscoverScreen(
     private inner class ReadingPosterRowView(
         context: android.content.Context,
         colors: PocketColors
-    ) : LinearLayout(context) {
+    ) : LinearLayout(context), ShelfFocusRow {
         private val feature = DiscoverFeatureCardView(context, colors, ringVisible)
         private val label: TextView
         private val strip: RecyclerView
+        override val featureFocusView: View get() = feature
+        override val posterFocusList: RecyclerView get() = strip
+        override val shelfHeadingView: View get() = label
         private val stripAdapter = ReadingStripAdapter()
         private var current: ReadingDiscoverRow? = null
         private var featuredRow = false
@@ -1128,6 +1167,7 @@ class DiscoverScreen(
                 feature.setTag(TAG_READING_ITEM, item)
                 feature.activateOnTap { openReadingDetail(item) }
                 feature.setOnFocusChangeListener { _, focused ->
+                    FocusDecorator.refresh(feature, ringVisible())
                     if (focused) { modeStates.recall(ContentMode.BOOKS)?.focusedKey = item.key; host?.refreshHints() }
                 }
             }
@@ -1191,6 +1231,16 @@ class DiscoverScreen(
     private inner class RowsAdapter : RecyclerView.Adapter<RowHolder>() {
         private val rows = mutableListOf<DiscoverRow>()
 
+        fun focusLanes(width: Int): List<ShelfFocusLane> = rows.flatMapIndexed { index, row ->
+            val feature = if (index == 0) DiscoverFeaturePolicy.mediaFeature(row, width) else null
+            val id = "media:${row.id}"
+            buildList {
+                if (feature != null) add(ShelfFocusLane("$id:feature", index, true, listOf(feature.media.key)))
+                val items = if (feature != null) row.items.drop(1) else row.items
+                if (items.isNotEmpty()) add(ShelfFocusLane(id, index, false, items.map { it.media.key }))
+            }
+        }
+
         fun submit(next: List<DiscoverRow>) {
             rows.clear()
             rows.addAll(next)
@@ -1249,11 +1299,14 @@ class DiscoverScreen(
     private inner class PosterRowView(
         context: android.content.Context,
         colors: PocketColors
-    ) : LinearLayout(context) {
+    ) : LinearLayout(context), ShelfFocusRow {
         private val feature = DiscoverFeatureCardView(context, colors, ringVisible)
 
         private val label: TextView
         private val strip: RecyclerView
+        override val featureFocusView: View get() = feature
+        override val posterFocusList: RecyclerView get() = strip
+        override val shelfHeadingView: View get() = label
         private val stripAdapter = StripAdapter()
         private var featuredRow = false
         private val featureWidthDp get() = (resources.configuration.screenWidthDp - 180).coerceAtLeast(0)
@@ -1317,6 +1370,7 @@ class DiscoverScreen(
                 feature.setTag(TAG_HIT, hit)
                 feature.activateOnTap { openDetail(hit) }
                 feature.setOnFocusChangeListener { _, focused ->
+                    FocusDecorator.refresh(feature, ringVisible())
                     if (focused) { modeStates.recall(ContentMode.MEDIA)?.focusedKey = hit.media.key; host?.refreshHints() }
                 }
             }

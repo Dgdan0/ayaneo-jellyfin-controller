@@ -210,6 +210,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         )
 
         showCurrent()
+        openAlertIntent()
+        com.pocketds.hub.alerts.TransferAlertJob.schedule(this)
         val offlineRepository = OfflineRepository.get(this)
         if (offlineRepository.batches().any { batch ->
                 !batch.paused && batch.jobs.any { it.state != com.pocketds.hub.offline.OfflineState.COMPLETE }
@@ -229,6 +231,21 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         setIntent(intent)
         seedFromIntent()
         (sections.stack().peek() as? Screen)?.onShow()
+        openAlertIntent()
+        com.pocketds.hub.alerts.TransferAlertJob.schedule(this)
+    }
+
+    private fun openAlertIntent() {
+        val id=intent?.getStringExtra(com.pocketds.hub.settings.LocalAlerts.EXTRA_ID) ?: return
+        val profile=intent?.getStringExtra(com.pocketds.hub.settings.LocalAlerts.EXTRA_SCOPE)
+        intent.removeExtra(com.pocketds.hub.settings.LocalAlerts.EXTRA_ID)
+        if(profile!=com.pocketds.hub.settings.LocalAlerts.scope(this)) {
+            notify("This alert belongs to another Hub or profile. Switch to that profile to open it.");return
+        }
+        val alert=com.pocketds.hub.settings.LocalAlerts.list(this).firstOrNull {it.id==id}
+        if(alert==null) {notify("This alert is no longer available.");return}
+        com.pocketds.hub.settings.LocalAlerts.markSeen(this,id)
+        com.pocketds.hub.screens.notifications.openLocalAlert(this,api,alert,::ringVisible)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -965,7 +982,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
                 when (val result = api.notifications(NotificationSettings.limits(this@HubActivity))) {
                     is com.pocketds.hub.net.HubResult.Ok -> {
                         val unread = NotificationReadStore(this@HubActivity).observe(result.value.sections)
-                        utilityHeader.setBadge(unread.size)
+                        utilityHeader.setBadge(unread.size + com.pocketds.hub.settings.LocalAlerts.unread(this@HubActivity))
                     }
                     is com.pocketds.hub.net.HubResult.Failed -> Unit
                 }

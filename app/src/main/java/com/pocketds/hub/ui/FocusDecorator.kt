@@ -77,8 +77,11 @@ object FocusDecorator {
                         // Keep the shelf heading with its cards when the whole
                         // row fits; otherwise prioritize the selected title.
                         list.findContainingItemView(view)?.takeIf { it !== view }?.let { row ->
-                            val shelf = android.graphics.Rect(0, 0, row.width, row.height)
-                            list.offsetDescendantRectToMyCoords(row, shelf)
+                            // Discover's first adapter row includes a separate featured
+                            // card. Include only this shelf's heading when a poster owns focus.
+                            val anchor = if (row is ShelfFocusRow && row.posterFocusList.hasFocus()) row.shelfHeadingView else row
+                            val shelf = android.graphics.Rect(0, 0, anchor.width, anchor.height)
+                            list.offsetDescendantRectToMyCoords(anchor, shelf)
                             val expandedTop = minOf(bounds.top, shelf.top)
                             val expandedBottom = maxOf(bounds.bottom, shelf.bottom)
                             if (expandedBottom - expandedTop <= bottom - top) {

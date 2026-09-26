@@ -1,5 +1,21 @@
 # Quartermaster feature checkpoint — 26 September 2026
 
+## Current update: v0.3.8 / code 23
+
+Installed in place on the AYANEO at `100.97.20.86:39751` on 26 September, with the final shelf-heading correction installed at 20:39 device time. Package version and final APK SHA-256 were verified (`94438BF5CE24452899254FF15AA3F26AE63BF06613B0E0CDFF086D8E2287F997`). The previous daily APK is retained on the device at `/data/local/tmp/hub-before-v038.apk`; the new APK is also saved locally as `.local-backups/app-v0.3.8-daily.apk`. No app data was cleared. This is an Android-only update; the existing FireDaemon `AyaneoHub` service remains running.
+
+Scope follows the user's accepted next steps 1–5 and 7. **Home customization (item 6) is excluded**, including rearranging/hiding shelves and pinned shortcuts. The existing sidebar and section order are unchanged.
+
+- Discover now treats the featured card and each poster shelf as separate directional stops. Down/Up are reversible across recycled rows, horizontal title selection is remembered, and returning from details restores the same title. The featured outline draws above the artwork. Search and Upcoming share one toolbar row; poster cards expose meaningful accessibility labels.
+- Movie and episode details have a direct Subtitles action beside Play/Resume. Offline availability and saved subtitle count are visible with the watch state. Existing secondary actions remain in More.
+- Subtitles distinguish library installation from this AYANEO's saved tracks, pending copy and failed copy. Completion messages reflect device sync, retries retain the video, and refreshes preserve the focused action. Provider match scores remain separate from personal ratings.
+- Failed title pipelines filter Transfers using exact provider IDs. Transfer cards show the diagnosis with the title; “Why isn't it working?” opens the existing explanation, evidence and allowed repair actions.
+- Notifications contains persistent download/subtitle alert history. Local completion and terminal failures link directly to the affected download or subtitle screen. Server transfer checks link to the exact transfer, including finished items and when launched from Books mode. History is isolated by Hub/profile, repeated events are suppressed, resolved failures are replaced, and a later subtitle update is treated as a new event. The Android alert toggle preserves in-app history.
+
+Validation: 553 JVM tests passed; 15 isolated AYANEO tests passed. After the final shelf-heading correction, all four affected navigation/layout tests passed again, including full heading and caption visibility at a 360dp content height. Device coverage includes Discover navigation through six shelves and back, horizontal selection and return, artwork outlines/caption visibility, series focus restoration, calendar continuity, diagnostics, subtitle selection/rating history, offline tracks without Hub connectivity, exact transfer alert routing, profile isolation/deduplication, and real sidecar HTTP transfer with **zero video requests and unchanged video bytes**, including a truncated subtitle recovery. The normal daily app was updated only after these checks passed. Live daily-app inspection confirmed the featured outline above artwork, reversible shelf navigation, visible poster captions, and the direct Subtitles button beside Resume. Screenshots are saved in `.local-backups/hub-feature-v038.png`, `hub-discover-ready.png` and `hub-title-ready.png`.
+
+Delivery limits: local download/subtitle workers publish completion alerts immediately when running. Remote transfer checks use an Android periodic job (15-minute minimum; Android may defer it), plus checks while Transfers is open. This is polling, so a transfer removed between observations may have no completion event. Server completion means downloaded on the server; it does not assert Jellyfin import. Quiet hours and server push are not part of this update. Physical controller key presses were simulated through ADB/instrumentation, not pressed by a person.
+
 ## Active source
 
 Feature worktree: `C:/Users/Dgdan/.codex/worktrees/quartermaster-features/Ayaneo Jellyfin Controler`, branch `codex/quartermaster-features`.
@@ -85,7 +101,7 @@ Automatic approval review previously rejected a combined command that would swit
 1. Verify a user-selected real subtitle acquisition and player selection of a newly synced offline track.
 2. Narrowly configured restarts with review, audit and health verification. Windows services observed include AyaneoHub, Bazarr, Prowlarr and Radarr; Docker is installed at its standard Program Files path. Actual management mechanisms and permissions must be verified for every supported target; unmanaged processes must not advertise restart.
 3. Actionable alerts with persistent deduplication and exact destinations, followed by background delivery and quiet hours.
-4. Home shortcuts and configurable shelves.
+4. Home shortcuts and configurable shelves — excluded by the user's latest instruction.
 5. Verified local/remote routing for the same Hub identity, preserving sessions and authentication/cache isolation.
 
 These remaining slices are approved backlog, not completed features. No family mode, new reading scope or multi-Arr instances have been added.

@@ -128,6 +128,7 @@ class OfflineDownloadService : Service() {
                 try {
                     OfflineSubtitleSync(repository, api).sync(subtitle)
                     repository.clearSubtitleSync(subtitle.rowId,subtitle.expectedLanguage)
+                    repository.download(subtitle.rowId)?.let { row -> publishAlert(row,"subtitle","ready","Subtitles are available offline. Your downloaded video was kept.","subtitles") }
                 } catch (_: CancellationException) {
                     throw CancellationException()
                 } catch (error: Exception) {
@@ -136,6 +137,10 @@ class OfflineDownloadService : Service() {
                         subtitle.rowId, subtitle.expectedLanguage,error.message ?: "Could not update offline subtitles",
                         error is SubtitleSyncBlocked
                     )
+                    repository.download(subtitle.rowId)?.let { row ->
+                        if(repository.subtitleSyncForItem(row.manifest.item.id)?.retryAt?.let { it<0 }==true)
+                            publishAlert(row,"subtitle","failed","Subtitle update needs attention. Open to review and retry.","subtitles")
+                    }
                 }
             }
         }
@@ -187,6 +192,9 @@ class OfflineDownloadService : Service() {
             }
             try {
                 download(row)
+                repository.download(row.id)?.takeIf { it.state==OfflineState.COMPLETE }?.let {
+                    publishAlert(it,"download","ready","Downloaded and ready on this AYANEO.","offline")
+                }
             } catch (_: CancellationException) {
                 repository.download(row.id)?.takeIf { it.state == OfflineState.DOWNLOADING }?.let {
                     repository.setState(it.id, OfflineState.QUEUED)
@@ -201,6 +209,7 @@ class OfflineDownloadService : Service() {
                 )
                 val failed = repository.download(row.id)?.state == OfflineState.FAILED
                 updateNotification(row, if (failed) "Needs attention" else "Waiting to retry")
+                if(failed) publishAlert(row,"download","failed","Download needs attention. Open to review the error and retry.","offline")
                 // A transient network error must not block every later item in
                 // a series. recordFailure schedules this item for a resumable
                 // retry, so the next loop can advance the queue immediately.
@@ -390,6 +399,12 @@ class OfflineDownloadService : Service() {
         getSystemService(NotificationManager::class.java).notify(
             NOTIFICATION_ID, notification("${row.manifest.item.title} · $status", progress, 100, false)
         )
+    }
+
+    private fun publishAlert(row: OfflineDownload, family: String, state: String, message: String, destination: String) {
+        com.pocketds.hub.settings.LocalAlerts.publish(this,
+            com.pocketds.hub.settings.LocalAlert("$family:${row.id}:$state",row.manifest.item.id,row.manifest.item.title,message,destination,
+                eventKey=if(family=="subtitle" && state=="ready") row.updatedAt.toString() else ""),row.userId)
     }
 
     private fun notification(text: String, progress: Int, max: Int, indeterminate: Boolean) =

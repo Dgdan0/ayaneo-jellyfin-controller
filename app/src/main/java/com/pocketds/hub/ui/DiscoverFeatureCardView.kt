@@ -1,8 +1,6 @@
 package com.pocketds.hub.ui
 
 import android.content.Context
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.StateListDrawable
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.ViewGroup
@@ -39,15 +37,12 @@ class DiscoverFeatureCardView(
         gravity = Gravity.CENTER_VERTICAL
         clipChildren = false
         minimumHeight = Styler.dpInt(context, 128f)
-        fun face(focused: Boolean) = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 13f)
+        background = ThemeGradientDrawable().apply {
+            cornerRadius = Styler.dp(context, 8f)
             setColor(this@DiscoverFeatureCardView.colors.cardSurface)
-            if (focused) setStroke(Styler.dpInt(context, 2f), this@DiscoverFeatureCardView.colors.focusRing)
         }
-        background = StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_focused), face(true))
-            addState(intArrayOf(), face(false))
-        }
+        clipToOutline = true
+        foreground = Styler.focusOutline(context, colors)
         Styler.makeFocusable(this)
         FocusDecorator.attach(this, ringVisible, scale = false)
         addView(art, LayoutParams(Styler.dpInt(context, 92f), Styler.dpInt(context, 128f)))

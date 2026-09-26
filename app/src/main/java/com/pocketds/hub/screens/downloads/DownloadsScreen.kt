@@ -59,10 +59,13 @@ import kotlinx.coroutines.launch
 class DownloadsScreen(
     private val api: HubApi,
     private val ringVisible: () -> Boolean,
-    startWithAttention: Boolean = false
+    startWithAttention: Boolean = false,
+    private val targetTransferId: String = "",
+    private val targetMediaKey: String = ""
 ) : Screen, ContentModeScreen {
 
     override val title: String = "Transfers"
+    override val contentDomain: ContentMode? get() = if (targetTransferId.isNotBlank() || targetMediaKey.isNotBlank()) ContentMode.MEDIA else null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -78,6 +81,7 @@ class DownloadsScreen(
     private lateinit var bandwidthButton: TextView
     private var attentionOnly = startWithAttention
     private var latestActivity: ActivityResponse? = null
+    private var targetOpened = false
     private var mode = ContentMode.MEDIA
 
     private var host: ScreenHost? = null
@@ -85,7 +89,7 @@ class DownloadsScreen(
     private var visible = false
     private var failures = 0
     private var anyActive = false
-    private var includeFinished = false
+    private var includeFinished = targetTransferId.isNotBlank()
 
     /** Set while a mutation is in flight, so a poll cannot race its own result. */
     private var acting = false
@@ -111,7 +115,7 @@ class DownloadsScreen(
         val content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        mode = ContentModeSettings.get(context)
+        mode = if (targetTransferId.isNotBlank() || targetMediaKey.isNotBlank()) ContentMode.MEDIA else ContentModeSettings.get(context)
         content.addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
@@ -209,7 +213,7 @@ class DownloadsScreen(
 
     override fun onShow() {
         visible = true
-        val stored = host?.viewContext?.let(ContentModeSettings::get) ?: mode
+        val stored = contentDomain ?: host?.viewContext?.let(ContentModeSettings::get) ?: mode
         if (stored != mode) switchMode(stored)
         failures = 0
         if (activeAdapter().itemCount == 0) statusLine.text = "Asking the hub…"
@@ -347,6 +351,7 @@ class DownloadsScreen(
         if (mode == ContentMode.MEDIA) adapter else readingAdapter
 
     private fun switchMode(next: ContentMode) {
+        if (contentDomain != null && next != contentDomain) return
         if (mode == next) return
         mode = next
         val context = host?.viewContext ?: return
@@ -402,17 +407,31 @@ class DownloadsScreen(
     }
 
     private fun render(body: ActivityResponse) {
+        host?.viewContext?.let { com.pocketds.hub.settings.TransferAlertObserver.observe(it,body) }
         latestActivity = body
         anyActive = body.anyActive
-        val displayed = if (attentionOnly) body.items.filter { it.isBroken } else body.items
+        val related = if(targetMediaKey.isBlank()) body.items else body.items.filter { transferMatchesMedia(it,targetMediaKey) }
+        val displayed = if (attentionOnly) related.filter { it.isBroken } else related
         adapter.submit(displayed)
-        val attentionCount = body.items.count { it.isBroken }
+        if(!targetOpened && targetTransferId.isNotBlank()) {
+            targetOpened=true
+            val target=body.items.firstOrNull { it.id==targetTransferId }
+            list.post {
+                if(target!=null) openDiagnosis(target)
+                else host?.notify("This transfer is no longer in the active queue.")
+            }
+        }
+        val attentionCount = related.count { it.isBroken }
         attentionFilter.text = if (attentionOnly) "All transfers · $attentionCount need attention" else "Needs attention · $attentionCount"
         attentionFilter.isSelected = attentionOnly
 
         val s = body.summary
         summaryLine.setTextColor(colors.primaryText)
         summaryLine.text = buildString {
+            if (targetMediaKey.isNotBlank()) {
+                append(related.size).append(" transfers for this title · ").append(attentionCount).append(" need attention")
+                return@buildString
+            }
             append(s.downloading).append(" downloading")
             if (s.queued > 0) append(" · ").append(s.queued).append(" queued")
             if (s.seeding > 0) append(" · ").append(s.seeding).append(" seeding")
@@ -432,11 +451,12 @@ class DownloadsScreen(
             // naming the missing one beats a silently shorter list.
             body.partial.isNotEmpty() ->
                 body.partial.joinToString(" · ") { it.service + " " + it.reason }
+            targetMediaKey.isNotBlank() && displayed.isEmpty() -> if (attentionOnly) "No transfers currently need attention for this title." else "No transfers found for this title."
             attentionOnly && displayed.isEmpty() -> "No transfers need attention."
             attentionOnly -> "${displayed.size} transfers need attention"
             body.items.isEmpty() && includeFinished -> "Nothing in the queues."
             body.items.isEmpty() -> "Nothing running. Ⓨ shows finished items."
-            else -> "${body.items.size} items" + if (includeFinished) " · including finished" else ""
+            else -> "${displayed.size} items" + if (includeFinished) " · including finished" else ""
         }
         host?.refreshHints()
     }
@@ -475,7 +495,7 @@ class DownloadsScreen(
     }
 
     private fun openActions(item: ActivityItem) {
-        val choices = listOf(ChoiceOverlay.Choice("diagnosis", if (item.isBroken) "Why is this stuck?" else "Check transfer status", item.diagnosis?.title.orEmpty())) +
+        val choices = listOf(ChoiceOverlay.Choice("diagnosis", if (item.isBroken) "Why isn't it working?" else "Check transfer status", item.diagnosis?.title.orEmpty())) +
             item.actions.mapNotNull { action -> choiceFor(item, action) } + ChoiceOverlay.Choice("details", "Transfer details")
         if (choices.isEmpty()) {
             host?.notify("This token cannot control downloads")
@@ -516,7 +536,7 @@ class DownloadsScreen(
         val context = host?.viewContext ?: return
         val diagnosis = item.diagnosis
         overlay.resetBody()
-        overlay.open(if (item.isBroken) "Why is this stuck?" else "Transfer status", item.headline) { host?.refreshHints() }
+        overlay.open(if (item.isBroken) "Why isn't it working?" else "Transfer status", item.headline) { host?.refreshHints() }
         fun paragraph(value: String, heading: Boolean = false) {
             if (value.isBlank()) return
             overlay.body.addView(TextView(context).apply {

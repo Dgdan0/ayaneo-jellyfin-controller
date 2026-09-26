@@ -48,7 +48,8 @@ import com.pocketds.hub.ui.activateOnTap
 /** Persistent transfer manager and the device's offline library. */
 class OfflineScreen(
     private val api: HubApi,
-    private val ringVisible: () -> Boolean
+    private val ringVisible: () -> Boolean,
+    private val targetItemId: String = ""
 ) : Screen {
     override val title = "Offline"
     override val focusOnShow = true
@@ -64,6 +65,7 @@ class OfflineScreen(
     private lateinit var overlay: ChoiceOverlay
     private var mode = MODE_LIBRARY
     private var selectedId = ""
+    private var targetOpened = false
     private var renderedSignature = ""
     private var receiverRegistered = false
     private var renderPosted = false
@@ -103,7 +105,16 @@ class OfflineScreen(
         root.addView(page, FrameLayout.LayoutParams(MATCH, MATCH))
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
+        val target = if (!targetOpened && targetItemId.isNotBlank()) repository.forItem(targetItemId) else null
+        if (target != null) { mode=MODE_QUEUE; selectedId=target.id }
         render(force = true)
+        if (!targetOpened && targetItemId.isNotBlank()) {
+            targetOpened=true
+            content.post {
+                if(target!=null) {requestInitialFocus();showDownloadDetails(target)}
+                else host.notify("This download is no longer on this AYANEO.")
+            }
+        }
         return root
     }
 
@@ -555,6 +566,10 @@ class OfflineScreen(
             episodeTitle(row),
             "${stateText(row)}\n${fileSize(row.bytesDownloaded)} of ${fileSize(row.totalBytes)}\n${row.error}",
             buildList {
+                if (row.state == OfflineState.COMPLETE) {
+                    add(ChoiceOverlay.Choice("play", "Play downloaded video"))
+                    add(ChoiceOverlay.Choice("subtitles", "Subtitles", "Saved tracks and subtitle-only updates"))
+                }
                 if (row.state == OfflineState.PAUSED) add(ChoiceOverlay.Choice("resume", "Resume download"))
                 else if (row.state in setOf(OfflineState.QUEUED, OfflineState.DOWNLOADING, OfflineState.WAITING)) {
                     add(ChoiceOverlay.Choice("pause", "Pause download"))
@@ -564,6 +579,8 @@ class OfflineScreen(
             }, onCancel = host::refreshHints
         ) {
             when (it) {
+                "play" -> host.playItem(row.manifest.item.id)
+                "subtitles" -> host.push(SubtitleScreen(api,row.manifest.item.id,row.manifest.item.title,ringVisible))
                 "pause" -> OfflineDownloadService.pauseItem(host.viewContext, row.id)
                 "resume" -> OfflineDownloadService.resumeItem(host.viewContext, row.id)
                 "retry" -> OfflineDownloadService.retry(host.viewContext, row.id)

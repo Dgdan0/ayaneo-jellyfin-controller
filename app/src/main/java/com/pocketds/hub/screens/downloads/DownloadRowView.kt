@@ -49,7 +49,7 @@ class DownloadRowView(
         addView(header, LayoutParams(MATCH, WRAP))
 
         stageChip = TextView(context).apply {
-            textSize = 10f
+            textSize = 11f
             setPadding(
                 Styler.dpInt(context, 8f), Styler.dpInt(context, 2f),
                 Styler.dpInt(context, 8f), Styler.dpInt(context, 2f)
@@ -62,7 +62,7 @@ class DownloadRowView(
         titleView = TextView(context).apply {
             textSize = 14f
             setTextColor(colors.primaryText)
-            maxLines = 1
+            maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
         header.addView(titleView, LayoutParams(0, WRAP, 1f))
@@ -145,7 +145,8 @@ class DownloadRowView(
         // with extension: '.exe'" into "import failed" would have hidden the
         // single most useful thing this screen has ever said.
         val note = buildString {
-            item.arr?.problem?.takeIf { it.isNotEmpty() }?.let { append(it) }
+            item.diagnosis?.takeIf { it.needsAttention }?.title?.takeIf(String::isNotBlank)?.let { append(it) }
+            item.arr?.problem?.takeIf { it.isNotEmpty() && !contains(it) }?.let { if(isNotEmpty()) append(" · "); append(it) }
             for (warning in item.warnings) {
                 if (isNotEmpty()) append(" · ")
                 append(warningLabel(warning))

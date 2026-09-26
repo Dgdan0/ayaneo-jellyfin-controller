@@ -15,6 +15,8 @@ data class NotificationLimits(
 }
 
 object NotificationSettings {
+    fun alertsEnabled(context: Context): Boolean = Prefs.of(context).getBoolean("actionable_alerts", true)
+    fun setAlertsEnabled(context: Context, enabled: Boolean) { Prefs.of(context).edit().putBoolean("actionable_alerts",enabled).apply() }
     val choices = listOf(20, 40, 60, 100)
 
     private const val KEY_SONARR_LIMIT = "notification_limit_sonarr"

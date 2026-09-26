@@ -89,6 +89,7 @@ class LibraryDetailScreen(
     private lateinit var overlay: ChoiceOverlay
     private lateinit var moreAction: TextView
     private var lastFocusKey: String? = null
+    private var watchProgressLabel = ""
     private lateinit var credits: TextView
     private lateinit var mediaInfo: TextView
     private lateinit var status: TextView
@@ -105,6 +106,7 @@ class LibraryDetailScreen(
     private lateinit var watchedAction: TextView
     private lateinit var favoriteAction: TextView
     private lateinit var downloadAction: TextView
+    private lateinit var subtitleAction: TextView
     private lateinit var seasonLabel: TextView
     private lateinit var seasons: RecyclerView
     private val seasonAdapter = SeasonAdapter()
@@ -133,13 +135,23 @@ class LibraryDetailScreen(
                 originalTitle = header.subtitleView; meta = header.metadataView; progress = header.stateView
                 overview = header.overview; actions = header.actions
                 playAction = actionButton("Play", ACTION_PLAY)
+                subtitleAction = TextView(context).apply {
+                    text = "Subtitles"; textSize = 14f; gravity = Gravity.CENTER
+                    contentDescription = "Subtitles"; tag = "subtitles"
+                    setTextColor(colors.primaryText); setPadding(dp(14), dp(8), dp(14), dp(8))
+                    background = Styler.chipBackground(context, colors)
+                    layoutParams = LinearLayout.LayoutParams(WRAP, dp(48)).apply { marginEnd = dp(12) }
+                    Styler.makeFocusable(this); FocusDecorator.attach(this, ringVisible, scale = false)
+                    setOnFocusChangeListener { view, _ -> FocusDecorator.refresh(view, ringVisible()); host.refreshHints() }
+                    activateOnTap { performAction("subtitles") }
+                }
                 favoriteAction = actionButton("Favourite", ACTION_FAVORITE)
                 downloadAction = actionButton("Download", ACTION_DOWNLOAD)
                 moreAction = actionButton("More actions", ACTION_MORE)
                 restartAction = actionButton("Start over", ACTION_RESTART)
                 optionsAction = actionButton("Playback options", ACTION_OPTIONS)
                 watchedAction = actionButton("Mark watched", ACTION_WATCHED)
-                listOf(playAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
+                listOf(playAction, subtitleAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
                     .forEach { actions.addView(it) }
                 playAction.layoutParams = LinearLayout.LayoutParams(dp(54), dp(54)).apply { marginEnd = dp(18) }
                 fun playFace(fill: Int, focused: Boolean) = ThemeGradientDrawable().apply {
@@ -233,7 +245,7 @@ class LibraryDetailScreen(
         when {
             seasons.hasFocus() -> focusedSeason()?.let { lastFocusKey = "season:${it.id}" }
             episodePreview.hasFocus() -> lastFocusKey = "continue"
-            else -> listOf(playAction, favoriteAction, downloadAction, moreAction).firstOrNull { it.hasFocus() }
+            else -> listOf(playAction, subtitleAction, favoriteAction, downloadAction, moreAction).firstOrNull { it.hasFocus() }
                 ?.let { lastFocusKey = it.tag as? String }
         }
         selectedSeason = focusedSeasonPosition().takeIf { it >= 0 } ?: selectedSeason
@@ -257,7 +269,7 @@ class LibraryDetailScreen(
                 return true
             }
         }
-        listOf(playAction, favoriteAction, downloadAction, moreAction)
+        listOf(playAction, subtitleAction, favoriteAction, downloadAction, moreAction)
             .firstOrNull { it.tag == lastFocusKey && it.visibility == View.VISIBLE && it.isEnabled }
             ?.let { return it.requestFocus() }
         if (::playAction.isInitialized && playAction.visibility == View.VISIBLE && playAction.isEnabled) {
@@ -285,7 +297,7 @@ class LibraryDetailScreen(
             return@buildList
         }
         val value = item
-        val focusedAction = listOf(playAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
+        val focusedAction = listOf(playAction, subtitleAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
             .firstOrNull { it.visibility == View.VISIBLE && it.hasFocus() }
         if (focusedAction != null) {
             add(ButtonHint.activate(focusedAction.contentDescription.toString()))
@@ -320,6 +332,7 @@ class LibraryDetailScreen(
         }
         PadAction.Activate -> when {
             playAction.hasFocus() -> { playAction.performClick(); true }
+            subtitleAction.hasFocus() -> { subtitleAction.performClick(); true }
             restartAction.hasFocus() -> { restartAction.performClick(); true }
             optionsAction.hasFocus() -> { optionsAction.performClick(); true }
             watchedAction.hasFocus() -> { watchedAction.performClick(); true }
@@ -357,7 +370,7 @@ class LibraryDetailScreen(
     }
 
     private fun moveActionFocus(delta: Int) {
-        val available = listOf(playAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
+        val available = listOf(playAction, subtitleAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
             .filter { it.visibility == View.VISIBLE && it.isEnabled && it.isFocusable }
         val current = available.indexOfFirst { it.hasFocus() }
         if (current < 0) return
@@ -416,6 +429,7 @@ class LibraryDetailScreen(
             if (value.favorite) add("★ Favourite")
         }.joinToString(" · ")
         progress.visibility = if (progress.text.isNullOrBlank()) View.GONE else View.VISIBLE
+        watchProgressLabel = progress.text.toString()
         overview.bind(value.overview)
         credits.text = creditText(value)
         credits.visibility = if (credits.text.isNullOrBlank()) View.GONE else View.VISIBLE
@@ -441,6 +455,7 @@ class LibraryDetailScreen(
     private fun renderActions(value: LibraryItem) {
         actions.visibility = if (value.type in setOf("movie", "episode", "series")) View.VISIBLE else View.GONE
         val playable = value.type == "movie" || value.type == "episode"
+        subtitleAction.visibility = if (playable) View.VISIBLE else View.GONE
         val visibleActions = DetailActions.forType(value.type).visible
         listOf(playAction, restartAction, optionsAction, watchedAction, moreAction, favoriteAction, downloadAction).forEach {
             it.visibility = if (it.tag in visibleActions) View.VISIBLE else View.GONE
@@ -467,6 +482,9 @@ class LibraryDetailScreen(
             OfflineRepository.get(requireNotNull(host).viewContext).forItem(value.id)
         } else null
         val downloaded = local?.state == com.pocketds.hub.offline.OfflineState.COMPLETE
+        progress.text = listOf(watchProgressLabel, if (downloaded) "Available offline · ${OfflineRepository.get(requireNotNull(host).viewContext).playbackPlan(value.id, "resume")?.subtitleTracks?.size ?: 0} saved subtitle tracks" else if (local != null) "Offline download: ${local.state.wire}" else "")
+            .filter(String::isNotBlank).distinct().joinToString(" · ")
+        progress.visibility = if (progress.text.isBlank()) View.GONE else View.VISIBLE
         downloadAction.text = ""
         downloadAction.contentDescription = when {
             downloaded -> "Downloaded"

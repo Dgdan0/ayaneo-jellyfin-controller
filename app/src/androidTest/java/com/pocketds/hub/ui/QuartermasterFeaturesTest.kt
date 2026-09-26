@@ -264,7 +264,7 @@ class QuartermasterFeaturesTest {
                 val rows=all(root).filterIsInstance<com.pocketds.hub.screens.downloads.DownloadRowView>()
                 assertEquals(1, rows.size)
                 rows.single().requestFocus(); assertTrue(screen.onPad(PadAction.Activate))
-                var target: View=all(root).filterIsInstance<TextView>().first { it.text=="Why is this stuck?" }
+                var target: View=all(root).filterIsInstance<TextView>().first { it.text=="Why isn't it working?" }
                 while(!target.isClickable) target=target.parent as View
                 target.performClick()
             }
