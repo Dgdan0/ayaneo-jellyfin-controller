@@ -19,6 +19,7 @@ import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.PosterCardView
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
+import com.pocketds.hub.ui.useResponsivePosterColumns
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -90,6 +91,7 @@ class PersonScreen(
 
         grid = RecyclerView(context).apply {
             layoutManager = GridLayoutManager(context, COLUMNS)
+            useResponsivePosterColumns(COLUMNS)
             adapter = this@PersonScreen.adapter
             setHasFixedSize(true)
             setItemViewCacheSize(COLUMNS * 3)
@@ -203,6 +205,6 @@ class PersonScreen(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-        const val COLUMNS = 4
+        const val COLUMNS = 7
     }
 }

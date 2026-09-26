@@ -101,6 +101,7 @@ class OfflineSeriesScreen(
         }
         when ((host.viewContext as? android.app.Activity)?.currentFocus?.tag) {
             is TaggedTarget -> { add(ButtonHint.activate("Play")); add(ButtonHint.secondary("Subtitles")) }
+            is TaggedSubtitles -> add(ButtonHint.activate("Subtitles"))
             is TaggedSeason -> add(ButtonHint.activate("Open season"))
         }
         add(ButtonHint.back())
@@ -116,6 +117,7 @@ class OfflineSeriesScreen(
         if (action != PadAction.Activate) return false
         return when (val tag = (host.viewContext as? android.app.Activity)?.currentFocus?.tag) {
             is TaggedTarget -> { host.playItem(tag.target.row.manifest.item.id, resumeMode(tag.target)); true }
+            is TaggedSubtitles -> { host.push(SubtitleScreen(api, tag.target.row.manifest.item.id, tag.target.row.manifest.item.title, ringVisible)); true }
             is TaggedSeason -> { host.push(OfflineSeasonScreen(api, seriesTitle, tag.season, ringVisible)); true }
             else -> false
         }
@@ -163,7 +165,9 @@ class OfflineSeriesScreen(
             detail.actions.addView(TextView(host.viewContext).apply {
                 DetailStyler.action(this,colors,primary=false)
                 text="Subtitles"
-                layoutParams=LinearLayout.LayoutParams(WRAP,dp(48));tag=TaggedTarget(target)
+                setPadding(dp(16), 0, dp(16), 0)
+                layoutParams=LinearLayout.LayoutParams(WRAP,dp(48)).apply { marginStart = dp(8) }
+                tag=TaggedSubtitles(target)
                 contentDescription="Subtitles for ${target.row.manifest.item.title}"
                 FocusDecorator.attach(this,ringVisible,scale=false)
                 activateOnTap { host.push(SubtitleScreen(api,target.row.manifest.item.id,target.row.manifest.item.title,ringVisible)) }
@@ -255,6 +259,7 @@ class OfflineSeriesScreen(
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
     private sealed interface TaggedKey { val key: String }
     private data class TaggedTarget(val target: OfflineCatalogPlayTarget, override val key: String = "play") : TaggedKey
+    private data class TaggedSubtitles(val target: OfflineCatalogPlayTarget) : TaggedKey { override val key = "subtitles" }
     private data class TaggedSeason(val season: OfflineCatalogSeason) : TaggedKey { override val key = "season:${season.key}" }
     private companion object { const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT; const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT }
 }

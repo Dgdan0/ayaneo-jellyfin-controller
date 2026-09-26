@@ -329,30 +329,14 @@ class OfflineScreen(
         val size = groups.sumOf { entry -> entry.rows.sumOf { it.totalBytes } }
         summary.text = "${groups.size} title${if (groups.size == 1) "" else "s"} · $complete file${if (complete == 1) "" else "s"} · ${fileSize(size)}"
         if (groups.isEmpty()) { empty("Downloaded movies and series will appear here and remain playable without a network."); return }
-        val grid = object: GridLayout(host.viewContext) {
-            override fun onSizeChanged(w:Int,h:Int,oldw:Int,oldh:Int) {
-                super.onSizeChanged(w,h,oldw,oldh)
-                val columns=com.pocketds.hub.state.LibraryGridSizing.columns(w,paddingLeft+paddingRight,resources.displayMetrics.density)
-                if(columns!=columnCount) {
-                    columnCount=columns
-                    for(i in 0 until childCount) {
-                        getChildAt(i).layoutParams=(getChildAt(i).layoutParams as GridLayout.LayoutParams).apply {
-                            columnSpec=GridLayout.spec(i%columns,1f);rowSpec=GridLayout.spec(i/columns)
-                        }
-                    }
-                }
-            }
-        }.apply {
-            columnCount = 5
-            alignmentMode = GridLayout.ALIGN_BOUNDS
-            useDefaultMargins = false
+        val grid = com.pocketds.hub.ui.PosterGridLayout(host.viewContext).apply {
             setPadding(dp(8), dp(12), dp(8), dp(22))
         }
         groups.forEach { value ->
             grid.addView(catalogCard(value), GridLayout.LayoutParams().apply {
                 width = 0
                 height = WRAP
-                columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                columnSpec = GridLayout.spec(GridLayout.UNDEFINED)
                 setMargins(dp(8), dp(8), dp(8), dp(8))
             })
         }
@@ -395,6 +379,7 @@ class OfflineScreen(
         if(value.isSeries) return card
         return LinearLayout(host.viewContext).apply {
             orientation=LinearLayout.VERTICAL
+            clipChildren=false; clipToPadding=false
             addView(card,LinearLayout.LayoutParams(MATCH,WRAP))
             addView(TextView(context).apply {
                 text="Subtitles";textSize=12f;setTextColor(colors.accent)

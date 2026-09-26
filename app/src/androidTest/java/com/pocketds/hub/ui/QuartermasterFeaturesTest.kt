@@ -28,6 +28,52 @@ import org.junit.runner.RunWith
 /** Runs only in .uitest: synthetic failures never touch the user's real queue. */
 @RunWith(AndroidJUnit4::class)
 class QuartermasterFeaturesTest {
+    @Test fun offlineSeriesSubtitleButtonOpensSubtitlesWithControllerAndRestoresFocus() {
+        val ins = InstrumentationRegistry.getInstrumentation()
+        val activity = ins.startActivitySync(Intent(ins.targetContext, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val key = "subtitle-action-${System.nanoTime()}"
+        val repository = OfflineRepository.get(activity)
+        repository.enqueue("Example series", "", listOf(OfflineManifest(batchKey=key, clientItemKey=key,
+            item=LibraryItem(id=key, type="episode", title="Example episode", seriesId=key, seasonId="$key-season", seasonNumber=1, indexNumber=1),
+            source=OfflineSource(id="source", container="mp4", sizeBytes=4))))
+        val row = checkNotNull(repository.forItem(key))
+        repository.mediaFile(row).writeText("film")
+        repository.finish(row.id)
+        var played = false
+        var pushed: Any? = null
+        val api = Proxy.newProxyInstance(HubApi::class.java.classLoader, arrayOf(HubApi::class.java)) { _, method, _ -> error("Unexpected ${method.name}") } as HubApi
+        val host = Proxy.newProxyInstance(ScreenHost::class.java.classLoader, arrayOf(ScreenHost::class.java)) { _, method, args ->
+            when (method.name) {
+                "getViewContext" -> activity
+                "playItem" -> { played=true; null }
+                "push" -> { pushed=args!![0]; null }
+                else -> null
+            }
+        } as ScreenHost
+        val screen = com.pocketds.hub.screens.offline.OfflineSeriesScreen(api, key, "Example series") { true }
+        lateinit var button: View
+        try {
+            ins.runOnMainSync {
+                val root = screen.onCreateView(host, FrameLayout(activity))
+                activity.setContentView(root); screen.onShow()
+                button = all(root).filterIsInstance<TextView>().first { it.text == "Subtitles" }
+            }
+            ins.waitForIdleSync()
+            ins.runOnMainSync {
+                assertTrue(button.requestFocus())
+                assertTrue(screen.onPad(PadAction.Activate))
+                assertTrue(pushed is com.pocketds.hub.screens.library.SubtitleScreen)
+                assertFalse("Subtitle action must never launch playback", played)
+                screen.onHide(); button.clearFocus(); screen.onShow()
+            }
+            ins.waitForIdleSync()
+            ins.runOnMainSync { assertTrue("Returning should restore the subtitle button", button.hasFocus()) }
+        } finally {
+            ins.runOnMainSync { screen.onHide(); screen.onDestroyView(); activity.finish() }
+            repository.remove(row.id)
+        }
+    }
+
     @Test fun downloadedTitleKeepsItsLocalSubtitleVisibleWithoutTheHub() {
         val ins=InstrumentationRegistry.getInstrumentation()
         val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

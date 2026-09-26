@@ -17,11 +17,14 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
+import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -42,6 +45,7 @@ class OfflineSubtitleSyncDeviceTest {
         val bytes="1\n00:00:00,000 --> 00:00:01,000\nHello\n".toByteArray()
         val mediaRequests=AtomicInteger()
         val subtitleRequests=AtomicInteger()
+        val truncateSubtitle=AtomicBoolean(false)
         val server=ServerSocket(0,8,InetAddress.getByName("127.0.0.1")).apply { soTimeout=500 }
         val thread=Thread {
             while(!server.isClosed) {
@@ -64,7 +68,8 @@ class OfflineSubtitleSyncDeviceTest {
                         val code=if(payload.isEmpty()) "404 Not Found" else "200 OK"
                         val type=if(path.endsWith("/renew")) "application/json" else "text/plain"
                         socket.getOutputStream().apply {
-                            write("HTTP/1.1 $code\r\nContent-Type: $type\r\nContent-Length: ${payload.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                            val declaredSize=payload.size + if(path.endsWith("/subtitles/5") && truncateSubtitle.get()) 100 else 0
+                            write("HTTP/1.1 $code\r\nContent-Type: $type\r\nContent-Length: $declaredSize\r\nConnection: close\r\n\r\n".toByteArray())
                             write(payload);flush()
                         }
                     }
@@ -93,6 +98,18 @@ class OfflineSubtitleSyncDeviceTest {
             val updated=checkNotNull(repository.completedForItem(item))
             assertEquals(String(bytes),repository.subtitleFile(updated,5,"srt").readText())
             assertTrue(repository.playbackPlan(item,"resume")!!.subtitleTracks.any { it.index==5 && it.external })
+            truncateSubtitle.set(true)
+            try {
+                runBlocking { OfflineSubtitleSync(repository,api).sync(PendingSubtitleSync(row.id,"he",0,0,"")) }
+                fail("A truncated subtitle must not replace the usable file")
+            } catch (_: java.io.IOException) { }
+            assertEquals(String(bytes),repository.subtitleFile(updated,5,"srt").readText())
+            assertFalse(repository.localSubtitleFiles(updated).any { it.name.endsWith(".sync-part") })
+            truncateSubtitle.set(false)
+            runBlocking { OfflineSubtitleSync(repository,api).sync(PendingSubtitleSync(row.id,"he",0,0,"")) }
+            assertEquals("film",repository.mediaFile(row).readText())
+            assertEquals(0,mediaRequests.get())
+            assertEquals(3,subtitleRequests.get())
         } finally {
             if(rowId.isNotEmpty()) repository.remove(rowId)
             HubSettings.save(context,oldUrl,oldToken)

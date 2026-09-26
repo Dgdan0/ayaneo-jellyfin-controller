@@ -16,7 +16,7 @@ At the initial checkpoint, production Hub was `0.3.1-monitor` and the daily Andr
 
 ## Unified online/offline subtitle update — 26 September
 
-The daily AYANEO app is now v0.3.5/code20. An offline movie or episode opens the same Subtitles screen as its online library item through the Y controller action or touch UI. The screen shows local tracks alongside Bazarr's installed tracks, download history, match score and the user's local quality rating. Selecting a new provider result writes through Bazarr, asks Jellyfin to refresh that one title and queues an update for any completed offline copy. The explicit “Prepare online subtitles and refresh this AYANEO” action also works while an earlier subtitle update is pending. If the Hub is unreachable, saved tracks remain visible and the screen offers a retry.
+This subtitle deployment used v0.3.5/code20; the subsequent browsing audit below advances the app to v0.3.7/code22. An offline movie or episode opens the same Subtitles screen as its online library item through the Y controller action or touch UI. The screen shows local tracks alongside Bazarr's installed tracks, download history, match score and the user's local quality rating. Selecting a new provider result writes through Bazarr, asks Jellyfin to refresh that one title and queues an update for any completed offline copy. The explicit “Prepare online subtitles and refresh this AYANEO” action also works while an earlier subtitle update is pending. If the Hub is unreachable, saved tracks remain visible and the screen offers a retry.
 
 The app persists a subtitle-only retry queue per profile. Its worker renews an offline grant, checks the item, media source and size against the existing video, fetches bounded sidecars, swaps them with recoverable backups and updates the local playback manifest. It never requests the video media URL during this update. A separate worker allows this to proceed while video downloads are queued.
 
@@ -29,6 +29,16 @@ The FireDaemon service now runs Hub `0.3.3-offline-subs`; its installed binary h
 Validation: `go test ./...` and `go vet ./...` passed, including path, alias update, ticket and refresh tests. `gradlew.bat testDebugUnitTest assembleDebug assembleUitest assembleUitestAndroidTest` passed; the smaller final UI changes passed `testDebugUnitTest assembleDebug` and the uitest artifacts were rebuilt. `OfflineSubtitleSyncDeviceTest` passed on the AYANEO: it exercised actual sidecar transfer and verified no media URL request or video mutation. A live provider subtitle replacement was not performed because it would replace the user's chosen subtitle; the two already-installed Bazarr files provided the end-to-end refresh check.
 
 Live calendar posters, week navigation and title open/back passed. Production transfers are currently empty, so failed-transfer UI is tested with deterministic fixtures in the isolated `.uitest` app. No daily app data was cleared.
+
+## Subtitle and browsing audit — v0.3.7/code22
+
+The Offline grid now assigns widths from the available columns, so one or three titles keep the same compact poster size as a full row. Shared poster focus outlines follow the artwork, titles reserve two lines, and focus reveals the complete card with scale clearance. Nested horizontal shelves explicitly reveal their selected card in the outer vertical list; the shelf heading stays visible too when the row fits. Discover focus callbacks now apply that behavior, and person filmographies use responsive columns. Downloaded episode cards grow with their text and reserve clearance around the first focus border.
+
+The audit also fixed two subtitle defects: incomplete HTTP transfers now remove their staged `.sync-part` files while preserving existing subtitles, and A on the Offline series Subtitles button opens Subtitles instead of starting playback. The button has its own focus identity, restores focus on return and has proper spacing from Play.
+
+Validation: 552 JVM tests and all debug/uitest builds passed. Five device tests passed in the isolated `.uitest` app: sparse grids and up/down caption visibility; nested shelf navigation; interrupted subtitle transfer and retry without a video request or mutation; local subtitle visibility when the Hub is unavailable; and controller activation/focus restoration on the series subtitle action. The two browsing tests passed again after the final shelf-heading refinement. Hub subtitle tests passed; production FireDaemon remained Running and `/v1/health/live` returned 200. A read-only Dune check still found two indexed English/Hebrew streams matching the same video managed by Bazarr.
+
+Live walkthrough covered media Home/Discover/Library, Offline movie cards, series/seasons/episodes, and Books Home/library cards. Before/after screenshots and test evidence are under gitignored `.local-backups/audit-*.png`. This is targeted landscape/controller coverage on the AYANEO, not a claim of every font size, theme, title or provider being tested. No provider subtitle was replaced during the audit.
 
 ## Installed and live-checked on 26 September
 

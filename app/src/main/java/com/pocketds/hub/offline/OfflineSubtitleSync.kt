@@ -40,6 +40,7 @@ class OfflineSubtitleSync(private val repository: OfflineRepository, private val
                 target.parentFile?.mkdirs()
                 val temporary = File(target.absolutePath + ".sync-part")
                 temporary.delete()
+                staged += temporary to target
                 api.offlineDownloadCall(subtitle.url, 0).execute().use { http ->
                     if (!http.isSuccessful) throw IOException("Subtitle HTTP ${http.code}")
                     val body = http.body ?: throw IOException("Empty subtitle response")
@@ -61,7 +62,6 @@ class OfflineSubtitleSync(private val repository: OfflineRepository, private val
                         }
                     }
                 }
-                staged += temporary to target
             }
             for ((temporary, target) in staged) {
                 if (target.exists()) {

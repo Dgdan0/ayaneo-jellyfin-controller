@@ -46,9 +46,8 @@ class PosterCardView(
     private var boundProgress = 0.0
 
     init {
-        foreground = Styler.focusOutline(context, colors)
         orientation = VERTICAL
-        background = Styler.cardBackground(context, colors, 8f, android.graphics.Color.TRANSPARENT, 2f)
+        background = ColorDrawable(android.graphics.Color.TRANSPARENT)
         Styler.makeFocusable(this)
         isClickable = true
         // The whole card is one focus target. Without this the image, title and
@@ -59,7 +58,10 @@ class PosterCardView(
         val compact = posterHeightDp < 170f
         setPadding(0, 0, 0, Styler.dpInt(context, 6f))
 
-        val posterWrap = ArtworkFrame(context, 2f / 3f)
+        val posterWrap = ArtworkFrame(context, 2f / 3f).apply {
+            isDuplicateParentStateEnabled = true
+            foreground = Styler.focusOutline(context, colors)
+        }
         poster = ImageView(context).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
@@ -99,7 +101,8 @@ class PosterCardView(
 
         title = TextView(context).apply {
             textSize = if (compact) 12f else 13f
-            maxLines = 1
+            maxLines = 2
+            minLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
             setTextColor(colors.primaryText)
             setPadding(0, Styler.dpInt(context, if (compact) 3f else 6f), 0, 0)

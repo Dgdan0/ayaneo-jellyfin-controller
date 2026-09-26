@@ -993,6 +993,7 @@ class DiscoverScreen(
         card.setTag(TAG_HIT, hit)
         card.activateOnTap { openDetail(hit) }
         card.setOnFocusChangeListener { _, hasFocus ->
+            FocusDecorator.refresh(card, ringVisible())
             if (hasFocus) {
                 modeStates.recall(ContentMode.MEDIA)?.focusedKey = hit.media.key
                 host?.refreshHints()
@@ -1009,6 +1010,7 @@ class DiscoverScreen(
         card.setTag(TAG_READING_ITEM, item)
         card.activateOnTap { openReadingDetail(item) }
         card.setOnFocusChangeListener { _, hasFocus ->
+            FocusDecorator.refresh(card, ringVisible())
             if (hasFocus) {
                 modeStates.recall(ContentMode.BOOKS)?.focusedKey = item.key
                 host?.refreshHints()

@@ -74,9 +74,13 @@ class OfflineSeasonScreen(
                 textSize = 11f; setTextColor(colors.mutedText); setPadding(0, dp(3), 0, dp(7))
             }
             addView(summary)
-            row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(2), dp(5), dp(16), dp(80)) }
+            row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL; clipChildren = false; clipToPadding = false
+                setPadding(dp(10), dp(10), dp(16), dp(16))
+            }
             addView(HorizontalScrollView(context).apply {
-                isFocusable = false; isHorizontalScrollBarEnabled = false; clipToPadding = false; addView(row)
+                isFocusable = false; isHorizontalScrollBarEnabled = false
+                clipToPadding = false; clipChildren = false; addView(row)
             }, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }, FrameLayout.LayoutParams(MATCH, MATCH))
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
@@ -152,7 +156,8 @@ class OfflineSeasonScreen(
             image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
             addView(image, LinearLayout.LayoutParams(MATCH, dp(125)))
             addView(TextView(context).apply {
-                text = "E${item.indexNumber} · ${item.title}"; textSize = 13f; maxLines = 1; setTextColor(colors.primaryText)
+                text = "E${item.indexNumber} · ${item.title}"; textSize = 13f; maxLines = 2; minLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END; setTextColor(colors.primaryText)
                 setPadding(dp(2), dp(5), dp(2), 0)
             })
             addView(TextView(context).apply {
@@ -165,7 +170,7 @@ class OfflineSeasonScreen(
                 contentDescription = "Subtitles for ${item.title}"
                 activateOnTap { host.push(SubtitleScreen(api,item.id,item.title,ringVisible)) }
             })
-            layoutParams = LinearLayout.LayoutParams(dp(230), dp(193)).apply { marginEnd = dp(9) }
+            layoutParams = LinearLayout.LayoutParams(dp(230), ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(9) }
             contentDescription = "Episode ${item.indexNumber}, ${item.title}, ${episodeStatus(item.runtimeSeconds, progress)}"
             FocusDecorator.attach(this, ringVisible)
             setOnFocusChangeListener { view, hasFocus ->
