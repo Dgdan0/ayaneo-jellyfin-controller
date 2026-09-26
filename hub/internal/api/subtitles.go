@@ -22,6 +22,7 @@ type subtitleTarget struct {
 	Movie        bool
 	ID, SeriesID int
 	Path         string
+	JellyfinPath string
 	FileID       int
 }
 type subtitleTicket struct {
@@ -33,6 +34,7 @@ type subtitleTicket struct {
 type subtitleRecord struct {
 	ID          string `json:"id"`
 	Language    string `json:"language"`
+	Code        string `json:"code,omitempty"`
 	Provider    string `json:"provider"`
 	Score       string `json:"score"`
 	Date        string `json:"date"`
@@ -118,6 +120,7 @@ func (s *Server) resolveSubtitleTarget(ctx context.Context, c *jellyfin.Client, 
 		return target, fmt.Errorf("Bazarr has no file for this item")
 	}
 	target.Path = media.Path
+	target.JellyfinPath = item.Path
 	return target, nil
 }
 func (s *Server) subtitleRequest(w http.ResponseWriter, r *http.Request) (*jellyfin.Client, bool) {
@@ -161,10 +164,13 @@ func (s *Server) handleSubtitles(w http.ResponseWriter, r *http.Request) {
 		if h.Action != 1 && h.Action != 2 && h.Action != 3 && h.Action != 4 && h.Action != 6 && h.Action != 7 {
 			continue
 		}
-		record := subtitleRecord{ID: subtitleHash(fmt.Sprint(target.Movie, target.ID), h.ParsedTimestamp, h.Path, h.Provider, h.Score), Language: h.Language.Name, Provider: h.Provider, Score: h.Score, Date: h.ParsedTimestamp, Description: h.Description}
+		record := subtitleRecord{ID: subtitleHash(fmt.Sprint(target.Movie, target.ID), h.ParsedTimestamp, h.Path, h.Provider, h.Score), Language: h.Language.Name, Code: h.Language.Code2, Provider: h.Provider, Score: h.Score, Date: h.ParsedTimestamp, Description: h.Description}
 		for _, track := range media.Subtitles {
 			if track.Path != nil && *track.Path == h.Path && h.Path != "" && !seenPath[h.Path] {
 				record.Installed = true
+				if record.Code == "" {
+					record.Code = track.Code2
+				}
 				record.Forced = track.Forced
 				record.HI = track.HI
 				matched[h.Path] = true
@@ -182,13 +188,47 @@ func (s *Server) handleSubtitles(w http.ResponseWriter, r *http.Request) {
 		if matched[path] && path != "" {
 			continue
 		}
-		records = append(records, subtitleRecord{ID: subtitleHash(target.Path, path, track.Code2, fmt.Sprint(track.Forced, track.HI, i)), Language: track.Name, Installed: true, Embedded: path == "", Forced: track.Forced, HI: track.HI})
+		records = append(records, subtitleRecord{ID: subtitleHash(target.Path, path, track.Code2, fmt.Sprint(track.Forced, track.HI, i)), Language: track.Name, Code: track.Code2, Installed: true, Embedded: path == "", Forced: track.Forced, HI: track.HI})
 	}
 	warning := ""
 	if historyErr != nil {
 		warning = "Installed tracks loaded; Bazarr download history is unavailable."
 	}
 	writeJSON(w, 200, map[string]any{"records": records, "canDownload": TokenFrom(r.Context()).HasScope("control"), "warning": warning})
+}
+
+// A subtitle may be present in Bazarr while Jellyfin's media streams still
+// reflect the earlier scan. Refresh only this item before the handheld asks
+// for a new offline sidecar manifest.
+func (s *Server) handleSubtitleRefresh(w http.ResponseWriter, r *http.Request) {
+	if !s.requireControl(w, r) || !s.requireDownload(w, r) {
+		return
+	}
+	c, ok := s.subtitleRequest(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := timeoutFor(r, 30*time.Second)
+	defer cancel()
+	target, err := s.resolveSubtitleTarget(ctx, c, r.PathValue("itemId"))
+	if err != nil {
+		writeError(w, r, 502, Error{Code: CodeUpstreamDown, Message: "Could not match this item to a downloaded file for subtitle refresh."})
+		return
+	}
+	media, err := s.bazarr.SubtitleMedia(ctx, target.Movie, target.ID)
+	if err != nil {
+		writeUpstreamError(w, r, "bazarr", err)
+		return
+	}
+	if err := prepareSubtitleSidecars(target.JellyfinPath, target.Path, media.Subtitles); err != nil {
+		writeError(w, r, 409, Error{Code: CodeInvalidRequest, Message: "Could not make Bazarr's subtitle files visible to Jellyfin: " + err.Error()})
+		return
+	}
+	if err := c.RefreshItem(ctx, r.PathValue("itemId")); err != nil {
+		writeUpstreamError(w, r, "jellyfin", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "action": "subtitle_item_refresh"})
 }
 func (s *Server) handleSubtitleSearch(w http.ResponseWriter, r *http.Request) {
 	if !s.requireControl(w, r) {
@@ -298,5 +338,13 @@ func (s *Server) handleSubtitleDownload(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, 502, Error{Code: CodeUpstreamDown, Message: "Download could not be confirmed. Refresh installed tracks and history before searching again."})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "action": "subtitle_download"})
+	warning := ""
+	media, mediaErr := s.bazarr.SubtitleMedia(ctx, target.Movie, target.ID)
+	if mediaErr != nil {
+		warning = "Saved in Bazarr, but could not inspect the subtitle file for Jellyfin. Refresh this title later."
+	} else if err := prepareSubtitleSidecars(target.JellyfinPath, target.Path, media.Subtitles); err != nil {
+		warning = "Saved in Bazarr, but could not make the file visible to Jellyfin: " + err.Error()
+	}
+	refreshStarted := c.RefreshItem(ctx, ticket.Item) == nil
+	writeJSON(w, 200, map[string]any{"ok": true, "action": "subtitle_download", "jellyfinRefreshStarted": refreshStarted, "warning": warning})
 }

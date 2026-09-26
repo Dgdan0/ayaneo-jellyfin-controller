@@ -12,7 +12,21 @@ Feature worktree: `C:/Users/Dgdan/.codex/worktrees/quartermaster-features/Ayaneo
 - Download diagnostics: Transfers > Needs attention; explanation, source evidence and next step; optional scoped resume. Failed title pipelines link to the attention list. Commits `bca0d1a`, `3d8b2dd`.
 - Discover cached-pagination crash fixed and device regression covered. Commits `77956a6`, `727973d`.
 
-Production Hub is now `0.3.1-monitor`; the daily Android app v0.3.1/code16 includes Upcoming, diagnostics, bandwidth, subtitles and monitoring. The FireDaemon `AyaneoHub` service is running on port 8791 after the combined deployment; its installed binary hash matches the tested ready binary (`E6C9E73286589A8693E2951ADE090532185D474F7FEDDF60BD0A46A62C68C981`). The AYANEO daily app was updated in place with `adb install -r` on `100.97.20.86:42603`, preserving app data.
+At the initial checkpoint, production Hub was `0.3.1-monitor` and the daily Android app was v0.3.1/code16. The FireDaemon `AyaneoHub` service was running on port 8791 after that combined deployment; its installed binary hash matched the tested ready binary (`E6C9E73286589A8693E2951ADE090532185D474F7FEDDF60BD0A46A62C68C981`). The AYANEO daily app was updated in place with `adb install -r` on `100.97.20.86:42603`, preserving app data. Current versions and the later subtitle deployment are recorded below.
+
+## Unified online/offline subtitle update — 26 September
+
+The daily AYANEO app is now v0.3.5/code20. An offline movie or episode opens the same Subtitles screen as its online library item through the Y controller action or touch UI. The screen shows local tracks alongside Bazarr's installed tracks, download history, match score and the user's local quality rating. Selecting a new provider result writes through Bazarr, asks Jellyfin to refresh that one title and queues an update for any completed offline copy. The explicit “Prepare online subtitles and refresh this AYANEO” action also works while an earlier subtitle update is pending. If the Hub is unreachable, saved tracks remain visible and the screen offers a retry.
+
+The app persists a subtitle-only retry queue per profile. Its worker renews an offline grant, checks the item, media source and size against the existing video, fetches bounded sidecars, swaps them with recoverable backups and updates the local playback manifest. It never requests the video media URL during this update. A separate worker allows this to proceed while video downloads are queued.
+
+Live Dune: Part Two exposed a real cross-service naming mismatch: Bazarr had English and Hebrew `.srt` files beside the movie, but their basenames did not match the video stem, so Jellyfin initially indexed zero subtitle streams. The Hub now verifies that Bazarr and Jellyfin refer to the same existing video, validates same-folder sidecars and language codes, writes bounded `pocketds` copies under the movie stem without changing Bazarr originals, then refreshes only that Jellyfin item. The download endpoint applies the same preparation after a successful Bazarr write. A failure after that write is returned as a warning so the app does not submit the provider selection again.
+
+After the live refresh, Jellyfin indexed two subtitle streams. The AYANEO fetched `/subtitles/0` and `/subtitles/1` through the existing offline grant and its Dune screen showed **2 local tracks: English SDH and Hebrew SDH**. The offline player opened Dune and listed both tracks as selectable. The final app suppresses the internal `pocketds` filename marker in the player label. The prior video file remained in place and the device's subtitle sync made no media download request. Screenshots: gitignored `.local-backups/dune-after-subtitle-sync.png` and `.local-backups/dune-player-final.png` (final player UI). Dune was closed after the check and its resume point returned to about 2:26, near its original 2:23.
+
+The FireDaemon service now runs Hub `0.3.3-offline-subs`; its installed binary hash matches `.local-backups/hub-offline-subtitle-naming-ready.exe` (`CDD13783077BBCB513922DBE0592DD2FDB8B87BDE43272345790F3A4FEFB2FC3`). `.local-backups/deploy-subtitle-naming.ps1` backed up the prior binary, checked configuration, replaced the service binary and verified service status, liveness and hash. The user ran this script in Administrator PowerShell after automatic approval review blocked the assistant's UAC launch. The daily APK was installed with `adb install -r`; no app data was cleared. The immediately previous v0.3.2 APK is saved as `.local-backups/daily-before-offline-subtitle-naming.apk`.
+
+Validation: `go test ./...` and `go vet ./...` passed, including path, alias update, ticket and refresh tests. `gradlew.bat testDebugUnitTest assembleDebug assembleUitest assembleUitestAndroidTest` passed; the smaller final UI changes passed `testDebugUnitTest assembleDebug` and the uitest artifacts were rebuilt. `OfflineSubtitleSyncDeviceTest` passed on the AYANEO: it exercised actual sidecar transfer and verified no media URL request or video mutation. A live provider subtitle replacement was not performed because it would replace the user's chosen subtitle; the two already-installed Bazarr files provided the end-to-end refresh check.
 
 Live calendar posters, week navigation and title open/back passed. Production transfers are currently empty, so failed-transfer UI is tested with deterministic fixtures in the isolated `.uitest` app. No daily app data was cleared.
 
@@ -30,7 +44,7 @@ Movie/episode > More actions > Subtitles. Installed tracks and history, recorded
 
 Hub resolves the selected Jellyfin item through TMDB/TVDB to an actual downloaded Arr/Bazarr file. Search results are bounded and retained only in short-lived Hub tickets bound to token, profile, item and file identity. The app never supplies serialized provider objects. Download requires control scope, revalidates file identity, consumes the ticket before writing and does not automatically replay uncertain results.
 
-Live reads: 100 English/Hebrew candidates for 10 Things I Hate About You; The Avengers installed Hebrew subtitle correctly joins its recorded 91.11% match score. No real subtitle was replaced for testing. Movie/episode wire contracts, forged/expired/profile-mismatched/duplicate tickets and changed paths are tested. Real acquisition and Jellyfin/player refresh still need a selected title/language; they are not claimed as live-verified.
+Live reads at that checkpoint: 100 English/Hebrew candidates for 10 Things I Hate About You; The Avengers installed Hebrew subtitle correctly joined its recorded 91.11% match score. No real subtitle was replaced for testing. Movie/episode wire contracts, forged/expired/profile-mismatched/duplicate tickets and changed paths are tested. Jellyfin item refresh and offline sidecar sync were subsequently verified with Dune, as recorded above; a provider replacement remains untested on live media.
 
 ### Server monitoring
 
@@ -58,7 +72,7 @@ Automatic approval review previously rejected a combined command that would swit
 
 ## Next slices
 
-1. Verify a user-selected real subtitle acquisition and subsequent player track refresh.
+1. Verify a user-selected real subtitle acquisition and player selection of a newly synced offline track.
 2. Narrowly configured restarts with review, audit and health verification. Windows services observed include AyaneoHub, Bazarr, Prowlarr and Radarr; Docker is installed at its standard Program Files path. Actual management mechanisms and permissions must be verified for every supported target; unmanaged processes must not advertise restart.
 3. Actionable alerts with persistent deduplication and exact destinations, followed by background delivery and quiet hours.
 4. Home shortcuts and configurable shelves.
@@ -66,6 +80,6 @@ Automatic approval review previously rejected a combined command that would swit
 
 These remaining slices are approved backlog, not completed features. No family mode, new reading scope or multi-Arr instances have been added.
 
-Known first-slice limits: Upcoming includes dated monitored calendar releases, with no undated inventory; Arr file availability is labeled Downloaded, not asserted Jellyfin availability. A failed title pipeline opens the attention list rather than an exact selected transfer. Subtitle feedback is local to the device; live replacement and player refresh are still unverified.
+Known first-slice limits: Upcoming includes dated monitored calendar releases, with no undated inventory; Arr file availability is labeled Downloaded, not asserted Jellyfin availability. A failed title pipeline opens the attention list rather than an exact selected transfer. Subtitle feedback is local to the device; live provider replacement and player track selection remain unverified.
 
 Final verification: the two affected device tests (subtitle history/selection and monitor focus/missing data) passed again against the final APK. Production configuration validation passed for the ready Hub binary. Commits: `7e55a8b` subtitles, `2b46036` history provenance, `5f5409b` monitoring. The daily app was updated without clearing its data. Actual production UI and read-only API checks passed after deployment.

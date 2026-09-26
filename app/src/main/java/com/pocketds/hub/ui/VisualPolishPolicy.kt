@@ -50,7 +50,7 @@ data class TrackPresentation(val title: String, val detail: String) {
                 // A commentary or alternate mix must remain distinguishable from the main track.
                 if (name.isNotBlank() && track.label.isNotBlank()) {
                     val generated = setOf(name, code, language, track.codec, "Default", "External",
-                        "Forced", "SDH", "Hearing impaired", "Mono", "Stereo", "Surround",
+                        "Forced", "SDH", "Hearing impaired", "Mono", "Stereo", "Surround", "pocketds",
                         "1.0", "2.0", "5.1", "7.1", "${track.channels} channels")
                         .map { it.lowercase(Locale.ROOT) }.toSet()
                     track.label.split(Regex("\\s+[-·|]\\s+"))

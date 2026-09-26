@@ -40,6 +40,7 @@ type Item struct {
 	ID   string `json:"Id"`
 	Name string `json:"Name"`
 	Type string `json:"Type"`
+	Path string `json:"Path"`
 
 	ProductionYear  int           `json:"ProductionYear"`
 	RunTimeTicks    int64         `json:"RunTimeTicks"`

@@ -3,7 +3,7 @@ package com.pocketds.hub.model
 import kotlinx.serialization.Serializable
 
 @Serializable data class SubtitleRecord(
-    val id: String, val language: String = "", val provider: String = "",
+    val id: String, val language: String = "", val code: String = "", val provider: String = "",
     val score: String = "", val date: String = "", val description: String = "",
     val installed: Boolean = false, val embedded: Boolean = false,
     val forced: Boolean = false, val hi: Boolean = false

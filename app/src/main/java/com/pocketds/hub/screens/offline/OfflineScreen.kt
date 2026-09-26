@@ -36,6 +36,7 @@ import com.pocketds.hub.offline.OfflineDownload
 import com.pocketds.hub.offline.OfflineDownloadService
 import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.offline.OfflineState
+import com.pocketds.hub.screens.library.SubtitleScreen
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
@@ -161,11 +162,13 @@ class OfflineScreen(
             when (row) {
                 is TaggedCatalog -> {
                     add(ButtonHint.activate(if (row.value.isSeries) "Open" else "Play"))
+                    if(!row.value.isSeries) add(ButtonHint.secondary("Subtitles"))
                     add(ButtonHint.primary("Remove download"))
                 }
                 is TaggedDownload -> {
                     if (row.value.state == OfflineState.COMPLETE) add(ButtonHint.activate("Play"))
                     else add(ButtonHint.activate("Manage"))
+                    if (row.value.state == OfflineState.COMPLETE) add(ButtonHint.secondary("Subtitles"))
                     if (row.value.state == OfflineState.FAILED || row.value.state == OfflineState.WAITING) {
                         add(ButtonHint.secondary("Retry"))
                     }
@@ -203,11 +206,19 @@ class OfflineScreen(
                 }
                 else -> false
             }
-            PadAction.Secondary -> if (row is TaggedDownload &&
-                row.value.state in setOf(OfflineState.FAILED, OfflineState.WAITING)
-            ) {
-                OfflineDownloadService.retry(host.viewContext, row.value.id); true
-            } else false
+            PadAction.Secondary -> when {
+                row is TaggedCatalog && !row.value.isSeries -> {
+                    row.value.rows.firstOrNull()?.let(::openSubtitles)
+                    true
+                }
+                row is TaggedDownload && row.value.state == OfflineState.COMPLETE -> {
+                    openSubtitles(row.value); true
+                }
+                row is TaggedDownload && row.value.state in setOf(OfflineState.FAILED, OfflineState.WAITING) -> {
+                    OfflineDownloadService.retry(host.viewContext, row.value.id); true
+                }
+                else -> false
+            }
             PadAction.Primary -> when (row) {
                 is TaggedCatalog -> { confirmRemoveCatalog(row.value); true }
                 is TaggedDownload -> { confirmRemove(row.value); true }
@@ -364,7 +375,7 @@ class OfflineScreen(
             } else fileSize(size),
             jellyfinItemId = value.key
         )
-        return PosterCardView(host.viewContext, colors, 158f).apply {
+        val card = PosterCardView(host.viewContext, colors, 158f).apply {
             tag = TaggedCatalog(value)
             contentDescription = if (value.isSeries) {
                 "${value.title}, ${value.rows.size} downloaded episodes"
@@ -381,6 +392,17 @@ class OfflineScreen(
             }
             activateOnTap { openCatalog(value) }
         }
+        if(value.isSeries) return card
+        return LinearLayout(host.viewContext).apply {
+            orientation=LinearLayout.VERTICAL
+            addView(card,LinearLayout.LayoutParams(MATCH,WRAP))
+            addView(TextView(context).apply {
+                text="Subtitles";textSize=12f;setTextColor(colors.accent)
+                setPadding(dp(8),dp(5),dp(8),dp(5))
+                contentDescription="Subtitles for ${value.title}"
+                activateOnTap { value.rows.firstOrNull()?.let(::openSubtitles) }
+            })
+        }
     }
 
     private fun openCatalog(value: OfflineCatalogEntry) {
@@ -389,6 +411,10 @@ class OfflineScreen(
         } else {
             value.rows.firstOrNull()?.let { host.playItem(it.manifest.item.id) }
         }
+    }
+
+    private fun openSubtitles(row: OfflineDownload) {
+        host.push(SubtitleScreen(api,row.manifest.item.id,row.manifest.item.title,ringVisible))
     }
 
     private fun confirmRemoveCatalog(value: OfflineCatalogEntry) {

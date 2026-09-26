@@ -242,6 +242,7 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/library/items/{itemId}/subtitles", s.handleSubtitles)
 	authed.HandleFunc("POST /v1/library/items/{itemId}/subtitles/search", s.handleSubtitleSearch)
 	authed.HandleFunc("POST /v1/library/items/{itemId}/subtitles/download", s.handleSubtitleDownload)
+	authed.HandleFunc("POST /v1/library/items/{itemId}/subtitles/refresh", s.handleSubtitleRefresh)
 	authed.HandleFunc("GET /v1/library/series/{seriesId}/play-target", s.handleSeriesPlayTarget)
 	authed.HandleFunc("POST /v1/playback/items/{itemId}/prepare", s.handlePlaybackPrepare)
 	authed.HandleFunc("GET /v1/playback/sessions/{sessionId}/stream", s.handlePlaybackStream)

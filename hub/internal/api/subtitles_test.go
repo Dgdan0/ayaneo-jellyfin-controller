@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,22 +14,37 @@ import (
 
 func TestSubtitleSearchBindsSelectionAndConsumesOnce(t *testing.T) {
 	const itemID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	path := "/media/movie.mkv"
+	directory := t.TempDir()
+	path := filepath.Join(directory, "movie.mkv")
+	sidecar := filepath.Join(directory, "other-release.he.srt")
+	if err := os.WriteFile(path, []byte("video"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecar, []byte("1\n00:00:00,000 --> 00:00:01,000\nHello\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	writes := 0
+	refreshes := 0
 	historyAction := 2
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/Items/"+itemID+"/Refresh":
+			refreshes++
+			if r.URL.Query().Get("ReplaceAllMetadata") != "false" {
+				t.Error("subtitle refresh must preserve metadata")
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case strings.Contains(r.URL.Path, "/Items/"+itemID):
-			json.NewEncoder(w).Encode(map[string]any{"Id": itemID, "Type": "Movie", "ProviderIds": map[string]string{"Tmdb": "10"}})
+			json.NewEncoder(w).Encode(map[string]any{"Id": itemID, "Type": "Movie", "Path": path, "ProviderIds": map[string]string{"Tmdb": "10"}})
 		case r.URL.Path == "/api/v3/movie":
 			w.Write([]byte(`[{"id":7,"tmdbId":10,"hasFile":true}]`))
 		case r.URL.Path == "/api/movies":
 			if r.URL.Query().Get("radarrid[]") != "7" {
 				t.Error("wrong movie filter")
 			}
-			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"radarrId": 7, "path": path, "subtitles": []any{map[string]any{"name": "Hebrew", "path": "/media/movie.he.srt"}}}}})
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"radarrId": 7, "path": path, "subtitles": []any{map[string]any{"name": "Hebrew", "code2": "he", "path": sidecar}}}}})
 		case r.URL.Path == "/api/movies/history":
-			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"radarrId": 7, "action": historyAction, "parsed_timestamp": "09/17/26 14:12:34", "subtitles_path": "/media/movie.he.srt", "score": "91.11%", "provider": "example", "language": map[string]string{"name": "Hebrew"}}}})
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"radarrId": 7, "action": historyAction, "parsed_timestamp": "09/17/26 14:12:34", "subtitles_path": sidecar, "score": "91.11%", "provider": "example", "language": map[string]string{"name": "Hebrew"}}}})
 		case r.URL.Path == "/api/providers/movies" && r.Method == "GET":
 			w.Write([]byte(`{"data":[{"provider":"example","language":"he","score":91,"subtitle":"private-serialized-provider-selection","hearing_impaired":"False","forced":"False","original_format":"True"}]}`))
 		case r.URL.Path == "/api/providers/movies" && r.Method == "POST":
@@ -43,7 +60,7 @@ func TestSubtitleSearchBindsSelectionAndConsumesOnce(t *testing.T) {
 	}))
 	defer upstream.Close()
 	cfg := libraryAPIConfig(upstream.URL, strings.Repeat("b", 32))
-	cfg.Auth.Tokens[0].Scopes = []string{"read", "control"}
+	cfg.Auth.Tokens[0].Scopes = []string{"read", "control", "download"}
 	cfg.Services["radarr"] = config.ServiceConfig{Enabled: true, BaseURL: upstream.URL}
 	cfg.Services["bazarr"] = config.ServiceConfig{Enabled: true, BaseURL: upstream.URL}
 	server := NewServer(cfg)
@@ -62,6 +79,12 @@ func TestSubtitleSearchBindsSelectionAndConsumesOnce(t *testing.T) {
 	state := call("GET", base, "", "")
 	if state.Code != 200 || !strings.Contains(state.Body.String(), `"score":"91.11%"`) || !strings.Contains(state.Body.String(), `"installed":true`) {
 		t.Fatalf("state: %d %s", state.Code, state.Body.String())
+	}
+	if w := call("POST", base+"/refresh", "{}", ""); w.Code != http.StatusAccepted || refreshes != 1 {
+		t.Fatalf("targeted refresh: %d %s; upstream=%d", w.Code, w.Body.String(), refreshes)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "movie.pocketds.he.srt")); err != nil {
+		t.Fatalf("Jellyfin sidecar not prepared: %v", err)
 	}
 	for _, action := range []int{3, 4, 6, 7, 0} {
 		historyAction = action
@@ -108,11 +131,11 @@ func TestSubtitleSearchBindsSelectionAndConsumesOnce(t *testing.T) {
 	if w := call("POST", base+"/download", strings.TrimSuffix(body, "}")+`,"subtitle":"injected"}`, ""); w.Code != 400 {
 		t.Fatalf("injection: %d", w.Code)
 	}
-	path = "/media/replaced.mkv"
+	path = filepath.Join(directory, "replaced.mkv")
 	if w := call("POST", base+"/download", body, ""); w.Code != 409 {
 		t.Fatalf("changed file: %d", w.Code)
 	}
-	path = "/media/movie.mkv"
+	path = filepath.Join(directory, "movie.mkv")
 	if w := call("POST", base+"/download", body, ""); w.Code != 200 {
 		t.Fatalf("download: %d %s", w.Code, w.Body.String())
 	}
@@ -121,6 +144,9 @@ func TestSubtitleSearchBindsSelectionAndConsumesOnce(t *testing.T) {
 	}
 	if writes != 1 {
 		t.Fatalf("writes=%d", writes)
+	}
+	if refreshes != 2 {
+		t.Fatalf("download did not start Jellyfin item refresh: %d", refreshes)
 	}
 	expired := search()
 	entry := server.subtitleTickets[expired]
@@ -134,7 +160,7 @@ func TestSubtitleWritesRequireControl(t *testing.T) {
 	cfg := libraryAPIConfig("", "")
 	cfg.Auth.Tokens[0].Scopes = []string{"read"}
 	handler := NewServer(cfg).Handler()
-	for _, action := range []string{"search", "download"} {
+	for _, action := range []string{"search", "download", "refresh"} {
 		r := httptest.NewRequest("POST", "/v1/library/items/"+strings.Repeat("a", 32)+"/subtitles/"+action, strings.NewReader("{}"))
 		r.Header.Set("Authorization", "Bearer "+libraryTestToken)
 		w := httptest.NewRecorder()

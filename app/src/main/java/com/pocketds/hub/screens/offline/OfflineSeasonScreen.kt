@@ -28,6 +28,7 @@ import com.pocketds.hub.offline.OfflineCatalogSeason
 import com.pocketds.hub.offline.OfflineDownload
 import com.pocketds.hub.offline.OfflineDownloadService
 import com.pocketds.hub.offline.OfflineRepository
+import com.pocketds.hub.screens.library.SubtitleScreen
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
@@ -105,7 +106,7 @@ class OfflineSeasonScreen(
     override fun hints(): List<ButtonHint> = if (overlay.isOpen) {
         listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
     } else buildList {
-        if (focusedEpisode() != null) { add(ButtonHint.activate("Play")); add(ButtonHint.primary("Remove")) }
+        if (focusedEpisode() != null) { add(ButtonHint.activate("Play")); add(ButtonHint.secondary("Subtitles")); add(ButtonHint.primary("Remove")) }
         add(ButtonHint.back())
     }
 
@@ -115,6 +116,7 @@ class OfflineSeasonScreen(
         val episode = focusedEpisode() ?: return false
         return when (action) {
             PadAction.Activate -> { host.playItem(episode.manifest.item.id); true }
+            PadAction.Secondary -> { host.push(SubtitleScreen(api,episode.manifest.item.id,episode.manifest.item.title,ringVisible)); true }
             PadAction.Primary -> { confirmRemove(episode); true }
             else -> false
         }
@@ -156,6 +158,12 @@ class OfflineSeasonScreen(
             addView(TextView(context).apply {
                 text = episodeStatus(item.runtimeSeconds, progress); textSize = 10f; maxLines = 1; setTextColor(colors.mutedText)
                 setPadding(dp(2), 0, dp(2), 0)
+            })
+            addView(TextView(context).apply {
+                text = "Subtitles"; textSize = 11f; setTextColor(colors.accent)
+                setPadding(dp(2), dp(2), dp(2), 0)
+                contentDescription = "Subtitles for ${item.title}"
+                activateOnTap { host.push(SubtitleScreen(api,item.id,item.title,ringVisible)) }
             })
             layoutParams = LinearLayout.LayoutParams(dp(230), dp(193)).apply { marginEnd = dp(9) }
             contentDescription = "Episode ${item.indexNumber}, ${item.title}, ${episodeStatus(item.runtimeSeconds, progress)}"

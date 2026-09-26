@@ -24,6 +24,7 @@ import com.pocketds.hub.offline.OfflineCatalogSeason
 import com.pocketds.hub.offline.OfflineDetailPresentation
 import com.pocketds.hub.offline.OfflineDownload
 import com.pocketds.hub.offline.OfflineRepository
+import com.pocketds.hub.screens.library.SubtitleScreen
 import com.pocketds.hub.ui.ContinuationCardView
 import com.pocketds.hub.ui.DetailArtworkCardView
 import com.pocketds.hub.ui.DetailHeaderView
@@ -99,7 +100,7 @@ class OfflineSeriesScreen(
             return@buildList
         }
         when ((host.viewContext as? android.app.Activity)?.currentFocus?.tag) {
-            is TaggedTarget -> add(ButtonHint.activate("Play"))
+            is TaggedTarget -> { add(ButtonHint.activate("Play")); add(ButtonHint.secondary("Subtitles")) }
             is TaggedSeason -> add(ButtonHint.activate("Open season"))
         }
         add(ButtonHint.back())
@@ -107,6 +108,11 @@ class OfflineSeriesScreen(
     override fun onPad(action: PadAction): Boolean {
         if (header?.overview?.onPad(action) == true) return true
         if (action == PadAction.Refresh) { render(force = true); return true }
+        if (action == PadAction.Secondary) {
+            val target = ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedTarget)?.target ?: return false
+            host.push(SubtitleScreen(api,target.row.manifest.item.id,target.row.manifest.item.title,ringVisible))
+            return true
+        }
         if (action != PadAction.Activate) return false
         return when (val tag = (host.viewContext as? android.app.Activity)?.currentFocus?.tag) {
             is TaggedTarget -> { host.playItem(tag.target.row.manifest.item.id, resumeMode(tag.target)); true }
@@ -153,6 +159,14 @@ class OfflineSeriesScreen(
                 contentDescription = "${targetLabel(target)}, ${target.row.manifest.item.title}"
                 FocusDecorator.attach(this, ringVisible, scale = false)
                 activateOnTap { host.playItem(target.row.manifest.item.id, resumeMode(target)) }
+            })
+            detail.actions.addView(TextView(host.viewContext).apply {
+                DetailStyler.action(this,colors,primary=false)
+                text="Subtitles"
+                layoutParams=LinearLayout.LayoutParams(WRAP,dp(48));tag=TaggedTarget(target)
+                contentDescription="Subtitles for ${target.row.manifest.item.title}"
+                FocusDecorator.attach(this,ringVisible,scale=false)
+                activateOnTap { host.push(SubtitleScreen(api,target.row.manifest.item.id,target.row.manifest.item.title,ringVisible)) }
             })
             content.addView(ContinuationCardView(host.viewContext, colors, ringVisible).apply {
                 val item = target.row.manifest.item

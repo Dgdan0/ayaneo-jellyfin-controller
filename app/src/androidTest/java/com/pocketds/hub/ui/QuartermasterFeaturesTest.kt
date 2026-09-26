@@ -13,6 +13,7 @@ import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.*
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.*
+import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.screens.discover.UpcomingScreen
 import com.pocketds.hub.screens.downloads.DownloadsScreen
 import com.pocketds.hub.settings.ContentModeSettings
@@ -27,6 +28,45 @@ import org.junit.runner.RunWith
 /** Runs only in .uitest: synthetic failures never touch the user's real queue. */
 @RunWith(AndroidJUnit4::class)
 class QuartermasterFeaturesTest {
+    @Test fun downloadedTitleKeepsItsLocalSubtitleVisibleWithoutTheHub() {
+        val ins=InstrumentationRegistry.getInstrumentation()
+        val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val item="offline-subtitle-${System.nanoTime()}"
+        val rowKey="fixture-${System.nanoTime()}"
+        val track=PlaybackTrack(index=4,type="Subtitle",language="he",codec="srt",external=true)
+        val manifest=OfflineManifest(batchKey=rowKey,clientItemKey=rowKey,
+            item=LibraryItem(id=item,type="movie",title="Offline example"),
+            source=OfflineSource(id="source-1",container="mp4",sizeBytes=4),
+            subtitles=listOf(OfflineSubtitle(track,"/fixture/subtitle")))
+        val repository=OfflineRepository.get(activity)
+        assertEquals(1,repository.enqueue("Offline example","",listOf(manifest)))
+        val row=checkNotNull(repository.forItem(item))
+        repository.mediaFile(row).writeText("film")
+        repository.finish(row.id)
+        repository.subtitleFile(row,4,"srt").writeText("1\n00:00:00,000 --> 00:00:01,000\nHello")
+        val api=Proxy.newProxyInstance(HubApi::class.java.classLoader,arrayOf(HubApi::class.java)) { _,method,_ ->
+            when(method.name) {"subtitles"->HubResult.Failed(FailureKind.NO_NETWORK);else->error("Unexpected ${method.name}")}
+        } as HubApi
+        val host=Proxy.newProxyInstance(ScreenHost::class.java.classLoader,arrayOf(ScreenHost::class.java)) { _,method,_ ->
+            if(method.name=="getViewContext") activity else null
+        } as ScreenHost
+        val screen=com.pocketds.hub.screens.library.SubtitleScreen(api,item,"Offline example"){true}
+        try {
+            lateinit var root:View
+            ins.runOnMainSync {root=screen.onCreateView(host,FrameLayout(activity));activity.setContentView(root);screen.onShow()}
+            ins.waitForIdleSync()
+            ins.runOnMainSync {
+                val text=all(root).filterIsInstance<TextView>().map { it.text.toString() }
+                assertTrue(text.any { it.contains("On this AYANEO · 1 subtitle track") })
+                assertTrue(text.any { it.contains("Hebrew") && it.contains("Downloaded") })
+                assertTrue(text.any { it.contains("Can't reach the Hub") })
+                assertFalse(text.any { it.contains("Search subtitle providers") })
+            }
+        } finally {
+            ins.runOnMainSync {screen.onHide();screen.onDestroyView();activity.finish()}
+            repository.remove(row.id)
+        }
+    }
     @Test fun serverMonitorShowsUnknownValuesAndPreservesFocusOnRefresh() {
         val ins=InstrumentationRegistry.getInstrumentation()
         val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

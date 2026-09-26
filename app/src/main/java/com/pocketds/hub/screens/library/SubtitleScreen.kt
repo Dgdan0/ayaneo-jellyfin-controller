@@ -1,10 +1,17 @@
 package com.pocketds.hub.screens.library
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.core.content.ContextCompat
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.*
+import com.pocketds.hub.offline.OfflineDownloadService
+import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.nav.*
 import com.pocketds.hub.net.*
 import com.pocketds.hub.state.ContentMode
@@ -22,13 +29,22 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
     private lateinit var body: LinearLayout
     private lateinit var panel: ChoiceOverlay
     private lateinit var memory: SubtitleMemory
+    private lateinit var offline: OfflineRepository
     private var busy = false
+    private var onlineAvailable = false
     private var state = SubtitleState()
     private var candidates: List<SubtitleCandidate>? = null
     private var selectedLanguage: String? = null
+    private var receiverRegistered = false
+    private val changedReceiver = object: BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if(candidates==null && ::body.isInitialized) render()
+        }
+    }
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host; colors = Theme.colors(host.viewContext); memory = SubtitleMemory(host.viewContext, itemId)
+        offline = OfflineRepository.get(host.viewContext)
         return FrameLayout(host.viewContext).apply {
             setBackgroundColor(colors.background)
             val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18),dp(8),dp(18),dp(10)) }
@@ -40,8 +56,18 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
             panel = ChoiceOverlay(context,colors,ringVisible,sidePanel=true);addView(panel,FrameLayout.LayoutParams(-1,-1))
         }
     }
-    override fun onShow() { load() }
-    override fun onHide() { scope.coroutineContext.cancelChildren();busy=false;panel.dismiss() }
+    override fun onShow() {
+        if(!receiverRegistered) {
+            ContextCompat.registerReceiver(checkNotNull(host).viewContext,changedReceiver,
+                IntentFilter(OfflineRepository.ACTION_CHANGED),ContextCompat.RECEIVER_NOT_EXPORTED)
+            receiverRegistered=true
+        }
+        load()
+    }
+    override fun onHide() {
+        if(receiverRegistered) {checkNotNull(host).viewContext.unregisterReceiver(changedReceiver);receiverRegistered=false}
+        scope.coroutineContext.cancelChildren();busy=false;panel.dismiss()
+    }
     override fun onDestroyView() { scope.cancel();host=null }
     override fun hints() = listOf(ButtonHint.activate(if(busy) "Please wait…" else "Choose"),ButtonHint.back(),ButtonHint("⟳","Refresh",PadAction.Refresh))
     override fun requestInitialFocus(): Boolean = body.getFocusables(View.FOCUS_FORWARD).firstOrNull()?.requestFocus() ?: false
@@ -57,8 +83,15 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
         scope.launch {
             val result=api.subtitles(itemId);busy=false
             when(result) {
-                is HubResult.Ok -> {state=result.value.copy(records=memory.merge(result.value.records));candidates=null;render()}
-                is HubResult.Failed -> {status.text=result.message;body.removeAllViews();body.addView(button("Try again"){load()})}
+                is HubResult.Ok -> {onlineAvailable=true;state=result.value.copy(records=memory.merge(result.value.records));candidates=null;render()}
+                is HubResult.Failed -> {
+                    onlineAvailable=false;candidates=null
+                    state=SubtitleState(records=memory.merge(emptyList()),warning=when(result.kind) {
+                        FailureKind.NO_NETWORK,FailureKind.TIMEOUT -> "Can't reach the Hub. Downloaded video and subtitles still work; connect and try again."
+                        else -> result.message
+                    })
+                    render()
+                }
             }
         }
     }
@@ -76,8 +109,27 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
             if(filtered.isEmpty()) body.addView(label("No matching subtitles found for the configured language profile.",14f))
             filtered.forEach { candidate -> body.addView(button("${language(candidate.language)}${flags(candidate.forced,candidate.hi)} · ${candidate.score.toInt()}% match · ${candidate.provider}\n${candidate.release.ifEmpty{"Release details unavailable"}}",maxLines=3){inspect(candidate)}) }
         } else {
-            if(state.canDownload) body.addView(button("Search subtitle providers"){search()})
-            else body.addView(label("This connection has read-only subtitle access.",13f))
+            val local=offline.playbackPlan(itemId,"resume")
+            if(local!=null) {
+                body.addView(label("On this AYANEO · ${local.subtitleTracks.size} subtitle track${if(local.subtitleTracks.size==1) "" else "s"}",16f))
+                if(local.subtitleTracks.isEmpty()) body.addView(label("No subtitles saved with this video yet.",13f))
+                local.subtitleTracks.forEach { track -> body.addView(label("${language(track.language)}${flags(track.forced,track.hearingImpaired)} · ${if(track.external) "Downloaded" else "Embedded"}",13f)) }
+                val pending=offline.subtitleSyncForItem(itemId)
+                if(pending!=null) {
+                    body.addView(label("Offline update ${if(pending.retryAt<0) "needs attention" else "pending"}${if(pending.error.isNotEmpty()) " · ${pending.error}" else ""}",13f))
+                    body.addView(button("Retry offline update now") { queueOfflineSync(pending.expectedLanguage) })
+                }
+                if(onlineAvailable) {
+                    val onlineTracks=state.records.filter { it.installed && !it.embedded }
+                    if(onlineTracks.isNotEmpty()) {
+                        val expected=onlineTracks.map { it.code.ifBlank { it.language } }.distinct().sorted().joinToString(",")
+                        body.addView(button("Prepare online subtitles and refresh this AYANEO") { refreshOnlineItem(expected) })
+                    } else if(pending==null) body.addView(label("No online subtitle to copy yet. Search providers below.",13f))
+                }
+            }
+            if(onlineAvailable&&state.canDownload) body.addView(button("Search subtitle providers"){search()})
+            else if(onlineAvailable) body.addView(label("This connection has read-only subtitle access.",13f))
+            else body.addView(button("Try connecting again"){load()})
             for((heading,records) in listOf("Installed" to state.records.filter{it.installed},"Download history · saved scores" to state.records.filter{!it.installed})) {
                 body.addView(label(heading,16f))
                 if(records.isEmpty()) body.addView(label(if(heading=="Installed") "No indexed subtitle tracks." else "No recorded subtitle downloads.",13f))
@@ -117,7 +169,34 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
         busy=true;status.text="Downloading selected subtitle…"
         scope.launch {
             val result=api.downloadSubtitle(itemId,candidate.ticket);busy=false;candidates=null
-            when(result) {is HubResult.Ok -> {host?.notify("Bazarr finished the download request. Refreshing installed tracks…");load()};is HubResult.Failed -> {render();status.text=result.message}}
+            when(result) {
+                is HubResult.Ok -> {
+                    val queued=offline.queueSubtitleSync(itemId,candidate.language)
+                    if(queued) OfflineDownloadService.start(checkNotNull(host).viewContext)
+                    val warning=result.value.warning.ifEmpty { if(!result.value.jellyfinRefreshStarted) "Saved online, but Jellyfin did not accept the subtitle refresh. Try Refresh subtitles later." else "" }
+                    host?.notify(warning.ifEmpty { if(queued) "Saved online · updating this AYANEO's subtitles" else "Saved online · refreshing installed tracks" })
+                    load()
+                }
+                is HubResult.Failed -> {render();status.text=result.message}
+            }
+        }
+    }
+    private fun queueOfflineSync(language: String = "") {
+        if(offline.queueSubtitleSync(itemId,language)) {
+            OfflineDownloadService.start(checkNotNull(host).viewContext)
+            host?.notify("Updating offline subtitles without downloading the video")
+            render()
+        }
+    }
+    private fun refreshOnlineItem(expectedLanguages: String) {
+        if(busy) return
+        busy=true;status.text="Asking Jellyfin to refresh this title's subtitles…"
+        scope.launch {
+            val result=api.refreshSubtitles(itemId);busy=false
+            when(result) {
+                is HubResult.Ok -> queueOfflineSync(expectedLanguages)
+                is HubResult.Failed -> {render();status.text="Could not start Jellyfin's subtitle refresh: ${result.message}"}
+            }
         }
     }
     private fun flags(forced:Boolean,hi:Boolean) = (if(forced) " · Forced" else "")+(if(hi) " · SDH" else "")

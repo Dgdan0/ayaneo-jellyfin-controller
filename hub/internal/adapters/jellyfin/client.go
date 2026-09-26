@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -157,7 +158,7 @@ func (c *Client) Item(ctx context.Context, itemID string) (*Item, error) {
 	out := &Item{}
 	query := url.Values{
 		"userId": {c.userID},
-		"fields": {"Overview,ProviderIds,Genres,Trickplay,OriginalTitle,Studios,People,MediaSources"},
+		"fields": {"Overview,ProviderIds,Genres,Trickplay,OriginalTitle,Studios,People,MediaSources,Path"},
 	}
 	if err := c.base.GetJSON(ctx, "/Items/"+itemID, query, out); err != nil {
 		return nil, err
@@ -196,6 +197,22 @@ func (c *Client) SetFavorite(ctx context.Context, itemID string, favorite bool) 
 // started rather than completed.
 func (c *Client) RefreshLibrary(ctx context.Context) error {
 	return c.base.PostJSON(ctx, "/Library/Refresh", nil, nil)
+}
+
+// RefreshItem asks Jellyfin to rescan one movie or episode, including sidecar
+// subtitles added after it was first indexed. It does not replace metadata.
+func (c *Client) RefreshItem(ctx context.Context, itemID string) error {
+	if len(itemID) != 32 {
+		return fmt.Errorf("invalid item id")
+	}
+	if _, err := hex.DecodeString(itemID); err != nil {
+		return fmt.Errorf("invalid item id")
+	}
+	_, err := c.base.PostJSONHeaders(ctx, "/Items/"+itemID+"/Refresh", url.Values{
+		"MetadataRefreshMode": {"Default"}, "ImageRefreshMode": {"None"},
+		"ReplaceAllMetadata": {"false"}, "ReplaceAllImages": {"false"},
+	}, nil, nil)
+	return err
 }
 
 // Images reports where Jellyfin sourced an item's artwork. A library view's

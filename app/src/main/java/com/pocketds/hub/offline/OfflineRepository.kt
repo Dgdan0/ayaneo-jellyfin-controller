@@ -58,6 +58,14 @@ data class OfflineDownload(
         (bytesDownloaded.toDouble() / totalBytes.toDouble()).coerceIn(0.0, 1.0).toFloat()
 }
 
+data class PendingSubtitleSync(
+    val rowId: String,
+    val expectedLanguage: String,
+    val attempts: Int,
+    val retryAt: Long,
+    val error: String
+)
+
 /** Durable queue, local catalog, and offline watch-progress outbox. */
 class OfflineRepository private constructor(context: Context) {
     private val app = context.applicationContext
@@ -144,6 +152,11 @@ class OfflineRepository private constructor(context: Context) {
             "updated_at DESC", "1").firstOrNull()?.takeIf { verifyCompletedFile(it) }
 
     @Synchronized
+    fun completedForRow(id: String): OfflineDownload? = download(id)?.takeIf {
+        it.userId == HubSettings.userId(app) && it.state == OfflineState.COMPLETE && verifyCompletedFile(it)
+    }
+
+    @Synchronized
     fun forItem(itemId: String, userId: String = HubSettings.userId(app)): OfflineDownload? =
         queryDownloads("user_id=? AND item_id=?", arrayOf(userId, itemId), "updated_at DESC", "1").firstOrNull()
 
@@ -218,6 +231,67 @@ class OfflineRepository private constructor(context: Context) {
         }, "id=?", arrayOf(id))
         changed()
     }
+
+    @Synchronized
+    fun queueSubtitleSync(itemId: String, expectedLanguage: String = ""): Boolean {
+        val rows = completed().filter { it.manifest.item.id == itemId && verifyCompletedFile(it) }
+        if (rows.isEmpty()) return false
+        rows.forEach { row ->
+            db.writableDatabase.insertWithOnConflict("subtitle_sync", null, ContentValues().apply {
+                put("row_id", row.id); put("expected_language", expectedLanguage)
+                put("attempts", 0); put("retry_at", 0L); put("error", "")
+            }, SQLiteDatabase.CONFLICT_REPLACE)
+        }
+        changed()
+        return true
+    }
+
+    @Synchronized
+    fun subtitleSyncForItem(itemId: String): PendingSubtitleSync? = db.readableDatabase.rawQuery(
+        "SELECT s.row_id,s.expected_language,s.attempts,s.retry_at,s.error FROM subtitle_sync s " +
+            "JOIN downloads d ON d.id=s.row_id WHERE d.user_id=? AND d.item_id=? AND d.state=? LIMIT 1",
+        arrayOf(HubSettings.userId(app), itemId, OfflineState.COMPLETE.wire)
+    ).use { cursor -> if (cursor.moveToFirst()) subtitleSync(cursor) else null }
+
+    @Synchronized
+    fun nextSubtitleSync(now: Long = System.currentTimeMillis()): PendingSubtitleSync? = db.readableDatabase.rawQuery(
+        "SELECT s.row_id,s.expected_language,s.attempts,s.retry_at,s.error FROM subtitle_sync s " +
+            "JOIN downloads d ON d.id=s.row_id WHERE d.user_id=? AND d.state=? AND s.retry_at>=0 AND s.retry_at<=? " +
+            "ORDER BY s.retry_at LIMIT 1",
+        arrayOf(HubSettings.userId(app), OfflineState.COMPLETE.wire, now.toString())
+    ).use { cursor -> if (cursor.moveToFirst()) subtitleSync(cursor) else null }
+
+    @Synchronized
+    fun nextSubtitleSyncRetryAt(): Long? = db.readableDatabase.rawQuery(
+        "SELECT MIN(s.retry_at) FROM subtitle_sync s JOIN downloads d ON d.id=s.row_id " +
+            "WHERE d.user_id=? AND d.state=? AND s.retry_at>=0",
+        arrayOf(HubSettings.userId(app), OfflineState.COMPLETE.wire)
+    ).use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null }
+
+    @Synchronized
+    fun clearSubtitleSync(rowId: String, expectedLanguage: String) {
+        db.writableDatabase.delete("subtitle_sync", "row_id=? AND expected_language=?", arrayOf(rowId, expectedLanguage))
+        changed()
+    }
+
+    @Synchronized
+    fun recordSubtitleSyncFailure(rowId: String, expectedLanguage: String, message: String, needsAttention: Boolean = false) {
+        val current = db.readableDatabase.rawQuery(
+            "SELECT attempts FROM subtitle_sync WHERE row_id=? AND expected_language=?", arrayOf(rowId,expectedLanguage)
+        ).use { if (it.moveToFirst()) it.getInt(0) else return }
+        val attempts = current + 1
+        val delay = (30_000L shl (attempts - 1).coerceIn(0, 7)).coerceAtMost(60 * 60_000L)
+        db.writableDatabase.update("subtitle_sync", ContentValues().apply {
+            put("attempts", attempts); put("retry_at", if (needsAttention) -1L else System.currentTimeMillis() + delay)
+            put("error", message.take(300))
+        }, "row_id=? AND expected_language=?", arrayOf(rowId,expectedLanguage))
+        changed()
+    }
+
+    private fun subtitleSync(cursor: Cursor) = PendingSubtitleSync(
+        cursor.string("row_id"), cursor.string("expected_language"), cursor.int("attempts"),
+        cursor.long("retry_at"), cursor.string("error")
+    )
 
     @Synchronized
     fun setState(id: String, state: OfflineState, error: String = "") {
@@ -310,6 +384,7 @@ class OfflineRepository private constructor(context: Context) {
             File(it.localPath).delete()
             subtitleFiles(it).forEach(File::delete)
             artworkFiles(it).forEach(File::delete)
+            db.writableDatabase.delete("subtitle_sync", "row_id=?", arrayOf(id))
             db.writableDatabase.delete("downloads", "id=?", arrayOf(id))
             removeEmptyBatch(it.batchId)
         }
@@ -322,6 +397,7 @@ class OfflineRepository private constructor(context: Context) {
             File(it.localPath).delete()
             subtitleFiles(it).forEach(File::delete)
             artworkFiles(it).forEach(File::delete)
+            db.writableDatabase.delete("subtitle_sync", "row_id=?", arrayOf(it.id))
         }
         db.writableDatabase.delete("downloads", "batch_id=?", arrayOf(batchId))
         db.writableDatabase.delete("batches", "id=?", arrayOf(batchId))
@@ -335,6 +411,7 @@ class OfflineRepository private constructor(context: Context) {
                 File(row.localPath).delete()
                 subtitleFiles(row).forEach(File::delete)
                 artworkFiles(row).forEach(File::delete)
+                db.writableDatabase.delete("subtitle_sync", "row_id=?", arrayOf(row.id))
                 db.writableDatabase.delete("downloads", "id=?", arrayOf(row.id))
             }
         }
@@ -346,6 +423,8 @@ class OfflineRepository private constructor(context: Context) {
 
     fun subtitleFile(row: OfflineDownload, trackIndex: Int, codec: String): File =
         File(storageRoot(row), "subtitles/${safe(row.id)}-$trackIndex.${subtitleExtension(codec)}")
+
+    fun localSubtitleFiles(row: OfflineDownload): List<File> = subtitleFiles(row).toList()
 
     fun artworkFile(row: OfflineDownload, kind: String): File =
         File(storageRoot(row), "artwork/${safe(row.id)}-${safe(kind)}.img")
@@ -536,7 +615,7 @@ class OfflineRepository private constructor(context: Context) {
     }
 }
 
-private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "offline.db", null, 3) {
+private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "offline.db", null, 4) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE batches(id TEXT PRIMARY KEY,title TEXT NOT NULL,series_id TEXT NOT NULL,user_id TEXT NOT NULL,paused INTEGER NOT NULL,created_at INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE downloads(id TEXT PRIMARY KEY,batch_id TEXT NOT NULL,user_id TEXT NOT NULL,item_id TEXT NOT NULL,source_id TEXT NOT NULL,manifest_json TEXT NOT NULL,state TEXT NOT NULL,bytes_downloaded INTEGER NOT NULL,total_bytes INTEGER NOT NULL,local_path TEXT NOT NULL,error TEXT NOT NULL,attempts INTEGER NOT NULL,speed_bps INTEGER NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,updated_at INTEGER NOT NULL,retry_at INTEGER NOT NULL DEFAULT 0)")
@@ -544,6 +623,7 @@ private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "off
         db.execSQL("CREATE INDEX downloads_queue ON downloads(user_id,state,sort_order)")
         db.execSQL("CREATE TABLE progress(item_id TEXT NOT NULL,user_id TEXT NOT NULL,position_ms INTEGER NOT NULL,duration_ms INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(item_id,user_id))")
         db.execSQL("CREATE TABLE outbox(event_key TEXT PRIMARY KEY,user_id TEXT NOT NULL,item_id TEXT NOT NULL,event_json TEXT NOT NULL,created_at INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE subtitle_sync(row_id TEXT PRIMARY KEY,expected_language TEXT NOT NULL,attempts INTEGER NOT NULL,retry_at INTEGER NOT NULL,error TEXT NOT NULL)")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
@@ -551,6 +631,9 @@ private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "off
         }
         if (oldVersion < 3) {
             db.execSQL("ALTER TABLE downloads ADD COLUMN retry_at INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion < 4) {
+            db.execSQL("CREATE TABLE subtitle_sync(row_id TEXT PRIMARY KEY,expected_language TEXT NOT NULL,attempts INTEGER NOT NULL,retry_at INTEGER NOT NULL,error TEXT NOT NULL)")
         }
     }
 }

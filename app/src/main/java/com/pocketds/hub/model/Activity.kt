@@ -143,5 +143,7 @@ data class ActionAck(
     val action: String = "",
     val deletedFiles: Boolean = false,
     val blocklist: Boolean = false,
-    val search: Boolean = false
+    val search: Boolean = false,
+    val warning: String = "",
+    val jellyfinRefreshStarted: Boolean = false
 )

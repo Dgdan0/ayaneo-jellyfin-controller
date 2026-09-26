@@ -213,7 +213,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         val offlineRepository = OfflineRepository.get(this)
         if (offlineRepository.batches().any { batch ->
                 !batch.paused && batch.jobs.any { it.state != com.pocketds.hub.offline.OfflineState.COMPLETE }
-            } || offlineRepository.outbox().isNotEmpty()
+            } || offlineRepository.outbox().isNotEmpty() || offlineRepository.nextSubtitleSyncRetryAt() != null
         ) OfflineDownloadService.start(this)
         DebugLog.log("nav", "HubActivity created with ${sectionTitles.size} sections")
     }

@@ -42,6 +42,7 @@ class OfflineDownloadService : Service() {
     private lateinit var repository: OfflineRepository
     private lateinit var api: HubClient
     private var worker: Job? = null
+    private var subtitleWorker: Job? = null
     @Volatile private var activeId: String? = null
 
     override fun onCreate() {
@@ -104,9 +105,40 @@ class OfflineDownloadService : Service() {
     }
 
     private fun ensureWorker() {
+        ensureSubtitleWorker()
         if (worker?.isActive == true) return
         startForeground(NOTIFICATION_ID, notification("Preparing downloads", 0, 0, true))
         worker = scope.launch { runQueue() }
+    }
+
+    private fun ensureSubtitleWorker() {
+        if (subtitleWorker?.isActive == true || repository.nextSubtitleSyncRetryAt() == null) return
+        subtitleWorker = scope.launch {
+            while (isActive) {
+                val subtitle = repository.nextSubtitleSync()
+                if (subtitle == null) {
+                    val retryAt = repository.nextSubtitleSyncRetryAt() ?: break
+                    delay((retryAt - System.currentTimeMillis()).coerceAtLeast(1_000L).coerceAtMost(RECHECK_DELAY_MS))
+                    continue
+                }
+                if (!networkAvailable()) {
+                    delay(RECHECK_DELAY_MS)
+                    continue
+                }
+                try {
+                    OfflineSubtitleSync(repository, api).sync(subtitle)
+                    repository.clearSubtitleSync(subtitle.rowId,subtitle.expectedLanguage)
+                } catch (_: CancellationException) {
+                    throw CancellationException()
+                } catch (error: Exception) {
+                    DebugLog.log("offline", "subtitle sync ${subtitle.rowId} failed: ${error.message}")
+                    repository.recordSubtitleSyncFailure(
+                        subtitle.rowId, subtitle.expectedLanguage,error.message ?: "Could not update offline subtitles",
+                        error is SubtitleSyncBlocked
+                    )
+                }
+            }
+        }
     }
 
     private fun cancelAndContinue() {
@@ -136,6 +168,10 @@ class OfflineDownloadService : Service() {
                     getSystemService(NotificationManager::class.java).notify(
                         NOTIFICATION_ID, notification("Waiting to sync watch progress", 0, 0, true)
                     )
+                    delay(RECHECK_DELAY_MS)
+                    continue
+                }
+                if (subtitleWorker?.isActive == true) {
                     delay(RECHECK_DELAY_MS)
                     continue
                 }
@@ -379,7 +415,7 @@ class OfflineDownloadService : Service() {
     }
 
     override fun onDestroy() {
-        worker?.cancel(); scope.cancel(); super.onDestroy()
+        worker?.cancel(); subtitleWorker?.cancel(); scope.cancel(); super.onDestroy()
     }
 
     companion object {

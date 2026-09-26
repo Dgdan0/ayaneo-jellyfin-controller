@@ -93,6 +93,7 @@ interface HubApi {
     suspend fun subtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleState>
     suspend fun searchSubtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleSearch>
     suspend fun downloadSubtitle(itemId: String, ticket: String): HubResult<ActionAck>
+    suspend fun refreshSubtitles(itemId: String): HubResult<ActionAck>
     suspend fun calendar(start: String, end: String, timezone: String): HubResult<com.pocketds.hub.model.CalendarResponse>
     suspend fun health(): HubResult<HealthResponse>
     suspend fun scanJellyfinLibrary(): HubResult<ActionAck>
@@ -637,6 +638,8 @@ class HubClient(private val context: Context, private val connection: HubConnect
 
     override suspend fun subtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleState> =
         get(HubEndpoints.subtitles(base(),itemId),noCache=true) {json.decodeFromString<com.pocketds.hub.model.SubtitleState>(it)}
+    override suspend fun refreshSubtitles(itemId: String): HubResult<ActionAck> =
+        postOnce(HubEndpoints.refreshSubtitles(base(),itemId),"{}") {json.decodeFromString<ActionAck>(it)}
     override suspend fun searchSubtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleSearch> =
         postOnce(HubEndpoints.subtitles(base(),itemId,"search"),"{}",slow=true) {json.decodeFromString<com.pocketds.hub.model.SubtitleSearch>(it)}
     override suspend fun downloadSubtitle(itemId: String,ticket: String): HubResult<ActionAck> =
