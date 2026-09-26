@@ -1,4 +1,4 @@
-# Quartermaster feature checkpoint — 25 September 2026
+# Quartermaster feature checkpoint — 26 September 2026
 
 ## Active source
 
@@ -12,11 +12,11 @@ Feature worktree: `C:/Users/Dgdan/.codex/worktrees/quartermaster-features/Ayaneo
 - Download diagnostics: Transfers > Needs attention; explanation, source evidence and next step; optional scoped resume. Failed title pipelines link to the attention list. Commits `bca0d1a`, `3d8b2dd`.
 - Discover cached-pagination crash fixed and device regression covered. Commits `77956a6`, `727973d`.
 
-Production Hub is `0.3.1-diagnostics`; daily Android app v0.3.1/code16 includes the above. Diagnostics deployment passed service health and binary hash verification after explicit authorization to reopen UAC. AYANEO ADB: `100.97.20.86:36813`.
+Production Hub is now `0.3.1-monitor`; the daily Android app v0.3.1/code16 includes Upcoming, diagnostics, bandwidth, subtitles and monitoring. The FireDaemon `AyaneoHub` service is running on port 8791 after the combined deployment; its installed binary hash matches the tested ready binary (`E6C9E73286589A8693E2951ADE090532185D474F7FEDDF60BD0A46A62C68C981`). The AYANEO daily app was updated in place with `adb install -r` on `100.97.20.86:42603`, preserving app data.
 
 Live calendar posters, week navigation and title open/back passed. Production transfers are currently empty, so failed-transfer UI is tested with deterministic fixtures in the isolated `.uitest` app. No daily app data was cleared.
 
-## Built and tested, deployment pending
+## Installed and live-checked on 26 September
 
 ### Bandwidth and queue priority (`007bc6c`)
 
@@ -36,7 +36,7 @@ Live reads: 100 English/Hebrew candidates for 10 Things I Hate About You; The Av
 
 Manage > Server monitor shows a short Windows CPU sample, physical memory use, uptime and fixed-drive space available to the Hub account. Docker CLI is invoked read-only with fixed arguments and bounded time/output; only name, image, state and status are returned. Current Jellyfin playback is filtered to the selected profile. Unknown/failed sources remain explicit, and a refresh error labels old values stale. The UI refreshes every 15 seconds and preserves focused cards.
 
-Live candidate returned 95.7 GiB total RAM (matching Windows CIM), five fixed volumes, 18 containers and no active playback for the selected profile. At the check C: had about 5.5 GiB free (1.2%) and E: 74.2 GiB (2%). Nothing was deleted or restarted. Host CPU math, malformed Docker output and cross-profile session filtering have regression coverage. Device monitor test passed for missing data, low disk highlighting and focus restoration.
+Live production returned five fixed volumes, 18 containers and no active playback for the selected profile. At the latest check C: had about 3.4 GiB free (0.7%) and E: 70.3 GiB (2%). Nothing was deleted or restarted. Host CPU math, malformed Docker output and cross-profile session filtering have regression coverage. Device monitor test passed for missing data, low disk highlighting and focus restoration.
 
 ## Validation
 
@@ -46,19 +46,19 @@ Live candidate returned 95.7 GiB total RAM (matching Windows CIM), five fixed vo
 - Subtitle screenshot capture was corrected to wait for a rendered frame; the focused test passed again and the screenshot was visually inspected.
 - Screenshots in gitignored `.local-backups/`: `upcoming-next.png` (real calendar), `diagnostics-fixture.png`, `bandwidth-fixture.png`, `subtitles-fixture.png`, `monitor-fixture.png` (synthetic UI fixtures).
 
-## Deployment state and pending approval
+## Deployment record
 
-Windows canceled the bandwidth UAC prompt. It was not silently retried. A new asynchronous question requests permission to reopen UAC for reopening UAC. While waiting, the read-only monitor was also completed. Latest combined script `.local-backups/deploy-monitor.ps1` validates configuration, backs up the current binary, replaces the service binary, verifies health/hash and rolls back on failure.
+The user authorized reopening Windows UAC. `.local-backups/deploy-monitor.ps1` backed up the prior binary, replaced the FireDaemon service binary, verified liveness and hash, and reported success. Ready Hub binary: `.local-backups/hub-monitor-ready.exe`. The daily APK at `app/build/outputs/apk/debug/app-debug.apk` installed successfully on the AYANEO. Previous device APK is backed up at `.local-backups/daily-before-monitor.apk`.
 
-Latest ready Hub binary: `.local-backups/hub-monitor-ready.exe`, version `0.3.1-monitor`, with production config validation passed. Pending daily APK: `app/build/outputs/apk/debug/app-debug.apk`. Install only with `adb install -r`, after the matching Hub deployment. The isolated test app already includes the new features.
+The actual daily app showed `v0.3.1-monitor` and 12 services running; the live Server monitor displayed Windows/Docker data. Transfers > Bandwidth displayed the production normal mode, unlimited normal rates, 10 KiB/s alternative rates and queueing off. Library > The Avengers > More actions > Subtitles displayed three installed tracks, including the Hebrew `ktuvit` track with its recorded 91.11% match score. Home, Library search and Offline also loaded. No subtitle was downloaded or replaced during this read-only UI verification. Screenshots: `.local-backups/daily-monitor-live.png`, `daily-bandwidth-live.png`, `daily-subtitles-live.png`.
 
 Candidate Hub processes used: bandwidth PID 153804 on 8793; subtitles PID 145848 on 8794; monitor PID 151516 on 8795. All three candidate processes were stopped after executable-path verification at the final checkpoint. Production remains running on 8791. Candidate configuration and secrets, backups and deployment scripts are inside `.local-backups/`; never commit or share that directory.
 
-Automatic approval review rejected a combined command that would switch the test app to the candidate Hub through ADB reverse. That route was not retried. Direct local API validation and isolated device fixtures succeeded. A real daily-app navigation check remains after approved deployment.
+Automatic approval review previously rejected a combined command that would switch the test app to the candidate Hub through ADB reverse. That route was not retried. Direct local API validation, isolated device fixtures and real daily-app navigation all succeeded.
 
 ## Next slices
 
-1. Finish the pending combined deployment and daily-app checks. Verify a user-selected real subtitle acquisition and subsequent player track refresh.
+1. Verify a user-selected real subtitle acquisition and subsequent player track refresh.
 2. Narrowly configured restarts with review, audit and health verification. Windows services observed include AyaneoHub, Bazarr, Prowlarr and Radarr; Docker is installed at its standard Program Files path. Actual management mechanisms and permissions must be verified for every supported target; unmanaged processes must not advertise restart.
 3. Actionable alerts with persistent deduplication and exact destinations, followed by background delivery and quiet hours.
 4. Home shortcuts and configurable shelves.
@@ -68,4 +68,4 @@ These remaining slices are approved backlog, not completed features. No family m
 
 Known first-slice limits: Upcoming includes dated monitored calendar releases, with no undated inventory; Arr file availability is labeled Downloaded, not asserted Jellyfin availability. A failed title pipeline opens the attention list rather than an exact selected transfer. Subtitle feedback is local to the device; live replacement and player refresh are still unverified.
 
-Final verification: the two affected device tests (subtitle history/selection and monitor focus/missing data) passed again against the final APK. Production configuration validation passed for the ready Hub binary. Commits: `7e55a8b` subtitles, `2b46036` history provenance, `5f5409b` monitoring. The daily app was reopened without changing its connection or data. Deployment approval remains pending.
+Final verification: the two affected device tests (subtitle history/selection and monitor focus/missing data) passed again against the final APK. Production configuration validation passed for the ready Hub binary. Commits: `7e55a8b` subtitles, `2b46036` history provenance, `5f5409b` monitoring. The daily app was updated without clearing its data. Actual production UI and read-only API checks passed after deployment.
