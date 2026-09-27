@@ -10,6 +10,11 @@ import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.View
 import android.view.ViewGroup
+import android.view.FocusFinder
+import android.widget.SeekBar
+import android.widget.EditText
+import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -65,6 +70,7 @@ import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Link
 import org.readium.r2.shared.publication.Publication
+import org.readium.r2.shared.publication.services.positions
 import org.readium.r2.shared.util.asset.AssetRetriever
 import org.readium.r2.shared.util.getOrElse
 import org.readium.r2.shared.util.http.DefaultHttpClient
@@ -97,6 +103,13 @@ class EpubReaderScreen(
     private lateinit var topBar: LinearLayout
     private lateinit var bottomBar: LinearLayout
     private lateinit var position: TextView
+    private lateinit var bookSeek: SeekBar
+    private lateinit var returnButton: TextView
+    private var bookPositions: List<Locator> = emptyList()
+    private var bookSections: List<Locator> = emptyList()
+    private var returnLocator: Locator? = null
+    private var searchJob: Job? = null
+    private var searchGeneration = 0
     private lateinit var overlay: ChoiceOverlay
     private lateinit var appearance: EpubAppearancePanel
     private lateinit var pagePreview: ReaderPagePreviewController
@@ -204,6 +217,10 @@ class EpubReaderScreen(
     }
 
     override fun onShow() {
+        val shared = loadPreferences()
+        if (shared != preferences) {
+            preferences = shared; preferenceState = EpubPreferenceState(shared); applyPreferences()
+        }
         val previousAudio = ReadingEntryPreferences.get(host.viewContext, workId)?.audioSourceItemId.orEmpty()
         ReadingEntryPreferences.put(host.viewContext, workId,
             if (readAlong) ReadingEntryMode.READ_ALONG else ReadingEntryMode.READ,
@@ -213,6 +230,7 @@ class EpubReaderScreen(
     }
 
     override fun onHide() {
+        cancelSearch()
         closeDictionary(resumeNarration = false)
         narration?.pause()
         dockJob?.cancel()
@@ -223,6 +241,7 @@ class EpubReaderScreen(
     }
 
     override fun onDestroyView() {
+        cancelSearch()
         closeDictionary(resumeNarration = false)
         saveCurrent(immediate = true)
         narration?.release()
@@ -279,16 +298,20 @@ class EpubReaderScreen(
         when (action) {
             PadAction.Menu -> setControlsVisible(!controlsVisible)
             PadAction.Back -> if (controlsVisible) setControlsVisible(false) else host.back()
-            PadAction.Activate -> if (controlsVisible) controls.getOrNull(focusedControl)?.performClick() else turn(1)
+            PadAction.Activate -> if (controlsVisible && bookSeek.hasFocus()) seekBook()
+                else if (controlsVisible) (root.findFocus() ?: controls.getOrNull(focusedControl))?.performClick() else turn(1)
             PadAction.Primary -> toggleBookmark()
             PadAction.Secondary -> {
                 setControlsVisible(true)
                 showNavigator()
             }
-            PadAction.Refresh -> if (navigator == null) openBook() else cycleTheme()
+            PadAction.Refresh -> if (navigator == null) openBook() else { setControlsVisible(true); showAppearance() }
             is PadAction.Section -> turn(action.delta)
             is PadAction.Page -> changeChapter(action.direction)
-            is PadAction.Step -> if (controlsVisible) moveControlFocus(action.direction) else when (action.direction) {
+            is PadAction.Step -> if (controlsVisible && bookSeek.hasFocus() && action.direction in listOf(Direction.LEFT, Direction.RIGHT)) {
+                bookSeek.progress = (bookSeek.progress + if (action.direction == Direction.RIGHT) 1 else -1).coerceIn(0, bookSeek.max)
+                position.text = "Browse · ${bookSeek.progress}% · A to jump"
+            } else if (controlsVisible) moveControlFocus(action.direction) else when (action.direction) {
                 Direction.LEFT -> turn(-1)
                 Direction.RIGHT -> turn(1)
                 Direction.UP, Direction.DOWN -> setControlsVisible(true)
@@ -364,6 +387,8 @@ class EpubReaderScreen(
         val asset = retriever.retrieve(file).getOrElse { error(it.toString()) }
         val opened = opener.open(asset, allowUserInteraction = false).getOrElse { error(it.toString()) }
         publication = opened
+        bookPositions = withContext(Dispatchers.Default) { opened.positions() }
+        bookSections = bookPositions.distinctBy { it.href }
 
         val factory = EpubNavigatorFactory(opened).createFragmentFactory(
             initialLocator = initialLocator,
@@ -403,6 +428,7 @@ class EpubReaderScreen(
         locatorJob = uiScope.launch {
             fragment.currentLocator.drop(1).collect { locator ->
                 latestLocator = locator
+                updatePosition()
                 refreshBookmarkButton()
                 scheduleSave()
             }
@@ -428,8 +454,12 @@ class EpubReaderScreen(
     }
 
     private fun changeChapter(direction: Direction) {
-        switchToReading()
-        repeat(4) { if (direction == Direction.UP) navigator?.goBackward() else navigator?.goForward() }
+        val book = publication ?: return
+        val current = book.readingOrder.indexOfFirst { it.href.toString().substringBefore('#') == latestLocator?.href?.toString()?.substringBefore('#') }
+        if (current < 0) return
+        val next = current + if (direction == Direction.UP || direction == Direction.LEFT) -1 else 1
+        val link = book.readingOrder.getOrNull(next) ?: return host.notify(if (next < 0) "First section" else "Last section")
+        book.locatorFromLink(link)?.let { jumpTo(it) }
     }
 
     private fun scheduleSave() = saveCurrent(immediate = false)
@@ -474,6 +504,8 @@ class EpubReaderScreen(
         topBar.addView(control("☷", "Table of contents", click = {
             showNavigator()
         }))
+        topBar.addView(control("search", "Search this book", { showSearch() }))
+        topBar.addView(View(host.viewContext).apply { setBackgroundColor(0x665C717A) }, LinearLayout.LayoutParams(dp(1), dp(22)).apply { setMargins(dp(5), 0, dp(5), 0) })
         if (audioEditions.isNotEmpty() || alignedEditions.isNotEmpty() || readAlong) {
             topBar.addView(PlayerIconButton(host.viewContext, PlayerControlIcon.AUDIO).apply {
                 contentDescription = "Reading and listening"
@@ -495,21 +527,51 @@ class EpubReaderScreen(
 
     private fun buildBottomBar() {
         bottomBar = LinearLayout(host.viewContext).apply {
-            orientation = LinearLayout.HORIZONTAL
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(10), dp(5), dp(10), dp(5))
             setBackgroundColor(0xD9141518.toInt())
         }
-        root.addView(bottomBar, FrameLayout.LayoutParams(MATCH, dp(58), Gravity.BOTTOM))
-        bottomBar.addView(control("‹", "Previous page", { turn(-1) }))
+        root.addView(bottomBar, FrameLayout.LayoutParams(MATCH, dp(88), Gravity.BOTTOM))
+        val navigationRow = LinearLayout(host.viewContext).apply { gravity = Gravity.CENTER_VERTICAL }
+        bottomBar.addView(navigationRow, LinearLayout.LayoutParams(MATCH, dp(44)))
+        navigationRow.addView(control("‹", "Previous page", { turn(-1) }))
         position = TextView(host.viewContext).apply {
             text = "Opening…"
             textSize = 12f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
+            contentDescription = "Reading position and navigation"
+            Styler.makeFocusable(this); FocusDecorator.attach(this, ringVisible, scale = false)
+            activateOnTap { showPageNavigation() }
         }
-        bottomBar.addView(position, LinearLayout.LayoutParams(0, MATCH, 1f))
-        bottomBar.addView(control("›", "Next page", { turn(1) }))
+        controls += position
+        navigationRow.addView(position, LinearLayout.LayoutParams(0, MATCH, 1f))
+        returnButton = control("return", "Return to previous place", {
+            val target = returnLocator
+            if (target != null && jumpTo(target, remember = false)) { returnLocator = null; updatePosition() }
+        }).apply { visibility = View.GONE }
+        navigationRow.addView(returnButton)
+        navigationRow.addView(control("›", "Next page", { turn(1) }))
+        bookSeek = SeekBar(host.viewContext).apply {
+            max = 100; contentDescription = "Browse book percentage"; minimumHeight = dp(34)
+            progressTintList = android.content.res.ColorStateList.valueOf(colors.accent)
+            thumbTintList = android.content.res.ColorStateList.valueOf(colors.accent)
+            Styler.makeFocusable(this); FocusDecorator.attach(this, ringVisible, scale = false)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onStartTrackingTouch(bar: SeekBar) = Unit
+                override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
+                    if (fromUser) position.text = "Browse · $value%"
+                }
+                override fun onStopTrackingTouch(bar: SeekBar) { seekBook() }
+            })
+            setOnFocusChangeListener { view, focused ->
+                FocusDecorator.refresh(view, focused && ringVisible())
+                if (!focused) updatePosition()
+            }
+        }
+        controls += bookSeek
+        bottomBar.addView(bookSeek, LinearLayout.LayoutParams(MATCH, dp(34)))
     }
 
     private fun buildNarrationDock() {
@@ -544,7 +606,7 @@ class EpubReaderScreen(
 
     private fun control(glyph: String, label: String, click: () -> Unit): TextView =
         TextView(host.viewContext).apply {
-            val icon = when (glyph) { "×" -> AppIcon.CLOSE; "☷" -> AppIcon.CONTENTS; "☆" -> AppIcon.BOOKMARK; "Aa" -> AppIcon.APPEARANCE; "‹" -> AppIcon.PREVIOUS; "▣" -> AppIcon.BOOK; else -> AppIcon.NEXT }
+            val icon = when (glyph) { "×" -> AppIcon.CLOSE; "☷" -> AppIcon.CONTENTS; "search" -> AppIcon.SEARCH; "return" -> AppIcon.PREVIOUS_ITEM; "☆" -> AppIcon.BOOKMARK; "Aa" -> AppIcon.APPEARANCE; "‹" -> AppIcon.PREVIOUS; "▣" -> AppIcon.BOOK; else -> AppIcon.NEXT }
             setCompoundDrawables(AppIconDrawable(icon, Color.WHITE).apply { setBounds(0,0,dp(22),dp(22)) },null,null,null)
             setPadding(dp(17),0,dp(17),0)
             gravity = Gravity.CENTER
@@ -561,12 +623,6 @@ class EpubReaderScreen(
             layoutParams = LinearLayout.LayoutParams(dp(56), MATCH)
             controls += this
         }
-
-    private fun cycleTheme() {
-        preferences = EpubPreferenceAdjuster.nextTheme(preferences)
-        applyPreferences()
-        host.notify("Reading theme: ${preferences.theme.name.lowercase()}")
-    }
 
     private suspend fun prepareNarration(file: File, saved: Locator?) {
         loading.visibility = View.VISIBLE
@@ -837,7 +893,122 @@ class EpubReaderScreen(
         showTableOfContents()
     }
 
+    private fun cancelSearch() { searchGeneration++; searchJob?.cancel(); searchJob = null }
+
+    private fun jumpTo(target: Locator, remember: Boolean = true): Boolean {
+        val previous = latestLocator
+        switchToReading()
+        if (navigator?.go(target, animated = false) != true) {
+            host.notify("This reading position could not be opened")
+            return false
+        }
+        if (remember && previous != null) returnLocator = previous
+        overlay.dismiss(); updatePosition(); host.refreshHints()
+        return true
+    }
+
+    private fun seekBook() {
+        if (bookSections.isEmpty()) return
+        val fraction = bookSeek.progress / 100.0
+        val index = bookSections.indexOfLast { (it.locations.totalProgression ?: 0.0) <= fraction }.coerceAtLeast(0)
+        val section = bookSections[index]
+        val start = section.locations.totalProgression ?: 0.0
+        val end = bookSections.getOrNull(index + 1)?.locations?.totalProgression ?: 1.0
+        val local = if (end > start) ((fraction - start) / (end - start)).coerceIn(0.0, 1.0) else 0.0
+        jumpTo(section.copy(locations = Locator.Locations(progression = local), text = Locator.Text()))
+    }
+
+    // Readium's stable positions can be sparse in short/compressed chapters. Interpolate the
+    // display and scrubber within each resource while leaving saved Readium locators untouched.
+    private fun bookProgress(): Double? {
+        val current = latestLocator ?: return null
+        val index = bookSections.indexOfFirst { it.href == current.href }
+        if (index < 0) return current.locations.totalProgression
+        val start = bookSections[index].locations.totalProgression ?: return current.locations.totalProgression
+        val end = bookSections.getOrNull(index + 1)?.locations?.totalProgression ?: 1.0
+        return (start + (end - start) * (current.locations.progression ?: 0.0)).coerceIn(0.0, 1.0)
+    }
+
+    private fun showPageNavigation() {
+        cancelSearch()
+        overlay.resetBody()
+        overlay.open("Reading position", "Screen pages are within this section. Book percentage uses saved ebook locations.", onDismiss = { host.refreshHints() })
+        if (pageCount > 0) {
+            val page = EditText(host.viewContext).apply {
+                inputType = InputType.TYPE_CLASS_NUMBER
+                setText((pageIndex + 1).toString()); setTextColor(colors.primaryText)
+                contentDescription = "Section page number, 1 to $pageCount"
+                selectAll(); minimumHeight = dp(48)
+            }
+            overlay.body.addView(page)
+            overlay.choice("Go to section page", "1–$pageCount") {
+                val number = page.text.toString().toIntOrNull()
+                val current = latestLocator
+                if (number == null || number !in 1..pageCount || current == null) host.notify("Enter a section page from 1 to $pageCount")
+                else jumpTo(current.copy(locations = Locator.Locations(progression = (number - 1).toDouble() / pageCount), text = Locator.Text()))
+            }
+        }
+        overlay.choice("Contents", "Jump to a chapter") { showTableOfContents() }
+        overlay.choice("Bookmarks", "Saved places in this book") { showBookmarks() }
+        returnLocator?.let { saved -> overlay.choice("Return to previous place") {
+            if (jumpTo(saved, remember = false)) { returnLocator = null; updatePosition() }
+        } }
+        overlay.focusBody(); host.refreshHints()
+    }
+
+    private fun showSearch() {
+        val book = publication ?: return host.notify("The book is still opening")
+        cancelSearch()
+        overlay.resetBody()
+        overlay.open("Search this book", "Find a passage in this edition", onDismiss = { cancelSearch(); host.refreshHints() })
+        val query = EditText(host.viewContext).apply {
+            hint = "Word or phrase"; contentDescription = "Search this book"
+            setTextColor(colors.primaryText); setHintTextColor(colors.mutedText); isSingleLine = true
+            filters = arrayOf(android.text.InputFilter.LengthFilter(200)); imeOptions = EditorInfo.IME_ACTION_SEARCH
+            minimumHeight = dp(48)
+        }
+        overlay.body.addView(query)
+        fun submit() {
+            val phrase = query.text.toString().trim()
+            if (phrase.isEmpty()) { host.notify("Enter a word or phrase"); return }
+            cancelSearch()
+            val generation = searchGeneration
+            (host.viewContext.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                .hideSoftInputFromWindow(query.windowToken, 0)
+            overlay.resetBody()
+            overlay.choice("Searching…") { }
+            searchJob = uiScope.launch {
+                try {
+                    val results = EpubBookSearch.find(book, phrase)
+                    if (generation != searchGeneration || !overlay.isOpen) return@launch
+                    overlay.resetBody()
+                    overlay.choice("Search again", if (results.size == 100) "First 100 matches · narrow your search" else "${results.size} matches") { showSearch() }
+                    results.forEach { locator ->
+                        overlay.choice(locator.title?.takeIf { it.isNotBlank() } ?: "Matching passage",
+                            listOfNotNull(locator.text.before, locator.text.highlight, locator.text.after).joinToString("").take(240)) {
+                            jumpTo(locator)
+                        }
+                    }
+                    overlay.focusBody()
+                } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                    if (generation == searchGeneration && overlay.isOpen) {
+                        overlay.resetBody(); overlay.choice("Search took too long", "Try a more specific phrase") { showSearch() }; overlay.focusBody()
+                    }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) {
+                    if (generation == searchGeneration && overlay.isOpen) {
+                        overlay.resetBody(); overlay.choice("Could not search this edition", "Choose to try again") { showSearch() }; overlay.focusBody()
+                    }
+                }
+            }
+        }
+        query.setOnEditorActionListener { _, action, _ -> if (action == EditorInfo.IME_ACTION_SEARCH) { submit(); true } else false }
+        overlay.choice("Search") { submit() }
+        overlay.focusBody(query); host.refreshHints()
+    }
+
     private fun showBookmarks() {
+        cancelSearch()
         val entries = try { bookmarks.list(checkpointKey) }
             catch (_: Exception) { return host.notify("Bookmarks could not be read on this device") }
         overlay.resetBody()
@@ -860,8 +1031,7 @@ class EpubReaderScreen(
                     } catch (_: Exception) { host.notify("Bookmark could not be deleted") }
                 } else {
                     val locator = runCatching { Locator.fromJSON(JSONObject(entry.locator.toString())) }.getOrNull()
-                    switchToReading()
-                    if (locator == null || navigator?.go(locator, animated = false) == false)
+                    if (locator == null || !jumpTo(locator))
                         host.notify("This bookmark could not be opened")
                     else overlay.dismiss()
                 }
@@ -875,6 +1045,7 @@ class EpubReaderScreen(
     }
 
     private fun showTableOfContents() {
+        cancelSearch()
         val book = publication ?: return host.notify("The book is still opening")
         val links = flattenLinks(book.tableOfContents.ifEmpty { book.readingOrder })
         val currentHref = latestLocator?.href?.toString()
@@ -889,9 +1060,7 @@ class EpubReaderScreen(
             val active = link.href.toString() == currentHref
             val row = overlay.choice("  ".repeat(depth) + (link.title ?: "Section ${index + 1}"),
                 if (active) "Current section" else "", selected = active) {
-                switchToReading()
-                book.locatorFromLink(link)?.let { navigator?.go(it, animated = false) }
-                overlay.dismiss()
+                book.locatorFromLink(link)?.let { jumpTo(it) }
                 host.refreshHints()
             }
             if (active) currentRow = row
@@ -908,6 +1077,7 @@ class EpubReaderScreen(
     }
 
     private fun showAppearance() {
+        cancelSearch()
         appearance.show(preferences, onChanged = {
             preferences = it
             preferenceState.preview(it)
@@ -926,43 +1096,20 @@ class EpubReaderScreen(
         navigator?.submitPreferences(readiumPreferences(preferences))
     }
 
-    private fun loadPreferences(): EpubReaderPreferences {
-        val store = host.viewContext.getSharedPreferences("epub-reader", 0)
-        return EpubReaderPreferences(
-            theme = runCatching { EpubTheme.valueOf(store.getString("theme", EpubTheme.SEPIA.name)!!) }.getOrDefault(EpubTheme.SEPIA),
-            fontFamily = store.getString("fontFamily", "publisher") ?: "publisher",
-            fontScale = store.getFloat("fontScale", 1f),
-            lineHeight = store.getFloat("lineHeight", 1.25f),
-            pageMargins = store.getFloat("pageMargins", 1f),
-            columns = runCatching { EpubColumns.valueOf(store.getString("columns", EpubColumns.AUTO.name)!!) }.getOrDefault(EpubColumns.AUTO),
-            publisherStyles = store.getBoolean("publisherStyles", true),
-            scroll = store.getBoolean("scroll", false),
-            textAlignment = store.getString("textAlignment", "start") ?: "start"
-        )
-    }
+    private fun loadPreferences() = EpubAppearanceStore.load(host.viewContext)
 
-    private fun persistPreferences(value: EpubReaderPreferences) {
-        host.viewContext.getSharedPreferences("epub-reader", 0).edit()
-            .putString("theme", value.theme.name)
-            .putString("fontFamily", value.fontFamily)
-            .putFloat("fontScale", value.fontScale)
-            .putFloat("lineHeight", value.lineHeight)
-            .putFloat("pageMargins", value.pageMargins)
-            .putString("columns", value.columns.name)
-            .putBoolean("publisherStyles", value.publisherStyles)
-            .putBoolean("scroll", value.scroll)
-            .putString("textAlignment", value.textAlignment)
-            .apply()
-    }
+    private fun persistPreferences(value: EpubReaderPreferences) = EpubAppearanceStore.save(host.viewContext, value)
 
     private fun readiumPreferences(value: EpubReaderPreferences) = EpubPreferences(
         theme = when (value.theme) {
             EpubTheme.SYSTEM -> null
             EpubTheme.LIGHT -> ReadiumTheme.LIGHT
             EpubTheme.SEPIA -> ReadiumTheme.SEPIA
-            EpubTheme.DARK -> ReadiumTheme.DARK
+            EpubTheme.DARK, EpubTheme.BLUE -> ReadiumTheme.DARK
         },
-        columnCount = when (value.columns) {
+        backgroundColor = EpubPagePalette.of(value.theme)?.first?.let { org.readium.r2.navigator.preferences.Color(it) },
+        textColor = EpubPagePalette.of(value.theme)?.second?.let { org.readium.r2.navigator.preferences.Color(it) },
+        columnCount = when (if (value.onePagePerScreen) EpubColumns.ONE else value.columns) {
             EpubColumns.AUTO -> ColumnCount.AUTO
             EpubColumns.ONE -> ColumnCount.ONE
             EpubColumns.TWO -> ColumnCount.TWO
@@ -977,7 +1124,7 @@ class EpubReaderScreen(
         lineHeight = value.lineHeight.toDouble(),
         pageMargins = value.pageMargins.toDouble(),
         publisherStyles = value.publisherStyles,
-        scroll = value.scroll,
+        scroll = value.scroll && !value.onePagePerScreen,
         textAlign = when (value.textAlignment) {
             "justify" -> TextAlign.JUSTIFY
             "center" -> TextAlign.CENTER
@@ -990,7 +1137,7 @@ class EpubReaderScreen(
         pagePreview.setControlsVisible(visible)
         if (::narrationDock.isInitialized) {
             val params = narrationDock.layoutParams as FrameLayout.LayoutParams
-            params.bottomMargin = dp(if (visible) 66 else 12)
+            params.bottomMargin = dp(if (visible) 96 else 12)
             narrationDock.layoutParams = params
             narrationDock.visibility = if (visible && narration != null) View.VISIBLE else View.GONE
         }
@@ -1000,27 +1147,26 @@ class EpubReaderScreen(
     }
 
     private fun moveControlFocus(direction: Direction) {
-        if (controls.isEmpty()) return
-        val step = if (direction == Direction.LEFT || direction == Direction.UP) -1 else 1
-        var next = focusedControl
-        while (next + step in controls.indices) {
-            next += step
-            if (controls[next].isShown) {
-                focusedControl = next
-                controls[next].requestFocus()
-                return
-            }
-        }
+        val focused = root.findFocus()
+        val axis = when (direction) { Direction.LEFT -> View.FOCUS_LEFT; Direction.RIGHT -> View.FOCUS_RIGHT; Direction.UP -> View.FOCUS_UP; Direction.DOWN -> View.FOCUS_DOWN }
+        val next = FocusFinder.getInstance().findNextFocus(root, focused, axis)
+        if (next != null && next in controls && next.isShown) { focusedControl = controls.indexOf(next); next.requestFocus() }
     }
 
     private fun updatePosition() {
         if (!::position.isInitialized) return
-        val progression = latestLocator?.locations?.totalProgression
-        position.text = when {
-            pageCount > 0 -> "Page ${pageIndex + 1} of $pageCount"
-            progression != null -> "${(progression * 100).toInt()}%"
-            else -> title
+        val progression = bookProgress()
+        position.text = buildList {
+            add(latestLocator?.title?.takeIf { it.isNotBlank() } ?: "Reading")
+            if (pageCount > 0) add("Section page ${pageIndex + 1}/$pageCount")
+            if (progression != null) add("${(progression * 100).toInt()}% of book")
+        }.joinToString(" · ")
+        position.maxLines = 2
+        if (::bookSeek.isInitialized) {
+            bookSeek.isEnabled = bookPositions.isNotEmpty()
+            if (!bookSeek.isPressed && !bookSeek.hasFocus()) bookSeek.progress = ((progression ?: 0.0) * 100).toInt()
         }
+        if (::returnButton.isInitialized) returnButton.visibility = if (returnLocator == null) View.GONE else View.VISIBLE
     }
 
     private fun showFailure(message: String) {

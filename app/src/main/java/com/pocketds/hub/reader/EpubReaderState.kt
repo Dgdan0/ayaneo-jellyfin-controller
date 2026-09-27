@@ -3,7 +3,7 @@ package com.pocketds.hub.reader
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class EpubTheme { SYSTEM, LIGHT, SEPIA, DARK }
+enum class EpubTheme { SYSTEM, LIGHT, SEPIA, DARK, BLUE }
 
 @Serializable
 enum class EpubColumns { AUTO, ONE, TWO }
@@ -18,7 +18,8 @@ data class EpubReaderPreferences(
     val columns: EpubColumns = EpubColumns.AUTO,
     val scroll: Boolean = false,
     val publisherStyles: Boolean = true,
-    val textAlignment: String = "start"
+    val textAlignment: String = "start",
+    val onePagePerScreen: Boolean = false
 )
 
 object EpubLayoutPolicy {
@@ -29,7 +30,7 @@ object EpubLayoutPolicy {
         viewportWidthDp: Int,
         publicationAllowsSpreads: Boolean
     ): Int {
-        if (preferences.scroll || !publicationAllowsSpreads) return 1
+        if (preferences.onePagePerScreen || preferences.scroll || !publicationAllowsSpreads) return 1
         return when (preferences.columns) {
             EpubColumns.ONE -> 1
             EpubColumns.TWO -> 2
@@ -38,10 +39,15 @@ object EpubLayoutPolicy {
     }
 
     fun selectColumns(value: EpubReaderPreferences, columns: EpubColumns): EpubReaderPreferences =
-        value.copy(columns = columns, scroll = if (columns == EpubColumns.TWO) false else value.scroll)
+        value.copy(columns = columns, scroll = if (columns == EpubColumns.TWO) false else value.scroll, onePagePerScreen = false)
 
     fun selectScroll(value: EpubReaderPreferences, enabled: Boolean): EpubReaderPreferences =
-        value.copy(scroll = enabled, columns = if (enabled && value.columns == EpubColumns.TWO) EpubColumns.AUTO else value.columns)
+        value.copy(scroll = enabled, columns = if (enabled && value.columns == EpubColumns.TWO) EpubColumns.AUTO else value.columns,
+            onePagePerScreen = if (enabled) false else value.onePagePerScreen)
+
+    fun selectOnePage(value: EpubReaderPreferences, enabled: Boolean): EpubReaderPreferences =
+        if (enabled) value.copy(onePagePerScreen = true, columns = EpubColumns.ONE, scroll = false)
+        else value.copy(onePagePerScreen = false)
 }
 
 object EpubChromePolicy {
@@ -52,7 +58,8 @@ object EpubPreferenceAdjuster {
     fun nextTheme(value: EpubReaderPreferences) = value.copy(theme = when (value.theme) {
         EpubTheme.SYSTEM, EpubTheme.LIGHT -> EpubTheme.SEPIA
         EpubTheme.SEPIA -> EpubTheme.DARK
-        EpubTheme.DARK -> EpubTheme.LIGHT
+        EpubTheme.DARK -> EpubTheme.BLUE
+        EpubTheme.BLUE -> EpubTheme.LIGHT
     })
 
     fun nextColumns(value: EpubReaderPreferences) = value.copy(columns = when (value.columns) {

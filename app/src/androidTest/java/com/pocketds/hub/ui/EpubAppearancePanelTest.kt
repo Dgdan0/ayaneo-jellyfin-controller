@@ -21,16 +21,16 @@ class EpubAppearancePanelTest {
             var saved=EpubReaderPreferences();var closed=false
             panel.show(saved,{saved=it},{closed=true})
             fun find(v:View,label:String):View? = if(v.contentDescription?.toString()?.startsWith(label)==true || (v is android.widget.TextView && v.text==label)) v else (v as? ViewGroup)?.let { g->(0 until g.childCount).firstNotNullOfOrNull {find(g.getChildAt(it),label)} }
-            find(panel,"Theme")!!.performClick()
-            find(panel,"Dark page colour")!!.performClick()
+            find(panel,"Themes")!!.performClick()
+            find(panel,"Night")!!.performClick()
             assertTrue(panel.isOpen);assertEquals(EpubTheme.DARK,saved.theme)
             assertNull(find(panel,"Save reading appearance"))
             find(panel,"Close panel")!!.performClick()
             assertFalse(panel.isOpen);assertTrue(closed)
             panel.show(saved,{saved=it},{})
-            find(panel,"Page")!!.performClick()
+            find(panel,"Layout")!!.performClick()
             find(panel,"Continuous scrolling")!!.performClick()
-            find(panel,"Two columns")!!.performClick()
+            find(panel,"Two pages")!!.performClick()
             assertFalse(saved.scroll);assertEquals(EpubColumns.TWO,saved.columns)
         }} finally {i.runOnMainSync {activity.finish()}}
     }

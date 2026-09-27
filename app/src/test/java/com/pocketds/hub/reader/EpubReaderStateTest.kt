@@ -11,6 +11,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EpubReaderStateTest {
+    @Test fun `one full page exits scrolling and spread and explicit layout replaces it`() {
+        val single = EpubLayoutPolicy.selectOnePage(EpubReaderPreferences(scroll = true, columns = EpubColumns.TWO), true)
+        assertFalse(single.scroll)
+        assertEquals(EpubColumns.ONE, single.columns)
+        assertEquals(1, EpubLayoutPolicy.columnCount(single, 1200, true))
+        assertFalse(EpubLayoutPolicy.selectColumns(single, EpubColumns.TWO).onePagePerScreen)
+        assertFalse(EpubLayoutPolicy.selectScroll(single, true).onePagePerScreen)
+        val disabled = EpubLayoutPolicy.selectOnePage(single, false)
+        assertFalse(disabled.onePagePerScreen)
+        assertEquals(EpubColumns.ONE, disabled.columns)
+    }
     @Test fun `centre tap reveals chrome and a page tap dismisses open chrome`() {
         assertTrue(EpubChromePolicy.handlesTap(.5f, controlsVisible = false))
         assertFalse(EpubChromePolicy.handlesTap(.1f, controlsVisible = false))

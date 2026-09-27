@@ -66,9 +66,14 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     }
     fun resetBody() {body.removeAllViews();tabRow.removeAllViews();footer.removeAllViews();scroll.scrollTo(0,0)}
     fun focusBody(preferred:View?=null) {post {if(isOpen)(preferred ?: body.getFocusables(FOCUS_FORWARD).firstOrNull() ?: close).requestFocus()}}
-    fun tabs(values:List<Pair<String,String>>,selected:String,onPick:(String)->Unit) {
+    fun tabs(values:List<Pair<String,String>>,selected:String,onPick:(String)->Unit) = tabs(values, selected, false, onPick)
+
+    fun tabs(values:List<Pair<String,String>>,selected:String,dividers:Boolean,onPick:(String)->Unit) {
         tabRow.removeAllViews()
-        values.forEach {(id,label)-> tabRow.addView(TextView(context).apply {
+        values.forEachIndexed { index,(id,label)->
+            if(dividers && index>0) tabRow.addView(View(context).apply {setBackgroundColor(colors.mutedText)},LinearLayout.LayoutParams(dp(1),dp(20)).apply {gravity=Gravity.CENTER_VERTICAL})
+            tabRow.addView(TextView(context).apply {
+            tag="tab:$id"
             text=label;textSize=14f;gravity=Gravity.CENTER;minimumHeight=dp(48);isSelected=id==selected
             setTextColor(if(isSelected) colors.accent else colors.mutedText)
             background=Styler.selectionBackground(context,colors,isSelected,cornerDp=8f)
