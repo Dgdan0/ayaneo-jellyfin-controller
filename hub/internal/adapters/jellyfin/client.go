@@ -166,6 +166,10 @@ func (c *Client) Item(ctx context.Context, itemID string) (*Item, error) {
 	return out, nil
 }
 
+func (c *Client) DeleteItem(ctx context.Context, itemID string) error {
+	return c.base.Delete(ctx, "/Items/"+itemID, nil)
+}
+
 // SetPlayed and SetFavorite use Jellyfin's idempotent user-item endpoints.
 // They carry no body; the selected user is part of the path and the API key is
 // still applied by the shared authenticated transport.

@@ -112,6 +112,7 @@ class LibraryCardView(
         val kind = when (view.kind) {
             "comic" -> "COMICS"
             "manga" -> "MANGA"
+            "reading_list" -> "KAVITA"
             else -> "BOOKS & AUDIO"
         }
         setText(view.title, kind)

@@ -629,7 +629,9 @@ class LibraryDetailScreen(
                         ACTION_OPTIONS -> "Audio & subtitles"
                         else -> if (value.played) "Mark unwatched" else "Mark watched"
                     })
-                } + if (value.type in setOf("movie", "episode")) listOf(ChoiceOverlay.Choice("subtitles", "Find / update subtitles", "Search providers, rate matches and update saved copies")) else emptyList()
+                } + (if (value.type in setOf("movie", "episode")) listOf(ChoiceOverlay.Choice("subtitles", "Find / update subtitles", "Search providers, rate matches and update saved copies")) else emptyList()) + listOf(
+                    ChoiceOverlay.Choice("offline-remove","Remove offline copy","Only this device; keep server media and progress"),
+                    ChoiceOverlay.Choice("server-remove","Delete from server…","Review the files before confirming",danger=true))
                 overlay.show("More actions", value.title, choices,
                     onCancel = { moreAction.requestFocus(); host?.refreshHints() },
                     onPick = { moreAction.requestFocus(); performAction(it); host?.refreshHints() })
@@ -649,6 +651,8 @@ class LibraryDetailScreen(
             ACTION_OPTIONS -> host?.openPlaybackOptions(itemId, if (canResume(item)) "resume" else "restart")
             ACTION_WATCHED -> item?.let { updateState(played = !it.played) }
             ACTION_FAVORITE -> item?.let { updateState(favorite = !it.favorite) }
+            "offline-remove" -> item?.let {removeOfflineVideo(requireNotNull(host),overlay,it)}
+            "server-remove" -> host?.push(MediaRemovalScreen(api,"video",itemId,ringVisible))
             ACTION_DOWNLOAD -> item?.let { value ->
                 val existing = if (value.type in setOf("movie", "episode")) {
                     OfflineRepository.get(requireNotNull(host).viewContext).forItem(value.id)

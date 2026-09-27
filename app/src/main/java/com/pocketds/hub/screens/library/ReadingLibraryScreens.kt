@@ -86,6 +86,7 @@ class ReadingLibraryGridScreen(
     override val horizontalMode get() = if(sortKey=="author") HorizontalMode.CONFINED else HorizontalMode.GRID
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var libraryRevision = MediaLibraryChanges.revision
     private val paging = PagedLoadState(PREFETCH_AHEAD)
     private val adapter = WorkAdapter()
     private lateinit var colors: PocketColors
@@ -171,6 +172,7 @@ class ReadingLibraryGridScreen(
     }
 
     override fun onShow() {
+        if(libraryRevision != MediaLibraryChanges.revision) {libraryRevision=MediaLibraryChanges.revision;reload();return}
         val saved=DomainPreferences.sort(requireNotNull(host).viewContext,ContentMode.BOOKS,sortFields.map { it.first },if (sortFields.any { it.first == "series" }) "series" else "title")
         if(saved!=SortPreference(sortKey,sortAscending)) { applySort(saved); return }
         if(sortKey=="author"){authorShelves.show(sortAscending);return}
@@ -773,10 +775,14 @@ class ReadingWorkScreen(
                         listOverlay.show("More actions", work.title, buildList {
                             add(ChoiceOverlay.Choice("read", read.contentDescription.toString()))
                             add(ChoiceOverlay.Choice("lists", "Reading lists"))
+                            add(ChoiceOverlay.Choice("offline-remove", "Remove offline copy", "Only this device; keep server files and progress"))
+                            add(ChoiceOverlay.Choice("server-remove", "Delete from server…", "Review the files before confirming", danger = true))
                         }, onCancel = { actionViews["list:more"]?.requestFocus(); host?.refreshHints() }) { selected ->
                             when (selected) {
                                 "read" -> read.performClick()
                                 "lists" -> lists.performClick()
+                                "offline-remove" -> removeOfflineReading(requireNotNull(host),listOverlay,work,scope)
+                                "server-remove" -> { refreshOnShow=true;host?.push(MediaRemovalScreen(api,"reading",work.id,ringVisible)) }
                             }
                             host?.refreshHints()
                         }

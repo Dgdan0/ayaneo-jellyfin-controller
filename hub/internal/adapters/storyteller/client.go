@@ -73,6 +73,7 @@ type Identifier struct {
 }
 
 type Ebook struct {
+	Filepath  string `json:"filepath"`
 	UUID      string `json:"uuid"`
 	PageCount int    `json:"pageCount,omitempty"`
 	FileSize  int64  `json:"fileSize,omitempty"`
@@ -80,6 +81,12 @@ type Ebook struct {
 }
 
 type Audiobook struct {
+	Filepath string `json:"filepath"`
+	Manifest struct {
+		ReadingOrder []struct {
+			Href string `json:"href"`
+		} `json:"readingOrder"`
+	} `json:"manifest"`
 	UUID     string  `json:"uuid"`
 	Duration float64 `json:"duration,omitempty"`
 	FileSize int64   `json:"fileSize,omitempty"`
@@ -87,6 +94,7 @@ type Audiobook struct {
 }
 
 type Readaloud struct {
+	Filepath      string  `json:"filepath"`
 	UUID          string  `json:"uuid"`
 	Missing       bool    `json:"missing"`
 	Status        string  `json:"status,omitempty"`
@@ -179,6 +187,19 @@ func (c *Client) Book(ctx context.Context, id int64) (*Book, error) {
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (c *Client) DeleteBook(ctx context.Context, id int64) error {
+	if id <= 0 {
+		return fmt.Errorf("storyteller: invalid book id")
+	}
+	resp, err := c.requestWith(ctx, c.http, http.MethodDelete, "/api/v2/books/"+strconv.FormatInt(id, 10), url.Values{"preventReImport": {"true"}}, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, err = io.Copy(io.Discard, io.LimitReader(resp.Body, httpx.MaxBodyBytes))
+	return err
 }
 
 // ScanAll runs Storyteller's installed v2 book processing route. The service

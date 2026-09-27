@@ -45,6 +45,8 @@ type Config struct {
 }
 
 type ServerConfig struct {
+	// Explicit, server-side mappings for deleting reader assets. No client path is accepted.
+	MediaRemovalRoots []MediaRemovalRoot `yaml:"media_removal_roots"`
 	// Loopback by default. Binding anywhere else requires AllowPublicBind and
 	// either TLS in front or a trusted proxy -- see validate.go.
 	Listen string `yaml:"listen"`
@@ -63,6 +65,12 @@ type ServerConfig struct {
 	// ReadingTransfers persists opaque BookKeeprr transfer capabilities and
 	// retry tickets. It contains no service credential or indexer URL.
 	ReadingTransfers string `yaml:"reading_transfers"`
+}
+
+type MediaRemovalRoot struct {
+	Service string `yaml:"service"`
+	Remote  string `yaml:"remote"`
+	Local   string `yaml:"local"`
 }
 
 type AuthConfig struct {

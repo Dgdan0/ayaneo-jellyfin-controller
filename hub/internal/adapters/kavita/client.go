@@ -1,5 +1,5 @@
-// Package kavita provides the authenticated read-only catalog boundary for
-// Kavita. Mutations and raw filesystem paths intentionally stay outside it.
+// Package kavita provides the authenticated Kavita boundary. Raw file paths
+// remain server-only; the API exposes them only as opaque media identities.
 package kavita
 
 import (
@@ -70,18 +70,37 @@ type Metadata struct {
 }
 
 type Chapter struct {
-	ID          int      `json:"id"`
-	Title       string   `json:"title"`
-	Number      string   `json:"number"`
-	Pages       int      `json:"pages"`
-	PagesRead   int      `json:"pagesRead"`
-	Format      int      `json:"format"`
-	ISBN        string   `json:"isbn,omitempty"`
-	IsSpecial   bool     `json:"isSpecial"`
-	Language    string   `json:"language,omitempty"`
-	Summary     string   `json:"summary,omitempty"`
-	ReleaseDate string   `json:"releaseDate,omitempty"`
-	Writers     []Person `json:"writers,omitempty"`
+	Files       []ChapterFile `json:"files"`
+	ID          int           `json:"id"`
+	Title       string        `json:"title"`
+	Number      string        `json:"number"`
+	Pages       int           `json:"pages"`
+	PagesRead   int           `json:"pagesRead"`
+	Format      int           `json:"format"`
+	ISBN        string        `json:"isbn,omitempty"`
+	IsSpecial   bool          `json:"isSpecial"`
+	Language    string        `json:"language,omitempty"`
+	Summary     string        `json:"summary,omitempty"`
+	ReleaseDate string        `json:"releaseDate,omitempty"`
+	Writers     []Person      `json:"writers,omitempty"`
+}
+
+type ChapterFile struct {
+	FilePath string `json:"filePath"`
+}
+
+func (c *Client) DeleteSeries(ctx context.Context, id int) error {
+	if id <= 0 {
+		return fmt.Errorf("kavita: invalid series id")
+	}
+	var ok bool
+	if err := c.base.DeleteJSON(ctx, "/api/Series/"+strconv.Itoa(id), &ok); err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("kavita: catalogue deletion failed")
+	}
+	return nil
 }
 
 type Volume struct {

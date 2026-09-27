@@ -89,6 +89,8 @@ import kotlin.coroutines.coroutineContext
  * what let phases A1 and A3 proceed independently of the Go work.
  */
 interface HubApi {
+    suspend fun removalPreview(kind: String, id: String): HubResult<com.pocketds.hub.model.MediaRemovalPreview> = HubResult.Failed(FailureKind.UNKNOWN, "Server deletion is unavailable")
+    suspend fun removeMedia(ticket: String): HubResult<ActionAck> = HubResult.Failed(FailureKind.UNKNOWN, "Server deletion is unavailable")
     suspend fun serverMonitor(): HubResult<com.pocketds.hub.model.ServerMonitor>
     suspend fun subtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleState>
     suspend fun searchSubtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleSearch>
@@ -161,6 +163,8 @@ interface HubApi {
     ): HubResult<ReadingDiscoverResponse>
     suspend fun readingSearch(query: String, type: String): HubResult<ReadingSearchResponse>
     suspend fun readingLibraries(): HubResult<ReadingLibrariesResponse>
+    suspend fun serverReadingLists(): HubResult<com.pocketds.hub.model.ServerReadingListsResponse> = HubResult.Failed(FailureKind.UNKNOWN, "Server reading lists are unavailable")
+    suspend fun serverReadingList(id: Int): HubResult<com.pocketds.hub.model.ServerReadingListResponse> = HubResult.Failed(FailureKind.UNKNOWN, "Server reading list is unavailable")
     suspend fun readingLibraryItems(
         libraryId: String,
         page: Int = 1,
@@ -767,6 +771,18 @@ class HubClient(private val context: Context, private val connection: HubConnect
             json.decodeFromString<ReadingLibrariesResponse>(it)
         }
 
+    override suspend fun serverReadingLists(): HubResult<com.pocketds.hub.model.ServerReadingListsResponse> =
+        get(HubEndpoints.serverReadingLists(base()), noCache = true) { json.decodeFromString<com.pocketds.hub.model.ServerReadingListsResponse>(it) }
+    override suspend fun removalPreview(kind: String, id: String): HubResult<com.pocketds.hub.model.MediaRemovalPreview> =
+        postOnce(HubEndpoints.removalPreview(base()), json.encodeToString(com.pocketds.hub.model.MediaRemovalRequest.serializer(), com.pocketds.hub.model.MediaRemovalRequest(kind,id)), slow = true) { json.decodeFromString<com.pocketds.hub.model.MediaRemovalPreview>(it) }
+    override suspend fun removeMedia(ticket: String): HubResult<ActionAck> {
+        val result=postOnce(HubEndpoints.mediaRemove(base()), json.encodeToString(com.pocketds.hub.model.MediaRemovalConfirmation.serializer(), com.pocketds.hub.model.MediaRemovalConfirmation(ticket)), slow = true, retryConnection = false) { json.decodeFromString<ActionAck>(it) }
+        withContext(Dispatchers.IO) { runCatching { api.cache?.evictAll() } }
+        return result
+    }
+    override suspend fun serverReadingList(id: Int): HubResult<com.pocketds.hub.model.ServerReadingListResponse> =
+        get(HubEndpoints.serverReadingLists(base(), id), noCache = true) { json.decodeFromString<com.pocketds.hub.model.ServerReadingListResponse>(it) }
+
     override suspend fun readingLibraryItems(
         libraryId: String,
         page: Int,
@@ -1022,12 +1038,14 @@ class HubClient(private val context: Context, private val connection: HubConnect
         payload: String,
         slow: Boolean = false,
         userId: String = "",
+        retryConnection: Boolean = true,
         decode: (String) -> T
     ): HubResult<T> {
         connectionFailure()?.let { return it }
         return try {
             withContext(Dispatchers.IO) {
-                val client = if (slow) slowApi else api
+                val baseClient = if (slow) slowApi else api
+                val client = if(retryConnection) baseClient else baseClient.newBuilder().retryOnConnectionFailure(false).build()
                 val call = client.newCall(
                     Request.Builder()
                         .url(request.url)

@@ -29,6 +29,8 @@ import (
 var Version = "0.1.0-dev"
 
 type Server struct {
+	removalMu       sync.Mutex
+	removalTickets  map[string]removalTicket
 	cfg             *config.Config
 	tokens          *auth.Store
 	limiter         *auth.Limiter
@@ -83,6 +85,7 @@ type Server struct {
 
 func NewServer(cfg *config.Config) *Server {
 	s := &Server{
+		removalTickets:  map[string]removalTicket{},
 		cfg:             cfg,
 		tokens:          auth.NewStore(cfg.Auth.Tokens),
 		limiter:         auth.NewLimiter(cfg.Auth.RateLimit.RPM, cfg.Auth.RateLimit.Burst),
@@ -269,6 +272,8 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/discover/{row}", s.handleReadingDiscoverRow)
 	authed.HandleFunc("GET /v1/reading/search", s.handleReadingSearch)
 	authed.HandleFunc("GET /v1/reading/libraries", s.handleReadingLibraries)
+	authed.HandleFunc("GET /v1/reading/lists", s.handleServerReadingLists)
+	authed.HandleFunc("GET /v1/reading/lists/{listId}", s.handleServerReadingLists)
 	authed.HandleFunc("GET /v1/reading/libraries/{libraryId}/items", s.handleReadingLibraryItems)
 	authed.HandleFunc("GET /v1/reading/libraries/{libraryId}/authors", s.handleReadingAuthors)
 	authed.HandleFunc("GET /v1/reading/resolve", s.handleReadingResolve)
@@ -306,6 +311,8 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("POST /v1/downloads/{id}/priority_up", s.handlePriority)
 	authed.HandleFunc("POST /v1/downloads/{id}/priority_down", s.handlePriority)
 	authed.HandleFunc("GET /v1/notifications", s.handleNotifications)
+	authed.HandleFunc("POST /v1/media/removal-preview", s.handleRemovalPreview)
+	authed.HandleFunc("POST /v1/media/remove", s.handleMediaRemove)
 	authed.HandleFunc("POST /v1/manage/jellyfin/scan", s.handleJellyfinLibraryScan)
 	authed.HandleFunc("POST /v1/manage/reading/scan", s.handleReadingLibraryScan)
 	authed.HandleFunc("POST /v1/downloads/{id}/stop", s.handleDownloadStop)

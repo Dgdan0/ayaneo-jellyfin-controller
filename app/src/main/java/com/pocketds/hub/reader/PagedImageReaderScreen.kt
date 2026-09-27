@@ -50,7 +50,10 @@ class PagedImageReaderScreen(
     private val initialSourceItemId: String,
     initialTitle: String,
     private val ringVisible: () -> Boolean,
-    private val onProgressChanged: () -> Unit = {}
+    private val onProgressChanged: () -> Unit = {},
+    private val readingList: List<com.pocketds.hub.model.ServerReadingListEntry> = emptyList(),
+    private val readingListIndex: Int = -1,
+    private val openAtEnd: Boolean = false
 ) : Screen {
     override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val title: String = initialTitle
@@ -168,7 +171,7 @@ class PagedImageReaderScreen(
 
     override fun onShow() {
         if (manifest == null && manifestJob?.isActive != true) {
-            loadManifest(currentSourceItemId)
+            loadManifest(currentSourceItemId, startAtEnd = openAtEnd)
         } else if (manifest != null && !image.isReady && pageJob?.isActive != true) {
             loadPage()
         }
@@ -477,6 +480,16 @@ class PagedImageReaderScreen(
     }
 
     private fun movePublication(delta: Int) {
+        if (readingList.isNotEmpty()) {
+            val index=readingListIndex.takeIf { it in readingList.indices }
+                ?: readingList.indexOfFirst { it.workId==workId && it.sourceItemId==currentSourceItemId }
+            val target=readingList.getOrNull(index+delta)
+            if(index<0 || target==null) { host.notify(if(delta<0) "Start of reading list" else "End of reading list");return }
+            saveCurrent(immediate=true)
+            host.back()
+            host.push(PagedImageReaderScreen(api,target.workId,target.sourceItemId,"${target.seriesTitle} · ${target.title}",ringVisible,onProgressChanged,readingList,index+delta,openAtEnd=delta<0))
+            return
+        }
         val value = manifest ?: return
         val target = if (delta < 0) value.previousSourceItemId else value.nextSourceItemId
         if (target.isBlank()) {

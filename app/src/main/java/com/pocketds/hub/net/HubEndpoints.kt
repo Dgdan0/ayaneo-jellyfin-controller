@@ -22,6 +22,8 @@ data class HubRequest(
  * of those should work.
  */
 object HubEndpoints {
+    fun removalPreview(base: String) = HubRequest(join(base, "/v1/media/removal-preview"), method = "POST")
+    fun mediaRemove(base: String) = HubRequest(join(base, "/v1/media/remove"), method = "POST")
     fun subtitles(base: String,itemId: String,action: String=""): HubRequest = HubRequest(join(base,"/v1/library/items/"+encode(itemId)+"/subtitles"+(if(action.isEmpty()) "" else "/"+encode(action))))
     fun refreshSubtitles(base: String,itemId: String): HubRequest = HubRequest(join(base,"/v1/library/items/"+encode(itemId)+"/subtitles/refresh"),method="POST")
     fun bandwidth(base: String): HubRequest = HubRequest(join(base, "/v1/downloads/bandwidth"))
@@ -164,6 +166,9 @@ object HubEndpoints {
 
     fun readingLibraries(base: String): HubRequest =
         HubRequest(join(base, "/v1/reading/libraries"))
+
+    fun serverReadingLists(base: String, id: Int? = null): HubRequest =
+        HubRequest(join(base, "/v1/reading/lists" + if (id == null) "" else "/$id"))
 
     fun readingLibraryItems(
         base: String,

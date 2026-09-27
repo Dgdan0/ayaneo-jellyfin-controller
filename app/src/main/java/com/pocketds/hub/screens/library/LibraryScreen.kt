@@ -279,7 +279,9 @@ class LibraryScreen(
     }
 
     private fun renderReading(body: ReadingLibrariesResponse) {
-        readingAdapter.submit(body.libraries)
+        readingAdapter.submit(body.libraries + if(body.libraries.any { it.source=="kavita" }) listOf(
+            ReadingLibrary(id="kavita:reading-lists",source="kavita",kind="reading_list",title="Reading lists")
+        ) else emptyList())
         readingArtworkDay = LocalDate.now().toString()
         status.setTextColor(if (body.partial.isEmpty()) colors.mutedText else colors.badgePending)
         status.text = when {
@@ -310,7 +312,7 @@ class LibraryScreen(
         rememberSelection()
         when (view) {
             is LibraryView -> host?.push(LibraryGridScreen(api, view, ringVisible))
-            is ReadingLibrary -> host?.push(ReadingLibraryGridScreen(api, view, ringVisible))
+            is ReadingLibrary -> if(view.id=="kavita:reading-lists") host?.push(ServerReadingListsScreen(api,ringVisible)) else host?.push(ReadingLibraryGridScreen(api, view, ringVisible))
         }
     }
 
@@ -481,6 +483,7 @@ class LibraryGridScreen(
     override val horizontalMode = HorizontalMode.GRID
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var libraryRevision = MediaLibraryChanges.revision
     private val paging = PagedLoadState(PREFETCH_AHEAD)
     private val adapter = ItemAdapter()
     private lateinit var colors: PocketColors
@@ -559,6 +562,7 @@ class LibraryGridScreen(
     }
 
     override fun onShow() {
+        if(libraryRevision != MediaLibraryChanges.revision) {libraryRevision=MediaLibraryChanges.revision;reload();return}
         val saved=DomainPreferences.sort(requireNotNull(host).viewContext,ContentMode.MEDIA,SORT_FIELDS.map { it.first },"name")
         if(saved!=SortPreference(sortKey,sortAscending)) { applySort(saved); return }
         if (refreshOnReturn && library.kind in setOf("search", "favorites")) {
