@@ -78,6 +78,9 @@ interface Screen : StackScreen {
     /** Full-screen media owns the whole display and hides the normal app chrome. */
     val immersive: Boolean get() = false
 
+    /** Delay trigger actions until a deliberate hold; changing screens/panels cancels it. */
+    val requiresTriggerHold: Boolean get() = false
+
     /** Called before onHide when Android backgrounds the whole Activity. */
     fun onAppBackgrounded() = Unit
 

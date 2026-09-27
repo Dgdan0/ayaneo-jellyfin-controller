@@ -172,7 +172,9 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         api = HubClient(this)
         requestDownloadNotificationPermission()
 
-        router = PadEventRouter(emit = ::onPadAction)
+        router = PadEventRouter(triggerHoldContext = {
+            (sections.stack().peek() as? Screen)?.takeIf { it.requiresTriggerHold && !trailerMode }
+        }, emit = ::onPadAction)
         ticker = PadTicker(router)
         sections = SectionStacks(sectionTitles.size)
 
@@ -537,7 +539,9 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             return true
         }
 
-        if (event.action == KeyEvent.ACTION_DOWN && router.onKeyDown(event.keyCode, event.deviceId)) {
+        if (event.action == KeyEvent.ACTION_UP && router.onKeyUp(event.keyCode, event.deviceId)) return true
+        if (event.action == KeyEvent.ACTION_DOWN && router.onKeyDown(event.keyCode, event.deviceId, event.eventTime, event.repeatCount)) {
+            ticker.ensureRunning()
             return true
         }
         // Directional keys are ours even when the router declined this one --
@@ -953,6 +957,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         // A backgrounded screen must not keep a frame callback alive, and a
         // trailer must not keep playing audio over whatever is now in front.
         ticker.stop()
+        router.reset()
         notificationBadgeJob?.cancel()
         notificationBadgeJob = null
         if (::player.isInitialized) player.pausePlayback()

@@ -33,7 +33,7 @@ class PadTicker(private val router: PadEventRouter) {
         }
     }
 
-    /** Call after any motion event. Cheap and idempotent when already running. */
+    /** Call after motion or key-down events. Cheap and idempotent when already running. */
     fun ensureRunning() {
         if (running || router.idle()) return
         running = true

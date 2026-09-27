@@ -260,6 +260,9 @@ class EpubReaderScreen(
 
     override fun onAppBackgrounded() { narration?.pause(); saveCurrent(immediate = true) }
 
+    override val requiresTriggerHold: Boolean get() = navigator != null &&
+        !appearance.isOpen && !overlay.isOpen && !dictionaryCard.isOpen
+
     override fun onSystemBack(): Boolean {
         if (::dictionaryCard.isInitialized && dictionaryCard.isOpen) { closeDictionary(resumeNarration = true); return true }
         if (::appearance.isInitialized && appearance.isOpen) { appearance.cancel(); return true }
@@ -282,7 +285,7 @@ class EpubReaderScreen(
     } else {
         listOf(
             ButtonHint.activate(if (controlsVisible) "Choose" else "Next page"),
-            ButtonHint.back(if (controlsVisible) "Hide controls" else "Close reader"),
+            ButtonHint.back(if (controlsVisible) "Close reader" else "Show controls"),
             ButtonHint.primary("Bookmark"),
             ButtonHint.secondary("Navigator")
         )
@@ -297,7 +300,7 @@ class EpubReaderScreen(
         }
         when (action) {
             PadAction.Menu -> setControlsVisible(!controlsVisible)
-            PadAction.Back -> if (controlsVisible) setControlsVisible(false) else host.back()
+            PadAction.Back -> if (controlsVisible) host.back() else setControlsVisible(true)
             PadAction.Activate -> if (controlsVisible && bookSeek.hasFocus()) seekBook()
                 else if (controlsVisible) (root.findFocus() ?: controls.getOrNull(focusedControl))?.performClick() else turn(1)
             PadAction.Primary -> toggleBookmark()
@@ -932,7 +935,7 @@ class EpubReaderScreen(
     private fun showPageNavigation() {
         cancelSearch()
         overlay.resetBody()
-        overlay.open("Reading position", "Screen pages are within this section. Book percentage uses saved ebook locations.", onDismiss = { host.refreshHints() })
+        overlay.open("Reading position", "Screen pages are within this section. Hold L2/R2 to change sections; L1/R1 turn pages.", onDismiss = { host.refreshHints() })
         if (pageCount > 0) {
             val page = EditText(host.viewContext).apply {
                 inputType = InputType.TYPE_CLASS_NUMBER

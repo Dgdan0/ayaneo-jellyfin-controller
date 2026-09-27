@@ -55,8 +55,9 @@ class EpubReaderPolishTest {
         }
         server.start()
         HubSettings.save(activity, server.url("/").toString(), "fixture")
+        var exits = 0
         val host = Proxy.newProxyInstance(ScreenHost::class.java.classLoader, arrayOf(ScreenHost::class.java)) { _, method, _ ->
-            when (method.name) { "getViewContext" -> activity; "back" -> true; else -> null }
+            when (method.name) { "getViewContext" -> activity; "back" -> { exits++; true }; else -> null }
         } as ScreenHost
         var screen: EpubReaderScreen? = null
         lateinit var root: View
@@ -84,9 +85,21 @@ class EpubReaderPolishTest {
         try {
             EpubAppearanceStore.save(activity, EpubReaderPreferences())
             open("polish-${System.nanoTime()}")
+            withContext(Dispatchers.Main) {
+                assertTrue(screen!!.requiresTriggerHold)
+                assertTrue(screen!!.hints().any { it.label == "Navigator" })
+                screen!!.onPad(PadAction.Back)
+                assertEquals(0, exits)
+                assertTrue(screen!!.hints().any { it.action == PadAction.Back && it.label == "Close reader" })
+                screen!!.onPad(PadAction.Back)
+                assertEquals(1, exits)
+                // The proxy records the exit without destroying the fixture screen.
+                screen!!.onPad(PadAction.Menu)
+            }
             withContext(Dispatchers.Main) { screen!!.onPad(PadAction.Menu); click("Reading appearance"); click("Themes") }
             ins.waitForIdleSync()
             withContext(Dispatchers.Main) {
+                assertFalse("A modal must cancel a pending chapter hold", screen!!.requiresTriggerHold)
                 listOf("Paper", "Sepia", "Night", "Blue").forEach { label -> assertTrue(all(root).any { it.contentDescription?.toString()?.startsWith(label) == true }) }
                 click("Blue")
             }
@@ -141,7 +154,14 @@ class EpubReaderPolishTest {
             until { withContext(Dispatchers.Main) { reader()?.currentLocator?.value?.href?.toString()?.contains("two.xhtml") == true } }
             withContext(Dispatchers.Main) { click("Return to previous place") }
             until { withContext(Dispatchers.Main) { reader()?.currentLocator?.value?.href?.toString()?.contains("one.xhtml") == true } }
-            withContext(Dispatchers.Main) { screen!!.onPad(PadAction.Page(Direction.DOWN)) }
+            withContext(Dispatchers.Main) {
+                val router = com.pocketds.hub.input.PadEventRouter(triggerHoldContext = { screen!!.takeIf { it.requiresTriggerHold } }, emit = { screen!!.onPad(it) })
+                router.onKeyDown(com.pocketds.hub.input.PadNames.KEYCODE_BUTTON_R2, nowMs = 0L)
+                router.onTick(599L)
+                assertTrue(reader()!!.currentLocator.value.href.toString().contains("one.xhtml"))
+                router.onTick(600L)
+                router.onKeyUp(com.pocketds.hub.input.PadNames.KEYCODE_BUTTON_R2)
+            }
             until { withContext(Dispatchers.Main) { reader()?.currentLocator?.value?.href?.toString()?.contains("two.xhtml") == true } }
             withContext(Dispatchers.Main) { screen!!.onHide(); screen!!.onDestroyView(); screen = null }
             open("second-book-${System.nanoTime()}")

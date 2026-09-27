@@ -29,6 +29,7 @@ class PadEventRouter(
     private val leftTrigger: TriggerLatch = TriggerLatch(),
     private val rightTrigger: TriggerLatch = TriggerLatch(),
     val inputMode: InputModeTracker = InputModeTracker(),
+    private val triggerHoldContext: () -> Any? = { null },
     private val emit: (PadAction) -> Unit
 ) {
 
@@ -48,6 +49,7 @@ class PadEventRouter(
     private val dpadSources = HashMap<Int, SourceLatch>()
     private val leftTriggerSources = HashMap<Int, SourceLatch>()
     private val rightTriggerSources = HashMap<Int, SourceLatch>()
+    private val triggerHolds = TriggerHoldGate()
 
     private fun latch(map: HashMap<Int, SourceLatch>, deviceId: Int): SourceLatch =
         map.getOrPut(deviceId) { SourceLatch() }
@@ -66,9 +68,11 @@ class PadEventRouter(
      *   deliberately dropped as a duplicate source, because the framework must
      *   not then go and do something else with it.
      */
-    fun onKeyDown(keyCode: Int, deviceId: Int = DEVICE_UNKNOWN): Boolean {
+    fun onKeyDown(keyCode: Int, deviceId: Int = DEVICE_UNKNOWN, nowMs: Long = 0L, repeatCount: Int = 0): Boolean {
         val action = gamepadMap.actionFor(keyCode) ?: return false
         inputMode.onDirectional()
+        // Holding B is one press, not an accidental second press that exits a reader.
+        if (action == PadAction.Back && repeatCount > 0) return true
 
         when (action) {
             is PadAction.Step ->
@@ -81,13 +85,27 @@ class PadEventRouter(
                     rightTriggerSources
                 }
                 if (!latch(map, deviceId).accept(SourceLatch.SOURCE_KEYS)) return true
+                if (repeatCount == 0) triggerDown(action.direction, deviceId, nowMs)
+                return true
             }
 
             else -> Unit
         }
 
+        triggerHolds.cancelPending()
         emit(action)
         return true
+    }
+
+    fun onKeyUp(keyCode: Int, deviceId: Int = DEVICE_UNKNOWN): Boolean {
+        val action = gamepadMap.actionFor(keyCode) as? PadAction.Page ?: return false
+        val sources = if (action.direction == Direction.UP) leftTriggerSources else rightTriggerSources
+        if (sources[deviceId]?.winner() == SourceLatch.SOURCE_KEYS) triggerHolds.up(deviceId, action.direction)
+        return true
+    }
+
+    private fun triggerDown(direction: Direction, deviceId: Int, now: Long) {
+        if (triggerHolds.down(deviceId, direction, now, triggerHoldContext())) emit(PadAction.Page(direction))
     }
 
     /**
@@ -119,14 +137,21 @@ class PadEventRouter(
             latch(leftTriggerSources, deviceId).accept(SourceLatch.SOURCE_ANALOG)
         ) {
             inputMode.onDirectional()
-            emit(PadAction.Page(Direction.UP))
+            triggerDown(Direction.UP, deviceId, nowMs)
         }
         if (rightTrigger.update(rightTriggerValue) &&
             latch(rightTriggerSources, deviceId).accept(SourceLatch.SOURCE_ANALOG)
         ) {
             inputMode.onDirectional()
-            emit(PadAction.Page(Direction.DOWN))
+            triggerDown(Direction.DOWN, deviceId, nowMs)
         }
+
+        // Only the winning source can release a pull; duplicate key-up/axis events
+        // from the same controller must not cancel the other source's hold.
+        if (leftTriggerValue <= .35f && leftTriggerSources[deviceId]?.winner() == SourceLatch.SOURCE_ANALOG)
+            triggerHolds.up(deviceId, Direction.UP)
+        if (rightTriggerValue <= .35f && rightTriggerSources[deviceId]?.winner() == SourceLatch.SOURCE_ANALOG)
+            triggerHolds.up(deviceId, Direction.DOWN)
 
         pump(nowMs)
         return true
@@ -137,17 +162,19 @@ class PadEventRouter(
 
     /** A tap or click arrived, so the focus ring should get out of the way. */
     fun onPointer() {
+        triggerHolds.cancelPending()
         inputMode.onPointer()
     }
 
-    /** True when neither the stick nor the hat is held, so the ticker can stop. */
-    fun idle(): Boolean = stick.idle() && hat.idle()
+    /** No directional repeat or pending trigger hold needs another frame. */
+    fun idle(): Boolean = stick.idle() && hat.idle() && !triggerHolds.pending()
 
     fun reset() {
         stick.reset()
         hat.reset()
         leftTrigger.reset()
         rightTrigger.reset()
+        triggerHolds.reset()
         lastX = 0f
         lastY = 0f
         lastHatX = 0f
@@ -160,14 +187,17 @@ class PadEventRouter(
 
     private fun pump(nowMs: Long) {
         stick.update(lastX, lastY, nowMs)?.let {
+            triggerHolds.cancelPending()
             inputMode.onDirectional()
             emit(PadAction.Step(it))
         }
         hat.update(lastHatX, lastHatY, nowMs)?.let {
             if (latch(dpadSources, motionDeviceId).accept(SourceLatch.SOURCE_HAT)) {
+                triggerHolds.cancelPending()
                 inputMode.onDirectional()
                 emit(PadAction.Step(it))
             }
         }
+        triggerHolds.tick(nowMs, triggerHoldContext()).forEach { emit(PadAction.Page(it)) }
     }
 }
