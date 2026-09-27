@@ -28,7 +28,7 @@ import org.junit.runner.RunWith
 /** Runs only in .uitest: synthetic failures never touch the user's real queue. */
 @RunWith(AndroidJUnit4::class)
 class QuartermasterFeaturesTest {
-    @Test fun offlineSeriesSubtitleButtonOpensSubtitlesWithControllerAndRestoresFocus() {
+    @Test fun offlineSeriesOverflowOpensSubtitleFetchingAndRestoresFocus() {
         val ins = InstrumentationRegistry.getInstrumentation()
         val activity = ins.startActivitySync(Intent(ins.targetContext, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         val key = "subtitle-action-${System.nanoTime()}"
@@ -56,18 +56,22 @@ class QuartermasterFeaturesTest {
             ins.runOnMainSync {
                 val root = screen.onCreateView(host, FrameLayout(activity))
                 activity.setContentView(root); screen.onShow()
-                button = all(root).filterIsInstance<TextView>().first { it.text == "Subtitles" }
+                button = all(root).filterIsInstance<TextView>().first { it.contentDescription?.startsWith("More actions for") == true }
             }
             ins.waitForIdleSync()
             ins.runOnMainSync {
                 assertTrue(button.requestFocus())
                 assertTrue(screen.onPad(PadAction.Activate))
+                assertNull("Opening More must not fetch or play", pushed)
+                var fetch: View = all(activity.window.decorView).filterIsInstance<TextView>().first { it.text == "Find / update subtitles" }
+                while (!fetch.isClickable) fetch = fetch.parent as View
+                fetch.performClick()
                 assertTrue(pushed is com.pocketds.hub.screens.library.SubtitleScreen)
                 assertFalse("Subtitle action must never launch playback", played)
                 screen.onHide(); button.clearFocus(); screen.onShow()
             }
             ins.waitForIdleSync()
-            ins.runOnMainSync { assertTrue("Returning should restore the subtitle button", button.hasFocus()) }
+            ins.runOnMainSync { assertTrue("Returning should restore the More button", button.hasFocus()) }
         } finally {
             ins.runOnMainSync { screen.onHide(); screen.onDestroyView(); activity.finish() }
             repository.remove(row.id)

@@ -30,9 +30,10 @@ class PlaybackOptionsScreen(
     private val api: HubApi,
     private val itemId: String,
     private val startMode: String,
-    private val ringVisible: () -> Boolean
+    private val ringVisible: () -> Boolean,
+    private val localPlan: PlaybackPrepareResponse? = null
 ) : Screen {
-    override val title = "Playback options"
+    override val title = "Audio & subtitles"
     override val focusOnShow = false
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -74,7 +75,7 @@ class PlaybackOptionsScreen(
     }
 
     override fun onDestroyView() {
-        val abandoned = plan?.takeUnless { handedOff }
+        val abandoned = plan?.takeUnless { handedOff || localPlan != null }
         scope.cancel()
         if (abandoned != null) CoroutineScope(Dispatchers.IO).launch {
             api.deletePlayback(abandoned.sessionId)
@@ -91,6 +92,11 @@ class PlaybackOptionsScreen(
     private fun prepare() {
         status.text = "Negotiating with Jellyfin…"
         job = scope.launch {
+            if (localPlan != null) {
+                plan = applyRememberedSelection(localPlan)
+                plan?.let(::showMain)
+                return@launch
+            }
             val userId = HubSettings.userId(host.viewContext)
             val localPosition = PlaybackProgressStore.resumePosition(
                 host.viewContext,
@@ -127,6 +133,7 @@ class PlaybackOptionsScreen(
             null -> initial.selectedSubtitleIndex
         }
         val desiredAudio = audio?.index ?: initial.selectedAudioIndex
+        if (localPlan != null) return initial.copy(selectedAudioIndex = desiredAudio, selectedSubtitleIndex = desiredSubtitle)
         if (desiredAudio == initial.selectedAudioIndex && desiredSubtitle == initial.selectedSubtitleIndex) {
             return initial
         }
@@ -158,7 +165,7 @@ class PlaybackOptionsScreen(
                 ChoiceOverlay.Choice("audio", "Audio", audio),
                 ChoiceOverlay.Choice("subtitle", "Subtitles", subtitle),
                 ChoiceOverlay.Choice("quality", "Quality", qualityLabel(value))
-            ),
+            ).filter { localPlan == null || it.id !in setOf("source", "quality") },
             onCancel = { host.back() }
         ) { choice ->
             when (choice) {
@@ -216,6 +223,16 @@ class PlaybackOptionsScreen(
 
     private fun select(body: PlaybackSelectBody) {
         val current = plan ?: return
+        if (localPlan != null) {
+            val updated = current.copy(
+                selectedAudioIndex = body.audioStreamIndex ?: current.selectedAudioIndex,
+                selectedSubtitleIndex = body.subtitleStreamIndex ?: current.selectedSubtitleIndex
+            )
+            plan = updated
+            remember(updated)
+            showMain(updated)
+            return
+        }
         overlay.dismiss()
         status.visibility = View.VISIBLE
         status.text = "Applying playback option…"

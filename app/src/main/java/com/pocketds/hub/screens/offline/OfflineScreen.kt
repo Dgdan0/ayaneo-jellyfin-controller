@@ -173,13 +173,13 @@ class OfflineScreen(
             when (row) {
                 is TaggedCatalog -> {
                     add(ButtonHint.activate(if (row.value.isSeries) "Open" else "Play"))
-                    if(!row.value.isSeries) add(ButtonHint.secondary("Subtitles"))
+                    if(!row.value.isSeries) add(ButtonHint.secondary("More actions"))
                     add(ButtonHint.primary("Remove download"))
                 }
                 is TaggedDownload -> {
                     if (row.value.state == OfflineState.COMPLETE) add(ButtonHint.activate("Play"))
                     else add(ButtonHint.activate("Manage"))
-                    if (row.value.state == OfflineState.COMPLETE) add(ButtonHint.secondary("Subtitles"))
+                    if (row.value.state == OfflineState.COMPLETE) add(ButtonHint.secondary("More actions"))
                     if (row.value.state == OfflineState.FAILED || row.value.state == OfflineState.WAITING) {
                         add(ButtonHint.secondary("Retry"))
                     }
@@ -219,11 +219,11 @@ class OfflineScreen(
             }
             PadAction.Secondary -> when {
                 row is TaggedCatalog && !row.value.isSeries -> {
-                    row.value.rows.firstOrNull()?.let(::openSubtitles)
+                    row.value.rows.firstOrNull()?.let(::showMediaOptions)
                     true
                 }
                 row is TaggedDownload && row.value.state == OfflineState.COMPLETE -> {
-                    openSubtitles(row.value); true
+                    showMediaOptions(row.value); true
                 }
                 row is TaggedDownload && row.value.state in setOf(OfflineState.FAILED, OfflineState.WAITING) -> {
                     OfflineDownloadService.retry(host.viewContext, row.value.id); true
@@ -393,10 +393,10 @@ class OfflineScreen(
             clipChildren=false; clipToPadding=false
             addView(card,LinearLayout.LayoutParams(MATCH,WRAP))
             addView(TextView(context).apply {
-                text="Subtitles";textSize=12f;setTextColor(colors.accent)
+                text="⋯";textSize=12f;setTextColor(colors.accent)
                 setPadding(dp(8),dp(5),dp(8),dp(5))
-                contentDescription="Subtitles for ${value.title}"
-                activateOnTap { value.rows.firstOrNull()?.let(::openSubtitles) }
+                contentDescription="More actions for ${value.title}"
+                activateOnTap { value.rows.firstOrNull()?.let(::showMediaOptions) }
             })
         }
     }
@@ -409,8 +409,8 @@ class OfflineScreen(
         }
     }
 
-    private fun openSubtitles(row: OfflineDownload) {
-        host.push(SubtitleScreen(api,row.manifest.item.id,row.manifest.item.title,ringVisible))
+    private fun showMediaOptions(row: OfflineDownload) {
+        showOfflineTitleMenu(host, api, overlay, row, ringVisible)
     }
 
     private fun confirmRemoveCatalog(value: OfflineCatalogEntry) {
@@ -568,7 +568,8 @@ class OfflineScreen(
             buildList {
                 if (row.state == OfflineState.COMPLETE) {
                     add(ChoiceOverlay.Choice("play", "Play downloaded video"))
-                    add(ChoiceOverlay.Choice("subtitles", "Subtitles", "Saved tracks and subtitle-only updates"))
+                    add(ChoiceOverlay.Choice("audio", "Audio & subtitles", "Choose saved tracks before playback"))
+                    add(ChoiceOverlay.Choice("subtitles", "Find / update subtitles", "Search providers and update this downloaded copy"))
                 }
                 if (row.state == OfflineState.PAUSED) add(ChoiceOverlay.Choice("resume", "Resume download"))
                 else if (row.state in setOf(OfflineState.QUEUED, OfflineState.DOWNLOADING, OfflineState.WAITING)) {
@@ -580,6 +581,7 @@ class OfflineScreen(
         ) {
             when (it) {
                 "play" -> host.playItem(row.manifest.item.id)
+                "audio" -> host.openPlaybackOptions(row.manifest.item.id)
                 "subtitles" -> host.push(SubtitleScreen(api,row.manifest.item.id,row.manifest.item.title,ringVisible))
                 "pause" -> OfflineDownloadService.pauseItem(host.viewContext, row.id)
                 "resume" -> OfflineDownloadService.resumeItem(host.viewContext, row.id)

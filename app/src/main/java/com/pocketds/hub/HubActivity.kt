@@ -837,10 +837,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         if (itemId.isEmpty()) return
         if (player.isOpen) closeTrailer()
         val local = OfflineRepository.get(this).playbackPlan(itemId, startMode)
-        if (local != null) {
-            // The in-player track sheet exposes every embedded/local track.
-            push(PlayerScreen(api, itemId, startMode, local, ::ringVisible))
-        } else push(PlaybackOptionsScreen(api, itemId, startMode, ::ringVisible))
+        push(PlaybackOptionsScreen(api, itemId, startMode, ::ringVisible, local))
     }
 
     override fun playPrepared(plan: PlaybackPrepareResponse) {

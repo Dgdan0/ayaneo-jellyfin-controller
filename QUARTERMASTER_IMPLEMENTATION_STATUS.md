@@ -109,3 +109,14 @@ These remaining slices are approved backlog, not completed features. No family m
 Known first-slice limits: Upcoming includes dated monitored calendar releases, with no undated inventory; Arr file availability is labeled Downloaded, not asserted Jellyfin availability. A failed title pipeline opens the attention list rather than an exact selected transfer. Subtitle feedback is local to the device; live provider replacement and player track selection remain unverified.
 
 Final verification: the two affected device tests (subtitle history/selection and monitor focus/missing data) passed again against the final APK. Production configuration validation passed for the ready Hub binary. Commits: `7e55a8b` subtitles, `2b46036` history provenance, `5f5409b` monitoring. The daily app was updated without clearing its data. Actual production UI and read-only API checks passed after deployment.
+
+
+## Subtitle menu refinement and reader review — v0.3.9/code24
+
+Installed on AYANEO 100.97.20.86:39751 on 27 September 2026. APK SHA-256: `dbd0f356fb48f26ebc3b314876be7b5b28e8d7ade5b245dea0284050b4e87f17`. The FireDaemon AyaneoHub service remains Running and its live health endpoint returns 200; this change requires no Hub deployment.
+
+Removed the standalone subtitle action from online details. More actions now separates Audio & subtitles (existing track selection before playback) from Find / update subtitles (provider search, scores, ratings and saved-copy updates). Offline movies, series, seasons and completed-download menus expose the same distinction. Offline track selection now uses the saved playback plan without contacting the Hub and does not start playback until Play/Resume is chosen. Returning from subtitle fetching restores the offline series More button focus.
+
+Validation: debug and isolated uitest APKs built; JVM suite reports 553 tests, 0 failures/errors, 2 skipped. All 17 targeted AYANEO instrumentation tests passed, covering offline selection without network/autoplay, subtitle fetching menu/focus, local subtitle availability, provider score/rating behavior, detail navigation, EPUB appearance, real Readium narration highlights, real read-along audio, reader preview and reading-library integration. Production movie More, Audio & subtitles and Find / update subtitles were visually checked. A brief movie playback occurred during navigation and was stopped; no provider subtitle was downloaded or replaced. Daily user data was preserved. Device screenshots are in gitignored `.local-backups/v039-*.png`.
+
+Reader analysis and proposed layouts: `docs/READER_POLISH_REVIEW_2026-09-27.md`. Covers production EPUB, comics/manga, audiobooks and read-along, distinguishes Reader Lab from production, and prioritizes reliability/controller work before comfort features. No reader upgrades were implemented in this change. Source review and targeted fixtures do not replace long-session testing with real publications.

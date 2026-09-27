@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
+import com.pocketds.hub.ui.ChoiceOverlay
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -52,6 +54,7 @@ class OfflineSeriesScreen(
     private lateinit var colors: PocketColors
     private lateinit var repository: OfflineRepository
     private lateinit var content: LinearLayout
+    private lateinit var overlay: ChoiceOverlay
     private lateinit var scroll: ScrollView
     private var header: DetailHeaderView? = null
     private var selectedKey = ""
@@ -71,8 +74,12 @@ class OfflineSeriesScreen(
             clipToPadding = false; clipChildren = false; setPadding(0, 0, 0, dp(18))
             addView(content, ViewGroup.LayoutParams(MATCH, WRAP))
         }
+        val root = FrameLayout(host.viewContext)
+        root.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
+        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
+        root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         render(force = true)
-        return scroll
+        return root
     }
 
     override fun onShow() {
@@ -87,6 +94,7 @@ class OfflineSeriesScreen(
     }
     override fun onHide() {
         ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedKey)?.let { selectedKey = it.key }
+        overlay.dismiss()
         unregister()
     }
     override fun onDestroyView() = unregister()
@@ -94,33 +102,40 @@ class OfflineSeriesScreen(
         findTagged(content, selectedKey)?.requestFocus() == true || firstFocusable(content)?.requestFocus() == true
 
     override fun hints(): List<ButtonHint> = buildList {
+        if (overlay.isOpen) { add(ButtonHint.activate("Choose")); add(ButtonHint.back("Cancel")); return@buildList }
         if (header?.overview?.hasFocus() == true) {
             header?.overview?.actionHint?.let { add(ButtonHint.activate(it)) }
             add(ButtonHint.back(if (header?.overview?.expanded == true) "Collapse description" else "Back"))
             return@buildList
         }
         when ((host.viewContext as? android.app.Activity)?.currentFocus?.tag) {
-            is TaggedTarget -> { add(ButtonHint.activate("Play")); add(ButtonHint.secondary("Subtitles")) }
-            is TaggedSubtitles -> add(ButtonHint.activate("Subtitles"))
+            is TaggedTarget -> { add(ButtonHint.activate("Play")); add(ButtonHint.secondary("More actions")) }
+            is TaggedMore -> add(ButtonHint.activate("More actions"))
             is TaggedSeason -> add(ButtonHint.activate("Open season"))
         }
         add(ButtonHint.back())
     }
     override fun onPad(action: PadAction): Boolean {
+        if (overlay.onPad(action)) return true
         if (header?.overview?.onPad(action) == true) return true
         if (action == PadAction.Refresh) { render(force = true); return true }
         if (action == PadAction.Secondary) {
             val target = ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedTarget)?.target ?: return false
-            host.push(SubtitleScreen(api,target.row.manifest.item.id,target.row.manifest.item.title,ringVisible))
+            openMore(target)
             return true
         }
         if (action != PadAction.Activate) return false
         return when (val tag = (host.viewContext as? android.app.Activity)?.currentFocus?.tag) {
             is TaggedTarget -> { host.playItem(tag.target.row.manifest.item.id, resumeMode(tag.target)); true }
-            is TaggedSubtitles -> { host.push(SubtitleScreen(api, tag.target.row.manifest.item.id, tag.target.row.manifest.item.title, ringVisible)); true }
+            is TaggedMore -> { openMore(tag.target); true }
             is TaggedSeason -> { host.push(OfflineSeasonScreen(api, seriesTitle, tag.season, ringVisible)); true }
             else -> false
         }
+    }
+
+    private fun openMore(target: OfflineCatalogPlayTarget) {
+        selectedKey = ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedKey)?.key ?: "more"
+        showOfflineTitleMenu(host, api, overlay, target.row, ringVisible)
     }
 
     private fun render(force: Boolean = false) {
@@ -164,13 +179,13 @@ class OfflineSeriesScreen(
             })
             detail.actions.addView(TextView(host.viewContext).apply {
                 DetailStyler.action(this,colors,primary=false)
-                text="Subtitles"
+                text="⋯"; textSize=22f
                 setPadding(dp(16), 0, dp(16), 0)
                 layoutParams=LinearLayout.LayoutParams(WRAP,dp(48)).apply { marginStart = dp(8) }
-                tag=TaggedSubtitles(target)
-                contentDescription="Subtitles for ${target.row.manifest.item.title}"
+                tag=TaggedMore(target)
+                contentDescription="More actions for ${target.row.manifest.item.title}"
                 FocusDecorator.attach(this,ringVisible,scale=false)
-                activateOnTap { host.push(SubtitleScreen(api,target.row.manifest.item.id,target.row.manifest.item.title,ringVisible)) }
+                activateOnTap { openMore(target) }
             })
             content.addView(ContinuationCardView(host.viewContext, colors, ringVisible).apply {
                 val item = target.row.manifest.item
@@ -259,7 +274,7 @@ class OfflineSeriesScreen(
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
     private sealed interface TaggedKey { val key: String }
     private data class TaggedTarget(val target: OfflineCatalogPlayTarget, override val key: String = "play") : TaggedKey
-    private data class TaggedSubtitles(val target: OfflineCatalogPlayTarget) : TaggedKey { override val key = "subtitles" }
+    private data class TaggedMore(val target: OfflineCatalogPlayTarget) : TaggedKey { override val key = "more" }
     private data class TaggedSeason(val season: OfflineCatalogSeason) : TaggedKey { override val key = "season:${season.key}" }
     private companion object { const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT; const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT }
 }
