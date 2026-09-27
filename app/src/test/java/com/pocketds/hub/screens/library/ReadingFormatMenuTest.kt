@@ -1,6 +1,8 @@
 package com.pocketds.hub.screens.library
 
 import com.pocketds.hub.model.ReadingEdition
+import com.pocketds.hub.model.ReadingSection
+import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.model.ReadingWork
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -60,6 +62,17 @@ class ReadingFormatMenuTest {
         val manga = ReadingFormatMenu.forWork(work(text.copy(kind = "manga")))
         assertEquals("Read manga", manga.options.single().label)
         assertEquals("Manga ready", manga.availability)
+    }
+
+    @Test fun `Kavita comic format opens a chapter instead of the series`() {
+        val work = ReadingWork(kind = "comic", editions = listOf(
+            ReadingEdition(source = "kavita", kind = "comic", sourceItemId = "91", availability = "available")
+        ), sections = listOf(ReadingSection(items = listOf(
+            ReadingSectionItem(kind = "comic", sourceItemId = "901", availability = "")
+        ))))
+        val menu = ReadingFormatMenu.forWork(work)
+        assertEquals("901", menu.options.single().choice.text?.sourceItemId)
+        assertEquals("Read comic", menu.options.single().label)
     }
 
     private fun work(vararg editions: ReadingEdition) = ReadingWork(id = "book", entityType = "work",

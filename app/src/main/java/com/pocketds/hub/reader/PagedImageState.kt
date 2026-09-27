@@ -120,6 +120,25 @@ object ViewportStepPlanner {
     }
 }
 
+/** Source-pixel movement for controller navigation within a zoomed comic page. */
+object ComicPanPolicy {
+    fun edge(sourceSize: Int, visibleSize: Float, high: Boolean): Float {
+        val halfVisible = visibleSize / 2f
+        return if (sourceSize <= visibleSize) sourceSize / 2f
+        else if (high) sourceSize - halfVisible else halfVisible
+    }
+
+    fun step(center: Float, sourceSize: Int, visibleSize: Float, direction: Int, distance: Float = 0.82f): Float? {
+        require(direction == -1 || direction == 1)
+        val halfVisible = visibleSize / 2f
+        val lower = halfVisible
+        val upper = sourceSize - halfVisible
+        if (upper <= lower + 1f) return null
+        val next = (center + direction * visibleSize * distance).coerceIn(lower, upper)
+        return next.takeIf { kotlin.math.abs(it - center) > 1f }
+    }
+}
+
 class PagedImageState(
     val pageCount: Int,
     startPage: Int = 0,
@@ -142,6 +161,16 @@ class PagedImageState(
     fun seek(page: Int) {
         pageIndex = page.coerceIn(0, pageCount - 1)
         viewportIndex = 0
+    }
+
+    /** X/Y skip all viewport steps, including when the current page is split into thirds. */
+    fun turnPage(delta: Int): Boolean {
+        require(delta == -1 || delta == 1)
+        val next = pageIndex + delta
+        if (next !in 0 until pageCount) return false
+        pageIndex = next
+        viewportIndex = if (delta > 0) 0 else viewportSteps - 1
+        return true
     }
 
     fun advance(): Boolean {

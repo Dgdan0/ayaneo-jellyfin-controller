@@ -35,19 +35,29 @@ data class ReadingWorkPresentation private constructor(
                 it.sourceItemId.isNotBlank() && it.kind in setOf("book", "ebook", "comic", "manga") &&
                     it.availability == "available"
             }
+            // Kavita's series edition identifies the series, while the page
+            // reader accepts chapter IDs. The hero Read action must use a
+            // chapter from the volume list, just like tapping an issue row.
+            val kavitaComic = work.kind in setOf("comic", "manga") &&
+                playable.any { it.source == "kavita" }
+            fun readableChapter(item: ReadingSectionItem): Boolean =
+                item.kind in setOf("book", "ebook", "comic", "manga") &&
+                    (item.isAvailable || (kavitaComic && item.sourceItemId.isNotBlank() &&
+                        (item.availability.isBlank() || item.availability.equals("available", ignoreCase = true))))
             val continued = work.continueAt?.takeIf { point ->
                 point.sourceItemId.isNotBlank() && point.kind in setOf("book", "ebook", "comic", "manga") && (
-                    playable.any { it.sourceItemId == point.sourceItemId } ||
+                    (!kavitaComic && playable.any { it.sourceItemId == point.sourceItemId }) ||
                         work.sections.any { section -> section.items.any {
-                            it.sourceItemId == point.sourceItemId && it.isAvailable &&
-                                it.kind in setOf("book", "ebook", "comic", "manga")
+                            it.sourceItemId == point.sourceItemId && readableChapter(it)
                         } }
                     )
             }
             val first = playable.firstOrNull()
             val section = work.sections.asSequence().flatMap { it.items.asSequence() }
-                .firstOrNull { it.isAvailable && it.kind in setOf("book", "ebook", "comic", "manga") }
-            val id = continued?.sourceItemId ?: first?.sourceItemId ?: section?.sourceItemId ?: return null
+                .firstOrNull(::readableChapter)
+            val id = continued?.sourceItemId ?: if (kavitaComic) section?.sourceItemId
+                else first?.sourceItemId ?: section?.sourceItemId ?: return null
+            if (id.isNullOrBlank()) return null
             val source = playable.firstOrNull { it.sourceItemId == id }?.source?.takeIf { it.isNotBlank() }
                 ?: continued?.source?.takeIf { it.isNotBlank() }
                 ?: if (section?.sourceItemId == id) "kavita" else first?.source.orEmpty()

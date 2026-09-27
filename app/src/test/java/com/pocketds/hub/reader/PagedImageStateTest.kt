@@ -90,6 +90,33 @@ class PagedImageStateTest {
     }
 
     @Test
+    fun `whole page turns skip thirds and land at the reading edge`() {
+        val state = PagedImageState(pageCount = 4, startPage = 1, viewportSteps = 3)
+        state.advance()
+        assertTrue(state.turnPage(1))
+        assertEquals(2, state.pageIndex)
+        assertEquals(0, state.viewportIndex)
+        assertTrue(state.turnPage(-1))
+        assertEquals(1, state.pageIndex)
+        assertEquals(2, state.viewportIndex)
+        state.seek(0)
+        assertFalse(state.turnPage(-1))
+        assertEquals(0, state.pageIndex)
+    }
+
+    @Test
+    fun `controller pan moves by a viewport step and stops at page edges`() {
+        assertEquals(1320f, ComicPanPolicy.step(500f, 2000, 1000f, 1)!!, 0.01f)
+        assertEquals(1500f, ComicPanPolicy.step(1400f, 2000, 1000f, 1)!!, 0.01f)
+        assertEquals(null, ComicPanPolicy.step(1500f, 2000, 1000f, 1))
+        assertEquals(500f, ComicPanPolicy.step(900f, 2000, 1000f, -1)!!, 0.01f)
+        assertEquals(null, ComicPanPolicy.step(500f, 2000, 1000f, -1))
+        assertEquals(null, ComicPanPolicy.step(500f, 1000, 1200f, 1))
+        assertEquals(500f, ComicPanPolicy.edge(2000, 1000f, high = false), 0.01f)
+        assertEquals(1500f, ComicPanPolicy.edge(2000, 1000f, high = true), 0.01f)
+    }
+
+    @Test
     fun `page progress is zero based and reaches completion on final page`() {
         val state = PagedImageState(pageCount = 5, startPage = 2)
 

@@ -12,6 +12,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReadingWorkPresentationTest {
+    @Test fun `Kavita comic Read opens a chapter rather than its series edition`() {
+        val work = ReadingWork(
+            kind = "comic",
+            editions = listOf(ReadingEdition(source = "kavita", kind = "comic", sourceItemId = "91", availability = "available")),
+            sections = listOf(ReadingSection(items = listOf(
+                ReadingSectionItem(kind = "comic", sourceItemId = "901", availability = "")
+            )))
+        )
+        assertEquals("901", ReadingWorkPresentation.primaryRead(work)?.sourceItemId)
+    }
+
     @Test fun `individual book gets one resume target from its continued readable edition`() {
         val work = ReadingWork(
             id = "golden-son", kind = "ebook", entityType = "work", title = "Golden Son",

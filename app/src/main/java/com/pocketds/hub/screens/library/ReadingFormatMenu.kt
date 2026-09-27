@@ -19,7 +19,8 @@ data class ReadingFormatMenu(
             val aligned = ReadingWorkPresentation.readAlongEditions(work)
             val readable = work.editions.filter {
                 it.sourceItemId.isNotBlank() && it.kind in setOf("book", "ebook", "comic", "manga") && it.availability == "available"
-            }.distinctBy { it.source to it.sourceItemId }
+            }.filterNot { it.source == "kavita" && it.kind in setOf("comic", "manga") }
+                .distinctBy { it.source to it.sourceItemId }
             val primaryText = ReadingWorkPresentation.primaryRead(work)
             val texts = readable.map { edition ->
                 ReadingWorkPresentation.PrimaryRead(edition.sourceItemId, edition.source, primaryText?.label ?: "Read book")

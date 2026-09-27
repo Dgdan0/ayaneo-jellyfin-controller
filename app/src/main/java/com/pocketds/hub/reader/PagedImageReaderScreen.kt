@@ -200,38 +200,35 @@ class PagedImageReaderScreen(
     override fun onAppBackgrounded() = saveCurrent(immediate = true)
 
     override fun hints(): List<ButtonHint> = listOf(
-        ButtonHint.activate(if (controlsVisible) "Choose" else "Next page"),
-        ButtonHint.back(if (controlsVisible) "Hide controls" else "Close reader"),
-        ButtonHint.primary(if (thirdsEnabled) "Whole page" else "Read in thirds"),
-        ButtonHint.secondary("Navigator")
+        ButtonHint.activate(if (controlsVisible) "Choose" else "Forward"),
+        ButtonHint.back(if (controlsVisible) "Hide controls" else "Backward"),
+        ButtonHint.primary("Next page"),
+        ButtonHint.secondary("Previous page")
     )
 
     override fun onPad(action: PadAction): Boolean {
         if(options.onPad(action)) return true
         when (action) {
             PadAction.Menu -> toggleControls()
-            PadAction.Back -> if (controlsVisible) setControlsVisible(false) else host.back()
+            PadAction.Back -> if (controlsVisible) setControlsVisible(false) else moveReadingFlow(false)
             PadAction.Activate -> if (controlsVisible) {
                 focusables.getOrNull(focusedControl)?.performClick()
             } else {
-                advance()
+                moveReadingFlow(true)
             }
-            PadAction.Primary -> toggleThirds()
-            PadAction.Secondary -> {
-                setControlsVisible(true)
-                focusedControl = focusables.indexOf(seek).coerceAtLeast(0)
-                focusables.getOrNull(focusedControl)?.requestFocus()
-            }
-            PadAction.Refresh -> loadPage()
-            is PadAction.Section -> if (action.delta > 0) advance() else retreat()
-            is PadAction.Page -> zoom(if (action.direction == Direction.UP) 1.25f else 0.8f)
-            is PadAction.Step -> if (controlsVisible) moveControlFocus(action.direction) else navigate(action.direction)
+            PadAction.Primary -> turnWholePage(1)
+            PadAction.Secondary -> turnWholePage(-1)
+            PadAction.Refresh -> if (loading.visibility == View.VISIBLE) {
+                if (manifest == null) loadManifest(currentSourceItemId) else loadPage()
+            } else host.back()
+            is PadAction.Section -> zoom(if (action.delta > 0) 1.2f else 1f / 1.2f)
+            is PadAction.Page -> zoom(if (action.direction == Direction.DOWN) 1.35f else 1f / 1.35f)
+            is PadAction.Step -> if (controlsVisible) moveControlFocus(action.direction) else scrollDirection(action.direction)
         }
         return true
     }
 
-    // Android edge-back should leave the reader in one gesture. Physical B is
-    // handled above and first dismisses chrome.
+    // Android edge-back leaves the reader; physical B follows the reading flow.
     override fun onSystemBack(): Boolean { if(options.isOpen) { options.cancel(); return true }; return false }
 
     private fun buildTopBar() {
@@ -269,7 +266,7 @@ class PagedImageReaderScreen(
             setBackgroundColor(0xD9141518.toInt())
         }
         root.addView(bottomBar, FrameLayout.LayoutParams(MATCH, dp(66), Gravity.BOTTOM))
-        bottomBar.addView(control("‹", "Previous page", ::retreat))
+        bottomBar.addView(control("‹", "Previous page", { turnWholePage(-1) }))
         seek = SeekBar(host.viewContext).apply {
             max = 1
             contentDescription = "Publication position"
@@ -305,7 +302,7 @@ class PagedImageReaderScreen(
             setTextColor(Color.WHITE)
         }
         bottomBar.addView(positionView, LinearLayout.LayoutParams(dp(128), MATCH))
-        bottomBar.addView(control("›", "Next page", ::advance))
+        bottomBar.addView(control("›", "Next page", { turnWholePage(1) }))
     }
 
     private fun control(glyph: String, label: String, click: () -> Unit): TextView =
@@ -438,13 +435,77 @@ class PagedImageReaderScreen(
         loading.visibility = View.VISIBLE
     }
 
-    private fun navigate(direction: Direction) {
-        val rtl = (directionOverride ?: manifest?.direction) == "rtl"
+    private fun moveReadingFlow(forward: Boolean) {
+        if (thirdsEnabled) {
+            if (forward) advance() else retreat()
+            return
+        }
+        if (image.isReady) {
+            val horizontal = image.sWidth > image.sHeight
+            val rtl = (directionOverride ?: manifest?.direction) == "rtl"
+            val first = if (horizontal) {
+                if (forward == rtl) Direction.LEFT else Direction.RIGHT
+            } else if (forward) Direction.DOWN else Direction.UP
+            if (panWithinPage(first)) return
+            // Wrap to the start of the next row or column when both dimensions
+            // overflow. Without this, zoomed spreads skip most of the image.
+            if (wrapReadingFlow(horizontal, forward, rtl)) return
+        }
+        if (forward) advance() else retreat()
+    }
+
+    private fun scrollDirection(direction: Direction) {
+        if (panWithinPage(direction)) return
+        // Horizontal input continues the reading flow at the edge of the page.
+        // Vertical input only pans; it never unexpectedly turns a page.
         when (direction) {
-            Direction.LEFT -> if (rtl) advance() else retreat()
-            Direction.RIGHT -> if (rtl) retreat() else advance()
-            Direction.UP -> retreat()
-            Direction.DOWN -> advance()
+            Direction.LEFT -> if ((directionOverride ?: manifest?.direction) == "rtl") advance() else retreat()
+            Direction.RIGHT -> if ((directionOverride ?: manifest?.direction) == "rtl") retreat() else advance()
+            Direction.UP, Direction.DOWN -> Unit
+        }
+    }
+
+    private fun panWithinPage(direction: Direction): Boolean {
+        if (!image.isReady || image.scale <= 0f) return false
+        val center = image.center ?: PointF(image.sWidth / 2f, image.sHeight / 2f)
+        val horizontal = direction == Direction.LEFT || direction == Direction.RIGHT
+        val sign = if (direction == Direction.LEFT || direction == Direction.UP) -1 else 1
+        val target = if (horizontal) {
+            ComicPanPolicy.step(center.x, image.sWidth, image.width / image.scale, sign)?.let { PointF(it, center.y) }
+        } else {
+            ComicPanPolicy.step(center.y, image.sHeight, image.height / image.scale, sign)?.let { PointF(center.x, it) }
+        } ?: return false
+        image.animateCenter(target)?.withDuration(180)?.withInterruptible(true)?.start()
+        return true
+    }
+
+    private fun wrapReadingFlow(horizontal: Boolean, forward: Boolean, rtl: Boolean): Boolean {
+        if (!image.isReady || image.scale <= 0f) return false
+        val center = image.center ?: PointF(image.sWidth / 2f, image.sHeight / 2f)
+        val visibleWidth = image.width / image.scale
+        val visibleHeight = image.height / image.scale
+        val target = if (horizontal) {
+            val nextY = ComicPanPolicy.step(center.y, image.sHeight, visibleHeight, if (forward) 1 else -1)
+                ?: return false
+            val firstX = ComicPanPolicy.edge(image.sWidth, visibleWidth, high = forward == rtl)
+            PointF(firstX, nextY)
+        } else {
+            val nextX = ComicPanPolicy.step(center.x, image.sWidth, visibleWidth, if (forward == rtl) -1 else 1)
+                ?: return false
+            val firstY = ComicPanPolicy.edge(image.sHeight, visibleHeight, high = !forward)
+            PointF(nextX, firstY)
+        }
+        image.animateCenter(target)?.withDuration(180)?.withInterruptible(true)?.start()
+        return true
+    }
+
+    private fun turnWholePage(delta: Int) {
+        val position = state ?: return
+        if (position.turnPage(delta)) {
+            loadPage()
+            scheduleSave()
+        } else {
+            movePublication(delta)
         }
     }
 
@@ -455,7 +516,7 @@ class PagedImageReaderScreen(
                 loadPage()
                 scheduleSave()
             } else {
-                applyViewport()
+                applyViewport(animated = true)
                 updatePosition()
             }
             return
@@ -470,7 +531,7 @@ class PagedImageReaderScreen(
             if (position.pageIndex != previousPage) {
                 loadPage()
             } else {
-                applyViewport()
+                applyViewport(animated = true)
                 updatePosition()
             }
             scheduleSave()
@@ -512,7 +573,7 @@ class PagedImageReaderScreen(
         host.refreshHints()
     }
 
-    private fun applyViewport() {
+    private fun applyViewport(animated: Boolean = false) {
         if (!image.isReady) return
         if (!thirdsEnabled) { if(fitWidth) image.setScaleAndCenter((image.width.toFloat()/image.sWidth).coerceIn(image.minScale,image.maxScale),PointF(image.sWidth/2f,image.sHeight/2f));return }
         val value = manifest ?: return
@@ -531,7 +592,9 @@ class PagedImageReaderScreen(
         val heightScale = image.height / ((viewport.bottom - viewport.top) * sourceHeight).toFloat()
         val scale = max(image.minScale, if (axis == ViewportAxis.HORIZONTAL) widthScale else heightScale)
             .coerceAtMost(image.maxScale)
-        image.setScaleAndCenter(scale, center)
+        if (animated) image.animateScaleAndCenter(scale, center)
+            ?.withDuration(180)?.withInterruptible(true)?.start()
+        else image.setScaleAndCenter(scale, center)
         regionHint.text="Region ${position.viewportIndex+1} of 3";regionHint.visibility=View.VISIBLE
         regionHint.removeCallbacks(hideRegionHint);regionHint.postDelayed(hideRegionHint,1200)
     }
@@ -578,7 +641,8 @@ class PagedImageReaderScreen(
     private fun zoom(factor: Float) {
         if (!image.isReady) return
         val center = image.center ?: PointF(image.sWidth / 2f, image.sHeight / 2f)
-        image.setScaleAndCenter((image.scale * factor).coerceIn(image.minScale, image.maxScale), center)
+        image.animateScaleAndCenter((image.scale * factor).coerceIn(image.minScale, image.maxScale), center)
+            ?.withDuration(180)?.withInterruptible(true)?.start()
     }
 
     private fun scheduleSave() {
