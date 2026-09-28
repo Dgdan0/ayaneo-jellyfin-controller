@@ -27,9 +27,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import okhttp3.Call
 import okhttp3.Response
 import java.io.File
 import java.io.FileOutputStream
@@ -44,6 +47,7 @@ class OfflineDownloadService : Service() {
     private var worker: Job? = null
     private var subtitleWorker: Job? = null
     @Volatile private var activeId: String? = null
+    @Volatile private var activeCall: Call? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -82,19 +86,19 @@ class OfflineDownloadService : Service() {
             }
             ACTION_REMOVE -> intent.getStringExtra(EXTRA_ID)?.let {
                 val active = activeId == it
-                if (active) worker?.cancel()
+                if (active) cancelActiveWorker()
                 repository.remove(it)
                 if (active) continueSoon() else ensureWorker()
             }
             ACTION_REMOVE_BATCH -> intent.getStringExtra(EXTRA_ID)?.let {
                 val active = repository.download(activeId.orEmpty())?.batchId == it
-                if (active) worker?.cancel()
+                if (active) cancelActiveWorker()
                 repository.removeBatch(it)
                 if (active) continueSoon() else ensureWorker()
             }
             ACTION_CANCEL_BATCH_KEEP -> intent.getStringExtra(EXTRA_ID)?.let {
                 val active = repository.download(activeId.orEmpty())?.batchId == it
-                if (active) worker?.cancel()
+                if (active) cancelActiveWorker()
                 repository.cancelBatch(it, false)
                 if (active) continueSoon() else ensureWorker()
             }
@@ -106,7 +110,9 @@ class OfflineDownloadService : Service() {
 
     private fun ensureWorker() {
         ensureSubtitleWorker()
-        if (worker?.isActive == true) return
+        // A cancelled worker may still be unwinding a blocking HTTP read.
+        // Wait for it to finish before allowing another media stream.
+        if (worker?.isCompleted == false) return
         startForeground(NOTIFICATION_ID, notification("Preparing downloads", 0, 0, true))
         worker = scope.launch { runQueue() }
     }
@@ -147,17 +153,24 @@ class OfflineDownloadService : Service() {
     }
 
     private fun cancelAndContinue() {
-        worker?.cancel()
+        cancelActiveWorker()
         continueSoon()
     }
 
+    private fun cancelActiveWorker() {
+        worker?.cancel()
+        activeCall?.cancel()
+    }
+
     private fun continueSoon() {
-        android.os.Handler(mainLooper).postDelayed({ ensureWorker() }, 150L)
+        android.os.Handler(mainLooper).postDelayed({
+            if (worker?.isCompleted == false) continueSoon() else ensureWorker()
+        }, 150L)
     }
 
     private suspend fun runQueue() {
         syncProgress()
-        while (scope.isActive) {
+        while (currentCoroutineContext().isActive) {
             val row = repository.nextQueued()
             if (row == null) {
                 val retryAt = repository.nextRetryAt()
@@ -201,6 +214,12 @@ class OfflineDownloadService : Service() {
                 }
                 throw CancellationException()
             } catch (error: Exception) {
+                if (!currentCoroutineContext().isActive) {
+                    repository.download(row.id)?.takeIf { it.state == OfflineState.DOWNLOADING }?.let {
+                        repository.setState(it.id, OfflineState.QUEUED)
+                    }
+                    throw CancellationException()
+                }
                 DebugLog.log("offline", "${row.id} failed: ${error.message}")
                 repository.recordFailure(
                     row.id,
@@ -230,76 +249,95 @@ class OfflineDownloadService : Service() {
             repository.mediaFile(row).delete(); existing = 0
         }
         if (existing > 0) repository.updateProgress(row.id, existing)
-        var response = api.offlineDownloadCall(manifest.mediaUrl, existing).execute()
+        var response = executeMediaCall(manifest.mediaUrl, existing)
         if (response.code == 410) {
             response.close()
+            activeCall = null
             when (val renewed = api.renewOffline(manifest.grantId)) {
                 is HubResult.Ok -> {
                     manifest = renewed.value
                     repository.updateManifest(row.id, manifest)
-                    response = api.offlineDownloadCall(manifest.mediaUrl, existing).execute()
+                    response = executeMediaCall(manifest.mediaUrl, existing)
                 }
                 is HubResult.Failed -> throw IOException(renewed.message)
             }
         }
-        response.use { streamResponse ->
-            if (!validContentRange(
-                    existing,
-                    manifest.source.sizeBytes,
-                    streamResponse.code,
-                    streamResponse.header("Content-Range")
-                )
-            ) throw IOException("Hub returned an invalid resume range")
-            val writeMode = transferWriteMode(existing, manifest.source.sizeBytes, streamResponse.code)
-            if (writeMode == TransferWriteMode.COMPLETE) {
-                repository.finish(row.id)
-                (repository.download(row.id) ?: row).let {
-                    downloadSubtitles(it)
-                    downloadArtwork(it)
-                }
-                return
-            }
-            val append = writeMode == TransferWriteMode.APPEND
-            if (existing > 0 && writeMode == TransferWriteMode.RESTART) {
-                repository.mediaFile(row).delete(); existing = 0
-            }
-            val body = streamResponse.body ?: throw IOException("Hub returned an empty media stream")
-            val file = repository.mediaFile(row)
-            file.parentFile?.mkdirs()
-            FileOutputStream(file, append).use { output ->
-                body.byteStream().use { input ->
-                    val buffer = ByteArray(256 * 1024)
-                    var written = existing
-                    var lastUpdate = 0L
-                    val transferStartedAt = android.os.SystemClock.elapsedRealtime()
-                    val transferStartedBytes = existing
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        written += count
-                        val now = android.os.SystemClock.elapsedRealtime()
-                        if (now - lastUpdate >= 500L) {
-                            lastUpdate = now
-                            val elapsed = (now - transferStartedAt).coerceAtLeast(1L)
-                            val speed = ((written - transferStartedBytes) * 1_000L / elapsed).coerceAtLeast(0L)
-                            repository.updateProgress(row.id, written, speedBytesPerSecond = speed)
-                            updateNotification(
-                                row.copy(bytesDownloaded = written, speedBytesPerSecond = speed),
-                                "Downloading"
-                            )
-                        }
+        try {
+            response.use { streamResponse ->
+                if (!validContentRange(
+                        existing,
+                        manifest.source.sizeBytes,
+                        streamResponse.code,
+                        streamResponse.header("Content-Range")
+                    )
+                ) throw IOException("Hub returned an invalid resume range")
+                val writeMode = transferWriteMode(existing, manifest.source.sizeBytes, streamResponse.code)
+                if (writeMode == TransferWriteMode.COMPLETE) {
+                    repository.finish(row.id)
+                    (repository.download(row.id) ?: row).let {
+                        downloadSubtitles(it)
+                        downloadArtwork(it)
                     }
-                    output.fd.sync()
-                    repository.updateProgress(row.id, written, speedBytesPerSecond = 0L)
+                    return
+                }
+                val append = writeMode == TransferWriteMode.APPEND
+                if (existing > 0 && writeMode == TransferWriteMode.RESTART) {
+                    repository.mediaFile(row).delete(); existing = 0
+                }
+                val body = streamResponse.body ?: throw IOException("Hub returned an empty media stream")
+                val file = repository.mediaFile(row)
+                file.parentFile?.mkdirs()
+                FileOutputStream(file, append).use { output ->
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(256 * 1024)
+                        var written = existing
+                        var lastUpdate = 0L
+                        val transferStartedAt = android.os.SystemClock.elapsedRealtime()
+                        val transferStartedBytes = existing
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            currentCoroutineContext().ensureActive()
+                            output.write(buffer, 0, count)
+                            written += count
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            if (now - lastUpdate >= 500L) {
+                                lastUpdate = now
+                                val elapsed = (now - transferStartedAt).coerceAtLeast(1L)
+                                val speed = ((written - transferStartedBytes) * 1_000L / elapsed).coerceAtLeast(0L)
+                                repository.updateProgress(row.id, written, speedBytesPerSecond = speed)
+                                updateNotification(
+                                    row.copy(bytesDownloaded = written, speedBytesPerSecond = speed),
+                                    "Downloading"
+                                )
+                            }
+                        }
+                        output.fd.sync()
+                        repository.updateProgress(row.id, written, speedBytesPerSecond = 0L)
+                    }
                 }
             }
+        } finally {
+            activeCall = null
         }
         repository.finish(row.id)
         row = repository.download(row.id) ?: return
         if (row.state == OfflineState.COMPLETE) {
             downloadSubtitles(row)
             downloadArtwork(row)
+        }
+    }
+
+    private suspend fun executeMediaCall(url: String, offset: Long): Response {
+        val call = api.offlineDownloadCall(url, offset)
+        activeCall = call
+        try {
+            currentCoroutineContext().ensureActive()
+            return call.execute()
+        } catch (error: Exception) {
+            if (activeCall === call) activeCall = null
+            throw error
         }
     }
 
@@ -430,7 +468,7 @@ class OfflineDownloadService : Service() {
     }
 
     override fun onDestroy() {
-        worker?.cancel(); subtitleWorker?.cancel(); scope.cancel(); super.onDestroy()
+        worker?.cancel(); activeCall?.cancel(); subtitleWorker?.cancel(); scope.cancel(); super.onDestroy()
     }
 
     companion object {
