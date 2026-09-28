@@ -12,9 +12,14 @@ class PosterGridLayout(context: Context) : GridLayout(context) {
         val available = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
         if (available > 0) {
             val columns = LibraryGridSizing.columns(available, 0, resources.displayMetrics.density)
-            // Reset explicit specs before reducing the column count on a rail resize.
-            for (i in 0 until childCount) (getChildAt(i).layoutParams as LayoutParams).apply {
-                columnSpec = spec(UNDEFINED); rowSpec = spec(UNDEFINED)
+            // Reassign the params so GridLayout invalidates its cached indices
+            // before a smaller column count is validated. Mutating specs alone
+            // leaves the previous maximum column cached and can crash here.
+            for (i in 0 until childCount) {
+                val child = getChildAt(i)
+                child.layoutParams = (child.layoutParams as LayoutParams).apply {
+                    columnSpec = spec(UNDEFINED); rowSpec = spec(UNDEFINED)
+                }
             }
             columnCount = columns
             for (i in 0 until childCount) {
