@@ -293,7 +293,8 @@ class OfflineDownloadService : Service() {
                         var written = existing
                         var lastUpdate = 0L
                         val transferStartedAt = android.os.SystemClock.elapsedRealtime()
-                        val transferStartedBytes = existing
+                        val speedSamples = ArrayDeque<Pair<Long, Long>>()
+                        speedSamples.addLast(transferStartedAt to existing)
                         while (true) {
                             currentCoroutineContext().ensureActive()
                             val count = input.read(buffer)
@@ -304,8 +305,13 @@ class OfflineDownloadService : Service() {
                             val now = android.os.SystemClock.elapsedRealtime()
                             if (now - lastUpdate >= 500L) {
                                 lastUpdate = now
-                                val elapsed = (now - transferStartedAt).coerceAtLeast(1L)
-                                val speed = ((written - transferStartedBytes) * 1_000L / elapsed).coerceAtLeast(0L)
+                                speedSamples.addLast(now to written)
+                                while (speedSamples.size > 2 && speedSamples.first().first < now - 10_000L) {
+                                    speedSamples.removeFirst()
+                                }
+                                val (sampleTime, sampleBytes) = speedSamples.first()
+                                val speed = ((written - sampleBytes) * 1_000L /
+                                    (now - sampleTime).coerceAtLeast(1L)).coerceAtLeast(0L)
                                 repository.updateProgress(row.id, written, speedBytesPerSecond = speed)
                                 updateNotification(
                                     row.copy(bytesDownloaded = written, speedBytesPerSecond = speed),
@@ -330,10 +336,28 @@ class OfflineDownloadService : Service() {
     }
 
     private suspend fun executeMediaCall(url: String, offset: Long): Response {
-        val call = api.offlineDownloadCall(url, offset)
+        var call = api.offlineDownloadCall(url, offset)
         activeCall = call
         try {
             currentCoroutineContext().ensureActive()
+            val privateCall = api.offlineDownloadCall(url, offset, usePrivateRoute = true)
+            val canFallBack = privateCall.request().url != call.request().url
+            var firstError: IOException? = null
+            val firstResponse = try {
+                call.execute()
+            } catch (error: IOException) {
+                firstError = error
+                null
+            }
+            if (!canFallBack || (firstResponse != null && firstResponse.code != 404 &&
+                    firstResponse.code !in 500..599)) {
+                return firstResponse ?: throw firstError!!
+            }
+            firstResponse?.close()
+            currentCoroutineContext().ensureActive()
+            DebugLog.log("offline", "public media route unavailable; trying private Hub route")
+            call = privateCall
+            activeCall = call
             return call.execute()
         } catch (error: Exception) {
             if (activeCall === call) activeCall = null
@@ -341,12 +365,12 @@ class OfflineDownloadService : Service() {
         }
     }
 
-    private fun downloadSubtitles(row: OfflineDownload) {
+    private suspend fun downloadSubtitles(row: OfflineDownload) {
         row.manifest.subtitles.forEach { subtitle ->
             val target = repository.subtitleFile(row, subtitle.track.index, subtitle.track.codec)
             val temporary = File(target.absolutePath + ".part")
-            runCatching {
-                api.offlineDownloadCall(subtitle.url, 0).execute().use { response ->
+            try {
+                executeMediaCall(subtitle.url, 0).use { response ->
                     if (!response.isSuccessful) throw IOException("subtitle HTTP ${response.code}")
                     response.body?.byteStream()?.use { input ->
                         temporary.outputStream().use { output -> input.copyTo(output) }
@@ -354,17 +378,20 @@ class OfflineDownloadService : Service() {
                 }
                 if (target.exists()) target.delete()
                 if (!temporary.renameTo(target)) throw IOException("could not store subtitle")
-            }.onFailure {
+            } catch (error: Exception) {
                 temporary.delete()
+                if (!currentCoroutineContext().isActive) throw CancellationException()
                 // The original file remains fully playable and still contains
                 // all embedded tracks. Missing external sidecars can be retried
                 // by removing and re-queueing this item.
-                DebugLog.log("offline", "subtitle ${subtitle.track.index} failed: ${it.message}")
+                DebugLog.log("offline", "subtitle ${subtitle.track.index} failed: ${error.message}")
+            } finally {
+                activeCall = null
             }
         }
     }
 
-    private fun downloadArtwork(row: OfflineDownload) {
+    private suspend fun downloadArtwork(row: OfflineDownload) {
         listOf(
             "thumb" to row.manifest.item.thumb,
             "poster" to row.manifest.item.poster,
@@ -373,8 +400,8 @@ class OfflineDownloadService : Service() {
             val target = repository.artworkFile(row, kind)
             if (target.isFile && target.length() > 0) return@forEach
             val temporary = File(target.absolutePath + ".part")
-            runCatching {
-                api.offlineDownloadCall(path, 0).execute().use { response ->
+            try {
+                executeMediaCall(path, 0).use { response ->
                     if (!response.isSuccessful) throw IOException("artwork HTTP ${response.code}")
                     response.body?.byteStream()?.use { input ->
                         temporary.outputStream().use { output -> input.copyTo(output) }
@@ -382,7 +409,12 @@ class OfflineDownloadService : Service() {
                 }
                 if (target.exists()) target.delete()
                 if (!temporary.renameTo(target)) throw IOException("could not store artwork")
-            }.onFailure { temporary.delete() }
+            } catch (error: Exception) {
+                temporary.delete()
+                if (!currentCoroutineContext().isActive) throw CancellationException()
+            } finally {
+                activeCall = null
+            }
         }
     }
 

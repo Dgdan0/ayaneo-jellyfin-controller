@@ -66,7 +66,7 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
             }
             addGroup("Playback & storage")
             addSetting("playback", "Playback") { showSeekChoices() }
-            addSetting("cast", "TV playback address", "Public HTTPS address used by Chromecast") { editCastAddress() }
+            addSetting("cast", "Public Hub address", "Used for TV playback and offline downloads") { editCastAddress() }
             addSetting("offline", "Offline downloads", "Wi-Fi, charging and storage rules") {
                 host.push(OfflineSettingsScreen(ringVisible))
             }
@@ -153,7 +153,7 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
             rows["notifications"]?.detail = "Sonarr ${it.sonarr} · Radarr ${it.radarr} · Bazarr ${it.bazarr}"
         }
         rows["playback"]?.detail = "Seek ${PlaybackSettings.seekSeconds(host.viewContext)} seconds"
-        rows["cast"]?.detail = HubSettings.castBaseUrl(host.viewContext).ifEmpty { "Use Hub address" }
+        rows["cast"]?.detail = HubSettings.publicBaseUrl(host.viewContext).ifEmpty { "Uses private Hub address" }
         rows["offline"]?.detail = buildList {
             add(if (com.pocketds.hub.settings.OfflineSettings.wifiOnly(host.viewContext)) "Wi-Fi only" else "Any network")
             if (com.pocketds.hub.settings.OfflineSettings.chargingOnly(host.viewContext)) add("while charging")
@@ -182,13 +182,13 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
         val field = EditText(host.viewContext).apply {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
             setSingleLine(true)
-            setText(HubSettings.castBaseUrl(host.viewContext))
+            setText(HubSettings.publicBaseUrl(host.viewContext))
             selectAll()
-            contentDescription = "Public HTTPS Hub address for TV playback"
+            contentDescription = "Public HTTPS Hub address for TV playback and offline downloads"
         }
         AlertDialog.Builder(host.viewContext)
-            .setTitle("TV playback address")
-            .setMessage("The Chromecast fetches video from this address. Use your public HTTPS Hub address, including its port.")
+            .setTitle("Public Hub address")
+            .setMessage("Chromecast and offline downloads use this HTTPS address. Downloads fall back to the private Hub address if it is unavailable.")
             .setView(field)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save") { _, _ ->
@@ -198,7 +198,7 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
                 } else {
                     HubSettings.setCastBaseUrl(host.viewContext, entered)
                     updateDetails()
-                    host.notify("TV playback address saved")
+                    host.notify("Public Hub address saved")
                 }
             }
             .show()

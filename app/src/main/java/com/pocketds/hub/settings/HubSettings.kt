@@ -30,9 +30,12 @@ object HubSettings {
     fun baseUrl(context: Context): String =
         debugBaseUrlOverride ?: Prefs.of(context).getString(KEY_URL, "").orEmpty()
 
-    /** Public HTTPS address fetched by a Chromecast/Google TV directly. */
+    /** Public HTTPS Hub address for TV playback and offline media transfers. */
+    fun publicBaseUrl(context: Context): String =
+        Prefs.of(context).getString(KEY_CAST_URL, "").orEmpty()
+
     fun castBaseUrl(context: Context): String =
-        Prefs.of(context).getString(KEY_CAST_URL, "").orEmpty().ifEmpty { baseUrl(context) }
+        publicBaseUrl(context).ifEmpty { baseUrl(context) }
 
     fun setCastBaseUrl(context: Context, url: String) {
         Prefs.of(context).edit().putString(KEY_CAST_URL, HubEndpoints.normaliseBase(url)).apply()

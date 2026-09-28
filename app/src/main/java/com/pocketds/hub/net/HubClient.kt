@@ -66,7 +66,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
+import okhttp3.Protocol
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaType
@@ -343,7 +345,10 @@ class HubClient(private val context: Context, private val connection: HubConnect
         .callTimeout(180, TimeUnit.SECONDS)
         .build()
 
+    /** Long transfers use their own HTTP/1.1 pool instead of sharing interactive HTTP/2 streams. */
     private val offlineHttp: OkHttpClient = api.newBuilder()
+        .connectionPool(ConnectionPool())
+        .protocols(listOf(Protocol.HTTP_1_1))
         .dispatcher(Dispatcher().apply {
             maxRequests = 2
             maxRequestsPerHost = 2
@@ -597,9 +602,14 @@ class HubClient(private val context: Context, private val connection: HubConnect
     ) { json.decodeFromString<OfflineProgressSyncResponse>(it) }
 
     /** A long-running, uncached client for resumable media transfers. */
-    fun offlineDownloadCall(hubPath: String, downloadedBytes: Long): Call {
+    fun offlineDownloadCall(hubPath: String, downloadedBytes: Long, usePrivateRoute: Boolean = false): Call {
+        // The configured public Hub address can be reached outside Android's
+        // per-app tailnet VPN path. Keep the ordinary Hub address for browsing,
+        // and fall back to it when no public address has been configured.
+        val downloadBase = if (usePrivateRoute) base()
+            else connection?.baseUrl ?: HubSettings.castBaseUrl(context)
         val builder = Request.Builder()
-            .url(playbackUrl(hubPath))
+            .url(HubEndpoints.playbackResource(downloadBase, hubPath))
             .cacheControl(noStore)
         if (downloadedBytes > 0) builder.header("Range", "bytes=$downloadedBytes-")
         return offlineHttp.newCall(builder.build())
