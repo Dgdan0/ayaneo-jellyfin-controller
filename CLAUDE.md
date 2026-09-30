@@ -940,10 +940,21 @@ app and upstream requests use the adapter's private header.
 
 Playback exit also refreshes Home, item details, series play targets and the selected loaded
 episode without discarding their focus or paging state. A two-minute checkpoint stored per
-Jellyfin user bridges the short interval before Jellyfin publishes the final stopped position;
-it is used only for valid Resume requests and never for Start over. A live Pocket DS check moved
-Drake & Josh S2E8 from Play to `Resume · 2:16` immediately after Back, then reopened beyond that
-position instead of using the earlier server value.
+Jellyfin user covers the moment between Back and the hub's refreshed read; it is used only for
+valid Resume requests and never for Start over.
+
+**Jellyfin keeps a watch position only through the user-data endpoint.** `/Sessions/Playing*`
+reports are attributed to the signed-in user, and the hub signs in with an API key, which has no
+user: Jellyfin accepts them and saves nothing. Until 2026-09-30 that was the only path, and the
+checkpoint above hid it for two minutes before the old position came back (the earlier "S2E8 moved
+to Resume · 2:16" check was the checkpoint, not the server). Measured on 10.11.8: resume at 17:12,
+watch 40 seconds, stop, and the server still said 17:12. `hub/internal/api/watchstate.go`
+`recordWatchPosition` is now the only writer: `POST /UserItems/{id}/UserData?userId=` with
+`PlaybackPositionTicks` and `LastPlayedDate` (a partial update that leaves favourite and play count
+alone), judged by the server's own `MinResumePct`/`MaxResumePct`/`MinResumeDurationSeconds` from
+`/System/Configuration`. Live progress, stops, abandoned sessions and offline sync all go through
+it; the session reports remain only for Jellyfin's dashboard. Verified against the live server
+through the deployed hub: a stop at 18:20 was kept as 18:20.
 
 The delivered first release and later player milestones are recorded in `PLAYER_PLAN.md`.
 The trickplay gateway and preview UI are delivered. The live server returned no generated
