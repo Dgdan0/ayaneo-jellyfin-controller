@@ -28,6 +28,7 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.state.RequestedTitles
 import com.pocketds.hub.ui.showStatus
 import com.pocketds.hub.ui.activateOnTap
 
@@ -60,6 +61,7 @@ class PersonScreen(
     private lateinit var status: TextView
     private lateinit var grid: RecyclerView
     private val adapter = CreditAdapter()
+    private var requestedRevision = RequestedTitles.revision
 
     private var host: ScreenHost? = null
     private var sort = "release"
@@ -114,6 +116,11 @@ class PersonScreen(
 
     override fun onShow() {
         if (adapter.itemCount == 0) load()
+        else if (requestedRevision != RequestedTitles.revision) {
+            // Back from a detail page where something was requested.
+            requestedRevision = RequestedTitles.revision
+            adapter.notifyItemRangeChanged(0, adapter.itemCount, "state")
+        }
     }
 
     override fun onHide() {
@@ -194,7 +201,7 @@ class PersonScreen(
         }
 
         override fun onBindViewHolder(holder: CardHolder, position: Int) {
-            val hit = items[position]
+            val hit = RequestedTitles.apply(items[position])
             val loader = (api as? HubClient)?.imageLoader
                 ?: coil.ImageLoader(holder.itemView.context)
             (holder.itemView as PosterCardView).bind(hit, loader) { api.imageUrl(it) }

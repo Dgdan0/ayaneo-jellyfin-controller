@@ -56,6 +56,7 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.state.RequestedTitles
 import com.pocketds.hub.ui.showStatus
 
 /**
@@ -95,6 +96,7 @@ class DiscoverScreen(
     private lateinit var readingRowsList: RecyclerView
     private lateinit var readingResultsGrid: RecyclerView
     private val rowsAdapter = RowsAdapter()
+    private var requestedRevision = RequestedTitles.revision
     private val shelfNavigation = ShelfFocusNavigator()
     private val resultsAdapter = HitAdapter()
     private val readingRowsAdapter = ReadingRowsAdapter()
@@ -376,7 +378,8 @@ class DiscoverScreen(
                 statusLine.text = text
             },
             onNotify = { host.notify(it) },
-            onHintsChanged = { host.refreshHints() }
+            onHintsChanged = { host.refreshHints() },
+            onRequested = ::rebindRequestedCards
         )
 
         applyModeVisibility()
@@ -552,7 +555,20 @@ class DiscoverScreen(
             override fun onChildViewDetachedFromWindow(view: View) = Unit
         }
 
+    /**
+     * Redraws the cards in place after a request, here or on a detail page
+     * opened from here. A payload keeps each card's holder, and so its focus.
+     */
+    private fun rebindRequestedCards() {
+        if (requestedRevision == RequestedTitles.revision) return
+        requestedRevision = RequestedTitles.revision
+        rowsAdapter.notifyItemRangeChanged(0, rowsAdapter.itemCount, PAYLOAD_STATE)
+        resultsAdapter.notifyItemRangeChanged(0, resultsAdapter.itemCount, PAYLOAD_STATE)
+        host?.refreshHints()
+    }
+
     override fun onShow() {
+        rebindRequestedCards()
         val stored = host?.viewContext?.let(ContentModeSettings::get) ?: mode
         if (stored != mode) switchMode(stored)
         if (searching) {
@@ -995,7 +1011,8 @@ class DiscoverScreen(
             FocusDecorator.attach(this, ringVisible)
         }
 
-    private fun bindCard(card: PosterCardView, hit: SearchHit) {
+    private fun bindCard(card: PosterCardView, fromHub: SearchHit) {
+        val hit = RequestedTitles.apply(fromHub)
         val client = api as? HubClient
         card.bind(
             hit,
@@ -1270,6 +1287,8 @@ class DiscoverScreen(
                 // Only the strip's adapter changed; rebuilding the whole row
                 // would reset its horizontal scroll to the left edge.
                 (holder.itemView as PosterRowView).appendOnly(rows[position])
+            } else if (payloads.isNotEmpty() && payloads.all { it == PAYLOAD_STATE }) {
+                (holder.itemView as PosterRowView).rebindCards()
             } else {
                 onBindViewHolder(holder, position)
             }
@@ -1369,6 +1388,11 @@ class DiscoverScreen(
             stripAdapter.submit(if (featuredRow) DiscoverFeaturePolicy.mediaShelf(row, featureWidthDp) else row.items)
         }
 
+        /** Same cards, fresh badges: keeps the strip's scroll and its focused card. */
+        fun rebindCards() {
+            stripAdapter.notifyItemRangeChanged(0, stripAdapter.itemCount, PAYLOAD_STATE)
+        }
+
         private inner class StripAdapter : RecyclerView.Adapter<CardHolder>() {
             private val items = mutableListOf<SearchHit>()
 
@@ -1458,6 +1482,7 @@ class DiscoverScreen(
         const val PREFETCH_AHEAD = 6
 
         const val PAYLOAD_MORE = "more"
+        const val PAYLOAD_STATE = "state"
         const val TAG_HIT = -0x7ffffff5
         const val TAG_READING_ITEM = -0x7ffffff4
     }

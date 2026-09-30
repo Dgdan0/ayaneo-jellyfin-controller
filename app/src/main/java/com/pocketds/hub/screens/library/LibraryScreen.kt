@@ -31,6 +31,7 @@ import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.state.LibraryGridSizing
 import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.state.PagedLoadState
+import com.pocketds.hub.state.HitRefresh
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.ui.LibraryCardView
@@ -500,6 +501,9 @@ class LibraryGridScreen(
     private var sortAscending = true
     private var loadGeneration = 0
     private var refreshOnReturn = false
+    /** Where each loaded page begins in the grid, so a return can patch just that page. */
+    private val pageStarts = HashMap<Int, Int>()
+    private var patchJob: Job? = null
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -570,7 +574,28 @@ class LibraryGridScreen(
             reload()
         } else if (paging.loadedPage == 0 && loadJob?.isActive != true) {
             (paging.retry() ?: paging.initial())?.let(::loadPage)
-        } else restoreFocus()
+        } else {
+            restoreFocus()
+            if (refreshOnReturn) {
+                refreshOnReturn = false
+                patchReturnedPage()
+            }
+        }
+    }
+
+    /**
+     * Back from a detail page -- often from playing it -- the card's watched
+     * badge and progress are out of date. Search and Favourites reload because
+     * their membership can change; a folder keeps its scroll and focus and
+     * re-reads only the page the opened title came from.
+     */
+    private fun patchReturnedPage() {
+        val page = HitRefresh.pageOf(selected, pageStarts) ?: return
+        patchJob?.cancel()
+        patchJob = scope.launch {
+            val result = api.libraryItems(library.id, page, sortKey, if (sortAscending) "asc" else "desc")
+            if (result is HubResult.Ok) adapter.patch(HitRefresh.changes(adapter.values(), result.value.items) { it.jellyfinItemId })
+        }
     }
 
     override fun onHide() {
@@ -634,6 +659,7 @@ class LibraryGridScreen(
         loadJob?.cancel()
         loadJob = null
         paging.reset()
+        pageStarts.clear()
         if (resetSelection) {
             selected = 0
             selectedItemId = ""
@@ -669,10 +695,15 @@ class LibraryGridScreen(
                     if (generation != loadGeneration) return@launch
                     paging.complete(page, result.value.totalPages)
                     if (page == 1 && refreshing) {
+                        pageStarts.clear()
+                        pageStarts[1] = 0
                         adapter.replace(result.value.items)
                         selected = adapter.indexOf(selectedItemId).takeIf { it >= 0 } ?: 0
                         refreshing = false
-                    } else adapter.append(result.value.items)
+                    } else {
+                        pageStarts[page] = adapter.itemCount
+                        adapter.append(result.value.items)
+                    }
                     val empty = result.value.items.isEmpty() && adapter.itemCount == 0
                     status.showStatus(
                         when {
@@ -741,7 +772,13 @@ class LibraryGridScreen(
     private inner class ItemAdapter : RecyclerView.Adapter<ItemHolder>() {
         private val values = mutableListOf<SearchHit>()
         fun at(position: Int) = values.getOrNull(position)
+        fun values(): List<SearchHit> = values
         fun indexOf(itemId: String) = values.indexOfFirst { it.jellyfinItemId == itemId }
+        /** A payload keeps each card's holder, so the focused card stays focused. */
+        fun patch(changes: List<IndexedValue<SearchHit>>) = changes.forEach { (position, value) ->
+            values[position] = value
+            notifyItemChanged(position, PAYLOAD_STATE)
+        }
         fun replace(next: List<SearchHit>) {
             values.clear()
             values.addAll(next.distinctBy { it.jellyfinItemId })
@@ -794,6 +831,7 @@ class LibraryGridScreen(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val MAX_COLUMNS = 7
         const val PREFETCH_AHEAD = 6
+        const val PAYLOAD_STATE = "state"
         const val POSTER_DP = 150f
         const val CARD_DP = 104
         const val TAG_HIT = -0x7fffffe2

@@ -1,6 +1,7 @@
 package com.pocketds.hub.screens.discover
 
 import com.pocketds.hub.state.JobSlot
+import com.pocketds.hub.state.RequestedTitles
 import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.model.RequestOptions
 import com.pocketds.hub.net.HubApi
@@ -201,6 +202,7 @@ class RequestFlow(
             DebugLog.log("net", "requesting $key profile=$profileId")
             when (val result = api.requestMedia(key, profileId, rootFolder, serverId, seasons)) {
                 is HubResult.Ok -> {
+                    RequestedTitles.record(key, result.value.availability, result.value.requestId)
                     onNotify(result.value.message.ifEmpty { "Requested $fallbackTitle" })
                     onStatus(result.value.message, false)
                     onRequested()
