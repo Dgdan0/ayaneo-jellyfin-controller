@@ -26,7 +26,9 @@ import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.state.Fmt
-import com.pocketds.hub.state.PollSchedule
+import com.pocketds.hub.state.PollCadence
+import com.pocketds.hub.state.PollOutcome
+import com.pocketds.hub.state.Poller
 import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
@@ -35,11 +37,9 @@ import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.showStatus
@@ -88,10 +88,8 @@ class DownloadsScreen(
     private var mode = ContentMode.MEDIA
 
     private var host: ScreenHost? = null
-    private var pollJob: Job? = null
+    private val poller = Poller(PollCadence.TRANSFERS)
     private var visible = false
-    private var failures = 0
-    private var anyActive = false
     private var includeFinished = targetTransferId.isNotBlank()
 
     /** Set while a mutation is in flight, so a poll cannot race its own result. */
@@ -101,17 +99,6 @@ class DownloadsScreen(
      * from onIdle instead, once the action is really over.
      */
     private val actions = JobSlot()
-
-    /**
-     * Poll fast until this moment, after the user acts.
-     *
-     * qBittorrent does not flip a torrent's state synchronously with the reply
-     * to a stop -- measured here, the reply landed in 11ms and the state had not
-     * moved 24ms later -- so the immediate refresh reads back the old row and
-     * the screen then sits on it for a full idle interval. That reads exactly
-     * like a button that did nothing.
-     */
-    private var settleUntilMs = 0L
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -223,15 +210,13 @@ class DownloadsScreen(
         visible = true
         val stored = contentDomain ?: host?.viewContext?.let(ContentModeSettings::get) ?: mode
         if (stored != mode) switchMode(stored)
-        failures = 0
         if (activeAdapter().itemCount == 0) statusLine.text = "Asking the hub…"
         startPolling()
     }
 
     override fun onHide() {
         visible = false
-        pollJob?.cancel()
-        pollJob = null
+        poller.stop()
         // A confirmation left open behind a section switch would be sitting
         // there waiting to fire on the next A press, against an item nobody is
         // looking at any more.
@@ -337,22 +322,14 @@ class DownloadsScreen(
     // ---- polling -----------------------------------------------------------
 
     private fun startPolling() {
-        pollJob?.cancel()
-        pollJob = scope.launch {
-            while (true) {
-                if (!actions.isBusy) fetchOnce()
-                val settling = android.os.SystemClock.uptimeMillis() < settleUntilMs
-                val wait = PollSchedule.nextDelayMs(visible, anyActive, failures, settling)
-                    ?: break
-                delay(wait)
-            }
-        }
+        // A read mid-action returns the old state, so the round is skipped and
+        // the action's onIdle asks again once it is really over.
+        poller.start(scope, { visible }) { if (actions.isBusy) null else fetchOnce() }
     }
 
     /** Poll now rather than waiting out the current interval. */
     private fun refreshNow() {
-        failures = 0
-        startPolling()
+        if (poller.isRunning) poller.pollNow() else startPolling()
     }
 
     private fun activeAdapter(): RecyclerView.Adapter<out RecyclerView.ViewHolder> =
@@ -370,54 +347,48 @@ class DownloadsScreen(
         summaryLine.text = ""
         statusLine.setTextColor(colors.mutedText)
         statusLine.text = "Asking the hub…"
-        failures = 0
         refreshNow()
         host?.refreshHints()
     }
 
     override fun selectContentMode(mode: ContentMode) = switchMode(mode)
 
-    private suspend fun fetchOnce() {
-        if (mode == ContentMode.BOOKS) {
-            fetchReadingOnce()
-            return
-        }
-        when (val result = api.activity(includeFinished)) {
+    private suspend fun fetchOnce(): PollOutcome {
+        if (mode == ContentMode.BOOKS) return fetchReadingOnce()
+        return when (val result = api.activity(includeFinished)) {
             is HubResult.Ok -> {
-                failures = 0
                 render(result.value)
+                PollOutcome(ok = true, active = result.value.anyActive)
             }
             is HubResult.Failed -> {
-                failures++
-                DebugLog.log("net", "activity failed #$failures: ${result.kind}")
+                DebugLog.log("net", "activity failed #${poller.consecutiveFailures + 1}: ${result.kind}")
                 // The list is deliberately kept. A failed poll means the hub was
                 // unreachable for a moment, not that the downloads stopped, and
                 // blanking the screen would say the opposite.
                 statusLine.setTextColor(colors.dangerText)
                 statusLine.text = result.message + " · retrying"
+                PollOutcome(ok = false)
             }
         }
     }
 
-    private suspend fun fetchReadingOnce() {
+    private suspend fun fetchReadingOnce(): PollOutcome =
         when (val result = api.readingDownloads()) {
             is HubResult.Ok -> {
-                failures = 0
                 renderReading(result.value)
+                PollOutcome(ok = true, active = result.value.anyActive)
             }
             is HubResult.Failed -> {
-                failures++
-                DebugLog.log("net", "reading downloads failed #$failures: ${result.kind}")
+                DebugLog.log("net", "reading downloads failed #${poller.consecutiveFailures + 1}: ${result.kind}")
                 statusLine.setTextColor(colors.dangerText)
                 statusLine.text = result.message + " · retrying"
+                PollOutcome(ok = false)
             }
         }
-    }
 
     private fun render(body: ActivityResponse) {
         host?.viewContext?.let { com.pocketds.hub.settings.TransferAlertObserver.observe(it,body) }
         latestActivity = body
-        anyActive = body.anyActive
         val related = if(targetMediaKey.isBlank()) body.items else body.items.filter { transferMatchesMedia(it,targetMediaKey) }
         val displayed = if (attentionOnly) related.filter { it.isBroken } else related
         adapter.submit(displayed)
@@ -466,7 +437,6 @@ class DownloadsScreen(
     }
 
     private fun renderReading(body: ReadingDownloadsResponse) {
-        anyActive = body.anyActive
         readingAdapter.submit(ReadingTransferSummary.grouped(body.items))
         val downloading = body.items.count { it.status == "downloading" }
         val queued = body.items.count { it.status == "queued" }
@@ -654,7 +624,7 @@ class DownloadsScreen(
                 null -> host?.notify("Unknown action $action")
                 is HubResult.Ok -> {
                     host?.notify(if (action == "retry") "Retrying ${item.title}" else "Canceled ${item.title}")
-                    settleUntilMs = android.os.SystemClock.uptimeMillis() + PollSchedule.SETTLE_MS
+                    poller.settle()
                     refreshAfter = true
                 }
                 is HubResult.Failed -> {
@@ -663,7 +633,7 @@ class DownloadsScreen(
                     host?.notify(result.message)
                     // A failed re-grab leaves a durable retry ticket. Refresh
                     // immediately so the user sees that actionable state.
-                    settleUntilMs = android.os.SystemClock.uptimeMillis() + PollSchedule.SETTLE_MS
+                    poller.settle()
                     refreshAfter = true
                 }
             }
@@ -721,7 +691,7 @@ class DownloadsScreen(
                     // reads through to the live services -- and keeps doing so
                     // for a few seconds, because the first read is usually too
                     // early to see the change.
-                    settleUntilMs = android.os.SystemClock.uptimeMillis() + PollSchedule.SETTLE_MS
+                    poller.settle()
                     refreshAfter = true
                 }
                 is HubResult.Failed -> {

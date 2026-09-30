@@ -72,10 +72,8 @@ import com.pocketds.hub.ui.KeyHaptics
 import com.pocketds.hub.ui.Theme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -140,7 +138,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private val chromeScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     /** A second press while the server position is being checked opens nothing twice. */
     private val localPlanCheck = com.pocketds.hub.state.JobSlot()
-    private var notificationBadgeJob: Job? = null
+    private val notificationBadge = com.pocketds.hub.state.Poller(com.pocketds.hub.state.PollCadence.BADGE)
 
     private val sectionItems = listOf(
         SectionRailItem("Home", R.drawable.ic_nav_home),
@@ -988,8 +986,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         // trailer must not keep playing audio over whatever is now in front.
         ticker.stop()
         router.reset()
-        notificationBadgeJob?.cancel()
-        notificationBadgeJob = null
+        notificationBadge.stop()
         if (::player.isInitialized) player.pausePlayback()
         if (!isInPictureInPictureMode && !enteringPictureInPicture) {
             (sections.stack().peek() as? Screen)?.let {
@@ -1001,24 +998,23 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     }
 
     override fun onDestroy() {
-        notificationBadgeJob?.cancel()
+        notificationBadge.stop()
         chromeScope.cancel()
         super.onDestroy()
     }
 
     private fun startNotificationBadgePolling() {
-        notificationBadgeJob?.cancel()
+        notificationBadge.stop()
         if (!HubSettings.isConfigured(this)) return
-        notificationBadgeJob = chromeScope.launch {
-            while (true) {
-                when (val result = api.notifications(NotificationSettings.limits(this@HubActivity))) {
-                    is com.pocketds.hub.net.HubResult.Ok -> {
-                        val unread = NotificationReadStore(this@HubActivity).observe(result.value.sections)
-                        utilityHeader.setBadge(unread.size + com.pocketds.hub.settings.LocalAlerts.unread(this@HubActivity))
-                    }
-                    is com.pocketds.hub.net.HubResult.Failed -> Unit
+        // Started in onResume and stopped in onPause, so resumed is visible.
+        notificationBadge.start(chromeScope, { true }) {
+            when (val result = api.notifications(NotificationSettings.limits(this@HubActivity))) {
+                is com.pocketds.hub.net.HubResult.Ok -> {
+                    val unread = NotificationReadStore(this@HubActivity).observe(result.value.sections)
+                    utilityHeader.setBadge(unread.size + com.pocketds.hub.settings.LocalAlerts.unread(this@HubActivity))
+                    com.pocketds.hub.state.PollOutcome(ok = true)
                 }
-                delay(NOTIFICATION_BADGE_POLL_MS)
+                is com.pocketds.hub.net.HubResult.Failed -> com.pocketds.hub.state.PollOutcome(ok = false)
             }
         }
     }
@@ -1048,7 +1044,6 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val NOTIFICATIONS_SECTION = 5
         const val CONTENT_SECTION_COUNT = 5
-        const val NOTIFICATION_BADGE_POLL_MS = 60_000L
         const val STATE_SECTION = "current_section"
     }
 }

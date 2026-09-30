@@ -40,6 +40,19 @@ class NotificationReadStateTest {
         assertEquals(setOf("health"), result.unreadIds)
     }
 
+    @Test fun capNeverForgetsAnIdStillOnScreen() {
+        // "a1" sorts first, so the old alphabetical cap dropped it and the badge
+        // counted it unread again on the next read.
+        val seen = setOf("a1", "m2", "z3", "z4")
+        val kept = NotificationReadReducer.bounded(seen, currentIds = setOf("a1"), max = 3)
+        assertEquals(setOf("a1", "z3", "z4"), kept)
+    }
+
+    @Test fun capLeavesASmallListAlone() {
+        val seen = setOf("a", "b")
+        assertEquals(seen, NotificationReadReducer.bounded(seen, emptySet(), max = 3))
+    }
+
     private fun notice(id: String, at: String) = ServiceNotice(id = id, service = "sonarr", occurredAt = at)
     private fun sections(vararg notices: ServiceNotice) = listOf(NotificationSection(service = "sonarr", items = notices.toList()))
 }

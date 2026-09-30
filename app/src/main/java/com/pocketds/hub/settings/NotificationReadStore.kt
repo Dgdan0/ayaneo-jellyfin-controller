@@ -21,8 +21,6 @@ class NotificationReadStore(private val context: Context) {
         save(NotificationReadReducer.markAllSeen(load(), ids))
     }
 
-    fun unread(ids: Collection<String>): Set<String> = ids.toSet() - load().seenIds
-
     private fun load(): NotificationReadSnapshot {
         val prefs = Prefs.of(context)
         val oldest = prefs.getStringSet(key("oldest"), emptySet()).orEmpty().mapNotNull { entry ->
@@ -37,11 +35,11 @@ class NotificationReadStore(private val context: Context) {
     }
 
     private fun save(snapshot: NotificationReadSnapshot) {
-        val boundedSeen = if (snapshot.seenIds.size <= MAX_SEEN_IDS) snapshot.seenIds else
-            snapshot.seenIds.sorted().takeLast(MAX_SEEN_IDS).toSet()
+        // Bounded by NotificationReadReducer.observe, which knows which ids are
+        // still on screen and so must not be forgotten.
         Prefs.of(context).edit()
             .putStringSet(key("initialized"), snapshot.initializedServices.toSet())
-            .putStringSet(key("seen"), boundedSeen)
+            .putStringSet(key("seen"), snapshot.seenIds.toSet())
             .putStringSet(key("oldest"), snapshot.oldestTimes.map { "${it.key}=${it.value}" }.toSet())
             .apply()
     }
@@ -49,9 +47,5 @@ class NotificationReadStore(private val context: Context) {
     private fun key(suffix: String): String {
         val hub = HubSettings.baseUrl(context).hashCode().toUInt().toString(16)
         return "notification_read_${hub}_$suffix"
-    }
-
-    private companion object {
-        const val MAX_SEEN_IDS = 1_000
     }
 }

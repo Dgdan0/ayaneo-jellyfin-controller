@@ -43,10 +43,25 @@ object NotificationReadReducer {
 
         val currentIds = sections.flatMap { it.items }.map { it.id }.toSet()
         return NotificationReadResult(
-            snapshot = NotificationReadSnapshot(initialized, seen, oldest),
+            snapshot = NotificationReadSnapshot(initialized, bounded(seen, currentIds), oldest),
             unreadIds = currentIds - seen
         )
     }
+
+    /**
+     * Caps the stored seen list, never forgetting an id that is still on
+     * screen. The cap used to keep the alphabetically last thousand, which
+     * could drop something visible: it came back as unread on the next read
+     * and the badge flipped between two counts.
+     */
+    internal fun bounded(seen: Set<String>, currentIds: Set<String>, max: Int = MAX_SEEN_IDS): Set<String> {
+        if (seen.size <= max) return seen
+        val visible = seen intersect currentIds
+        val rest = (seen - visible).sorted().takeLast((max - visible.size).coerceAtLeast(0))
+        return visible + rest
+    }
+
+    const val MAX_SEEN_IDS = 1_000
 
     fun markSeen(snapshot: NotificationReadSnapshot, id: String): NotificationReadSnapshot =
         snapshot.copy(seenIds = snapshot.seenIds + id)

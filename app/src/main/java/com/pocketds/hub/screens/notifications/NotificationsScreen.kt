@@ -37,15 +37,16 @@ import com.pocketds.hub.ui.SemanticColor
 import com.pocketds.hub.ui.activateOnTap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
 import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.state.PollCadence
+import com.pocketds.hub.state.PollOutcome
+import com.pocketds.hub.state.Poller
 import com.pocketds.hub.ui.showStatus
 
 /** Recent automation activity and current health, kept separate by service. */
@@ -66,7 +67,7 @@ class NotificationsScreen(
     private lateinit var mediaColumns: LinearLayout
     private lateinit var bookColumns: LinearLayout
     private var mode = ContentMode.MEDIA
-    private var pollJob: Job? = null
+    private val poller = Poller(PollCadence.NOTIFICATIONS)
     private var visible = false
     private var selectedID = ""
     private var hasContent = false
@@ -138,8 +139,7 @@ class NotificationsScreen(
 
     override fun onHide() {
         visible = false
-        pollJob?.cancel()
-        pollJob = null
+        poller.stop()
         scope.coroutineContext.cancelChildren()
     }
 
@@ -182,40 +182,40 @@ class NotificationsScreen(
     }
 
     private fun startPolling(showLoading: Boolean) {
-        pollJob?.cancel()
         if (showLoading) {
             status.showStatus(StatusText.loading("activity", refreshing = false), colors)
         } else if (hasContent) {
             status.showStatus(StatusText.loading("activity", refreshing = true), colors)
         }
-        pollJob = scope.launch {
-            while (visible) {
-                fetchOnce()
-                delay(POLL_MS)
-            }
-        }
+        poller.start(scope, { visible }) { fetchOnce() }
     }
 
-    private suspend fun fetchOnce() {
+    private suspend fun fetchOnce(): PollOutcome =
         when (val result = api.notifications(NotificationSettings.limits(host.viewContext))) {
-            is HubResult.Ok -> render(result.value)
+            is HubResult.Ok -> {
+                render(result.value)
+                PollOutcome(ok = true)
+            }
             is HubResult.Failed -> {
                 status.showStatus(StatusText.failed(result.message, result.kind, hasData = hasContent), colors)
+                PollOutcome(ok = false)
             }
         }
-    }
 
     private fun render(response: NotificationsResponse) {
         hasContent = true
         latestResponse = response
-        readStore.observe(response.sections)
         val byService = response.sections.associateBy { it.service }
         (MEDIA_SERVICES + BOOK_SERVICES).forEach { service ->
             columns[service]?.bind(
                 byService[service] ?: NotificationSection(service = service, state = "disabled")
             )
         }
-        unreadIds = readStore.unread(response.sections.flatMap { it.items }.map { it.id })
+        // The same answer the header badge gets. This used to re-read the
+        // stored seen list instead, which is trimmed at a thousand entries, so
+        // the badge and this screen could disagree and the count flipped
+        // between them.
+        unreadIds = readStore.observe(response.sections)
         columns.values.forEach { it.updateUnreadCount() }
         onUnreadChanged(unreadIds.size + com.pocketds.hub.settings.LocalAlerts.unread(host.viewContext))
         updateStatus(response)
@@ -577,7 +577,6 @@ class NotificationsScreen(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val TAG_NOTICE = -0x7ffffc01
-        const val POLL_MS = 30_000L
         val MEDIA_SERVICES = listOf("sonarr", "radarr", "bazarr")
         val BOOK_SERVICES = listOf("bookkeeprr", "kavita", "storyteller")
         val HEALTH_WORD_BOUNDARY = Regex("(?<=[a-z0-9])(?=[A-Z])")

@@ -33,14 +33,15 @@ import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.state.PollCadence
+import com.pocketds.hub.state.PollOutcome
+import com.pocketds.hub.state.Poller
 import com.pocketds.hub.ui.showStatus
 import com.pocketds.hub.ui.activateOnTap
 
@@ -86,7 +87,9 @@ class MediaDetailScreen(
     private var host: ScreenHost? = null
     private var detail: MediaDetail? = null
     private var visible = false
-    private var refreshJob: Job? = null
+    /** Refreshes the pipeline while a stage is active, and retries a failed load. */
+    private val poller = Poller(PollCadence.PIPELINE)
+    private var actionsKey: List<Any> = emptyList()
     private lateinit var form: FormOverlay
     private lateinit var picker: ChoiceOverlay
     private lateinit var flow: RequestFlow
@@ -275,8 +278,7 @@ class MediaDetailScreen(
 
     override fun onHide() {
         visible = false
-        refreshJob?.cancel()
-        refreshJob = null
+        poller.stop()
         if (form.isOpen) form.dismiss()
         if (picker.isOpen) picker.dismiss()
         host?.refreshHints()
@@ -350,15 +352,24 @@ class MediaDetailScreen(
             findRelease()
             return true
         }
+        if (action == PadAction.Refresh) {
+            load()
+            return true
+        }
         return false
     }
 
     private fun load() {
-        scope.launch {
+        poller.start(scope, { visible }) {
             when (val result = api.mediaDetail(mediaKey)) {
-                is HubResult.Ok -> render(result.value)
-                is HubResult.Failed ->
-                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = false, canRetry = false), colors)
+                is HubResult.Ok -> {
+                    render(result.value)
+                    PollOutcome(ok = true, active = result.value.pipeline.stages.any { it.state == "active" })
+                }
+                is HubResult.Failed -> {
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = detail != null), colors)
+                    PollOutcome(ok = false)
+                }
             }
         }
     }
@@ -420,17 +431,6 @@ class MediaDetailScreen(
         loadImage(d.media.poster, poster)
 
         host?.refreshHints()
-        schedulePipelineRefresh(d)
-    }
-
-    private fun schedulePipelineRefresh(d: MediaDetail) {
-        refreshJob?.cancel()
-        refreshJob = null
-        if (!visible || d.pipeline.stages.none { it.state == "active" }) return
-        refreshJob = scope.launch {
-            delay(4_000)
-            if (visible) load()
-        }
     }
 
     private fun loadImage(hubPath: String, into: ImageView) {
@@ -565,8 +565,16 @@ class MediaDetailScreen(
      * model: finding a release by hand.
      */
     private fun buildActions(d: MediaDetail) {
+        val attention = d.pipeline.stages.any { it.id in listOf("download", "import") && it.state in listOf("failed", "stuck") }
+        val key = listOf(attention, d.canRequest, flow.busy, d.trailerKey, d.trailerUrl)
+        // The pipeline refresh re-renders every four seconds while a download
+        // runs. Rebuilding identical buttons threw focus out of the row each
+        // time, so the selection jumped under a pad user's thumb.
+        if (key == actionsKey && actionRow.childCount > 0) return
+        actionsKey = key
+        val focusedLabel = (actionRow.findFocus() as? TextView)?.text?.toString()
         actionRow.removeAllViews()
-        if (d.pipeline.stages.any { it.id in listOf("download", "import") && it.state in listOf("failed", "stuck") }) {
+        if (attention) {
             actionRow.addView(actionButton("Transfers needing attention") {
                 host?.push(com.pocketds.hub.screens.downloads.DownloadsScreen(api, ringVisible, startWithAttention = true, targetMediaKey = mediaKey))
             })
@@ -600,8 +608,12 @@ class MediaDetailScreen(
         // no buttons yet, focusOnShow found nothing, and the screen opened with
         // no selection at all.
         actionRow.post {
-            if (rootFrame.findFocus() == null) {
-                actionRow.getChildAt(0)?.requestFocus()
+            val same = (0 until actionRow.childCount).map(actionRow::getChildAt)
+                .firstOrNull { (it as? TextView)?.text?.toString() == focusedLabel }
+            when {
+                // The row changed under the selection: keep it on the same action.
+                focusedLabel != null -> (same ?: actionRow.getChildAt(0))?.requestFocus()
+                rootFrame.findFocus() == null -> actionRow.getChildAt(0)?.requestFocus()
             }
             host?.refreshHints()
         }

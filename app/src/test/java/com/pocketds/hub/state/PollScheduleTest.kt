@@ -99,6 +99,18 @@ class PollScheduleTest {
     }
 
     @Test
+    fun `a cadence without an idle pace stops when nothing moves`() {
+        assertNull(PollSchedule.nextDelayMs(true, false, 0, cadence = PollCadence.PIPELINE))
+        assertEquals(4_000L, PollSchedule.nextDelayMs(true, true, 0, cadence = PollCadence.PIPELINE))
+    }
+
+    @Test
+    fun `a failure retries even where idle would stop, never faster than the screen's pace`() {
+        assertEquals(5_000L, PollSchedule.nextDelayMs(true, false, 1, cadence = PollCadence.PIPELINE))
+        assertEquals(60_000L, PollSchedule.nextDelayMs(true, false, 1, cadence = PollCadence.BADGE))
+    }
+
+    @Test
     fun `success resumes immediately rather than serving out the backoff`() {
         assertEquals(
             PollSchedule.ACTIVE_MS,

@@ -1,6 +1,22 @@
 package com.pocketds.hub.state
 
 /**
+ * How fast one screen asks again: while something is moving, and while
+ * nothing is. A null [idleMs] stops polling once nothing is moving -- a detail
+ * page has nothing to watch unless a download is under way.
+ */
+data class PollCadence(val activeMs: Long, val idleMs: Long?) {
+    companion object {
+        val TRANSFERS = PollCadence(PollSchedule.ACTIVE_MS, PollSchedule.IDLE_MS)
+        /** A title's request pipeline while a stage is active. */
+        val PIPELINE = PollCadence(4_000L, null)
+        val NOTIFICATIONS = PollCadence(30_000L, 30_000L)
+        /** The header badge, which only needs to notice new activity eventually. */
+        val BADGE = PollCadence(60_000L, 60_000L)
+    }
+}
+
+/**
  * How often to ask the hub again.
  *
  * A downloads screen has to feel live without turning the handheld into a
@@ -45,13 +61,17 @@ object PollSchedule {
         visible: Boolean,
         anyActive: Boolean,
         consecutiveFailures: Int,
-        settling: Boolean = false
+        settling: Boolean = false,
+        cadence: PollCadence = PollCadence.TRANSFERS
     ): Long? {
         if (!visible) return null
         if (consecutiveFailures > 0) {
+            // A failure keeps trying even where idle would stop: a detail page
+            // whose refresh failed has not learned that nothing is moving. And
+            // never faster than the screen's own pace.
             val index = (consecutiveFailures - 1).coerceAtMost(BACKOFF_MS.lastIndex)
-            return BACKOFF_MS[index]
+            return maxOf(BACKOFF_MS[index], cadence.activeMs)
         }
-        return if (anyActive || settling) ACTIVE_MS else IDLE_MS
+        return if (anyActive || settling) cadence.activeMs else cadence.idleMs
     }
 }
