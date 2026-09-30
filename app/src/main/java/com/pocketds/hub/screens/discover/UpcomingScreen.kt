@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.ui.Artwork
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -7,7 +8,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import coil.ImageLoader
 import coil.request.Disposable
 import coil.request.ImageRequest
 import com.pocketds.hub.input.Direction
@@ -17,7 +17,6 @@ import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.ui.FocusDecorator
@@ -56,7 +55,7 @@ class UpcomingScreen(private val api:HubApi,private val ringVisible:()->Boolean)
  private var anchor=LocalDate.now()
  private val zone get()=ZoneId.systemDefault()
  private val range get()=UpcomingPresentation.range(anchor,week)
- private val imageLoader by lazy { (api as? HubClient)?.imageLoader ?: ImageLoader.Builder(checkNotNull(host).viewContext).build() }
+ private val imageLoader by lazy { Artwork.loader(api, checkNotNull(host).viewContext) }
 
  override fun onCreateView(host:ScreenHost,container:ViewGroup):View {
   this.host=host;colors=Theme.colors(host.viewContext)

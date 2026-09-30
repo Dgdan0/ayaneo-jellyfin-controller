@@ -1,18 +1,13 @@
 package com.pocketds.hub.screens.home
 
-import android.graphics.Bitmap
-import android.graphics.drawable.ColorDrawable
-import android.view.Gravity
+import com.pocketds.hub.ui.Artwork
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.input.HorizontalMode
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.DiscoverRow
@@ -24,7 +19,6 @@ import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ContentModeScreen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.screens.library.LibraryDetailScreen
 import com.pocketds.hub.settings.HubSettings
@@ -517,8 +511,7 @@ class HomeScreen(
             override fun onBindViewHolder(holder: CardHolder, position: Int) {
                 val hit = items[position]
                 val card = holder.itemView
-                val client = api as? HubClient
-                val loader = client?.imageLoader ?: ImageLoader(card.context)
+                val loader = Artwork.loader(api, card.context)
                 when (card) {
                     is PosterCardView -> card.bind(hit, loader, api::imageUrl, showAvailability = false)
                     is LandscapeCardView -> card.bind(hit, loader, api::imageUrl)

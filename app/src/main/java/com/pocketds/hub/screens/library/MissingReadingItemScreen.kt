@@ -1,9 +1,9 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.Artwork
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
-import coil.ImageLoader
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.model.ReadingType
@@ -32,7 +32,7 @@ class MissingReadingItemScreen(private val api:HubApi,private val item:ReadingSe
             titleView.text=item.title;subtitleView.text=item.authors.joinToString(", ");subtitleView.visibility=View.VISIBLE
             metadataView.text=listOfNotNull(item.number.takeIf(String::isNotBlank)?.let{"Book $it"},"Missing from library").joinToString(" · ")
             overview.bind("This volume is part of the collection but is not available to read. Search for an edition to see its details and available request options.")
-            bindArtwork("book",null,item.artwork.takeIf(String::isNotBlank)?.let(api::imageUrl),(api as? HubClient)?.imageLoader ?: ImageLoader(context))
+            bindArtwork("book",null,item.artwork.takeIf(String::isNotBlank)?.let(api::imageUrl),Artwork.loader(api, context))
         }
         button=TextView(context).apply {
             text="Find this book";textSize=14f;DetailStyler.action(this,colors,true);FocusDecorator.attach(this,ring,scale=false)

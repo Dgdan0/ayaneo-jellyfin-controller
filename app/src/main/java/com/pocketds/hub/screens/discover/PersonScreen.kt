@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.ui.Artwork
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -12,7 +13,6 @@ import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
@@ -26,7 +26,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
-import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.state.RequestedTitles
 import com.pocketds.hub.ui.showStatus
@@ -202,8 +201,7 @@ class PersonScreen(
 
         override fun onBindViewHolder(holder: CardHolder, position: Int) {
             val hit = RequestedTitles.apply(items[position])
-            val loader = (api as? HubClient)?.imageLoader
-                ?: coil.ImageLoader(holder.itemView.context)
+            val loader = Artwork.loader(api, holder.itemView.context)
             (holder.itemView as PosterCardView).bind(hit, loader) { api.imageUrl(it) }
             holder.itemView.activateOnTap {
                 host?.push(MediaDetailScreen(api, hit.media.key, hit.media.title, ringVisible))

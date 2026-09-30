@@ -1,7 +1,6 @@
 package com.pocketds.hub.screens.discover
 
-import android.graphics.Bitmap
-import android.graphics.drawable.ColorDrawable
+import com.pocketds.hub.ui.Artwork
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -10,8 +9,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.ReleaseEpisodeTarget
 import com.pocketds.hub.model.ReleaseTargetsResponse
@@ -20,7 +17,6 @@ import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
@@ -192,17 +188,8 @@ class SeasonReleasePickerScreen(
         val meta: TextView
     ) : RecyclerView.ViewHolder(root)
 
-    private fun loadImage(view: ImageView, path: String) {
-        view.setImageDrawable(ColorDrawable(colors.posterPlaceholder))
-        if (path.isEmpty()) return
-        imageLoader().enqueue(
-            ImageRequest.Builder(view.context).data(api.imageUrl(path)).target(view)
-                .bitmapConfig(Bitmap.Config.RGB_565).build()
-        )
-    }
-
-    private fun imageLoader(): ImageLoader =
-        (api as? HubClient)?.imageLoader ?: ImageLoader(requireNotNull(host).viewContext)
+    private fun loadImage(view: ImageView, path: String) =
+        Artwork.bindHub(view, api, path, opaque = true, placeholderColor = colors.posterPlaceholder)
 
     private fun dp(value: Int) = Styler.dpInt(requireNotNull(host).viewContext, value.toFloat())
 
@@ -506,17 +493,8 @@ class ReleaseTargetsScreen(
         val overview: TextView
     ) : RecyclerView.ViewHolder(root)
 
-    private fun loadImage(view: ImageView, path: String) {
-        view.setImageDrawable(ColorDrawable(colors.posterPlaceholder))
-        if (path.isEmpty()) return
-        imageLoader().enqueue(
-            ImageRequest.Builder(view.context).data(api.imageUrl(path)).target(view)
-                .bitmapConfig(Bitmap.Config.RGB_565).build()
-        )
-    }
-
-    private fun imageLoader(): ImageLoader =
-        (api as? HubClient)?.imageLoader ?: ImageLoader(requireNotNull(host).viewContext)
+    private fun loadImage(view: ImageView, path: String) =
+        Artwork.bindHub(view, api, path, opaque = true, placeholderColor = colors.posterPlaceholder)
 
     private fun dp(value: Int) = Styler.dpInt(requireNotNull(host).viewContext, value.toFloat())
 

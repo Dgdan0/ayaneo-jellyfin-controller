@@ -1,8 +1,8 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.view.Gravity
-import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.InsetDrawable
 import android.view.View
 import android.view.ViewGroup
@@ -27,7 +27,6 @@ import com.pocketds.hub.nav.ContentModeScreen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.FailureKind
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.state.ContentMode
@@ -1013,10 +1012,9 @@ class DiscoverScreen(
 
     private fun bindCard(card: PosterCardView, fromHub: SearchHit) {
         val hit = RequestedTitles.apply(fromHub)
-        val client = api as? HubClient
         card.bind(
             hit,
-            client?.imageLoader ?: coil.ImageLoader(card.context)
+            Artwork.loader(api, card.context)
         ) { path -> api.imageUrl(path) }
         card.setTag(TAG_HIT, hit)
         card.activateOnTap { openDetail(hit) }
@@ -1030,10 +1028,9 @@ class DiscoverScreen(
     }
 
     private fun bindReadingCard(card: PosterCardView, item: ReadingItem) {
-        val client = api as? HubClient
         card.bindReading(
             item,
-            client?.imageLoader ?: coil.ImageLoader(card.context)
+            Artwork.loader(api, card.context)
         ) { path -> api.imageUrl(path) }
         card.setTag(TAG_READING_ITEM, item)
         card.activateOnTap { openReadingDetail(item) }
@@ -1165,7 +1162,7 @@ class DiscoverScreen(
             feature.visibility = if (selected == null) View.GONE else View.VISIBLE
             selected?.let { item ->
                 feature.bind(item.title, item.subtitle, item.description, api.imageUrl(item.cover),
-                    landscape = false, loader = (api as? HubClient)?.imageLoader ?: coil.ImageLoader(context))
+                    landscape = false, loader = Artwork.loader(api, context))
                 feature.setTag(TAG_READING_ITEM, item)
                 feature.activateOnTap { openReadingDetail(item) }
                 feature.setOnFocusChangeListener { _, focused ->
@@ -1370,7 +1367,7 @@ class DiscoverScreen(
                 val image = hit.media.backdrop.ifBlank { hit.media.poster }
                 feature.bind(hit.media.title, hit.subtitle.ifBlank { hit.media.year.takeIf { it > 0 }?.toString().orEmpty() },
                     hit.overview, api.imageUrl(image), hit.media.backdrop.isNotBlank(),
-                    (api as? HubClient)?.imageLoader ?: coil.ImageLoader(context))
+                    Artwork.loader(api, context))
                 feature.setTag(TAG_HIT, hit)
                 feature.activateOnTap { openDetail(hit) }
                 feature.setOnFocusChangeListener { _, focused ->

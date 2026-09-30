@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.home
 
+import com.pocketds.hub.ui.Artwork
 import android.app.AlertDialog
 import android.content.Context
 import android.view.Gravity
@@ -11,13 +12,11 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import coil.ImageLoader
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.reader.ReadingProgress
 import com.pocketds.hub.reader.ReadingProgressPresentation
@@ -50,7 +49,7 @@ class ReadingHomeView(
     private val content: LinearLayout
     private val scroll: ScrollView
     private val overlay = ChoiceOverlay(context, colors, ringVisible, sidePanel = true)
-    private val loader = (api as? HubClient)?.imageLoader ?: ImageLoader(context)
+    private val loader = Artwork.loader(api, context)
     private lateinit var greeting: TextView
     private val createButton: TextView
     private val profileButton: TextView

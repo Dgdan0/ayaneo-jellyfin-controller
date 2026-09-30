@@ -1,7 +1,6 @@
 package com.pocketds.hub.ui
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.drawable.ColorDrawable
@@ -12,7 +11,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.model.Availability
 import com.pocketds.hub.model.SearchHit
 import com.pocketds.hub.model.ReadingItem
@@ -38,6 +36,9 @@ class PosterCardView(
 ) : LinearLayout(context) {
 
     private val poster: ImageView
+    private val missingArt: TextView
+    /** Which bind a late load failure belongs to, so it cannot label a recycled card. */
+    private var bindToken = 0
     private val badge: TextView
     private val title: TextView
     private val subtitle: TextView
@@ -68,6 +69,22 @@ class PosterCardView(
             setBackgroundColor(colors.posterPlaceholder)
         }
         posterWrap.addView(poster)
+
+        // Shown only when the server has no artwork, or it failed to load: an
+        // empty grey box (How I Met Your Mother has no poster in Jellyfin)
+        // read as "still loading" forever.
+        missingArt = TextView(context).apply {
+            textSize = 13f
+            gravity = Gravity.CENTER
+            maxLines = 5
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setTextColor(colors.mutedText)
+            val pad = Styler.dpInt(context, 10f)
+            setPadding(pad, pad, pad, pad)
+            visibility = GONE
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        posterWrap.addView(missingArt, FrameLayout.LayoutParams(MATCH, MATCH))
 
         badge = TextView(context).apply {
             textSize = 10f
@@ -284,9 +301,11 @@ class PosterCardView(
     }
 
     private fun loadPoster(path: String, imageLoader: ImageLoader, imageUrl: (String) -> String) {
-        val url = imageUrl(path).takeIf { it.isNotEmpty() }
-        imageLoader.enqueue(ImageRequest.Builder(context).data(url).target(poster)
-            .bitmapConfig(Bitmap.Config.RGB_565).build())
+        val token = ++bindToken
+        missingArt.visibility = GONE
+        missingArt.text = title.text
+        Artwork.bind(poster, imageLoader, if (path.isBlank()) null else imageUrl(path), opaque = true,
+            onMissing = { if (token == bindToken) missingArt.visibility = VISIBLE })
     }
 
     private fun updateProgressWidth() {

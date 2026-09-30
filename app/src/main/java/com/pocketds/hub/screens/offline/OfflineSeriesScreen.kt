@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.offline
 
+import com.pocketds.hub.ui.Artwork
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -13,20 +14,17 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
-import coil.ImageLoader
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.offline.OfflineCatalog
 import com.pocketds.hub.offline.OfflineCatalogPlayTarget
 import com.pocketds.hub.offline.OfflineCatalogSeason
 import com.pocketds.hub.offline.OfflineDetailPresentation
 import com.pocketds.hub.offline.OfflineDownload
 import com.pocketds.hub.offline.OfflineRepository
-import com.pocketds.hub.screens.library.SubtitleScreen
 import com.pocketds.hub.ui.ContinuationCardView
 import com.pocketds.hub.ui.DetailArtworkCardView
 import com.pocketds.hub.ui.DetailHeaderView
@@ -240,7 +238,7 @@ class OfflineSeriesScreen(
 
     private fun artwork(row: OfflineDownload, preferred: String) = sequenceOf(preferred, "poster", "thumb", "backdrop")
         .map { repository.artworkFile(row, it) }.firstOrNull { it.isFile && it.length() > 0 }
-    private fun imageLoader() = (api as? HubClient)?.imageLoader ?: ImageLoader(host.viewContext)
+    private fun imageLoader() = Artwork.loader(api, host.viewContext)
     private fun message(text: String) = TextView(host.viewContext).apply {
         this.text = text; textSize = 13f; setTextColor(colors.mutedText); setPadding(dp(24), dp(12), dp(24), dp(8))
     }

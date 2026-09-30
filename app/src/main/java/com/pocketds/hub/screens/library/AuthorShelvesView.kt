@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.Artwork
 import android.content.Context
 import android.graphics.Typeface
 import android.view.Gravity
@@ -8,7 +9,6 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import coil.ImageLoader
 import coil.request.ImageRequest
 import com.pocketds.hub.model.*
 import com.pocketds.hub.net.*
@@ -27,7 +27,7 @@ class AuthorShelvesView(context:Context,private val api:HubApi,private val libra
     private val jobs=mutableMapOf<String,Job>()
     private val errors=mutableMapOf<String,String>()
     private val rowPositions=mutableMapOf<String,Int>()
-    private val loader=(api as? HubClient)?.imageLoader ?: ImageLoader(context)
+    private val loader=Artwork.loader(api, context)
     private var generation=0
     private var direction=""
     private var requestedDirection="asc"

@@ -1,14 +1,11 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.settings.DomainPreferences
 import com.pocketds.hub.settings.SortPreference
 import com.pocketds.hub.ui.LibrarySortPanel
 import com.pocketds.hub.ui.CenteredIconTextView
 import com.pocketds.hub.state.ContentMode
-import android.graphics.Bitmap
-import android.graphics.drawable.ColorDrawable
-import android.text.TextUtils
-import android.view.KeyEvent
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -16,14 +13,11 @@ import android.widget.FrameLayout
 import android.widget.EditText
 import android.app.AlertDialog
 import android.widget.HorizontalScrollView
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.input.HorizontalMode
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.ReadingEdition
@@ -45,7 +39,6 @@ import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.state.LibraryGridSizing
 import com.pocketds.hub.state.PagedLoadState
@@ -385,10 +378,9 @@ class ReadingLibraryGridScreen(
             val work = values[position]
             val card = holder.itemView as PosterCardView
             card.setTag(TAG_WORK, work)
-            val client = api as? HubClient
             card.bindReadingWork(
                 ReadingCompletionRepository.get(card.context).project(work),
-                client?.imageLoader ?: ImageLoader(card.context),
+                Artwork.loader(api, card.context),
                 api::imageUrl
             )
         }
@@ -634,7 +626,7 @@ class ReadingWorkScreen(
         }.joinToString(" · ")
         overview.bind(work.overview)
         bindArtwork("book", null, work.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
-            (api as? HubClient)?.imageLoader ?: ImageLoader(context))
+            Artwork.loader(api, context))
         if (work.entityType != "collection") {
             val remembered = ReadingEntryPreferences.get(context, work.id)
             val formatMenu = ReadingFormatMenu.forWork(work, remembered)
@@ -860,7 +852,7 @@ class ReadingWorkScreen(
                 if (point.percentage > 0) add("${(point.percentage * 100).roundToInt()}% read")
             }.joinToString(" · "), point.percentage, point.percentage >= 1.0)
             val url = ReadingWorkPresentation.continueArtwork(work).takeIf { it.isNotBlank() }?.let(api::imageUrl)
-            DetailStyler.image(image, url, (api as? HubClient)?.imageLoader ?: ImageLoader(context))
+            DetailStyler.image(image, url, Artwork.loader(api, context))
             onFocused = { lastActionKey = point.sourceItemId; host?.refreshHints() }
             if (canReadPublication(work.kind, point.sourceItemId)) {
                 hasChildLinks = true
@@ -985,7 +977,7 @@ class ReadingWorkScreen(
                         available(item.isAvailable)
                         contentDescription = "${item.title}, ${subtitleView.text}"
                         DetailStyler.image(image, item.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
-                            (api as? HubClient)?.imageLoader ?: ImageLoader(context))
+                            Artwork.loader(api, context))
                         if (ReadingWorkPresentation.canOpen(item)) {
                             val key = "book:${item.workId}"
                             actionViews[key] = this

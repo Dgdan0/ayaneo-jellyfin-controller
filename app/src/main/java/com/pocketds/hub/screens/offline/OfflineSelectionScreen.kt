@@ -1,7 +1,6 @@
 package com.pocketds.hub.screens.offline
 
-import android.graphics.Bitmap
-import android.graphics.drawable.ColorDrawable
+import com.pocketds.hub.ui.Artwork
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -13,8 +12,6 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.OfflinePrepareBody
 import com.pocketds.hub.model.OfflinePrepareItem
@@ -24,7 +21,6 @@ import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.offline.OfflineDownloadService
 import com.pocketds.hub.offline.OfflineRepository
@@ -43,7 +39,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import com.pocketds.hub.state.Fmt
-import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.showStatus
 
@@ -449,14 +444,8 @@ class OfflineSelectionScreen(
 
     private class EpisodeHolder(view: View, val card: EpisodeCard) : RecyclerView.ViewHolder(view)
 
-    private fun loadImage(view: ImageView, path: String) {
-        view.setImageDrawable(ColorDrawable(colors.posterPlaceholder))
-        if (path.isEmpty()) return
-        ((api as? HubClient)?.imageLoader ?: ImageLoader(host.viewContext)).enqueue(
-            ImageRequest.Builder(view.context).data(api.imageUrl(path)).target(view)
-                .bitmapConfig(Bitmap.Config.RGB_565).build()
-        )
-    }
+    private fun loadImage(view: ImageView, path: String) =
+        Artwork.bindHub(view, api, path, opaque = true, placeholderColor = colors.posterPlaceholder)
 
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
 

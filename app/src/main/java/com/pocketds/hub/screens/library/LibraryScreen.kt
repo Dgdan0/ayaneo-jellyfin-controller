@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.settings.DomainPreferences
 import com.pocketds.hub.settings.SortPreference
 import com.pocketds.hub.ui.LibrarySortPanel
@@ -26,7 +27,6 @@ import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ContentModeScreen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.state.LibraryGridSizing
 import com.pocketds.hub.state.ContentMode
@@ -413,8 +413,7 @@ class LibraryScreen(
             val value = values[position]
             val row = holder.itemView as LibraryCardView
             row.setTag(TAG_VIEW, value)
-            val client = api as? HubClient
-            row.bind(value, client?.imageLoader ?: coil.ImageLoader(row.context), api::imageUrl)
+            row.bind(value, Artwork.loader(api, row.context), api::imageUrl)
         }
     }
 
@@ -452,10 +451,9 @@ class LibraryScreen(
             val value = values[position]
             val row = holder.itemView as LibraryCardView
             row.setTag(TAG_READING_VIEW, value)
-            val client = api as? HubClient
             row.bindReading(
                 value,
-                client?.imageLoader ?: coil.ImageLoader(row.context),
+                Artwork.loader(api, row.context),
                 api::imageUrl
             )
         }
@@ -814,10 +812,9 @@ class LibraryGridScreen(
             val hit = values[position]
             val card = holder.itemView as PosterCardView
             card.setTag(TAG_HIT, hit)
-            val client = api as? HubClient
             card.bind(
                 hit,
-                client?.imageLoader ?: coil.ImageLoader(card.context),
+                Artwork.loader(api, card.context),
                 api::imageUrl,
                 showAvailability = false
             )

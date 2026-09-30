@@ -632,7 +632,7 @@ class PagedImageReaderScreen(
             try {
                 val file=repo.obtain(readingSession.api.readingPublicationPageUrl(workId,value.sourceItemId,page))
                 if (seek.progress!=page || previewCard.visibility!=View.VISIBLE) return@launch
-                previewRequest=(api as? HubClient)?.imageLoader?.enqueue(ImageRequest.Builder(host.viewContext).data(file).size(dp(88),dp(112)).target(previewImage).build())
+                previewRequest=com.pocketds.hub.ui.Artwork.loader(api,host.viewContext).enqueue(ImageRequest.Builder(host.viewContext).data(file).size(dp(88),dp(112)).target(previewImage).build())
             } catch (_: kotlinx.coroutines.CancellationException) { /* A newer scrub target replaced this one. */ }
             catch (_: Exception) { previewLabel.text="Page ${page+1} · preview unavailable" }
         }

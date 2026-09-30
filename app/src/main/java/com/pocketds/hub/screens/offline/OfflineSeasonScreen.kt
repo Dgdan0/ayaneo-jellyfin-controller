@@ -1,12 +1,10 @@
 package com.pocketds.hub.screens.offline
 
+import com.pocketds.hub.ui.Artwork
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.graphics.Bitmap
-import android.graphics.drawable.ColorDrawable
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -15,20 +13,16 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
-import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.offline.OfflineCatalogProgress
 import com.pocketds.hub.offline.OfflineCatalogSeason
 import com.pocketds.hub.offline.OfflineDownload
 import com.pocketds.hub.offline.OfflineDownloadService
 import com.pocketds.hub.offline.OfflineRepository
-import com.pocketds.hub.screens.library.SubtitleScreen
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
@@ -194,12 +188,10 @@ class OfflineSeasonScreen(
     }
 
     private fun loadArtwork(view: ImageView, download: OfflineDownload) {
-        view.setImageDrawable(ColorDrawable(colors.posterPlaceholder))
         val local = sequenceOf("thumb", "poster", "backdrop").map { repository.artworkFile(download, it) }
-            .firstOrNull { it.isFile && it.length() > 0 } ?: return
-        ((api as? HubClient)?.imageLoader ?: ImageLoader(view.context)).enqueue(
-            ImageRequest.Builder(view.context).data(local).target(view).bitmapConfig(Bitmap.Config.RGB_565).build()
-        )
+            .firstOrNull { it.isFile && it.length() > 0 }
+        Artwork.bind(view, Artwork.loader(api, view.context), local,
+            opaque = true, placeholderColor = colors.posterPlaceholder)
     }
 
     private fun focusedEpisode(): OfflineDownload? =

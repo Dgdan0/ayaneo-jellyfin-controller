@@ -1,8 +1,7 @@
 package com.pocketds.hub.playback
 
+import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.ThemeGradientDrawable
-import android.app.Activity
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
@@ -10,7 +9,6 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.media.AudioManager
-import android.media.audiofx.AudioEffect
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
@@ -49,7 +47,6 @@ import com.pocketds.hub.model.PlaybackSelectBody
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.settings.HubSettings
@@ -967,7 +964,7 @@ class PlayerScreen(
     }
 
     private fun imageLoader(): ImageLoader =
-        (api as? HubClient)?.imageLoader ?: ImageLoader(host.viewContext)
+        Artwork.loader(api, host.viewContext)
 
     private fun signedTime(deltaMillis: Long): String {
         val sign = if (deltaMillis < 0) "−" else "+"

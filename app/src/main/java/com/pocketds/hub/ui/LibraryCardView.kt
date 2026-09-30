@@ -1,7 +1,6 @@
 package com.pocketds.hub.ui
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
@@ -14,7 +13,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.model.LibraryView
 import com.pocketds.hub.model.ReadingLibrary
 
@@ -141,13 +139,9 @@ class LibraryCardView(
         backdrop.alpha = if (wide) 1f else .52f
         poster.scaleType = if (icon) ImageView.ScaleType.CENTER_INSIDE else ImageView.ScaleType.FIT_CENTER
         placeholder.visibility = if (url.isEmpty()) View.VISIBLE else View.GONE
-        backdrop.setImageDrawable(ColorDrawable(Color.TRANSPARENT))
-        poster.setImageDrawable(ColorDrawable(Color.TRANSPARENT))
-        if (url.isEmpty()) return
-        if (!icon) imageLoader.enqueue(ImageRequest.Builder(context).data(url).target(backdrop)
-            .bitmapConfig(Bitmap.Config.RGB_565).build())
-        if (!wide) imageLoader.enqueue(ImageRequest.Builder(context).data(url).target(poster)
-            .bitmapConfig(Bitmap.Config.RGB_565).build())
+        Artwork.bind(backdrop, imageLoader, url.takeUnless { icon }, opaque = true)
+        // An icon is a logo with transparency, which the opaque format would fill black.
+        Artwork.bind(poster, imageLoader, url.takeUnless { wide }, opaque = !icon)
     }
 
     private fun textStack(context: Context) = LinearLayout(context).apply {

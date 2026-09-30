@@ -1,17 +1,11 @@
 package com.pocketds.hub.screens.discover
 
-import android.graphics.Bitmap
-import android.graphics.drawable.ColorDrawable
-import android.view.Gravity
+import com.pocketds.hub.ui.Artwork
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.ReadingItem
 import com.pocketds.hub.model.ReadingRequestTarget
@@ -20,7 +14,6 @@ import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.settings.Prefs
 import com.pocketds.hub.ui.DetailHeaderView
@@ -81,7 +74,7 @@ class ReadingDetailScreen(
         if (releaseTargets.isEmpty() && requestSeriesId > 0) releaseTargets = listOf(ReadingRequestTarget(requestSeriesId, item.title))
         requested = requestSeriesId > 0
         colors = Theme.colors(context)
-        val loader = (api as? HubClient)?.imageLoader ?: ImageLoader(context)
+        val loader = Artwork.loader(api, context)
         header = DetailHeaderView(context, colors, ringVisible).apply {
             compact=true;titleView.text=item.title
             metadataView.text=buildList {

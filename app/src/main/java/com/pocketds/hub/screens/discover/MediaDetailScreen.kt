@@ -1,6 +1,5 @@
 package com.pocketds.hub.screens.discover
 
-import android.graphics.Bitmap
 import android.view.View
 import android.view.ViewGroup
 import android.widget.HorizontalScrollView
@@ -9,23 +8,18 @@ import android.widget.LinearLayout
 import android.widget.FrameLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import coil.request.ImageRequest
-import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.Availability
 import com.pocketds.hub.model.CastMember
 import com.pocketds.hub.model.MediaDetail
 import com.pocketds.hub.model.Stage
-import com.pocketds.hub.state.Fmt
-import com.pocketds.hub.state.FormModel
-import com.pocketds.hub.state.FormRow
+import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FormOverlay
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
@@ -36,8 +30,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
-import kotlinx.coroutines.launch
-import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.state.PollCadence
 import com.pocketds.hub.state.PollOutcome
@@ -433,17 +425,8 @@ class MediaDetailScreen(
         host?.refreshHints()
     }
 
-    private fun loadImage(hubPath: String, into: ImageView) {
-        val url = api.imageUrl(hubPath)
-        if (url.isEmpty()) return
-        (api as? HubClient)?.imageLoader?.enqueue(
-            ImageRequest.Builder(into.context)
-                .data(url)
-                .target(into)
-                .bitmapConfig(Bitmap.Config.RGB_565)
-                .build()
-        )
-    }
+    private fun loadImage(hubPath: String, into: ImageView) =
+        Artwork.bindHub(into, api, hubPath, opaque = true)
 
     private fun describe(d: MediaDetail): String = buildString {
         if (d.media.year > 0) append(d.media.year)
@@ -547,16 +530,7 @@ class MediaDetailScreen(
             host?.push(PersonScreen(api, member.id, member.name, ringVisible))
         }
 
-        val url = api.imageUrl(member.profile)
-        if (url.isNotEmpty()) {
-            (api as? HubClient)?.imageLoader?.enqueue(
-                ImageRequest.Builder(context)
-                    .data(url)
-                    .target(photo)
-                    .bitmapConfig(Bitmap.Config.RGB_565)
-                    .build()
-            )
-        }
+        Artwork.bindHub(photo, api, member.profile, opaque = true)
         return card
     }
 

@@ -1,8 +1,7 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.ThemeGradientDrawable
-import android.graphics.Bitmap
-import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.view.Gravity
@@ -10,7 +9,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -18,7 +16,6 @@ import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.LibraryEpisodesResponse
@@ -31,7 +28,6 @@ import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.playback.PlaybackProgressStore
 import com.pocketds.hub.offline.OfflineRepository
@@ -883,17 +879,11 @@ class LibraryDetailScreen(
         )
     }
 
-    private fun loadImage(view: ImageView, path: String) {
-        view.setImageDrawable(ColorDrawable(colors.posterPlaceholder))
-        if (path.isEmpty()) return
-        imageLoader().enqueue(
-            ImageRequest.Builder(view.context).data(api.imageUrl(path)).target(view)
-                .bitmapConfig(Bitmap.Config.RGB_565).build()
-        )
-    }
+    private fun loadImage(view: ImageView, path: String) =
+        Artwork.bindHub(view, api, path, opaque = true, placeholderColor = colors.posterPlaceholder)
 
     private fun imageLoader(): ImageLoader =
-        (api as? HubClient)?.imageLoader ?: ImageLoader(requireNotNull(host).viewContext)
+        Artwork.loader(api, requireNotNull(host).viewContext)
 
     private inner class SeasonAdapter : RecyclerView.Adapter<SeasonHolder>() {
         private val values = mutableListOf<LibraryItem>()
@@ -1279,12 +1269,9 @@ class EpisodesScreen(
             holder.progress.visibility = if (!value.played && value.progress > 0) View.VISIBLE else View.GONE
             holder.itemView.setTag(TAG_EPISODE, value)
             holder.itemView.contentDescription = "Episode ${value.indexNumber}, ${value.subtitle.ifEmpty { value.title }}, ${holder.meta.text}"
-            holder.image.setImageDrawable(ColorDrawable(colors.posterPlaceholder))
-            val path = value.thumb.ifEmpty { value.poster }
-            if (path.isNotEmpty()) imageLoader().enqueue(
-                ImageRequest.Builder(holder.image.context).data(api.imageUrl(path)).target(holder.image)
-                    .bitmapConfig(Bitmap.Config.RGB_565).build()
-            )
+            // A recycled holder's previous still must not land here late.
+            Artwork.bindHub(holder.image, api, value.thumb.ifEmpty { value.poster },
+                opaque = true, placeholderColor = colors.posterPlaceholder)
         }
     }
 
@@ -1303,9 +1290,6 @@ class EpisodesScreen(
         }
         return null
     }
-
-    private fun imageLoader(): ImageLoader =
-        (api as? HubClient)?.imageLoader ?: ImageLoader(requireNotNull(host).viewContext)
     private class EpisodeHolder(
         view: View,
         val image: ImageView,

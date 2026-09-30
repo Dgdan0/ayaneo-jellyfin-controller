@@ -1,7 +1,6 @@
 package com.pocketds.hub.screens.offline
 
-import android.graphics.Bitmap
-import android.graphics.drawable.ColorDrawable
+import com.pocketds.hub.ui.Artwork
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -18,15 +17,12 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
-import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.model.MediaRef
 import com.pocketds.hub.model.SearchHit
 import com.pocketds.hub.offline.OfflineBatch
@@ -376,7 +372,7 @@ class OfflineScreen(
             contentDescription = if (value.isSeries) {
                 "${value.title}, ${value.rows.size} downloaded episodes"
             } else "${value.title}, downloaded movie"
-            val loader = (api as? HubClient)?.imageLoader ?: ImageLoader(context)
+            val loader = Artwork.loader(api, context)
             bind(hit, loader, { it }, showAvailability = false)
             FocusDecorator.attach(this, ringVisible)
             setOnFocusChangeListener { view, hasFocus ->
@@ -694,22 +690,14 @@ class OfflineScreen(
         } else item.title
     }
 
-    private fun loadImage(view: ImageView, path: String) {
-        view.setImageDrawable(ColorDrawable(colors.posterPlaceholder)); if (path.isEmpty()) return
-        ((api as? HubClient)?.imageLoader ?: ImageLoader(host.viewContext)).enqueue(
-            ImageRequest.Builder(view.context).data(api.imageUrl(path)).target(view)
-                .bitmapConfig(Bitmap.Config.RGB_565).build()
-        )
-    }
+    private fun loadImage(view: ImageView, path: String) =
+        Artwork.bindHub(view, api, path, opaque = true, placeholderColor = colors.posterPlaceholder)
     private fun loadArtwork(view: ImageView, row: OfflineDownload) {
-        view.setImageDrawable(ColorDrawable(colors.posterPlaceholder))
         val local = sequenceOf("thumb", "poster", "backdrop")
             .map { repository.artworkFile(row, it) }.firstOrNull { it.isFile && it.length() > 0 }
         if (local != null) {
-            ((api as? HubClient)?.imageLoader ?: ImageLoader(host.viewContext)).enqueue(
-                ImageRequest.Builder(view.context).data(local).target(view)
-                    .bitmapConfig(Bitmap.Config.RGB_565).build()
-            )
+            Artwork.bind(view, Artwork.loader(api, view.context), local,
+                opaque = true, placeholderColor = colors.posterPlaceholder)
         } else loadImage(view, row.manifest.item.thumb.ifEmpty { row.manifest.item.poster })
     }
     private fun tabBackground(selected: Boolean) = Styler.selectionBackground(
