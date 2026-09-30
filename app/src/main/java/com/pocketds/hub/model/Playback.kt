@@ -66,6 +66,8 @@ data class PlaybackPrepareResponse(
     val nextItem: PlaybackItem? = null,
     val trickplay: PlaybackTrickplay? = null,
     val previewUrl: String = "",
+    val chapters: List<PlaybackChapter> = emptyList(),
+    val segments: List<PlaybackSegment> = emptyList(),
     val offline: Boolean = false,
     val offlineDownloadId: String = ""
 )
@@ -76,6 +78,21 @@ data class PlaybackCastGrantResponse(
     val mimeType: String = "",
     val subtitleUrls: Map<String, String> = emptyMap(),
     val expiresAt: String = ""
+)
+
+@Serializable
+data class PlaybackChapter(
+    val id: String = "",
+    val name: String = "",
+    val positionMillis: Long = 0
+)
+
+@Serializable
+data class PlaybackSegment(
+    val id: String = "",
+    val type: String = "",
+    val startMillis: Long = 0,
+    val endMillis: Long = 0
 )
 
 @Serializable

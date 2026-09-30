@@ -467,6 +467,7 @@ class ManageScreen(
         "radarr" -> R.drawable.logo_radarr
         "readarr" -> R.drawable.logo_readarr
         "bazarr" -> R.drawable.logo_bazarr
+        "cleanuparr" -> R.drawable.logo_cleanuparr
         "qbittorrent" -> R.drawable.logo_qbittorrent
         else -> R.drawable.ic_launcher_foreground
     }
@@ -559,13 +560,14 @@ class ManageScreen(
             "readarr" to "Readarr",
             "qbittorrent" to "qBittorrent",
             "bazarr" to "Bazarr",
+            "cleanuparr" to "Cleanuparr",
             "bookkeeprr" to "BookKeeprr",
             "kavita" to "Kavita",
             "storyteller" to "Storyteller"
         )
         val serviceOrder = listOf(
             "jellyfin", "jellyseerr", "prowlarr", "sonarr", "radarr", "readarr", "qbittorrent", "bazarr",
-            "bookkeeprr", "kavita", "storyteller"
+            "cleanuparr", "bookkeeprr", "kavita", "storyteller"
         ).withIndex().associate { it.value to it.index }
         val scannableServices = setOf("jellyfin", "kavita", "storyteller")
     }

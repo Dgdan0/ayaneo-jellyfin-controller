@@ -158,7 +158,7 @@ func (c *Client) Item(ctx context.Context, itemID string) (*Item, error) {
 	out := &Item{}
 	query := url.Values{
 		"userId": {c.userID},
-		"fields": {"Overview,ProviderIds,Genres,Trickplay,OriginalTitle,Studios,People,MediaSources,Path"},
+		"fields": {"Overview,ProviderIds,Genres,Trickplay,Chapters,OriginalTitle,Studios,People,MediaSources,Path"},
 	}
 	if err := c.base.GetJSON(ctx, "/Items/"+itemID, query, out); err != nil {
 		return nil, err
@@ -168,6 +168,20 @@ func (c *Client) Item(ctx context.Context, itemID string) (*Item, error) {
 
 func (c *Client) DeleteItem(ctx context.Context, itemID string) error {
 	return c.base.Delete(ctx, "/Items/"+itemID, nil)
+}
+
+// MediaSegments returns optional segment metadata for a playable item. A
+// caller must treat an unavailable provider as an enhancement that is absent,
+// never as a playback failure.
+func (c *Client) MediaSegments(ctx context.Context, itemID string) ([]MediaSegment, error) {
+	if err := c.requireUser(); err != nil {
+		return nil, err
+	}
+	var out []MediaSegment
+	if err := c.base.GetJSON(ctx, "/MediaSegments/"+itemID, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // SetPlayed and SetFavorite use Jellyfin's idempotent user-item endpoints.

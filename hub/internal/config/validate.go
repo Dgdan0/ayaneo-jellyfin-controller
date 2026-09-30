@@ -281,6 +281,12 @@ func (c *Config) validateServices() error {
 			}
 			continue
 		}
+		if name == "cleanuparr" {
+			// The hub's Cleanuparr integration is deliberately health-only and
+			// probes its unauthenticated liveness route. Do not collect a dashboard
+			// credential until there is an explicit review-and-confirm action flow.
+			continue
+		}
 		if !svc.APIKey.IsSet() {
 			return &Error{
 				Path:    path + ".api_key",

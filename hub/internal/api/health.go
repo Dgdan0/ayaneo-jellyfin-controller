@@ -72,6 +72,11 @@ var probes = map[string]probeSpec{
 	"readarr": {
 		path: "/api/v1/system/status", authHeader: "X-Api-Key", versionField: "version",
 	},
+	"cleanuparr": {
+		// This intentionally exposes only liveness. Cleanup decisions stay in
+		// Cleanuparr's own dashboard until a review flow is designed.
+		path: "/health",
+	},
 	"bazarr": {
 		// Verified against source: the blueprint is registered at /api with
 		// namespaces added flat, and the header really is spelled X-API-KEY.

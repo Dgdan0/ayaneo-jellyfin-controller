@@ -23,7 +23,11 @@ internal enum class PlayerControlIcon {
     PLAY,
     PAUSE,
     FORWARD,
-    NEXT
+    NEXT,
+    CHAPTERS,
+    LOCK,
+    UNLOCK,
+    SKIP
 }
 
 internal class PlayerIconButton(
@@ -85,6 +89,10 @@ internal class PlayerIconButton(
             PlayerControlIcon.PAUSE -> drawPause(canvas)
             PlayerControlIcon.FORWARD -> drawForward(canvas)
             PlayerControlIcon.NEXT -> drawNext(canvas)
+            PlayerControlIcon.CHAPTERS -> drawChapters(canvas)
+            PlayerControlIcon.LOCK -> drawLock(canvas, locked = true)
+            PlayerControlIcon.UNLOCK -> drawLock(canvas, locked = false)
+            PlayerControlIcon.SKIP -> drawSkip(canvas)
         }
         canvas.restore()
     }
@@ -196,6 +204,39 @@ internal class PlayerIconButton(
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 0.08f
         canvas.drawLine(0.31f, -0.29f, 0.31f, 0.29f, paint)
+    }
+
+    private fun drawChapters(canvas: Canvas) {
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 0.065f
+        canvas.drawRoundRect(RectF(-0.36f, -0.31f, 0.36f, 0.31f), 0.06f, 0.06f, paint)
+        paint.style = Paint.Style.FILL
+        canvas.drawCircle(-0.22f, -0.13f, 0.045f, paint)
+        canvas.drawCircle(-0.22f, 0.12f, 0.045f, paint)
+        paint.strokeWidth = 0.06f
+        canvas.drawLine(-0.10f, -0.13f, 0.22f, -0.13f, paint)
+        canvas.drawLine(-0.10f, 0.12f, 0.22f, 0.12f, paint)
+    }
+
+    private fun drawLock(canvas: Canvas, locked: Boolean) {
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 0.075f
+        val body = RectF(-0.28f, -0.05f, 0.28f, 0.32f)
+        canvas.drawRoundRect(body, 0.055f, 0.055f, paint)
+        val arc = if (locked) RectF(-0.18f, -0.32f, 0.18f, 0.04f) else RectF(-0.06f, -0.32f, 0.30f, 0.04f)
+        canvas.drawArc(arc, 180f, 180f, false, paint)
+        if (!locked) canvas.drawLine(-0.06f, -0.14f, -0.06f, 0.04f, paint)
+        paint.style = Paint.Style.FILL
+        canvas.drawCircle(0f, 0.13f, 0.045f, paint)
+    }
+
+    private fun drawSkip(canvas: Canvas) {
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 0.075f
+        canvas.drawLine(-0.35f, 0f, 0.24f, 0f, paint)
+        canvas.drawLine(0.07f, -0.18f, 0.29f, 0f, paint)
+        canvas.drawLine(0.07f, 0.18f, 0.29f, 0f, paint)
+        canvas.drawLine(0.34f, -0.27f, 0.34f, 0.27f, paint)
     }
 
     private fun triangle(

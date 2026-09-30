@@ -47,8 +47,11 @@ func (u *playbackUpstream) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"Id":"`+playbackItemID+`","Name":"Pilot","Type":"Episode",`+
 			`"SeriesName":"A Show","SeriesId":"`+playbackSeriesID+`","ParentIndexNumber":1,"IndexNumber":2,`+
 			`"RunTimeTicks":27000000000,"UserData":{"PlaybackPositionTicks":9000000000},`+
+			`"Chapters":[{"Name":"Cold open","StartPositionTicks":100000000},{"Name":"Act two","StartPositionTicks":9000000000}],`+
 			`"Trickplay":{"source-1":{"320":{"Width":320,"Height":180,"TileWidth":4,"TileHeight":3,`+
 			`"ThumbnailCount":25,"Interval":10000}}}}`)
+	case r.Method == http.MethodGet && r.URL.Path == "/MediaSegments/"+playbackItemID:
+		_, _ = io.WriteString(w, `[{"Id":"intro","Type":"Intro","StartTicks":200000000,"EndTicks":800000000}]`)
 	case r.Method == http.MethodPost && r.URL.Path == "/Items/"+playbackItemID+"/PlaybackInfo":
 		var request map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -173,6 +176,14 @@ func TestPlaybackPrepareNormalizesResumeTracksAndNextEpisode(t *testing.T) {
 	}
 	if !strings.HasSuffix(plan.PreviewURL, "/preview") {
 		t.Fatalf("preview URL = %q", plan.PreviewURL)
+	}
+	if len(plan.Chapters) != 2 || plan.Chapters[0].Name != "Cold open" ||
+		plan.Chapters[1].PositionMillis != 900_000 {
+		t.Fatalf("chapters = %+v", plan.Chapters)
+	}
+	if len(plan.Segments) != 1 || plan.Segments[0].Type != "Intro" ||
+		plan.Segments[0].StartMillis != 20_000 || plan.Segments[0].EndMillis != 80_000 {
+		t.Fatalf("segments = %+v", plan.Segments)
 	}
 	preview := playbackRequest(
 		handler, http.MethodGet, plan.PreviewURL+"?positionMillis=129999", "", playbackUserID,

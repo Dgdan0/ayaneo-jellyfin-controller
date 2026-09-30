@@ -29,6 +29,7 @@ import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
 import androidx.mediarouter.app.MediaRouteButton
@@ -90,6 +91,7 @@ class PlayerScreen(
     private lateinit var playerView: PlayerView
     private lateinit var videoDimmer: View
     private lateinit var dynamicSubtitleView: SubtitleView
+    private lateinit var gestureView: PlayerGestureView
     private lateinit var topPanel: LinearLayout
     private lateinit var controllerPanel: LinearLayout
     private lateinit var titleView: TextView
@@ -102,11 +104,13 @@ class PlayerScreen(
     private val menuState = PlayerMenuState()
     private lateinit var optionsButton: PlayerIconButton
     private lateinit var castButton: MediaRouteButton
+    private lateinit var lockButton: PlayerIconButton
     private lateinit var pipButton: PlayerIconButton
     private lateinit var closeButton: PlayerIconButton
     private lateinit var previousButton: PlayerIconButton
     private lateinit var rewindButton: PlayerIconButton
     private lateinit var forwardButton: PlayerIconButton
+    private lateinit var skipButton: PlayerIconButton
     private lateinit var nextButton: PlayerIconButton
     private lateinit var choiceOverlay: ChoiceOverlay
     private lateinit var subtitleOffsetOverlay: SubtitleOffsetOverlay
@@ -164,6 +168,11 @@ class PlayerScreen(
             serviceLoaded = false
         }
     }
+    private var playbackSpeed = PlaybackEnhancements.defaultSpeed
+    private var playbackAspect = PlaybackEnhancements.defaultAspect
+    private var subtitleAppearance = PlaybackEnhancements.defaultSubtitleAppearance
+    private var touchLocked = false
+    private var activeSegmentId = ""
 
     private val uiTick = object : Runnable {
         override fun run() {
@@ -245,24 +254,28 @@ class PlayerScreen(
         root.addView(status, FrameLayout.LayoutParams(MATCH, MATCH))
         // PlayerView's SurfaceView can own input once frames start. This sibling
         // stays above video and below the visible controls, so buttons keep taps.
-        root.addView(
-            PlayerGestureView(host.viewContext, object : PlayerGestureView.Listener {
+        gestureView = PlayerGestureView(host.viewContext, object : PlayerGestureView.Listener {
                 override fun onSingleTap() {
+                    if (touchLocked) {
+                        showGestureFeedback("Touch controls locked", PlayerGestureView.Side.CENTER)
+                        return
+                    }
                     if (controlsVisible) setControls(false) else showControls()
                 }
 
-                override fun onDoubleTap(side: PlayerGestureView.Side) = handleDoubleTap(side)
-                override fun onHorizontalStart() = beginHorizontalScrub()
-                override fun onHorizontalMove(fraction: Float) = updateHorizontalScrub(fraction)
-                override fun onHorizontalEnd(cancelled: Boolean) = finishHorizontalScrub(cancelled)
-                override fun onVerticalStart(side: PlayerGestureView.Side) = beginVerticalGesture(side)
+                override fun onDoubleTap(side: PlayerGestureView.Side) {
+                    if (!touchLocked) handleDoubleTap(side)
+                }
+                override fun onHorizontalStart() { if (!touchLocked) beginHorizontalScrub() }
+                override fun onHorizontalMove(fraction: Float) { if (!touchLocked) updateHorizontalScrub(fraction) }
+                override fun onHorizontalEnd(cancelled: Boolean) { if (!touchLocked) finishHorizontalScrub(cancelled) }
+                override fun onVerticalStart(side: PlayerGestureView.Side) { if (!touchLocked) beginVerticalGesture(side) }
                 override fun onVerticalMove(side: PlayerGestureView.Side, fraction: Float) =
-                    updateVerticalGesture(side, fraction)
+                    if (!touchLocked) updateVerticalGesture(side, fraction) else Unit
                 override fun onVerticalEnd(side: PlayerGestureView.Side, cancelled: Boolean) =
-                    finishVerticalGesture(side, cancelled)
-            }),
-            FrameLayout.LayoutParams(MATCH, MATCH)
-        )
+                    if (!touchLocked) finishVerticalGesture(side, cancelled) else Unit
+            })
+        root.addView(gestureView, FrameLayout.LayoutParams(MATCH, MATCH))
         topPanel = buildTopController()
         root.addView(topPanel, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
         controllerPanel = buildController()
@@ -643,9 +656,9 @@ class PlayerScreen(
             return
         }
         val focused = root.findFocus()
-        val top = listOf<View>(tracksButton, castButton, optionsButton, pipButton, closeButton)
+        val top = listOf<View>(tracksButton, castButton, optionsButton, lockButton, pipButton, closeButton)
             .filter { it.visibility == View.VISIBLE && it.isEnabled }
-        val playback = listOf<View>(previousButton, rewindButton, playButton, forwardButton, nextButton)
+        val playback = listOf<View>(previousButton, rewindButton, playButton, forwardButton, skipButton, nextButton)
             .filter { it.visibility == View.VISIBLE && it.isEnabled }
         when {
             focused === seekBar -> when (direction) {
@@ -980,6 +993,20 @@ class PlayerScreen(
             seekBar.max = 10_000
             seekBar.progress = if (end > 0) ((current.toDouble() / end) * 10_000).toInt().coerceIn(0, 10_000) else 0
         }
+        updateSegmentSkip(current)
+    }
+
+    private fun updateSegmentSkip(positionMillis: Long) {
+        if (!::skipButton.isInitialized) return
+        val segment = PlaybackEnhancements.skipPrompt(plan?.segments.orEmpty(), positionMillis)
+        val id = segment?.id.orEmpty()
+        if (id == activeSegmentId) return
+        activeSegmentId = id
+        skipButton.visibility = if (segment == null) View.GONE else View.VISIBLE
+        if (segment != null) {
+            skipButton.contentDescription = "Skip ${segment.type.ifBlank { "segment" }}"
+            showGestureFeedback("Skip ${segment.type.ifBlank { "segment" }}", PlayerGestureView.Side.CENTER)
+        }
     }
 
     private fun syncServicePlan() {
@@ -1023,14 +1050,12 @@ class PlayerScreen(
         }
         if (tab == "audio" && tracks.isEmpty()) choiceOverlay.choice("No selectable audio tracks") { choiceOverlay.cancel() }
         if (tab == "subtitles" && selectedSubtitleSupportsOffset(current)) {
-            choiceOverlay.body.addView(TextView(host.viewContext).apply {
-                text = "TIMING"
-                textSize = 11f
-                letterSpacing = 0.12f
-                setTextColor(colors.mutedText)
-                setPadding(dp(10), dp(20), dp(10), dp(6))
-            })
+            addSheetSection("TIMING")
             choiceOverlay.choice("Adjust subtitle timing", subtitleOffsetLabel(subtitleOffsetMillis)) { showSubtitleOffsetSheet() }
+        }
+        if (tab == "subtitles") {
+            addSheetSection("APPEARANCE")
+            choiceOverlay.choice("Subtitle appearance", subtitleAppearanceLabel(subtitleAppearance)) { showSubtitleAppearanceSheet() }
         }
         choiceOverlay.focusBody(selected)
         handler.removeCallbacks(hideControls)
@@ -1194,27 +1219,105 @@ class PlayerScreen(
 
     private fun showPlaybackSheet() = showPlaybackPanel("quality")
 
+    private fun showCastPanel() {
+        choiceOverlay.resetBody()
+        choiceOverlay.open("Playing on ${CastPlaybackCoordinator.deviceName}", onDismiss = ::showControls)
+        choiceOverlay.choice("Move to Pocket DS", "Continue here at the TV position") {
+            choiceOverlay.dismiss()
+            moveCastToDevice()
+        }
+        choiceOverlay.choice("Stop on TV", "End playback on the receiver") {
+            choiceOverlay.dismiss()
+            CastPlaybackCoordinator.stop()
+            host.back()
+        }
+        choiceOverlay.choice("TV stream", "H.264/AAC · up to 20 Mbps") { choiceOverlay.dismiss() }
+        choiceOverlay.focusBody()
+    }
+
+    /** A small uppercase heading between groups of rows in a player side panel. */
+    private fun addSheetSection(label: String) {
+        choiceOverlay.body.addView(TextView(host.viewContext).apply {
+            text = label
+            textSize = 11f
+            letterSpacing = 0.12f
+            setTextColor(colors.mutedText)
+            setPadding(dp(10), dp(20), dp(10), dp(6))
+        })
+    }
+
+    private fun showSubtitleAppearanceSheet() {
+        val choices = PlaybackEnhancements.subtitleAppearances.map { appearance ->
+            ChoiceOverlay.Choice(
+                appearance.name,
+                subtitleAppearanceLabel(appearance),
+                if (appearance == subtitleAppearance) "Selected" else ""
+            )
+        }
+        val selected = choices.indexOfFirst { it.id == subtitleAppearance.name }.coerceAtLeast(0)
+        choiceOverlay.show("Subtitle appearance", "Changes apply without reloading the video.", choices, selected, ::showControls) { id ->
+            subtitleAppearance = SubtitleAppearance.valueOf(id)
+            applySubtitleAppearance()
+            showControls()
+        }
+        handler.removeCallbacks(hideControls)
+    }
+
+    private fun subtitleAppearanceLabel(value: SubtitleAppearance) = when (value) {
+        SubtitleAppearance.SYSTEM -> "System"
+        SubtitleAppearance.LARGE -> "Large"
+        SubtitleAppearance.HIGH_CONTRAST -> "High contrast"
+    }
+
+    private fun applySubtitleAppearance() {
+        val targets = listOfNotNull(playerView.subtitleView, dynamicSubtitleView)
+        targets.forEach { view ->
+            when (subtitleAppearance) {
+                SubtitleAppearance.SYSTEM -> {
+                    view.setApplyEmbeddedStyles(true)
+                    view.setApplyEmbeddedFontSizes(true)
+                    view.setUserDefaultStyle()
+                    view.setUserDefaultTextSize()
+                    view.setBottomPaddingFraction(0.08f)
+                }
+                SubtitleAppearance.LARGE -> {
+                    view.setApplyEmbeddedStyles(false)
+                    view.setApplyEmbeddedFontSizes(false)
+                    view.setStyle(CaptionStyleCompat.DEFAULT)
+                    view.setFractionalTextSize(0.075f)
+                    view.setBottomPaddingFraction(0.11f)
+                }
+                SubtitleAppearance.HIGH_CONTRAST -> {
+                    view.setApplyEmbeddedStyles(false)
+                    view.setApplyEmbeddedFontSizes(false)
+                    view.setStyle(CaptionStyleCompat(
+                        Color.WHITE,
+                        Color.argb(185, 0, 0, 0),
+                        Color.TRANSPARENT,
+                        CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                        Color.BLACK,
+                        null
+                    ))
+                    view.setFractionalTextSize(0.062f)
+                    view.setBottomPaddingFraction(0.09f)
+                }
+            }
+        }
+    }
+
     private fun showPlaybackPanel(tab: String) {
         if (CastPlaybackCoordinator.isActive) {
-            choiceOverlay.resetBody()
-            choiceOverlay.open("Playing on ${CastPlaybackCoordinator.deviceName}", onDismiss = ::showControls)
-            choiceOverlay.choice("Move to Pocket DS", "Continue here at the TV position") {
-                choiceOverlay.dismiss()
-                moveCastToDevice()
-            }
-            choiceOverlay.choice("Stop on TV", "End playback on the receiver") {
-                choiceOverlay.dismiss()
-                CastPlaybackCoordinator.stop()
-                host.back()
-            }
-            choiceOverlay.choice("TV stream", "H.264/AAC · up to 20 Mbps") { choiceOverlay.dismiss() }
-            choiceOverlay.focusBody()
+            showCastPanel()
             return
         }
         val current = plan ?: return
         choiceOverlay.resetBody()
         choiceOverlay.open("Playback", onDismiss = ::showControls)
-        choiceOverlay.tabs(listOf("quality" to "Quality", "source" to "Version", "info" to "Info"), tab, ::showPlaybackPanel)
+        choiceOverlay.tabs(
+            listOf("quality" to "Quality", "source" to "Version", "view" to "View", "info" to "Info"),
+            tab,
+            ::showPlaybackPanel
+        )
         var selected: View? = null
         when (tab) {
             "quality" -> if (current.offline) {
@@ -1234,6 +1337,15 @@ class PlayerScreen(
                     choiceOverlay.dismiss(); changeSelection(source = source.id)
                 }
                 if (active) selected = row
+            }
+            "view" -> {
+                val chapterCount = current.chapters.size
+                choiceOverlay.choice(
+                    "Chapters",
+                    if (chapterCount == 0) "Unavailable" else "$chapterCount markers"
+                ) { showChapterSheet() }
+                choiceOverlay.choice("Speed", speedLabel(playbackSpeed)) { showSpeedSheet() }
+                choiceOverlay.choice("Aspect", aspectLabel(playbackAspect)) { showAspectSheet() }
             }
             else -> choiceOverlay.body.addView(TextView(host.viewContext).apply {
                 text = diagnostic(current); textSize = 14f; setTextColor(colors.primaryText)
@@ -1277,6 +1389,70 @@ class PlayerScreen(
                 }
             }
             selectionJob = null
+        }
+    }
+
+    private fun showChapterSheet() {
+        val durationMillis = controller?.duration?.takeIf { it > 0 } ?: plan?.durationMillis ?: 0
+        val chapters = PlaybackEnhancements.chapters(plan?.chapters.orEmpty(), durationMillis)
+        if (chapters.isEmpty()) {
+            host.notify("This item has no chapter markers")
+            showControls()
+            return
+        }
+        val at = controller?.currentPosition ?: 0L
+        val choices = chapters.map { chapter ->
+            ChoiceOverlay.Choice(chapter.positionMillis.toString(), chapter.name, time(chapter.positionMillis))
+        }
+        val selected = chapters.indexOfLast { it.positionMillis <= at }.coerceAtLeast(0)
+        choiceOverlay.show("Chapters", "Jump to a chapter.", choices, selected, ::showControls) { id ->
+            controller?.seekTo(id.toLong())
+            showControls()
+        }
+        handler.removeCallbacks(hideControls)
+    }
+
+    private fun showSpeedSheet() {
+        val choices = PlaybackEnhancements.speeds.map { speed ->
+            ChoiceOverlay.Choice(speed.toString(), speedLabel(speed), if (speed == playbackSpeed) "Selected" else "")
+        }
+        val selected = choices.indexOfFirst { it.id == playbackSpeed.toString() }.coerceAtLeast(0)
+        choiceOverlay.show("Playback speed", "Changes apply without reloading the video.", choices, selected, ::showControls) { id ->
+            playbackSpeed = id.toFloat()
+            controller?.setPlaybackSpeed(playbackSpeed)
+            showControls()
+        }
+        handler.removeCallbacks(hideControls)
+    }
+
+    private fun showAspectSheet() {
+        val choices = PlaybackAspect.entries.map { aspect ->
+            ChoiceOverlay.Choice(aspect.name, aspectLabel(aspect), if (aspect == playbackAspect) "Selected" else "")
+        }
+        val selected = choices.indexOfFirst { it.id == playbackAspect.name }.coerceAtLeast(0)
+        choiceOverlay.show("Aspect", "Fit keeps the whole picture visible.", choices, selected, ::showControls) { id ->
+            playbackAspect = PlaybackAspect.valueOf(id)
+            applyAspect()
+            showControls()
+        }
+        handler.removeCallbacks(hideControls)
+    }
+
+    private fun speedLabel(value: Float) = if (value == 1f) "Normal" else "${value}×"
+
+    private fun aspectLabel(value: PlaybackAspect) = when (value) {
+        PlaybackAspect.FIT -> "Fit"
+        PlaybackAspect.FILL -> "Fill"
+        PlaybackAspect.ZOOM -> "Zoom"
+        PlaybackAspect.ORIGINAL -> "Original aspect"
+    }
+
+    private fun applyAspect() {
+        playerView.resizeMode = when (playbackAspect) {
+            PlaybackAspect.FIT -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+            PlaybackAspect.FILL -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            PlaybackAspect.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            PlaybackAspect.ORIGINAL -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
         }
     }
 
@@ -1477,9 +1653,17 @@ class PlayerScreen(
         }
         addView(castButton, LinearLayout.LayoutParams(dp(48), dp(48)))
         optionsButton = control(
-            PlayerControlIcon.OPTIONS, "Quality, version and stream information"
+            PlayerControlIcon.OPTIONS, "Playback options, chapters, speed and aspect"
         ) { showPlaybackSheet() }
         addView(optionsButton)
+        lockButton = control(PlayerControlIcon.UNLOCK, "Lock touch controls") {
+            touchLocked = !touchLocked
+            lockButton.setIcon(if (touchLocked) PlayerControlIcon.LOCK else PlayerControlIcon.UNLOCK)
+            lockButton.contentDescription = if (touchLocked) "Unlock touch controls" else "Lock touch controls"
+            host.notify(if (touchLocked) "Touch controls locked" else "Touch controls unlocked")
+            showControls()
+        }
+        addView(lockButton)
         pipButton = control(PlayerControlIcon.PICTURE_IN_PICTURE, "Open picture in picture") {
             setControls(false)
             if (!host.enterPictureInPicture(playerView)) showControls()
@@ -1563,6 +1747,14 @@ class PlayerScreen(
                 seekBy(configuredSeekMillis())
             }
             addView(forwardButton)
+            skipButton = control(PlayerControlIcon.SKIP, "Skip current segment") {
+                val segment = PlaybackEnhancements.skipPrompt(
+                    plan?.segments.orEmpty(), controller?.currentPosition ?: 0L
+                ) ?: return@control
+                controller?.seekTo(segment.endMillis)
+                skipButton.visibility = View.GONE
+            }.apply { visibility = View.GONE }
+            addView(skipButton)
             nextButton = control(PlayerControlIcon.NEXT, "Play next episode") { playNext() }
             addView(nextButton)
         }, LinearLayout.LayoutParams(MATCH, WRAP))
@@ -1678,6 +1870,7 @@ class PlayerScreen(
 
     private fun updateControlLabels(value: PlaybackPrepareResponse) {
         lastPreviewThumbnail = -1
+        activeSegmentId = ""
         titleView.text = if (value.offline) "${value.item.displayTitle()}  ·  Offline" else value.item.displayTitle()
         val audio = value.audioTracks.firstOrNull { it.index == value.selectedAudioIndex }
         val subtitle = value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }
@@ -1690,6 +1883,9 @@ class PlayerScreen(
         nextButton.visibility = if (value.nextItem == null) View.GONE else View.VISIBLE
         nextButton.contentDescription = value.nextItem?.let { "Play next episode, ${it.displayTitle()}" }
             ?: "Next episode unavailable"
+        controller?.setPlaybackSpeed(playbackSpeed)
+        applyAspect()
+        applySubtitleAppearance()
     }
 
     private fun timeText(value: String) = TextView(host.viewContext).apply {
