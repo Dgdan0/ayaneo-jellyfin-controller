@@ -772,12 +772,36 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         )
     }
 
+    /**
+     * L2/R2: a screenful up or down, with the selection coming along.
+     *
+     * This used to scroll without moving focus. The focused poster scrolled
+     * away, RecyclerView detached it, and Android handed focus to the first
+     * focusable in the window -- a Library grid ended up on its Sort button.
+     * It also paged the nearest list, which on Discover is a horizontal row.
+     * Now the nearest vertical list jumps a page and the card at the same spot
+     * on screen takes focus; at either end, the last or first row does.
+     */
     private fun page(direction: Direction) {
-        val list = generateSequence(currentFocus) { it.parent as? View }
+        val focused = currentFocus ?: return
+        val list = generateSequence(focused.parent as? View) { it.parent as? View }
             .filterIsInstance<RecyclerView>()
-            .firstOrNull() ?: return
+            .firstOrNull { it.layoutManager?.canScrollVertically() == true } ?: return
+        val spot = android.graphics.Rect()
+        focused.getDrawingRect(spot)
+        list.offsetDescendantRectToMyCoords(focused, spot)
         val by = if (direction == Direction.UP) -list.height else list.height
-        list.smoothScrollBy(0, by)
+        val before = list.computeVerticalScrollOffset()
+        list.scrollBy(0, by)
+        val moved = list.computeVerticalScrollOffset() - before
+        list.post {
+            val atEnd = moved != by
+            val target = list.findChildViewUnder(spot.exactCenterX(), spot.exactCenterY())
+                ?.takeUnless { atEnd }
+                ?: list.getChildAt(if (direction == Direction.UP) 0 else list.childCount - 1)
+            target?.requestFocus()
+            refreshHints()
+        }
     }
 
     private fun Direction.toFocusConstant(): Int = when (this) {

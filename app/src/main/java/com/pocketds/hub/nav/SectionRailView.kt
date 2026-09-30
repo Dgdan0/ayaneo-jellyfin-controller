@@ -77,6 +77,10 @@ class SectionRailView(context: Context, private val colors: PocketColors) : Line
             setCenteredIcon(com.pocketds.hub.ui.AppIconDrawable(com.pocketds.hub.ui.AppIcon.PANEL,colors.mutedText),dp(22),dp(8))
             contentDescription=if(isExpanded) "Collapse navigation" else "Expand navigation"
             isClickable=true;setOnClickListener {toggle()}
+            // Android 8+ makes a clickable view focusable unless told otherwise,
+            // and this one sits right below the content: Down from any screen's
+            // last row landed here. The rail stays out of focus; Start toggles it.
+            isFocusable=false;isFocusableInTouchMode=false
             background=Styler.chipBackground(context,colors)
         }.also {addView(it,LayoutParams(MATCH,dp(48)))}
         setCurrent(current.coerceIn(0, (items.size - 1).coerceAtLeast(0)))
