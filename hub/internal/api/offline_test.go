@@ -30,6 +30,8 @@ type offlineUpstream struct {
 	stopped        int
 	played         int
 	lastPlayedDate string
+	savedTicks     []int64
+	savedAt        []string
 }
 
 func newOfflineUpstream(t *testing.T) *offlineUpstream {
@@ -102,6 +104,24 @@ func (u *offlineUpstream) serve(w http.ResponseWriter, r *http.Request) {
 		u.played++
 		u.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
+	case r.Method == http.MethodGet && r.URL.Path == "/System/Configuration":
+		_, _ = io.WriteString(w, `{"MinResumePct":5,"MaxResumePct":90,"MinResumeDurationSeconds":300}`)
+	case r.Method == http.MethodPost && r.URL.Path == "/UserItems/"+offlineItemID+"/UserData":
+		if r.URL.Query().Get("userId") != playbackUserID {
+			u.t.Errorf("user data written for %q", r.URL.Query().Get("userId"))
+		}
+		var update struct {
+			PlaybackPositionTicks int64
+			LastPlayedDate        string
+		}
+		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+			u.t.Fatal(err)
+		}
+		u.mu.Lock()
+		u.savedTicks = append(u.savedTicks, update.PlaybackPositionTicks)
+		u.savedAt = append(u.savedAt, update.LastPlayedDate)
+		u.mu.Unlock()
+		_, _ = io.WriteString(w, `{}`)
 	default:
 		http.NotFound(w, r)
 	}
@@ -122,6 +142,33 @@ func TestOfflineCompletedProgressMarksJellyfinItemWatched(t *testing.T) {
 	defer upstream.mu.Unlock()
 	if upstream.stopped != 1 || upstream.played != 1 {
 		t.Fatalf("offline completion sent stopped=%d played=%d", upstream.stopped, upstream.played)
+	}
+	if len(upstream.savedTicks) != 1 || upstream.savedTicks[0] != 0 {
+		t.Fatalf("a watched item must not keep a resume point: %v", upstream.savedTicks)
+	}
+}
+
+func TestOfflinePartialProgressBecomesTheJellyfinResumePoint(t *testing.T) {
+	upstream := newOfflineUpstream(t)
+	defer upstream.close()
+	server := NewServer(offlineConfig(upstream.server.URL, filepath.Join(t.TempDir(), "registry.json")))
+	occurred := time.Now().Add(-2 * time.Minute).Truncate(time.Millisecond)
+	body := `{"events":[{"clientEventKey":"half-1","itemId":"` + offlineItemID + `",` +
+		`"positionMillis":1200000,"durationMillis":2400000,"occurredAt":` +
+		strconv.FormatInt(occurred.UnixMilli(), 10) + `}]}`
+	response := playbackRequest(server.Handler(), http.MethodPost, "/v1/offline/progress/sync", body, playbackUserID)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"applied"`) {
+		t.Fatalf("partial sync = %d %s", response.Code, response.Body.String())
+	}
+	upstream.mu.Lock()
+	defer upstream.mu.Unlock()
+	if len(upstream.savedTicks) != 1 || upstream.savedTicks[0] != 12_000_000_000 || upstream.played != 0 {
+		t.Fatalf("saved = %v played = %d", upstream.savedTicks, upstream.played)
+	}
+	// The resume point carries when it was watched, not when it synced, so
+	// the newer-server check keeps comparing like with like.
+	if saved, err := time.Parse(time.RFC3339Nano, upstream.savedAt[0]); err != nil || !saved.Equal(occurred) {
+		t.Fatalf("last played = %q, want %s", upstream.savedAt[0], occurred.UTC().Format(time.RFC3339Nano))
 	}
 }
 

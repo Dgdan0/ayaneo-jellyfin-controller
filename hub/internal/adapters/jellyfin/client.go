@@ -209,6 +209,55 @@ func (c *Client) SetFavorite(ctx context.Context, itemID string, favorite bool) 
 	return c.base.Delete(ctx, path, nil)
 }
 
+// UserDataUpdate changes only the fields that are set. Jellyfin applies it as
+// a partial update, so favourite, play count and rating stay as they were.
+type UserDataUpdate struct {
+	PlaybackPositionTicks *int64 `json:"PlaybackPositionTicks,omitempty"`
+	LastPlayedDate        string `json:"LastPlayedDate,omitempty"`
+}
+
+// UpdateUserData writes the selected user's data for one item.
+//
+// This, not /Sessions/Playing*, is what saves a resume position. Jellyfin
+// attributes playback reports to the signed-in user, and the hub signs in with
+// an API key, which has none: the reports are accepted and nothing is kept.
+// Measured on 10.11.8: a 40-second session through the hub left the episode's
+// position exactly where it started.
+func (c *Client) UpdateUserData(ctx context.Context, itemID string, update UserDataUpdate) error {
+	if err := c.requireUser(); err != nil {
+		return err
+	}
+	_, err := c.base.PostJSONHeaders(ctx, "/UserItems/"+itemID+"/UserData",
+		url.Values{"userId": {c.userID}}, update, nil)
+	return err
+}
+
+// ResumeRules are the server's own thresholds for what a stopped position
+// means: below MinResumePct it is not a resume point, above MaxResumePct it is
+// watched, and an item shorter than MinResumeDurationSeconds is never resumed.
+type ResumeRules struct {
+	MinResumePct             float64 `json:"MinResumePct"`
+	MaxResumePct             float64 `json:"MaxResumePct"`
+	MinResumeDurationSeconds int64   `json:"MinResumeDurationSeconds"`
+}
+
+// DefaultResumeRules are Jellyfin's shipped values, used when the server's
+// configuration cannot be read.
+var DefaultResumeRules = ResumeRules{MinResumePct: 5, MaxResumePct: 90, MinResumeDurationSeconds: 300}
+
+// ResumeRules reads the thresholds from the server configuration, so the hub
+// decides "watched" exactly as Jellyfin's own clients would.
+func (c *Client) ResumeRules(ctx context.Context) (ResumeRules, error) {
+	var out ResumeRules
+	if err := c.base.GetJSON(ctx, "/System/Configuration", nil, &out); err != nil {
+		return ResumeRules{}, err
+	}
+	if out.MaxResumePct <= 0 {
+		return DefaultResumeRules, nil
+	}
+	return out, nil
+}
+
 // RefreshLibrary starts Jellyfin's normal "Scan Media Library" task. Jellyfin
 // accepts the request and performs the scan asynchronously, so there is no
 // response body to decode and callers should describe the operation as

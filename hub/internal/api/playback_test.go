@@ -27,6 +27,11 @@ type playbackUpstream struct {
 	server *httptest.Server
 	mu     sync.Mutex
 	events []string
+	// positions records every resume point written to the user's item data,
+	// which is what Jellyfin actually keeps; /Sessions/Playing* saves nothing
+	// for an API-key caller.
+	positions []int64
+	played    int
 }
 
 func newPlaybackUpstream(t *testing.T) *playbackUpstream {
@@ -107,8 +112,46 @@ func (u *playbackUpstream) serve(w http.ResponseWriter, r *http.Request) {
 		u.events = append(u.events, "cleanup")
 		u.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
+	case r.Method == http.MethodGet && r.URL.Path == "/System/Configuration":
+		_, _ = io.WriteString(w, `{"MinResumePct":5,"MaxResumePct":90,"MinResumeDurationSeconds":300}`)
+	case r.Method == http.MethodPost && r.URL.Path == "/UserItems/"+playbackItemID+"/UserData":
+		if r.URL.Query().Get("userId") != playbackUserID {
+			u.t.Errorf("user data written for %q", r.URL.Query().Get("userId"))
+		}
+		var update map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+			u.t.Fatal(err)
+		}
+		if _, touched := update["IsFavorite"]; touched {
+			u.t.Errorf("a position write must not touch favourite: %v", update)
+		}
+		u.mu.Lock()
+		u.positions = append(u.positions, int64(update["PlaybackPositionTicks"].(float64)))
+		u.mu.Unlock()
+		_, _ = io.WriteString(w, `{}`)
+	case r.Method == http.MethodPost && r.URL.Path == "/Users/"+playbackUserID+"/PlayedItems/"+playbackItemID:
+		u.mu.Lock()
+		u.played++
+		u.mu.Unlock()
+		_, _ = io.WriteString(w, `{}`)
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+func (u *playbackUpstream) savedPositions() []int64 {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]int64(nil), u.positions...)
+}
+
+func playbackEvent(t *testing.T, handler http.Handler, sessionID, kind string, sequence int, positionMillis int64) {
+	t.Helper()
+	body := `{"type":"` + kind + `","sequence":` + strconv.Itoa(sequence) + `,"positionMillis":` +
+		strconv.FormatInt(positionMillis, 10) + `,"paused":false,"volume":100}`
+	got := playbackRequest(handler, http.MethodPost, "/v1/playback/sessions/"+sessionID+"/events", body, playbackUserID)
+	if got.Code != http.StatusOK {
+		t.Fatalf("%s returned %d: %s", kind, got.Code, got.Body.String())
 	}
 }
 
@@ -263,10 +306,48 @@ func TestPlaybackRangeSubtitleOwnershipEventsAndCleanup(t *testing.T) {
 	if closed.Code != http.StatusOK {
 		t.Fatalf("delete returned %d: %s", closed.Code, closed.Body.String())
 	}
+	// Progress, pause and stop each become the user's resume point; "started"
+	// is only the position playback began from.
+	if got := upstream.savedPositions(); len(got) != 3 || got[2] != 9_100_000_000 {
+		t.Fatalf("saved resume points = %v", got)
+	}
 	upstream.mu.Lock()
 	defer upstream.mu.Unlock()
 	if len(upstream.events) != 5 || upstream.events[len(upstream.events)-1] != "cleanup" {
 		t.Fatalf("upstream event order = %v", upstream.events)
+	}
+}
+
+func TestAbandonedPlaybackSessionStillSavesTheLastPosition(t *testing.T) {
+	upstream := newPlaybackUpstream(t)
+	defer upstream.close()
+	handler := NewServer(libraryAPIConfig(upstream.server.URL, playbackUserID)).Handler()
+	plan := preparePlaybackForTest(t, handler)
+	playbackEvent(t, handler, plan.SessionID, "started", 1, 900_000)
+	playbackEvent(t, handler, plan.SessionID, "progress", 2, 1_200_000)
+
+	closed := playbackRequest(handler, http.MethodDelete, "/v1/playback/sessions/"+plan.SessionID, "", playbackUserID)
+	if closed.Code != http.StatusOK {
+		t.Fatalf("delete returned %d: %s", closed.Code, closed.Body.String())
+	}
+	if got := upstream.savedPositions(); len(got) != 2 || got[1] != 12_000_000_000 {
+		t.Fatalf("saved resume points = %v", got)
+	}
+}
+
+func TestStoppingNearTheEndMarksTheEpisodeWatched(t *testing.T) {
+	upstream := newPlaybackUpstream(t)
+	defer upstream.close()
+	handler := NewServer(libraryAPIConfig(upstream.server.URL, playbackUserID)).Handler()
+	plan := preparePlaybackForTest(t, handler)
+	playbackEvent(t, handler, plan.SessionID, "started", 1, 900_000)
+	playbackEvent(t, handler, plan.SessionID, "stopped", 2, 2_600_000) // 96% of 45 minutes
+
+	upstream.mu.Lock()
+	played := upstream.played
+	upstream.mu.Unlock()
+	if got := upstream.savedPositions(); played != 1 || len(got) != 1 || got[0] != 0 {
+		t.Fatalf("watched = %d, saved resume points = %v", played, got)
 	}
 }
 

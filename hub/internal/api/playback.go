@@ -949,6 +949,23 @@ func (s *Server) handlePlaybackEvent(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, "jellyfin", err)
 		return
 	}
+	// The session report above keeps Jellyfin's dashboard honest; it does not
+	// save anything for the user. The position is saved here.
+	if body.Type != "started" {
+		report := watchReport{
+			ItemID: session.Item.ID, PositionTicks: body.PositionMillis * 10_000,
+			RuntimeTicks: session.Plan.DurationMillis * 10_000, Final: body.Type == "stopped", At: time.Now(),
+		}
+		if err := s.recordWatchPosition(ctx, session.Client, report); err != nil {
+			if report.Final {
+				// Unacknowledged, so the app retries the stop rather than
+				// losing where the user stopped.
+				writeUpstreamError(w, r, "jellyfin", err)
+				return
+			}
+			slog.Warn("playback position was not saved", "error", err)
+		}
+	}
 	session.LastSequence = body.Sequence
 	session.LastPositionMillis = body.PositionMillis
 	if body.Type == "started" {
@@ -956,7 +973,6 @@ func (s *Server) handlePlaybackEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Type == "stopped" {
 		session.Stopped = true
-		s.invalidatePlaybackCaches(session)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -1012,26 +1028,18 @@ func (s *Server) finishPlaybackSession(ctx context.Context, session *playbackSes
 		if err := session.Client.SendPlaybackEvent(ctx, "/Sessions/Playing/Stopped", event); err != nil {
 			slog.Warn("playback stop report failed", "error", err)
 		}
+		if err := s.recordWatchPosition(ctx, session.Client, watchReport{
+			ItemID: session.Item.ID, PositionTicks: session.LastPositionMillis * 10_000,
+			RuntimeTicks: session.Plan.DurationMillis * 10_000, Final: true, At: time.Now(),
+		}); err != nil {
+			slog.Warn("abandoned playback position was not saved", "error", err)
+		}
 		session.Stopped = true
-		s.invalidatePlaybackCaches(session)
 	}
 	if session.Info != nil {
 		if err := session.Client.CloseTranscode(ctx, session.DeviceID, session.Info.PlaySessionID); err != nil {
 			slog.Debug("transcode cleanup did not complete", "error", err)
 		}
-	}
-}
-
-func (s *Server) invalidatePlaybackCaches(session *playbackSession) {
-	s.cache.InvalidatePrefix("home:" + session.UserID + ":")
-	s.cache.Invalidate("library:item:" + session.UserID + ":" + session.Item.ID)
-	if session.Item.SeriesID != "" {
-		s.cache.Invalidate("library:item:" + session.UserID + ":" + session.Item.SeriesID)
-		s.cache.InvalidatePrefix("library:seasons:" + session.UserID + ":" + session.Item.SeriesID)
-		s.cache.InvalidatePrefix("library:episodes:" + session.UserID + ":" + session.Item.SeriesID + ":")
-	}
-	if session.Item.SeasonID != "" {
-		s.cache.Invalidate("library:item:" + session.UserID + ":" + session.Item.SeasonID)
 	}
 }
 
