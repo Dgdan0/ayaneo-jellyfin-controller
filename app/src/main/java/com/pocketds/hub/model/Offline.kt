@@ -92,7 +92,10 @@ data class OfflineProgressResult(
     val clientEventKey: String = "",
     val itemId: String = "",
     val status: String = "",
-    val serverPositionMillis: Long = 0
+    val serverPositionMillis: Long = 0,
+    /** For server_newer: the watch this device should adopt in place of its own. */
+    val serverPlayed: Boolean = false,
+    val serverLastPlayedAt: Long = 0
 )
 
 @Serializable

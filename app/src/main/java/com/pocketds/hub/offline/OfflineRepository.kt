@@ -442,17 +442,21 @@ class OfflineRepository private constructor(context: Context) {
         val row = completedForItem(itemId) ?: return null
         val item = row.manifest.item
         val source = row.manifest.source
-        val progress = progress(itemId)
+        val saved = progress(itemId)
         val embeddedSubtitles = source.tracks.filter { it.type.equals("Subtitle", true) && !it.external }
         val externalSubtitles = row.manifest.subtitles.mapNotNull { subtitle ->
             val file = subtitleFile(row, subtitle.track.index, subtitle.track.codec)
             subtitle.track.takeIf { file.isFile }?.copy(externalUrl = Uri.fromFile(file).toString())
         }
-        val duration = (item.runtimeSeconds * 1_000L).coerceAtLeast(progress?.second ?: 0L)
-        val remembered = progress?.first ?: item.positionSeconds * 1_000L
+        val duration = (item.runtimeSeconds * 1_000L).coerceAtLeast(saved?.durationMillis ?: 0L)
+        // Before any local session, the position the server had at download
+        // time; a later server watch has already been adopted into `saved`.
+        val watch = saved ?: OfflineCatalogProgress.fromServer(
+            item.positionSeconds * 1_000L, duration, item.played, item.lastPlayedAt
+        )
         // A completed item retains its final local position for sync, but must
         // never reopen at its last frame. Match the normal playback resume rule.
-        val position = if (startMode == "restart") 0L else ResumeRules.resumePosition(remembered, duration)
+        val position = if (startMode == "restart") 0L else ResumeRules.resumePosition(watch.positionMillis, duration)
         val audio = source.tracks.filter { it.type.equals("Audio", true) }
         val subtitles = embeddedSubtitles + externalSubtitles
         val siblings = if (item.seriesId.isNotEmpty()) completed()
@@ -528,12 +532,23 @@ class OfflineRepository private constructor(context: Context) {
         db.writableDatabase.delete("outbox", "event_key IN ($placeholders)", keys.toTypedArray())
     }
 
-    private fun progress(itemId: String): Pair<Long, Long>? {
-        db.readableDatabase.rawQuery(
-            "SELECT position_ms,duration_ms FROM progress WHERE user_id=? AND item_id=?",
-            arrayOf(HubSettings.userId(app), itemId)
-        ).use { if (it.moveToFirst()) return it.getLong(0) to it.getLong(1) }
-        return null
+    private fun progress(itemId: String): OfflineCatalogProgress? = playbackProgress(listOf(itemId))[itemId]
+
+    /**
+     * Takes the server's newer watch in place of this device's own, without
+     * queueing it for sync -- the server already has it. Every offline screen
+     * then agrees with what playback will do.
+     */
+    @Synchronized
+    fun adoptServerWatch(itemId: String, server: OfflineCatalogProgress) {
+        val current = progress(itemId)
+        if (server.updatedAtMillis <= 0 || (current != null && OfflineCatalogProgress.newer(current, server) === current)) return
+        db.writableDatabase.insertWithOnConflict("progress", null, ContentValues().apply {
+            put("item_id", itemId); put("user_id", HubSettings.userId(app))
+            put("position_ms", server.positionMillis); put("duration_ms", server.durationMillis)
+            put("updated_at", server.updatedAtMillis)
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+        changed()
     }
 
     private fun downloadsForBatch(batchId: String) = queryDownloads(

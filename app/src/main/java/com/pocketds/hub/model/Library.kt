@@ -62,6 +62,8 @@ data class LibraryItem(
     val unplayedCount: Int = 0,
     val progress: Double = 0.0,
     val positionSeconds: Int = 0,
+    /** When this user last watched it, Unix millis; 0 when unknown or from an older hub. */
+    val lastPlayedAt: Long = 0,
     val poster: String = "",
     val thumb: String = "",
     val backdrop: String = ""

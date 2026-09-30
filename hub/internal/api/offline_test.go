@@ -306,10 +306,15 @@ func TestOfflineProgressIsIdempotentAndDoesNotOverwriteNewerServerState(t *testi
 	}
 	upstream.mu.Unlock()
 
-	upstream.lastPlayedDate = time.Now().Add(time.Minute).Format(time.RFC3339Nano)
+	serverWatch := time.Now().Add(time.Minute).UTC()
+	upstream.lastPlayedDate = serverWatch.Format(time.RFC3339Nano)
 	newerBody := strings.Replace(body, "watch-1", "watch-2", 1)
 	newer := playbackRequest(handler, http.MethodPost, "/v1/offline/progress/sync", newerBody, playbackUserID)
 	if newer.Code != http.StatusOK || !strings.Contains(newer.Body.String(), `"status":"server_newer"`) {
 		t.Fatalf("newer sync = %d %s", newer.Code, newer.Body.String())
+	}
+	// The handheld adopts the server's watch, so it needs to know when it was.
+	if !strings.Contains(newer.Body.String(), `"serverLastPlayedAt":`+strconv.FormatInt(serverWatch.UnixMilli(), 10)) {
+		t.Fatalf("server_newer did not say when the server watch happened: %s", newer.Body.String())
 	}
 }

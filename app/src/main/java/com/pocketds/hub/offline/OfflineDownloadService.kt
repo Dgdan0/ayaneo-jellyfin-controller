@@ -424,7 +424,16 @@ class OfflineDownloadService : Service() {
             val events = repository.outbox()
             if (events.isEmpty()) return
             when (val result = api.syncOfflineProgress(OfflineProgressSyncBody(events))) {
-                is HubResult.Ok -> repository.removeOutbox(result.value.results.map { it.clientEventKey })
+                is HubResult.Ok -> {
+                    val durations = events.associate { it.clientEventKey to it.durationMillis }
+                    result.value.results.filter { it.status == "server_newer" && it.serverLastPlayedAt > 0 }.forEach {
+                        repository.adoptServerWatch(it.itemId, OfflineCatalogProgress.fromServer(
+                            it.serverPositionMillis, durations[it.clientEventKey] ?: 0L,
+                            it.serverPlayed, it.serverLastPlayedAt
+                        ))
+                    }
+                    repository.removeOutbox(result.value.results.map { it.clientEventKey })
+                }
                 is HubResult.Failed -> {
                     DebugLog.log("offline", "progress sync failed: ${result.message}")
                     return

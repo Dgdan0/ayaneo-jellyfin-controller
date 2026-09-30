@@ -61,6 +61,31 @@ class OfflineCatalogTest {
         assertEquals(OfflineCatalogPlayTarget.Kind.NEXT, next?.kind)
     }
 
+    @Test
+    fun `a later watch on the server replaces an older one from this device`() {
+        // Downloaded, watched to 20 minutes offline, then carried on to 60 on the TV.
+        val local = OfflineCatalogProgress(1_200_000, 7_200_000, 1_000)
+        val server = OfflineCatalogProgress.fromServer(3_600_000, 7_200_000, played = false, lastPlayedAt = 2_000)
+        assertEquals(3_600_000L, OfflineCatalogProgress.newer(local, server).resumePosition())
+    }
+
+    @Test
+    fun `this device keeps its own watch when it is the later one`() {
+        val local = OfflineCatalogProgress(1_200_000, 7_200_000, 3_000)
+        val server = OfflineCatalogProgress.fromServer(3_600_000, 7_200_000, played = false, lastPlayedAt = 2_000)
+        assertEquals(local, OfflineCatalogProgress.newer(local, server))
+        // An older hub sends no date, which never wins.
+        assertEquals(local, OfflineCatalogProgress.newer(local, server.copy(updatedAtMillis = 0)))
+        assertEquals(local, OfflineCatalogProgress.newer(local, null))
+    }
+
+    @Test
+    fun `a server watch that finished the item starts it over`() {
+        val server = OfflineCatalogProgress.fromServer(0, 7_200_000, played = true, lastPlayedAt = 2_000)
+        assertTrue(server.isComplete())
+        assertEquals(0L, server.resumePosition())
+    }
+
     private fun episode(
         id: String,
         seriesId: String,

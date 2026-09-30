@@ -33,6 +33,21 @@ data class OfflineCatalogProgress(
     fun isComplete(): Boolean = ResumeRules.isFinished(positionMillis, durationMillis)
 
     fun resumePosition(): Long = ResumeRules.resumePosition(positionMillis, durationMillis)
+
+    companion object {
+        /** The server's view of a watch, in the same shape; a played item sits at its end. */
+        fun fromServer(positionMillis: Long, durationMillis: Long, played: Boolean, lastPlayedAt: Long) =
+            OfflineCatalogProgress(if (played) durationMillis else positionMillis, durationMillis, lastPlayedAt)
+
+        /**
+         * A download keeps its own watch unless the server saw a later one --
+         * someone carried on on the TV after downloading, or after the last
+         * offline session. Without a server date the local watch stands, which
+         * is also what an older hub gets.
+         */
+        fun newer(local: OfflineCatalogProgress, server: OfflineCatalogProgress?): OfflineCatalogProgress =
+            if (server != null && server.updatedAtMillis > local.updatedAtMillis) server else local
+    }
 }
 
 /** Pure catalog shaping shared by the UI and JVM tests. */

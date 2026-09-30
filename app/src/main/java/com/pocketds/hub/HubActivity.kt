@@ -51,6 +51,7 @@ import com.pocketds.hub.playback.PlaybackOptionsScreen
 import com.pocketds.hub.playback.PlaybackService
 import com.pocketds.hub.playback.PlayerScreen
 import com.pocketds.hub.offline.OfflineDownloadService
+import com.pocketds.hub.offline.OfflineCatalogProgress
 import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.screens.offline.OfflineSelectionScreen
 import com.pocketds.hub.screens.offline.OfflineScreen
@@ -76,6 +77,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The one Activity.
@@ -136,6 +138,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private lateinit var api: HubApi
     private lateinit var offlineRoot: OfflineScreen
     private val chromeScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /** A second press while the server position is being checked opens nothing twice. */
+    private val localPlanCheck = com.pocketds.hub.state.JobSlot()
     private var notificationBadgeJob: Job? = null
 
     private val sectionItems = listOf(
@@ -833,15 +837,41 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             return
         }
         if (player.isOpen) closeTrailer()
-        val local = OfflineRepository.get(this).playbackPlan(itemId, startMode)
-        push(PlayerScreen(api, itemId, startMode, local, ::ringVisible))
+        withLocalPlan(itemId, startMode) { local ->
+            push(PlayerScreen(api, itemId, startMode, local, ::ringVisible))
+        }
     }
 
     override fun openPlaybackOptions(itemId: String, startMode: String) {
         if (itemId.isEmpty()) return
         if (player.isOpen) closeTrailer()
-        val local = OfflineRepository.get(this).playbackPlan(itemId, startMode)
-        push(PlaybackOptionsScreen(api, itemId, startMode, ::ringVisible, local))
+        withLocalPlan(itemId, startMode) { local ->
+            push(PlaybackOptionsScreen(api, itemId, startMode, ::ringVisible, local))
+        }
+    }
+
+    /**
+     * A download plays from the file even when the hub is reachable, so before
+     * resuming one this asks the hub -- for at most two seconds, since an
+     * unreachable hub is the usual reason to play a download -- whether it was
+     * watched further elsewhere since. It used to reopen at the position from
+     * download time or the last offline session, behind a later watch on the TV.
+     */
+    private fun withLocalPlan(itemId: String, startMode: String, open: (PlaybackPrepareResponse?) -> Unit) {
+        val repository = OfflineRepository.get(this)
+        if (startMode != "resume" || repository.playbackPlan(itemId, startMode) == null) {
+            open(repository.playbackPlan(itemId, startMode))
+            return
+        }
+        localPlanCheck.launch(chromeScope) {
+            val server = withTimeoutOrNull(2_000L) { api.libraryItem(itemId) }
+            (server as? com.pocketds.hub.net.HubResult.Ok)?.value?.item?.takeIf { it.lastPlayedAt > 0 }?.let { item ->
+                repository.adoptServerWatch(itemId, OfflineCatalogProgress.fromServer(
+                    item.positionSeconds * 1_000L, item.runtimeSeconds * 1_000L, item.played, item.lastPlayedAt
+                ))
+            }
+            open(repository.playbackPlan(itemId, startMode))
+        }
     }
 
     override fun playPrepared(plan: PlaybackPrepareResponse) {

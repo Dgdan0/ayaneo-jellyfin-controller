@@ -1,6 +1,9 @@
 package jellyfin
 
-import "strconv"
+import (
+	"strconv"
+	"time"
+)
 
 // Jellyfin's wire format, trimmed to what this project uses.
 //
@@ -294,6 +297,20 @@ func (i Item) PositionSeconds() int {
 		return 0
 	}
 	return int(i.UserData.PlaybackPositionTicks / TicksPerSecond)
+}
+
+// LastPlayedMillis is when the user last watched this, as Unix milliseconds,
+// or 0 when Jellyfin has no date. It is what decides whether a position on the
+// server is newer than one saved by a download on the handheld.
+func (i Item) LastPlayedMillis() int64 {
+	if i.UserData == nil || i.UserData.LastPlayedDate == "" {
+		return 0
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, i.UserData.LastPlayedDate)
+	if err != nil {
+		return 0
+	}
+	return parsed.UnixMilli()
 }
 
 // Progress is 0..1, or 0 when there is nothing to report.

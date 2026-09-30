@@ -103,6 +103,10 @@ type OfflineProgressResult struct {
 	ItemID               string `json:"itemId"`
 	Status               string `json:"status"` // applied | server_newer | duplicate
 	ServerPositionMillis int64  `json:"serverPositionMillis,omitempty"`
+	// For server_newer: what the handheld should adopt in place of its own
+	// older position, so its offline screens stop offering it.
+	ServerPlayed       bool  `json:"serverPlayed,omitempty"`
+	ServerLastPlayedAt int64 `json:"serverLastPlayedAt,omitempty"`
 }
 
 type OfflineProgressSyncResponse struct {
@@ -491,15 +495,11 @@ func (s *Server) handleOfflineProgressSync(w http.ResponseWriter, r *http.Reques
 			writeUpstreamError(w, r, "jellyfin", err)
 			return
 		}
-		serverTime := int64(0)
-		if item.UserData != nil && item.UserData.LastPlayedDate != "" {
-			if parsed, parseErr := time.Parse(time.RFC3339Nano, item.UserData.LastPlayedDate); parseErr == nil {
-				serverTime = parsed.UnixMilli()
-			}
-		}
 		result.ServerPositionMillis = int64(item.PositionSeconds()) * 1000
-		if serverTime > event.OccurredAt {
+		if item.LastPlayedMillis() > event.OccurredAt {
 			result.Status = "server_newer"
+			result.ServerPlayed = item.UserData != nil && item.UserData.Played
+			result.ServerLastPlayedAt = item.LastPlayedMillis()
 			if err := s.offline.markSynced(receipt, time.Now().UnixMilli()); err != nil {
 				writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "could not persist sync receipt"})
 				return

@@ -46,9 +46,13 @@ type LibraryItem struct {
 	UnplayedCount   int                   `json:"unplayedCount,omitempty"`
 	Progress        float64               `json:"progress,omitempty"`
 	PositionSeconds int                   `json:"positionSeconds,omitempty"`
-	Poster          string                `json:"poster,omitempty"`
-	Thumb           string                `json:"thumb,omitempty"`
-	Backdrop        string                `json:"backdrop,omitempty"`
+	// LastPlayedAt is Unix milliseconds. A downloaded copy compares it with its
+	// own last watch, so it does not reopen at a position the server has since
+	// moved past on another device.
+	LastPlayedAt int64  `json:"lastPlayedAt,omitempty"`
+	Poster       string `json:"poster,omitempty"`
+	Thumb        string `json:"thumb,omitempty"`
+	Backdrop     string `json:"backdrop,omitempty"`
 }
 
 type LibraryPerson struct {
@@ -399,7 +403,7 @@ func libraryItemFrom(item jellyfin.Item) LibraryItem {
 		OriginalTitle: item.OriginalTitle, PremiereDate: item.PremiereDate,
 		RuntimeSeconds: item.RuntimeSeconds(), Rating: item.CommunityRating,
 		CriticRating: item.CriticRating, OfficialRating: item.OfficialRating, Genres: item.Genres,
-		Progress: item.Progress(), PositionSeconds: item.PositionSeconds(),
+		Progress: item.Progress(), PositionSeconds: item.PositionSeconds(), LastPlayedAt: item.LastPlayedMillis(),
 		Studios: []string{}, People: []LibraryPerson{}, MediaVersions: []LibraryMediaVersion{},
 	}
 	if item.ProviderIds != nil && item.ProviderIds.Tmdb != "" && (item.Type == "Movie" || item.Type == "Series") {
