@@ -914,7 +914,7 @@ class LibraryDetailScreen(
         override fun onBindViewHolder(holder: SeasonHolder, position: Int) {
             val value = values[position]
             holder.title.text = value.title.ifEmpty {
-                if (value.seasonNumber == 0) "Specials" else "Season ${value.seasonNumber}"
+                EpisodeLabel.season(value.seasonNumber)
             }
             holder.meta.text = when {
                 value.played -> "Watched"
@@ -963,7 +963,7 @@ class EpisodesScreen(
     private val ringVisible: () -> Boolean
 ) : Screen {
     override val title = season.title.ifEmpty {
-        if (season.seasonNumber == 0) "Specials" else "Season ${season.seasonNumber}"
+        EpisodeLabel.season(season.seasonNumber)
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

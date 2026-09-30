@@ -199,7 +199,7 @@ class OfflineSelectionScreen(
                 addView(seasonPoster, LinearLayout.LayoutParams(dp(36), dp(52)).apply { marginEnd = dp(9) })
                 addView(TextView(context).apply {
                     text = season.season.title.ifBlank {
-                        if (season.season.seasonNumber == 0) "Specials" else "Season ${season.season.seasonNumber}"
+                        EpisodeLabel.season(season.season.seasonNumber)
                     }
                     textSize = 16f; setTextColor(colors.primaryText)
                 })

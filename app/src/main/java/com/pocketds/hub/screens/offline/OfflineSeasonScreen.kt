@@ -208,7 +208,7 @@ class OfflineSeasonScreen(
         runtimeSeconds > 0 -> Fmt.runtime(runtimeSeconds.toLong())
         else -> "Downloaded"
     }
-    private fun seasonName(number: Int) = if (number == 0) "Specials" else "Season $number"
+    private fun seasonName(number: Int) = EpisodeLabel.season(number)
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
     private data class TaggedEpisode(val row: OfflineDownload)
     private companion object { const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT }

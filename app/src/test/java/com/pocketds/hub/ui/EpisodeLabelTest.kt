@@ -12,6 +12,12 @@ class EpisodeLabelTest {
     }
 
     @Test
+    fun `season zero is specials`() {
+        assertEquals("Specials", EpisodeLabel.season(0))
+        assertEquals("Season 3", EpisodeLabel.season(3))
+    }
+
+    @Test
     fun `specials and unnumbered episodes still read cleanly`() {
         assertEquals("S0E2 · Behind the Scenes", EpisodeLabel.of(0, 2, "Behind the Scenes"))
         assertEquals("Pilot", EpisodeLabel.of(0, 0, "Pilot"))

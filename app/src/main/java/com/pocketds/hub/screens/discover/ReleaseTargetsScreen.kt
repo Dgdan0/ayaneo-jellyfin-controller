@@ -1,6 +1,7 @@
 package com.pocketds.hub.screens.discover
 
 import com.pocketds.hub.ui.Artwork
+import com.pocketds.hub.ui.DetailArtworkCardView
 import com.pocketds.hub.ui.EpisodeCardView
 import com.pocketds.hub.ui.EpisodeLabel
 import android.view.Gravity
@@ -78,8 +79,8 @@ class SeasonReleasePickerScreen(
                 adapter = this@SeasonReleasePickerScreen.adapter
                 clipToPadding = false
                 clipChildren = false
-                setPadding(dp(16), dp(16), dp(16), dp(84))
-                layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
+                setPadding(dp(16), dp(16), dp(16), dp(16))
+                layoutParams = LinearLayout.LayoutParams(MATCH, WRAP)
             }
             addView(list)
         }
@@ -125,71 +126,35 @@ class SeasonReleasePickerScreen(
     private inner class SeasonTargetAdapter : RecyclerView.Adapter<SeasonHolder>() {
         override fun getItemCount() = seasons.size
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SeasonHolder {
-            lateinit var art: ImageView
-            lateinit var label: TextView
-            lateinit var meta: TextView
-            val card = LinearLayout(parent.context).apply {
-                orientation = LinearLayout.VERTICAL
-                background = Styler.cardBackground(context, colors)
-                Styler.makeFocusable(this)
-                descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-                setPadding(dp(7), dp(7), dp(7), dp(10))
-                layoutParams = RecyclerView.LayoutParams(dp(172), dp(282)).apply {
-                    setMargins(dp(8), dp(8), dp(8), dp(8))
-                }
-                art = ImageView(context).apply {
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    setBackgroundColor(colors.posterPlaceholder)
-                }
-                addView(art, LinearLayout.LayoutParams(MATCH, dp(224)))
-                label = TextView(context).apply {
-                    textSize = 15f
-                    maxLines = 1
-                    gravity = Gravity.CENTER
-                    setTextColor(colors.primaryText)
-                    setPadding(dp(3), dp(7), dp(3), 0)
-                }
-                addView(label, LinearLayout.LayoutParams(MATCH, WRAP))
-                meta = TextView(context).apply {
-                    textSize = 11f
-                    maxLines = 1
-                    gravity = Gravity.CENTER
-                    setTextColor(colors.mutedText)
-                }
-                addView(meta, LinearLayout.LayoutParams(MATCH, WRAP))
-                FocusDecorator.attach(this, ringVisible)
-                setOnFocusChangeListener { _, focused ->
-                    FocusDecorator.refresh(this, ringVisible())
+            // The same season card as a Library series page.
+            val card = DetailArtworkCardView(parent.context, colors, ringVisible).apply {
+                layoutParams = RecyclerView.LayoutParams(dp(112), WRAP).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) }
+                setOnFocusChangeListener { view, focused ->
+                    FocusDecorator.refresh(view, ringVisible())
                     if (focused) {
-                        selected = list.getChildAdapterPosition(this)
+                        selected = list.getChildAdapterPosition(view)
                         host?.refreshHints()
                     }
                 }
                 activateOnTap { focusedSeason()?.let(::open) }
             }
-            return SeasonHolder(card, art, label, meta)
+            return SeasonHolder(card)
         }
 
         override fun onBindViewHolder(holder: SeasonHolder, position: Int) {
             val value = seasons[position]
-            holder.title.text = value.name.ifEmpty {
-                if (value.number == 0) "Specials" else "Season ${value.number}"
-            }
-            holder.meta.text = buildList {
+            holder.card.titleView.text = value.name.ifEmpty { EpisodeLabel.season(value.number) }
+            holder.card.subtitleView.text = buildList {
                 add("${value.episodeCount} episodes")
                 if (value.year > 0) add(value.year.toString())
             }.joinToString(" · ")
-            loadImage(holder.art, value.image.ifEmpty { fallbackPoster })
+            holder.card.contentDescription = "${holder.card.titleView.text}, ${holder.card.subtitleView.text}"
+            loadImage(holder.card.image, value.image.ifEmpty { fallbackPoster })
             holder.itemView.activateOnTap { open(value) }
         }
     }
 
-    private data class SeasonHolder(
-        val root: View,
-        val art: ImageView,
-        val title: TextView,
-        val meta: TextView
-    ) : RecyclerView.ViewHolder(root)
+    private class SeasonHolder(val card: DetailArtworkCardView) : RecyclerView.ViewHolder(card)
 
     private fun loadImage(view: ImageView, path: String) =
         Artwork.bindHub(view, api, path, opaque = true, placeholderColor = colors.posterPlaceholder)
@@ -274,7 +239,7 @@ class ReleaseTargetsScreen(
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(13), 0, 0, 0)
                     seasonTitle = TextView(context).apply {
-                        text = if (seasonNumber == 0) "Specials" else "Season $seasonNumber"
+                        text = EpisodeLabel.season(seasonNumber)
                         textSize = 17f
                         setTextColor(colors.primaryText)
                     }
@@ -365,7 +330,7 @@ class ReleaseTargetsScreen(
     private fun render(next: ReleaseTargetsResponse) {
         body = next
         seasonTitle.text = next.seasonTitle.ifEmpty {
-            if (seasonNumber == 0) "Specials" else "Season $seasonNumber"
+            EpisodeLabel.season(seasonNumber)
         }
         loadImage(seasonArt, next.seasonImage.ifEmpty { fallbackSeasonImage })
         adapter.submit(next.episodes)

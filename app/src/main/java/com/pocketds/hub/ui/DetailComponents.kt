@@ -285,6 +285,10 @@ class DetailArtworkCardView(context: Context, private val colors: PocketColors, 
         minimumHeight = dp(DetailLayout.posterCardHeight(156, resources.configuration.fontScale))
         FocusDecorator.attach(this, ringVisible)
     }
+    /** Always its natural height, like [EpisodeCardView]: a short row squashed the title to a sliver. */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) =
+        super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+
     fun artworkHeight(heightDp: Int) {
         image.layoutParams = image.layoutParams.apply { height = dp(heightDp) }
         minimumHeight = dp(DetailLayout.posterCardHeight(heightDp, resources.configuration.fontScale))

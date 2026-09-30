@@ -268,7 +268,7 @@ class OfflineSeriesScreen(
     private fun resumeMode(target: OfflineCatalogPlayTarget) = if (target.kind == OfflineCatalogPlayTarget.Kind.RESUME) "resume" else "restart"
     private fun episodeCode(item: com.pocketds.hub.model.LibraryItem) =
         EpisodeLabel.code(item.seasonNumber, item.indexNumber).ifEmpty { item.title }
-    private fun seasonName(number: Int) = if (number == 0) "Specials" else "Season $number"
+    private fun seasonName(number: Int) = EpisodeLabel.season(number)
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
     private sealed interface TaggedKey { val key: String }
     private data class TaggedTarget(val target: OfflineCatalogPlayTarget, override val key: String = "play") : TaggedKey

@@ -15,6 +15,9 @@ object EpisodeLabel {
     fun of(season: Int, episode: Int, title: String): String =
         listOf(code(season, episode), title).filter(String::isNotBlank).joinToString(" · ")
 
+    /** Season 0 is where Jellyfin and Sonarr keep specials. */
+    fun season(number: Int): String = if (number == 0) "Specials" else "Season $number"
+
     /** "S1E4", or empty when the episode has no number. */
     fun code(season: Int, episode: Int): String =
         if (season > 0 || episode > 0) "S${season}E$episode" else ""
