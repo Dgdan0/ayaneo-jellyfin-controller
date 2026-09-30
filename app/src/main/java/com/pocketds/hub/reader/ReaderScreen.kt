@@ -561,13 +561,13 @@ class ReaderScreen(
     private fun buildAppearance(panel: LinearLayout) {
         panel.sheetHeading("Appearance", "Changes apply without reopening the publication.")
         if (engine.profile in setOf(ReaderProfile.BOOK, ReaderProfile.READ_ALONG)) {
-            panel.sheetOption("White page", if (pageTheme == PageTheme.WHITE) "Selected" else "") {
+            panel.sheetOption("White page", "", selected = pageTheme == PageTheme.WHITE) {
                 pageTheme = PageTheme.WHITE; render(); showSheet(ReaderOverlay.APPEARANCE)
             }
-            panel.sheetOption("Sepia page", if (pageTheme == PageTheme.SEPIA) "Selected" else "") {
+            panel.sheetOption("Sepia page", "", selected = pageTheme == PageTheme.SEPIA) {
                 pageTheme = PageTheme.SEPIA; render(); showSheet(ReaderOverlay.APPEARANCE)
             }
-            panel.sheetOption("Dark page", if (pageTheme == PageTheme.DARK) "Selected" else "") {
+            panel.sheetOption("Dark page", "", selected = pageTheme == PageTheme.DARK) {
                 pageTheme = PageTheme.DARK; render(); showSheet(ReaderOverlay.APPEARANCE)
             }
             panel.sheetOption("Columns", if (twoColumns) "Two columns" else "One column") {
@@ -577,7 +577,7 @@ class ReaderScreen(
                 host.notify("Font and spacing controls arrive with the EPUB navigator")
             }
         } else {
-            panel.sheetOption("Fit screen", "Selected") { host.notify("Fit screen") }
+            panel.sheetOption("Fit screen", "", selected = true) { host.notify("Fit screen") }
             panel.sheetOption("Fit width", "Keep manual zoom per orientation") { host.notify("Fit width") }
             panel.sheetOption("Reading direction", if (engine.profile == ReaderProfile.MANGA) "Right to left" else "Left to right") {
                 host.notify("Direction remains scoped to this series")
@@ -626,15 +626,17 @@ class ReaderScreen(
         })
     }
 
-    private fun LinearLayout.sheetOption(title: String, detail: String, click: () -> Unit) {
+    /** [selected] draws the same check mark as the shared menus, not the word "Selected". */
+    private fun LinearLayout.sheetOption(title: String, detail: String, selected: Boolean = false, click: () -> Unit) {
         val option = TextView(context).apply {
-            text = if (detail.isBlank()) title else "$title\n$detail"
+            val heading = if (selected) "$title  ✓" else title
+            text = if (detail.isBlank()) heading else "$heading\n$detail"
             textSize = 14f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), dp(8), dp(14), dp(8))
             background = darkCardBackground()
-            contentDescription = if (detail.isBlank()) title else "$title. $detail"
+            contentDescription = listOf(title, detail, if (selected) "selected" else "").filter(String::isNotBlank).joinToString(". ")
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
             activateOnTap(click)

@@ -768,7 +768,7 @@ class EpubReaderScreen(
         overlay.show("Narration", "Recorded audiobook · synchronized text", listOf(
             ChoiceOverlay.Choice("here", "Listen from this page", "Moves the narration to the first visible aligned sentence"),
             ChoiceOverlay.Choice("follow", "Return to narration", "Show the sentence currently being read")
-        ) + listOf(.75f, 1f, 1.25f, 1.5f, 1.75f, 2f).map { ChoiceOverlay.Choice("speed:$it", "${it}× speed", if (audio.speed == it) "Selected" else "") }) { id ->
+        ) + listOf(.75f, 1f, 1.25f, 1.5f, 1.75f, 2f).map { ChoiceOverlay.Choice("speed:$it", "${it}× speed", selected = audio.speed == it) }) { id ->
             when {
                 id.startsWith("speed:") -> audio.speed = id.removePrefix("speed:").toFloat()
                 id == "follow" -> highlightNarration(audio.timeline.active(audio.position.track, audio.position.offsetMs))

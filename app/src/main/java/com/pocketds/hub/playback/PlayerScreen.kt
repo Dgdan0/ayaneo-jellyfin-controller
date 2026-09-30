@@ -1245,16 +1245,12 @@ class PlayerScreen(
     }
 
     private fun showSubtitleAppearanceSheet() {
-        val choices = PlaybackEnhancements.subtitleAppearances.map { appearance ->
-            ChoiceOverlay.Choice(
-                appearance.name,
-                subtitleAppearanceLabel(appearance),
-                if (appearance == subtitleAppearance) "Selected" else ""
-            )
-        }
-        val selected = choices.indexOfFirst { it.id == subtitleAppearance.name }.coerceAtLeast(0)
-        choiceOverlay.show("Subtitle appearance", "Changes apply without reloading the video.", choices, selected, ::showControls) { id ->
-            subtitleAppearance = SubtitleAppearance.valueOf(id)
+        choiceOverlay.pickValue(
+            "Subtitle appearance", "Changes apply without reloading the video.",
+            PlaybackEnhancements.subtitleAppearances, subtitleAppearance, ::subtitleAppearanceLabel,
+            onCancel = ::showControls
+        ) { picked ->
+            subtitleAppearance = picked
             applySubtitleAppearance()
             showControls()
         }
@@ -1411,12 +1407,11 @@ class PlayerScreen(
     }
 
     private fun showSpeedSheet() {
-        val choices = PlaybackEnhancements.speeds.map { speed ->
-            ChoiceOverlay.Choice(speed.toString(), speedLabel(speed), if (speed == playbackSpeed) "Selected" else "")
-        }
-        val selected = choices.indexOfFirst { it.id == playbackSpeed.toString() }.coerceAtLeast(0)
-        choiceOverlay.show("Playback speed", "Changes apply without reloading the video.", choices, selected, ::showControls) { id ->
-            playbackSpeed = id.toFloat()
+        choiceOverlay.pickValue(
+            "Playback speed", "Changes apply without reloading the video.",
+            PlaybackEnhancements.speeds, playbackSpeed, ::speedLabel, onCancel = ::showControls
+        ) { picked ->
+            playbackSpeed = picked
             controller?.setPlaybackSpeed(playbackSpeed)
             showControls()
         }
@@ -1424,12 +1419,11 @@ class PlayerScreen(
     }
 
     private fun showAspectSheet() {
-        val choices = PlaybackAspect.entries.map { aspect ->
-            ChoiceOverlay.Choice(aspect.name, aspectLabel(aspect), if (aspect == playbackAspect) "Selected" else "")
-        }
-        val selected = choices.indexOfFirst { it.id == playbackAspect.name }.coerceAtLeast(0)
-        choiceOverlay.show("Aspect", "Fit keeps the whole picture visible.", choices, selected, ::showControls) { id ->
-            playbackAspect = PlaybackAspect.valueOf(id)
+        choiceOverlay.pickValue(
+            "Aspect", "Fit keeps the whole picture visible.",
+            PlaybackAspect.entries, playbackAspect, ::aspectLabel, onCancel = ::showControls
+        ) { picked ->
+            playbackAspect = picked
             applyAspect()
             showControls()
         }
@@ -1927,11 +1921,6 @@ class PlayerScreen(
     private fun trackDetail(codec: String, channels: Int) = buildList {
         if (codec.isNotEmpty()) add(codec.uppercase())
         if (channels > 0) add("$channels channels")
-    }.joinToString(" · ")
-
-    private fun selectedDetail(detail: String, selected: Boolean): String = buildList {
-        if (selected) add("Selected")
-        if (detail.isNotEmpty()) add(detail)
     }.joinToString(" · ")
 
     private fun sourceDetail(container: String, bitrate: Int) = buildList {

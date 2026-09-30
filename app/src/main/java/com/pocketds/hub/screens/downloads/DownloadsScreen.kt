@@ -646,20 +646,14 @@ class DownloadsScreen(
     }
 
     private fun confirm(item: ActivityItem, choice: ChoiceOverlay.Choice) {
-        overlay.show(
+        overlay.confirm(
             title = choice.label + "?",
             subtitle = item.headline + "\n" + choice.detail,
-            choices = listOf(
-                ChoiceOverlay.Choice("cancel", "Cancel"),
-                ChoiceOverlay.Choice(choice.id, choice.label, danger = true)
-            ),
-            // Cancel is first and starts under the cursor, so the reflex press
-            // after opening this by accident is the harmless one.
-            startIndex = 0,
+            action = choice.label,
             onCancel = { host?.refreshHints() }
-        ) { picked ->
+        ) {
             host?.refreshHints()
-            if (picked != "cancel") run(item, picked)
+            run(item, choice.id)
         }
         host?.refreshHints()
     }

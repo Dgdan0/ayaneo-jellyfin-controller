@@ -178,10 +178,9 @@ class OfflineSeasonScreen(
     }
 
     private fun confirmRemove(download: OfflineDownload) {
-        overlay.show("Remove ${download.manifest.item.title}?", "The local episode and downloaded subtitles will be deleted.",
-            listOf(ChoiceOverlay.Choice("keep", "Keep episode"), ChoiceOverlay.Choice("remove", "Remove", danger = true)),
-            onCancel = host::refreshHints) {
-            if (it == "remove") OfflineDownloadService.remove(host.viewContext, download.id)
+        overlay.confirm("Remove ${download.manifest.item.title}?", "The local episode and downloaded subtitles will be deleted.",
+            action = "Remove", keep = "Keep episode", onCancel = host::refreshHints) {
+            OfflineDownloadService.remove(host.viewContext, download.id)
             host.refreshHints()
         }
         host.refreshHints()

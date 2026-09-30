@@ -412,16 +412,14 @@ class OfflineScreen(
 
     private fun confirmRemoveCatalog(value: OfflineCatalogEntry) {
         val noun = if (value.isSeries) "${value.rows.size} downloaded episodes" else "the downloaded movie"
-        overlay.show(
+        overlay.confirm(
             "Remove ${value.title}?",
-            "$noun will be deleted from this device.",
-            listOf(
-                ChoiceOverlay.Choice("keep", "Keep download"),
-                ChoiceOverlay.Choice("remove", "Remove", danger = true)
-            ),
+            "${noun.replaceFirstChar(Char::uppercase)} will be deleted from this device.",
+            action = "Remove",
+            keep = "Keep download",
             onCancel = host::refreshHints
         ) {
-            if (it == "remove") value.rows.forEach { row ->
+            value.rows.forEach { row ->
                 OfflineDownloadService.remove(host.viewContext, row.id)
             }
             host.refreshHints()
@@ -590,10 +588,9 @@ class OfflineScreen(
     }
 
     private fun confirmRemove(row: OfflineDownload) {
-        overlay.show("Remove ${row.manifest.item.title}?", "The local file and downloaded subtitles will be deleted.",
-            listOf(ChoiceOverlay.Choice("keep", "Keep download"), ChoiceOverlay.Choice("remove", "Remove", danger = true)),
-            onCancel = host::refreshHints
-        ) { if (it == "remove") OfflineDownloadService.remove(host.viewContext, row.id); host.refreshHints() }
+        overlay.confirm("Remove ${row.manifest.item.title}?", "The local file and downloaded subtitles will be deleted.",
+            action = "Remove", keep = "Keep download", onCancel = host::refreshHints
+        ) { OfflineDownloadService.remove(host.viewContext, row.id); host.refreshHints() }
         host.refreshHints()
     }
 

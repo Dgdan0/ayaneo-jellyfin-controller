@@ -13,4 +13,55 @@ class ChoiceOverlay(context:Context,colors:PocketColors,ringVisible:()->Boolean,
         }}
         focusBody(views.getOrNull(startIndex))
     }
+
+    /**
+     * One option per value, the current one checked and under the cursor.
+     *
+     * Speed, aspect, subtitle appearance and narration speed each built this by
+     * hand and wrote the word "Selected" into the detail line, while every other
+     * menu drew the check mark the panel already provides.
+     */
+    fun <T> pickValue(
+        title: String,
+        subtitle: String,
+        values: List<T>,
+        current: T,
+        label: (T) -> String,
+        detail: (T) -> String = { "" },
+        onCancel: () -> Unit = {},
+        onPick: (T) -> Unit
+    ) {
+        val choices = values.mapIndexed { index, value ->
+            Choice(index.toString(), label(value), detail(value), selected = value == current)
+        }
+        show(title, subtitle, choices, values.indexOf(current).coerceAtLeast(0), onCancel) { id ->
+            onPick(values[id.toInt()])
+        }
+    }
+
+    /**
+     * A question with one consequential answer. The harmless answer is first
+     * and starts under the cursor, so the reflex press after opening it by
+     * accident does nothing.
+     */
+    fun confirm(
+        title: String,
+        subtitle: String,
+        action: String,
+        keep: String = "Cancel",
+        actionDetail: String = "",
+        danger: Boolean = true,
+        onCancel: () -> Unit = {},
+        onConfirm: () -> Unit
+    ) = show(
+        title, subtitle,
+        listOf(Choice(KEEP, keep), Choice(CONFIRM, action, actionDetail, danger = danger)),
+        startIndex = 0,
+        onCancel = onCancel
+    ) { if (it == CONFIRM) onConfirm() else onCancel() }
+
+    private companion object {
+        const val KEEP = "keep"
+        const val CONFIRM = "confirm"
+    }
 }

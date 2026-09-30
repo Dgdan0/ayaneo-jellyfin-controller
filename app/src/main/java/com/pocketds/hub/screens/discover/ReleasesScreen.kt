@@ -252,7 +252,7 @@ class ReleasesScreen(
         } else {
             ""
         }
-        overlay.show(
+        overlay.confirm(
             title = release.title,
             subtitle = buildString {
                 append(Fmt.bytes(release.sizeBytes))
@@ -260,27 +260,20 @@ class ReleasesScreen(
                 append(" · ").append(release.seeders).append(" seeders")
                 if (warning.isNotEmpty()) append("\n").append(warning)
             },
-            choices = listOfNotNull(
-                ChoiceOverlay.Choice("cancel", "Cancel"),
-                ChoiceOverlay.Choice(
-                    "grab",
-                    if (release.rejected) "Grab anyway" else "Grab this release",
-                    if (release.rejected) {
-                        // Overriding the profile is the entire point of a manual
-                        // picker, so this is offered rather than blocked -- but
-                        // it is named honestly.
-                        "Overrides what ${'$'}{release.indexer} and your profile decided"
-                    } else {
-                        release.indexer
-                    },
-                    danger = release.rejected
-                )
-            ),
-            startIndex = 0,
+            action = if (release.rejected) "Grab anyway" else "Grab this release",
+            // Overriding the profile is the entire point of a manual picker, so
+            // this is offered rather than blocked -- but it is named honestly.
+            // (It printed a literal "${'$'}{release.indexer}" until 2026-10-01.)
+            actionDetail = if (release.rejected) {
+                "Overrides what ${release.indexer} and your profile decided"
+            } else {
+                release.indexer
+            },
+            danger = release.rejected,
             onCancel = { host?.refreshHints() }
-        ) { picked ->
+        ) {
             host?.refreshHints()
-            if (picked == "grab") grab(release)
+            grab(release)
         }
         host?.refreshHints()
     }
