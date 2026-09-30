@@ -1,6 +1,8 @@
 package com.pocketds.hub.screens.offline
 
 import com.pocketds.hub.ui.Artwork
+import com.pocketds.hub.ui.EpisodeCardView
+import com.pocketds.hub.ui.EpisodeLabel
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -387,58 +389,41 @@ class OfflineSelectionScreen(
 
     private inner class EpisodeCard(parent: ViewGroup, val seasonId: String) {
         lateinit var item: OfflineSelectionItem
-        private val image: ImageView
-        private val marker: TextView
-        private val title: TextView
-        private val meta: TextView
-        val view = FrameLayout(parent.context).apply {
-            background = Styler.cardBackground(context, colors)
-            Styler.makeFocusable(this); descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-            layoutParams = RecyclerView.LayoutParams(dp(224), dp(180)).apply { marginEnd = dp(9); topMargin = dp(3) }
-            image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-            addView(image, FrameLayout.LayoutParams(MATCH, dp(118)))
-            marker = TextView(context).apply {
-                gravity = Gravity.CENTER; textSize = 16f; setTextColor(colors.primaryText)
-                background = Styler.cardBackground(context, colors, cornerDp = 16f)
-            }
-            addView(marker, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.TOP or Gravity.END).apply {
-                topMargin = dp(7); marginEnd = dp(7)
-            })
-            val labels = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(5), dp(8), dp(5))
-                title = TextView(context).apply { textSize = 13f; maxLines = 1; setTextColor(colors.primaryText) }
-                addView(title)
-                meta = TextView(context).apply { textSize = 10f; maxLines = 1; setTextColor(colors.mutedText) }
-                addView(meta)
-            }
-            addView(labels, FrameLayout.LayoutParams(MATCH, dp(62), Gravity.BOTTOM))
-            FocusDecorator.attach(this, ringVisible, scale = false)
-            setOnFocusChangeListener { focused, _ -> FocusDecorator.refresh(focused, ringVisible()); host.refreshHints() }
-            activateOnTap { if (::item.isInitialized && item.available) toggle(item.item.id) }
+        val view = EpisodeCardView(parent.context, colors, ringVisible, compact = true).apply {
+            layoutParams = RecyclerView.LayoutParams(dp(EpisodeCardView.COMPACT_WIDTH_DP), WRAP)
+                .apply { marginEnd = dp(9); topMargin = dp(3) }
+            onFocused = { host.refreshHints() }
+            onActivate = { if (::item.isInitialized && item.available) toggle(item.item.id) }
         }
 
         fun bind(value: OfflineSelectionItem) {
             item = value
-            title.text = if (value.item.indexNumber > 0) "E${value.item.indexNumber} · ${value.item.title}" else value.item.title
             val local = OfflineRepository.get(host.viewContext).forItem(value.item.id)
-            meta.text = if (value.available) {
-                buildList {
-                    add(Fmt.bytes(value.estimatedSizeBytes))
-                    if (local != null) add(local.state.wire.replaceFirstChar { it.uppercase() })
-                    if (value.item.played) add("Watched") else if (value.item.progress > 0) add("${(value.item.progress * 100).toInt()}% watched")
-                }.joinToString(" · ")
-            } else "Unavailable"
-            view.alpha = if (value.available) 1f else .45f
+            view.bind(
+                EpisodeCardView.Model(
+                    title = EpisodeLabel.of(value.item.seasonNumber, value.item.indexNumber, value.item.title),
+                    meta = if (value.available) {
+                        buildList {
+                            add(Fmt.bytes(value.estimatedSizeBytes))
+                            if (local != null) add(local.state.wire.replaceFirstChar { it.uppercase() })
+                            if (value.item.played) add("Watched") else if (value.item.progress > 0) add("${(value.item.progress * 100).toInt()}% watched")
+                        }.joinToString(" · ")
+                    } else "Unavailable",
+                    still = api.imageUrl(value.item.thumb.ifEmpty { value.item.poster }).takeIf(String::isNotEmpty),
+                    progress = if (value.item.played) 0.0 else value.item.progress,
+                    available = value.available
+                ),
+                Artwork.loader(api, view.context)
+            )
             view.isEnabled = value.available
-            loadImage(image, value.item.thumb.ifEmpty { value.item.poster })
             render(value.item.id in selected)
         }
 
         fun render(isSelected: Boolean) {
             val stored = ::item.isInitialized && alreadyStored(item.item.id)
-            marker.text = if (isSelected || stored) "✓" else "○"
-            marker.setTextColor(if (isSelected || stored) colors.accent else colors.mutedText)
-            view.contentDescription = "${title.text}, ${when { stored -> "already downloaded or queued"; isSelected -> "selected"; else -> "not selected" }}"
+            view.setMarked(isSelected || stored)
+            view.contentDescription = "${EpisodeLabel.of(item.item.seasonNumber, item.item.indexNumber, item.item.title)}, " +
+                when { stored -> "already downloaded or queued"; isSelected -> "selected"; else -> "not selected" }
         }
     }
 

@@ -1,6 +1,7 @@
 package com.pocketds.hub.screens.offline
 
 import com.pocketds.hub.ui.Artwork
+import com.pocketds.hub.ui.EpisodeLabel
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -266,7 +267,7 @@ class OfflineSeriesScreen(
     }
     private fun resumeMode(target: OfflineCatalogPlayTarget) = if (target.kind == OfflineCatalogPlayTarget.Kind.RESUME) "resume" else "restart"
     private fun episodeCode(item: com.pocketds.hub.model.LibraryItem) =
-        if (item.indexNumber > 0) "S${item.seasonNumber} E${item.indexNumber}" else item.title
+        EpisodeLabel.code(item.seasonNumber, item.indexNumber).ifEmpty { item.title }
     private fun seasonName(number: Int) = if (number == 0) "Specials" else "Season $number"
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
     private sealed interface TaggedKey { val key: String }

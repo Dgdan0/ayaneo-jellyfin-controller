@@ -3,6 +3,8 @@ package com.pocketds.hub.screens.library
 import com.pocketds.hub.ui.ProgressLine
 import com.pocketds.hub.ui.ProgressLine.showFraction
 import com.pocketds.hub.ui.Artwork
+import com.pocketds.hub.ui.EpisodeCardView
+import com.pocketds.hub.ui.EpisodeLabel
 import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
@@ -795,9 +797,8 @@ class LibraryDetailScreen(
 
     private fun seriesActionLabel(target: SeriesPlayTargetResponse): String {
         val episode = target.item
-        val code = if (episode.seasonNumber > 0 && episode.indexNumber > 0) {
-            " S${episode.seasonNumber}E${episode.indexNumber}"
-        } else ""
+        val code = EpisodeLabel.code(episode.seasonNumber, episode.indexNumber).takeIf { it.isNotEmpty() }
+            ?.let { " $it" }.orEmpty()
         return when (target.kind) {
             "resume" -> "Resume$code"
             "next" -> "Play next episode$code"
@@ -1190,79 +1191,37 @@ class EpisodesScreen(
         }
         override fun getItemCount() = values.size
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EpisodeHolder {
-            lateinit var image: ImageView
-            lateinit var title: TextView
-            lateinit var meta: TextView
-            lateinit var overview: TextView
-            lateinit var progress: ProgressBar
-            val row = LinearLayout(parent.context).apply {
-                orientation = LinearLayout.VERTICAL
-                background = Styler.cardBackground(context, colors)
-                Styler.makeFocusable(this)
-                descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-                setPadding(dp(7), dp(7), dp(7), dp(10))
-                layoutParams = RecyclerView.LayoutParams(dp(270), dp(242)).apply {
-                    setMargins(dp(8), dp(8), dp(8), dp(8))
-                }
-                image = ImageView(context).apply {
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    setBackgroundColor(colors.posterPlaceholder)
-                }
-                addView(image, LinearLayout.LayoutParams(MATCH, dp(144)))
-                title = TextView(context).apply {
-                    textSize = 15f
-                    setTextColor(colors.primaryText)
-                    maxLines = 1
-                    setPadding(dp(4), dp(7), dp(4), 0)
-                }
-                addView(title, LinearLayout.LayoutParams(MATCH, WRAP))
-                meta = TextView(context).apply {
-                    textSize = 11f
-                    setTextColor(colors.mutedText)
-                    maxLines = 1
-                    setPadding(dp(4), dp(3), dp(4), 0)
-                }
-                addView(meta, LinearLayout.LayoutParams(MATCH, WRAP))
-                progress = ProgressLine.create(context, colors).apply { visibility = View.GONE }
-                addView(progress, LinearLayout.LayoutParams(MATCH, dp(3)).apply {
-                    setMargins(dp(4), dp(5), dp(4), 0)
-                })
-                overview = TextView(context).apply {
-                    textSize = 10f
-                    setTextColor(colors.mutedText)
-                    maxLines = 2
-                    setPadding(dp(4), dp(3), dp(4), 0)
-                }
-                addView(overview, LinearLayout.LayoutParams(MATCH, 0, 1f))
-                FocusDecorator.attach(this, ringVisible)
-                setOnFocusChangeListener { _, focused ->
-                    FocusDecorator.refresh(this, ringVisible())
-                    if (focused) {
-                        selected = list.getChildAdapterPosition(this)
-                        selectedItemId = (getTag(TAG_EPISODE) as? LibraryItem)?.id.orEmpty()
-                        host?.refreshHints()
-                    }
-                }
-                activateOnTap { (getTag(TAG_EPISODE) as? LibraryItem)?.let(::open) }
+            val card = EpisodeCardView(parent.context, colors, ringVisible).apply {
+                layoutParams = RecyclerView.LayoutParams(dp(EpisodeCardView.WIDTH_DP), ViewGroup.LayoutParams.WRAP_CONTENT)
+                    .apply { setMargins(dp(8), dp(8), dp(8), dp(8)) }
             }
-            return EpisodeHolder(row, image, title, meta, overview, progress)
+            card.onFocused = {
+                selected = list.getChildAdapterPosition(card)
+                selectedItemId = (card.getTag(TAG_EPISODE) as? LibraryItem)?.id.orEmpty()
+                host?.refreshHints()
+            }
+            card.onActivate = { (card.getTag(TAG_EPISODE) as? LibraryItem)?.let(::open) }
+            return EpisodeHolder(card)
         }
         override fun onBindViewHolder(holder: EpisodeHolder, position: Int) {
             val value = values[position]
-            holder.title.text = value.subtitle.ifEmpty { value.title }
-            holder.meta.text = buildString {
-                if (value.runtimeSeconds > 0) append(value.runtimeSeconds / 60).append(" min")
-                if (value.played) append(if (isEmpty()) "Watched" else " · Watched")
-                else if (value.progress > 0) append(if (isEmpty()) "" else " · ")
-                    .append((value.progress * 100).toInt()).append("% watched")
-            }
-            holder.overview.text = value.overview
-            holder.progress.showFraction(if (value.played) 0.0 else value.progress)
-            holder.itemView.setTag(TAG_EPISODE, value)
-            holder.itemView.contentDescription = "Episode ${value.indexNumber}, ${value.subtitle.ifEmpty { value.title }}, ${holder.meta.text}"
-            // A recycled holder's previous still must not land here late.
-            Artwork.bindHub(holder.image, api, value.thumb.ifEmpty { value.poster },
-                opaque = true, placeholderColor = colors.posterPlaceholder)
+            val meta = buildList {
+                if (value.runtimeSeconds > 0) add(Fmt.runtime(value.runtimeSeconds.toLong()))
+                if (value.played) add("Watched")
+                else if (value.progress > 0) add("${(value.progress * 100).toInt()}% watched")
+            }.joinToString(" · ")
+            holder.card.setTag(TAG_EPISODE, value)
+            holder.card.bind(
+                EpisodeCardView.Model(
+                    title = value.subtitle.ifEmpty { EpisodeLabel.of(value.seasonNumber, value.indexNumber, value.title) },
+                    meta = meta,
+                    still = api.imageUrl(value.thumb.ifEmpty { value.poster }).takeIf(String::isNotEmpty),
+                    progress = if (value.played) 0.0 else value.progress,
+                    overview = value.overview,
+                    description = "Episode ${value.indexNumber}, ${value.subtitle.ifEmpty { value.title }}, $meta"
+                ),
+                Artwork.loader(api, holder.card.context)
+            )
         }
     }
 
@@ -1281,14 +1240,7 @@ class EpisodesScreen(
         }
         return null
     }
-    private class EpisodeHolder(
-        view: View,
-        val image: ImageView,
-        val title: TextView,
-        val meta: TextView,
-        val overview: TextView,
-        val progress: ProgressBar
-    ) : RecyclerView.ViewHolder(view)
+    private class EpisodeHolder(val card: EpisodeCardView) : RecyclerView.ViewHolder(card)
     private fun dp(value: Int) = Styler.dpInt(requireNotNull(host).viewContext, value.toFloat())
 
     private companion object {

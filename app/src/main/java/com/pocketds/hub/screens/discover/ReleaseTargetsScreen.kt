@@ -1,11 +1,14 @@
 package com.pocketds.hub.screens.discover
 
 import com.pocketds.hub.ui.Artwork
+import com.pocketds.hub.ui.EpisodeCardView
+import com.pocketds.hub.ui.EpisodeLabel
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -227,9 +230,16 @@ class ReleaseTargetsScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
-        return LinearLayout(host.viewContext).apply {
-            orientation = LinearLayout.VERTICAL
+        // A page that scrolls: the episode row sits below the season card, and
+        // on this 456dp-tall screen a focused episode's title and air date were
+        // below the edge with no way to reach them.
+        return ScrollView(host.viewContext).apply {
+            isFocusable = false
+            isFocusableInTouchMode = false
+            isVerticalScrollBarEnabled = false
             setBackgroundColor(colors.background)
+            addView(LinearLayout(host.viewContext).apply {
+            orientation = LinearLayout.VERTICAL
             addView(TextView(context).apply {
                 text = mediaTitle
                 textSize = 22f
@@ -297,10 +307,11 @@ class ReleaseTargetsScreen(
                 adapter = this@ReleaseTargetsScreen.adapter
                 clipToPadding = false
                 clipChildren = false
-                setPadding(dp(16), dp(12), dp(16), dp(84))
-                layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
+                setPadding(dp(16), dp(12), dp(16), dp(16))
+                layoutParams = LinearLayout.LayoutParams(MATCH, WRAP)
             }
             addView(list)
+            })
         }
     }
 
@@ -402,7 +413,7 @@ class ReleaseTargetsScreen(
         host?.push(
             ReleasesScreen(
                 api, mediaKey,
-                "$mediaTitle · S${episode.season.toString().padStart(2, '0')}E${episode.episode.toString().padStart(2, '0')} · ${episode.title}",
+                "$mediaTitle · ${EpisodeLabel.of(episode.season, episode.episode, episode.title)}",
                 episode.season, episode.episode, ringVisible
             )
         )
@@ -417,81 +428,40 @@ class ReleaseTargetsScreen(
         }
         override fun getItemCount() = values.size
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EpisodeHolder {
-            lateinit var art: ImageView
-            lateinit var label: TextView
-            lateinit var meta: TextView
-            lateinit var overview: TextView
-            val card = LinearLayout(parent.context).apply {
-                orientation = LinearLayout.VERTICAL
-                background = Styler.cardBackground(context, colors)
-                Styler.makeFocusable(this)
-                descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-                setPadding(dp(7), dp(7), dp(7), dp(9))
-                layoutParams = RecyclerView.LayoutParams(dp(270), dp(238)).apply {
-                    setMargins(dp(8), dp(8), dp(8), dp(8))
-                }
-                art = ImageView(context).apply {
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    setBackgroundColor(colors.posterPlaceholder)
-                }
-                addView(art, LinearLayout.LayoutParams(MATCH, dp(140)))
-                label = TextView(context).apply {
-                    textSize = 15f
-                    maxLines = 1
-                    setTextColor(colors.primaryText)
-                    setPadding(dp(4), dp(7), dp(4), 0)
-                }
-                addView(label, LinearLayout.LayoutParams(MATCH, WRAP))
-                meta = TextView(context).apply {
-                    textSize = 11f
-                    maxLines = 1
-                    setTextColor(colors.mutedText)
-                    setPadding(dp(4), dp(3), dp(4), 0)
-                }
-                addView(meta, LinearLayout.LayoutParams(MATCH, WRAP))
-                overview = TextView(context).apply {
-                    textSize = 10f
-                    maxLines = 2
-                    setTextColor(colors.mutedText)
-                    setPadding(dp(4), dp(3), dp(4), 0)
-                }
-                addView(overview, LinearLayout.LayoutParams(MATCH, 0, 1f))
-                FocusDecorator.attach(this, ringVisible)
-                setOnFocusChangeListener { _, focused ->
-                    FocusDecorator.refresh(this, ringVisible())
-                    if (focused) {
-                        selectedEpisode = (getTag(TAG_EPISODE) as? ReleaseEpisodeTarget)?.episode ?: 0
-                        host?.refreshHints()
-                    }
-                }
+            val card = EpisodeCardView(parent.context, colors, ringVisible).apply {
+                layoutParams = RecyclerView.LayoutParams(dp(EpisodeCardView.WIDTH_DP), WRAP)
+                    .apply { setMargins(dp(8), dp(8), dp(8), dp(8)) }
             }
-            return EpisodeHolder(card, art, label, meta, overview)
+            card.onFocused = {
+                selectedEpisode = (card.getTag(TAG_EPISODE) as? ReleaseEpisodeTarget)?.episode ?: 0
+                host?.refreshHints()
+            }
+            card.onActivate = { (card.getTag(TAG_EPISODE) as? ReleaseEpisodeTarget)?.let(::openEpisode) }
+            return EpisodeHolder(card)
         }
 
         override fun onBindViewHolder(holder: EpisodeHolder, position: Int) {
             val value = values[position]
-            holder.title.text = "E${value.episode.toString().padStart(2, '0')} · ${value.title}"
-            holder.meta.text = buildList {
-                if (value.airDate.isNotEmpty()) add(value.airDate)
-                if (value.runtimeMinutes > 0) add(Fmt.runtime(value.runtimeMinutes * 60L))
-                if (value.hasFile) add("Downloaded")
-                if (!value.monitored) add("Not monitored")
-            }.joinToString(" · ")
-            holder.overview.text = value.overview
-            holder.itemView.setTag(TAG_EPISODE, value)
-            holder.itemView.contentDescription = "Episode ${value.episode}, ${value.title}, search releases"
-            loadImage(holder.art, value.image)
-            holder.itemView.activateOnTap { openEpisode(value) }
+            holder.card.setTag(TAG_EPISODE, value)
+            holder.card.bind(
+                EpisodeCardView.Model(
+                    title = EpisodeLabel.of(value.season, value.episode, value.title),
+                    meta = buildList {
+                        if (value.airDate.isNotEmpty()) add(value.airDate)
+                        if (value.runtimeMinutes > 0) add(Fmt.runtime(value.runtimeMinutes * 60L))
+                        if (value.hasFile) add("Downloaded")
+                        if (!value.monitored) add("Not monitored")
+                    }.joinToString(" · "),
+                    still = api.imageUrl(value.image).takeIf(String::isNotEmpty),
+                    overview = value.overview,
+                    description = "Episode ${value.episode}, ${value.title}, search releases"
+                ),
+                Artwork.loader(api, holder.card.context)
+            )
         }
     }
 
-    private data class EpisodeHolder(
-        val root: View,
-        val art: ImageView,
-        val title: TextView,
-        val meta: TextView,
-        val overview: TextView
-    ) : RecyclerView.ViewHolder(root)
+    private class EpisodeHolder(val card: EpisodeCardView) : RecyclerView.ViewHolder(card)
 
     private fun loadImage(view: ImageView, path: String) =
         Artwork.bindHub(view, api, path, opaque = true, placeholderColor = colors.posterPlaceholder)

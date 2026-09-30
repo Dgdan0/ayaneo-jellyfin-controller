@@ -2,6 +2,7 @@ package com.pocketds.hub.screens.offline
 
 import com.pocketds.hub.ui.ProgressLine
 import com.pocketds.hub.ui.Artwork
+import com.pocketds.hub.ui.EpisodeLabel
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -681,9 +682,8 @@ class OfflineScreen(
 
     private fun episodeTitle(row: OfflineDownload): String {
         val item = row.manifest.item
-        return if (item.type == "episode" && item.seasonNumber > 0 && item.indexNumber > 0) {
-            "S${item.seasonNumber}E${item.indexNumber} · ${item.title}"
-        } else item.title
+        return if (item.type == "episode") EpisodeLabel.of(item.seasonNumber, item.indexNumber, item.title)
+        else item.title
     }
 
     private fun loadImage(view: ImageView, path: String) =

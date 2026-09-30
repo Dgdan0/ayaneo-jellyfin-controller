@@ -983,8 +983,13 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             return
         }
         val hints = (top?.hints() ?: emptyList()).toMutableList()
-        if (player.isOpen) hints.add(ButtonHint("⏵", "Trailer", PadAction.Menu))
-        else hints.add(
+        // One chip per button, in the order Start is actually handled: an open
+        // trailer takes it first, then the screen, and only then the rail. The
+        // download picker showed "Start · Select all" and "Start · Expand menu".
+        if (player.isOpen) {
+            hints.removeAll { it.action == PadAction.Menu }
+            hints.add(ButtonHint("⏵", "Trailer", PadAction.Menu))
+        } else if (hints.none { it.action == PadAction.Menu }) hints.add(
             ButtonHint(
                 "Start",
                 if (sectionRail.isExpanded) "Collapse menu" else "Expand menu",

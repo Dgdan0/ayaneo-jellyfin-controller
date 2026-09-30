@@ -1,6 +1,8 @@
 package com.pocketds.hub.screens.offline
 
 import com.pocketds.hub.ui.Artwork
+import com.pocketds.hub.ui.EpisodeCardView
+import com.pocketds.hub.ui.EpisodeLabel
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -9,7 +11,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
@@ -24,11 +25,9 @@ import com.pocketds.hub.offline.OfflineDownload
 import com.pocketds.hub.offline.OfflineDownloadService
 import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.ui.ChoiceOverlay
-import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
-import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.state.Fmt
 
 /** One locally available season, mirroring the online horizontal episode page. */
@@ -143,39 +142,34 @@ class OfflineSeasonScreen(
 
     private fun episodeCard(download: OfflineDownload, progress: OfflineCatalogProgress?): View {
         val item = download.manifest.item
-        lateinit var image: ImageView
-        return LinearLayout(host.viewContext).apply {
-            orientation = LinearLayout.VERTICAL; background = Styler.cardBackground(context, colors, cornerDp = 10f)
-            setPadding(dp(5), dp(5), dp(5), dp(6)); tag = TaggedEpisode(download)
-            Styler.makeFocusable(this); descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-            image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-            addView(image, LinearLayout.LayoutParams(MATCH, dp(125)))
-            addView(TextView(context).apply {
-                text = "E${item.indexNumber} · ${item.title}"; textSize = 13f; maxLines = 2; minLines = 2
-                ellipsize = android.text.TextUtils.TruncateAt.END; setTextColor(colors.primaryText)
-                setPadding(dp(2), dp(5), dp(2), 0)
-            })
-            addView(TextView(context).apply {
-                text = episodeStatus(item.runtimeSeconds, progress); textSize = 10f; maxLines = 1; setTextColor(colors.mutedText)
-                setPadding(dp(2), 0, dp(2), 0)
-            })
-            addView(TextView(context).apply {
-                text = "⋯"; textSize = 18f; setTextColor(colors.accent)
-                setPadding(dp(2), dp(2), dp(2), 0)
-                contentDescription = "More actions for ${item.title}"
-                activateOnTap { showOfflineTitleMenu(host, api, this@OfflineSeasonScreen.overlay, download, ringVisible) }
-            })
-            layoutParams = LinearLayout.LayoutParams(dp(230), ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(9) }
-            contentDescription = "Episode ${item.indexNumber}, ${item.title}, ${episodeStatus(item.runtimeSeconds, progress)}"
-            FocusDecorator.attach(this, ringVisible)
-            setOnFocusChangeListener { view, hasFocus ->
-                FocusDecorator.refresh(view, ringVisible())
-                if (hasFocus) { selectedId = download.id; host.refreshHints() }
-            }
-            activateOnTap { host.playItem(item.id) }
-            loadArtwork(image, download)
+        val status = episodeStatus(item.runtimeSeconds, progress)
+        return EpisodeCardView(host.viewContext, colors, ringVisible).apply {
+            tag = TaggedEpisode(download)
+            layoutParams = LinearLayout.LayoutParams(dp(EpisodeCardView.WIDTH_DP), ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { marginEnd = dp(9) }
+            onFocused = { selectedId = download.id; host.refreshHints() }
+            onActivate = { host.playItem(item.id) }
+            // More actions stay on Y and its hint chip, as everywhere else.
+            val watched = progress?.takeUnless { it.isComplete() }?.takeIf { it.durationMillis > 0 }
+                ?.let { it.positionMillis.toDouble() / it.durationMillis } ?: 0.0
+            bind(
+                EpisodeCardView.Model(
+                    title = EpisodeLabel.of(item.seasonNumber, item.indexNumber, item.title),
+                    meta = status,
+                    still = localStill(download),
+                    progress = watched,
+                    overview = item.overview,
+                    description = "Episode ${item.indexNumber}, ${item.title}, $status"
+                ),
+                Artwork.loader(api, context)
+            )
         }
     }
+
+    /** The still saved with the download; this screen must work with no hub at all. */
+    private fun localStill(download: OfflineDownload): Any? =
+        sequenceOf("thumb", "poster", "backdrop").map { repository.artworkFile(download, it) }
+            .firstOrNull { it.isFile && it.length() > 0 }
 
     private fun confirmRemove(download: OfflineDownload) {
         overlay.confirm("Remove ${download.manifest.item.title}?", "The local episode and downloaded subtitles will be deleted.",
@@ -186,12 +180,6 @@ class OfflineSeasonScreen(
         host.refreshHints()
     }
 
-    private fun loadArtwork(view: ImageView, download: OfflineDownload) {
-        val local = sequenceOf("thumb", "poster", "backdrop").map { repository.artworkFile(download, it) }
-            .firstOrNull { it.isFile && it.length() > 0 }
-        Artwork.bind(view, Artwork.loader(api, view.context), local,
-            opaque = true, placeholderColor = colors.posterPlaceholder)
-    }
 
     private fun focusedEpisode(): OfflineDownload? =
         ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedEpisode)?.row
