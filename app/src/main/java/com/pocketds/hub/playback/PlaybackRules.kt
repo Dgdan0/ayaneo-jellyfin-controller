@@ -15,9 +15,6 @@ object PlaybackRules {
         Quality("2 Mbps", 2_000_000)
     )
 
-    fun resumePosition(savedMillis: Long, durationMillis: Long, played: Boolean = false): Long =
-        if (!played && savedMillis >= 30_000 && durationMillis - savedMillis > 30_000) savedMillis else 0
-
     fun seekStep(repeatCount: Int): Long = when {
         repeatCount >= 12 -> 60_000L
         repeatCount >= 5 -> 30_000L

@@ -1,5 +1,7 @@
 package com.pocketds.hub.offline
 
+import com.pocketds.hub.playback.ResumeRules
+
 data class OfflineCatalogEntry(
     val key: String,
     val title: String,
@@ -28,18 +30,9 @@ data class OfflineCatalogProgress(
     val durationMillis: Long,
     val updatedAtMillis: Long
 ) {
-    fun isComplete(): Boolean = durationMillis > 0 &&
-        positionMillis >= durationMillis - COMPLETE_REMAINING_MILLIS
+    fun isComplete(): Boolean = ResumeRules.isFinished(positionMillis, durationMillis)
 
-    fun resumePosition(): Long = if (
-        durationMillis > 0 && positionMillis >= MIN_RESUME_MILLIS &&
-        durationMillis - positionMillis > COMPLETE_REMAINING_MILLIS
-    ) positionMillis else 0L
-
-    private companion object {
-        const val MIN_RESUME_MILLIS = 30_000L
-        const val COMPLETE_REMAINING_MILLIS = 30_000L
-    }
+    fun resumePosition(): Long = ResumeRules.resumePosition(positionMillis, durationMillis)
 }
 
 /** Pure catalog shaping shared by the UI and JVM tests. */
@@ -82,8 +75,8 @@ object OfflineCatalog {
             .sortedBy { it.number }
 
     /**
-     * Select a locally downloaded episode using the same 30-second resume
-     * window as playback. A recent partial episode wins; otherwise the first
+     * Select a locally downloaded episode using the same [ResumeRules] as
+     * playback. A recent partial episode wins; otherwise the first
      * locally available episode that has not been finished is Next.
      */
     fun playTarget(

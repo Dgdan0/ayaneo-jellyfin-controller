@@ -668,6 +668,10 @@ class LibraryDetailScreen(
     private fun updateState(played: Boolean? = null, favorite: Boolean? = null) {
         if (stateJob?.isActive == true) return
         val previous = item ?: return
+        if (played != null) {
+            val context = requireNotNull(host).viewContext
+            PlaybackProgressStore.forget(context, HubSettings.userId(context))
+        }
         val optimistic = previous.copy(
             played = played ?: previous.played,
             favorite = favorite ?: previous.favorite,
@@ -807,8 +811,11 @@ class LibraryDetailScreen(
         }
     }
 
-    private fun canResume(value: LibraryItem?): Boolean = value != null &&
-        value.positionSeconds >= 30 && value.runtimeSeconds - value.positionSeconds > 30 && !value.played
+    // The position was already judged -- by the hub when it saved the stop, or
+    // by ResumeRules in the checkpoint applyTo overlaid -- so judging it again
+    // with another rule could only disagree with Home's Continue watching row.
+    private fun canResume(value: LibraryItem?): Boolean =
+        value != null && !value.played && value.positionSeconds > 0
 
 
     private fun loadSeasons() {

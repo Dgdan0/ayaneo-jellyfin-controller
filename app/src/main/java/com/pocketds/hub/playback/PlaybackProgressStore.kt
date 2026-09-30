@@ -54,6 +54,22 @@ object PlaybackProgressStore {
         )
     }
 
+    /**
+     * Drops the checkpoint once the user sets watched state by hand. The
+     * choice is newer than anything the player saw, and keeping it overrode
+     * the server's reply: "Mark unwatched" on a just-finished episode still
+     * showed it watched for two minutes.
+     */
+    fun forget(context: Context, userId: String) {
+        val prefix = prefix(userId)
+        Prefs.of(context).edit()
+            .remove("${prefix}item")
+            .remove("${prefix}position")
+            .remove("${prefix}duration")
+            .remove("${prefix}updated")
+            .apply()
+    }
+
     /** True only for a fresh checkpoint that reached Jellyfin's completion window. */
     fun isRecentlyComplete(
         context: Context,
@@ -87,15 +103,12 @@ internal data class PlaybackCheckpoint(
 ) {
     fun isComplete(itemId: String, nowMillis: Long): Boolean =
         this.itemId == itemId && isFresh(nowMillis) && durationMillis > 0 &&
-            positionMillis >= durationMillis - MIN_REMAINING_MILLIS
+            ResumeRules.isFinished(positionMillis, durationMillis)
 
     fun resumePosition(itemId: String, startMode: String, nowMillis: Long): Long {
         if (startMode != "resume" || this.itemId != itemId) return 0L
         if (!isFresh(nowMillis)) return 0L
-        if (positionMillis < MIN_RESUME_MILLIS || durationMillis - positionMillis <= MIN_REMAINING_MILLIS) {
-            return 0L
-        }
-        return positionMillis
+        return ResumeRules.resumePosition(positionMillis, durationMillis)
     }
 
     private fun isFresh(nowMillis: Long): Boolean =
@@ -103,7 +116,5 @@ internal data class PlaybackCheckpoint(
 
     private companion object {
         const val MAX_AGE_MILLIS = 2 * 60 * 1_000L
-        const val MIN_RESUME_MILLIS = 30_000L
-        const val MIN_REMAINING_MILLIS = 30_000L
     }
 }

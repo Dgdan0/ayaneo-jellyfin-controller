@@ -11,7 +11,7 @@ import com.pocketds.hub.model.OfflineProgressEvent
 import com.pocketds.hub.model.PlaybackItem
 import com.pocketds.hub.model.PlaybackPrepareResponse
 import com.pocketds.hub.model.PlaybackSource
-import com.pocketds.hub.playback.PlaybackRules
+import com.pocketds.hub.playback.ResumeRules
 import com.pocketds.hub.settings.HubSettings
 import com.pocketds.hub.settings.OfflineSettings
 import kotlinx.serialization.encodeToString
@@ -452,7 +452,7 @@ class OfflineRepository private constructor(context: Context) {
         val remembered = progress?.first ?: item.positionSeconds * 1_000L
         // A completed item retains its final local position for sync, but must
         // never reopen at its last frame. Match the normal playback resume rule.
-        val position = if (startMode == "restart") 0L else PlaybackRules.resumePosition(remembered, duration)
+        val position = if (startMode == "restart") 0L else ResumeRules.resumePosition(remembered, duration)
         val audio = source.tracks.filter { it.type.equals("Audio", true) }
         val subtitles = embeddedSubtitles + externalSubtitles
         val siblings = if (item.seriesId.isNotEmpty()) completed()

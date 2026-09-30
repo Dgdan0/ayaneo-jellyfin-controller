@@ -6,14 +6,6 @@ import org.junit.Test
 
 class PlaybackRulesTest {
     @Test
-    fun `resume requires thirty seconds watched and remaining`() {
-        assertEquals(0L, PlaybackRules.resumePosition(29_999, 600_000))
-        assertEquals(30_000L, PlaybackRules.resumePosition(30_000, 600_000))
-        assertEquals(0L, PlaybackRules.resumePosition(570_000, 600_000))
-        assertEquals(0L, PlaybackRules.resumePosition(120_000, 600_000, played = true))
-    }
-
-    @Test
     fun `held seek accelerates in bounded stages`() {
         assertEquals(10_000L, PlaybackRules.seekStep(0))
         assertEquals(30_000L, PlaybackRules.seekStep(5))
