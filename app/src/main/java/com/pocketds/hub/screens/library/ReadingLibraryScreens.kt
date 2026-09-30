@@ -75,6 +75,9 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import com.pocketds.hub.state.Fmt
+import com.pocketds.hub.state.StatusMessage
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /** One Kavita or Storyteller library, paged through the Hub's normalized model. */
 class ReadingLibraryGridScreen(
@@ -220,7 +223,7 @@ class ReadingLibraryGridScreen(
             ButtonHint.activate("Details"),
             ButtonHint.back(),
             ButtonHint.secondary("Sort"),
-            ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh)
+            ButtonHint.refresh()
         )
     }
 
@@ -287,23 +290,22 @@ class ReadingLibraryGridScreen(
                     } else {
                         adapter.append(result.value.items)
                     }
-                    status.setTextColor(
-                        if (result.value.partial.isEmpty()) colors.mutedText else colors.badgePending
+                    status.showStatus(
+                        if (result.value.items.isEmpty() && adapter.itemCount == 0) StatusMessage("This reading library is empty.")
+                        else StatusText.loaded(
+                            "${adapter.itemCount} of ${result.value.total} · ${sortLabel()}",
+                            result.value.cache,
+                            result.value.partial.map { it.service }
+                        ),
+                        colors
                     )
-                    status.text = when {
-                        result.value.items.isEmpty() && adapter.itemCount == 0 -> "This reading library is empty."
-                        result.value.cache.stale -> "${adapter.itemCount} of ${result.value.total} · cached"
-                        else -> "${adapter.itemCount} of ${result.value.total} · ${sortLabel()}"
-                    }
                     if (page == 1 && !overlay.isOpen) restoreFocus()
                     host?.refreshHints()
                 }
                 is HubResult.Failed -> {
                     if (generation != loadGeneration) return@launch
                     paging.fail(page)
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message + if (adapter.itemCount == 0) " · Select retries"
-                    else " · showing previous items · Select retries"
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = adapter.itemCount > 0), colors)
                     host?.refreshHints()
                 }
             }
@@ -518,7 +520,7 @@ class ReadingWorkScreen(
                 description = view.contentDescription?.toString().orEmpty())))
         } else if (hasChildLinks) add(ButtonHint.activate("Open"))
         add(ButtonHint.back())
-        add(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
+        add(ButtonHint.refresh())
     }
 
     private fun attachActionFocus(view: TextView) {
@@ -557,15 +559,12 @@ class ReadingWorkScreen(
     private fun load(force: Boolean = false) {
         if (loadJob?.isActive == true) return
         status.visibility = View.VISIBLE
-        status.setTextColor(colors.mutedText)
-        status.text = if (force) "Refreshing…" else "Loading details…"
+        status.showStatus(StatusText.loading("details", refreshing = force), colors)
         loadJob = scope.launch {
             when (val result = api.readingWork(workId)) {
                 is HubResult.Ok -> render(result.value)
-                is HubResult.Failed -> {
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message + " · Select retries"
-                }
+                is HubResult.Failed ->
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = force), colors)
             }
             loadJob = null
         }
@@ -612,12 +611,7 @@ class ReadingWorkScreen(
                 actionViews[preferredSource]?.requestFocus()
             }
         }
-        status.setTextColor(if (work.partial.isEmpty()) colors.mutedText else colors.badgePending)
-        status.text = when {
-            work.partial.isNotEmpty() -> work.partial.joinToString(" · ") { it.message }
-            work.cache.stale -> "Showing cached details"
-            else -> ""
-        }
+        status.showStatus(StatusText.caveat(work.cache, work.partial.map { it.service }), colors)
         status.visibility = if (status.text.isNullOrBlank()) View.GONE else View.VISIBLE
         host?.refreshHints()
     }

@@ -168,5 +168,7 @@ data class ButtonHint(
         fun back(label: String = "Back") = ButtonHint("Ⓑ", label, PadAction.Back)   // Ⓑ
         fun primary(label: String) = ButtonHint("Ⓧ", label, PadAction.Primary)      // Ⓧ
         fun secondary(label: String) = ButtonHint("Ⓨ", label, PadAction.Secondary)  // Ⓨ
+        /** Select reloads the screen. One spelling and glyph, instead of eleven copies and a stray ↻. */
+        fun refresh(label: String = "Refresh (Select)") = ButtonHint("⟳", label, PadAction.Refresh)
     }
 }

@@ -54,6 +54,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
+import com.pocketds.hub.state.StatusMessage
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /**
  * Browse and search — the Infuse/Findroid shape.
@@ -97,7 +100,7 @@ class DiscoverScreen(
     private val readingRowsAdapter = ReadingRowsAdapter()
     private val readingResultsAdapter = ReadingHitAdapter()
     private var readingSearchPresentation = ReadingSearchPresentation()
-    private var readingSearchExtra = ""
+    private var readingSearchCaveat = StatusMessage("")
     private lateinit var form: FormOverlay
     private lateinit var flow: RequestFlow
 
@@ -427,6 +430,9 @@ class DiscoverScreen(
                 focusTarget = readingRowsList
                 readingRowsList.scrollToPosition(0)
             } else {
+                // A different book type must not show the previous type's rows
+                // while it loads; Refresh, by contrast, keeps them.
+                readingRowsAdapter.submit(emptyList())
                 loadReadingRows(force = true)
             }
         }
@@ -444,8 +450,11 @@ class DiscoverScreen(
         statusLine.setTextColor(colors.mutedText)
         if (searching) {
             val count = if (mode == ContentMode.MEDIA) resultsAdapter.itemCount else readingResultsAdapter.itemCount
-            statusLine.text = if (mode == ContentMode.BOOKS) readingSearchPresentation.summary() + readingSearchExtra
-                else "$count results"
+            statusLine.showStatus(
+                if (mode == ContentMode.BOOKS) StatusText.loaded(readingSearchPresentation.summary(), readingSearchCaveat)
+                else StatusMessage("$count results"),
+                colors
+            )
             if (count == 0 && lastQuery.isNotBlank()) runSearch(lastQuery, force = true)
         } else if (mode == ContentMode.MEDIA) {
             statusLine.text = "${rowsAdapter.itemCount} rows"
@@ -721,9 +730,9 @@ class DiscoverScreen(
 
     private fun loadRows(force: Boolean = false) {
         shelfNavigation.cancel()
-        statusLine.setTextColor(colors.mutedText)
-        statusLine.text = "Loading…"
-        if (force) rowsAdapter.submit(emptyList())
+        // Refresh keeps the rows on screen until new ones arrive; clearing them
+        // first turned a failed refresh into a blank screen.
+        statusLine.showStatus(StatusText.loading("Discover", refreshing = rowsAdapter.itemCount > 0), colors)
         focusTarget = rowsList
         rowsJob?.cancel()
         rowsJob = scope.launch {
@@ -732,23 +741,17 @@ class DiscoverScreen(
                     val body = result.value
                     rowsAdapter.submit(body.rows)
                     if (mode == ContentMode.MEDIA && !searching) {
-                        statusLine.text = buildString {
-                            append(body.rows.size).append(" rows")
-                            if (body.cache.hit && body.cache.ageSeconds > 0) {
-                                append(" · cached ").append(body.cache.ageSeconds).append("s ago")
-                            }
-                            if (body.cache.degraded) append(" · offline cache")
-                            if (body.partial.isNotEmpty()) {
-                                append(" · ").append(body.partial.joinToString(", ") { it.message })
-                            }
-                        }
+                        statusLine.showStatus(
+                            StatusText.loaded("${body.rows.size} rows", body.cache, body.partial.map { it.service }),
+                            colors
+                        )
                         host?.refreshHints()
                     }
                     // Focus is claimed by claimFocusOnFirstChild once a row is
                     // actually attached; asking here would be too early.
                 }
                 is HubResult.Failed -> if (mode == ContentMode.MEDIA && !searching) {
-                    showFailure(result.kind, result.message)
+                    showFailure(result.kind, result.message, hasData = rowsAdapter.itemCount > 0)
                 }
             }
         }
@@ -789,9 +792,10 @@ class DiscoverScreen(
     private fun loadReadingRows(force: Boolean = false) {
         shelfNavigation.cancel()
         val requestedType = readingType
-        statusLine.setTextColor(colors.mutedText)
-        statusLine.text = "Loading ${ReadingType.label(requestedType).lowercase()}…"
-        if (force) readingRowsAdapter.submit(emptyList())
+        statusLine.showStatus(
+            StatusText.loading(ReadingType.label(requestedType).lowercase(), refreshing = readingRowsAdapter.itemCount > 0),
+            colors
+        )
         focusTarget = readingRowsList
         readingRowsJob?.cancel()
         readingRowsJob = scope.launch {
@@ -802,21 +806,15 @@ class DiscoverScreen(
                     readingRowsByType[requestedType] = body.rows
                     readingRowsAdapter.submit(body.rows)
                     if (mode == ContentMode.BOOKS && !searching) {
-                        statusLine.text = buildString {
-                            append(body.rows.size).append(" rows")
-                            if (body.cache.hit && body.cache.ageSeconds > 0) {
-                                append(" · cached ").append(body.cache.ageSeconds).append("s ago")
-                            }
-                            if (body.cache.degraded) append(" · offline cache")
-                            if (body.partial.isNotEmpty()) {
-                                append(" · ").append(body.partial.joinToString(", ") { it.message })
-                            }
-                        }
+                        statusLine.showStatus(
+                            StatusText.loaded("${body.rows.size} rows", body.cache, body.partial.map { it.service }),
+                            colors
+                        )
                         host?.refreshHints()
                     }
                 }
                 is HubResult.Failed -> if (mode == ContentMode.BOOKS && !searching && requestedType == readingType) {
-                    showFailure(result.kind, result.message)
+                    showFailure(result.kind, result.message, hasData = readingRowsAdapter.itemCount > 0)
                 }
             }
         }
@@ -880,7 +878,7 @@ class DiscoverScreen(
         val requestedType = readingType
         if (requestedMode == ContentMode.BOOKS) {
             readingSearchPresentation = ReadingSearchPresentation()
-            readingSearchExtra = ""
+            readingSearchCaveat = StatusMessage("")
         }
         lastQuery = trimmed
         searching = true
@@ -906,19 +904,16 @@ class DiscoverScreen(
                         }
                         val body = result.value
                         readingSearchPresentation = ReadingSearchPresentation.forResults(body.results, body.broaderResults)
-                        readingSearchExtra = buildString {
-                            if (body.cache.hit) append(" · cached")
-                            if (body.partial.isNotEmpty()) append(" · some sources unavailable")
-                        }
+                        readingSearchCaveat = StatusText.caveat(body.cache, body.partial.map { it.service })
                         readingResultsAdapter.submit(readingSearchPresentation.visibleResults())
                         if (mode == ContentMode.BOOKS) {
-                            statusLine.text = readingSearchPresentation.summary() + readingSearchExtra
+                            statusLine.showStatus(StatusText.loaded(readingSearchPresentation.summary(), readingSearchCaveat), colors)
                             applyModeVisibility()
                             host?.refreshHints()
                         }
                     }
                     is HubResult.Failed -> if (mode == ContentMode.BOOKS && modeStates.recall(ContentMode.BOOKS)?.query == trimmed) {
-                        showFailure(result.kind, result.message)
+                        showFailure(result.kind, result.message, hasData = readingResultsAdapter.itemCount > 0)
                     }
                 }
                 return@launch
@@ -931,21 +926,12 @@ class DiscoverScreen(
                     searchTotalPages = body.totalPages
                     resultsAdapter.submit(body.results)
                     if (mode == ContentMode.MEDIA) {
-                        statusLine.text = buildString {
-                            append(body.totalResults).append(" results")
-                            if (body.cache.hit) {
-                                append(" · cached")
-                                if (body.cache.ageSeconds > 0) {
-                                    append(" ").append(body.cache.ageSeconds).append("s ago")
-                                }
-                            }
-                            if (body.cache.degraded) append(" · hub degraded")
-                        }
+                        statusLine.showStatus(StatusText.loaded("${body.totalResults} results", body.cache), colors)
                         host?.refreshHints()
                     }
                 }
                 is HubResult.Failed -> if (mode == ContentMode.MEDIA && modeStates.recall(ContentMode.MEDIA)?.query == trimmed) {
-                    showFailure(result.kind, result.message)
+                    showFailure(result.kind, result.message, hasData = resultsAdapter.itemCount > 0)
                 }
             }
         }
@@ -956,7 +942,7 @@ class DiscoverScreen(
         val buttonHadFocus = broaderSearchButton.hasFocus()
         readingSearchPresentation = readingSearchPresentation.toggleBroader()
         readingResultsAdapter.submit(readingSearchPresentation.visibleResults())
-        statusLine.text = readingSearchPresentation.summary() + readingSearchExtra
+        statusLine.showStatus(StatusText.loaded(readingSearchPresentation.summary(), readingSearchCaveat), colors)
         applyModeVisibility()
         readingResultsGrid.post {
             if (buttonHadFocus) broaderSearchButton.requestFocus() else restoreContentFocus()
@@ -993,9 +979,8 @@ class DiscoverScreen(
         }
     }
 
-    private fun showFailure(kind: FailureKind, message: String) {
-        statusLine.setTextColor(colors.dangerText)
-        statusLine.text = message
+    private fun showFailure(kind: FailureKind, message: String, hasData: Boolean) {
+        statusLine.showStatus(StatusText.failed(message, kind, hasData), colors)
         DebugLog.log("net", "failed: $kind — $message")
     }
 

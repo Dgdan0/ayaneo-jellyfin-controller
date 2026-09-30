@@ -64,6 +64,9 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.pocketds.hub.state.Fmt
+import com.pocketds.hub.state.StatusMessage
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /** Movie, series, season, or episode metadata sourced directly from Jellyfin. */
 class LibraryDetailScreen(
@@ -283,7 +286,7 @@ class LibraryDetailScreen(
             add(ButtonHint.activate(if (seasons.hasFocus()) "Episodes" else "Episode details"))
             if (seasons.hasFocus() && !item?.mediaKey.isNullOrEmpty()) add(ButtonHint.secondary("Find releases"))
             add(ButtonHint.back())
-            add(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
+            add(ButtonHint.refresh())
             return@buildList
         }
         val value = item
@@ -308,7 +311,7 @@ class LibraryDetailScreen(
             if (!value?.mediaKey.isNullOrEmpty()) add(ButtonHint.secondary("Find releases"))
         }
         add(ButtonHint.back())
-        add(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
+        add(ButtonHint.refresh())
     }
 
     override fun onPad(action: PadAction): Boolean {
@@ -368,16 +371,13 @@ class LibraryDetailScreen(
 
     private fun loadItem() {
         if (itemJob?.isActive == true) return
-        status.setTextColor(colors.mutedText)
-        status.text = if (item == null) "Asking Jellyfin…" else "Refreshing…"
+        status.showStatus(StatusText.loading("details", refreshing = item != null), colors)
         itemJob = scope.launch {
             when (val result = api.libraryItem(itemId)) {
                 is HubResult.Ok -> render(result.value)
                 is HubResult.Failed -> {
                     status.visibility = View.VISIBLE
-                    status.setTextColor(colors.dangerText)
-                    status.text = if (item == null) result.message + " · Select retries"
-                        else result.message + " · showing previous details"
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = item != null), colors)
                 }
             }
             itemJob = null
@@ -424,12 +424,8 @@ class LibraryDetailScreen(
         credits.visibility = if (credits.text.isNullOrBlank()) View.GONE else View.VISIBLE
         mediaInfo.text = mediaInfoText(value)
         mediaInfo.visibility = if (mediaInfo.text.isNullOrBlank()) View.GONE else View.VISIBLE
-        status.setTextColor(if (body.partial.isEmpty()) colors.mutedText else colors.badgePending)
-        status.text = when {
-            body.partial.isNotEmpty() -> body.partial.joinToString(" · ") { it.message }
-            body.cache.stale -> "Showing cached watch state"
-            else -> ""
-        }
+        // Fresh details need no line; only a caveat earns one.
+        status.showStatus(StatusText.caveat(body.cache, body.partial.map { it.service }), colors)
         status.visibility = if (status.text.isNullOrBlank()) View.GONE else View.VISIBLE
         val landscapePath = value.backdrop.ifBlank { if (value.type == "episode") value.thumb else "" }
         header.bindArtwork(value.type, landscapePath.takeIf { it.isNotBlank() }?.let(api::imageUrl),
@@ -822,8 +818,9 @@ class LibraryDetailScreen(
                 is HubResult.Ok -> renderSeasons(result.value)
                 is HubResult.Failed -> {
                     seasonLabel.visibility = View.VISIBLE
-                    seasonLabel.text = "Seasons · ${result.message} · Select retries"
-                    seasonLabel.setTextColor(colors.dangerText)
+                    seasonLabel.showStatus(
+                        StatusText.failed("Seasons · ${result.message}", result.kind, hasData = false), colors
+                    )
                 }
             }
             seasonsJob = null
@@ -1055,7 +1052,7 @@ class EpisodesScreen(
         add(ButtonHint.primary("Download season"))
         if (seriesMediaKey.isNotEmpty()) add(ButtonHint.secondary("Find releases"))
         add(ButtonHint.back())
-        add(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
+        add(ButtonHint.refresh())
     }
 
     override fun onPad(action: PadAction): Boolean = when (action) {
@@ -1107,9 +1104,7 @@ class EpisodesScreen(
                 is HubResult.Ok -> render(result.value)
                 is HubResult.Failed -> {
                     paging.fail(page)
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message + if (adapter.itemCount == 0) " · Select retries"
-                        else " · showing previous episodes · Select retries"
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = adapter.itemCount > 0), colors)
                 }
             }
             loadJob = null
@@ -1123,12 +1118,11 @@ class EpisodesScreen(
             selected = adapter.indexOf(selectedItemId).takeIf { it >= 0 } ?: 0
             refreshing = false
         } else adapter.append(body.items)
-        status.setTextColor(if (body.partial.isEmpty()) colors.mutedText else colors.badgePending)
-        status.text = when {
-            body.items.isEmpty() && adapter.itemCount == 0 -> "No episodes found."
-            body.cache.stale -> "${adapter.itemCount} of ${body.total} · cached"
-            else -> "${adapter.itemCount} of ${body.total} episodes"
-        }
+        status.showStatus(
+            if (body.items.isEmpty() && adapter.itemCount == 0) StatusMessage("No episodes found.")
+            else StatusText.loaded("${adapter.itemCount} of ${body.total} episodes", body.cache, body.partial.map { it.service }),
+            colors
+        )
         if (body.page == 1) restoreFocus()
         host?.refreshHints()
     }

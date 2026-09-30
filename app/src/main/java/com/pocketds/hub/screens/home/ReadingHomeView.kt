@@ -167,7 +167,7 @@ class ReadingHomeView(
     } else listOf(
         ButtonHint.activate(if (profileButton.hasFocus()) "Choose profile" else if (createButton.hasFocus()) "Create list" else "Details"),
         ButtonHint.secondary("List actions"),
-        ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh)
+        ButtonHint.refresh()
     )
 
     fun onPad(action: PadAction): Boolean {

@@ -35,6 +35,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import com.pocketds.hub.state.Fmt
+import com.pocketds.hub.state.StatusMessage
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /** Portrait season chooser shown before selecting a Sonarr search scope. */
 class SeasonReleasePickerScreen(
@@ -334,7 +337,7 @@ class ReleaseTargetsScreen(
     override fun hints() = listOf(
         ButtonHint.activate(if (focusedEpisode() == null) "Search season" else "Search episode"),
         ButtonHint.back(),
-        ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh)
+        ButtonHint.refresh()
     )
 
     override fun onPad(action: PadAction): Boolean = when (action) {
@@ -350,15 +353,12 @@ class ReleaseTargetsScreen(
     private fun load(force: Boolean = false) {
         if (loadJob?.isActive == true) return
         if (force) body = null
-        status.setTextColor(colors.mutedText)
-        status.text = "Loading released episodes…"
+        status.showStatus(StatusText.loading("released episodes", refreshing = force), colors)
         loadJob = scope.launch {
             when (val result = api.releaseTargets(mediaKey, seasonNumber)) {
                 is HubResult.Ok -> render(result.value)
-                is HubResult.Failed -> {
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message + " · Select retries"
-                }
+                is HubResult.Failed ->
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = false), colors)
             }
             loadJob = null
         }
@@ -371,12 +371,14 @@ class ReleaseTargetsScreen(
         }
         loadImage(seasonArt, next.seasonImage.ifEmpty { fallbackSeasonImage })
         adapter.submit(next.episodes)
-        status.setTextColor(if (next.partial.isEmpty()) colors.mutedText else colors.badgePending)
-        status.text = when {
-            next.episodes.isEmpty() -> "No episodes have aired yet · the season search is still available"
-            next.partial.isNotEmpty() -> "${next.episodes.size} aired · artwork partially unavailable"
-            else -> "${next.episodes.size} aired episode${if (next.episodes.size == 1) "" else "s"}"
-        }
+        status.showStatus(
+            if (next.episodes.isEmpty()) StatusMessage("No episodes have aired yet · the season search is still available")
+            else StatusText.loaded(
+                "${next.episodes.size} aired episode${if (next.episodes.size == 1) "" else "s"}",
+                unavailable = next.partial.map { it.service }
+            ),
+            colors
+        )
         restoreFocus()
         host?.refreshHints()
     }

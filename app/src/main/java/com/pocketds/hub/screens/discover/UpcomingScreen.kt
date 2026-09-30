@@ -29,6 +29,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 class UpcomingScreen(private val api:HubApi,private val ringVisible:()->Boolean):Screen {
  override val title="Upcoming"
@@ -110,12 +112,12 @@ class UpcomingScreen(private val api:HubApi,private val ringVisible:()->Boolean)
   job=scope.launch {
    when(val result=api.calendar(requested.start.toString(),requested.endExclusive.toString(),zone.id)){
     is HubResult.Ok->{body=result.value;render(result.value)}
-    is HubResult.Failed->{status.text=result.message;details.addView(button("Try again"){load()})}
+    is HubResult.Failed->{status.showStatus(StatusText.failed(result.message,result.kind,hasData=false,canRetry=false),colors);details.addView(button("Try again"){load()})}
    }
   }
  }
  private fun render(data:CalendarResponse){
-  status.text=if(data.partial.isEmpty())"${data.items.size} ${if(data.items.size==1) "release" else "releases"} · ${zone.id}" else data.partial.joinToString(" · "){it.message}
+  status.showStatus(StatusText.loaded("${data.items.size} ${if(data.items.size==1) "release" else "releases"} · ${zone.id}",unavailable=data.partial.map{it.service}),colors)
   val grouped=UpcomingPresentation.groups(data.items)
   for(day in UpcomingPresentation.days(range)){
    val prefix=when(day){LocalDate.now()->"Today · ";LocalDate.now().plusDays(1)->"Tomorrow · ";else->""}

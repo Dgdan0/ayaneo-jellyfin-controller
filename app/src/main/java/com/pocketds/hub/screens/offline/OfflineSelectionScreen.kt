@@ -43,6 +43,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import com.pocketds.hub.state.Fmt
+import com.pocketds.hub.state.StatusMessage
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /** Controller-first episode picker used by series and season download actions. */
 class OfflineSelectionScreen(
@@ -174,15 +177,13 @@ class OfflineSelectionScreen(
     private fun load() {
         loadJob?.cancel()
         loading.visibility = View.VISIBLE
-        status.setTextColor(colors.mutedText)
-        status.text = "Loading available episodes…"
+        status.showStatus(StatusText.loading("available episodes", refreshing = false), colors)
         loadJob = scope.launch {
             when (val result = api.offlineSelection(seriesId)) {
                 is HubResult.Ok -> render(result.value)
                 is HubResult.Failed -> {
                     loading.visibility = View.GONE
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message + " · Select retries"
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = false), colors)
                 }
             }
             loadJob = null

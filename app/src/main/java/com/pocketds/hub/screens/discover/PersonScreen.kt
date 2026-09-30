@@ -26,6 +26,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
+import com.pocketds.hub.state.StatusMessage
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /**
  * Everything one performer has been in.
@@ -142,8 +145,7 @@ class PersonScreen(
     }
 
     private fun load() {
-        status.setTextColor(colors.mutedText)
-        status.text = "Loading…"
+        status.showStatus(StatusText.loading("credits", refreshing = adapter.itemCount > 0), colors)
         scope.coroutineContext.cancelChildren()
         scope.launch {
             when (val result = api.person(personId, sort)) {
@@ -151,18 +153,21 @@ class PersonScreen(
                     val person = result.value
                     heading.text = person.name.ifEmpty { personName }
                     adapter.submit(person.credits)
-                    status.text = buildString {
-                        append(person.credits.size).append(" credits")
-                        if (person.knownFor.isNotEmpty()) append(" · ").append(person.knownFor)
-                        append(if (sort == "release") " · newest first" else " · by popularity")
-                        if (person.cache.hit) append(" · cached")
-                    }
+                    status.showStatus(
+                        StatusText.loaded(
+                            listOf(
+                                "${person.credits.size} credits",
+                                person.knownFor,
+                                if (sort == "release") "newest first" else "by popularity"
+                            ).filter(String::isNotBlank).joinToString(" · "),
+                            person.cache
+                        ),
+                        colors
+                    )
                     grid.post { grid.getChildAt(0)?.requestFocus() }
                 }
-                is HubResult.Failed -> {
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message
-                }
+                is HubResult.Failed ->
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = false, canRetry = false), colors)
             }
         }
     }

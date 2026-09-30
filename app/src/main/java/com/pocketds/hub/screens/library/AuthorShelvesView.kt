@@ -15,6 +15,7 @@ import com.pocketds.hub.net.*
 import com.pocketds.hub.reader.ReadingCompletionRepository
 import com.pocketds.hub.ui.*
 import kotlinx.coroutines.*
+import com.pocketds.hub.state.StatusText
 
 /** Vertically recycled author rows, with independent, stable horizontal book paging. */
 class AuthorShelvesView(context:Context,private val api:HubApi,private val libraryId:String,
@@ -71,10 +72,10 @@ class AuthorShelvesView(context:Context,private val api:HubApi,private val libra
                     result.value.authors.forEach { if(groups.none { prior -> prior.id==it.id })groups.add(it) }
                     page=next;totalPages=result.value.totalPages;direction=requested
                     errors.remove("root");rows.notifyDataSetChanged();onReady()
-                    onStatus(if(groups.isEmpty())"No authors in this library" else "${result.value.total} authors${if(result.value.cache.stale) " · cached" else ""}",false)
+                    onStatus(if(groups.isEmpty())"No authors in this library" else StatusText.loaded("${result.value.total} authors",result.value.cache).text,false)
                 }
                 is HubResult.Failed -> if(visible && token==generation) {
-                    errors["root"]=result.message;onStatus("${result.message} · previous order kept · Refresh retries",true);rows.notifyDataSetChanged()
+                    errors["root"]=result.message;onStatus(StatusText.failed(result.message,result.kind,hasData=true).text,true);rows.notifyDataSetChanged()
                 }
             }
             if(token==generation)jobs.remove("root")

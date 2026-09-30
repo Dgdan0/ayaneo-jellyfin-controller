@@ -39,6 +39,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.pocketds.hub.state.StatusMessage
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /**
  * One title, and where it actually is.
@@ -353,10 +356,8 @@ class MediaDetailScreen(
         scope.launch {
             when (val result = api.mediaDetail(mediaKey)) {
                 is HubResult.Ok -> render(result.value)
-                is HubResult.Failed -> {
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message
-                }
+                is HubResult.Failed ->
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = false, canRetry = false), colors)
             }
         }
     }
@@ -402,17 +403,17 @@ class MediaDetailScreen(
             d.cast.forEach { castRow.addView(castCard(it)) }
         }
 
-        status.setTextColor(colors.mutedText)
-        status.text = buildString {
-            val availability = Availability.fromWire(d.availability)
-            append(availability.label.ifEmpty {
-                if (availability == Availability.NOT_IN_LIBRARY) "Not in library" else "Status unavailable"
-            })
-            if (d.cache.hit) append(" · cached ").append(d.cache.ageSeconds).append("s ago")
-            if (d.partial.isNotEmpty()) {
-                append(" · degraded: ").append(d.partial.joinToString(", ") { it.service })
-            }
-        }
+        val availability = Availability.fromWire(d.availability)
+        status.showStatus(
+            StatusText.loaded(
+                availability.label.ifEmpty {
+                    if (availability == Availability.NOT_IN_LIBRARY) "Not in library" else "Status unavailable"
+                },
+                d.cache,
+                d.partial.map { it.service }
+            ),
+            colors
+        )
 
         loadImage(d.media.backdrop, backdrop)
         loadImage(d.media.poster, poster)

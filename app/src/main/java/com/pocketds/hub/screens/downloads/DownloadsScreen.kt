@@ -41,6 +41,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /**
  * The download manager.
@@ -259,7 +261,7 @@ class DownloadsScreen(
             return listOfNotNull(
                 focusedReadingItem()?.takeIf { it.availableActions.isNotEmpty() }
                     ?.let { ButtonHint.activate("Actions") },
-                ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh)
+                ButtonHint.refresh()
             )
         }
         val item = focusedItem()
@@ -276,7 +278,7 @@ class DownloadsScreen(
             // The button is named in the label. There is no conventional glyph
             // for Select, and "⊙ Refresh" told the user nothing about which
             // button to press -- they said so.
-            ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh)
+            ButtonHint.refresh()
         )
     }
 
@@ -448,15 +450,10 @@ class DownloadsScreen(
             }
         }
 
-        statusLine.setTextColor(
-            if (body.partial.isEmpty()) colors.mutedText else colors.badgePending
-        )
-        statusLine.text = when {
-            // A partial response is the normal shape here, not an error: this
-            // screen is useful with any one of the three services answering, and
-            // naming the missing one beats a silently shorter list.
-            body.partial.isNotEmpty() ->
-                body.partial.joinToString(" · ") { it.service + " " + it.reason }
+        // A partial response is the normal shape here, not an error: this screen
+        // is useful with any one of the three services answering. The summary
+        // stays, and the missing service is named after it.
+        val summary = when {
             targetMediaKey.isNotBlank() && displayed.isEmpty() -> if (attentionOnly) "No transfers currently need attention for this title." else "No transfers found for this title."
             attentionOnly && displayed.isEmpty() -> "No transfers need attention."
             attentionOnly -> "${displayed.size} transfers need attention"
@@ -464,6 +461,7 @@ class DownloadsScreen(
             body.items.isEmpty() -> "Nothing running. Ⓨ shows finished items."
             else -> "${displayed.size} items" + if (includeFinished) " · including finished" else ""
         }
+        statusLine.showStatus(StatusText.loaded(summary, unavailable = body.partial.map { it.service }), colors)
         host?.refreshHints()
     }
 

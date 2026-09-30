@@ -29,6 +29,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.state.StatusTone
+import com.pocketds.hub.ui.showStatus
 
 /**
  * Interactive search — the manual release picker, as Radarr and Sonarr have it.
@@ -201,10 +204,7 @@ class ReleasesScreen(
                     applyFilter()
                     val ms = System.currentTimeMillis() - started
                     DebugLog.log("net", "releases ${body.releases.size} in ${ms}ms")
-                    status.setTextColor(
-                        if (body.accepted == 0) colors.badgePending else colors.mutedText
-                    )
-                    status.text = buildString {
+                    val summary = buildString {
                         append(body.releases.size).append(" releases")
                         append(" · ").append(body.accepted).append(" acceptable")
                         if (body.accepted == 0 && body.releases.isNotEmpty()) {
@@ -213,14 +213,14 @@ class ReleasesScreen(
                             // state the user came here to get out of.
                             append(" — every one was refused, see why below")
                         }
-                        if (body.cache.hit) append(" · cached ${body.cache.ageSeconds}s ago")
                     }
+                    val line = StatusText.loaded(summary, body.cache)
+                    // Nothing acceptable is itself the warning here.
+                    status.showStatus(if (body.accepted == 0) line.copy(tone = StatusTone.WARNING) else line, colors)
                     list.post { list.getChildAt(0)?.requestFocus() }
                 }
-                is HubResult.Failed -> {
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message
-                }
+                is HubResult.Failed ->
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = false, canRetry = false), colors)
             }
             host?.refreshHints()
         }

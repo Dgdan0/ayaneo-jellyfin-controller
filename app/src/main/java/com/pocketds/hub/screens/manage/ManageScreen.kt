@@ -39,6 +39,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import com.pocketds.hub.state.StatusMessage
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
+import com.pocketds.hub.model.ServiceNames
 
 /** Service dashboard with authenticated, service-specific maintenance actions. */
 class ManageScreen(
@@ -137,7 +141,7 @@ class ManageScreen(
             }
         ))
         if (selectedService in scannableServices) add(ButtonHint.primary("Scan library"))
-        add(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
+        add(ButtonHint.refresh())
     }
 
     override fun onPad(action: PadAction): Boolean = when (action) {
@@ -176,7 +180,7 @@ class ManageScreen(
     }
 
     private fun scanLibrary(service: String) {
-        val label = displayNames[service] ?: service.replaceFirstChar { it.uppercase() }
+        val label = ServiceNames.display(service)
         if (scanJob?.isActive == true) {
             host.notify("A library scan is already running")
             return
@@ -207,19 +211,21 @@ class ManageScreen(
 
     private fun refresh() {
         if (loadJob?.isActive == true) return
-        status.setTextColor(colors.mutedText)
-        status.text = if (adapter.itemCount == 0) "Checking Ayaneo Hub…" else "Refreshing services…"
+        status.showStatus(
+            StatusMessage(if (adapter.itemCount == 0) "Checking Ayaneo Hub…" else "Refreshing services…"), colors
+        )
         loadJob = scope.launch {
             when (val result = api.health()) {
                 is HubResult.Ok -> render(result.value)
                 is HubResult.Failed -> {
-                    status.setTextColor(colors.dangerText)
-                    status.text = if (adapter.itemCount <= 2) {
-                        adapter.showHub(configuredHubRow(state = "down"))
-                        "Ayaneo Hub is not reachable · open it to edit the address"
-                    } else {
-                        "Could not refresh · showing the previous result"
-                    }
+                    // The hub's own reason matters most on the one screen where
+                    // it can be fixed: a rejected token used to read as
+                    // "not reachable" and sent people to edit the address.
+                    val hasServices = adapter.itemCount > 2
+                    if (!hasServices) adapter.showHub(configuredHubRow(state = "down"))
+                    val message = if (hasServices) result.message
+                        else "${result.message} · open Ayaneo Hub to edit the connection"
+                    status.showStatus(StatusText.failed(message, result.kind, hasData = hasServices), colors)
                 }
             }
             loadJob = null
@@ -256,7 +262,7 @@ class ManageScreen(
         }.joinToString(" · ")
         return ServiceRow(
             id = name,
-            name = displayNames[name] ?: name.replaceFirstChar { it.uppercase() },
+            name = ServiceNames.display(name),
             state = state,
             icon = name,
             dashboardUrl = dashboardUrl,
@@ -551,20 +557,6 @@ class ManageScreen(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
-        val displayNames = mapOf(
-            "jellyfin" to "Jellyfin",
-            "jellyseerr" to "Jellyseerr",
-            "prowlarr" to "Prowlarr",
-            "sonarr" to "Sonarr",
-            "radarr" to "Radarr",
-            "readarr" to "Readarr",
-            "qbittorrent" to "qBittorrent",
-            "bazarr" to "Bazarr",
-            "cleanuparr" to "Cleanuparr",
-            "bookkeeprr" to "BookKeeprr",
-            "kavita" to "Kavita",
-            "storyteller" to "Storyteller"
-        )
         val serviceOrder = listOf(
             "jellyfin", "jellyseerr", "prowlarr", "sonarr", "radarr", "readarr", "qbittorrent", "bazarr",
             "cleanuparr", "bookkeeprr", "kavita", "storyteller"

@@ -50,6 +50,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import com.pocketds.hub.state.StatusMessage
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /** Media and reading folders exactly as their servers name and order them. */
 class LibraryScreen(
@@ -212,7 +215,7 @@ class LibraryScreen(
             }
         ),
         ButtonHint.secondary(if (mode == ContentMode.MEDIA) "Search" else "Books search"),
-        ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh)
+        ButtonHint.refresh()
     )
 
     override fun onPad(action: PadAction): Boolean = when (action) {
@@ -230,8 +233,10 @@ class LibraryScreen(
         if (loadJob?.isActive == true) return
         val generation = ++loadGeneration
         val requestedMode = mode
-        if (force) status.text = "Refreshing…"
-        else status.text = if (mode == ContentMode.MEDIA) "Asking Jellyfin…" else "Loading reading libraries…"
+        status.showStatus(
+            StatusText.loading(if (mode == ContentMode.MEDIA) "libraries" else "reading libraries", refreshing = force),
+            colors
+        )
         loadJob = scope.launch {
             if (requestedMode == ContentMode.MEDIA) {
                 when (val result = api.library()) {
@@ -257,20 +262,17 @@ class LibraryScreen(
     }
 
     private fun renderFailure(result: HubResult.Failed) {
-        status.setTextColor(colors.dangerText)
-        status.text = result.message + " · Select retries"
+        status.showStatus(StatusText.failed(result.message, result.kind, hasData = activeAdapter().itemCount > 0), colors)
     }
 
     private fun renderMedia(body: LibraryResponse) {
         mediaAdapter.submit(body.views)
         mediaArtworkDay = LocalDate.now().toString()
-        status.setTextColor(if (body.partial.isEmpty()) colors.mutedText else colors.badgePending)
-        status.text = when {
-            body.views.isEmpty() -> "No movie or TV libraries were found."
-            body.partial.isNotEmpty() -> body.partial.joinToString(" · ") { it.message }
-            body.cache.stale -> "Showing cached libraries"
-            else -> "${body.views.size} libraries"
-        }
+        status.showStatus(
+            if (body.views.isEmpty()) StatusMessage("No movie or TV libraries were found.")
+            else StatusText.loaded("${body.views.size} libraries", body.cache, body.partial.map { it.service }),
+            colors
+        )
         restoreFocus()
         // The list is empty when showCurrent first draws the bar. Refresh after
         // its first focus settles as well, because this device can complete the
@@ -283,13 +285,11 @@ class LibraryScreen(
             ReadingLibrary(id="kavita:reading-lists",source="kavita",kind="reading_list",title="Reading lists")
         ) else emptyList())
         readingArtworkDay = LocalDate.now().toString()
-        status.setTextColor(if (body.partial.isEmpty()) colors.mutedText else colors.badgePending)
-        status.text = when {
-            body.libraries.isEmpty() -> "No reading libraries were found."
-            body.partial.isNotEmpty() -> body.partial.joinToString(" · ") { it.message }
-            body.cache.stale -> "Showing cached reading libraries"
-            else -> "${body.libraries.size} reading libraries"
-        }
+        status.showStatus(
+            if (body.libraries.isEmpty()) StatusMessage("No reading libraries were found.")
+            else StatusText.loaded("${body.libraries.size} reading libraries", body.cache, body.partial.map { it.service }),
+            colors
+        )
         restoreFocus()
         host?.refreshHints()
     }
@@ -601,7 +601,7 @@ class LibraryGridScreen(
             add(ButtonHint.activate("Details"))
             add(ButtonHint.back())
             if (library.kind !in setOf("search", "favorites")) add(ButtonHint.secondary("Sort"))
-            add(ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh))
+            add(ButtonHint.refresh())
         }
     }
 
@@ -673,29 +673,31 @@ class LibraryGridScreen(
                         selected = adapter.indexOf(selectedItemId).takeIf { it >= 0 } ?: 0
                         refreshing = false
                     } else adapter.append(result.value.items)
-                    status.setTextColor(
-                        if (result.value.partial.isEmpty()) colors.mutedText else colors.badgePending
+                    val empty = result.value.items.isEmpty() && adapter.itemCount == 0
+                    status.showStatus(
+                        when {
+                            empty && library.kind == "favorites" -> StatusMessage("No favourites yet.")
+                            empty && library.kind == "search" -> StatusMessage("No Jellyfin matches.")
+                            empty -> StatusMessage("This library is empty.")
+                            else -> StatusText.loaded(
+                                when (library.kind) {
+                                    "search" -> "${adapter.itemCount} of ${result.value.total} matches"
+                                    "favorites" -> "${adapter.itemCount} of ${result.value.total} favourites"
+                                    else -> "${adapter.itemCount} of ${result.value.total} · ${sortLabel()}"
+                                },
+                                result.value.cache,
+                                result.value.partial.map { it.service }
+                            )
+                        },
+                        colors
                     )
-                    status.text = when {
-                        result.value.items.isEmpty() && adapter.itemCount == 0 && library.kind == "favorites" ->
-                            "No favourites yet."
-                        result.value.items.isEmpty() && adapter.itemCount == 0 && library.kind == "search" ->
-                            "No Jellyfin matches."
-                        result.value.items.isEmpty() && adapter.itemCount == 0 -> "This library is empty."
-                        result.value.cache.stale -> "${adapter.itemCount} of ${result.value.total} · cached"
-                        library.kind == "search" -> "${adapter.itemCount} of ${result.value.total} matches"
-                        library.kind == "favorites" -> "${adapter.itemCount} of ${result.value.total} favourites"
-                        else -> "${adapter.itemCount} of ${result.value.total} · ${sortLabel()}"
-                    }
                     if (page == 1 && !overlay.isOpen) restoreFocus()
                     host?.refreshHints()
                 }
                 is HubResult.Failed -> {
                     if (generation != loadGeneration) return@launch
                     paging.fail(page)
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message + if (adapter.itemCount == 0) " · Select retries"
-                        else " · showing previous items · Select retries"
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = adapter.itemCount > 0), colors)
                     host?.refreshHints()
                 }
             }

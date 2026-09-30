@@ -25,6 +25,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import com.pocketds.hub.state.Fmt
+import com.pocketds.hub.state.StatusMessage
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /** Pre-play source, language, subtitle and quality selection. */
 class PlaybackOptionsScreen(
@@ -85,13 +88,20 @@ class PlaybackOptionsScreen(
 
     override fun hints() = if (::overlay.isInitialized && overlay.isOpen) {
         listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
+    } else if (plan == null && job?.isActive != true) {
+        listOf(ButtonHint.refresh("Retry (Select)"), ButtonHint.back())
     } else listOf(ButtonHint.back())
 
-    override fun onPad(action: PadAction): Boolean =
-        if (::overlay.isInitialized && overlay.onPad(action)) true else false
+    override fun onPad(action: PadAction): Boolean = when {
+        ::overlay.isInitialized && overlay.onPad(action) -> true
+        // The failure line has always said "Select retries"; this makes it true.
+        action == PadAction.Refresh && plan == null && job?.isActive != true -> { prepare(); true }
+        else -> false
+    }
 
     private fun prepare() {
-        status.text = "Negotiating with Jellyfin…"
+        status.showStatus(StatusMessage("Negotiating with Jellyfin…"), colors)
+        host.refreshHints()
         job = scope.launch {
             if (localPlan != null) {
                 plan = applyRememberedSelection(localPlan)
@@ -113,12 +123,11 @@ class PlaybackOptionsScreen(
                     plan = applyRememberedSelection(result.value)
                     plan?.let(::showMain)
                 }
-                is HubResult.Failed -> {
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message + " · Select retries"
-                }
+                is HubResult.Failed ->
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = false), colors)
             }
             job = null
+            host.refreshHints()
         }
     }
 

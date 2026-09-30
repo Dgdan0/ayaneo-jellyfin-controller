@@ -46,6 +46,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.pocketds.hub.state.StatusMessage
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /** Personal Jellyfin rows: favourites, resume, next episode, and recent additions. */
 class HomeScreen(
@@ -193,7 +196,7 @@ class HomeScreen(
         listOf(
             ButtonHint.activate("Details"),
             ButtonHint.secondary("Users"),
-            ButtonHint("⟳", "Refresh (Select)", PadAction.Refresh)
+            ButtonHint.refresh()
         )
     }
 
@@ -309,8 +312,7 @@ class HomeScreen(
         loadGeneration++
         val generation = loadGeneration
         loadJob?.cancel()
-        status.setTextColor(colors.mutedText)
-        status.text = if (force) "Refreshing your Jellyfin home…" else "Loading your Jellyfin home…"
+        status.showStatus(StatusText.loading("your Jellyfin home", refreshing = force), colors)
         wantsFocus = adapter.itemCount == 0
         loadJob = scope.launch {
             when (val result = api.home()) {
@@ -320,12 +322,10 @@ class HomeScreen(
                 }
                 is HubResult.Failed -> {
                     if (generation != loadGeneration) return@launch
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message + if (adapter.itemCount == 0) {
-                        " · Select retries"
-                    } else {
-                        " · showing previous rows · Select retries"
-                    }
+                    status.showStatus(
+                        StatusText.failed(result.message, result.kind, hasData = adapter.itemCount > 0), colors
+                    )
+                    status.visibility = View.VISIBLE
                     host?.refreshHints()
                 }
             }
@@ -335,16 +335,16 @@ class HomeScreen(
 
     private fun render(body: HomeResponse) {
         adapter.submit(body.rows, retainMissing = body.partial.isNotEmpty())
-        status.setTextColor(if (body.partial.isEmpty()) colors.mutedText else colors.badgePending)
-        status.text = when {
-            body.rows.isEmpty() && adapter.itemCount == 0 -> "Nothing to continue or show yet."
-            body.partial.isNotEmpty() -> buildString {
-                append(adapter.itemCount).append(" rows · ")
-                append(body.partial.joinToString(" · ") { it.message })
-            }
-            body.cache.stale -> "${adapter.itemCount} rows · cached"
-            else -> ""
-        }
+        // Fresh, complete rows need no line at all; only a caveat earns one.
+        val unavailable = body.partial.map { it.service }
+        status.showStatus(
+            when {
+                body.rows.isEmpty() && adapter.itemCount == 0 -> StatusMessage("Nothing to continue or show yet.")
+                StatusText.caveat(body.cache, unavailable).text.isEmpty() -> StatusMessage("")
+                else -> StatusText.loaded("${adapter.itemCount} rows", body.cache, unavailable)
+            },
+            colors
+        )
         status.visibility = if (status.text.isNullOrBlank()) View.GONE else View.VISIBLE
         requestInitialFocus()
         host?.refreshHints()

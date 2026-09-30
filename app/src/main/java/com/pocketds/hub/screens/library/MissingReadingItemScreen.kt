@@ -12,6 +12,8 @@ import com.pocketds.hub.net.*
 import com.pocketds.hub.screens.discover.ReadingDetailScreen
 import com.pocketds.hub.ui.*
 import kotlinx.coroutines.*
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /** Missing volumes remain inspectable; acquisition still goes through the explicit request flow. */
 class MissingReadingItemScreen(private val api:HubApi,private val item:ReadingSectionItem,private val ring:()->Boolean):Screen {
@@ -58,7 +60,7 @@ class MissingReadingItemScreen(private val api:HubApi,private val item:ReadingSe
         searchJob=scope.launch {
             val query=listOf(item.title,item.authors.firstOrNull().orEmpty()).filter(String::isNotBlank).joinToString(" ")
             when(val result=api.readingSearch(query,ReadingType.EBOOK)) {
-                is HubResult.Failed->status.text="${result.message} · Select retries"
+                is HubResult.Failed->status.showStatus(StatusText.failed(result.message,result.kind,hasData=false),Theme.colors(status.context))
                 is HubResult.Ok->{
                     val results=result.value.results.ifEmpty { result.value.broaderResults }
                     status.text=if(results.isEmpty())"No matching editions found" else ""

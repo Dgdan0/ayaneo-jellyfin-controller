@@ -45,6 +45,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
+import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.ui.showStatus
 
 /** Recent automation activity and current health, kept separate by service. */
 class NotificationsScreen(
@@ -149,7 +151,7 @@ class NotificationsScreen(
     override fun hints(): List<ButtonHint> = listOfNotNull(
         selectedNotice()?.let { ButtonHint.activate("Show message") },
         ButtonHint.primary("Mark all seen").takeIf { unreadIds.isNotEmpty() },
-        ButtonHint("↻", "Refresh (Select)", PadAction.Refresh)
+        ButtonHint.refresh()
     )
 
     override fun onPad(action: PadAction): Boolean = when (action) {
@@ -182,11 +184,9 @@ class NotificationsScreen(
     private fun startPolling(showLoading: Boolean) {
         pollJob?.cancel()
         if (showLoading) {
-            status.setTextColor(colors.mutedText)
-            status.text = "Loading activity…"
+            status.showStatus(StatusText.loading("activity", refreshing = false), colors)
         } else if (hasContent) {
-            status.setTextColor(colors.mutedText)
-            status.text = "Refreshing activity…"
+            status.showStatus(StatusText.loading("activity", refreshing = true), colors)
         }
         pollJob = scope.launch {
             while (visible) {
@@ -200,8 +200,7 @@ class NotificationsScreen(
         when (val result = api.notifications(NotificationSettings.limits(host.viewContext))) {
             is HubResult.Ok -> render(result.value)
             is HubResult.Failed -> {
-                status.setTextColor(colors.dangerText)
-                status.text = result.message + if (hasContent) " · showing previous activity" else " · Select retries"
+                status.showStatus(StatusText.failed(result.message, result.kind, hasData = hasContent), colors)
             }
         }
     }
@@ -219,7 +218,6 @@ class NotificationsScreen(
         unreadIds = readStore.unread(response.sections.flatMap { it.items }.map { it.id })
         columns.values.forEach { it.updateUnreadCount() }
         onUnreadChanged(unreadIds.size + com.pocketds.hub.settings.LocalAlerts.unread(host.viewContext))
-        status.setTextColor(if (response.partial.isEmpty()) colors.mutedText else colors.badgePending)
         updateStatus(response)
         if (visibleColumns().none { it.contains(selectedID) }) selectedID = ""
         requestInitialFocus()
@@ -253,14 +251,14 @@ class NotificationsScreen(
     }
 
     private fun updateStatus(response: NotificationsResponse) {
-        status.text = when {
-            response.partial.isNotEmpty() -> response.partial.joinToString(" · ") { it.message }
-            response.sections.all { it.items.isEmpty() } -> "No recent activity or service warnings."
+        val summary = when {
+            response.sections.all { it.items.isEmpty() } && response.partial.isEmpty() -> "No recent activity or service warnings."
             unreadIds.isNotEmpty() -> "${unreadIds.size} unread notification${if (unreadIds.size == 1) "" else "s"}"
             response.attentionCount > 0 -> "${response.attentionCount} current service issue${if (response.attentionCount == 1) "" else "s"} · all seen"
-            response.cache.stale -> "Recent activity · cached"
+            response.partial.isNotEmpty() || response.cache.stale -> "Recent activity"
             else -> "Recent activity · all services responding"
         }
+        status.showStatus(StatusText.loaded(summary, response.cache, response.partial.map { it.service }), colors)
     }
 
     private fun selectedNotice(): ServiceNotice? =
