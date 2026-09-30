@@ -29,6 +29,7 @@ import kotlinx.coroutines.launch
 import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.showStatus
+import com.pocketds.hub.ui.activateOnTap
 
 /**
  * Everything one performer has been in.
@@ -197,7 +198,7 @@ class PersonScreen(
             val loader = (api as? HubClient)?.imageLoader
                 ?: coil.ImageLoader(holder.itemView.context)
             (holder.itemView as PosterCardView).bind(hit, loader) { api.imageUrl(it) }
-            holder.itemView.setOnClickListener {
+            holder.itemView.activateOnTap {
                 host?.push(MediaDetailScreen(api, hit.media.key, hit.media.title, ringVisible))
             }
         }

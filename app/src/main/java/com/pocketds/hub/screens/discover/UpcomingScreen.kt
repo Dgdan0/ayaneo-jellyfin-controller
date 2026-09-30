@@ -31,6 +31,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.showStatus
+import com.pocketds.hub.ui.activateOnTap
 
 class UpcomingScreen(private val api:HubApi,private val ringVisible:()->Boolean):Screen {
  override val title="Upcoming"
@@ -137,7 +138,7 @@ class UpcomingScreen(private val api:HubApi,private val ringVisible:()->Boolean)
       addView(label(timeLabel(group),11f,true))
      },LinearLayout.LayoutParams(0,WRAP,1f))
      setOnFocusChangeListener {v,focused->FocusDecorator.refresh(v,ringVisible());if(focused){select(group);host?.refreshHints()}}
-     setOnClickListener {select(group);open(group)}
+     activateOnTap {select(group);open(group)}
      contentDescription=group.first.media.title+", "+group.label+", "+timeLabel(group)
     }
     agenda.addView(row,LinearLayout.LayoutParams(MATCH,WRAP).apply{bottomMargin=dp(6)})

@@ -186,7 +186,7 @@ class DiscoverScreen(
             background = Styler.chipBackground(context, colors)
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, false)
-            setOnClickListener { host.push(UpcomingScreen(api, ringVisible)) }
+            activateOnTap { host.push(UpcomingScreen(api, ringVisible)) }
         }
 
         searchBox = EditText(context).apply {

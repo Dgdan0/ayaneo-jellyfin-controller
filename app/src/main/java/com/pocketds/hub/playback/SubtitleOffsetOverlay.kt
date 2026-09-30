@@ -14,6 +14,7 @@ import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import kotlin.math.abs
+import com.pocketds.hub.ui.activateOnTap
 
 /** A small live timing control that leaves the scene and active subtitle visible. */
 internal class SubtitleOffsetOverlay(
@@ -252,7 +253,7 @@ internal class SubtitleOffsetOverlay(
         background = Styler.cardBackground(context, colors, cornerDp = 9f, baseFill = colors.stripBackground)
         contentDescription = description
         Styler.makeFocusable(this)
-        setOnClickListener { click() }
+        activateOnTap { click() }
     }
 
     private fun spokenLabel(value: Long): String = when {

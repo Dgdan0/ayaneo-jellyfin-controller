@@ -42,6 +42,7 @@ import kotlinx.coroutines.launch
 import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.showStatus
+import com.pocketds.hub.ui.activateOnTap
 
 /**
  * One title, and where it actually is.
@@ -542,7 +543,7 @@ class MediaDetailScreen(
         )
 
         FocusDecorator.attach(card, ringVisible)
-        card.setOnClickListener {
+        card.activateOnTap {
             host?.push(PersonScreen(api, member.id, member.name, ringVisible))
         }
 
@@ -618,7 +619,7 @@ class MediaDetailScreen(
             setPadding(h, v, h, v)
             Styler.makeFocusable(this)
             isClickable = true
-            setOnClickListener { onClick() }
+            activateOnTap { onClick() }
             // No scale: these sit in a row of text and growing one shoves the
             // next along.
             FocusDecorator.attach(this, ringVisible, scale = false)

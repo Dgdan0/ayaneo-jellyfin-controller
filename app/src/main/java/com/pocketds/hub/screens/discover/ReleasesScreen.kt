@@ -32,6 +32,7 @@ import kotlinx.coroutines.launch
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.state.StatusTone
 import com.pocketds.hub.ui.showStatus
+import com.pocketds.hub.ui.activateOnTap
 
 /**
  * Interactive search — the manual release picker, as Radarr and Sonarr have it.
@@ -329,7 +330,7 @@ class ReleasesScreen(
         override fun onBindViewHolder(holder: RowHolder, position: Int) {
             val release = items[position]
             (holder.itemView as ReleaseRowView).bind(release)
-            holder.itemView.setOnClickListener { confirmGrab(release) }
+            holder.itemView.activateOnTap { confirmGrab(release) }
         }
 
         override fun getItemCount(): Int = items.size
