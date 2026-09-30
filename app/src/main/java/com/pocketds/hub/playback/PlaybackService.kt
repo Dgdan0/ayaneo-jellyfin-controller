@@ -43,6 +43,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+import androidx.media3.exoplayer.mediacodec.MediaCodecAdapter
 
 /** Owns ExoPlayer, the MediaSession, and ordered Jellyfin progress reporting. */
 @UnstableApi
@@ -117,7 +118,11 @@ class PlaybackService : MediaSessionService() {
         val upstream = OkHttpDataSource.Factory(http).setDefaultRequestProperties(headers)
         val mediaSources = DefaultMediaSourceFactory(DefaultDataSource.Factory(this, upstream))
         val trackSelector = DefaultTrackSelector(this)
-        val renderers = DefaultRenderersFactory(this)
+        // HDR titles looked dim on this panel; decode them as SDR instead (see HdrOutput).
+        val renderers = object : DefaultRenderersFactory(this) {
+            override fun getCodecAdapterFactory(): MediaCodecAdapter.Factory =
+                HdrToSdrCodecFactory(super.getCodecAdapterFactory())
+        }
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
         DebugLog.log(
