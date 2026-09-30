@@ -543,6 +543,36 @@ on the machine that holds every API key.
 
 ---
 
+## Shared building blocks
+
+**One behaviour, one implementation.** Before writing a loop, a card, a label or a rule, use the
+owner below; if it does not fit, change the owner (with a test) so every screen gets the fix.
+Most of these exist because several screens had drifted copies of the same thing.
+
+| Behaviour | Owner |
+|---|---|
+| Talking to the hub | `HubClient.shared(context)` -- one per process. `net/CredentialGate` in its interceptor: one 401 stops all traffic, a ban's long `Retry-After` holds it, 403 is a scope (`FailureKind.FORBIDDEN`) |
+| One request at a time, busy flag that cannot stick | `state/JobSlot` |
+| Asking again on a timer | `state/Poller` + `PollCadence` (backoff, settle window, hidden stops) |
+| Status line wording and tone | `state/StatusText` + `TextView.showStatus` |
+| Numbers, times, sizes | `state/Fmt` |
+| Resume point / finished / not started | `playback/ResumeRules` (mirrors the hub's `decideWatchPosition`) |
+| Which watch is newer, local or server | `OfflineCatalogProgress.newer` / `fromServer` |
+| Titles requested this session | `state/RequestedTitles` (applied at card bind) |
+| Patching cards already on screen | `state/HitRefresh` |
+| Loading any hub image | `ui/Artwork.loader` / `bind` / `bindHub` (always cancels a recycled view's old request) |
+| Watch progress | `ui/ArtworkProgressView` on artwork, `ui/ProgressLine` under titles |
+| An episode | `ui/EpisodeCardView`; names via `EpisodeLabel.of` / `code` / `season` ("S1E4 · Title", "Specials") |
+| A season or poster-shaped detail card | `ui/DetailArtworkCardView` |
+| A value menu / a destructive confirm | `ChoiceOverlay.pickValue` / `confirm` (harmless answer first) |
+| Activating a focusable on the first tap | `activateOnTap`, never `setOnClickListener` on a focusable |
+| Paging with L2/R2 | `HubActivity.page` (moves focus with the scroll) |
+
+Cards measure at their natural height (`EpisodeCardView`, `DetailArtworkCardView`); give a row
+`WRAP` height rather than leftover space.
+
+---
+
 ## Conventions (inherited from `../Ayaneo PocketDS Keyboard+Mouse`)
 
 That sibling project targets the same device. Read it before inventing anything — several
