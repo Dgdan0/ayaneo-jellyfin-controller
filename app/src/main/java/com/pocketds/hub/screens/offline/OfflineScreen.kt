@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.offline
 
+import com.pocketds.hub.ui.ProgressLine
 import com.pocketds.hub.ui.Artwork
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -489,9 +490,7 @@ class OfflineScreen(
                 })
                 state = TextView(context).apply { textSize = 12f; maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END }
                 addView(state)
-                progress = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
-                    max = 1_000
-                }
+                progress = ProgressLine.create(context, colors)
                 addView(progress, LinearLayout.LayoutParams(MATCH, dp(3)).apply { topMargin = dp(4) })
             }, LinearLayout.LayoutParams(0, WRAP, 1f))
             percent = TextView(context).apply { textSize = 13f; gravity = Gravity.CENTER; setTextColor(colors.accent) }

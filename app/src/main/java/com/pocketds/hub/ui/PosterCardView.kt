@@ -42,9 +42,8 @@ class PosterCardView(
     private val badge: TextView
     private val title: TextView
     private val subtitle: TextView
-    private val progressBar: android.view.View
+    private val progressBar: ArtworkProgressView
     private val compactCard: Boolean
-    private var boundProgress = 0.0
 
     init {
         orientation = VERTICAL
@@ -103,18 +102,9 @@ class PosterCardView(
 
         // A thin bar along the bottom of the poster while something is actually
         // downloading -- readable at a glance without reading any text.
-        progressBar = android.view.View(context).apply {
-            setBackgroundColor(colors.accent)
-            visibility = GONE
-            layoutParams = FrameLayout.LayoutParams(0, Styler.dpInt(context, 4f)).apply {
-                gravity = Gravity.BOTTOM or Gravity.START
-            }
-        }
-        posterWrap.addView(progressBar)
+        progressBar = ArtworkProgressView(context, colors.accent)
+        posterWrap.addView(progressBar, FrameLayout.LayoutParams(MATCH, Styler.dpInt(context, 4f), Gravity.BOTTOM))
         addView(posterWrap, LayoutParams(MATCH, WRAP))
-        poster.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            updateProgressWidth()
-        }
 
         title = TextView(context).apply {
             textSize = if (compact) 12f else 13f
@@ -160,18 +150,7 @@ class PosterCardView(
             else -> ""
         }
         if (!showAvailability && libraryBadge.isNotEmpty()) {
-            badge.visibility = VISIBLE
-            badge.text = libraryBadge
-            badge.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(
-                    if (hit.played) this@PosterCardView.colors.badgeAvailable
-                    else this@PosterCardView.colors.accent
-                )
-            }
-            badge.minWidth = Styler.dpInt(context, 24f)
-            badge.gravity = Gravity.CENTER
-            badge.setTextColor(SemanticColor.foreground(if (badge.text == "✓") colors.badgeAvailable else colors.accent))
+            roundBadge(libraryBadge, if (hit.played) colors.badgeAvailable else colors.accent)
         } else if (showAvailability && availability.label.isNotEmpty()) {
             badge.visibility = VISIBLE
             badge.text = availability.label
@@ -181,17 +160,7 @@ class PosterCardView(
             badge.visibility = GONE
         }
 
-        boundProgress = if (hit.played) 0.0 else hit.progress.coerceIn(0.0, 1.0)
-        if (boundProgress > 0.0) {
-            progressBar.visibility = VISIBLE
-            updateProgressWidth()
-            // RecyclerView normally binds before the poster has a measured
-            // width. Recompute after layout so 50% is really half the poster,
-            // rather than the old two-pixel fallback.
-            poster.post(::updateProgressWidth)
-        } else {
-            progressBar.visibility = GONE
-        }
+        progressBar.fraction = if (hit.played) 0.0 else hit.progress
 
         loadPoster(hit.media.poster, imageLoader, imageUrl)
     }
@@ -201,8 +170,7 @@ class PosterCardView(
         contentDescription = listOf(item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(", ")
         subtitle.text = item.subtitle
         subtitle.visibility = if (compactCard) GONE else VISIBLE
-        boundProgress = 0.0
-        progressBar.visibility = GONE
+        progressBar.fraction = 0.0
         if (item.inLibrary) {
             badge.visibility = VISIBLE
             badge.text = "Tracked"
@@ -223,37 +191,13 @@ class PosterCardView(
         title.setPadding(Styler.dpInt(context,8f),Styler.dpInt(context,8f),Styler.dpInt(context,8f),0)
         subtitle.setPadding(Styler.dpInt(context,8f),Styler.dpInt(context,3f),Styler.dpInt(context,8f),Styler.dpInt(context,8f))
         subtitle.ellipsize=android.text.TextUtils.TruncateAt.END
-        boundProgress = if (work.progress?.completed == true) 0.0
-        else work.progress?.percentage?.coerceIn(0.0, 1.0) ?: 0.0
+        progressBar.fraction = if (work.progress?.completed == true) 0.0 else work.progress?.percentage ?: 0.0
         if (work.progress?.completed == true) {
-            badge.visibility = VISIBLE
-            badge.text = "✓"
-            badge.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(this@PosterCardView.colors.badgeAvailable)
-            }
-            badge.minWidth = Styler.dpInt(context, 24f)
-            badge.gravity = Gravity.CENTER
-            badge.setTextColor(SemanticColor.foreground(if (badge.text == "✓") colors.badgeAvailable else colors.accent))
+            roundBadge("✓", colors.badgeAvailable)
         } else if (work.entityType == "collection" && work.bookCount > 0) {
-            badge.visibility = VISIBLE
-            badge.text = work.bookCount.toString()
-            badge.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(this@PosterCardView.colors.accent)
-            }
-            badge.minWidth = Styler.dpInt(context, 24f)
-            badge.gravity = Gravity.CENTER
-            badge.setTextColor(SemanticColor.foreground(if (badge.text == "✓") colors.badgeAvailable else colors.accent))
+            roundBadge(work.bookCount.toString(), colors.accent)
         } else {
             badge.visibility = GONE
-        }
-        if (boundProgress > 0.0) {
-            progressBar.visibility = VISIBLE
-            updateProgressWidth()
-            poster.post(::updateProgressWidth)
-        } else {
-            progressBar.visibility = GONE
         }
         loadPoster(work.artwork, imageLoader, imageUrl)
         contentDescription = buildString {
@@ -286,8 +230,7 @@ class PosterCardView(
         poster.imageAlpha = 105
         title.alpha = 1f
         subtitle.alpha = 1f
-        boundProgress = 0.0
-        progressBar.visibility = GONE
+        progressBar.fraction = 0.0
         badge.visibility = VISIBLE
         badge.text = "Missing"
         badge.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
@@ -308,15 +251,17 @@ class PosterCardView(
             onMissing = { if (token == bindToken) missingArt.visibility = VISIBLE })
     }
 
-    private fun updateProgressWidth() {
-        if (boundProgress <= 0.0 || poster.width <= 0) return
-        val params = progressBar.layoutParams as FrameLayout.LayoutParams
-        val next = (poster.width * boundProgress).toInt()
-            .coerceAtLeast(Styler.dpInt(context, 2f))
-        if (params.width != next) {
-            params.width = next
-            progressBar.layoutParams = params
+    /** A count or ✓ in a coloured circle: watched, unwatched episodes, books in a collection. */
+    private fun roundBadge(text: String, color: Int) {
+        badge.visibility = VISIBLE
+        badge.text = text
+        badge.background = ThemeGradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(color)
         }
+        badge.minWidth = Styler.dpInt(context, 24f)
+        badge.gravity = Gravity.CENTER
+        badge.setTextColor(SemanticColor.foreground(color))
     }
 
     private fun badgeColour(availability: Availability): Int = when (availability) {

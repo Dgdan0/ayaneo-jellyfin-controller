@@ -15,6 +15,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import com.pocketds.hub.ui.ProgressLine.showFraction
 import android.widget.ScrollView
 import android.widget.TextView
 import coil.ImageLoader
@@ -237,9 +238,7 @@ class ContinuationCardView(context: Context, colors: PocketColors, private val r
     val image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
     val titleView = label(context, 14f, colors.primaryText).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
     val metadataView = label(context, 11f, colors.mutedText).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
-    val progressView = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
-        max = 1000; progressTintList = ColorStateList.valueOf(colors.accent); progressBackgroundTintList = ColorStateList.valueOf(colors.cardSurfacePressed)
-    }
+    val progressView = ProgressLine.create(context, colors)
     var onFocused: (() -> Unit)? = null
     init {
         orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -264,8 +263,7 @@ class ContinuationCardView(context: Context, colors: PocketColors, private val r
     }
     fun bind(title: String, metadata: String, fraction: Double, completed: Boolean) {
         titleView.text = title; metadataView.text = metadata
-        progressView.progress = (fraction.coerceIn(0.0, 1.0) * 1000).toInt()
-        progressView.visibility = if (!completed && fraction > 0) VISIBLE else GONE
+        progressView.showFraction(if (completed) 0.0 else fraction)
         contentDescription = "$title, $metadata"
     }
 }

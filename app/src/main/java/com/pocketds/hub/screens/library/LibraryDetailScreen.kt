@@ -1,5 +1,7 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.ProgressLine
+import com.pocketds.hub.ui.ProgressLine.showFraction
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.graphics.drawable.GradientDrawable
@@ -603,11 +605,7 @@ class LibraryDetailScreen(
                 episode.progress > 0 -> add("${(episode.progress * 100).toInt()}% watched")
             }
         }.joinToString(" · ")
-        episodePreviewProgress.progress = when {
-            !episode.played && episode.progress > 0 -> (episode.progress * 1_000).toInt().coerceIn(0, 1_000)
-            else -> 0
-        }
-        episodePreviewProgress.visibility = if (!episode.played && episode.progress > 0) View.VISIBLE else View.GONE
+        episodePreviewProgress.showFraction(if (episode.played) 0.0 else episode.progress)
         loadImage(episodePreviewImage, episode.thumb.ifEmpty { episode.poster })
         episodePreview.contentDescription = "${episodePreviewLabel.text}, ${episodePreviewTitle.text}"
     }
@@ -1225,11 +1223,8 @@ class EpisodesScreen(
                     setPadding(dp(4), dp(3), dp(4), 0)
                 }
                 addView(meta, LinearLayout.LayoutParams(MATCH, WRAP))
-                progress = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
-                    max = 1_000
-                    visibility = View.GONE
-                }
-                addView(progress, LinearLayout.LayoutParams(MATCH, dp(8)).apply {
+                progress = ProgressLine.create(context, colors).apply { visibility = View.GONE }
+                addView(progress, LinearLayout.LayoutParams(MATCH, dp(3)).apply {
                     setMargins(dp(4), dp(5), dp(4), 0)
                 })
                 overview = TextView(context).apply {
@@ -1262,11 +1257,7 @@ class EpisodesScreen(
                     .append((value.progress * 100).toInt()).append("% watched")
             }
             holder.overview.text = value.overview
-            holder.progress.progress = when {
-                !value.played && value.progress > 0 -> (value.progress * 1_000).toInt().coerceIn(0, 1_000)
-                else -> 0
-            }
-            holder.progress.visibility = if (!value.played && value.progress > 0) View.VISIBLE else View.GONE
+            holder.progress.showFraction(if (value.played) 0.0 else value.progress)
             holder.itemView.setTag(TAG_EPISODE, value)
             holder.itemView.contentDescription = "Episode ${value.indexNumber}, ${value.subtitle.ifEmpty { value.title }}, ${holder.meta.text}"
             // A recycled holder's previous still must not land here late.
