@@ -18,6 +18,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,6 +93,8 @@ type PlaybackPrepareResponse struct {
 	NextItem              *PlaybackItem      `json:"nextItem,omitempty"`
 	Trickplay             *PlaybackTrickplay `json:"trickplay,omitempty"`
 	PreviewURL            string             `json:"previewUrl,omitempty"`
+	Chapters              []PlaybackChapter  `json:"chapters"`
+	Segments              []PlaybackSegment  `json:"segments"`
 }
 
 type PlaybackTrickplay struct {
@@ -102,6 +105,19 @@ type PlaybackTrickplay struct {
 	TileHeight     int    `json:"tileHeight"`
 	ThumbnailCount int    `json:"thumbnailCount"`
 	IntervalMillis int64  `json:"intervalMillis"`
+}
+
+type PlaybackChapter struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	PositionMillis int64  `json:"positionMillis"`
+}
+
+type PlaybackSegment struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	StartMillis int64  `json:"startMillis"`
+	EndMillis   int64  `json:"endMillis"`
 }
 
 type PlaybackItem struct {
@@ -170,6 +186,7 @@ type playbackSession struct {
 	Source    jellyfin.MediaSource
 	Plan      PlaybackPrepareResponse
 	Subtitles map[string]string
+	Segments  []jellyfin.MediaSegment
 
 	LastPositionMillis int64
 	LastSequence       int64
@@ -294,6 +311,13 @@ func (s *Server) handlePlaybackPrepare(w http.ResponseWriter, r *http.Request) {
 		ID: id, Owner: TokenFrom(r.Context()).Label, UserID: playbackClient.UserID(),
 		DeviceID: body.Device.ID, Client: playbackClient, Item: *item, Prepare: body,
 		Subtitles: make(map[string]string),
+	}
+	// A segment provider is optional in Jellyfin. Its absence cannot prevent a
+	// movie or episode from starting, so preserve the successful play path.
+	if segments, segmentErr := playbackClient.MediaSegments(ctx, itemID); segmentErr == nil {
+		session.Segments = segments
+	} else {
+		slog.Debug("Jellyfin media segments unavailable", "item", itemID)
 	}
 	plan, err := s.negotiatePlayback(ctx, session)
 	if err != nil {
@@ -577,7 +601,48 @@ func (s *Server) playbackPlan(
 		SelectedSubtitleIndex: selectedSubtitle, PreviousItem: previous, NextItem: next,
 		Trickplay:  playbackTrickplay(session),
 		PreviewURL: "/v1/playback/sessions/" + session.ID + "/preview",
+		Chapters:   playbackChapters(session.Item, durationMillis),
+		Segments:   playbackSegments(session.Segments, durationMillis),
 	}
+}
+
+func playbackChapters(item jellyfin.Item, durationMillis int64) []PlaybackChapter {
+	values := make([]PlaybackChapter, 0, len(item.Chapters))
+	seen := make(map[int64]bool)
+	for index, chapter := range item.Chapters {
+		position := chapter.StartPositionTicks / 10_000
+		if position < 0 || (durationMillis > 0 && position >= durationMillis) || seen[position] {
+			continue
+		}
+		seen[position] = true
+		name := strings.TrimSpace(chapter.Name)
+		if name == "" {
+			name = fmt.Sprintf("Chapter %d", len(values)+1)
+		}
+		values = append(values, PlaybackChapter{ID: strconv.Itoa(index), Name: name, PositionMillis: position})
+	}
+	sort.SliceStable(values, func(i, j int) bool { return values[i].PositionMillis < values[j].PositionMillis })
+	return values
+}
+
+func playbackSegments(segments []jellyfin.MediaSegment, durationMillis int64) []PlaybackSegment {
+	values := make([]PlaybackSegment, 0, len(segments))
+	for _, segment := range segments {
+		start, end := segment.StartTicks/10_000, segment.EndTicks/10_000
+		if start < 0 || end <= start || (durationMillis > 0 && start >= durationMillis) {
+			continue
+		}
+		if durationMillis > 0 && end > durationMillis {
+			end = durationMillis
+		}
+		kind := strings.TrimSpace(segment.Type)
+		if kind == "" {
+			kind = "Segment"
+		}
+		values = append(values, PlaybackSegment{ID: segment.ID, Type: kind, StartMillis: start, EndMillis: end})
+	}
+	sort.SliceStable(values, func(i, j int) bool { return values[i].StartMillis < values[j].StartMillis })
+	return values
 }
 
 func playbackTrickplay(session *playbackSession) *PlaybackTrickplay {

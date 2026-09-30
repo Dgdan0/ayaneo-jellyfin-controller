@@ -229,6 +229,14 @@ func TestRefusesAnEnabledServiceWithNoKey(t *testing.T) {
 	wantError(t, c, "api_key")
 }
 
+func TestCleanuparrHealthOnlyStatusDoesNotNeedAnAPIKey(t *testing.T) {
+	// The handheld only calls Cleanuparr's public /health endpoint. Requiring a
+	// dashboard credential would add a secret without granting any capability.
+	c := base()
+	c.Services["cleanuparr"] = ServiceConfig{Enabled: true, BaseURL: "http://127.0.0.1:11011"}
+	wantOK(t, c)
+}
+
 func TestQBittorrentAcceptsEitherCredentialStyle(t *testing.T) {
 	// Newer builds take a bearer key; older ones need the login session.
 	withKey := base()

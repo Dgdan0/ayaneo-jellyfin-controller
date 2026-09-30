@@ -8,6 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import android.net.Uri
 import com.pocketds.hub.model.OfflineManifest
 import com.pocketds.hub.model.OfflineProgressEvent
+import com.pocketds.hub.model.LibraryItem
 import com.pocketds.hub.model.PlaybackItem
 import com.pocketds.hub.model.PlaybackPrepareResponse
 import com.pocketds.hub.model.PlaybackSource
@@ -15,6 +16,7 @@ import com.pocketds.hub.playback.PlaybackRules
 import com.pocketds.hub.settings.HubSettings
 import com.pocketds.hub.settings.OfflineSettings
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
@@ -137,6 +139,29 @@ class OfflineRepository private constructor(context: Context) {
     fun completed(userId: String = HubSettings.userId(app)): List<OfflineDownload> =
         queryDownloads("user_id=? AND state=?", arrayOf(userId, OfflineState.COMPLETE.wire),
             "updated_at DESC")
+
+    @Synchronized
+    fun rememberSeries(item: LibraryItem, userId: String = HubSettings.userId(app)) {
+        if (item.id.isBlank() || item.type.lowercase() != "series") return
+        db.writableDatabase.insertWithOnConflict(
+            "series_metadata", null, ContentValues().apply {
+                put("series_id", item.id)
+                put("user_id", userId)
+                put("item_json", JSON.encodeToString(item))
+                put("updated_at", System.currentTimeMillis())
+            }, SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    @Synchronized
+    fun seriesMetadata(seriesId: String, userId: String = HubSettings.userId(app)): LibraryItem? =
+        db.readableDatabase.rawQuery(
+            "SELECT item_json FROM series_metadata WHERE series_id=? AND user_id=?",
+            arrayOf(seriesId, userId)
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            runCatching { JSON.decodeFromString<LibraryItem>(cursor.string("item_json")) }.getOrNull()
+        }
 
     @Synchronized
     fun completedForItem(itemId: String, userId: String = HubSettings.userId(app)): OfflineDownload? =
@@ -536,7 +561,7 @@ class OfflineRepository private constructor(context: Context) {
     }
 }
 
-private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "offline.db", null, 3) {
+private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "offline.db", null, 4) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE batches(id TEXT PRIMARY KEY,title TEXT NOT NULL,series_id TEXT NOT NULL,user_id TEXT NOT NULL,paused INTEGER NOT NULL,created_at INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE downloads(id TEXT PRIMARY KEY,batch_id TEXT NOT NULL,user_id TEXT NOT NULL,item_id TEXT NOT NULL,source_id TEXT NOT NULL,manifest_json TEXT NOT NULL,state TEXT NOT NULL,bytes_downloaded INTEGER NOT NULL,total_bytes INTEGER NOT NULL,local_path TEXT NOT NULL,error TEXT NOT NULL,attempts INTEGER NOT NULL,speed_bps INTEGER NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,updated_at INTEGER NOT NULL,retry_at INTEGER NOT NULL DEFAULT 0)")
@@ -544,6 +569,7 @@ private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "off
         db.execSQL("CREATE INDEX downloads_queue ON downloads(user_id,state,sort_order)")
         db.execSQL("CREATE TABLE progress(item_id TEXT NOT NULL,user_id TEXT NOT NULL,position_ms INTEGER NOT NULL,duration_ms INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(item_id,user_id))")
         db.execSQL("CREATE TABLE outbox(event_key TEXT PRIMARY KEY,user_id TEXT NOT NULL,item_id TEXT NOT NULL,event_json TEXT NOT NULL,created_at INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE series_metadata(series_id TEXT NOT NULL,user_id TEXT NOT NULL,item_json TEXT NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(series_id,user_id))")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
@@ -551,6 +577,9 @@ private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "off
         }
         if (oldVersion < 3) {
             db.execSQL("ALTER TABLE downloads ADD COLUMN retry_at INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion < 4) {
+            db.execSQL("CREATE TABLE series_metadata(series_id TEXT NOT NULL,user_id TEXT NOT NULL,item_json TEXT NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(series_id,user_id))")
         }
     }
 }

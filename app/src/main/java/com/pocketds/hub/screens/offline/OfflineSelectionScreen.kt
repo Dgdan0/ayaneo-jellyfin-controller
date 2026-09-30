@@ -334,6 +334,7 @@ class OfflineSelectionScreen(
             )
             when (val result = api.prepareOffline(body)) {
                 is HubResult.Ok -> {
+                    OfflineRepository.get(host.viewContext).rememberSeries(value.series)
                     val count = OfflineRepository.get(host.viewContext).enqueue(
                         value.series.title.ifBlank { fallbackTitle }, seriesId, result.value.items
                     )

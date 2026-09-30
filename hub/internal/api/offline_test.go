@@ -171,10 +171,11 @@ func TestOfflineSelectionPreparePersistenceRangeAndSubtitle(t *testing.T) {
 	}
 
 	manifest := prepareOffline(t, handler)
-	if manifest.Source.SizeBytes != 8 || len(manifest.Subtitles) != 1 || manifest.Item.SeriesID != offlineSeriesID {
+	if manifest.Source.SizeBytes != 8 || len(manifest.Subtitles) != 1 || manifest.Item.SeriesID != offlineSeriesID ||
+		manifest.Series.ID != offlineSeriesID || manifest.Series.Type != "series" {
 		t.Fatalf("manifest = %+v", manifest)
 	}
-	if duplicate := prepareOffline(t, handler); duplicate.GrantID != manifest.GrantID {
+	if duplicate := prepareOffline(t, handler); duplicate.GrantID != manifest.GrantID || duplicate.Series.ID != offlineSeriesID {
 		t.Fatalf("idempotent prepare changed grant %q to %q", manifest.GrantID, duplicate.GrantID)
 	}
 

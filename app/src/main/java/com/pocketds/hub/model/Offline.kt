@@ -63,6 +63,7 @@ data class OfflineManifest(
     val clientItemKey: String = "",
     val expiresAt: Long = 0,
     val item: LibraryItem = LibraryItem(),
+    val series: LibraryItem = LibraryItem(type = "series"),
     val source: OfflineSource = OfflineSource(),
     val mediaUrl: String = "",
     val subtitles: List<OfflineSubtitle> = emptyList()

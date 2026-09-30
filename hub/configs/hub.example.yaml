@@ -99,6 +99,13 @@ services:
     # base_url setting prefixes every route.
     api_base_path: ""
 
+  # Status and dashboard only. The handheld must never issue cleanup commands
+  # until a separate review-and-confirmation flow has been designed.
+  cleanuparr:
+    enabled: false
+    base_url: "http://127.0.0.1:11011"
+    web_url: ""
+
   qbittorrent:
     enabled: true
     base_url: "http://127.0.0.1:8080"

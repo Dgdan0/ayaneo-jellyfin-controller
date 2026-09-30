@@ -38,3 +38,20 @@ func TestProwlarrAndReadarrUseTheirSystemStatusEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanuparrUsesItsUnauthenticatedLivenessEndpoint(t *testing.T) {
+	spec, ok := probes["cleanuparr"]
+	if !ok {
+		t.Fatal("no probe for cleanuparr")
+	}
+	if spec.path != "/health" || spec.authHeader != "" || spec.versionField != "" {
+		t.Fatalf("cleanuparr probe = %+v", spec)
+	}
+	known := false
+	for _, name := range config.KnownServices {
+		known = known || name == "cleanuparr"
+	}
+	if !known {
+		t.Fatal("cleanuparr is not a known service")
+	}
+}

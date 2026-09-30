@@ -75,6 +75,7 @@ type OfflineManifest struct {
 	ClientItemKey string            `json:"clientItemKey"`
 	ExpiresAt     int64             `json:"expiresAt"`
 	Item          LibraryItem       `json:"item"`
+	Series        LibraryItem       `json:"series,omitempty"`
 	Source        OfflineSource     `json:"source"`
 	MediaURL      string            `json:"mediaUrl"`
 	Subtitles     []OfflineSubtitle `json:"subtitles"`
@@ -249,6 +250,19 @@ func (s *Server) handleOfflinePrepare(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	response := OfflinePrepareResponse{BatchKey: body.BatchKey, Items: []OfflineManifest{}}
 	created := []offlineGrant{}
+	var series LibraryItem
+	if body.SeriesID != "" {
+		value, err := client.Item(ctx, body.SeriesID)
+		if err != nil {
+			writeUpstreamError(w, r, "jellyfin", err)
+			return
+		}
+		if !strings.EqualFold(value.Type, "Series") {
+			writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "selected series is unavailable"})
+			return
+		}
+		series = libraryItemFrom(*value)
+	}
 	for _, request := range body.Items {
 		if !isHex32(request.ItemID) || !offlineClientKey.MatchString(request.ClientItemKey) || seen[request.ItemID] {
 			writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "offline item id or key is invalid"})
@@ -258,6 +272,9 @@ func (s *Server) handleOfflinePrepare(w http.ResponseWriter, r *http.Request) {
 		if existing, found := s.offline.find(owner, client.UserID(), request.ClientItemKey); found &&
 			existing.ItemID == request.ItemID &&
 			(request.MediaSourceID == "" || existing.MediaSourceID == request.MediaSourceID) {
+			if series.ID != "" {
+				existing.Manifest.Series = series
+			}
 			response.Items = append(response.Items, existing.Manifest)
 			continue
 		}
@@ -279,6 +296,7 @@ func (s *Server) handleOfflinePrepare(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, http.StatusConflict, Error{Code: CodeInvalidRequest, Message: err.Error()})
 			return
 		}
+		grant.Manifest.Series = series
 		created = append(created, grant)
 		response.Items = append(response.Items, grant.Manifest)
 	}

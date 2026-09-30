@@ -71,6 +71,7 @@ type Item struct {
 	SeriesPrimaryImageTag string                              `json:"SeriesPrimaryImageTag"`
 	BackdropImageTags     []string                            `json:"BackdropImageTags"`
 	Trickplay             map[string]map[string]TrickplayInfo `json:"Trickplay"`
+	Chapters              []ChapterInfo                       `json:"Chapters"`
 
 	UserData *UserData `json:"UserData"`
 
@@ -98,6 +99,21 @@ type TrickplayInfo struct {
 	TileHeight     int   `json:"TileHeight"`
 	ThumbnailCount int   `json:"ThumbnailCount"`
 	Interval       int64 `json:"Interval"`
+}
+
+// ChapterInfo is returned with an item when Jellyfin's Chapters field is requested.
+type ChapterInfo struct {
+	Name               string `json:"Name"`
+	StartPositionTicks int64  `json:"StartPositionTicks"`
+}
+
+// MediaSegment is optional Intro/Recap/Outro-style metadata from a Jellyfin
+// segment provider. It is never required for ordinary playback.
+type MediaSegment struct {
+	ID         string `json:"Id"`
+	Type       string `json:"Type"`
+	StartTicks int64  `json:"StartTicks"`
+	EndTicks   int64  `json:"EndTicks"`
 }
 
 // ItemsPage is the shape of a paged query. Note that /Items/Latest answers a
