@@ -38,6 +38,13 @@ const (
 	// playback from consuming the much smaller interactive API allowance.
 	playbackTransportRPM   = 3600
 	playbackTransportBurst = 240
+
+	// Artwork is one screen, not one action per poster: opening a 60-title
+	// Library page asks for 60 images at once, and on the interactive budget
+	// (burst 30) the rest came back 429 and stayed blank. Measured on the
+	// Pocket DS on 2026-09-30 -- every refused request was an image.
+	artworkRPM   = 1800
+	artworkBurst = 150
 )
 
 func chain(h http.Handler, ms ...middleware) http.Handler {
@@ -199,10 +206,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		}
 		s.bans.Succeed(ip)
 
-		limiter := s.limiter
-		if usesTransportRateLimit(r) {
-			limiter = s.playbackLimiter
-		}
+		limiter := s.limiterFor(r)
 		if limiter == nil || !limiter.Allow(token.Label, now) {
 			writeError(w, r, http.StatusTooManyRequests, Error{
 				Code:              CodeRateLimited,
@@ -217,9 +221,19 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 	})
 }
 
-func usesTransportRateLimit(r *http.Request) bool {
-	return strings.HasPrefix(r.URL.Path, "/v1/playback/sessions/") ||
-		strings.HasPrefix(r.URL.Path, "/v1/offline/grants/")
+// limiterFor picks the budget a request spends: session-bound playback and
+// offline transfers, artwork, or the interactive screen budget. Each is still
+// per token label and still behind authentication.
+func (s *Server) limiterFor(r *http.Request) *auth.Limiter {
+	path := r.URL.Path
+	switch {
+	case strings.HasPrefix(path, "/v1/playback/sessions/"), strings.HasPrefix(path, "/v1/offline/grants/"):
+		return s.playbackLimiter
+	case strings.HasPrefix(path, "/v1/img/"):
+		return s.artworkLimiter
+	default:
+		return s.limiter
+	}
 }
 
 // timeoutFor bounds a handler by the server-wide request budget, so one slow

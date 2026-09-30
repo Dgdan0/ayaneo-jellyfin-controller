@@ -35,6 +35,7 @@ type Server struct {
 	tokens          *auth.Store
 	limiter         *auth.Limiter
 	playbackLimiter *auth.Limiter
+	artworkLimiter  *auth.Limiter
 	bans            *auth.BanList
 	prober          *Prober
 	trustedProxies  []*net.IPNet
@@ -90,6 +91,7 @@ func NewServer(cfg *config.Config) *Server {
 		tokens:          auth.NewStore(cfg.Auth.Tokens),
 		limiter:         auth.NewLimiter(cfg.Auth.RateLimit.RPM, cfg.Auth.RateLimit.Burst),
 		playbackLimiter: auth.NewLimiter(playbackTransportRPM, playbackTransportBurst),
+		artworkLimiter:  auth.NewLimiter(artworkRPM, artworkBurst),
 		bans: auth.NewBanList(
 			cfg.Auth.AuthFailureBan.Attempts,
 			cfg.Auth.AuthFailureBan.Window.OrDefault(time.Minute),

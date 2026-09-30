@@ -492,6 +492,9 @@ read-only token must never be served a response computed for one that can reques
   device cannot starve another behind the same NAT. Authenticated, session-owned playback
   routes have a separate 3600 rpm / 240 burst transport budget; HLS segments, byte ranges,
   subtitles and progress events therefore cannot consume the 90 rpm / 30 burst screen budget.
+  Artwork (`/v1/img/`) has its own 1800 rpm / 150 burst budget: a 60-title Library page asks for
+  60 posters at once, and on the screen budget the overflow came back 429 and stayed blank.
+  `Server.limiterFor` is the one place a path picks its budget.
 - Auth failures ban the source, and hammering through a ban **extends** it rather than
   resetting the clock. `X-Forwarded-For` is honoured only from a declared trusted proxy —
   taking it from anyone lets a guesser spoof a fresh source per attempt.
