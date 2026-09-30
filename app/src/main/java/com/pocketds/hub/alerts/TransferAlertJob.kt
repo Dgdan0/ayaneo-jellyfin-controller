@@ -23,7 +23,7 @@ class TransferAlertJob : JobService() {
         work=scope.launch {
             var retry=false
             try {
-                when(val response=HubClient(this@TransferAlertJob).activity(true)) {
+                when(val response=HubClient.shared(this@TransferAlertJob).activity(true)) {
                     is HubResult.Ok -> if(profile==LocalAlerts.scope(this@TransferAlertJob)) TransferAlertObserver.observe(this@TransferAlertJob,response.value)
                     is HubResult.Failed -> retry=true
                 }

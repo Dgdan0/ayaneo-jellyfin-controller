@@ -22,7 +22,8 @@ class OfflineSubtitleSync(private val repository: OfflineRepository, private val
         val fresh = when (renewal) {
             is HubResult.Ok -> renewal.value
             is HubResult.Failed -> {
-                if(renewal.kind==FailureKind.NOT_FOUND || renewal.kind==FailureKind.UNAUTHORIZED)
+                if(renewal.kind==FailureKind.NOT_FOUND || renewal.kind==FailureKind.UNAUTHORIZED ||
+                    renewal.kind==FailureKind.FORBIDDEN)
                     throw SubtitleSyncBlocked("Offline subtitle access needs attention: ${renewal.message}")
                 throw IOException(renewal.message)
             }

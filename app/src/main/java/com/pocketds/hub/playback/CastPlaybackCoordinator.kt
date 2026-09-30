@@ -173,7 +173,7 @@ internal object CastPlaybackCoordinator {
         }
         if (isActive) finish(stopReceiver = false)
         appContext = context.applicationContext
-        api = HubClient(context.applicationContext)
+        api = HubClient.shared(context)
         userId = pinnedUser
         plan = prepared
         client = receiver

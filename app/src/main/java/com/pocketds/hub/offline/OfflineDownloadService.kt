@@ -52,7 +52,7 @@ class OfflineDownloadService : Service() {
     override fun onCreate() {
         super.onCreate()
         repository = OfflineRepository.get(this)
-        api = HubClient(this)
+        api = HubClient.shared(this)
         createChannel()
     }
 
@@ -436,6 +436,10 @@ class OfflineDownloadService : Service() {
 
     private fun blockedReason(row: OfflineDownload): String? {
         if (!networkAvailable()) return "Waiting for a network connection"
+        // Waits rather than failing: each item used to try, get a 401 and move
+        // straight to the next, so a queued series could hand the Hub the five
+        // failures that ban this device. Fixing the token resumes the queue.
+        api.credentialProblem()?.let { return it }
         if (OfflineSettings.wifiOnly(this) && !onUnmeteredNetwork()) return "Waiting for Wi-Fi"
         if (OfflineSettings.chargingOnly(this) && !isCharging()) return "Waiting for charging"
         val remaining = (row.totalBytes - row.bytesDownloaded).coerceAtLeast(0)

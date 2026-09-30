@@ -74,6 +74,7 @@ import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -271,7 +272,23 @@ class HubConnection(val baseUrl: String, val token: String, val userId: String) 
 
 class HubClient(private val context: Context, private val connection: HubConnection? = null) : HubApi {
 
-    @Volatile private var rejectedToken = ""
+    companion object {
+        /** Process-wide, so a rejected token or a ban stops every client at once. */
+        private val gate = CredentialGate()
+        private val probeLock = Any()
+        @Volatile private var shared: HubClient? = null
+
+        /**
+         * The one client for the settings-backed connection. The activity and
+         * each service used to build their own: separate token memories (so the
+         * download queue kept sending a token the screens had already found
+         * rejected) and two OkHttp caches over one `hub-http` directory, which
+         * OkHttp does not support.
+         */
+        fun shared(context: Context): HubClient = shared ?: synchronized(this) {
+            shared ?: HubClient(context.applicationContext).also { shared = it }
+        }
+    }
 
     private val json = Json {
         // The hub will grow fields; an old APK must not crash on them.
@@ -290,43 +307,67 @@ class HubClient(private val context: Context, private val connection: HubConnect
         .callTimeout(45, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .cache(if (connection == null) okhttp3.Cache(File(context.cacheDir, "hub-http"), 256L * 1024 * 1024) else null)
-        .addInterceptor { chain ->
-            val token = connection?.token ?: HubSettings.token(context)
-            val request = if (token.isEmpty()) {
-                chain.request()
-            } else {
-                chain.request().newBuilder()
-                    .header("Authorization", "Bearer $token")
-                    .apply {
-                        (connection?.userId ?: HubSettings.userId(context)).takeIf {
-                            it.isNotEmpty() && chain.request().header(JELLYFIN_USER_HEADER) == null
-                        }?.let {
-                            header(JELLYFIN_USER_HEADER, it)
-                        }
-                    }
-                    .build()
-            }
-            val started = System.currentTimeMillis()
-            val response = chain.proceed(request)
-            if ((response.code == 401 || response.code == 403) && token.isNotEmpty()) {
-                // One rejected credential is enough. Holding it in memory stops
-                // refreshes and screen polling from turning a typo into the
-                // Hub's 15-minute source ban. Editing the token re-enables one
-                // test request because the new value no longer matches.
-                rejectedToken = token
-            } else if (response.isSuccessful && rejectedToken == token) {
-                rejectedToken = ""
-            }
-            // The Authorization header is deliberately never logged: a typo'd
-            // real token would then sit in the trace in clear text.
-            DebugLog.log(
-                "net",
-                "${request.method} ${request.url.encodedPath} -> ${response.code}" +
-                    " in ${System.currentTimeMillis() - started}ms"
-            )
-            response
-        }
+        .addInterceptor { chain -> authorize(chain) }
         .build()
+
+    /**
+     * Every request -- JSON, images, reader pages, offline transfers -- passes
+     * through here, so this is the one place the [CredentialGate] is applied.
+     */
+    private fun authorize(chain: okhttp3.Interceptor.Chain): Response {
+        val token = connection?.token ?: HubSettings.token(context)
+        gate.blockFor(token, System.currentTimeMillis())?.let { return refused(chain.request(), it) }
+        val request = if (token.isEmpty()) {
+            chain.request()
+        } else {
+            chain.request().newBuilder()
+                .header("Authorization", "Bearer $token")
+                .apply {
+                    (connection?.userId ?: HubSettings.userId(context)).takeIf {
+                        it.isNotEmpty() && chain.request().header(JELLYFIN_USER_HEADER) == null
+                    }?.let {
+                        header(JELLYFIN_USER_HEADER, it)
+                    }
+                }
+                .build()
+        }
+        if (!gate.needsProbe(token)) return send(chain, request, token)
+        synchronized(probeLock) {
+            // Another request may have settled this token while we waited.
+            gate.blockFor(token, System.currentTimeMillis())?.let { return refused(request, it) }
+            return send(chain, request, token)
+        }
+    }
+
+    private fun send(chain: okhttp3.Interceptor.Chain, request: Request, token: String): Response {
+        val started = System.currentTimeMillis()
+        val response = chain.proceed(request)
+        gate.observe(token, response.code, response.header("Retry-After")?.toLongOrNull(), System.currentTimeMillis())
+        // The Authorization header is deliberately never logged: a typo'd
+        // real token would then sit in the trace in clear text.
+        DebugLog.log(
+            "net",
+            "${request.method} ${request.url.encodedPath} -> ${response.code}" +
+                " in ${System.currentTimeMillis() - started}ms"
+        )
+        return response
+    }
+
+    /** The hub's own error envelope, answered without touching the network. */
+    private fun refused(request: Request, block: CredentialGate.Block): Response {
+        val body = json.encodeToString(
+            HubErrorBody.serializer(),
+            HubErrorBody(com.pocketds.hub.model.HubErrorDetail(code = "refused_on_device", message = block.message))
+        )
+        return Response.Builder()
+            .request(request)
+            .protocol(Protocol.HTTP_1_1)
+            .code(if (block is CredentialGate.Block.Banned) 429 else 401)
+            .message(block.message)
+            .apply { if (block is CredentialGate.Block.Banned) header("Retry-After", "${block.remainingSeconds}") }
+            .body(body.toResponseBody(jsonMedia))
+            .build()
+    }
 
     private val discoverCache = PersistentResponseCache(File(context.cacheDir, "discover-responses"))
 
@@ -399,14 +440,15 @@ class HubClient(private val context: Context, private val connection: HubConnect
                 "No Hub access token — open Manage > Ayaneo Hub"
             )
         }
-        if (token == rejectedToken) {
-            return HubResult.Failed(
-                FailureKind.UNAUTHORIZED,
-                "This token was rejected — edit it in Manage > Ayaneo Hub"
-            )
+        return when (val block = gate.blockFor(token, System.currentTimeMillis())) {
+            null -> null
+            is CredentialGate.Block.Banned -> HubResult.Failed(FailureKind.BANNED, block.message)
+            else -> HubResult.Failed(FailureKind.UNAUTHORIZED, block.message)
         }
-        return null
     }
+
+    /** Why nothing can be sent to the hub right now, for work that waits instead of failing. */
+    fun credentialProblem(): String? = connectionFailure()?.message
 
     override fun imageUrl(hubPath: String): String =
         if (hubPath.isEmpty()) "" else HubEndpoints.image(base(), hubPath)

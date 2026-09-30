@@ -85,7 +85,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        api = HubClient(applicationContext)
+        api = HubClient.shared(this)
         offline = OfflineRepository.get(applicationContext)
         val headers = buildMap {
             HubSettings.token(this@PlaybackService).takeIf { it.isNotEmpty() }?.let {

@@ -169,7 +169,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         // this way, because typing a 43-character token on a handheld after every
         // clean install is a reason not to test.
         seedFromIntent()
-        api = HubClient(this)
+        api = HubClient.shared(this)
         requestDownloadNotificationPermission()
 
         router = PadEventRouter(triggerHoldContext = {

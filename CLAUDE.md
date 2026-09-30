@@ -66,10 +66,14 @@ loop cannot broadcast a false visual refresh.
 
 Fresh installs from v0.1.1 onward expose both Hub address and masked bearer-token fields under
 Manage > Ayaneo Hub. Uninstalling removes these app-private values. The screen points Jump Desktop
-users to the gitignored `scripts/dev.env`; no token is embedded in the APK. `HubClient` rejects
-missing credentials locally and remembers a token that received 401/403 for the process lifetime,
-so screen refreshes cannot turn one typo into the Hub's 15-minute source ban. Editing the token
-re-enables one connection test.
+users to the gitignored `scripts/dev.env`; no token is embedded in the APK. The activity and every
+service share one `HubClient.shared` instance, and `net/CredentialGate` sits in its interceptor, so
+images, reader pages and offline transfers obey it too. One 401 stops all traffic for that token
+(verified on the device: six section switches and a refresh reached the Hub as exactly one
+rejected credential); a 429 with a long `Retry-After` holds everything until the ban ends; a token
+not yet accepted sends one request at a time; and the offline queue waits instead of failing. A 403
+is a missing scope, not a bad token (`FailureKind.FORBIDDEN`). Editing the token re-enables one
+connection test.
 
 ## Reaching the hub from the handheld
 

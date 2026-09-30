@@ -11,6 +11,10 @@ enum class FailureKind {
     NO_NETWORK,
     TIMEOUT,
     UNAUTHORIZED,
+    /** The token works but lacks the scope for this action. */
+    FORBIDDEN,
+    /** The hub has banned this source after failed sign-ins; waiting is the only fix. */
+    BANNED,
     RATE_LIMITED,
     NOT_FOUND,
     UPSTREAM_DOWN,
@@ -35,7 +39,9 @@ object HubFailures {
     fun classify(exceptionClassName: String?, httpCode: Int?): FailureKind {
         if (httpCode != null) {
             return when {
-                httpCode == 401 || httpCode == 403 -> FailureKind.UNAUTHORIZED
+                httpCode == 401 -> FailureKind.UNAUTHORIZED
+                // The hub answers 403 only for a missing scope; the token is fine.
+                httpCode == 403 -> FailureKind.FORBIDDEN
                 httpCode == 404 -> FailureKind.NOT_FOUND
                 httpCode == 429 -> FailureKind.RATE_LIMITED
                 httpCode == 502 || httpCode == 503 || httpCode == 504 -> FailureKind.UPSTREAM_DOWN
@@ -63,6 +69,8 @@ object HubFailures {
         FailureKind.NO_NETWORK -> "Can't reach the hub"
         FailureKind.TIMEOUT -> "The hub took too long"
         FailureKind.UNAUTHORIZED -> "The hub rejected this device — check the token"
+        FailureKind.FORBIDDEN -> "This device isn't allowed to do that"
+        FailureKind.BANNED -> "The hub is refusing this device after failed sign-ins"
         FailureKind.RATE_LIMITED -> "Too many requests — slow down"
         FailureKind.NOT_FOUND -> "Not found"
         FailureKind.UPSTREAM_DOWN -> "A service behind the hub is down"

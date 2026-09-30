@@ -10,7 +10,6 @@ class HubFailuresTest {
     @Test
     fun `http status codes map to their kinds`() {
         assertEquals(FailureKind.UNAUTHORIZED, HubFailures.classify(null, 401))
-        assertEquals(FailureKind.UNAUTHORIZED, HubFailures.classify(null, 403))
         assertEquals(FailureKind.NOT_FOUND, HubFailures.classify(null, 404))
         assertEquals(FailureKind.RATE_LIMITED, HubFailures.classify(null, 429))
         assertEquals(FailureKind.UPSTREAM_DOWN, HubFailures.classify(null, 503))
@@ -24,6 +23,15 @@ class HubFailuresTest {
         // UNAUTHORIZED would send the user to the Setup screen to fix a token
         // that is perfectly correct.
         assertEquals(FailureKind.RATE_LIMITED, HubFailures.classify(null, 429))
+    }
+
+    @Test
+    fun `a 403 is a missing scope, so it does not send the user to fix the token`() {
+        // The hub answers 403 for "this device is not allowed to control
+        // downloads"; the same token still reads everything else.
+        assertEquals(FailureKind.FORBIDDEN, HubFailures.classify(null, 403))
+        assertFalse(FailureKind.FORBIDDEN.isRetryable)
+        assertFalse(FailureKind.BANNED.isRetryable)
     }
 
     @Test
