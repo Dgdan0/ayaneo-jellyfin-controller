@@ -3,6 +3,7 @@ package com.pocketds.hub.screens.library
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import com.pocketds.hub.state.JobSlot
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.nav.*
 import com.pocketds.hub.net.*
@@ -19,7 +20,8 @@ class MediaRemovalScreen(private val api: HubApi, private val kind: String, priv
     private lateinit var status: TextView
     private lateinit var overlay: ChoiceOverlay
     private lateinit var colors: PocketColors
-    private var busy = false
+    private val deleting = JobSlot()
+    private val busy: Boolean get() = deleting.isBusy
     private var loaded = false
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host=host;colors=Theme.colors(host.viewContext)
@@ -57,11 +59,12 @@ class MediaRemovalScreen(private val api: HubApi, private val kind: String, priv
                             ChoiceOverlay.Choice("delete","Delete server files",danger=true)
                         ),onCancel=host::refreshHints) {choice->
                             if(choice=="delete") {
-                                busy=true;status.text="Deleting ${preview.title}…";body.getFocusables(View.FOCUS_FORWARD).forEach {it.isEnabled=false};host.refreshHints()
-                                scope.launch {
+                                status.text="Deleting ${preview.title}…";body.getFocusables(View.FOCUS_FORWARD).forEach {it.isEnabled=false}
+                                deleting.launch(scope) {
+                                    host.refreshHints()
                                     when(val deleted=api.removeMedia(preview.ticket)) {
-                                        is HubResult.Ok -> {busy=false;MediaLibraryChanges.changed();host.notify("Deleted from server · offline copies kept");leave()}
-                                        is HubResult.Failed -> {busy=false;MediaLibraryChanges.changed();body.removeAllViews();status=label(deleted.message,16f);body.addView(status);button("Back to library") {leave()};requestInitialFocus();host.refreshHints()}
+                                        is HubResult.Ok -> {MediaLibraryChanges.changed();host.notify("Deleted from server · offline copies kept");leave()}
+                                        is HubResult.Failed -> {MediaLibraryChanges.changed();body.removeAllViews();status=label(deleted.message,16f);body.addView(status);button("Back to library") {leave()};requestInitialFocus();host.refreshHints()}
                                     }
                                 }
                             }

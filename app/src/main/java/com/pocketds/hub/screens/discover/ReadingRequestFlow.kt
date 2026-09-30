@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.state.JobSlot
 import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.model.ReadingItem
 import com.pocketds.hub.model.ReadingRequestOptions
@@ -25,28 +26,23 @@ class ReadingRequestFlow(
     private val onHintsChanged: () -> Unit,
     private val onRequested: (ReadingRequestResponse) -> Unit = {}
 ) {
-    var busy = false
-        private set
+    private val working = JobSlot()
+
+    val busy: Boolean get() = working.isBusy
 
     fun start(item: ReadingItem) {
         if (busy || !item.actions.contains("request")) return
-        busy = true
         onStatus("Loading download choices…", false)
-        onHintsChanged()
-        scope.launch {
+        working.launch(scope, onIdle = onHintsChanged) {
             when (val result = api.readingRequestOptions(item.key)) {
-                is HubResult.Ok -> {
-                    busy = false
-                    showForm(item, result.value)
-                }
+                is HubResult.Ok -> showForm(item, result.value)
                 is HubResult.Failed -> {
-                    busy = false
                     onStatus(result.message, true)
                     onNotify(result.message)
                 }
             }
-            onHintsChanged()
         }
+        onHintsChanged()
     }
 
     private fun showForm(item: ReadingItem, options: ReadingRequestOptions) {
@@ -94,13 +90,10 @@ class ReadingRequestFlow(
     }
 
     private fun loadSeriesPreview(item: ReadingItem, body: com.pocketds.hub.model.ReadingCreateRequestBody) {
-        busy = true
         onStatus("Verifying the series books…", false)
-        onHintsChanged()
-        scope.launch {
+        working.launch(scope, onIdle = onHintsChanged) {
             when (val result = api.readingSeriesPreview(item.key)) {
                 is HubResult.Ok -> {
-                    busy = false
                     if (result.value.scopes.isEmpty()) {
                         onStatus("No verified books were found for this series", true)
                     } else if (result.value.scopes.size == 1) {
@@ -110,13 +103,12 @@ class ReadingRequestFlow(
                     }
                 }
                 is HubResult.Failed -> {
-                    busy = false
                     onStatus(result.message, true)
                     onNotify(result.message)
                 }
             }
-            onHintsChanged()
         }
+        onHintsChanged()
     }
 
     private fun showScopeChoice(
@@ -165,10 +157,8 @@ class ReadingRequestFlow(
     }
 
     private fun submit(item: ReadingItem, body: com.pocketds.hub.model.ReadingCreateRequestBody) {
-        busy = true
         onStatus(if (body.bookIds.isEmpty()) "Starting BookKeeprr search…" else "Starting ${body.bookIds.size} book searches…", false)
-        onHintsChanged()
-        scope.launch {
+        working.launch(scope, onIdle = onHintsChanged) {
             DebugLog.log("net", "reading request ${item.key} mode=${body.mode} books=${body.bookIds.size}")
             when (val result = api.requestReading(body)) {
                 is HubResult.Ok -> {
@@ -181,8 +171,7 @@ class ReadingRequestFlow(
                     onNotify(result.message)
                 }
             }
-            busy = false
-            onHintsChanged()
         }
+        onHintsChanged()
     }
 }

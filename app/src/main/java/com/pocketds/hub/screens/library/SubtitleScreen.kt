@@ -8,6 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.core.content.ContextCompat
+import com.pocketds.hub.state.JobSlot
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.*
 import com.pocketds.hub.offline.OfflineDownloadService
@@ -31,7 +32,8 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
     private lateinit var panel: ChoiceOverlay
     private lateinit var memory: SubtitleMemory
     private lateinit var offline: OfflineRepository
-    private var busy = false
+    private val work = JobSlot()
+    private val busy: Boolean get() = work.isBusy
     private var onlineAvailable = false
     private var state = SubtitleState()
     private var candidates: List<SubtitleCandidate>? = null
@@ -75,7 +77,7 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
     }
     override fun onHide() {
         if(receiverRegistered) {checkNotNull(host).viewContext.unregisterReceiver(changedReceiver);receiverRegistered=false}
-        scope.coroutineContext.cancelChildren();busy=false;panel.dismiss()
+        scope.coroutineContext.cancelChildren();panel.dismiss()
     }
     override fun onDestroyView() { scope.cancel();host=null }
     override fun hints() = listOf(ButtonHint.activate(if(busy) "Please wait…" else "Choose"),ButtonHint.back(),ButtonHint("⟳","Refresh",PadAction.Refresh))
@@ -88,9 +90,10 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
     }
     private fun load() {
         if(busy) return
-        busy=true;status.text="Loading installed tracks and download history…"
-        scope.launch {
-            val result=api.subtitles(itemId);busy=false
+        status.text="Loading installed tracks and download history…"
+        work.launch(scope, onIdle = { host?.refreshHints() }) {
+            host?.refreshHints()
+            val result=api.subtitles(itemId)
             when(result) {
                 is HubResult.Ok -> {onlineAvailable=true;state=result.value.copy(records=memory.merge(result.value.records));candidates=null;render()}
                 is HubResult.Failed -> {
@@ -187,17 +190,19 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
     }
     private fun search() {
         if(busy) return
-        busy=true;status.text="Searching configured subtitle providers… This can take a minute."
-        scope.launch {
-            val result=api.searchSubtitles(itemId);busy=false
+        status.text="Searching configured subtitle providers… This can take a minute."
+        work.launch(scope, onIdle = { host?.refreshHints() }) {
+            host?.refreshHints()
+            val result=api.searchSubtitles(itemId)
             when(result) {is HubResult.Ok -> {candidates=result.value.candidates;selectedLanguage=null;render()};is HubResult.Failed -> status.text=result.message}
         }
     }
     private fun download(candidate: SubtitleCandidate) {
         if(busy) return
-        busy=true;status.text="Downloading selected subtitle…"
-        scope.launch {
-            val result=api.downloadSubtitle(itemId,candidate.ticket);busy=false;candidates=null
+        status.text="Downloading selected subtitle…"
+        work.launch(scope, onIdle = { host?.refreshHints() }) {
+            host?.refreshHints()
+            val result=api.downloadSubtitle(itemId,candidate.ticket);candidates=null
             when(result) {
                 is HubResult.Ok -> {
                     val queued=offline.queueSubtitleSync(itemId,candidate.language)
@@ -223,9 +228,10 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
     }
     private fun refreshOnlineItem(expectedLanguages: String) {
         if(busy) return
-        busy=true;status.text="Asking Jellyfin to refresh this title's subtitles…"
-        scope.launch {
-            val result=api.refreshSubtitles(itemId);busy=false
+        status.text="Asking Jellyfin to refresh this title's subtitles…"
+        work.launch(scope, onIdle = { host?.refreshHints() }) {
+            host?.refreshHints()
+            val result=api.refreshSubtitles(itemId)
             when(result) {
                 is HubResult.Ok -> queueOfflineSync(expectedLanguages)
                 is HubResult.Failed -> {render();status.text="Could not start Jellyfin's subtitle refresh: ${result.message}"}

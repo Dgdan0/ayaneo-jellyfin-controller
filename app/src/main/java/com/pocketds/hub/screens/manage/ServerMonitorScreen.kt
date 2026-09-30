@@ -3,6 +3,7 @@ package com.pocketds.hub.screens.manage
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import com.pocketds.hub.state.JobSlot
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.*
 import com.pocketds.hub.nav.*
@@ -23,7 +24,8 @@ class ServerMonitorScreen(private val api: HubApi, private val ringVisible: () -
     private lateinit var body:LinearLayout
     private lateinit var status:TextView
     private lateinit var refresh:TextView
-    private var busy=false
+    private val work = JobSlot()
+    private val busy: Boolean get() = work.isBusy
     override fun onCreateView(host:ScreenHost,container:ViewGroup):View {
         this.host=host;colors=Theme.colors(host.viewContext)
         return LinearLayout(host.viewContext).apply {
@@ -37,15 +39,15 @@ class ServerMonitorScreen(private val api: HubApi, private val ringVisible: () -
         }
     }
     override fun onShow() {load();scope.launch {while(isActive){delay(15000);load()}}}
-    override fun onHide() {scope.coroutineContext.cancelChildren();busy=false}
+    override fun onHide() {scope.coroutineContext.cancelChildren()}
     override fun onDestroyView() {scope.cancel();host=null}
     override fun requestInitialFocus()=refresh.requestFocus()
     override fun hints()=listOf(ButtonHint.activate("Refresh"),ButtonHint.back(),ButtonHint("⟳","Refresh",PadAction.Refresh))
     override fun onPad(action:PadAction):Boolean {if(action==PadAction.Refresh){load();return true};return false}
     private fun load() {
-        if(busy)return;busy=true
-        scope.launch {
-            val result=api.serverMonitor();busy=false
+        if(busy)return
+        work.launch(scope) {
+            val result=api.serverMonitor()
             when(result){is HubResult.Ok->render(result.value);is HubResult.Failed->{status.text="Refresh failed · ${result.message} · Previous values may be stale";status.setTextColor(colors.dangerText)}}
         }
     }

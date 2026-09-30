@@ -7,6 +7,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.pocketds.hub.state.JobSlot
 import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.ActivityItem
@@ -92,7 +93,12 @@ class DownloadsScreen(
     private var includeFinished = targetTransferId.isNotBlank()
 
     /** Set while a mutation is in flight, so a poll cannot race its own result. */
-    private var acting = false
+    /**
+     * The transfer action in flight. The poll loop skips its fetch while this is
+     * busy, because a read mid-action returns the old state; the refresh runs
+     * from onIdle instead, once the action is really over.
+     */
+    private val actions = JobSlot()
 
     /**
      * Poll fast until this moment, after the user acts.
@@ -332,7 +338,7 @@ class DownloadsScreen(
         pollJob?.cancel()
         pollJob = scope.launch {
             while (true) {
-                if (!acting) fetchOnce()
+                if (!actions.isBusy) fetchOnce()
                 val settling = android.os.SystemClock.uptimeMillis() < settleUntilMs
                 val wait = PollSchedule.nextDelayMs(visible, anyActive, failures, settling)
                     ?: break
@@ -637,22 +643,21 @@ class DownloadsScreen(
     }
 
     private fun runReading(item: ReadingDownloadItem, action: String) {
-        acting = true
         statusLine.setTextColor(colors.mutedText)
         statusLine.text = if (action == "retry") "Retrying…" else "Canceling…"
-        scope.launch {
+        var refreshAfter = false
+        actions.launch(scope, onIdle = { if (refreshAfter) refreshNow() }) {
             val result = when (action) {
                 "retry" -> api.retryReadingDownload(item.id)
                 "cancel" -> api.cancelReadingDownload(item.id)
                 else -> null
             }
-            acting = false
             when (result) {
                 null -> host?.notify("Unknown action $action")
                 is HubResult.Ok -> {
                     host?.notify(if (action == "retry") "Retrying ${item.title}" else "Canceled ${item.title}")
                     settleUntilMs = android.os.SystemClock.uptimeMillis() + PollSchedule.SETTLE_MS
-                    refreshNow()
+                    refreshAfter = true
                 }
                 is HubResult.Failed -> {
                     statusLine.setTextColor(colors.dangerText)
@@ -661,7 +666,7 @@ class DownloadsScreen(
                     // A failed re-grab leaves a durable retry ticket. Refresh
                     // immediately so the user sees that actionable state.
                     settleUntilMs = android.os.SystemClock.uptimeMillis() + PollSchedule.SETTLE_MS
-                    refreshNow()
+                    refreshAfter = true
                 }
             }
         }
@@ -697,10 +702,10 @@ class DownloadsScreen(
     }
 
     private fun run(item: ActivityItem, action: String) {
-        acting = true
         statusLine.setTextColor(colors.mutedText)
         statusLine.text = "Working…"
-        scope.launch {
+        var refreshAfter = false
+        actions.launch(scope, onIdle = { if (refreshAfter) refreshNow() }) {
             val result = when (action) {
                 "stop", "start", "priority_up", "priority_down" -> api.downloadAction(item.id, action)
                 "delete" -> api.deleteDownload(item.id, deleteFiles = false)
@@ -709,7 +714,6 @@ class DownloadsScreen(
                 "arr_blocklist_and_search" -> queueCall(item, blocklist = true, search = true)
                 else -> null
             }
-            acting = false
             when (result) {
                 null -> host?.notify("Unknown action $action")
                 is HubResult.Ok -> {
@@ -720,7 +724,7 @@ class DownloadsScreen(
                     // for a few seconds, because the first read is usually too
                     // early to see the change.
                     settleUntilMs = android.os.SystemClock.uptimeMillis() + PollSchedule.SETTLE_MS
-                    refreshNow()
+                    refreshAfter = true
                 }
                 is HubResult.Failed -> {
                     DebugLog.log("net", "$action failed on ${item.id}: ${result.message}")

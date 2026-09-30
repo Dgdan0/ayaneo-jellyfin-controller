@@ -4,6 +4,7 @@ import android.text.InputType
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import com.pocketds.hub.state.JobSlot
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.BandwidthChange
 import com.pocketds.hub.model.BandwidthState
@@ -24,7 +25,8 @@ class BandwidthScreen(private val api: HubApi, private val ringVisible: () -> Bo
     private lateinit var body: LinearLayout
     private lateinit var status: TextView
     private lateinit var panel: ChoiceOverlay
-    private var busy = false
+    private val work = JobSlot()
+    private val busy: Boolean get() = work.isBusy
     private var state: BandwidthState? = null
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
@@ -43,7 +45,7 @@ class BandwidthScreen(private val api: HubApi, private val ringVisible: () -> Bo
         }
     }
     override fun onShow() { load() }
-    override fun onHide() { scope.coroutineContext.cancelChildren();busy=false;panel.dismiss() }
+    override fun onHide() { scope.coroutineContext.cancelChildren();panel.dismiss() }
     override fun onDestroyView() { scope.cancel();host=null }
     override fun hints()=listOf(ButtonHint.activate(if(busy) "Saving…" else "Choose"),ButtonHint.back(),ButtonHint("⟳","Refresh",PadAction.Refresh))
     override fun requestInitialFocus():Boolean=body.getFocusables(View.FOCUS_FORWARD).firstOrNull()?.requestFocus() ?: false
@@ -54,9 +56,9 @@ class BandwidthScreen(private val api: HubApi, private val ringVisible: () -> Bo
     }
     private fun load() {
         if(busy) return
-        busy=true;status.text="Loading qBittorrent settings…"
-        scope.launch {
-            val response=api.bandwidth();busy=false
+        status.text="Loading qBittorrent settings…"
+        work.launch(scope) {
+            val response=api.bandwidth()
             when(response) {
                 is HubResult.Ok -> render(response.value)
                 is HubResult.Failed -> {status.text=response.message;body.removeAllViews();body.addView(button("Try again"){load()})}
@@ -105,9 +107,10 @@ class BandwidthScreen(private val api: HubApi, private val ringVisible: () -> Bo
     }
     private fun save(change:BandwidthChange) {
         if(busy) return
-        busy=true;status.text="Applying and verifying settings…";host?.refreshHints()
-        scope.launch {
-            val result=api.setBandwidth(change);busy=false
+        status.text="Applying and verifying settings…"
+        work.launch(scope, onIdle = { host?.refreshHints() }) {
+            host?.refreshHints()
+            val result=api.setBandwidth(change)
             when(result) {
                 is HubResult.Ok -> {render(result.value);host?.notify("Bandwidth settings verified")}
                 is HubResult.Failed -> {status.text=result.message;host?.notify(result.message)}

@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.manage
 
+import com.pocketds.hub.state.JobSlot
 import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -48,7 +49,7 @@ class HubConnectionScreen(
     private lateinit var token: EditText
     private lateinit var save: TextView
     private lateinit var status: TextView
-    private var testJob: Job? = null
+    private val connectionTest = JobSlot()
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -180,12 +181,11 @@ class HubConnectionScreen(
     }
 
     override fun onHide() {
-        testJob?.cancel()
-        testJob = null
+        connectionTest.cancel()
     }
 
     override fun onDestroyView() {
-        testJob?.cancel()
+        connectionTest.cancel()
         scope.cancel()
     }
 
@@ -198,7 +198,7 @@ class HubConnectionScreen(
     )
 
     private fun testAndSave() {
-        if (testJob?.isActive == true) return
+        if (connectionTest.isBusy) return
         val normalized = HubEndpoints.normaliseBase(address.text.toString())
         val effectiveToken = HubConnectionValidation.effectiveToken(
             HubSettings.token(host.viewContext),
@@ -222,7 +222,17 @@ class HubConnectionScreen(
         status.text = "Testing connection…"
         save.isEnabled = false
 
-        testJob = scope.launch {
+        // The settings are already saved; only the test can be interrupted --
+        // most often by switching to Jump Desktop to copy the token. Save must
+        // come back either way, or the screen is stuck on "Testing connection…".
+        var answered = false
+        connectionTest.launch(scope, onIdle = {
+            save.isEnabled = true
+            if (!answered) {
+                status.setTextColor(colors.mutedText)
+                status.text = "Saved. The connection test was interrupted; select Save to test again."
+            }
+        }) {
             when (val result = api.health()) {
                 is HubResult.Ok -> {
                     status.setTextColor(colors.badgeAvailable)
@@ -234,8 +244,7 @@ class HubConnectionScreen(
                     status.text = "Saved, but the test failed: ${result.message}"
                 }
             }
-            save.isEnabled = true
-            testJob = null
+            answered = true
         }
     }
 

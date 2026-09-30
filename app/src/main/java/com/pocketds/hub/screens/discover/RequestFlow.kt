@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.state.JobSlot
 import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.model.RequestOptions
 import com.pocketds.hub.net.HubApi
@@ -34,8 +35,9 @@ class RequestFlow(
     private val onRequested: () -> Unit = {}
 ) {
 
-    var busy: Boolean = false
-        private set
+    private val requesting = JobSlot()
+
+    val busy: Boolean get() = requesting.isBusy
 
     /**
      * Fetch the options, then show the dialog.
@@ -194,28 +196,24 @@ class RequestFlow(
         serverId: Int?,
         seasons: JsonElement?
     ) {
-        busy = true
-        onHintsChanged()
         onStatus("Requesting…", false)
-        scope.launch {
+        requesting.launch(scope, onIdle = onHintsChanged) {
             DebugLog.log("net", "requesting $key profile=$profileId")
             when (val result = api.requestMedia(key, profileId, rootFolder, serverId, seasons)) {
                 is HubResult.Ok -> {
-                    busy = false
                     onNotify(result.value.message.ifEmpty { "Requested $fallbackTitle" })
                     onStatus(result.value.message, false)
                     onRequested()
                 }
                 is HubResult.Failed -> {
-                    busy = false
                     // The hub's own wording. "You have already requested this"
                     // beats a generic failure message.
                     onStatus(result.message, true)
                     onNotify(result.message)
                 }
             }
-            onHintsChanged()
         }
+        onHintsChanged()
     }
 
     private fun plural(count: Int, noun: String): String =
