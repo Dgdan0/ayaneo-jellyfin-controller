@@ -44,6 +44,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
+import com.pocketds.hub.state.Fmt
 
 /** Storyteller audiobook player. Its archive is temporary; narration progress is device-local. */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -111,7 +112,7 @@ class AudiobookScreen(
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
                     if (fromUser) player?.let { audio ->
-                        if (audio.duration > 0) position.text = clock(audio.duration * value / 1000) + " / " + clock(audio.duration)
+                        if (audio.duration > 0) position.text = Fmt.clock(audio.duration * value / 1000) + " / " + Fmt.clock(audio.duration)
                     }
                 }
                 override fun onStartTrackingTouch(bar: SeekBar?) = Unit
@@ -253,7 +254,7 @@ class AudiobookScreen(
         val index = audio.currentMediaItemIndex.coerceIn(0, parts.lastIndex.coerceAtLeast(0))
         partTitle.text = "Part ${index + 1} of ${parts.size} · ${parts.getOrNull(index)?.title.orEmpty()}"
         val duration = audio.duration.coerceAtLeast(0)
-        position.text = "${clock(audio.currentPosition)} / ${clock(duration)}"
+        position.text = "${Fmt.clock(audio.currentPosition)} / ${Fmt.clock(duration)}"
         if (!timeline.isPressed && duration > 0) timeline.progress = (audio.currentPosition * 1000 / duration).toInt().coerceIn(0, 1000)
     }
 
@@ -346,11 +347,6 @@ class AudiobookScreen(
     }
 
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
-    private fun clock(ms: Long): String {
-        val seconds = ms.coerceAtLeast(0) / 1000
-        return if (seconds >= 3600) "%d:%02d:%02d".format(seconds / 3600, seconds / 60 % 60, seconds % 60)
-        else "%d:%02d".format(seconds / 60, seconds % 60)
-    }
 
     private companion object { const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT }
 }

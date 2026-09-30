@@ -24,6 +24,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import com.pocketds.hub.state.Fmt
 
 /** Pre-play source, language, subtitle and quality selection. */
 class PlaybackOptionsScreen(
@@ -160,7 +161,7 @@ class PlaybackOptionsScreen(
             title = value.item.displayTitle(),
             subtitle = "Choose the streams before playback starts.",
             choices = listOf(
-                ChoiceOverlay.Choice("play", if (value.positionMillis > 0) "Resume" else "Play", time(value.positionMillis)),
+                ChoiceOverlay.Choice("play", if (value.positionMillis > 0) "Resume" else "Play", if (value.positionMillis > 0) Fmt.clock(value.positionMillis) else ""),
                 ChoiceOverlay.Choice("source", "Media version", source?.let { sourceLabel(it.name, it.container, it.bitrate) }.orEmpty()),
                 ChoiceOverlay.Choice("audio", "Audio", audio),
                 ChoiceOverlay.Choice("subtitle", "Subtitles", subtitle),
@@ -266,13 +267,13 @@ class PlaybackOptionsScreen(
     private fun qualityLabel(value: PlaybackPrepareResponse): String = buildString {
         append(if (value.playMethod.isEmpty()) "Original" else value.playMethod)
         if (value.width > 0 && value.height > 0) append(" · ${value.width}×${value.height}")
-        if (value.bitrate > 0) append(" · %.1f Mbps".format(value.bitrate / 1_000_000.0))
+        if (value.bitrate > 0) append(" · ${Fmt.mbps(value.bitrate.toLong())}")
     }
 
     private fun sourceLabel(name: String, container: String, bitrate: Int) = buildList {
         if (name.isNotEmpty()) add(name)
         if (container.isNotEmpty()) add(container.uppercase())
-        if (bitrate > 0) add("%.1f Mbps".format(bitrate / 1_000_000.0))
+        if (bitrate > 0) add(Fmt.mbps(bitrate.toLong()))
     }.joinToString(" · ")
 
     private fun trackDetail(codec: String, channels: Int) = buildList {
@@ -280,12 +281,6 @@ class PlaybackOptionsScreen(
         if (channels > 0) add("$channels channels")
     }.joinToString(" · ")
 
-    private fun time(milliseconds: Long): String {
-        if (milliseconds <= 0) return ""
-        val total = milliseconds / 1_000
-        return if (total >= 3_600) "%d:%02d:%02d".format(total / 3_600, total % 3_600 / 60, total % 60)
-            else "%d:%02d".format(total / 60, total % 60)
-    }
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT

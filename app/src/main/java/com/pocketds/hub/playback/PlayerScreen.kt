@@ -68,6 +68,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import com.pocketds.hub.state.Fmt
 
 /** Full-screen controller-first Media3 playback for a movie or episode. */
 @UnstableApi
@@ -492,7 +493,7 @@ class PlayerScreen(
         restoreSubtitleOffset(current)
         prepareDynamicSubtitle(current)
         updateControlLabels(current)
-        duration.text = time(current.durationMillis)
+        duration.text = Fmt.clock(current.durationMillis)
         status.setTextColor(Color.WHITE)
         status.text = "Opening ${current.playMethod.lowercase().ifEmpty { "media" }}…"
         if (!serviceLoaded) {
@@ -737,7 +738,7 @@ class PlayerScreen(
         val end = value.duration.takeIf { it > 0 } ?: plan?.durationMillis ?: return
         val target = PlaybackRules.clampSeek(value.currentPosition + delta, end)
         seekBy(delta, showChrome = false)
-        showGestureFeedback("${signedTime(delta)}  ·  ${time(target)}", side)
+        showGestureFeedback("${signedTime(delta)}  ·  ${Fmt.clock(target)}", side)
     }
 
     private fun beginHorizontalScrub() {
@@ -851,7 +852,7 @@ class PlayerScreen(
     private fun showSeekPreview(targetMillis: Long, showDelta: Boolean) {
         handler.removeCallbacks(hideSeekPreview)
         seekPreview.visibility = View.VISIBLE
-        seekPreviewTime.text = time(targetMillis)
+        seekPreviewTime.text = Fmt.clock(targetMillis)
         seekPreviewDelta.visibility = if (showDelta) View.VISIBLE else View.GONE
         if (showDelta) seekPreviewDelta.text = signedTime(targetMillis - scrubStartMillis)
         pendingPreviewPosition = targetMillis
@@ -970,15 +971,15 @@ class PlayerScreen(
 
     private fun signedTime(deltaMillis: Long): String {
         val sign = if (deltaMillis < 0) "−" else "+"
-        return sign + time(abs(deltaMillis))
+        return sign + Fmt.clock(abs(deltaMillis))
     }
 
     private fun updateTimeline() {
         if (CastPlaybackCoordinator.isActive) {
             val current = CastPlaybackCoordinator.positionMillis
             val end = CastPlaybackCoordinator.activePlan?.durationMillis ?: 0
-            position.text = time(current)
-            duration.text = time(end)
+            position.text = Fmt.clock(current)
+            duration.text = Fmt.clock(end)
             playButton.setIcon(if (CastPlaybackCoordinator.isPlaying) PlayerControlIcon.PAUSE else PlayerControlIcon.PLAY)
             playButton.contentDescription = if (CastPlaybackCoordinator.isPlaying) "Pause on TV" else "Play on TV"
             if (!seekingByTouch && !padTimelineSeeking && end > 0) setSeekBarTarget(current, end)
@@ -987,8 +988,8 @@ class PlayerScreen(
         val value = controller ?: return
         val current = value.currentPosition.coerceAtLeast(0)
         val end = value.duration.takeIf { it > 0 } ?: plan?.durationMillis ?: 0
-        position.text = time(current)
-        duration.text = time(end)
+        position.text = Fmt.clock(current)
+        duration.text = Fmt.clock(end)
         if (!seekingByTouch && !padTimelineSeeking) {
             seekBar.max = 10_000
             seekBar.progress = if (end > 0) ((current.toDouble() / end) * 10_000).toInt().coerceIn(0, 10_000) else 0
@@ -1016,7 +1017,7 @@ class PlayerScreen(
         plan = active
         prepareDynamicSubtitle(active)
         updateControlLabels(active)
-        duration.text = time(active.durationMillis)
+        duration.text = Fmt.clock(active.durationMillis)
     }
 
     private fun showTrackSheet() = showTracks(menuState.trackTab)
@@ -1402,7 +1403,7 @@ class PlayerScreen(
         }
         val at = controller?.currentPosition ?: 0L
         val choices = chapters.map { chapter ->
-            ChoiceOverlay.Choice(chapter.positionMillis.toString(), chapter.name, time(chapter.positionMillis))
+            ChoiceOverlay.Choice(chapter.positionMillis.toString(), chapter.name, Fmt.clock(chapter.positionMillis))
         }
         val selected = chapters.indexOfLast { it.positionMillis <= at }.coerceAtLeast(0)
         choiceOverlay.show("Chapters", "Jump to a chapter.", choices, selected, ::showControls) { id ->
@@ -1594,7 +1595,7 @@ class PlayerScreen(
                 PlaybackService.load(host.viewContext, local, subtitleOffsetMillis = subtitleOffsetMillis)
                 prepareDynamicSubtitle(local)
                 updateControlLabels(local)
-                duration.text = time(local.durationMillis)
+                duration.text = Fmt.clock(local.durationMillis)
                 status.visibility = View.GONE
                 return
             }
@@ -1615,7 +1616,7 @@ class PlayerScreen(
                     )
                     prepareDynamicSubtitle(requireNotNull(plan))
                     updateControlLabels(requireNotNull(plan))
-                    duration.text = time(requireNotNull(plan).durationMillis)
+                    duration.text = Fmt.clock(requireNotNull(plan).durationMillis)
                     status.visibility = View.GONE
                 }
                 is HubResult.Failed -> {
@@ -1921,7 +1922,7 @@ class PlayerScreen(
         if (value.videoCodec.isNotEmpty()) add(value.videoCodec.uppercase())
         if (value.audioCodec.isNotEmpty()) add(value.audioCodec.uppercase())
         if (value.frameRate > 0) add("%.2f fps".format(value.frameRate))
-        if (value.bitrate > 0) add("%.1f Mbps".format(value.bitrate / 1_000_000.0))
+        if (value.bitrate > 0) add(Fmt.mbps(value.bitrate.toLong()))
         if (value.hdr.isNotEmpty()) add(value.hdr)
         if (value.transcodeReason.isNotEmpty()) add(value.transcodeReason)
     }.joinToString(" · ")
@@ -1938,17 +1939,9 @@ class PlayerScreen(
 
     private fun sourceDetail(container: String, bitrate: Int) = buildList {
         if (container.isNotEmpty()) add(container.uppercase())
-        if (bitrate > 0) add("%.1f Mbps".format(bitrate / 1_000_000.0))
+        if (bitrate > 0) add(Fmt.mbps(bitrate.toLong()))
     }.joinToString(" · ")
 
-    private fun time(milliseconds: Long): String {
-        val total = milliseconds.coerceAtLeast(0) / 1_000
-        val hours = total / 3_600
-        val minutes = (total % 3_600) / 60
-        val seconds = total % 60
-        return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds)
-            else "%d:%02d".format(minutes, seconds)
-    }
 
     private fun configuredSeekSeconds(): Int = PlaybackSettings.seekSeconds(host.viewContext)
 

@@ -34,6 +34,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
+import com.pocketds.hub.state.Fmt
 
 /** Portrait season chooser shown before selecting a Sonarr search scope. */
 class SeasonReleasePickerScreen(
@@ -483,7 +484,7 @@ class ReleaseTargetsScreen(
             holder.title.text = "E${value.episode.toString().padStart(2, '0')} · ${value.title}"
             holder.meta.text = buildList {
                 if (value.airDate.isNotEmpty()) add(value.airDate)
-                if (value.runtimeMinutes > 0) add("${value.runtimeMinutes} min")
+                if (value.runtimeMinutes > 0) add(Fmt.runtime(value.runtimeMinutes * 60L))
                 if (value.hasFile) add("Downloaded")
                 if (!value.monitored) add("Not monitored")
             }.joinToString(" · ")

@@ -63,6 +63,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.pocketds.hub.state.Fmt
 
 /** Movie, series, season, or episode metadata sourced directly from Jellyfin. */
 class LibraryDetailScreen(
@@ -401,7 +402,7 @@ class LibraryDetailScreen(
             if (value.type.isNotEmpty()) add(value.type.replaceFirstChar { it.uppercase() })
             if (value.year > 0) add(value.year.toString())
             if (value.type == "episode" && value.premiereDate.length >= 10) add(value.premiereDate.take(10))
-            if (value.runtimeSeconds > 0) add(runtime(value.runtimeSeconds))
+            if (value.runtimeSeconds > 0) add(Fmt.runtime(value.runtimeSeconds.toLong()))
             if (value.officialRating.isNotEmpty()) add(value.officialRating)
             if (value.rating > 0) add("★ %.1f".format(value.rating))
             if (value.criticRating > 0) add("Critics %.0f%%".format(value.criticRating))
@@ -413,7 +414,7 @@ class LibraryDetailScreen(
                 value.progress > 0 -> add("${(value.progress * 100).toInt()}% watched")
                 value.unplayedCount > 0 -> add("${value.unplayedCount} unwatched")
             }
-            if (canResume(value)) add("Continue at ${playTime(value.positionSeconds.toLong() * 1_000)}")
+            if (canResume(value)) add("Continue at ${Fmt.clock(value.positionSeconds.toLong() * 1_000)}")
             if (value.favorite) add("★ Favourite")
         }.joinToString(" · ")
         progress.visibility = if (progress.text.isNullOrBlank()) View.GONE else View.VISIBLE
@@ -483,7 +484,7 @@ class LibraryDetailScreen(
         playAction.isEnabled = playable || seriesTarget != null
         playAction.alpha = if (playAction.isEnabled) 1f else .55f
         val playLabel = when {
-            playable && canResume(value) -> "Resume · ${playTime(value.positionSeconds.toLong() * 1_000)}"
+            playable && canResume(value) -> "Resume · ${Fmt.clock(value.positionSeconds.toLong() * 1_000)}"
             playable -> "Play"
             seriesTarget == null -> "Finding next episode…"
             else -> seriesActionLabel(requireNotNull(seriesTarget))
@@ -604,7 +605,7 @@ class LibraryDetailScreen(
         episodePreview.visibility = View.VISIBLE
         episodePreviewTitle.text = "${episodePreviewLabel.text} · " + episode.subtitle.ifEmpty { episode.title }
         episodePreviewMeta.text = buildList {
-            if (episode.runtimeSeconds > 0) add(runtime(episode.runtimeSeconds))
+            if (episode.runtimeSeconds > 0) add(Fmt.runtime(episode.runtimeSeconds.toLong()))
             when {
                 episode.played -> add("Watched")
                 episode.progress > 0 -> add("${(episode.progress * 100).toInt()}% watched")
@@ -728,8 +729,8 @@ class LibraryDetailScreen(
                 append(version.name.ifBlank { "Version ${versionIndex + 1}" })
                 val facts = buildList {
                     if (version.container.isNotBlank()) add(version.container.uppercase())
-                    if (version.sizeBytes > 0) add(fileSize(version.sizeBytes))
-                    if (version.bitrate > 0) add("%.1f Mbps".format(version.bitrate / 1_000_000.0))
+                    if (version.sizeBytes > 0) add(Fmt.bytes(version.sizeBytes))
+                    if (version.bitrate > 0) add(Fmt.mbps(version.bitrate.toLong()))
                 }
                 if (facts.isNotEmpty()) append(" · ").append(facts.joinToString(" · "))
                 version.tracks.forEach { track ->
@@ -752,10 +753,6 @@ class LibraryDetailScreen(
         }
     }
 
-    private fun fileSize(bytes: Long): String {
-        val gib = bytes / 1_073_741_824.0
-        return if (gib >= 1.0) "%.1f GB".format(gib) else "%.0f MB".format(bytes / 1_048_576.0)
-    }
 
     private fun actionButton(label: String, action: String) = CenteredIconTextView(requireNotNull(host).viewContext).apply {
         text = ""
@@ -817,11 +814,6 @@ class LibraryDetailScreen(
     private fun canResume(value: LibraryItem?): Boolean = value != null &&
         value.positionSeconds >= 30 && value.runtimeSeconds - value.positionSeconds > 30 && !value.played
 
-    private fun playTime(milliseconds: Long): String {
-        val total = milliseconds / 1_000
-        return if (total >= 3_600) "%d:%02d:%02d".format(total / 3_600, total % 3_600 / 60, total % 60)
-            else "%d:%02d".format(total / 60, total % 60)
-    }
 
     private fun loadSeasons() {
         if (seasonsJob?.isActive == true) return
@@ -950,10 +942,6 @@ class LibraryDetailScreen(
         val meta: TextView
     ) : RecyclerView.ViewHolder(view)
     private fun dp(value: Int) = Styler.dpInt(requireNotNull(host).viewContext, value.toFloat())
-    private fun runtime(seconds: Int): String {
-        val minutes = seconds / 60
-        return if (minutes < 60) "${minutes} min" else "${minutes / 60}h ${minutes % 60}m"
-    }
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT

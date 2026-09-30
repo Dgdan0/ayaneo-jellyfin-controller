@@ -11,6 +11,7 @@ import android.widget.TextView
 import com.pocketds.hub.playback.PlayerControlIcon
 import com.pocketds.hub.playback.PlayerIconButton
 import com.pocketds.hub.ui.Styler
+import com.pocketds.hub.state.Fmt
 
 /** Compact audio controls stay available even when the book's full chrome is hidden. */
 class ReadAlongDock(context: Context) : LinearLayout(context) {
@@ -104,14 +105,9 @@ class ReadAlongDock(context: Context) : LinearLayout(context) {
         playButton.contentDescription = if (playing) "Pause narration" else "Play narration"
         val elapsed = timeline.tracks.take(position.track).sumOf { it.durationMs } + position.offsetMs
         val total = timeline.tracks.sumOf { it.durationMs }
-        timeLabel.text = "${format(elapsed)} / ${format(total)}"
+        timeLabel.text = "${Fmt.clock(elapsed)} / ${Fmt.clock(total)}"
         trackLabel.text = "   Track ${position.track + 1}/${timeline.tracks.size}"
         speedButton.text = "${speed}×"
     }
 
-    private fun format(ms: Long): String {
-        val seconds = (ms.coerceAtLeast(0) / 1000)
-        return if (seconds >= 3600) "%d:%02d:%02d".format(seconds / 3600, seconds / 60 % 60, seconds % 60)
-            else "%d:%02d".format(seconds / 60, seconds % 60)
-    }
 }

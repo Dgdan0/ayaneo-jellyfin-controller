@@ -13,6 +13,7 @@ import java.util.Locale
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import com.pocketds.hub.state.Fmt
 
 class ServerMonitorScreen(private val api: HubApi, private val ringVisible: () -> Boolean) : Screen {
     override val title = "Server monitor"
@@ -57,7 +58,7 @@ class ServerMonitorScreen(private val api: HubApi, private val ringVisible: () -
         val total=value.host.memoryTotalBytes;val used=(total-value.host.memoryAvailableBytes).coerceAtLeast(0)
         listOf(
             card("cpu","CPU",value.host.cpuPercent?.let{String.format(Locale.US,"%.1f%% · short sample",it)}?:"Unavailable",value.host.cpuPercent),
-            card("memory","Memory",if(total>0) "${bytes(used)} / ${bytes(total)}" else "Unavailable",if(total>0)100.0*used/total else null),
+            card("memory","Memory",if(total>0) "${Fmt.bytes(used)} / ${Fmt.bytes(total)}" else "Unavailable",if(total>0)100.0*used/total else null),
             card("uptime","Host uptime",if(value.host.uptimeSeconds>0) "${value.host.uptimeSeconds/86400} days ${(value.host.uptimeSeconds%86400)/3600} hours" else "Unavailable")
         ).forEach {metrics.addView(it,LinearLayout.LayoutParams(0,-2,1f).apply{marginEnd=dp(6)})}
         body.addView(metrics)
@@ -68,7 +69,7 @@ class ServerMonitorScreen(private val api: HubApi, private val ringVisible: () -
         if(value.host.disks.isEmpty())disks.addView(label("No fixed-disk statistics available.",13f))
         value.host.disks.forEach {disk->
             val free=if(disk.totalBytes>0)100.0*disk.availableBytes/disk.totalBytes else null
-            disks.addView(card("disk:${disk.name}",disk.name,"${bytes(disk.availableBytes)} free of ${bytes(disk.totalBytes)}${if(free!=null&&free<10) " · Low space (<10%)" else ""}",free?.let{100-it},free!=null&&free<10))
+            disks.addView(card("disk:${disk.name}",disk.name,"${Fmt.bytes(disk.availableBytes)} free of ${Fmt.bytes(disk.totalBytes)}${if(free!=null&&free<10) " · Low space (<10%)" else ""}",free?.let{100-it},free!=null&&free<10))
         }
         disks.addView(label("Playing · selected Jellyfin profile",16f))
         if(value.sessionWarning.isNotEmpty())disks.addView(label(value.sessionWarning,13f))
@@ -90,7 +91,6 @@ class ServerMonitorScreen(private val api: HubApi, private val ringVisible: () -
         percentage?.let {p->addView(ProgressBar(context,null,android.R.attr.progressBarStyleHorizontal).apply{max=1000;progress=(p*10).toInt().coerceIn(0,1000);progressTintList=android.content.res.ColorStateList.valueOf(if(warning)colors.dangerText else colors.accent)},LinearLayout.LayoutParams(-1,dp(6)).apply{topMargin=dp(6)})}
         Styler.makeFocusable(this);FocusDecorator.attach(this,ringVisible,false);contentDescription="$title, $detail"
     }
-    private fun bytes(value:Long)=String.format(Locale.US,"%,.1f GiB",value/1073741824.0)
     private fun label(value:String,size:Float)=TextView(checkNotNull(host).viewContext).apply{text=value;textSize=size;setTextColor(colors.primaryText);setPadding(0,dp(4),0,dp(4))}
     private fun dp(n:Int)=Styler.dpInt(checkNotNull(host).viewContext,n.toFloat())
 }

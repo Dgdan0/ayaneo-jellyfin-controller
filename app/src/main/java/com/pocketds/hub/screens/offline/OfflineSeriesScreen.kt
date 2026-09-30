@@ -40,6 +40,7 @@ import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
+import com.pocketds.hub.state.Fmt
 
 /** Shared online detail anatomy, backed only by downloaded files and scoped display snapshots. */
 class OfflineSeriesScreen(
@@ -157,7 +158,7 @@ class OfflineSeriesScreen(
         header = detail
         detail.overview.onChanged = { host.refreshHints() }
         detail.titleView.text = snapshot?.item?.title?.ifBlank { seriesTitle } ?: seriesTitle
-        detail.metadataView.text = "${rows.size} downloaded episodes · ${fileSize(rows.sumOf { it.totalBytes })} · Offline"
+        detail.metadataView.text = "${rows.size} downloaded episodes · ${Fmt.bytes(rows.sumOf { it.totalBytes })} · Offline"
         detail.overview.bind(snapshot?.item?.overview.orEmpty())
         detail.bindArtwork("series", null, rows.firstOrNull()?.let { artwork(it, "poster") }, imageLoader())
         content.addView(detail, LinearLayout.LayoutParams(MATCH, WRAP))
@@ -169,7 +170,7 @@ class OfflineSeriesScreen(
         presentation.playable?.let { target ->
             detail.actions.addView(TextView(host.viewContext).apply {
                 DetailStyler.action(this, colors, primary = true)
-                text = if (target.kind == OfflineCatalogPlayTarget.Kind.RESUME) time(target.positionMillis) else ""
+                text = if (target.kind == OfflineCatalogPlayTarget.Kind.RESUME) Fmt.clock(target.positionMillis) else ""
                 setCompoundDrawablesRelativeWithIntrinsicBounds(MediaActionIconDrawable(context, MediaActionIcon.PLAY, colors.accentText), null, null, null)
                 compoundDrawablePadding = dp(8); setPadding(dp(16), 0, dp(16), 0)
                 layoutParams = LinearLayout.LayoutParams(WRAP, dp(48)); tag = TaggedTarget(target)
@@ -191,7 +192,7 @@ class OfflineSeriesScreen(
                 val item = target.row.manifest.item
                 bind(targetLabel(target), buildList {
                     add(item.title)
-                    if (target.positionMillis > 0) add(time(target.positionMillis))
+                    if (target.positionMillis > 0) add(Fmt.clock(target.positionMillis))
                     if (presentation.localSuggestion) add("On this device")
                 }.joinToString(" · "), if (item.runtimeSeconds > 0) target.positionMillis / (item.runtimeSeconds * 1000.0) else 0.0, false)
                 tag = TaggedTarget(target, "continue")
@@ -269,8 +270,6 @@ class OfflineSeriesScreen(
     private fun episodeCode(item: com.pocketds.hub.model.LibraryItem) =
         if (item.indexNumber > 0) "S${item.seasonNumber} E${item.indexNumber}" else item.title
     private fun seasonName(number: Int) = if (number == 0) "Specials" else "Season $number"
-    private fun time(millis: Long) = "%d:%02d".format(millis / 60_000, millis / 1000 % 60)
-    private fun fileSize(bytes: Long) = if (bytes >= 1_073_741_824L) "%.1f GB".format(bytes / 1_073_741_824.0) else "%.0f MB".format(bytes / 1_048_576.0)
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
     private sealed interface TaggedKey { val key: String }
     private data class TaggedTarget(val target: OfflineCatalogPlayTarget, override val key: String = "play") : TaggedKey

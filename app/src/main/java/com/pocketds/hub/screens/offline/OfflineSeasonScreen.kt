@@ -35,6 +35,7 @@ import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
+import com.pocketds.hub.state.Fmt
 
 /** One locally available season, mirroring the online horizontal episode page. */
 class OfflineSeasonScreen(
@@ -224,13 +225,11 @@ class OfflineSeasonScreen(
     }
     private fun episodeStatus(runtimeSeconds: Int, progress: OfflineCatalogProgress?): String = when {
         progress?.isComplete() == true -> "Watched"
-        progress?.resumePosition()?.let { it > 0L } == true -> "Resume · ${time(progress.resumePosition())}"
-        runtimeSeconds > 0 -> runtime(runtimeSeconds)
+        progress?.resumePosition()?.let { it > 0L } == true -> "Resume · ${Fmt.clock(progress.resumePosition())}"
+        runtimeSeconds > 0 -> Fmt.runtime(runtimeSeconds.toLong())
         else -> "Downloaded"
     }
     private fun seasonName(number: Int) = if (number == 0) "Specials" else "Season $number"
-    private fun runtime(seconds: Int) = if (seconds >= 3_600) "%dh %02dm".format(seconds / 3_600, seconds % 3_600 / 60) else "%dm".format(seconds / 60)
-    private fun time(millis: Long) = "%d:%02d".format(millis / 60_000L, millis / 1_000L % 60L)
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
     private data class TaggedEpisode(val row: OfflineDownload)
     private companion object { const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT }

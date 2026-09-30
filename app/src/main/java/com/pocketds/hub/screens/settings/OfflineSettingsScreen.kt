@@ -17,6 +17,7 @@ import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
+import com.pocketds.hub.state.Fmt
 
 class OfflineSettingsScreen(private val ringVisible: () -> Boolean) : Screen {
     override val title = "Offline settings"
@@ -79,7 +80,7 @@ class OfflineSettingsScreen(private val ringVisible: () -> Boolean) : Screen {
         charging.text = "Only while charging                        ${yesNo(OfflineSettings.chargingOnly(host.viewContext))}"
         val selectedStorage = OfflineSettings.selectedStorage(host.viewContext)
         storage.text = "Download location                          " +
-            (selectedStorage?.let { "${it.label} · ${fileSize(it.availableBytes)} free" } ?: "Unavailable")
+            (selectedStorage?.let { "${it.label} · ${Fmt.bytes(it.availableBytes)} free" } ?: "Unavailable")
         reserve.text = "Keep free space                                ${OfflineSettings.minimumFreeMb(host.viewContext)} MB"
         retries.text = "Automatic retries                            ${OfflineSettings.maxRetries(host.viewContext)}"
     }
@@ -107,7 +108,7 @@ class OfflineSettingsScreen(private val ringVisible: () -> Boolean) : Screen {
                 ChoiceOverlay.Choice(
                     location.key,
                     location.label,
-                    "${fileSize(location.availableBytes)} free of ${fileSize(location.totalBytes)}" +
+                    "${Fmt.bytes(location.availableBytes)} free of ${Fmt.bytes(location.totalBytes)}" +
                         if (location.removable) " · removable" else ""
                 )
             },
@@ -139,12 +140,6 @@ class OfflineSettingsScreen(private val ringVisible: () -> Boolean) : Screen {
             startIndex = values.indexOf(current).coerceAtLeast(0), onCancel = host::refreshHints
         ) { OfflineSettings.setMaxRetries(host.viewContext, it.toInt()); update(); host.refreshHints() }
         host.refreshHints()
-    }
-
-    private fun fileSize(bytes: Long): String = when {
-        bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824.0)
-        bytes >= 1_048_576L -> "%.0f MB".format(bytes / 1_048_576.0)
-        else -> "%.0f KB".format(bytes / 1024.0)
     }
 
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())

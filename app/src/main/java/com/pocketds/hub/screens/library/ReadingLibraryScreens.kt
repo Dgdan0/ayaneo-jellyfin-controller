@@ -74,6 +74,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import com.pocketds.hub.state.Fmt
 
 /** One Kavita or Storyteller library, paged through the Hub's normalized model. */
 class ReadingLibraryGridScreen(
@@ -879,7 +880,7 @@ class ReadingWorkScreen(
         buildList {
             if (edition.format.isNotBlank()) add(edition.format.uppercase())
             if (edition.pageCount > 0) add("${edition.pageCount} pages")
-            if (edition.durationMs > 0) add(durationText(edition.durationMs))
+            if (edition.durationMs > 0) add(Fmt.runtime(edition.durationMs / 1_000))
             if (edition.narrator.isNotBlank()) add("Narrated by ${edition.narrator}")
             add(edition.source.replaceFirstChar { it.uppercase() })
         }.joinToString(" · ")
@@ -1035,12 +1036,6 @@ class ReadingWorkScreen(
         }
     }
 
-    private fun durationText(durationMs: Long): String {
-        val minutes = durationMs / 60_000
-        val hours = minutes / 60
-        val rest = minutes % 60
-        return if (hours > 0) "${hours}h ${rest}m" else "${minutes}m"
-    }
 
     private fun dp(value: Int) = Styler.dpInt(requireNotNull(host).viewContext, value.toFloat())
 

@@ -42,6 +42,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
+import com.pocketds.hub.state.Fmt
 
 /** Controller-first episode picker used by series and season download actions. */
 class OfflineSelectionScreen(
@@ -230,7 +231,7 @@ class OfflineSelectionScreen(
             "What should be downloaded?",
             "You can review and change the selected episodes before the download starts.",
             listOf(
-                ChoiceOverlay.Choice("all", "All available episodes", fileSize(all.sumOf(::sizeOf))),
+                ChoiceOverlay.Choice("all", "All available episodes", Fmt.bytes(all.sumOf(::sizeOf))),
                 ChoiceOverlay.Choice("unwatched", "All unwatched episodes"),
                 ChoiceOverlay.Choice("next", "Next unwatched episode"),
                 ChoiceOverlay.Choice("next_x", "Next episodes…"),
@@ -289,7 +290,7 @@ class OfflineSelectionScreen(
         if (!::counter.isInitialized) return
         val lookup = availableItems().associateBy { it.item.id }
         val bytes = selected.sumOf { id -> lookup[id]?.estimatedSizeBytes ?: 0L }
-        counter.text = "${selected.size} selected · ${fileSize(bytes)}"
+        counter.text = "${selected.size} selected · ${Fmt.bytes(bytes)}"
     }
 
     private fun confirmSelection() {
@@ -309,7 +310,7 @@ class OfflineSelectionScreen(
         val quality = source?.name?.ifBlank { source.container.uppercase() }.orEmpty()
         overlay.show(
             "Download ${selected.size} episode${if (selected.size == 1) "" else "s"}?",
-            "${fileSize(bytes)} selected · ${fileSize(available)} free\n" +
+            "${Fmt.bytes(bytes)} selected · ${Fmt.bytes(available)} free\n" +
                 "${location.label} · private app storage · Original" +
                     if (quality.isEmpty()) "" else " · $quality",
             listOf(
@@ -426,7 +427,7 @@ class OfflineSelectionScreen(
             val local = OfflineRepository.get(host.viewContext).forItem(value.item.id)
             meta.text = if (value.available) {
                 buildList {
-                    add(fileSize(value.estimatedSizeBytes))
+                    add(Fmt.bytes(value.estimatedSizeBytes))
                     if (local != null) add(local.state.wire.replaceFirstChar { it.uppercase() })
                     if (value.item.played) add("Watched") else if (value.item.progress > 0) add("${(value.item.progress * 100).toInt()}% watched")
                 }.joinToString(" · ")
@@ -456,11 +457,6 @@ class OfflineSelectionScreen(
         )
     }
 
-    private fun fileSize(bytes: Long): String = when {
-        bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824.0)
-        bytes >= 1_048_576L -> "%.0f MB".format(bytes / 1_048_576.0)
-        else -> "%.0f KB".format(bytes / 1024.0)
-    }
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
 
     private companion object {

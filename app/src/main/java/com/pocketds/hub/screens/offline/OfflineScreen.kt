@@ -44,6 +44,7 @@ import com.pocketds.hub.ui.PosterCardView
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
+import com.pocketds.hub.state.Fmt
 
 /** Persistent transfer manager and the device's offline library. */
 class OfflineScreen(
@@ -325,7 +326,7 @@ class OfflineScreen(
 
     private fun setQueueSummary(batches: List<OfflineBatch>) {
         val queued = batches.sumOf { it.jobs.count { job -> job.state != OfflineState.COMPLETE } }
-        summary.text = "$queued pending \u00b7 ${fileSize(repository.availableBytes())} free \u00b7 downloads run one at a time"
+        summary.text = "$queued pending \u00b7 ${Fmt.bytes(repository.availableBytes())} free \u00b7 downloads run one at a time"
     }
 
     private fun queueStructureSignature(batches: List<OfflineBatch>): String =
@@ -338,7 +339,7 @@ class OfflineScreen(
         val groups = OfflineCatalog.titles(completed, batchTitles)
         val complete = groups.sumOf { it.rows.size }
         val size = groups.sumOf { entry -> entry.rows.sumOf { it.totalBytes } }
-        summary.text = "${groups.size} title${if (groups.size == 1) "" else "s"} · $complete file${if (complete == 1) "" else "s"} · ${fileSize(size)}"
+        summary.text = "${groups.size} title${if (groups.size == 1) "" else "s"} · $complete file${if (complete == 1) "" else "s"} · ${Fmt.bytes(size)}"
         if (groups.isEmpty()) { empty("Downloaded movies and series will appear here and remain playable without a network."); return }
         val grid = com.pocketds.hub.ui.PosterGridLayout(host.viewContext).apply {
             setPadding(dp(8), dp(12), dp(8), dp(22))
@@ -366,8 +367,8 @@ class OfflineScreen(
                 poster = poster?.let { Uri.fromFile(it).toString() }.orEmpty()
             ),
             subtitle = if (value.isSeries) {
-                "${value.rows.size} episode${if (value.rows.size == 1) "" else "s"} · ${fileSize(size)}"
-            } else fileSize(size),
+                "${value.rows.size} episode${if (value.rows.size == 1) "" else "s"} · ${Fmt.bytes(size)}"
+            } else Fmt.bytes(size),
             jellyfinItemId = value.key
         )
         val card = PosterCardView(host.viewContext, colors, 158f).apply {
@@ -450,9 +451,9 @@ class OfflineScreen(
                 val active = batch.jobs.firstOrNull { it.state == OfflineState.DOWNLOADING }
                 val transfer = active?.speedBytesPerSecond?.takeIf { it > 0 }?.let { speed ->
                     val remaining = batch.totalBytes - batch.downloadedBytes
-                    " · ${fileSize(speed)}/s · ${duration(remaining / speed)} left"
+                    " · ${Fmt.speed(speed)} · ${Fmt.eta(remaining / speed)} left"
                 }.orEmpty()
-                text = "${batch.completeCount}/${batch.jobs.size} complete · ${fileSize(batch.downloadedBytes)} / ${fileSize(batch.totalBytes)}$transfer"
+                text = "${batch.completeCount}/${batch.jobs.size} complete · ${Fmt.bytes(batch.downloadedBytes)} / ${Fmt.bytes(batch.totalBytes)}$transfer"
                 textSize = 10f; setTextColor(colors.mutedText)
             }
             addView(detail)
@@ -564,7 +565,7 @@ class OfflineScreen(
     private fun showDownloadDetails(row: OfflineDownload) {
         overlay.show(
             episodeTitle(row),
-            "${stateText(row)}\n${fileSize(row.bytesDownloaded)} of ${fileSize(row.totalBytes)}\n${row.error}",
+            "${stateText(row)}\n${Fmt.bytes(row.bytesDownloaded)} of ${Fmt.bytes(row.totalBytes)}\n${row.error}",
             buildList {
                 if (row.state == OfflineState.COMPLETE) {
                     add(ChoiceOverlay.Choice("play", "Play downloaded video"))
@@ -652,10 +653,10 @@ class OfflineScreen(
             val active = batch.jobs.firstOrNull { it.state == OfflineState.DOWNLOADING }
             val transfer = active?.speedBytesPerSecond?.takeIf { it > 0 }?.let { speed ->
                 val remaining = (batch.totalBytes - batch.downloadedBytes).coerceAtLeast(0L)
-                " \u00b7 ${fileSize(speed)}/s \u00b7 ${duration(remaining / speed)} left"
+                " \u00b7 ${Fmt.speed(speed)} \u00b7 ${Fmt.eta(remaining / speed)} left"
             }.orEmpty()
             detail.text = "${batch.completeCount}/${batch.jobs.size} complete \u00b7 " +
-                "${fileSize(batch.downloadedBytes)} / ${fileSize(batch.totalBytes)}$transfer"
+                "${Fmt.bytes(batch.downloadedBytes)} / ${Fmt.bytes(batch.totalBytes)}$transfer"
             control.text = if (batch.paused) "\u25b6" else "\u2161"
         }
     }
@@ -678,10 +679,10 @@ class OfflineScreen(
 
     private fun stateText(row: OfflineDownload): String = buildList {
         add(row.state.wire.replaceFirstChar { it.uppercase() })
-        if (row.state != OfflineState.COMPLETE) add("${fileSize(row.bytesDownloaded)} / ${fileSize(row.totalBytes)}")
+        if (row.state != OfflineState.COMPLETE) add("${Fmt.bytes(row.bytesDownloaded)} / ${Fmt.bytes(row.totalBytes)}")
         if (row.state == OfflineState.DOWNLOADING && row.speedBytesPerSecond > 0) {
-            add("${fileSize(row.speedBytesPerSecond)}/s")
-            add("${duration((row.totalBytes - row.bytesDownloaded).coerceAtLeast(0) / row.speedBytesPerSecond)} left")
+            add(Fmt.speed(row.speedBytesPerSecond))
+            add("${Fmt.eta((row.totalBytes - row.bytesDownloaded).coerceAtLeast(0) / row.speedBytesPerSecond)} left")
         }
         if (row.error.isNotBlank()) add(row.error)
     }.joinToString(" · ")
@@ -714,16 +715,6 @@ class OfflineScreen(
     private fun tabBackground(selected: Boolean) = Styler.selectionBackground(
         host.viewContext, colors, selected, baseFill = colors.cardSurface,
         selectedFill = colors.focusFill, selectedStrokeDp = 1f, cornerDp = 10f)
-    private fun fileSize(bytes: Long): String = when {
-        bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824.0)
-        bytes >= 1_048_576L -> "%.0f MB".format(bytes / 1_048_576.0)
-        else -> "%.0f KB".format(bytes / 1024.0)
-    }
-    private fun duration(seconds: Long): String = when {
-        seconds >= 3_600 -> "%dh %02dm".format(seconds / 3_600, seconds % 3_600 / 60)
-        seconds >= 60 -> "%dm %02ds".format(seconds / 60, seconds % 60)
-        else -> "${seconds}s"
-    }
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
 
     private data class TaggedDownload(val value: OfflineDownload)
