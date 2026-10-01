@@ -360,7 +360,20 @@ func (s *Server) handleLibrarySeasons(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	cacheKey := "library:seasons:" + jellyfinClient.UserID() + ":" + seriesID
 	page, meta, err := cache.Fetch(ctx, s.cache, cacheKey, cache.UserData,
-		func(ctx context.Context) (*jellyfin.ItemsPage, error) { return jellyfinClient.Seasons(ctx, seriesID) })
+		func(ctx context.Context) (*jellyfin.ItemsPage, error) {
+			page, err := jellyfinClient.Seasons(ctx, seriesID)
+			if err != nil {
+				return nil, err
+			}
+			page.Items = withoutFolderSeasons(ctx, page.Items, func(ctx context.Context, seasonID string) ([]jellyfin.Item, error) {
+				episodes, err := jellyfinClient.Episodes(ctx, seriesID, seasonID, 500, 0)
+				if err != nil {
+					return nil, err
+				}
+				return episodes.Items, nil
+			})
+			return page, nil
+		})
 	if err != nil {
 		writeUpstreamError(w, r, "jellyfin", err)
 		return

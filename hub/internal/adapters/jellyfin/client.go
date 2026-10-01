@@ -466,7 +466,14 @@ func (c *Client) FetchImage(
 	// poster at 150 KB -- four times TMDB's equivalent, and a poster row is
 	// two dozen of them over a phone connection. 82 is visually
 	// indistinguishable at this size.
-	query.Set("quality", "82")
+	// Full-screen backdrops are the exception: at 1280px and up the picture
+	// fills the panel behind the words, and 82 shows its blocks in skies and
+	// shadows, so those ask for 92.
+	if maxWidth >= 1280 {
+		query.Set("quality", "92")
+	} else {
+		query.Set("quality", "82")
+	}
 	if maxWidth > 0 {
 		query.Set("maxWidth", strconv.Itoa(maxWidth))
 	}
