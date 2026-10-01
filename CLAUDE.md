@@ -571,6 +571,11 @@ Most of these exist because several screens had drifted copies of the same thing
 Cards measure at their natural height (`EpisodeCardView`, `DetailArtworkCardView`); give a row
 `WRAP` height rather than leftover space.
 
+`ConsolidationGuardTest` (part of `dev.sh test`) fails when a removed copy comes back -- a new
+`HubClient(context)`, a hand-built image loader, a hand-written episode code or "Specials", a
+`"Selected"` detail line, an untinted progress bar, or a `delay(POLL…)` loop -- and names the owner
+to use instead. Extend its rules when you consolidate something new.
+
 ---
 
 ## Conventions (inherited from `../Ayaneo PocketDS Keyboard+Mouse`)
