@@ -72,7 +72,8 @@ class ServerMonitorScreen(private val api: HubApi, private val ringVisible: () -
         if(value.host.disks.isEmpty())disks.addView(label("No fixed-disk statistics available.",13f))
         value.host.disks.forEach {disk->
             val free=if(disk.totalBytes>0)100.0*disk.availableBytes/disk.totalBytes else null
-            disks.addView(card("disk:${disk.name}",disk.name,"${Fmt.bytes(disk.availableBytes)} free of ${Fmt.bytes(disk.totalBytes)}${if(free!=null&&free<10) " · Low space (<10%)" else ""}",free?.let{100-it},free!=null&&free<10))
+            val low=com.pocketds.hub.screens.downloads.ActivityDashboard.lowSpace(disk)
+            disks.addView(card("disk:${disk.name}",disk.name,"${Fmt.bytes(disk.availableBytes)} free of ${Fmt.bytes(disk.totalBytes)}${if(low) " · Low space (<10%)" else ""}",free?.let{100-it},low))
         }
         disks.addView(label("Playing · selected Jellyfin profile",16f))
         if(value.sessionWarning.isNotEmpty())disks.addView(label(value.sessionWarning,13f))

@@ -30,14 +30,33 @@ class SettingsCard(context: Context, private val colors: PocketColors) : LinearL
         clipToPadding = false
     }
 
+    /** The heading, the quiet text at its end, and the row holding both: set by [title]. */
+    var titleView: TextView? = null; private set
+    var trailingView: TextView? = null; private set
+    private var header: LinearLayout? = null
+
     fun title(text: String, trailing: String = ""): SettingsCard {
-        addView(LinearLayout(context).apply {
+        header = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.BOTTOM
-            addView(TextView(context).apply { this.text = text; textSize = 14f; textWeight(700); setTextColor(colors.primaryText) },
-                LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            if (trailing.isNotBlank()) addView(TextView(context).apply { this.text = trailing; textSize = 11f; setTextColor(colors.mutedText) })
-        })
+            titleView = TextView(context).apply { this.text = text; textSize = 14f; textWeight(700); setTextColor(colors.primaryText) }
+            addView(titleView, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            trailingView = TextView(context).apply { textSize = 11f; setTextColor(colors.mutedText) }
+            addView(trailingView)
+        }
+        addView(header)
+        trailing(trailing)
+        return this
+    }
+
+    /** Changes the text at the end of the heading; blank hides it. */
+    fun trailing(text: String, color: Int = colors.mutedText) {
+        trailingView?.apply { this.text = text; setTextColor(color); visibility = if (text.isBlank()) GONE else VISIBLE }
+    }
+
+    /** A control at the end of the heading, such as "See all". */
+    fun headerAction(view: View): SettingsCard {
+        header?.apply { gravity = Gravity.CENTER_VERTICAL; addView(view) }
         return this
     }
 
@@ -48,8 +67,9 @@ class SettingsCard(context: Context, private val colors: PocketColors) : LinearL
         return this
     }
 
-    fun body(view: View, topDp: Float = 10f): SettingsCard {
-        addView(view, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+    /** [fill] spans the card's width, for rows that end at its right edge. */
+    fun body(view: View, topDp: Float = 10f, fill: Boolean = false): SettingsCard {
+        addView(view, LayoutParams(if (fill) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = Styler.dpInt(context, topDp)
         })
         return this

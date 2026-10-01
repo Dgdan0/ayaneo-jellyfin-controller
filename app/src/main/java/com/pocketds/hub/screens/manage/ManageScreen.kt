@@ -236,7 +236,7 @@ class ManageScreen(
         val rows = buildList {
             add(configuredHubRow(value.hub))
             add(monitorRow())
-            value.services.sortedBy { serviceOrder[it.name] ?: Int.MAX_VALUE }.forEach {
+            value.services.sortedBy { ServiceNames.rank(it.name) }.forEach {
                 add(it.toRow())
             }
         }
@@ -556,10 +556,6 @@ class ManageScreen(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
-        val serviceOrder = listOf(
-            "jellyfin", "jellyseerr", "prowlarr", "sonarr", "radarr", "readarr", "qbittorrent", "bazarr",
-            "cleanuparr", "bookkeeprr", "kavita", "storyteller"
-        ).withIndex().associate { it.value to it.index }
         val scannableServices = setOf("jellyfin", "kavita", "storyteller")
     }
 }

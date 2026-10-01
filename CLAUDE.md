@@ -588,6 +588,8 @@ Most of these exist because several screens had drifted copies of the same thing
 | A settings panel, an on/off row, colour swatches | `ui/SettingsCard`, `SwitchRowView`, `SwatchRowView` |
 | How subtitles look | `SubtitleSettings` (style, size, lift) applied by `playback/SubtitleLooks` in the player and the Settings preview |
 | When the up-next card shows, what gets a Skip button | `playback/UpNext` (`cardAt`, `skipLabel`); the card is `UpNextCardView` |
+| A service's name on screen and its place in a list | `model/ServiceNames.display` / `rank` |
+| What the Activity dashboard shows: what needs attention, the short agenda, service lines, low disk space, an address the Pocket can open | `screens/downloads/ActivityDashboard` |
 | Hub: intro/credits segments | Jellyfin's own, else `segmentsOrChapters` from whole chapter names ("OP", "Ending", "Credits") |
 | Paging with L2/R2 | `HubActivity.page` (moves focus with the scroll) |
 | Loading the next page of a list or row | `state/PagedLoadState`; one per row via `state/RowPaging` |
@@ -1175,6 +1177,11 @@ Design consequences:
   `web_url` is empty, the Hub falls back to a credential-free copy of `base_url`, which is usually
   loopback and therefore wrong on the handheld. Keep Funnel disabled; these dashboards are for
   authenticated tailnet devices only.
+- **The Activity tab opens each service's `web_url` in the default browser.** A loopback address
+  would look for the service on the Pocket, so `ActivityDashboard.reachableFromPocket` refuses it and
+  names the setting instead. On 2026-10-02 Kavita and Storyteller were already served by Tailscale
+  at `https://ayaneo-media-pc.tail737e96.ts.net:5000` and `:8001`, but their `web_url` was empty;
+  BookKeeprr (3000) is not served on the tailnet at all.
 - **Jellyfin library refresh is a narrow Hub action.** `POST /v1/manage/jellyfin/scan` requires the
   existing `control` scope and invokes Jellyfin's asynchronous `/Library/Refresh`. The app exposes
   it as a visible action on the Jellyfin Manage row and as X. The Hub clears affected response

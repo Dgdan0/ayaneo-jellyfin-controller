@@ -202,7 +202,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         sections.select(2); sections.push(LibraryScreen(api, ::ringVisible).also { attach(it) })
         offlineRoot = OfflineScreen(api, ::ringVisible).also { attach(it) }
         sections.select(3); sections.push(offlineRoot)
-        sections.select(4); sections.push(DownloadsScreen(api, ::ringVisible).also { attach(it) })
+        sections.select(4); sections.push(com.pocketds.hub.screens.downloads.ActivityScreen(api, ::ringVisible).also { attach(it) })
         sections.select(NOTIFICATIONS_SECTION); sections.push(
             NotificationsScreen(api, ::ringVisible) { count ->
                 if (::topBar.isInitialized) topBar.setBadge(count)
