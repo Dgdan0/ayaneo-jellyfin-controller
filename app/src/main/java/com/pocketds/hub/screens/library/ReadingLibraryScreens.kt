@@ -1061,8 +1061,8 @@ class ReadingWorkScreen(
     private fun seriesStrip(work: ReadingWork, books: List<ReadingSectionItem>): View =
         SeriesBookStrip.create(requireNotNull(host).viewContext, colors, ringVisible, api, books) { card, item ->
             if (item.workId == work.id) {
-                card.subtitleView.text = listOfNotNull(item.number.takeIf { it.isNotBlank() }?.let { "Book $it" }, "This book")
-                    .joinToString(" · ")
+                // "Book 6 · This book" wrapped; its number is plain from its neighbours.
+                card.subtitleView.text = "This book"
                 card.isFocusable = false
                 card.isFocusableInTouchMode = false
                 return@create

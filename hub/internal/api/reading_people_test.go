@@ -106,3 +106,22 @@ func TestSeriesEditionsMergeIntoOneBook(t *testing.T) {
 		t.Fatalf("merged: %+v", items[0])
 	}
 }
+
+func TestSeriesNotesLeaveTheTitle(t *testing.T) {
+	for title, want := range map[string]string{
+		"Morning Star: Book III of the Red Rising Trilogy":         "Morning Star",
+		"The Shadow Of What Was Lost (Book 1)":                     "The Shadow Of What Was Lost",
+		"An Echo of Things to Come (The Licanius Trilogy, Book 2)": "An Echo of Things to Come",
+		"The Way of Kings (Book One)":                              "The Way of Kings",
+		// Not series notes: a number in a title, a subtitle, a lone parenthesis.
+		"Mistborn: The Final Empire":    "Mistborn: The Final Empire",
+		"Catch-22":                      "Catch-22",
+		"The Book of Dust (Volume One)": "The Book of Dust",
+		"(Book 1)":                      "(Book 1)",
+		"Dark Matter (A Novel)":         "Dark Matter (A Novel)",
+	} {
+		if got := withoutSeriesNote(title); got != want {
+			t.Errorf("%q -> %q, want %q", title, got, want)
+		}
+	}
+}

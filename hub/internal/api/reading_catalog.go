@@ -868,6 +868,7 @@ func (s *Server) reconcileStorytellerBook(book storyteller.Book) storyteller.Boo
 			book.Series = []storyteller.Series{{Name: series, Position: position}}
 		}
 	}
+	book.Title = withoutSeriesNote(book.Title)
 	if s == nil || s.readingAcquisitions == nil {
 		return book
 	}

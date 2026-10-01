@@ -147,13 +147,21 @@ class ReadingHomeView(
         render(ReadingShelves.rows(emptyList(), ReadingListsRepository.get(context), emptyMap()))
     }
 
+    /**
+     * The profile name the hub reported. Home's own settings may hold none (no
+     * profile picked on this device, the hub's default is used), and re-reading
+     * them on every show turned "Hello Dgdan" into "Hello" after opening a book.
+     */
+    private var reportedName: String? = null
+
     fun setUserName(name:String?) {
+        reportedName = name
         greeting.text = HomeHeaderLabel.forUser(name)
         profileButton.visibility = if (name.isNullOrBlank()) View.VISIBLE else View.GONE
     }
 
     fun onShow() {
-        greeting.text = HomeHeaderLabel.forUser(com.pocketds.hub.settings.HubSettings.userName(context))
+        greeting.text = HomeHeaderLabel.forUser(reportedName ?: com.pocketds.hub.settings.HubSettings.userName(context))
         val state = ReadingListsRepository.get(context)
         val completion = ReadingCompletionRepository.get(context)
         render(ReadingShelves.rows(current.map(completion::project), state, observed.mapValues { completion.project(it.value) },

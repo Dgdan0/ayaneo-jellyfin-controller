@@ -166,3 +166,26 @@ func distinctStorytellerBooks(books []storyteller.Book) int {
 	}
 	return len(seen)
 }
+
+const seriesNoteNumber = `(?:\d+(?:\.\d+)?|[ivxlc]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)`
+
+var (
+	// "The Shadow Of What Was Lost (Book 1)", "(The Licanius Trilogy, Book 1)".
+	seriesNoteInParens = regexp.MustCompile(`(?i)\s*\([^()]*\b(?:book|volume|vol\.?|#)\s*` + seriesNoteNumber + `\b[^()]*\)\s*$`)
+	// "Morning Star: Book III of the Red Rising Trilogy".
+	seriesNoteAfterColon = regexp.MustCompile(`(?i)\s*[:–—-]\s*(?:book|volume)\s+` + seriesNoteNumber + `\s+(?:of|in)\s+.+$`)
+)
+
+// withoutSeriesNote drops a publisher's note of where a book sits in its
+// series from the end of its title. The app says "Book 3 of Red Rising"
+// itself, and "Morning Star: Book III of the Red Rising Trilogy" did not fit
+// a card. A title that would be left empty is kept as it was.
+func withoutSeriesNote(title string) string {
+	clean := seriesNoteInParens.ReplaceAllString(title, "")
+	clean = seriesNoteAfterColon.ReplaceAllString(clean, "")
+	clean = strings.TrimSpace(clean)
+	if clean == "" {
+		return title
+	}
+	return clean
+}
