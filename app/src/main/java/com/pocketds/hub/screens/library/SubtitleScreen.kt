@@ -1,14 +1,10 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.offline.OfflineChanges
 import com.pocketds.hub.ui.FocusScrollView
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
-import androidx.core.content.ContextCompat
 import com.pocketds.hub.state.JobSlot
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.*
@@ -39,14 +35,9 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
     private var state = SubtitleState()
     private var candidates: List<SubtitleCandidate>? = null
     private var selectedLanguage: String? = null
-    private var receiverRegistered = false
     private var lastUpdateMessage = ""
     private var awaitingDeviceUpdate = false
-    private val changedReceiver = object: BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if(candidates==null && ::body.isInitialized) render()
-        }
-    }
+    private val offlineChanges = OfflineChanges { if(candidates==null && ::body.isInitialized) render() }
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host; colors = Theme.colors(host.viewContext); memory = SubtitleMemory(host.viewContext, itemId)
@@ -69,15 +60,11 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
         }
     }
     override fun onShow() {
-        if(!receiverRegistered) {
-            ContextCompat.registerReceiver(checkNotNull(host).viewContext,changedReceiver,
-                IntentFilter(OfflineRepository.ACTION_CHANGED),ContextCompat.RECEIVER_NOT_EXPORTED)
-            receiverRegistered=true
-        }
+        offlineChanges.start(checkNotNull(host).viewContext)
         load()
     }
     override fun onHide() {
-        if(receiverRegistered) {checkNotNull(host).viewContext.unregisterReceiver(changedReceiver);receiverRegistered=false}
+        offlineChanges.stop()
         scope.coroutineContext.cancelChildren();panel.dismiss()
     }
     override fun onDestroyView() { scope.cancel();host=null }

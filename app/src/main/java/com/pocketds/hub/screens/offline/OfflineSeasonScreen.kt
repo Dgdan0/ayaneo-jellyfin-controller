@@ -1,20 +1,16 @@
 package com.pocketds.hub.screens.offline
 
+import com.pocketds.hub.offline.OfflineChanges
 import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.EpisodeCardView
 import com.pocketds.hub.ui.EpisodeLabel
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.content.ContextCompat
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
@@ -49,10 +45,7 @@ class OfflineSeasonScreen(
     private lateinit var overlay: ChoiceOverlay
     private var selectedId = ""
     private var renderedSignature = ""
-    private var receiverRegistered = false
-    private val changedReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) = render()
-    }
+    private val offlineChanges = OfflineChanges { render() }
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -85,11 +78,7 @@ class OfflineSeasonScreen(
     }
 
     override fun onShow() {
-        if (!receiverRegistered) {
-            ContextCompat.registerReceiver(host.viewContext, changedReceiver,
-                IntentFilter(OfflineRepository.ACTION_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
-            receiverRegistered = true
-        }
+        offlineChanges.start(host.viewContext)
         render(force = true)
     }
 
@@ -200,9 +189,7 @@ class OfflineSeasonScreen(
         }
         return null
     }
-    private fun unregister() {
-        if (receiverRegistered) { host.viewContext.unregisterReceiver(changedReceiver); receiverRegistered = false }
-    }
+    private fun unregister() = offlineChanges.stop()
     private fun episodeStatus(runtimeSeconds: Int, progress: OfflineCatalogProgress?): String = when {
         progress?.isComplete() == true -> "Watched"
         progress?.resumePosition()?.let { it > 0L } == true -> "Resume · ${Fmt.clock(progress.resumePosition())}"

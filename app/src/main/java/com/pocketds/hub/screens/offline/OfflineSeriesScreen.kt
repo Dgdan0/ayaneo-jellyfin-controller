@@ -1,13 +1,10 @@
 package com.pocketds.hub.screens.offline
 
+import com.pocketds.hub.offline.OfflineChanges
 import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.EpisodeLabel
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -16,7 +13,6 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.core.content.ContextCompat
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
@@ -61,10 +57,7 @@ class OfflineSeriesScreen(
     private var header: DetailHeaderView? = null
     private var selectedKey = ""
     private var renderedSignature = ""
-    private var receiverRegistered = false
-    private val changedReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) = render()
-    }
+    private val offlineChanges = OfflineChanges { render() }
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -85,11 +78,7 @@ class OfflineSeriesScreen(
     }
 
     override fun onShow() {
-        if (!receiverRegistered) {
-            ContextCompat.registerReceiver(host.viewContext, changedReceiver,
-                IntentFilter(OfflineRepository.ACTION_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
-            receiverRegistered = true
-        }
+        offlineChanges.start(host.viewContext)
         header?.overview?.collapse()
         render()
         scroll.post { if (scroll.isShown) requestInitialFocus() }
@@ -244,7 +233,7 @@ class OfflineSeriesScreen(
     private fun message(text: String) = TextView(host.viewContext).apply {
         this.text = text; textSize = 13f; setTextColor(colors.mutedText); setPadding(dp(24), dp(12), dp(24), dp(8))
     }
-    private fun unregister() { if (receiverRegistered) { host.viewContext.unregisterReceiver(changedReceiver); receiverRegistered = false } }
+    private fun unregister() = offlineChanges.stop()
     private fun findTagged(root: ViewGroup, key: String): View? {
         for (index in 0 until root.childCount) {
             val child = root.getChildAt(index)

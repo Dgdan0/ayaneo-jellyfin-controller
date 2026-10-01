@@ -57,6 +57,9 @@ class ConsolidationGuardTest {
             "ResumeRules.showsWatched / watchLabel: a saved position wins over watched (a rewatch)"),
         Rule(Regex("""delay\(\w*POLL\w*\)"""),
             "state/Poller with a PollCadence: backoff on failure, stop when hidden"),
+        Rule(Regex("""IntentFilter\(\s*OfflineRepository\.ACTION_CHANGED"""),
+            "offline/OfflineChanges: start in onShow, stop in onHide; no registered flag to keep",
+            setOf("offline/OfflineChanges.kt")),
     )
 
     @Test
