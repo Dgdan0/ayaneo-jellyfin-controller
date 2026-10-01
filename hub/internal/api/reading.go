@@ -112,8 +112,7 @@ func (s *Server) handleReadingDiscover(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 
 	out := ReadingDiscoverResponse{Rows: []ReadingDiscoverRow{}, Partial: []Partial{}}
-	allCacheHits := true
-	var oldest time.Duration
+	var freshness cacheSummary
 	for _, result := range results {
 		if result.err != nil {
 			out.Partial = append(out.Partial, Partial{
@@ -126,12 +125,7 @@ func (s *Server) handleReadingDiscover(w http.ResponseWriter, r *http.Request) {
 		for _, row := range result.body.Rows {
 			out.Rows = append(out.Rows, s.readingRow(row, result.kind))
 		}
-		if !result.meta.Hit {
-			allCacheHits = false
-		}
-		if result.meta.Age > oldest {
-			oldest = result.meta.Age
-		}
+		freshness.add(result.meta)
 	}
 	if len(out.Rows) == 0 && len(out.Partial) > 0 {
 		writeError(w, r, http.StatusServiceUnavailable, Error{
@@ -139,7 +133,7 @@ func (s *Server) handleReadingDiscover(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	out.Cache = CacheInfo{Hit: allCacheHits, AgeSeconds: int(oldest.Seconds())}
+	out.Cache = freshness.result()
 	writeJSON(w, http.StatusOK, out)
 }
 

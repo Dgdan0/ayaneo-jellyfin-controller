@@ -106,8 +106,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := HomeResponse{Rows: make([]DiscoverRow, 0, len(specs)), Partial: []Partial{}}
-	var oldest time.Duration
-	anyHit := true
+	var freshness cacheSummary
 	for i, spec := range specs {
 		got := results[i]
 		if got.err != nil {
@@ -132,15 +131,10 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 			TotalPages: 1,
 			Items:      hits,
 		})
-		if got.meta.Age > oldest {
-			oldest = got.meta.Age
-		}
-		if !got.meta.Hit {
-			anyHit = false
-		}
+		freshness.add(got.meta)
 	}
 
-	out.Cache = CacheInfo{Hit: anyHit, AgeSeconds: int(oldest.Seconds())}
+	out.Cache = freshness.result()
 	writeJSON(w, http.StatusOK, out)
 }
 

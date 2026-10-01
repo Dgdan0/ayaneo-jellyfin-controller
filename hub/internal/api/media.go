@@ -16,6 +16,37 @@ func cacheInfoFrom(m cache.Meta) CacheInfo {
 	}
 }
 
+// cacheSummary folds several cached reads into the one cache block a screen
+// reports: a hit only if every part was, the oldest part's age, and stale or
+// degraded if any part was. Home, Discover and the reading screens each folded
+// these by hand and kept only hit and age, so a row served from an old copy
+// because its service was down never told the app to say so.
+type cacheSummary struct {
+	info CacheInfo
+	seen bool
+}
+
+func (c *cacheSummary) add(m cache.Meta) {
+	part := cacheInfoFrom(m)
+	if !c.seen {
+		c.info, c.seen = part, true
+		return
+	}
+	c.info.Hit = c.info.Hit && part.Hit
+	c.info.AgeSeconds = max(c.info.AgeSeconds, part.AgeSeconds)
+	c.info.Stale = c.info.Stale || part.Stale
+	c.info.Degraded = c.info.Degraded || part.Degraded
+}
+
+// result is the summary; with nothing added it reads as a fresh hit, which is
+// what these screens reported before.
+func (c *cacheSummary) result() CacheInfo {
+	if !c.seen {
+		return CacheInfo{Hit: true}
+	}
+	return c.info
+}
+
 // Availability is the one word the app puts on a card.
 //
 // Deliberately a string rather than Jellyseerr's integer: the app should never

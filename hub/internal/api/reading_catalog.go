@@ -137,8 +137,7 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := timeoutFor(r, s.cfg.Server.RequestTimeout.OrDefault(20*time.Second))
 	defer cancel()
 	out := ReadingLibrariesResponse{Libraries: []ReadingLibrary{}, Partial: []Partial{}}
-	allHits := true
-	var oldest time.Duration
+	var freshness cacheSummary
 	var kavitaLibraries []kavita.Library
 	var storytellerLibrary *ReadingLibrary
 	storytellerAvailable := false
@@ -149,10 +148,7 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 			out.Partial = append(out.Partial, readingPartial("kavita", "libraries"))
 		} else {
 			kavitaLibraries = libraries
-			allHits = allHits && meta.Hit
-			if meta.Age > oldest {
-				oldest = meta.Age
-			}
+			freshness.add(meta)
 		}
 	}
 	if s.storyteller != nil {
@@ -173,10 +169,7 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 				storytellerLibrary.Artwork = "/v1/img/reading/storyteller/" + strconv.FormatInt(selected, 10)
 				storytellerLibrary.ArtworkStyle = "poster"
 			}
-			allHits = allHits && meta.Hit
-			if meta.Age > oldest {
-				oldest = meta.Age
-			}
+			freshness.add(meta)
 		}
 	}
 	for _, library := range kavitaLibraries {
@@ -227,7 +220,7 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, http.StatusServiceUnavailable, Error{Code: CodeUpstreamDown, Service: "reading", Message: "Reading libraries are unavailable", Retryable: true})
 		return
 	}
-	out.Cache = CacheInfo{Hit: allHits, AgeSeconds: int(oldest.Seconds())}
+	out.Cache = freshness.result()
 	writeJSON(w, http.StatusOK, out)
 }
 
