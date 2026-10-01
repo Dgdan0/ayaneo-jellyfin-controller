@@ -85,8 +85,8 @@ object FocusDecorator {
                         list.stopScroll()
                         val bounds = android.graphics.Rect(-gutter, -gutter, view.width + gutter, view.height + gutter)
                         list.offsetDescendantRectToMyCoords(view, bounds)
-                        val top = list.paddingTop
-                        val bottom = list.height - list.paddingBottom
+                        var top = list.paddingTop
+                        var bottom = list.height - list.paddingBottom
                         // Keep the shelf heading with its cards when the whole
                         // row fits; otherwise prioritize the selected title.
                         list.findContainingItemView(view)?.takeIf { it !== view }?.let { row ->
@@ -99,6 +99,12 @@ object FocusDecorator {
                             val expandedBottom = maxOf(bounds.bottom, shelf.bottom)
                             if (expandedBottom - expandedTop <= bottom - top) {
                                 bounds.top = expandedTop; bounds.bottom = expandedBottom
+                            } else if (!list.clipToPadding && expandedBottom - expandedTop <= list.height) {
+                                // The padding bands are drawn too. Books Discover's taller
+                                // cards fit only that way, and fitting the card alone cut
+                                // "Popular audiobooks" in half under the status line.
+                                bounds.top = expandedTop; bounds.bottom = expandedBottom
+                                top = 0; bottom = list.height
                             }
                         }
                         val dy = when {
