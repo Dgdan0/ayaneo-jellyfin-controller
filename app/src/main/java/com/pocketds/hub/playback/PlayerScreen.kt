@@ -47,6 +47,7 @@ import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.settings.HubSettings
 import com.pocketds.hub.settings.PlaybackSettings
+import com.pocketds.hub.settings.SubtitleSettings
 import com.pocketds.hub.ui.TrackPresentation
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.PocketColors
@@ -166,7 +167,7 @@ class PlayerScreen(
     }
     private var playbackSpeed = PlaybackEnhancements.defaultSpeed
     private var playbackAspect = PlaybackEnhancements.defaultAspect
-    private var subtitleAppearance = PlaybackEnhancements.defaultSubtitleAppearance
+    private var subtitleLook = SubtitleLook()
     private var touchLocked = false
     private var activeSegmentId = ""
 
@@ -207,6 +208,7 @@ class PlayerScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
+        subtitleLook = SubtitleSettings.look(host.viewContext)
         root = FrameLayout(host.viewContext).apply {
             setBackgroundColor(Color.BLACK)
             isFocusable = true
@@ -224,11 +226,6 @@ class PlayerScreen(
         // adjustment possible without rebuilding ExoPlayer's media item.
         dynamicSubtitleView = SubtitleView(host.viewContext).apply {
             visibility = View.GONE
-            setApplyEmbeddedStyles(true)
-            setApplyEmbeddedFontSizes(true)
-            setUserDefaultStyle()
-            setUserDefaultTextSize()
-            setBottomPaddingFraction(0.08f)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
         root.addView(dynamicSubtitleView, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -1036,7 +1033,7 @@ class PlayerScreen(
         }
         if (tab == "subtitles") {
             addSheetSection("APPEARANCE")
-            choiceOverlay.choice("Subtitle appearance", PlayerLabels.subtitleAppearance(subtitleAppearance)) { showSubtitleAppearanceSheet() }
+            choiceOverlay.choice("Subtitle look", PlayerLabels.subtitleLook(subtitleLook)) { showSubtitleAppearanceSheet() }
         }
         choiceOverlay.focusBody(selected)
         handler.removeCallbacks(hideControls)
@@ -1222,12 +1219,14 @@ class PlayerScreen(
     }
 
     private fun showSubtitleAppearanceSheet() {
+        val looks = SubtitleStyle.entries.flatMap { style -> SubtitleSize.entries.map { subtitleLook.copy(style = style, size = it) } }
         choiceOverlay.pickValue(
-            "Subtitle appearance", "Changes apply without reloading the video.",
-            PlaybackEnhancements.subtitleAppearances, subtitleAppearance, PlayerLabels::subtitleAppearance,
+            "Subtitle look", "For every video. Also in Settings › Subtitles.",
+            looks, subtitleLook, PlayerLabels::subtitleLook,
             onCancel = { showTracks("subtitles") }
         ) { picked ->
-            subtitleAppearance = picked
+            subtitleLook = picked
+            SubtitleSettings.save(host.viewContext, picked)
             applySubtitleAppearance()
             showControls()
         }
@@ -1235,45 +1234,15 @@ class PlayerScreen(
     }
 
     private fun applySubtitleAppearance() {
-        val targets = listOfNotNull(playerView.subtitleView, dynamicSubtitleView)
-        targets.forEach { view ->
-            when (subtitleAppearance) {
-                SubtitleAppearance.SYSTEM -> {
-                    view.setApplyEmbeddedStyles(true)
-                    view.setApplyEmbeddedFontSizes(true)
-                    view.setUserDefaultStyle()
-                    view.setUserDefaultTextSize()
-                }
-                SubtitleAppearance.LARGE -> {
-                    view.setApplyEmbeddedStyles(false)
-                    view.setApplyEmbeddedFontSizes(false)
-                    view.setStyle(CaptionStyleCompat.DEFAULT)
-                    view.setFractionalTextSize(0.075f)
-                }
-                SubtitleAppearance.HIGH_CONTRAST -> {
-                    view.setApplyEmbeddedStyles(false)
-                    view.setApplyEmbeddedFontSizes(false)
-                    view.setStyle(CaptionStyleCompat(
-                        Color.WHITE,
-                        Color.argb(185, 0, 0, 0),
-                        Color.TRANSPARENT,
-                        CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-                        Color.BLACK,
-                        null
-                    ))
-                    view.setFractionalTextSize(0.062f)
-                }
-            }
-        }
+        listOfNotNull(playerView.subtitleView, dynamicSubtitleView).forEach { SubtitleLooks.apply(it, subtitleLook) }
+        subtitleFraction = -1f
         placeSubtitles()
     }
 
-    /** The appearance's own height, or just above the timeline while it shows. */
+    /** The look's own height, or just above the timeline while it shows if the look asks for that. */
     private fun placeSubtitles() {
         val covered = if (controlsVisible && controllerPanel.height > 0) root.height - controllerPanel.top else 0
-        val fraction = PlaybackEnhancements.subtitleLift(
-            PlaybackEnhancements.subtitleBottomFraction(subtitleAppearance), covered, root.height
-        )
+        val fraction = PlaybackEnhancements.subtitlePlacement(subtitleLook, covered, root.height)
         if (fraction == subtitleFraction) return
         subtitleFraction = fraction
         listOfNotNull(playerView.subtitleView, dynamicSubtitleView).forEach { it.setBottomPaddingFraction(fraction) }

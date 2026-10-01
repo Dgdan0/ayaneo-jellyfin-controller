@@ -9,7 +9,7 @@ import org.junit.Test
 class PlaybackEnhancementsTest {
     @Test
     fun subtitles_rise_above_the_controls_only_while_they_show() {
-        val large = PlaybackEnhancements.subtitleBottomFraction(SubtitleAppearance.LARGE)
+        val large = SubtitleSize.LARGE.bottomFraction
         // Hidden controls: the appearance's own place.
         assertEquals(large, PlaybackEnhancements.subtitleLift(large, coveredPx = 0, heightPx = 1080), 0f)
         // A 216px panel on a 1080px picture covers 20%; subtitles sit 2% above it.
@@ -19,6 +19,17 @@ class PlaybackEnhancementsTest {
         // Before layout, or a panel taller than sense: no lift, or a capped one.
         assertEquals(large, PlaybackEnhancements.subtitleLift(large, coveredPx = 216, heightPx = 0), 0f)
         assertEquals(.6f, PlaybackEnhancements.subtitleLift(large, coveredPx = 1000, heightPx = 1080), 0f)
+    }
+
+    @Test
+    fun subtitles_default_to_an_outline_that_stays_put_when_the_controls_show() {
+        val look = SubtitleLook()
+        assertEquals(SubtitleStyle.OUTLINE, look.style)
+        assertEquals(SubtitleSize.MEDIUM, look.size)
+        assertEquals(look.size.bottomFraction, PlaybackEnhancements.subtitlePlacement(look, coveredPx = 216, heightPx = 1080), 0f)
+        val lifted = look.copy(liftWithControls = true)
+        assertEquals(.22f, PlaybackEnhancements.subtitlePlacement(lifted, coveredPx = 216, heightPx = 1080), 1e-4f)
+        assertEquals("Outline · Medium", PlayerLabels.subtitleLook(look))
     }
 
     @Test
@@ -54,10 +65,5 @@ class PlaybackEnhancementsTest {
         assertEquals(1f, PlaybackEnhancements.defaultSpeed)
         assertEquals(listOf(.5f, .75f, 1f, 1.25f, 1.5f, 2f), PlaybackEnhancements.speeds)
         assertEquals(PlaybackAspect.FIT, PlaybackEnhancements.defaultAspect)
-        assertEquals(
-            listOf(SubtitleAppearance.SYSTEM, SubtitleAppearance.LARGE, SubtitleAppearance.HIGH_CONTRAST),
-            PlaybackEnhancements.subtitleAppearances
-        )
-        assertEquals(SubtitleAppearance.SYSTEM, PlaybackEnhancements.defaultSubtitleAppearance)
     }
 }

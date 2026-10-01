@@ -21,11 +21,18 @@ object PlayerLabels {
         else -> String.format(Locale.US, "%.1f seconds later", offsetMillis / 1_000.0)
     }
 
-    fun subtitleAppearance(value: SubtitleAppearance): String = when (value) {
-        SubtitleAppearance.SYSTEM -> "System"
-        SubtitleAppearance.LARGE -> "Large"
-        SubtitleAppearance.HIGH_CONTRAST -> "High contrast"
+    fun subtitleStyle(value: SubtitleStyle): String = when (value) {
+        SubtitleStyle.OUTLINE -> "Outline"
+        SubtitleStyle.BOX -> "Box"
     }
+
+    fun subtitleSize(value: SubtitleSize): String = when (value) {
+        SubtitleSize.SMALL -> "Small"
+        SubtitleSize.MEDIUM -> "Medium"
+        SubtitleSize.LARGE -> "Large"
+    }
+
+    fun subtitleLook(look: SubtitleLook): String = "${subtitleStyle(look.style)} · ${subtitleSize(look.size)}"
 
     fun speed(value: Float): String = if (value == 1f) "Normal" else "${value}×"
 
