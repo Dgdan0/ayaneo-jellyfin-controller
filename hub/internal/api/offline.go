@@ -277,6 +277,7 @@ func (s *Server) handleOfflinePrepare(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, http.StatusConflict, Error{Code: CodeInvalidRequest, Message: err.Error()})
 			return
 		}
+		grant.Manifest.Item.Library = s.libraryOf(ctx, client, request.ItemID)
 		created = append(created, grant)
 		response.Items = append(response.Items, grant.Manifest)
 	}

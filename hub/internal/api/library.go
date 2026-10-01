@@ -53,6 +53,9 @@ type LibraryItem struct {
 	Poster       string `json:"poster,omitempty"`
 	Thumb        string `json:"thumb,omitempty"`
 	Backdrop     string `json:"backdrop,omitempty"`
+	// Library is the Jellyfin library the item lives in, so Downloads can
+	// group what is on the handheld the way Library shows it.
+	Library *LibraryRef `json:"library,omitempty"`
 }
 
 type LibraryPerson struct {
@@ -340,8 +343,10 @@ func (s *Server) handleLibraryItem(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, "jellyfin", err)
 		return
 	}
+	value := libraryItemFrom(*item)
+	value.Library = s.libraryOf(ctx, jellyfinClient, itemID)
 	writeJSON(w, http.StatusOK, LibraryItemResponse{
-		Item: libraryItemFrom(*item), Partial: []Partial{}, Cache: cacheInfoFrom(meta),
+		Item: value, Partial: []Partial{}, Cache: cacheInfoFrom(meta),
 	})
 }
 

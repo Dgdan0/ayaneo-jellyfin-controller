@@ -149,6 +149,19 @@ func (c *Client) Items(ctx context.Context, q ItemsQuery) (*ItemsPage, error) {
 	return out, nil
 }
 
+// Ancestors are an item's parents up to the server root: season, series,
+// the library's collection folder, the root folder.
+func (c *Client) Ancestors(ctx context.Context, itemID string) ([]Item, error) {
+	if err := c.requireUser(); err != nil {
+		return nil, err
+	}
+	var out []Item
+	if err := c.base.GetJSON(ctx, "/Items/"+itemID+"/Ancestors", url.Values{"userId": {c.userID}}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Similar is Jellyfin's own "more like this" for a movie or series, with
 // the configured user's watch state, as a page of ordinary items.
 func (c *Client) Similar(ctx context.Context, itemID string, limit int) (*ItemsPage, error) {
