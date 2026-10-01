@@ -143,10 +143,7 @@ func (s *Server) handleLibraryRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLibraryState(w http.ResponseWriter, r *http.Request) {
-	if !TokenFrom(r.Context()).HasScope("play") {
-		writeError(w, r, http.StatusForbidden, Error{
-			Code: CodeForbiddenScope, Message: "this token cannot change Jellyfin profile state",
-		})
+	if !requireScope(w, r, "play", "change watched or favourite state") {
 		return
 	}
 	client, ok := s.jellyfinForRequest(w, r)

@@ -56,13 +56,7 @@ type ReadingSearchResponse struct {
 }
 
 func (s *Server) requireReading(w http.ResponseWriter, r *http.Request) bool {
-	if TokenFrom(r.Context()).HasScope("reading") {
-		return true
-	}
-	writeError(w, r, http.StatusForbidden, Error{
-		Code: CodeForbiddenScope, Message: "this device is not allowed to browse books",
-	})
-	return false
+	return requireScope(w, r, "reading", "browse books")
 }
 
 func readingType(r *http.Request, allowAll bool) (bookkeeprr.ContentType, error) {

@@ -114,13 +114,7 @@ type OfflineProgressSyncResponse struct {
 }
 
 func (s *Server) requireDownload(w http.ResponseWriter, r *http.Request) bool {
-	if TokenFrom(r.Context()).HasScope("download") {
-		return true
-	}
-	writeError(w, r, http.StatusForbidden, Error{
-		Code: CodeForbiddenScope, Message: "this token cannot download media for offline use",
-	})
-	return false
+	return requireScope(w, r, "download", "download media for offline use")
 }
 
 func (s *Server) handleOfflineSelection(w http.ResponseWriter, r *http.Request) {

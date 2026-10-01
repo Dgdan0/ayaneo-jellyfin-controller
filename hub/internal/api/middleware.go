@@ -221,6 +221,21 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 	})
 }
 
+// requireScope is the one permission check. The token got past withAuth, so
+// a refusal here is a missing scope (403), never a bad token (401) -- the app
+// keeps working for everything else. Seven handlers wrote this by hand, half
+// saying "this token cannot" and half "this device is not allowed to".
+func requireScope(w http.ResponseWriter, r *http.Request, scope, action string) bool {
+	if TokenFrom(r.Context()).HasScope(scope) {
+		return true
+	}
+	writeError(w, r, http.StatusForbidden, Error{
+		Code:    CodeForbiddenScope,
+		Message: "this device is not allowed to " + action,
+	})
+	return false
+}
+
 // limiterFor picks the budget a request spends: session-bound playback and
 // offline transfers, artwork, or the interactive screen budget. Each is still
 // per token label and still behind authentication.

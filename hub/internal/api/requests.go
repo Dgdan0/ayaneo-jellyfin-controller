@@ -206,12 +206,7 @@ type createRequestResponse struct {
 // Never retried, here or in the client: a timeout does not mean it did not
 // happen, and a duplicate request is a real annoyance to unpick by hand.
 func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
-	token := TokenFrom(r.Context())
-	if !token.HasScope("request") {
-		writeError(w, r, http.StatusForbidden, Error{
-			Code:    CodeForbiddenScope,
-			Message: "this device is not allowed to request titles",
-		})
+	if !requireScope(w, r, "request", "request titles") {
 		return
 	}
 

@@ -53,14 +53,7 @@ func isHex(s string) bool {
 
 // requireControl gates every mutating download action.
 func (s *Server) requireControl(w http.ResponseWriter, r *http.Request) bool {
-	if TokenFrom(r.Context()).HasScope("control") {
-		return true
-	}
-	writeError(w, r, http.StatusForbidden, Error{
-		Code:    CodeForbiddenScope,
-		Message: "this device is not allowed to control downloads",
-	})
-	return false
+	return requireScope(w, r, "control", "control downloads")
 }
 
 func (s *Server) handleDownloadStop(w http.ResponseWriter, r *http.Request) {

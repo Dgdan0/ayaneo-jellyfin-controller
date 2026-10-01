@@ -196,13 +196,7 @@ type playbackSession struct {
 }
 
 func (s *Server) requirePlay(w http.ResponseWriter, r *http.Request) bool {
-	if TokenFrom(r.Context()).HasScope("play") {
-		return true
-	}
-	writeError(w, r, http.StatusForbidden, Error{
-		Code: CodeForbiddenScope, Message: "this token cannot play media",
-	})
-	return false
+	return requireScope(w, r, "play", "play media")
 }
 
 func (s *Server) handleSeriesPlayTarget(w http.ResponseWriter, r *http.Request) {

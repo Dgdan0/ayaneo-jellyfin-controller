@@ -369,11 +369,7 @@ type grabBody struct {
 
 // handleGrab sends one chosen release for download.
 func (s *Server) handleGrab(w http.ResponseWriter, r *http.Request) {
-	if !TokenFrom(r.Context()).HasScope("request") {
-		writeError(w, r, http.StatusForbidden, Error{
-			Code:    CodeForbiddenScope,
-			Message: "this device is not allowed to grab releases",
-		})
+	if !requireScope(w, r, "request", "grab releases") {
 		return
 	}
 	key, err := ParseMediaKey(r.PathValue("key"))

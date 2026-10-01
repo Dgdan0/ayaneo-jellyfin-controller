@@ -137,16 +137,7 @@ func validReadingCandidateKey(key string) bool {
 }
 
 func (s *Server) requireReadingRequest(w http.ResponseWriter, r *http.Request) bool {
-	if !s.requireReading(w, r) {
-		return false
-	}
-	if TokenFrom(r.Context()).HasScope("request") {
-		return true
-	}
-	writeError(w, r, http.StatusForbidden, Error{
-		Code: CodeForbiddenScope, Message: "this device is not allowed to request books",
-	})
-	return false
+	return s.requireReading(w, r) && requireScope(w, r, "request", "request books")
 }
 
 func (s *Server) readingCandidate(w http.ResponseWriter, r *http.Request, key string) (bookkeeprr.Item, bool) {

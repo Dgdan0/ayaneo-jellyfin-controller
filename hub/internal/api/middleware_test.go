@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"ayaneohub/internal/auth"
@@ -99,4 +101,23 @@ func authenticatedMiddlewareRequest(handler http.Handler, path string) *httptest
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	return recorder
+}
+
+func TestRequireScopeRefusesWithAScopeErrorNotAnAuthError(t *testing.T) {
+	// A 403 tells the app the token still works for everything else.
+	request := httptest.NewRequest(http.MethodPost, "/v1/downloads/x/stop", nil)
+	request = request.WithContext(context.WithValue(request.Context(), ctxToken, auth.Token{Label: "x", Scopes: []string{"read"}}))
+	recorder := httptest.NewRecorder()
+	if requireScope(recorder, request, "control", "control downloads") {
+		t.Fatal("a read-only token passed a control check")
+	}
+	if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), `"code":"forbidden_scope"`) ||
+		!strings.Contains(recorder.Body.String(), "not allowed to control downloads") {
+		t.Fatalf("got %d %s", recorder.Code, recorder.Body.String())
+	}
+
+	allowed := request.WithContext(context.WithValue(request.Context(), ctxToken, auth.Token{Label: "x", Scopes: []string{"control"}}))
+	if !requireScope(httptest.NewRecorder(), allowed, "control", "control downloads") {
+		t.Fatal("a control token was refused")
+	}
 }
