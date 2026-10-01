@@ -28,6 +28,19 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     private var opener:View?=null
     private var dismissed:(()->Unit)?=null
     private val hiddenAccessibility=mutableMapOf<View,Int>()
+    /**
+     * The row last chosen in each menu, by title and tab. Backing out of a
+     * submenu rebuilds its parent, which used to put the cursor back on the
+     * first row: Audio & subtitles -> Quality -> Back landed on Play rather
+     * than Quality. A menu reopened without an explicit start row now lands
+     * where it was left. Danger rows are not remembered, so a stray A cannot
+     * land on Delete.
+     */
+    private val lastChosen=mutableMapOf<String,Int>()
+    /** The row a submenu was opened from; it beats a menu's own start row once, on the way back. */
+    private var returning:Pair<String,Int>?=null
+    private var menuKey=""
+    private val choiceRows=mutableListOf<View>()
     val isOpen get()=visibility==VISIBLE
     /** Optional reader preview hook; called for both cancel and successful selection. */
     var onPanelGeometryChanged: (() -> Unit)? = null
@@ -59,17 +72,23 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
                 if(sibling!=this){hiddenAccessibility[sibling]=sibling.importantForAccessibility;sibling.importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS}
             }}
         }
-        dismissed=onDismiss;titleView.text=title;subtitle.text=detail;subtitle.visibility=if(detail.isBlank()) GONE else VISIBLE
+        dismissed=onDismiss;titleView.text=title;menuKey=title;subtitle.text=detail;subtitle.visibility=if(detail.isBlank()) GONE else VISIBLE
         visibility=VISIBLE;bringToFront();ViewCompat.setAccessibilityPaneTitle(this,title)
         onPanelGeometryChanged?.invoke()
         if(ValueAnimator.areAnimatorsEnabled()){card.alpha=0f;card.animate().alpha(1f).setDuration(180).start()}
     }
-    fun resetBody() {body.removeAllViews();tabRow.removeAllViews();footer.removeAllViews();scroll.scrollTo(0,0)}
-    fun focusBody(preferred:View?=null) {post {if(isOpen)(preferred ?: body.getFocusables(FOCUS_FORWARD).firstOrNull() ?: close).requestFocus()}}
+    fun resetBody() {body.removeAllViews();tabRow.removeAllViews();footer.removeAllViews();choiceRows.clear();scroll.scrollTo(0,0)}
+    /** Focuses [preferred], else the row last chosen in this menu, else the first row. */
+    fun focusBody(preferred:View?=null) {
+        val back=returning?.takeIf {it.first==menuKey}?.let {returning=null;choiceRows.getOrNull(it.second)}
+        val remembered=lastChosen[menuKey]?.let(choiceRows::getOrNull)
+        post {if(isOpen)(back ?: preferred ?: remembered ?: body.getFocusables(FOCUS_FORWARD).firstOrNull() ?: close).requestFocus()}
+    }
     fun tabs(values:List<Pair<String,String>>,selected:String,onPick:(String)->Unit) = tabs(values, selected, false, onPick)
 
     fun tabs(values:List<Pair<String,String>>,selected:String,dividers:Boolean,onPick:(String)->Unit) {
         tabRow.removeAllViews()
+        menuKey="${titleView.text}/$selected"
         values.forEachIndexed { index,(id,label)->
             if(dividers && index>0) tabRow.addView(View(context).apply {setBackgroundColor(colors.mutedText)},LinearLayout.LayoutParams(dp(1),dp(20)).apply {gravity=Gravity.CENTER_VERTICAL})
             tabRow.addView(TextView(context).apply {
@@ -88,7 +107,12 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     fun choice(label:String,detail:String="",selected:Boolean=false,danger:Boolean=false,onPick:()->Unit):View {
         val row=LinearLayout(context).apply {
             orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;minimumHeight=dp(52);setPadding(dp(10),dp(8),dp(10),dp(8))
-            background=Styler.selectionBackground(context,colors,selected);Styler.makeFocusable(this);activateOnTap(onPick)
+            val key=menuKey;val index=choiceRows.size
+            background=Styler.selectionBackground(context,colors,selected);Styler.makeFocusable(this)
+            activateOnTap {
+                if(danger){lastChosen.remove(key);returning=null} else {lastChosen[key]=index;returning=key to index}
+                onPick()
+            }
             contentDescription=listOf(label,detail,if(selected) "Selected" else "").filter(String::isNotBlank).joinToString(", ")
             isSelected=selected;FocusDecorator.attach(this,ringVisible,scale=false)
         }
@@ -98,6 +122,7 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
         row.addView(copy,LinearLayout.LayoutParams(0,-2,1f))
         if(selected)row.addView(ImageView(context).apply {setImageDrawable(AppIconDrawable(AppIcon.CHECK,colors.accent));importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO},LinearLayout.LayoutParams(dp(22),dp(22)).apply{marginStart=dp(8)})
         body.addView(row,LinearLayout.LayoutParams(-1,-2).apply {bottomMargin=dp(3)})
+        choiceRows+=row
         return row
     }
     open fun dismiss() {
@@ -107,7 +132,8 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
         hiddenAccessibility.forEach {(view,mode)->view.importantForAccessibility=mode};hiddenAccessibility.clear()
         opener?.takeIf {it.isShown && it.isFocusable}?.requestFocus();opener=null;dismissed=null
     }
-    fun cancel(){val callback=dismissed;dismiss();callback?.invoke()}
+    // A Back that closes the whole panel (no parent reopened) drops the return marker.
+    fun cancel(){val callback=dismissed;dismiss();callback?.invoke();if(!isOpen)returning=null}
     open fun onPad(action:PadAction):Boolean {
         if(!isOpen)return false
         val focused=findFocus()

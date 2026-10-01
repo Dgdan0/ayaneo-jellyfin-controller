@@ -181,6 +181,14 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         sections = SectionStacks(sectionTitles.size)
 
         setContentView(buildChrome())
+        // hints() reads the focused item, so every path that moves focus had to
+        // refresh the bar afterwards, and the ones that forgot left it stale (a
+        // menu returning from a submenu kept the bell's hints). Following every
+        // focus change here covers them all; one refresh per frame at most.
+        window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, _ ->
+            window.decorView.removeCallbacks(hintRefresh)
+            window.decorView.post(hintRefresh)
+        }
         if (savedInstanceState != null) {
             supportFragmentManager.fragments
                 .filterIsInstance<EpubNavigatorFragment>()
@@ -962,6 +970,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             .getOrDefault(false)
             .also { if (!it) enteringPictureInPicture = false }
     }
+
+    private val hintRefresh = Runnable { refreshHints() }
 
     override fun refreshHints() {
         if (!::player.isInitialized) return
