@@ -566,6 +566,10 @@ Most of these exist because several screens had drifted copies of the same thing
 | An episode | `ui/EpisodeCardView`; names via `EpisodeLabel.of` / `code` / `season` ("S1E4 · Title", "Specials") |
 | A season or poster-shaped detail card | `ui/DetailArtworkCardView` |
 | A value menu / a destructive confirm | `ChoiceOverlay.pickValue` / `confirm` (harmless answer first) |
+| A menu's cursor after a submenu | `SidePanelView` remembers the row last chosen per menu and tab; pass no start row and Back lands where you were |
+| On/off action icons (watched, favourite, downloaded) | `MediaActionIconDrawable.of` (`MediaActionIcon.isOn`): filled accent when on, outline when off; `DOWNLOADING` is a progress ring |
+| Reacting to offline downloads changing | `offline/OfflineChanges` (start in onShow, stop in onHide) |
+| Sorting a library | `ui/LibrarySortControls` (field button + one-press direction); wording from `SortPreference.directionLabel` |
 | Activating a focusable on the first tap | `activateOnTap`, never `setOnClickListener` on a focusable |
 | Paging with L2/R2 | `HubActivity.page` (moves focus with the scroll) |
 | Loading the next page of a list or row | `state/PagedLoadState`; one per row via `state/RowPaging` |
@@ -1082,7 +1086,8 @@ Design consequences:
   view is still what `currentFocus` returns, so the next directional press searches outward
   from something invisible. `showCurrent` clears it, and `moveFocus` also ignores a `from`
   that is not `isShown`.
-- **`hints()` reads the focused item, so it must be recomputed after focus lands.** Contextual
+- **`hints()` reads the focused item, so it must be recomputed after focus lands.** Since
+  2026-10-01 a global focus listener in `HubActivity` does this on every focus change. Contextual
   chips are derived from the selection, and every path that moves focus asynchronously needs to
   refresh them afterwards: `moveFocus`, `showCurrent`'s post, and the adapter's own focus
   settling. Downloads showed a blank Ⓧ on a transfer that could plainly be stopped, because
