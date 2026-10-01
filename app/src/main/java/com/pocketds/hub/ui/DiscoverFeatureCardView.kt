@@ -16,9 +16,9 @@ class DiscoverFeatureCardView(
     ringVisible: () -> Boolean
 ) : LinearLayout(context) {
     private val art = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-    private val kicker = TextView(context).apply { textSize = 11f; setTextColor(colors.accent); includeFontPadding = false }
+    private val kicker = TextView(context).apply { typeRole(Type.Role.EYEBROW); setTextColor(colors.accent) }
     private val heading = TextView(context).apply {
-        textSize = 21f; setTextColor(colors.primaryText); maxLines = 2
+        typeRole(Type.Role.HERO, 24f); setTextColor(colors.primaryText); maxLines = 2
         ellipsize = TextUtils.TruncateAt.END; includeFontPadding = false
     }
     private val meta = TextView(context).apply {

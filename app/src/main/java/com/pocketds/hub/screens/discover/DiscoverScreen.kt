@@ -89,7 +89,13 @@ class DiscoverScreen(
     private lateinit var colors: PocketColors
     private lateinit var searchBox: EditText
     private lateinit var readingFilters: HorizontalScrollView
-    private lateinit var upcomingButton: TextView
+    /** Discover | Upcoming, at the start of the search row. */
+    private lateinit var tabs: com.pocketds.hub.ui.BlobSegmentedView
+    /** Upcoming lives here as a tab: the calendar screen, embedded. */
+    private val upcoming = UpcomingScreen(api, ringVisible)
+    private lateinit var upcomingView: View
+    private lateinit var searchStatus: View
+    private var tab = TAB_DISCOVER
     private val readingFilterButtons = mutableMapOf<String, ReadingCategoryTabView>()
     private lateinit var statusLine: TextView
     private lateinit var broaderSearchButton: TextView
@@ -177,17 +183,16 @@ class DiscoverScreen(
         }
         root.addView(readingFilters, LinearLayout.LayoutParams(MATCH, WRAP))
 
-        upcomingButton = TextView(context).apply {
-            text = "Upcoming"
-            textSize = 13f
-            setTextColor(colors.primaryText)
-            minHeight = Styler.dpInt(context, 40f)
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(Styler.dpInt(context, 14f), 0, Styler.dpInt(context, 14f), 0)
-            background = Styler.chipBackground(context, colors)
-            Styler.makeFocusable(this)
-            FocusDecorator.attach(this, ringVisible, false)
-            activateOnTap { host.push(UpcomingScreen(api, ringVisible)) }
+        tabs = com.pocketds.hub.ui.BlobSegmentedView(context, colors, ringVisible).apply {
+            heightDp = 38f
+            textSp = 12.5f
+            trackColor = colors.cardSurface
+            // A picks: the tabs sit beside the search box, and passing through
+            // them on the way there should not swap the page.
+            setOptions(listOf(com.pocketds.hub.ui.BlobSegmentedView.Option(TAB_DISCOVER, "Discover"),
+                com.pocketds.hub.ui.BlobSegmentedView.Option(TAB_UPCOMING, "Upcoming")), TAB_DISCOVER)
+            onPick = ::showTab
+            onOptionFocused = { host.refreshHints() }
         }
 
         searchBox = EditText(context).apply {
@@ -245,10 +250,11 @@ class DiscoverScreen(
             gravity = Gravity.CENTER_VERTICAL
             clipChildren = false
             setPadding(Styler.dpInt(context, 16f), Styler.dpInt(context, 4f), Styler.dpInt(context, 16f), 0)
-            addView(searchBox, LinearLayout.LayoutParams(0, WRAP, 1f))
-            addView(upcomingButton, LinearLayout.LayoutParams(WRAP, WRAP).apply {
-                marginStart = Styler.dpInt(context, 12f)
+            addView(tabs, LinearLayout.LayoutParams(WRAP, WRAP).apply {
+                marginStart = Styler.dpInt(context, 8f)
+                marginEnd = Styler.dpInt(context, 2f)
             })
+            addView(searchBox, LinearLayout.LayoutParams(0, WRAP, 1f))
         }, LinearLayout.LayoutParams(MATCH, WRAP))
 
         val searchStatusRow = LinearLayout(context).apply {
@@ -260,7 +266,7 @@ class DiscoverScreen(
             setTextColor(colors.mutedText)
             gravity = Gravity.CENTER_VERTICAL
             setPadding(
-                Styler.dpInt(context, 12f), Styler.dpInt(context, 3f),
+                Styler.dpInt(context, 26f), Styler.dpInt(context, 3f),
                 Styler.dpInt(context, 12f), Styler.dpInt(context, 3f)
             )
         }
@@ -280,6 +286,12 @@ class DiscoverScreen(
             marginEnd = Styler.dpInt(context, 10f)
         })
         root.addView(searchStatusRow)
+        searchStatus = searchStatusRow
+        upcomingView = upcoming.onCreateView(host, root).apply {
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
+        }
+        root.addView(upcomingView)
 
         rowsList = RecyclerView(context).apply {
             layoutManager = LinearLayoutManager(context)
@@ -472,9 +484,13 @@ class DiscoverScreen(
     override fun selectContentMode(mode: ContentMode) = switchMode(mode)
 
     private fun applyModeVisibility() {
-        upcomingButton.visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
-        rowsList.visibility = if (mode == ContentMode.MEDIA && !searching) View.VISIBLE else View.GONE
-        resultsGrid.visibility = if (mode == ContentMode.MEDIA && searching) View.VISIBLE else View.GONE
+        val upcomingTab = mode == ContentMode.MEDIA && tab == TAB_UPCOMING
+        tabs.visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
+        searchBox.visibility = if (upcomingTab) View.GONE else View.VISIBLE
+        searchStatus.visibility = if (upcomingTab) View.GONE else View.VISIBLE
+        upcomingView.visibility = if (upcomingTab) View.VISIBLE else View.GONE
+        rowsList.visibility = if (mode == ContentMode.MEDIA && !searching && !upcomingTab) View.VISIBLE else View.GONE
+        resultsGrid.visibility = if (mode == ContentMode.MEDIA && searching && !upcomingTab) View.VISIBLE else View.GONE
         readingRowsList.visibility = if (mode == ContentMode.BOOKS && !searching) View.VISIBLE else View.GONE
         readingResultsGrid.visibility = if (mode == ContentMode.BOOKS && searching) View.VISIBLE else View.GONE
         broaderSearchButton.visibility = if (mode == ContentMode.BOOKS && searching && readingSearchPresentation.canToggle)
@@ -564,10 +580,27 @@ class DiscoverScreen(
         host?.refreshHints()
     }
 
+    /**
+     * Upcoming is a tab here rather than a page you push and back out of: the
+     * calendar of what your monitored films and series bring next, beside what
+     * there is to discover.
+     */
+    private fun showTab(id: String) {
+        if (id == tab) return
+        tab = id
+        tabs.select(id)
+        if (tab == TAB_UPCOMING) upcoming.onShow() else upcoming.onHide()
+        applyModeVisibility()
+        host?.refreshHints()
+    }
+
+    private val upcomingActive: Boolean get() = mode == ContentMode.MEDIA && tab == TAB_UPCOMING
+
     override fun onShow() {
         rebindRequestedCards()
         val stored = host?.viewContext?.let(ContentModeSettings::get) ?: mode
         if (stored != mode) switchMode(stored)
+        if (upcomingActive) { upcoming.onShow(); return }
         if (searching) {
             val empty = if (mode == ContentMode.MEDIA) resultsAdapter.itemCount == 0
             else readingResultsAdapter.itemCount == 0
@@ -582,6 +615,7 @@ class DiscoverScreen(
     }
 
     override fun onHide() {
+        upcoming.onHide()
         shelfNavigation.cancel()
         if (form.isOpen) {
             form.dismiss()
@@ -597,6 +631,7 @@ class DiscoverScreen(
     }
 
     override fun onDestroyView() {
+        upcoming.onDestroyView()
         scope.cancel()
         host = null
     }
@@ -605,6 +640,8 @@ class DiscoverScreen(
         if (form.isOpen) {
             return listOf(ButtonHint.activate("Change"), ButtonHint.back("Cancel"))
         }
+        if (::tabs.isInitialized && tabs.hasFocus()) return listOf(ButtonHint.activate("Show"), ButtonHint.refresh())
+        if (upcomingActive) return upcoming.hints()
         val hints = mutableListOf<ButtonHint>()
         hints.add(
             ButtonHint.activate(
@@ -649,7 +686,10 @@ class DiscoverScreen(
         }
 
     override fun requestInitialFocus(): Boolean {
-        return restoreContentFocus()
+        if (upcomingActive) return upcoming.requestInitialFocus()
+        // A card that is no longer there gives way to the first row, not to
+        // whatever is first in the view (the tabs).
+        return restoreContentFocus() || focusLanes().firstOrNull()?.let { shelfNavigation.focus(activeList(), it); true } == true
     }
 
     override fun onPad(action: PadAction): Boolean = when {
@@ -657,10 +697,18 @@ class DiscoverScreen(
             host?.refreshHints()
             true
         }
+        // Down from the tabs goes into whichever tab is showing.
+        action is PadAction.Step && action.direction == com.pocketds.hub.input.Direction.DOWN && tabs.hasFocus() ->
+            if (upcomingActive) upcoming.requestInitialFocus()
+            else { focusLanes().firstOrNull()?.let { shelfNavigation.focus(activeList(), it) }; true }
+        // Left from the start of the search box goes to the tab you are on.
+        action is PadAction.Step && action.direction == com.pocketds.hub.input.Direction.LEFT && searchBox.hasFocus() &&
+            searchBox.selectionStart == 0 && tabs.visibility == View.VISIBLE -> tabs.focus(tab)
+        upcomingActive && !tabs.hasFocus() -> upcoming.onPad(action)
         action is PadAction.Step && !searching &&
             shelfNavigation.step(activeList(), focusLanes(), action.direction, searchBox) -> true
         action is PadAction.Step && !searching && action.direction == com.pocketds.hub.input.Direction.DOWN &&
-            (searchBox.hasFocus() || upcomingButton.hasFocus()) -> {
+            searchBox.hasFocus() -> {
                 focusLanes().firstOrNull()?.let { shelfNavigation.focus(activeList(), it) }
                 true
             }
@@ -1109,11 +1157,11 @@ class DiscoverScreen(
                     Styler.dpInt(context, 18f), Styler.dpInt(context, 9f))
             })
             label = TextView(context).apply {
-                textSize = 13f
+                com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 15f)
                 setTextColor(colors.primaryText)
                 setPadding(
-                    Styler.dpInt(context, 12f), Styler.dpInt(context, 6f),
-                    Styler.dpInt(context, 12f), Styler.dpInt(context, 1f)
+                    Styler.dpInt(context, 24f), Styler.dpInt(context, 8f),
+                    Styler.dpInt(context, 12f), Styler.dpInt(context, 2f)
                 )
             }
             addView(label)
@@ -1301,11 +1349,11 @@ class DiscoverScreen(
                     Styler.dpInt(context, 18f), Styler.dpInt(context, 9f))
             })
             label = TextView(context).apply {
-                textSize = 13f
+                com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 15f)
                 setTextColor(colors.primaryText)
                 setPadding(
-                    Styler.dpInt(context, 12f), Styler.dpInt(context, 6f),
-                    Styler.dpInt(context, 12f), Styler.dpInt(context, 1f)
+                    Styler.dpInt(context, 24f), Styler.dpInt(context, 8f),
+                    Styler.dpInt(context, 12f), Styler.dpInt(context, 2f)
                 )
             }
             addView(label)
@@ -1430,6 +1478,8 @@ class DiscoverScreen(
     private class CardHolder(view: View) : RecyclerView.ViewHolder(view)
 
     private companion object {
+        const val TAB_DISCOVER = "discover"
+        const val TAB_UPCOMING = "upcoming"
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
