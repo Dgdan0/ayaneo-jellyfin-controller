@@ -72,6 +72,9 @@ type ReadingSectionItem struct {
 	PageCount    int              `json:"pageCount,omitempty"`
 	Progress     *ReadingProgress `json:"progress,omitempty"`
 	Availability string           `json:"availability"`
+	// Formats is what this book can be opened as: ebook, audiobook, readaloud.
+	// An ebook and an audiobook of one book are one item with both.
+	Formats []string `json:"formats,omitempty"`
 }
 
 type ReadingSection struct {
@@ -644,7 +647,7 @@ func (s *Server) kavitaWork(ctx context.Context, workID string, detail *kavita.D
 
 func (s *Server) storytellerWork(libraryID string, book storyteller.Book, includeEditions bool) (ReadingWork, error) {
 	book = s.reconcileStorytellerBook(book)
-	authors := creatorNames(book.Authors)
+	authors := storytellerPeople(book)
 	seriesName := ""
 	seriesIndex := 0.0
 	if len(book.Series) > 0 {
@@ -694,9 +697,31 @@ func (s *Server) storytellerShelf(libraryID string, books []storyteller.Book) ([
 }
 
 func (s *Server) storytellerShelfWithGrouping(libraryID string, books []storyteller.Book, groupSeries bool) ([]ReadingWork, error) {
+	standalone, groups := s.storytellerShelfGroups(books, groupSeries)
+	out, err := s.storytellerStandaloneWorks(libraryID, standalone)
+	if err != nil {
+		return nil, err
+	}
+	for _, group := range groups {
+		work, err := s.storytellerCollection(libraryID, group, false)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, work)
+	}
+	return out, nil
+}
+
+// storytellerShelfGroups splits a library into standalone books and series,
+// leaving out the reading-lab fixtures. The shelf and the author shelves both
+// start here, so a series is the same series in both.
+func (s *Server) storytellerShelfGroups(books []storyteller.Book, groupSeries bool) ([]storyteller.Book, []*storytellerSeriesGroup) {
 	groups := map[string]*storytellerSeriesGroup{}
 	standalone := make([]storyteller.Book, 0, len(books))
 	for _, rawBook := range books {
+		if isReadingFixture(rawBook) {
+			continue
+		}
 		book := s.reconcileStorytellerBook(rawBook)
 		sourceID, title, grouped := storytellerSeriesSource(book)
 		if !grouped || !groupSeries {
@@ -710,8 +735,22 @@ func (s *Server) storytellerShelfWithGrouping(libraryID string, books []storytel
 		}
 		group.books = append(group.books, book)
 	}
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	ordered := make([]*storytellerSeriesGroup, 0, len(keys))
+	for _, key := range keys {
+		ordered = append(ordered, groups[key])
+	}
+	return standalone, ordered
+}
 
-	out := make([]ReadingWork, 0, len(standalone)+len(groups))
+// storytellerStandaloneWorks makes one work per standalone book, folding an
+// ebook and an audiobook of the same book into one.
+func (s *Server) storytellerStandaloneWorks(libraryID string, standalone []storyteller.Book) ([]ReadingWork, error) {
+	out := make([]ReadingWork, 0, len(standalone))
 	byID := map[string]int{}
 	standaloneBases := make([]storyteller.Book, 0, len(standalone))
 	for _, book := range standalone {
@@ -734,18 +773,6 @@ func (s *Server) storytellerShelfWithGrouping(libraryID string, books []storytel
 		}
 		byID[work.ID] = len(out)
 		standaloneBases = append(standaloneBases, book)
-		out = append(out, work)
-	}
-	keys := make([]string, 0, len(groups))
-	for key := range groups {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		work, err := s.storytellerCollection(libraryID, groups[key], false)
-		if err != nil {
-			return nil, err
-		}
 		out = append(out, work)
 	}
 	return out, nil
@@ -811,7 +838,7 @@ func storytellerSeriesSource(book storyteller.Book) (string, string, bool) {
 		identity = "uuid:" + strings.ToLower(uuid)
 	} else {
 		author := ""
-		if names := creatorNames(book.Authors); len(names) > 0 {
+		if names := storytellerPeople(book); len(names) > 0 {
 			author = names[0]
 		}
 		identity = "name:" + normalizeReadingIdentity(series.Name) + "|author:" + normalizeReadingIdentity(author)
@@ -820,6 +847,12 @@ func storytellerSeriesSource(book storyteller.Book) (string, string, bool) {
 }
 
 func (s *Server) reconcileStorytellerBook(book storyteller.Book) storyteller.Book {
+	if clean, series, position, ok := storytellerFileTitle(book.Title, storytellerPeople(book)); ok {
+		book.Title = clean
+		if len(book.Series) == 0 && series != "" {
+			book.Series = []storyteller.Series{{Name: series, Position: position}}
+		}
+	}
 	if s == nil || s.readingAcquisitions == nil {
 		return book
 	}
@@ -837,7 +870,7 @@ func (s *Server) reconcileStorytellerBook(book storyteller.Book) storyteller.Boo
 			identifiers["isbn"] = value
 		}
 	}
-	match, ok := s.readingAcquisitions.matchBook(book.Title, creatorNames(book.Authors), identifiers)
+	match, ok := s.readingAcquisitions.matchBook(book.Title, storytellerPeople(book), identifiers)
 	if !ok {
 		return book
 	}
@@ -867,7 +900,7 @@ func (s *Server) storytellerCollection(
 	overview := ""
 	allAudioOnly := len(books) > 0
 	for _, book := range books {
-		authors = mergeUnique(authors, creatorNames(book.Authors))
+		authors = mergeUnique(authors, storytellerPeople(book))
 		availability = mergeUnique(availability, storytellerAvailability(book))
 		if book.CreatedAt > addedAt {
 			addedAt = book.CreatedAt
@@ -893,7 +926,7 @@ func (s *Server) storytellerCollection(
 		Artwork:  "/v1/img/reading/storyteller/" + strconv.FormatInt(books[0].ID, 10),
 		Genres:   []string{}, Languages: []string{}, Editions: []ReadingEdition{},
 		Progress: storytellerCollectionProgress(books), Availability: availability,
-		Year: year, AddedAt: addedAt, BookCount: len(books), Partial: []Partial{},
+		Year: year, AddedAt: addedAt, BookCount: distinctStorytellerBooks(books), Partial: []Partial{},
 	}
 	seriesID := storytellerAcquisitionSeriesID(books)
 	manifest, hasManifest := s.readingAcquisitions.seriesRoster(seriesID, group.title, authors)
@@ -921,12 +954,17 @@ func (s *Server) storytellerCollection(
 		if pageCount == 0 && book.Ebook != nil {
 			pageCount = book.Ebook.PageCount
 		}
-		availableItems = append(availableItems, ReadingSectionItem{
+		item := ReadingSectionItem{
 			SourceItemID: strconv.FormatInt(book.ID, 10), WorkID: child.ID,
 			Title: book.Title, Number: storytellerSeriesNumber(book), Kind: child.Kind,
 			Artwork: child.Artwork, Authors: child.Authors, PageCount: pageCount, Progress: child.Progress,
-			Availability: "available",
-		})
+			Availability: "available", Formats: storytellerAvailability(book),
+		}
+		if same := sameSeriesBook(availableItems, book); same >= 0 {
+			mergeSeriesEdition(&availableItems[same], item)
+		} else {
+			availableItems = append(availableItems, item)
+		}
 		if book.Position != nil && (continueBook == nil || storytellerLastRead(book) > storytellerLastRead(*continueBook)) {
 			candidate := book
 			continueBook = &candidate
@@ -1379,7 +1417,7 @@ func sortReadingWorks(works []ReadingWork, sortBy, direction string) {
 }
 
 func storytellerAuthorSort(book storyteller.Book) string {
-	names := creatorNames(book.Authors)
+	names := storytellerPeople(book)
 	if len(names) == 0 {
 		return "\uffff"
 	}

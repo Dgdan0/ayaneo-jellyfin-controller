@@ -19,6 +19,14 @@ import (
 	"time"
 )
 
+// FixtureAuthor and FixtureIdentifierPrefix mark the generated reading-lab
+// books. They are real files on the reading server for device tests, and the
+// Hub keeps them out of library listings so they do not sit among real books.
+const (
+	FixtureAuthor           = "Lab Author"
+	FixtureIdentifierPrefix = "urn:pocketds:fixture:"
+)
+
 type FixtureRole string
 
 const (
@@ -64,7 +72,7 @@ func GenerateFixtureSet(root string) (FixtureManifest, error) {
 			kind: MediaBook,
 			path: "Books/Lab Author/Lab Stories/01 - The Clockwork Island/The Clockwork Island.epub",
 			data: func() ([]byte, error) {
-				return buildEPUB(epubSpec{title: "The Clockwork Island", identifier: "urn:pocketds:fixture:clockwork-island", readaloud: false})
+				return buildEPUB(epubSpec{title: "The Clockwork Island", identifier: FixtureIdentifierPrefix + "clockwork-island", readaloud: false})
 			},
 		},
 		{
@@ -73,7 +81,7 @@ func GenerateFixtureSet(root string) (FixtureManifest, error) {
 			kind: MediaBook,
 			path: "Books/Lab Author/Lab Stories/02 - The Readaloud Signal/The Readaloud Signal.epub",
 			data: func() ([]byte, error) {
-				return buildEPUB(epubSpec{title: "The Readaloud Signal", identifier: "urn:pocketds:fixture:readaloud-signal", readaloud: true})
+				return buildEPUB(epubSpec{title: "The Readaloud Signal", identifier: FixtureIdentifierPrefix + "readaloud-signal", readaloud: true})
 			},
 		},
 		{
@@ -83,7 +91,7 @@ func GenerateFixtureSet(root string) (FixtureManifest, error) {
 			path: "Books/Lab Author/Lab Stories/05 - The Readaloud Journey/The Readaloud Journey.epub",
 			data: func() ([]byte, error) {
 				return buildEPUB(epubSpec{
-					title: "The Readaloud Journey", identifier: "urn:pocketds:fixture:readaloud-journey",
+					title: "The Readaloud Journey", identifier: FixtureIdentifierPrefix + "readaloud-journey",
 					readaloud: true, timedSegments: 6,
 				})
 			},

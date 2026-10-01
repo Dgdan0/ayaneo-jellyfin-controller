@@ -245,7 +245,8 @@ func (s *readingAcquisitionStore) matchBook(
 			expectedAuthor := normalizeReadingIdentity(book.Author)
 			strongAuthorMatch := normalizedAuthors != "" && expectedAuthor != "" &&
 				strings.Contains(normalizedAuthors, expectedAuthor)
-			titleMatch := normalizedTitle != "" && normalizedTitle == expectedTitle
+			titleMatch := normalizedTitle != "" && (normalizedTitle == expectedTitle ||
+				withoutLeadingArticle(normalizedTitle) == withoutLeadingArticle(expectedTitle))
 			// EPUB metadata often prefixes a volume title with the series name,
 			// for example "Mistborn: The Final Empire". Accept that form only
 			// when the manifest author also matches so generic suffixes cannot

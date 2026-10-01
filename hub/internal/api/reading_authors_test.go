@@ -40,28 +40,25 @@ func TestAuthorShelvesUseWholeCatalogAndPageEachAuthor(t *testing.T) {
 	}
 	root := "/v1/reading/libraries/storyteller:books/authors"
 	out := get(root)
-	if len(out.Authors) != 3 || out.Authors[0].Name != "Brandon Sanderson" || out.Authors[1].Total != 76 || out.Authors[2].Name != "Unknown author" {
+	if len(out.Authors) != 3 || out.Authors[0].Name != "Brandon Sanderson" || out.Authors[2].Name != "Unknown author" {
 		t.Fatalf("groups: %+v", out.Authors)
 	}
+	// An author's shelf is their series, then their books outside a series.
 	group := out.Authors[1]
-	if len(group.Items) != 12 || group.Items[1].SeriesIndex != 2 || group.Items[9].SeriesIndex != 10 {
-		t.Fatalf("numeric series order: %+v", group.Items)
+	if group.Name != "Pierce Brown" || group.Total != 2 || group.SeriesCount != 1 || group.BookCount != 76 ||
+		group.Items[0].EntityType != "collection" || group.Items[0].Title != "Saga" || group.Items[0].BookCount != 75 ||
+		group.Items[1].Title != "Shared" {
+		t.Fatalf("Pierce Brown shelf: %+v", group)
 	}
-	seen := map[string]bool{}
-	for page := 1; page <= 7; page++ {
-		pageOut := get(fmt.Sprintf("%s?authorId=%s&page=%d", root, group.ID, page))
-		for _, item := range pageOut.Authors[0].Items {
-			if seen[item.ID] {
-				t.Fatal("duplicate across pages")
-			}
-			seen[item.ID] = true
-		}
-	}
-	if len(seen) != 76 {
-		t.Fatalf("paged only %d works", len(seen))
+	// One author asked for: each series carries its books, in numeric order.
+	detail := get(fmt.Sprintf("%s?authorId=%s", root, group.ID)).Authors[0]
+	saga := detail.Items[0]
+	if len(saga.Sections) != 1 || len(saga.Sections[0].Items) != 75 ||
+		saga.Sections[0].Items[1].Number != "2" || saga.Sections[0].Items[9].Number != "10" {
+		t.Fatalf("series books: %+v", saga.Sections)
 	}
 	descending := get(root + "?direction=desc")
-	if descending.Authors[0].Name != "Pierce Brown" || descending.Authors[0].Items[1].SeriesIndex != 2 || descending.Authors[2].Name != "Unknown author" {
+	if descending.Authors[0].Name != "Pierce Brown" || descending.Authors[0].Items[0].Title != "Saga" || descending.Authors[2].Name != "Unknown author" {
 		t.Fatal("descending reversed member order or misplaced unknown")
 	}
 	for _, path := range []string{root + "?page=0", root + "?authorId=bad"} {

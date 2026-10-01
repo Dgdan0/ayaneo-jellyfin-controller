@@ -12,13 +12,16 @@ import (
 )
 
 type ReadingAuthor struct {
-	ID         string        `json:"id"`
-	Name       string        `json:"name"`
-	Artwork    string        `json:"artwork,omitempty"`
-	Total      int           `json:"total"`
-	Page       int           `json:"page"`
-	TotalPages int           `json:"totalPages"`
-	Items      []ReadingWork `json:"items"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Artwork string `json:"artwork,omitempty"`
+	// SeriesCount and BookCount describe the author's shelf: "2 series", "2 books".
+	SeriesCount int           `json:"seriesCount"`
+	BookCount   int           `json:"bookCount"`
+	Total       int           `json:"total"`
+	Page        int           `json:"page"`
+	TotalPages  int           `json:"totalPages"`
+	Items       []ReadingWork `json:"items"`
 }
 type ReadingAuthorsResponse struct {
 	Authors    []ReadingAuthor `json:"authors"`
@@ -29,7 +32,12 @@ type ReadingAuthorsResponse struct {
 	Cache      CacheInfo       `json:"cache"`
 }
 
-// Author grouping is done before pagination, over individual works rather than series containers.
+// An author's shelf is their series, each as one collection, then their books
+// outside any series: Brandon Sanderson holds Mistborn and the Stormlight
+// Archive, Blake Crouch holds Dark Matter and Recursion. Asking for one author
+// includes each series' books, for an author page with a row per series.
+// Authors are keyed by name as storytellerPeople writes it, so "Brown, Pierce"
+// and "Pierce Brown" are one person and narrators are not authors.
 func (s *Server) handleReadingAuthors(w http.ResponseWriter, r *http.Request) {
 	if !s.requireReading(w, r) {
 		return
@@ -58,65 +66,67 @@ func (s *Server) handleReadingAuthors(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, "storyteller", err)
 		return
 	}
+	standalone, seriesGroups := s.storytellerShelfGroups(books, true)
 	groups := map[string]*ReadingAuthor{}
-	bases := []storyteller.Book{}
-	works := []ReadingWork{}
-	for _, raw := range books {
-		book := s.reconcileStorytellerBook(raw)
-		work, err := s.storytellerWork("storyteller:books", book, false)
+	add := func(name string, work ReadingWork, artworkBook *storyteller.Book) {
+		key := normalizeReadingIdentity(name)
+		if key == "" {
+			name, key = "Unknown author", "unknown"
+		}
+		digest := sha256.Sum256([]byte("name:" + key))
+		id := "ra_" + hex.EncodeToString(digest[:16])
+		group := groups[id]
+		if group == nil {
+			group = &ReadingAuthor{ID: id, Name: name, Items: []ReadingWork{}}
+			groups[id] = group
+		}
+		if group.Artwork == "" && artworkBook != nil {
+			group.Artwork = s.readingAuthorArtwork(*artworkBook, name)
+		}
+		group.Items = append(group.Items, work)
+		if work.EntityType == "collection" {
+			group.SeriesCount++
+		}
+		group.BookCount += max(work.BookCount, 1)
+	}
+	for _, series := range seriesGroups {
+		work, err := s.storytellerCollection("storyteller:books", series, false)
 		if err != nil {
 			writeReadingCatalogError(w, r, err)
 			return
 		}
-		for i, base := range bases {
-			if works[i].ID == work.ID || sameStorytellerEditionWork(base, book) {
-				work.ID = works[i].ID
-				break
-			}
+		names := work.Authors
+		if len(names) == 0 {
+			names = []string{""}
 		}
-		bases = append(bases, book)
-		works = append(works, work)
-		authors := book.Authors
-		if len(authors) == 0 {
-			authors = []storyteller.Creator{{Name: ""}}
+		for _, name := range names {
+			add(name, work, &series.books[0])
 		}
-		for _, author := range authors {
-			name := strings.Join(strings.Fields(author.Name), " ")
-			key := "name:" + strings.ToLower(name)
-			if author.UUID != "" {
-				key = "storyteller:" + author.UUID
-			}
-			if name == "" {
-				name = "Unknown author"
-				key = "unknown"
-			}
-			digest := sha256.Sum256([]byte(key))
-			id := "ra_" + hex.EncodeToString(digest[:16])
-			group := groups[id]
-			if group == nil {
-				group = &ReadingAuthor{ID: id, Name: name, Items: []ReadingWork{}}
-				groups[id] = group
-			}
-			if group.Artwork == "" {
-				group.Artwork = s.readingAuthorArtwork(book, name)
-			}
-			found := false
-			for i, item := range group.Items {
-				if item.ID == work.ID {
-					mergeReadingWork(&group.Items[i], work)
-					found = true
-					break
-				}
-			}
-			if !found {
-				group.Items = append(group.Items, work)
-			}
+	}
+	works, err := s.storytellerStandaloneWorks("storyteller:books", standalone)
+	if err != nil {
+		writeReadingCatalogError(w, r, err)
+		return
+	}
+	for _, work := range works {
+		names := work.Authors
+		if len(names) == 0 {
+			names = []string{""}
+		}
+		for _, name := range names {
+			add(name, work, nil)
 		}
 	}
 	authors := make([]ReadingAuthor, 0, len(groups))
 	for _, group := range groups {
 		// Unverified/missing portraits deliberately request the initials fallback.
-		sortReadingWorks(group.Items, "series", "asc")
+		sort.SliceStable(group.Items, func(i, j int) bool {
+			left, right := group.Items[i], group.Items[j]
+			if (left.EntityType == "collection") != (right.EntityType == "collection") {
+				return left.EntityType == "collection"
+			}
+			return readingTitleSort(left) < readingTitleSort(right)
+		})
 		group.Total = len(group.Items)
 		group.TotalPages = (group.Total + 11) / 12
 		authors = append(authors, *group)
@@ -135,6 +145,18 @@ func (s *Server) handleReadingAuthors(w http.ResponseWriter, r *http.Request) {
 	if authorID != "" {
 		for _, group := range authors {
 			if group.ID == authorID {
+				for i, item := range group.Items {
+					if item.EntityType != "collection" {
+						continue
+					}
+					for _, series := range seriesGroups {
+						full, err := s.storytellerCollection("storyteller:books", series, true)
+						if err == nil && full.ID == item.ID {
+							group.Items[i] = full
+							break
+						}
+					}
+				}
 				group.Page = page
 				group.Items = readingAuthorPage(group.Items, page)
 				out.Authors = []ReadingAuthor{group}
