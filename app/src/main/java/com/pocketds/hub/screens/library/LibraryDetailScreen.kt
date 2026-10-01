@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.offline.OfflineChanges
 import com.pocketds.hub.playback.ResumeRules
 import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.ProgressLine.showFraction
@@ -112,6 +113,8 @@ class LibraryDetailScreen(
     private val seasonAdapter = SeasonAdapter()
     private var host: ScreenHost? = null
     private var item: LibraryItem? = null
+    /** Redraws the download button while a transfer moves; see renderDownload. */
+    private val offlineChanges = OfflineChanges { item?.let(::renderDownload) }
     private var itemJob: Job? = null
     private var seasonsJob: Job? = null
     private var targetJob: Job? = null
@@ -141,7 +144,7 @@ class LibraryDetailScreen(
                 restartAction = actionButton("Start over", ACTION_RESTART)
                 optionsAction = actionButton("Audio & subtitles", ACTION_OPTIONS)
                 watchedAction = actionButton("Mark watched", ACTION_WATCHED)
-                listOf(playAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
+                listOf(playAction, watchedAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction)
                     .forEach { actions.addView(it) }
                 playAction.layoutParams = LinearLayout.LayoutParams(dp(54), dp(54)).apply { marginEnd = dp(18) }
                 fun playFace(fill: Int, focused: Boolean) = ThemeGradientDrawable().apply {
@@ -206,6 +209,8 @@ class LibraryDetailScreen(
 
     override fun onShow() {
         overview.collapse()
+        host?.viewContext?.let(offlineChanges::start)
+        item?.let(::renderDownload)
         val returning = item != null
         if (!returning && itemJob?.isActive != true) loadItem()
         if (expectedType == "series" && seasonAdapter.itemCount == 0 && seasonsJob?.isActive != true) {
@@ -235,7 +240,7 @@ class LibraryDetailScreen(
         when {
             seasons.hasFocus() -> focusedSeason()?.let { lastFocusKey = "season:${it.id}" }
             episodePreview.hasFocus() -> lastFocusKey = "continue"
-            else -> listOf(playAction, favoriteAction, downloadAction, moreAction).firstOrNull { it.hasFocus() }
+            else -> listOf(playAction, watchedAction, favoriteAction, downloadAction, moreAction).firstOrNull { it.hasFocus() }
                 ?.let { lastFocusKey = it.tag as? String }
         }
         selectedSeason = focusedSeasonPosition().takeIf { it >= 0 } ?: selectedSeason
@@ -245,9 +250,10 @@ class LibraryDetailScreen(
         targetJob = null
         stateJob = null
         returnRefreshJob = null
+        offlineChanges.stop()
     }
 
-    override fun onDestroyView() { scope.cancel(); host = null }
+    override fun onDestroyView() { offlineChanges.stop(); scope.cancel(); host = null }
 
     override fun requestInitialFocus(): Boolean {
         if (lastFocusKey == "continue" && episodePreview.visibility == View.VISIBLE) return episodePreview.requestFocus()
@@ -359,7 +365,8 @@ class LibraryDetailScreen(
     }
 
     private fun moveActionFocus(delta: Int) {
-        val available = listOf(playAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
+        // The row's own order, so moving along it cannot disagree with what is drawn.
+        val available = (0 until actions.childCount).map(actions::getChildAt)
             .filter { it.visibility == View.VISIBLE && it.isEnabled && it.isFocusable }
         val current = available.indexOfFirst { it.hasFocus() }
         if (current < 0) return
@@ -459,20 +466,7 @@ class LibraryDetailScreen(
             favoriteAction,
             if (value.favorite) MediaActionIcon.FAVOURITE else MediaActionIcon.NOT_FAVOURITE
         )
-        val local = if (value.type == "movie" || value.type == "episode") {
-            OfflineRepository.get(requireNotNull(host).viewContext).forItem(value.id)
-        } else null
-        val downloaded = local?.state == com.pocketds.hub.offline.OfflineState.COMPLETE
-        progress.text = listOf(watchProgressLabel, if (downloaded) "Available offline · ${OfflineRepository.get(requireNotNull(host).viewContext).playbackPlan(value.id, "resume")?.subtitleTracks?.size ?: 0} saved subtitle tracks" else if (local != null) "Offline download: ${local.state.wire}" else "")
-            .filter(String::isNotBlank).distinct().joinToString(" · ")
-        progress.visibility = if (progress.text.isBlank()) View.GONE else View.VISIBLE
-        downloadAction.text = ""
-        downloadAction.contentDescription = when {
-            downloaded -> "Downloaded"
-            local != null -> "Download ${local.state.wire}, ${(local.progress * 100).toInt()} percent"
-            else -> "Download"
-        }
-        setActionIcon(downloadAction, if (downloaded) MediaActionIcon.DOWNLOADED else MediaActionIcon.DOWNLOAD)
+        renderDownload(value)
         playAction.visibility = View.VISIBLE
         playAction.isEnabled = playable || seriesTarget != null
         playAction.alpha = if (playAction.isEnabled) 1f else .55f
@@ -492,6 +486,28 @@ class LibraryDetailScreen(
         optionsAction.contentDescription = "Audio & subtitles"
         if (value.type == "series") renderEpisodePreview(seriesTarget)
         host?.refreshHints()
+    }
+
+    /** The offline line and the download button: arrow, a filling ring while it transfers, solid when done. */
+    private fun renderDownload(value: LibraryItem) {
+        val context = host?.viewContext ?: return
+        val repository = OfflineRepository.get(context)
+        val local = if (value.type == "movie" || value.type == "episode") repository.forItem(value.id) else null
+        val downloaded = local?.state == com.pocketds.hub.offline.OfflineState.COMPLETE
+        progress.text = listOf(watchProgressLabel, if (downloaded) "Available offline · ${repository.playbackPlan(value.id, "resume")?.subtitleTracks?.size ?: 0} saved subtitle tracks" else if (local != null) "Offline download: ${local.state.wire}" else "")
+            .filter(String::isNotBlank).distinct().joinToString(" · ")
+        progress.visibility = if (progress.text.isBlank()) View.GONE else View.VISIBLE
+        downloadAction.text = ""
+        downloadAction.contentDescription = when {
+            downloaded -> "Downloaded"
+            local != null -> "Download ${local.state.wire}, ${(local.progress * 100).toInt()} percent"
+            else -> "Download"
+        }
+        when {
+            downloaded -> setActionIcon(downloadAction, MediaActionIcon.DOWNLOADED)
+            local != null -> setActionIcon(downloadAction, MediaActionIcon.DOWNLOADING, local.progress.toFloat())
+            else -> setActionIcon(downloadAction, MediaActionIcon.DOWNLOAD)
+        }
     }
 
     private fun loadPlayTarget() {
@@ -779,9 +795,9 @@ class LibraryDetailScreen(
         else -> MediaActionIcon.PLAY
     }
 
-    private fun setActionIcon(view: TextView, icon: MediaActionIcon) {
-        val drawable = MediaActionIconDrawable(view.context, icon,
-            if (view == playActionOrNull()) colors.accentText else colors.primaryText)
+    private fun setActionIcon(view: TextView, icon: MediaActionIcon, progress: Float = 0f) {
+        val drawable = if (view == playActionOrNull()) MediaActionIconDrawable(view.context, icon, colors.accentText)
+            else MediaActionIconDrawable.of(view.context, icon, colors, progress)
         if (view is CenteredIconTextView) view.setCenteredIcon(drawable, dp(21))
         else view.setCompoundDrawablesRelativeWithIntrinsicBounds(drawable, null, null, null)
     }

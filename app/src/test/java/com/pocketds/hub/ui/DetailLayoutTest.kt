@@ -34,11 +34,12 @@ class DetailLayoutTest {
 
     @Test fun `more keeps every less frequent movie action reachable`() {
         val movie = DetailActions.forType("movie")
-        assertEquals(listOf("play", "favorite", "download", "more"), movie.visible)
-        assertEquals(listOf("restart", "options", "watched"), movie.overflow)
+        // The state toggles sit beside Play; the rest is under More.
+        assertEquals(listOf("play", "watched", "favorite", "download", "more"), movie.visible)
+        assertEquals(listOf("restart", "options"), movie.overflow)
         assertEquals(setOf("play", "favorite", "download", "restart", "options", "watched"),
             (movie.visible.filterNot { it == "more" } + movie.overflow).toSet())
-        assertEquals(listOf("watched"), DetailActions.forType("series").overflow)
+        assertEquals(listOf("play", "watched", "favorite", "download", "more"), DetailActions.forType("series").visible)
         assertTrue(DetailActions.forType("season").visible.isEmpty())
     }
 

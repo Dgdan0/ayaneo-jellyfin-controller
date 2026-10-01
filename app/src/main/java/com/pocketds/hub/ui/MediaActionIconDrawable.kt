@@ -23,15 +23,35 @@ enum class MediaActionIcon {
     FAVOURITE,
     NOT_FAVOURITE,
     DOWNLOAD,
+    DOWNLOADING,
     DOWNLOADED,
-    MORE
+    MORE;
+
+    /**
+     * A state that is on: watched, favourite, downloaded. On is drawn filled in
+     * the accent colour and off as an outline in the text colour, so the three
+     * toggles beside Play read the same way. A tick drawn over the download
+     * arrow was hard to read at 21dp and meant nothing next to the others.
+     */
+    val isOn: Boolean get() = this == WATCHED || this == FAVOURITE || this == DOWNLOADED
 }
 
 class MediaActionIconDrawable(
     context: Context,
     private val icon: MediaActionIcon,
-    color: Int
+    color: Int,
+    /** DOWNLOADING only: how far the ring is filled, 0..1. */
+    private val progress: Float = 0f,
+    private val ringColor: Int = color,
+    private val ringTrackColor: Int = color
 ) : Drawable() {
+    companion object {
+        /** The icon in its state's colours: accent when on, text colour when off. */
+        fun of(context: Context, icon: MediaActionIcon, colors: PocketColors, progress: Float = 0f) =
+            MediaActionIconDrawable(context, icon, if (icon.isOn) colors.accent else colors.primaryText,
+                progress, colors.accent, colors.mutedText)
+    }
+
     private val size = Styler.dpInt(context, 21f)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         this.color = color
@@ -52,12 +72,13 @@ class MediaActionIconDrawable(
             MediaActionIcon.PLAY -> play(canvas)
             MediaActionIcon.START_OVER -> startOver(canvas)
             MediaActionIcon.OPTIONS -> options(canvas)
-            MediaActionIcon.WATCHED -> eye(canvas, crossed = false)
-            MediaActionIcon.UNWATCHED -> eye(canvas, crossed = true)
+            MediaActionIcon.WATCHED -> eye(canvas, filled = true)
+            MediaActionIcon.UNWATCHED -> eye(canvas, filled = false)
             MediaActionIcon.FAVOURITE -> star(canvas, filled = true)
             MediaActionIcon.NOT_FAVOURITE -> star(canvas, filled = false)
-            MediaActionIcon.DOWNLOAD -> download(canvas, complete = false)
-            MediaActionIcon.DOWNLOADED -> download(canvas, complete = true)
+            MediaActionIcon.DOWNLOAD -> download(canvas)
+            MediaActionIcon.DOWNLOADING -> downloading(canvas)
+            MediaActionIcon.DOWNLOADED -> downloaded(canvas)
             MediaActionIcon.MORE -> {
                 paint.style = Paint.Style.FILL
                 for (x in listOf(-7f, 0f, 7f)) canvas.drawCircle(x, 0f, 1.6f, paint)
@@ -97,20 +118,24 @@ class MediaActionIconDrawable(
         canvas.drawCircle(-1f, 7f, 2.5f, paint)
     }
 
-    private fun eye(canvas: Canvas, crossed: Boolean) {
-        paint.style = Paint.Style.STROKE
+    private fun eye(canvas: Canvas, filled: Boolean) {
         path.reset()
-        path.moveTo(-10f, 0f)
-        path.cubicTo(-5.5f, -6.5f, 5.5f, -6.5f, 10f, 0f)
-        path.cubicTo(5.5f, 6.5f, -5.5f, 6.5f, -10f, 0f)
+        path.moveTo(-10.5f, 0f)
+        path.cubicTo(-5.5f, -7f, 5.5f, -7f, 10.5f, 0f)
+        path.cubicTo(5.5f, 7f, -5.5f, 7f, -10.5f, 0f)
         path.close()
-        canvas.drawPath(path, paint)
-        paint.style = Paint.Style.FILL
-        canvas.drawCircle(0f, 0f, 3.1f, paint)
-        if (crossed) {
+        if (filled) {
+            // A solid eye with the pupil cut out, so it still reads as an eye.
+            path.addCircle(0f, 0f, 2.8f, Path.Direction.CW)
+            path.fillType = Path.FillType.EVEN_ODD
+            paint.style = Paint.Style.FILL
+            canvas.drawPath(path, paint)
+            path.fillType = Path.FillType.WINDING
+        } else {
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 2.5f
-            canvas.drawLine(-8f, -8f, 8f, 8f, paint)
+            canvas.drawPath(path, paint)
+            paint.style = Paint.Style.FILL
+            canvas.drawCircle(0f, 0f, 3.1f, paint)
         }
     }
 
@@ -128,17 +153,42 @@ class MediaActionIconDrawable(
         canvas.drawPath(path, paint)
     }
 
-    private fun download(canvas: Canvas, complete: Boolean) {
+    private fun download(canvas: Canvas) {
         paint.style = Paint.Style.STROKE
         canvas.drawLine(0f, -9f, 0f, 5f, paint)
         canvas.drawLine(-5f, 0f, 0f, 5f, paint)
         canvas.drawLine(5f, 0f, 0f, 5f, paint)
         canvas.drawLine(-8f, 9f, 8f, 9f, paint)
-        if (complete) {
-            paint.strokeWidth = 2.4f
-            canvas.drawLine(-7f, -2f, -3f, 2f, paint)
-            canvas.drawLine(-3f, 2f, 5f, -6f, paint)
-        }
+    }
+
+    /** The same arrow and tray, solid. */
+    private fun downloaded(canvas: Canvas) {
+        paint.style = Paint.Style.FILL
+        path.reset()
+        path.moveTo(-2.4f, -9.5f); path.lineTo(2.4f, -9.5f); path.lineTo(2.4f, -1f)
+        path.lineTo(7f, -1f); path.lineTo(0f, 6.5f); path.lineTo(-7f, -1f); path.lineTo(-2.4f, -1f)
+        path.close()
+        canvas.drawPath(path, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2.8f
+        canvas.drawLine(-8.5f, 9.5f, 8.5f, 9.5f, paint)
+    }
+
+    /** A ring that fills with the transfer, around a smaller arrow. */
+    private fun downloading(canvas: Canvas) {
+        val color = paint.color
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2f
+        paint.color = ringTrackColor
+        canvas.drawCircle(0f, 0f, 10.8f, paint)
+        paint.color = ringColor
+        canvas.drawArc(RectF(-10.8f, -10.8f, 10.8f, 10.8f), -90f, 360f * progress.coerceIn(0f, 1f), false, paint)
+        paint.color = color
+        paint.strokeWidth = 1.7f
+        canvas.drawLine(0f, -5.5f, 0f, 3.5f, paint)
+        canvas.drawLine(-3.5f, 0f, 0f, 3.5f, paint)
+        canvas.drawLine(3.5f, 0f, 0f, 3.5f, paint)
+        canvas.drawLine(-4.5f, 6f, 4.5f, 6f, paint)
     }
 
     override fun setAlpha(alpha: Int) {

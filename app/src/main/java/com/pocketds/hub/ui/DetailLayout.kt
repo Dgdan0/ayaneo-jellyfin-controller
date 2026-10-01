@@ -22,8 +22,10 @@ object DetailLayout {
 data class DetailActions(val visible: List<String>, val overflow: List<String>) {
     companion object {
         fun forType(type: String) = when (type) {
-            "movie", "episode" -> DetailActions(listOf("play", "favorite", "download", "more"), listOf("restart", "options", "watched"))
-            "series" -> DetailActions(listOf("play", "favorite", "download", "more"), listOf("watched"))
+            // Watched, favourite and downloaded sit beside Play as icons that show
+            // their state; everything else is under More.
+            "movie", "episode" -> DetailActions(listOf("play", "watched", "favorite", "download", "more"), listOf("restart", "options"))
+            "series" -> DetailActions(listOf("play", "watched", "favorite", "download", "more"), emptyList())
             else -> DetailActions(emptyList(), emptyList())
         }
     }
