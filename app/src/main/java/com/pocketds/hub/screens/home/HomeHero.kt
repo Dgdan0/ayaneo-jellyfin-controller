@@ -30,6 +30,12 @@ data class HeroContent(
 )
 
 object HomeHero {
+    private val jellyfinPoster = Regex("^/v1/img/jf/([0-9a-f]{32})/Primary")
+
+    /** The series behind an episode card's poster, or null when the poster is the episode's own. */
+    fun seriesIdFromPoster(poster: String, itemId: String): String? =
+        jellyfinPoster.find(poster)?.groupValues?.get(1)?.takeIf { it != itemId }
+
     /** The row a card came from names the eyebrow. Library rows pass the library's own name. */
     fun eyebrowFor(rowId: String, rowTitle: String): String = when (rowId) {
         "continue" -> "CONTINUE WATCHING"
@@ -55,8 +61,12 @@ object HomeHero {
             hit.rating.takeIf { it > 0 }?.let { String.format(Locale.US, "★ %.1f", it) }.orEmpty()
         ).filter(String::isNotBlank)
         val left = if (watching && runtime > 0) Fmt.runtime((runtime * (1 - hit.progress)).toLong()).let { "$it left" } else ""
+        // An episode shows its series' backdrop from the first frame: the card's
+        // poster is the series' own, so its id is known before any details
+        // arrive, and the hero never starts on the still and then swaps.
+        val seriesId = if (episode) detail?.seriesId?.takeIf(String::isNotBlank) ?: seriesIdFromPoster(hit.media.poster, hit.jellyfinItemId) else null
         val backdrop = when {
-            episode && !detail?.seriesId.isNullOrBlank() -> "/v1/img/jf/${detail!!.seriesId}/Backdrop"
+            seriesId != null -> "/v1/img/jf/$seriesId/Backdrop"
             else -> detail?.backdrop?.takeIf(String::isNotBlank) ?: hit.media.backdrop.ifBlank { hit.media.poster }
         }
         return HeroContent(

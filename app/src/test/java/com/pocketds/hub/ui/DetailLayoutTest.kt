@@ -10,7 +10,7 @@ class DetailLayoutTest {
         assertFalse(DetailLayout.useHero("movie", false, 785, 1f))
         assertFalse(DetailLayout.useHero("movie", true, 420, 1f))
         assertFalse(DetailLayout.useHero("movie", true, 663, 1.5f))
-        assertFalse(DetailLayout.useHero("series", true, 785, 1f))
+        assertTrue(DetailLayout.useHero("series", true, 785, 1f))
         assertFalse(DetailLayout.useHero("book", true, 785, 1f))
     }
 

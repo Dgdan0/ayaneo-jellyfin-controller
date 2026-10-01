@@ -3,23 +3,14 @@ package com.pocketds.hub.screens.library
 import com.pocketds.hub.offline.OfflineChanges
 import com.pocketds.hub.playback.ResumeRules
 import com.pocketds.hub.ui.FocusScrollView
-import com.pocketds.hub.ui.ProgressLine.showFraction
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.EpisodeLabel
-import com.pocketds.hub.ui.ThemeGradientDrawable
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.StateListDrawable
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.ScrollView
 import android.widget.TextView
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import coil.ImageLoader
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
@@ -31,25 +22,30 @@ import com.pocketds.hub.model.SeriesPlayTargetResponse
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
+import com.pocketds.hub.nav.TopBarView
 import com.pocketds.hub.net.HubApi
+import com.pocketds.hub.net.HubEndpoints
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.playback.PlaybackProgressStore
 import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.screens.discover.ReleaseTargetsScreen
 import com.pocketds.hub.settings.HubSettings
+import com.pocketds.hub.ui.AppIcon
+import com.pocketds.hub.ui.BlobSegmentedView
+import com.pocketds.hub.ui.CastRowView
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.DetailHeaderView
 import com.pocketds.hub.ui.DetailOverviewView
-import com.pocketds.hub.ui.ContinuationCardView
-import com.pocketds.hub.ui.DetailArtworkCardView
 import com.pocketds.hub.ui.DetailStyler
 import com.pocketds.hub.ui.DetailActions
-import com.pocketds.hub.ui.DetailLayout
 import com.pocketds.hub.ui.DetailSnapshotStore
+import com.pocketds.hub.ui.FactsGridView
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.ui.MediaActionIcon
 import com.pocketds.hub.ui.MediaActionIconDrawable
 import com.pocketds.hub.ui.CenteredIconTextView
+import com.pocketds.hub.ui.PillButton
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
@@ -66,7 +62,15 @@ import com.pocketds.hub.state.Fmt
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.showStatus
 
-/** Movie, series, season, or episode metadata sourced directly from Jellyfin. */
+/**
+ * A movie, series or episode from Jellyfin: its backdrop and words, Play and
+ * the state toggles, then tabs.
+ *
+ * A series opens on Episodes: its seasons as a row of choices with that
+ * season's episodes right under them, the one Play would start marked UP NEXT.
+ * Cast is the people as faces; Details is the facts and the file. The tabs
+ * switch as focus moves along them.
+ */
 class LibraryDetailScreen(
     private val api: HubApi,
     private val itemId: String,
@@ -77,11 +81,12 @@ class LibraryDetailScreen(
     override val contentDomain = com.pocketds.hub.state.ContentMode.MEDIA
     override val title = fallbackTitle
     override val focusOnShow = true
+    override val drawsUnderTopBar = true
+    override val showsOwnTitle = true
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var colors: PocketColors
-    private lateinit var backdrop: ImageView
-    private lateinit var poster: ImageView
+    private lateinit var scroll: FocusScrollView
     private lateinit var heading: TextView
     private lateinit var originalTitle: TextView
     private lateinit var meta: TextView
@@ -92,15 +97,7 @@ class LibraryDetailScreen(
     private lateinit var moreAction: TextView
     private var lastFocusKey: String? = null
     private var watchProgressLabel = ""
-    private lateinit var credits: TextView
-    private lateinit var mediaInfo: TextView
     private lateinit var status: TextView
-    private lateinit var episodePreviewLabel: TextView
-    private lateinit var episodePreview: ContinuationCardView
-    private lateinit var episodePreviewImage: ImageView
-    private lateinit var episodePreviewTitle: TextView
-    private lateinit var episodePreviewMeta: TextView
-    private lateinit var episodePreviewProgress: ProgressBar
     private lateinit var actions: LinearLayout
     private lateinit var playAction: TextView
     private lateinit var restartAction: TextView
@@ -108,9 +105,16 @@ class LibraryDetailScreen(
     private lateinit var watchedAction: TextView
     private lateinit var favoriteAction: TextView
     private lateinit var downloadAction: TextView
-    private lateinit var seasonLabel: TextView
-    private lateinit var seasons: RecyclerView
-    private val seasonAdapter = SeasonAdapter()
+    private lateinit var tabs: BlobSegmentedView
+    private lateinit var tabRow: View
+    private lateinit var episodesPanel: LinearLayout
+    private lateinit var seasonBlob: BlobSegmentedView
+    private lateinit var episodes: SeasonEpisodesView
+    private lateinit var cast: CastRowView
+    private lateinit var similar: com.pocketds.hub.ui.PosterStripView
+    private var similarHits: List<com.pocketds.hub.model.SearchHit> = emptyList()
+    private var similarJob: Job? = null
+    private lateinit var facts: FactsGridView
     private var host: ScreenHost? = null
     private var item: LibraryItem? = null
     /** Redraws the download button while a transfer moves; see renderDownload. */
@@ -121,86 +125,106 @@ class LibraryDetailScreen(
     private var stateJob: Job? = null
     private var returnRefreshJob: Job? = null
     private var seriesTarget: SeriesPlayTargetResponse? = null
-    private var selectedSeason = 0
+    private var seasonList: List<LibraryItem> = emptyList()
+    private val seasonTotals = HashMap<String, Int>()
+    private var selectedSeasonId = ""
+    private var selectedTab = ""
+    /** Until a tab is chosen, the first one wins, including one that arrives late. */
+    private var tabChosen = false
     private var staleTargetRetries = 0
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
-        root.addView(FocusScrollView(host.viewContext).apply {
+        scroll = FocusScrollView(host.viewContext, revealAbove = dp(56)).apply {
             isFillViewport = true; clipChildren = false
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL; clipChildren = false
-                header = DetailHeaderView(context, colors, ringVisible)
+                header = DetailHeaderView(context, colors, ringVisible).apply { topInsetDp = TopBarView.HEIGHT_DP.toInt() }
                 heading = header.titleView; heading.text = fallbackTitle
-                backdrop = header.landscape; poster = header.poster
                 originalTitle = header.subtitleView; meta = header.metadataView; progress = header.stateView
                 overview = header.overview; actions = header.actions
-                playAction = actionButton("Play", ACTION_PLAY)
+                playAction = PillButton.create(context, colors, "Play", AppIcon.PLAY, primary = true, heightDp = 40f).apply {
+                    tag = ACTION_PLAY
+                    FocusDecorator.attach(this, ringVisible, scale = false)
+                    FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) scroll.smoothScrollTo(0, 0); host.refreshHints() }
+                    activateOnTap { performAction(ACTION_PLAY) }
+                }
+                watchedAction = actionButton("Mark watched", ACTION_WATCHED)
                 favoriteAction = actionButton("Favourite", ACTION_FAVORITE)
                 downloadAction = actionButton("Download", ACTION_DOWNLOAD)
                 moreAction = actionButton("More actions", ACTION_MORE)
                 restartAction = actionButton("Start over", ACTION_RESTART)
                 optionsAction = actionButton("Audio & subtitles", ACTION_OPTIONS)
-                watchedAction = actionButton("Mark watched", ACTION_WATCHED)
-                listOf(playAction, watchedAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction)
-                    .forEach { actions.addView(it) }
-                playAction.layoutParams = LinearLayout.LayoutParams(dp(54), dp(54)).apply { marginEnd = dp(18) }
-                fun playFace(fill: Int, focused: Boolean) = ThemeGradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(fill)
-                    if (focused) setStroke(dp(2), this@LibraryDetailScreen.colors.primaryText)
-                }
-                playAction.background = StateListDrawable().apply {
-                    addState(intArrayOf(android.R.attr.state_focused), playFace(colors.accent, true))
-                    addState(intArrayOf(), playFace(colors.accent, false))
-                }
+                actions.addView(playAction, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = -dp(PillButton.RING_DP.toInt()); marginEnd = dp(6) })
+                listOf(watchedAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction).forEach { actions.addView(it) }
                 actions.visibility = View.GONE
                 addView(header, LinearLayout.LayoutParams(MATCH, WRAP))
-                addView(LinearLayout(context).apply {
-                    orientation = LinearLayout.VERTICAL; clipChildren = false
-                    setPadding(dp(24), 0, dp(24), dp(18))
-                    status = TextView(context).apply { textSize = 11f; setTextColor(colors.mutedText) }
-                    addView(status)
-                    episodePreviewLabel = TextView(context).apply { visibility = View.GONE }
-                    episodePreview = ContinuationCardView(context, colors, ringVisible).apply {
-                        visibility = View.GONE
-                        onFocused = { lastFocusKey = "continue"; host.refreshHints() }
-                        activateOnTap { openSeriesTargetDetails() }
+                status = TextView(context).apply {
+                    textSize = 11f; setTextColor(colors.mutedText); setPadding(dp(24), 0, dp(24), dp(4))
+                }
+                addView(status)
+                tabs = BlobSegmentedView(context, colors, ringVisible, BlobSegmentedView.Style.UNDERLINE).apply {
+                    textSp = 13f
+                    padXDp = 6f
+                    growDp = 0f
+                    heightDp = 38f
+                    followFocus = true
+                    onPick = { id -> tabChosen = true; showTab(id) }
+                    onOptionFocused = { liftToTabs(); host.refreshHints() }
+                }
+                tabRow = FrameLayout(context).apply {
+                    visibility = View.GONE
+                    addView(tabs, FrameLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(18) })
+                    // A hairline under the tabs, the full width of the words.
+                    addView(View(context).apply {
+                        setBackgroundColor(androidx.core.graphics.ColorUtils.setAlphaComponent(colors.primaryText, 0x16))
+                    }, FrameLayout.LayoutParams(MATCH, dp(1), android.view.Gravity.BOTTOM).apply { marginStart = dp(24); marginEnd = dp(24) })
+                }
+                addView(tabRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(4) })
+                episodesPanel = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL; clipChildren = false; visibility = View.GONE
+                    seasonBlob = BlobSegmentedView(context, colors, ringVisible, BlobSegmentedView.Style.PILL).apply {
+                        heightDp = 32f
+                        onPick = { id -> seasonList.firstOrNull { it.id == id }?.let(::selectSeason) }
+                        onOptionFocused = { id -> lastFocusKey = "season:$id"; liftToTabs(); host.refreshHints() }
                     }
-                    episodePreviewImage = episodePreview.image
-                    episodePreviewTitle = episodePreview.titleView
-                    episodePreviewMeta = episodePreview.metadataView
-                    episodePreviewProgress = episodePreview.progressView
-                    addView(episodePreview, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(8) })
-                    seasonLabel = TextView(context).apply {
-                        text = "Seasons"; textSize = 17f; setTextColor(colors.primaryText)
-                        setPadding(0, dp(16), 0, dp(2)); visibility = View.GONE
+                    addView(FocusHorizontalScrollView(context).apply {
+                        isHorizontalScrollBarEnabled = false; clipToPadding = false
+                        setPadding(dp(24), dp(14), dp(24), dp(2))
+                        addView(seasonBlob)
+                    }, LinearLayout.LayoutParams(MATCH, WRAP))
+                    episodes = SeasonEpisodesView(context, api, colors, ringVisible, scope).apply {
+                        onPlay = { episode -> host.playItem(episode.id, if (episode.positionSeconds > 0) "resume" else "restart") }
+                        onFocusedEpisode = { lastFocusKey = "episode"; liftToTabs(); host.refreshHints() }
+                        onTotal = { seasonId, total -> seasonTotals[seasonId] = total; labelSeasons() }
                     }
-                    addView(seasonLabel)
-                    seasons = RecyclerView(context).apply {
-                        layoutManager = LinearLayoutManager(context, RecyclerView.HORIZONTAL, false)
-                        adapter = seasonAdapter; isFocusable = false
-                        clipToPadding = false; clipChildren = false; visibility = View.GONE
-                        setItemViewCacheSize(8)
-                        val clearance = DetailLayout.focusClearance(DetailLayout.posterCardHeight(156, resources.configuration.fontScale)).coerceAtLeast(10)
-                        setPadding(dp(8), dp(clearance), dp(8), dp(clearance))
-                    }
-                    addView(seasons, LinearLayout.LayoutParams(MATCH, WRAP))
-                    credits = TextView(context).apply {
-                        textSize = 12f; setTextColor(colors.mutedText); setLineSpacing(0f, 1.12f)
-                        setPadding(0, dp(16), 0, dp(6)); visibility = View.GONE
-                    }
-                    addView(credits)
-                    mediaInfo = TextView(context).apply {
-                        textSize = 12f; setTextColor(colors.mutedText); setLineSpacing(0f, 1.16f)
-                        setPadding(0, dp(12), 0, dp(8)); visibility = View.GONE
-                    }
-                    addView(mediaInfo)
-                }, LinearLayout.LayoutParams(MATCH, WRAP))
+                    addView(episodes, LinearLayout.LayoutParams(MATCH, WRAP))
+                }
+                addView(episodesPanel, LinearLayout.LayoutParams(MATCH, WRAP))
+                similar = com.pocketds.hub.ui.PosterStripView(context, colors, ringVisible).apply {
+                    visibility = View.GONE
+                    onOpen = { hit -> if (hit.jellyfinItemId.isNotEmpty()) host.push(LibraryDetailScreen(api, hit.jellyfinItemId, hit.media.title, hit.media.type, ringVisible)) }
+                    onFocused = { lastFocusKey = "similar"; liftToTabs(); host.refreshHints() }
+                }
+                addView(similar, LinearLayout.LayoutParams(MATCH, WRAP))
+                cast = CastRowView(context, colors, ringVisible).apply {
+                    visibility = View.GONE
+                    onFocused = { lastFocusKey = "cast"; liftToTabs(); host.refreshHints() }
+                }
+                addView(cast, LinearLayout.LayoutParams(MATCH, WRAP))
+                facts = FactsGridView(context, colors, ringVisible).apply {
+                    visibility = View.GONE
+                    onFocused = { lastFocusKey = "facts"; host.refreshHints() }
+                }
+                addView(facts, LinearLayout.LayoutParams(MATCH, WRAP))
+                addView(View(context), LinearLayout.LayoutParams(MATCH, dp(16)))
             }, ViewGroup.LayoutParams(MATCH, WRAP))
-        }, FrameLayout.LayoutParams(MATCH, MATCH))
+        }
+        root.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
+        // Once the backdrop has scrolled away, the tabs above need solid ground.
+        scroll.setOnScrollChangeListener { _, _, y, _, _ -> host.setTopBarOverArtwork(y < dp(24)) }
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         overview.onChanged = { host.refreshHints() }
@@ -209,20 +233,20 @@ class LibraryDetailScreen(
 
     override fun onShow() {
         overview.collapse()
+        scroll.post { host?.setTopBarOverArtwork(scroll.scrollY < dp(24)) }
         host?.viewContext?.let(offlineChanges::start)
         item?.let(::renderDownload)
         val returning = item != null
         if (!returning && itemJob?.isActive != true) loadItem()
-        if (expectedType == "series" && seasonAdapter.itemCount == 0 && seasonsJob?.isActive != true) {
-            loadSeasons()
-        }
+        if (expectedType == "series" && seasonList.isEmpty() && seasonsJob?.isActive != true) loadSeasons()
         if (item?.type == "series" && seriesTarget == null && targetJob?.isActive != true) loadPlayTarget()
         if (returning) {
-            // Android can auto-focus the nearest continuation while the retained
-            // ScrollView becomes visible. Restore the user's explicit selection.
+            // Android can auto-focus the nearest view while the retained page
+            // becomes visible. Restore the user's explicit selection.
             header.post { if (header.isShown) requestInitialFocus() }
             applyPendingPlaybackProgress()
             invalidateFinishedSeriesTarget()
+            if (episodesPanel.visibility == View.VISIBLE) episodes.refreshAfterPlayback()
             returnRefreshJob?.cancel()
             returnRefreshJob = scope.launch {
                 delay(RETURN_REFRESH_DELAY_MILLIS)
@@ -238,12 +262,13 @@ class LibraryDetailScreen(
 
     override fun onHide() {
         when {
-            seasons.hasFocus() -> focusedSeason()?.let { lastFocusKey = "season:${it.id}" }
-            episodePreview.hasFocus() -> lastFocusKey = "continue"
+            episodes.hasFocus() -> lastFocusKey = "episode"
+            seasonBlob.hasFocus() -> seasonBlob.focusedId?.let { lastFocusKey = "season:$it" }
+            tabs.hasFocus() -> lastFocusKey = "tabs"
             else -> listOf(playAction, watchedAction, favoriteAction, downloadAction, moreAction).firstOrNull { it.hasFocus() }
                 ?.let { lastFocusKey = it.tag as? String }
         }
-        selectedSeason = focusedSeasonPosition().takeIf { it >= 0 } ?: selectedSeason
+        episodes.cancel()
         scope.coroutineContext.cancelChildren()
         itemJob = null
         seasonsJob = null
@@ -256,26 +281,23 @@ class LibraryDetailScreen(
     override fun onDestroyView() { offlineChanges.stop(); scope.cancel(); host = null }
 
     override fun requestInitialFocus(): Boolean {
-        if (lastFocusKey == "continue" && episodePreview.visibility == View.VISIBLE) return episodePreview.requestFocus()
-        if (lastFocusKey?.startsWith("season:") == true) {
-            val index = seasonAdapter.positionOf(lastFocusKey.orEmpty().removePrefix("season:"))
-            if (index >= 0) {
-                seasons.scrollToPosition(index)
-                seasons.post { seasons.findViewHolderForAdapterPosition(index)?.itemView?.requestFocus() }
-                return true
-            }
+        val key = lastFocusKey
+        when {
+            key == "episode" && episodesPanel.visibility == View.VISIBLE && episodes.focusEpisode() -> return true
+            key?.startsWith("season:") == true && episodesPanel.visibility == View.VISIBLE &&
+                seasonBlob.focus(key.removePrefix("season:")) -> return true
+            key == "tabs" && tabRow.visibility == View.VISIBLE && tabs.focus() -> return true
+            key == "cast" && cast.visibility == View.VISIBLE -> cast.first?.let { return it.requestFocus() }
+            key == "similar" && similar.visibility == View.VISIBLE && similar.focusFirst() -> return true
+            key == "facts" && facts.visibility == View.VISIBLE -> facts.first?.let { return it.requestFocus() }
         }
-        listOf(playAction, favoriteAction, downloadAction, moreAction)
-            .firstOrNull { it.tag == lastFocusKey && it.visibility == View.VISIBLE && it.isEnabled }
+        listOf(playAction, watchedAction, favoriteAction, downloadAction, moreAction)
+            .firstOrNull { it.tag == key && it.visibility == View.VISIBLE && it.isEnabled }
             ?.let { return it.requestFocus() }
         if (::playAction.isInitialized && playAction.visibility == View.VISIBLE && playAction.isEnabled) {
             return playAction.requestFocus()
         }
-        if (seasonAdapter.itemCount == 0) return false
-        val target = selectedSeason.coerceIn(0, seasonAdapter.itemCount - 1)
-        seasons.scrollToPosition(target)
-        seasons.post { seasons.findViewHolderForAdapterPosition(target)?.itemView?.requestFocus() }
-        return true
+        return tabRow.visibility == View.VISIBLE && tabs.focus()
     }
 
     override fun hints(): List<ButtonHint> = buildList {
@@ -285,33 +307,34 @@ class LibraryDetailScreen(
             add(ButtonHint.back(if (overview.expanded) "Collapse description" else "Back"))
             return@buildList
         }
-        if (seasons.hasFocus() || episodePreview.hasFocus()) {
-            add(ButtonHint.activate(if (seasons.hasFocus()) "Episodes" else "Episode details"))
-            if (seasons.hasFocus() && !item?.mediaKey.isNullOrEmpty()) add(ButtonHint.secondary("Find releases"))
-            add(ButtonHint.back())
-            add(ButtonHint.refresh())
-            return@buildList
-        }
         val value = item
-        val focusedAction = listOf(playAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
-            .firstOrNull { it.visibility == View.VISIBLE && it.hasFocus() }
-        if (focusedAction != null) {
-            add(ButtonHint.activate(focusedAction.contentDescription.toString()))
-        } else {
-            when (value?.type) {
-                "movie", "episode" -> add(ButtonHint.activate(if (canResume(value)) "Resume" else "Play"))
-                "series" -> if (seriesTarget != null) {
-                    add(ButtonHint.activate(playAction.contentDescription.toString()))
+        when {
+            episodes.hasFocus() -> {
+                val episode = episodes.focusedEpisode
+                add(ButtonHint.activate(if ((episode?.positionSeconds ?: 0) > 0) "Resume" else "Play"))
+                add(ButtonHint.primary("Episode details"))
+                if (!value?.mediaKey.isNullOrEmpty()) add(ButtonHint.secondary("Find releases"))
+            }
+            seasonBlob.hasFocus() -> {
+                add(ButtonHint.activate("Show season"))
+                add(ButtonHint.primary("Download season"))
+                if (!value?.mediaKey.isNullOrEmpty()) add(ButtonHint.secondary("Find releases"))
+            }
+            similar.hasFocus() -> add(ButtonHint.activate("Details"))
+            tabs.hasFocus() || cast.hasFocus() || facts.hasFocus() -> Unit
+            else -> {
+                val focusedAction = listOf(playAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
+                    .firstOrNull { it.visibility == View.VISIBLE && it.hasFocus() }
+                if (focusedAction != null) add(ButtonHint.activate(focusedAction.contentDescription.toString()))
+                else when (value?.type) {
+                    "movie", "episode" -> add(ButtonHint.activate(if (canResume(value)) "Resume" else "Play"))
+                    "series" -> if (seriesTarget != null) add(ButtonHint.activate(playAction.contentDescription.toString()))
+                }
+                if (value?.type == "movie" || value?.type == "episode") {
+                    add(ButtonHint.primary("Audio & subtitles"))
+                    add(ButtonHint.secondary("Start over"))
                 }
             }
-        }
-        if (value?.type == "movie" || value?.type == "episode") {
-            add(ButtonHint.primary("Audio & subtitles"))
-            add(ButtonHint.secondary("Start over"))
-        }
-        if (::seasons.isInitialized && seasons.hasFocus() && focusedSeason() != null) {
-            add(ButtonHint.activate("Episodes"))
-            if (!value?.mediaKey.isNullOrEmpty()) add(ButtonHint.secondary("Find releases"))
         }
         add(ButtonHint.back())
         add(ButtonHint.refresh())
@@ -320,48 +343,88 @@ class LibraryDetailScreen(
     override fun onPad(action: PadAction): Boolean {
         if (overlay.onPad(action) || overview.onPad(action)) return true
         return when (action) {
-        is PadAction.Step -> when {
-            !actions.hasFocus() -> false
-            action.direction == Direction.LEFT -> { moveActionFocus(-1); true }
-            action.direction == Direction.RIGHT -> { moveActionFocus(1); true }
-            else -> false
-        }
-        PadAction.Activate -> when {
-            playAction.hasFocus() -> { playAction.performClick(); true }
-            restartAction.hasFocus() -> { restartAction.performClick(); true }
-            optionsAction.hasFocus() -> { optionsAction.performClick(); true }
-            watchedAction.hasFocus() -> { watchedAction.performClick(); true }
-            favoriteAction.hasFocus() -> { favoriteAction.performClick(); true }
-            downloadAction.hasFocus() -> { downloadAction.performClick(); true }
-            moreAction.hasFocus() -> { moreAction.performClick(); true }
-            episodePreview.hasFocus() -> { episodePreview.performClick(); true }
-            else -> seasons.hasFocus() && focusedSeason()?.let(::openSeason) != null
-        }
-        PadAction.Primary -> if (item?.type == "movie" || item?.type == "episode") {
-            host?.openPlaybackOptions(itemId, if (canResume(item)) "resume" else "restart")
-            true
-        } else false
-        PadAction.Secondary -> when {
-            item?.type == "movie" || item?.type == "episode" -> {
-                host?.playItem(itemId, "restart")
+            is PadAction.Step -> step(action.direction)
+            PadAction.Activate -> when {
+                actions.hasFocus() -> { actions.findFocus()?.performClick(); true }
+                else -> false
+            }
+            PadAction.Primary -> when {
+                episodes.hasFocus() -> episodes.focusedEpisode?.let { openEpisode(it) } != null
+                seasonBlob.hasFocus() -> focusedSeason()?.let { season ->
+                    host?.downloadItem(LibraryItem(id = itemId, type = "series", title = item?.title ?: fallbackTitle), season.id)
+                } != null
+                item?.type == "movie" || item?.type == "episode" -> {
+                    host?.openPlaybackOptions(itemId, if (canResume(item)) "resume" else "restart")
+                    true
+                }
+                else -> false
+            }
+            PadAction.Secondary -> when {
+                episodes.hasFocus() -> selectedSeason()?.let { openReleaseTargets(it, episodes.focusedEpisode?.indexNumber ?: 0) } != null
+                seasonBlob.hasFocus() -> focusedSeason()?.let { openReleaseTargets(it, 0) } != null
+                item?.type == "movie" || item?.type == "episode" -> {
+                    host?.playItem(itemId, "restart")
+                    true
+                }
+                else -> false
+            }
+            PadAction.Refresh -> {
+                loadItem()
+                if (item?.type == "series" || expectedType == "series") {
+                    loadSeasons()
+                    loadPlayTarget()
+                    episodes.reload()
+                }
                 true
             }
-            item?.type == "series" && seasons.hasFocus() -> {
-                focusedSeason()?.let(::openReleaseTargets) != null
-            }
             else -> false
         }
-        PadAction.Refresh -> {
-            loadItem()
-            if (item?.type == "series" || expectedType == "series") {
-                loadSeasons()
-                loadPlayTarget()
-            }
-            true
+    }
+
+    /**
+     * The page reads top to bottom: buttons, tabs, the tab's content. Down and
+     * Up go to the remembered or chosen thing in the next band rather than
+     * whatever happens to sit under the focused button.
+     */
+    private fun step(direction: Direction): Boolean = when {
+        actions.hasFocus() && (direction == Direction.LEFT || direction == Direction.RIGHT) -> {
+            moveActionFocus(if (direction == Direction.LEFT) -1 else 1); true
         }
+        actions.hasFocus() && direction == Direction.DOWN -> tabRow.visibility == View.VISIBLE && tabs.focus()
+        tabs.hasFocus() && direction == Direction.UP -> playAction.takeIf { it.visibility == View.VISIBLE && it.isEnabled }?.requestFocus() ?: false
+        tabs.hasFocus() && direction == Direction.DOWN -> focusPanel()
+        seasonBlob.hasFocus() && direction == Direction.UP -> tabs.focus()
+        seasonBlob.hasFocus() && direction == Direction.DOWN -> episodes.focusEpisode()
+        episodes.hasFocus() && direction == Direction.UP -> seasonBlob.focus(selectedSeasonId)
+        (cast.hasFocus() || facts.hasFocus() || similar.hasFocus()) && direction == Direction.UP && !factsHasRowAbove() -> tabs.focus()
         else -> false
     }
 
+    /** In the facts grid, Up from a second-row card stays in the grid. */
+    private fun factsHasRowAbove(): Boolean {
+        if (!facts.hasFocus()) return false
+        val focused = facts.findFocus() ?: return false
+        val row = focused.parent as? View ?: return false
+        return facts.indexOfChild(row) > 0
+    }
+
+    /**
+     * Moving into the tabs slides the page up until they sit under the top bar,
+     * so the season row and its episodes are on screen whole; Play and the
+     * toggles bring the backdrop back.
+     */
+    private fun liftToTabs() {
+        if (tabRow.visibility != View.VISIBLE || tabRow.height == 0) return
+        val target = (tabRow.top - dp(TopBarView.HEIGHT_DP.toInt() + 4)).coerceAtLeast(0)
+        if (scroll.scrollY < target) scroll.post { scroll.smoothScrollTo(0, target) }
+    }
+
+    private fun focusPanel(): Boolean = when (selectedTab) {
+        TAB_EPISODES -> seasonBlob.focus(selectedSeasonId)
+        TAB_CAST -> cast.first?.requestFocus() == true
+        TAB_SIMILAR -> similar.focusFirst()
+        TAB_DETAILS -> facts.first?.requestFocus() == true
+        else -> false
     }
 
     private fun moveActionFocus(delta: Int) {
@@ -403,15 +466,13 @@ class LibraryDetailScreen(
             value.originalTitle.isNotBlank() && !value.originalTitle.equals(value.title, ignoreCase = true)
         ) View.VISIBLE else View.GONE
         meta.text = buildList {
-            if (value.type.isNotEmpty()) add(value.type.replaceFirstChar { it.uppercase() })
+            if (value.type == "episode") add(value.subtitle.ifEmpty { EpisodeLabel.code(value.seasonNumber, value.indexNumber) })
             if (value.year > 0) add(value.year.toString())
-            if (value.type == "episode" && value.premiereDate.length >= 10) add(value.premiereDate.take(10))
-            if (value.runtimeSeconds > 0) add(Fmt.runtime(value.runtimeSeconds.toLong()))
             if (value.officialRating.isNotEmpty()) add(value.officialRating)
+            if (value.runtimeSeconds > 0) add(Fmt.runtime(value.runtimeSeconds.toLong()))
             if (value.rating > 0) add("★ %.1f".format(value.rating))
-            if (value.criticRating > 0) add("Critics %.0f%%".format(value.criticRating))
-            addAll(value.genres)
-        }.joinToString(" · ")
+            addAll(value.genres.take(3))
+        }.filter(String::isNotBlank).joinToString("  ·  ")
         progress.text = buildList {
             val watch = ResumeRules.watchLabel(value.played, value.progress)
             when {
@@ -424,21 +485,54 @@ class LibraryDetailScreen(
         progress.visibility = if (progress.text.isNullOrBlank()) View.GONE else View.VISIBLE
         watchProgressLabel = progress.text.toString()
         overview.bind(value.overview)
-        credits.text = creditText(value)
-        credits.visibility = if (credits.text.isNullOrBlank()) View.GONE else View.VISIBLE
-        mediaInfo.text = mediaInfoText(value)
-        mediaInfo.visibility = if (mediaInfo.text.isNullOrBlank()) View.GONE else View.VISIBLE
         // Fresh details need no line; only a caveat earns one.
         status.showStatus(StatusText.caveat(body.cache, body.partial.map { it.service }), colors)
         status.visibility = if (status.text.isNullOrBlank()) View.GONE else View.VISIBLE
         val landscapePath = value.backdrop.ifBlank { if (value.type == "episode") value.thumb else "" }
-        header.bindArtwork(value.type, landscapePath.takeIf { it.isNotBlank() }?.let(api::imageUrl),
+        header.bindArtwork(value.type, landscapePath.takeIf { it.isNotBlank() }?.let { api.imageUrl(HubEndpoints.sized(it, ART_WIDTH_PX)) },
             value.poster.ifBlank { value.thumb }.takeIf { it.isNotBlank() }?.let(api::imageUrl), imageLoader())
         renderActions(value)
-        if (value.type == "series" && seasonAdapter.itemCount == 0 && seasonsJob?.isActive != true) {
-            loadSeasons()
-        }
+        renderTabs(value)
+        if (value.type == "series" && seasonList.isEmpty() && seasonsJob?.isActive != true) loadSeasons()
         if (value.type == "series" && seriesTarget == null && targetJob?.isActive != true) loadPlayTarget()
+    }
+
+    /** Episodes for a series; Cast and Details whenever there is something in them. */
+    private fun renderTabs(value: LibraryItem) {
+        val people = MediaFacts.cast(value)
+        cast.bind(people.map { CastRowView.Person(it.id, it.name, it.role, it.image.takeIf(String::isNotBlank)?.let(api::imageUrl)) }, imageLoader())
+        facts.bind(MediaFacts.facts(value).map { FactsGridView.Fact(it.label, it.value) })
+        if (similarHits.isEmpty() && similarJob?.isActive != true && value.type in setOf("movie", "series")) loadSimilar()
+        val options = buildList {
+            if (value.type == "series") add(BlobSegmentedView.Option(TAB_EPISODES, "Episodes"))
+            if (similarHits.isNotEmpty()) add(BlobSegmentedView.Option(TAB_SIMILAR, "More like this"))
+            if (people.isNotEmpty()) add(BlobSegmentedView.Option(TAB_CAST, "Cast"))
+            add(BlobSegmentedView.Option(TAB_DETAILS, "Details"))
+        }
+        val keep = selectedTab.takeIf { id -> tabChosen && options.any { it.id == id } } ?: options.first().id
+        if (tabs.optionIds != options.map { it.id }) tabs.setOptions(options, keep)
+        tabRow.visibility = View.VISIBLE
+        showTab(keep)
+    }
+
+    private fun showTab(id: String) {
+        selectedTab = id
+        tabs.select(id)
+        episodesPanel.visibility = if (id == TAB_EPISODES) View.VISIBLE else View.GONE
+        cast.visibility = if (id == TAB_CAST) View.VISIBLE else View.GONE
+        similar.visibility = if (id == TAB_SIMILAR) View.VISIBLE else View.GONE
+        facts.visibility = if (id == TAB_DETAILS) View.VISIBLE else View.GONE
+        host?.refreshHints()
+    }
+
+    /** More like this arrives after the page; its tab appears when it has something in it. */
+    private fun loadSimilar() {
+        similarJob = scope.launch {
+            val hits = (api.librarySimilar(itemId) as? HubResult.Ok)?.value?.items.orEmpty()
+            similarHits = hits
+            similar.bind(hits, imageLoader(), api::imageUrl)
+            item?.takeIf { hits.isNotEmpty() }?.let(::renderTabs)
+        }
     }
 
     private fun renderActions(value: LibraryItem) {
@@ -448,24 +542,10 @@ class LibraryDetailScreen(
         listOf(playAction, restartAction, optionsAction, watchedAction, moreAction, favoriteAction, downloadAction).forEach {
             it.visibility = if (it.tag in visibleActions) View.VISIBLE else View.GONE
         }
-        watchedAction.isFocusable = true
-        favoriteAction.isFocusable = true
-        watchedAction.text = ""
         watchedAction.contentDescription = if (value.played) "Mark unwatched" else "Mark watched"
-        setActionIcon(
-            watchedAction,
-            if (value.played) MediaActionIcon.WATCHED else MediaActionIcon.UNWATCHED
-        )
-        favoriteAction.text = ""
-        favoriteAction.contentDescription = if (value.favorite) {
-            "Remove from favourites"
-        } else {
-            "Add to favourites"
-        }
-        setActionIcon(
-            favoriteAction,
-            if (value.favorite) MediaActionIcon.FAVOURITE else MediaActionIcon.NOT_FAVOURITE
-        )
+        setActionIcon(watchedAction, if (value.played) MediaActionIcon.WATCHED else MediaActionIcon.UNWATCHED)
+        favoriteAction.contentDescription = if (value.favorite) "Remove from favourites" else "Add to favourites"
+        setActionIcon(favoriteAction, if (value.favorite) MediaActionIcon.FAVOURITE else MediaActionIcon.NOT_FAVOURITE)
         renderDownload(value)
         playAction.visibility = View.VISIBLE
         playAction.isEnabled = playable || seriesTarget != null
@@ -476,15 +556,10 @@ class LibraryDetailScreen(
             seriesTarget == null -> "Finding next episode…"
             else -> seriesActionLabel(requireNotNull(seriesTarget))
         }
-        playAction.text = ""
+        playAction.text = playLabel
         playAction.contentDescription = playLabel
-        resizeActionForText(playAction)
-        setActionIcon(playAction, MediaActionIcon.PLAY)
-        restartAction.text = ""
         restartAction.contentDescription = "Start over"
-        optionsAction.text = ""
         optionsAction.contentDescription = "Audio & subtitles"
-        if (value.type == "series") renderEpisodePreview(seriesTarget)
         host?.refreshHints()
     }
 
@@ -497,7 +572,6 @@ class LibraryDetailScreen(
         progress.text = listOf(watchProgressLabel, if (downloaded) "Available offline · ${repository.playbackPlan(value.id, "resume")?.subtitleTracks?.size ?: 0} saved subtitle tracks" else if (local != null) "Offline download: ${local.state.wire}" else "")
             .filter(String::isNotBlank).distinct().joinToString(" · ")
         progress.visibility = if (progress.text.isBlank()) View.GONE else View.VISIBLE
-        downloadAction.text = ""
         downloadAction.contentDescription = when {
             downloaded -> "Downloaded"
             local != null -> "Download ${local.state.wire}, ${(local.progress * 100).toInt()} percent"
@@ -515,7 +589,9 @@ class LibraryDetailScreen(
         targetJob = scope.launch {
             when (val result = api.seriesPlayTarget(itemId)) {
                 is HubResult.Ok -> {
-                    val alreadyFocusedContent = header.hasFocus() || seasons.hasFocus() || episodePreview.hasFocus()
+                    // The description takes focus only because Play was not ready
+                    // yet; that is not a choice to keep.
+                    val alreadyFocusedContent = actions.hasFocus() || tabs.hasFocus() || episodesPanel.hasFocus() || cast.hasFocus() || facts.hasFocus()
                     if (isFinishedCheckpoint(result.value.item.id)) {
                         // Jellyfin processes Stop asynchronously. Do not offer the just-finished
                         // episode as Resume while the server advances its Next Up state.
@@ -523,6 +599,7 @@ class LibraryDetailScreen(
                         item?.let(::renderActions)
                         status.setTextColor(colors.mutedText)
                         status.text = "Updating next episode…"
+                        status.visibility = View.VISIBLE
                         if (staleTargetRetries++ < MAX_STALE_TARGET_RETRIES) {
                             scope.launch {
                                 delay(STALE_TARGET_RETRY_MILLIS)
@@ -535,18 +612,16 @@ class LibraryDetailScreen(
                     val resolved = withPendingPlaybackProgress(result.value)
                     seriesTarget = resolved
                     DetailSnapshotStore.saveTarget(requireNotNull(host).viewContext, itemId, resolved)
-                    renderEpisodePreview(resolved)
+                    episodes.setTarget(resolved.item.id)
+                    if (selectedSeasonId.isEmpty()) chooseDefaultSeason()
                     item?.let(::renderActions)
                     if (!alreadyFocusedContent) playAction.post { playAction.requestFocus() }
                 }
                 is HubResult.Failed -> {
-                    episodePreviewLabel.visibility = View.GONE
-                    episodePreview.visibility = View.GONE
                     playAction.isEnabled = false
                     playAction.alpha = .55f
-                    playAction.text = ""
+                    playAction.text = "No episode to play"
                     playAction.contentDescription = "No playable episode"
-                    resizeActionForText(playAction)
                 }
             }
             targetJob = null
@@ -567,7 +642,6 @@ class LibraryDetailScreen(
             val resolved = withPendingPlaybackProgress(current)
             if (resolved != current) {
                 seriesTarget = resolved
-                renderEpisodePreview(resolved)
                 item?.let(::renderActions)
             }
         }
@@ -594,32 +668,7 @@ class LibraryDetailScreen(
         if (!isFinishedCheckpoint(current.item.id)) return
         seriesTarget = null
         staleTargetRetries = 0
-        renderEpisodePreview(null)
         item?.let(::renderActions)
-    }
-
-    private fun renderEpisodePreview(target: SeriesPlayTargetResponse?) {
-        if (target == null) {
-            episodePreviewLabel.visibility = View.GONE
-            episodePreview.visibility = View.GONE
-            return
-        }
-        val episode = target.item
-        episodePreviewLabel.text = when (target.kind) {
-            "resume" -> "Continue watching"
-            "next" -> "Next episode"
-            else -> "Start series"
-        }
-        episodePreviewLabel.visibility = View.GONE
-        episodePreview.visibility = View.VISIBLE
-        episodePreviewTitle.text = "${episodePreviewLabel.text} · " + episode.subtitle.ifEmpty { episode.title }
-        episodePreviewMeta.text = buildList {
-            if (episode.runtimeSeconds > 0) add(Fmt.runtime(episode.runtimeSeconds.toLong()))
-            ResumeRules.watchLabel(episode.played, episode.progress)?.let(::add)
-        }.joinToString(" · ")
-        episodePreviewProgress.showFraction(episode.progress)
-        loadImage(episodePreviewImage, episode.thumb.ifEmpty { episode.poster })
-        episodePreview.contentDescription = "${episodePreviewLabel.text}, ${episodePreviewTitle.text}"
     }
 
     private fun performAction(action: String) {
@@ -666,8 +715,8 @@ class LibraryDetailScreen(
         }
     }
 
-    private fun openSeriesTargetDetails() {
-        val episode = seriesTarget?.item ?: return
+    private fun openEpisode(episode: LibraryItem) {
+        lastFocusKey = "episode"
         host?.push(LibraryDetailScreen(api, episode.id, episode.title, "episode", ringVisible))
     }
 
@@ -687,6 +736,7 @@ class LibraryDetailScreen(
         render(LibraryItemResponse(item = optimistic))
         status.setTextColor(colors.mutedText)
         status.text = "Saving to Jellyfin…"
+        status.visibility = View.VISIBLE
         stateJob = scope.launch {
             when (val result = api.updateLibraryState(
                 itemId,
@@ -697,6 +747,7 @@ class LibraryDetailScreen(
                     if (result.value.item.type == "series" && played != null) {
                         seriesTarget = null
                         loadPlayTarget()
+                        episodes.reload()
                     }
                 }
                 is HubResult.Failed -> {
@@ -710,79 +761,18 @@ class LibraryDetailScreen(
         }
     }
 
-    private fun creditText(value: LibraryItem): String = buildList {
-        if (value.studios.isNotEmpty()) add("Studios  ${value.studios.joinToString(", ")}")
-        val directors = value.people.filter { it.type.equals("Director", true) }.map { it.name }.distinct()
-        val writers = value.people.filter {
-            it.type.equals("Writer", true) || it.type.equals("Screenwriter", true)
-        }.map { it.name }.distinct()
-        val cast = value.people.filter {
-            it.type.equals("Actor", true) || it.type.equals("GuestStar", true)
-        }.take(12).map { person ->
-            if (person.role.isBlank()) person.name else "${person.name} (${person.role})"
-        }
-        if (directors.isNotEmpty()) add("Directed by  ${directors.joinToString(", ")}")
-        if (writers.isNotEmpty()) add("Written by  ${writers.joinToString(", ")}")
-        if (cast.isNotEmpty()) add("Cast  ${cast.joinToString(", ")}")
-    }.joinToString("\n")
-
-    private fun mediaInfoText(value: LibraryItem): String {
-        if (value.mediaVersions.isEmpty()) return ""
-        return buildString {
-            append("Media information")
-            value.mediaVersions.forEachIndexed { versionIndex, version ->
-                append("\n")
-                append(version.name.ifBlank { "Version ${versionIndex + 1}" })
-                val facts = buildList {
-                    if (version.container.isNotBlank()) add(version.container.uppercase())
-                    if (version.sizeBytes > 0) add(Fmt.bytes(version.sizeBytes))
-                    if (version.bitrate > 0) add(Fmt.mbps(version.bitrate.toLong()))
-                }
-                if (facts.isNotEmpty()) append(" · ").append(facts.joinToString(" · "))
-                version.tracks.forEach { track ->
-                    append("\n  ").append(track.type.replaceFirstChar { it.uppercase() })
-                    val details = buildList {
-                        if (track.title.isNotBlank()) add(track.title)
-                        else {
-                            if (track.language.isNotBlank()) add(track.language.uppercase())
-                            if (track.codec.isNotBlank()) add(track.codec.uppercase())
-                        }
-                        if (track.width > 0 && track.height > 0) add("${track.width}×${track.height}")
-                        if (track.channels > 0) add(if (track.channels == 6) "5.1" else "${track.channels} ch")
-                        if (track.hdr.isNotBlank() && !track.hdr.equals("SDR", true)) add(track.hdr)
-                        if (track.default) add("Default")
-                        if (track.forced) add("Forced")
-                    }
-                    if (details.isNotEmpty()) append(" · ").append(details.distinct().joinToString(" · "))
-                }
-            }
-        }
-    }
-
-
     private fun actionButton(label: String, action: String) = CenteredIconTextView(requireNotNull(host).viewContext).apply {
         text = ""
         textSize = 14f
-        gravity = Gravity.CENTER
-        setTextColor(colors.primaryText)
-        DetailStyler.action(this, colors, primary = action == ACTION_PLAY)
+        DetailStyler.action(this, colors)
         tag = action
         contentDescription = label
-        setPadding(dp(12), dp(10), dp(12), dp(10))
         compoundDrawablePadding = 0
         setActionIcon(this, iconForAction(action))
-        layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(8) }
+        layoutParams = LinearLayout.LayoutParams(dp(46), dp(46)).apply { marginEnd = dp(8) }
         FocusDecorator.attach(this, ringVisible, scale = false)
-        FocusDecorator.listen(this, ringVisible) { view, _ ->
-            host?.refreshHints()
-        }
+        FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) scroll.smoothScrollTo(0, 0); host?.refreshHints() }
         activateOnTap { performAction(action) }
-    }
-
-    private fun resizeActionForText(view: TextView) {
-        val params = view.layoutParams as? LinearLayout.LayoutParams ?: return
-        params.width = if (view == playActionOrNull()) dp(54) else if (view.text.isNullOrEmpty()) dp(50) else dp(92)
-        view.layoutParams = params
     }
 
     private fun iconForAction(action: String): MediaActionIcon = when (action) {
@@ -791,18 +781,14 @@ class LibraryDetailScreen(
         ACTION_WATCHED -> MediaActionIcon.UNWATCHED
         ACTION_FAVORITE -> MediaActionIcon.NOT_FAVOURITE
         ACTION_DOWNLOAD -> MediaActionIcon.DOWNLOAD
-        ACTION_MORE -> MediaActionIcon.MORE
-        else -> MediaActionIcon.PLAY
+        else -> MediaActionIcon.MORE
     }
 
     private fun setActionIcon(view: TextView, icon: MediaActionIcon, progress: Float = 0f) {
-        val drawable = if (view == playActionOrNull()) MediaActionIconDrawable(view.context, icon, colors.accentText)
-            else MediaActionIconDrawable.of(view.context, icon, colors, progress)
-        if (view is CenteredIconTextView) view.setCenteredIcon(drawable, dp(21))
+        val drawable = MediaActionIconDrawable.of(view.context, icon, colors, progress)
+        if (view is CenteredIconTextView) view.setCenteredIcon(drawable, dp(20))
         else view.setCompoundDrawablesRelativeWithIntrinsicBounds(drawable, null, null, null)
     }
-
-    private fun playActionOrNull(): TextView? = if (::playAction.isInitialized) playAction else null
 
     private fun seriesActionLabel(target: SeriesPlayTargetResponse): String {
         val episode = target.item
@@ -810,8 +796,7 @@ class LibraryDetailScreen(
             ?.let { " $it" }.orEmpty()
         return when (target.kind) {
             "resume" -> "Resume$code"
-            "next" -> "Play next episode$code"
-            else -> "Start series$code"
+            else -> "Play$code"
         }
     }
 
@@ -823,17 +808,14 @@ class LibraryDetailScreen(
     private fun canResume(value: LibraryItem?): Boolean =
         value != null && value.positionSeconds > 0
 
-
     private fun loadSeasons() {
         if (seasonsJob?.isActive == true) return
         seasonsJob = scope.launch {
             when (val result = api.librarySeasons(itemId)) {
                 is HubResult.Ok -> renderSeasons(result.value)
                 is HubResult.Failed -> {
-                    seasonLabel.visibility = View.VISIBLE
-                    seasonLabel.showStatus(
-                        StatusText.failed("Seasons · ${result.message}", result.kind, hasData = false), colors
-                    )
+                    status.visibility = View.VISIBLE
+                    status.showStatus(StatusText.failed("Seasons · ${result.message}", result.kind, hasData = false), colors)
                 }
             }
             seasonsJob = null
@@ -841,115 +823,73 @@ class LibraryDetailScreen(
     }
 
     private fun renderSeasons(body: LibrarySeasonsResponse) {
-        val focusedId = if (seasons.hasFocus()) focusedSeason()?.id else null
-        seasonAdapter.submit(body.items)
-        seasonLabel.visibility = View.VISIBLE
-        seasons.visibility = if (body.items.isEmpty()) View.GONE else View.VISIBLE
-        seasonLabel.setTextColor(colors.primaryText)
-        seasonLabel.text = if (body.items.isEmpty()) "No seasons found" else "Seasons"
-        if (focusedId != null) {
-            val position = seasonAdapter.positionOf(focusedId)
-            if (position >= 0) {
-                seasons.scrollToPosition(position)
-                seasons.post { seasons.findViewHolderForAdapterPosition(position)?.itemView?.requestFocus() }
-            } else playAction.post { playAction.requestFocus() }
+        val focused = seasonBlob.focusedId
+        seasonList = body.items
+        if (seasonList.isEmpty()) {
+            episodesPanel.visibility = View.GONE
+            return
         }
+        if (seasonList.none { it.id == selectedSeasonId }) selectedSeasonId = ""
+        seasonBlob.setOptions(seasonList.map { BlobSegmentedView.Option(it.id, seasonName(it)) }, selectedSeasonId.ifEmpty { null })
+        if (selectedSeasonId.isEmpty()) chooseDefaultSeason() else labelSeasons()
+        focused?.let(seasonBlob::focus)
+        if (selectedTab == TAB_EPISODES) episodesPanel.visibility = View.VISIBLE
         host?.refreshHints()
     }
 
-    private fun focusedSeasonPosition(): Int {
-        if (!::seasons.isInitialized) return -1
-        val focused = seasons.focusedChild ?: return selectedSeason.takeIf { seasonAdapter.itemCount > 0 } ?: -1
-        return seasons.getChildAdapterPosition(focused).takeIf { it >= 0 }
-            ?: selectedSeason.takeIf { seasonAdapter.itemCount > 0 } ?: -1
-    }
-    private fun focusedSeason() = seasonAdapter.at(focusedSeasonPosition())
-    private fun openSeason(season: LibraryItem) {
-        selectedSeason = focusedSeasonPosition().coerceAtLeast(0)
-        host?.push(
-            EpisodesScreen(
-                api, itemId, item?.mediaKey.orEmpty(), item?.title ?: fallbackTitle,
-                season, ringVisible
-            )
-        )
+    /** The season of the episode Play would start, else the first that is not Specials. */
+    private fun chooseDefaultSeason() {
+        if (seasonList.isEmpty()) return
+        val targetSeason = seriesTarget?.item?.seasonNumber
+        val season = seasonList.firstOrNull { it.seasonNumber == targetSeason && targetSeason != null }
+            ?: seasonList.firstOrNull { it.seasonNumber > 0 } ?: seasonList.first()
+        selectSeason(season)
     }
 
-    private fun openReleaseTargets(season: LibraryItem) {
+    private fun selectSeason(season: LibraryItem) {
+        selectedSeasonId = season.id
+        seasonBlob.select(season.id)
+        labelSeasons()
+        episodes.show(itemId, season, seriesTarget?.item?.id.orEmpty())
+    }
+
+    /** "Season 2", and on the chosen one its count once known: "Season 2 · 10 episodes". */
+    private fun labelSeasons() {
+        seasonList.forEach { season ->
+            val total = seasonTotals[season.id]
+            val name = seasonName(season)
+            seasonBlob.relabel(season.id, if (season.id == selectedSeasonId && total != null && total > 0)
+                "$name · $total episode${if (total == 1) "" else "s"}" else name)
+        }
+    }
+
+    private fun seasonName(season: LibraryItem) = season.title.ifEmpty { EpisodeLabel.season(season.seasonNumber) }
+
+    private fun selectedSeason() = seasonList.firstOrNull { it.id == selectedSeasonId }
+    private fun focusedSeason() = seasonBlob.focusedId?.let { id -> seasonList.firstOrNull { it.id == id } }
+
+    private fun openReleaseTargets(season: LibraryItem, episodeNumber: Int) {
         val value = item ?: return
         if (value.mediaKey.isEmpty()) {
             host?.notify("This series has no TMDB match, so Sonarr releases cannot be linked safely")
             return
         }
-        selectedSeason = focusedSeasonPosition().coerceAtLeast(0)
         host?.push(
             ReleaseTargetsScreen(
                 api, value.mediaKey, value.title, season.seasonNumber,
-                season.poster.ifEmpty { season.thumb }, 0, ringVisible
+                season.poster.ifEmpty { season.thumb }, episodeNumber, ringVisible
             )
         )
     }
 
-    private fun loadImage(view: ImageView, path: String) =
-        Artwork.bindHub(view, api, path, opaque = true, placeholderColor = colors.posterPlaceholder)
-
     private fun imageLoader(): ImageLoader =
         Artwork.loader(api, requireNotNull(host).viewContext)
 
-    private inner class SeasonAdapter : RecyclerView.Adapter<SeasonHolder>() {
-        private val values = mutableListOf<LibraryItem>()
-        private val stableIds = mutableMapOf<String, Long>()
-        init { setHasStableIds(true) }
-        override fun getItemId(position: Int) = stableIds.getOrPut(values[position].id) { stableIds.size.toLong() }
-        fun submit(next: List<LibraryItem>) {
-            if (values == next) return
-            values.clear(); values.addAll(next); notifyDataSetChanged()
-        }
-        fun at(position: Int) = values.getOrNull(position)
-        fun positionOf(id: String) = values.indexOfFirst { it.id == id }
-        override fun getItemCount() = values.size
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SeasonHolder {
-            val card = DetailArtworkCardView(parent.context, colors, ringVisible).apply {
-                layoutParams = RecyclerView.LayoutParams(dp(112), WRAP).apply { marginEnd = dp(12) }
-                FocusDecorator.listen(this, ringVisible) { view, focused ->
-                    if (focused) {
-                        selectedSeason = seasons.getChildAdapterPosition(view)
-                        (view.getTag(TAG_SEASON) as? LibraryItem)?.let { lastFocusKey = "season:${it.id}" }
-                        host?.refreshHints()
-                    }
-                }
-                activateOnTap { (getTag(TAG_SEASON) as? LibraryItem)?.let(::openSeason) }
-            }
-            return SeasonHolder(card, card.image, card.titleView, card.subtitleView)
-        }
-        override fun onBindViewHolder(holder: SeasonHolder, position: Int) {
-            val value = values[position]
-            holder.title.text = value.title.ifEmpty {
-                EpisodeLabel.season(value.seasonNumber)
-            }
-            holder.meta.text = when {
-                value.played -> "Watched"
-                value.unplayedCount > 0 -> "${value.unplayedCount} unwatched"
-                value.progress > 0 -> "${(value.progress * 100).toInt()}% watched"
-                else -> ""
-            }
-            holder.itemView.setTag(TAG_SEASON, value)
-            holder.itemView.contentDescription = "${holder.title.text}, ${holder.meta.text}"
-            loadImage(holder.image, value.poster.ifEmpty { value.thumb })
-        }
-    }
-
-    private class SeasonHolder(
-        view: View,
-        val image: ImageView,
-        val title: TextView,
-        val meta: TextView
-    ) : RecyclerView.ViewHolder(view)
     private fun dp(value: Int) = Styler.dpInt(requireNotNull(host).viewContext, value.toFloat())
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-        const val TAG_SEASON = -0x7fffffe3
         const val ACTION_MORE = "more"
         const val ACTION_PLAY = "play"
         const val ACTION_RESTART = "restart"
@@ -957,6 +897,11 @@ class LibraryDetailScreen(
         const val ACTION_WATCHED = "watched"
         const val ACTION_FAVORITE = "favorite"
         const val ACTION_DOWNLOAD = "download"
+        const val TAB_EPISODES = "episodes"
+        const val TAB_CAST = "cast"
+        const val TAB_DETAILS = "details"
+        const val TAB_SIMILAR = "similar"
+        const val ART_WIDTH_PX = 1920
         const val RETURN_REFRESH_DELAY_MILLIS = 450L
         const val STALE_TARGET_RETRY_MILLIS = 700L
         const val MAX_STALE_TARGET_RETRIES = 3

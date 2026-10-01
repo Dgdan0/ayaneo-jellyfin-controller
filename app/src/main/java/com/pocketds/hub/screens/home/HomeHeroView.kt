@@ -99,7 +99,7 @@ class HomeHeroView(
             background = ScrimDrawable(colors, ScrimDrawable.Edge.LEFT, listOf(0f to 1f, .36f to .9f, .74f to .15f, 1f to 0f))
         }, LayoutParams(MATCH, MATCH))
         addView(View(context).apply {
-            background = ScrimDrawable(colors, ScrimDrawable.Edge.BOTTOM, listOf(0f to 1f, .42f to 0f))
+            background = ScrimDrawable(colors, ScrimDrawable.Edge.BOTTOM, listOf(0f to 1f, .14f to .97f, .55f to 0f))
         }, LayoutParams(MATCH, MATCH))
 
         val words = LinearLayout(context).apply {
@@ -181,7 +181,7 @@ class HomeHeroView(
     companion object {
         const val WORDS_DP = 430
         const val TOP_DP = 54
-        const val ART_WIDTH_PX = 1280
+        const val ART_WIDTH_PX = 1920
         const val CROSSFADE_MS = 220
         private const val MATCH = LayoutParams.MATCH_PARENT
         private const val WRAP = LayoutParams.WRAP_CONTENT

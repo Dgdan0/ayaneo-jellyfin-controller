@@ -7,10 +7,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class HomeHeroTest {
+    private val seriesId = "8e950bfabe23bbfbb1a99ecccd1b954d"
+    private val episodeId = "2d47480cfb56648c4c1dbae678660479"
     private val episode = SearchHit(
         media = MediaRef(type = "episode", title = "Drake & Josh", year = 2005,
-            poster = "/v1/img/jf/series/Primary?tag=p", backdrop = "/v1/img/jf/ep/Primary?tag=still"),
-        subtitle = "S3E4 · Mindy's Back", rating = 8.0, jellyfinItemId = "ep", progress = 0.2
+            poster = "/v1/img/jf/$seriesId/Primary?tag=p", backdrop = "/v1/img/jf/$episodeId/Primary?tag=still"),
+        subtitle = "S3E4 · Mindy's Back", rating = 8.0, jellyfinItemId = episodeId, progress = 0.2
     )
 
     @Test
@@ -20,19 +22,19 @@ class HomeHeroTest {
         assertEquals("Drake & Josh", hero.title)
         assertEquals(listOf("Mindy's Back", "2005", "★ 8.0"), hero.meta)
         assertEquals("Resume", hero.playLabel)
-        // The still, until the details name the series and its backdrop.
-        assertEquals("/v1/img/jf/ep/Primary?tag=still", hero.backdrop)
+        // The series' backdrop at once, from the series poster's id: no still first.
+        assertEquals("/v1/img/jf/$seriesId/Backdrop", hero.backdrop)
     }
 
     @Test
     fun `details add the overview, certification, runtime left and the series backdrop`() {
-        val detail = LibraryItem(id = "ep", type = "episode", title = "Mindy's Back", seriesId = "series", year = 2005,
+        val detail = LibraryItem(id = episodeId, type = "episode", title = "Mindy's Back", seriesId = seriesId, year = 2005,
             overview = "Science fair.", runtimeSeconds = 1500, officialRating = "TV-Y7")
         val hero = HomeHero.from("continue", "Continue watching", episode, detail)
         assertEquals(listOf("Mindy's Back", "2005", "TV-Y7", "25 min", "★ 8.0"), hero.meta)
         assertEquals("Science fair.", hero.overview)
         assertEquals("20 min left", hero.progressLabel)
-        assertEquals("/v1/img/jf/series/Backdrop", hero.backdrop)
+        assertEquals("/v1/img/jf/$seriesId/Backdrop", hero.backdrop)
     }
 
     @Test
@@ -43,6 +45,13 @@ class HomeHeroTest {
         assertEquals("Play", hero.playLabel)
         assertEquals(0.0, hero.progress, 0.0)
         assertEquals("/b", hero.backdrop)
+    }
+
+    @Test
+    fun `an episode whose poster is its own still has no series to borrow from`() {
+        val own = episode.copy(media = episode.media.copy(poster = "/v1/img/jf/$episodeId/Primary?tag=still"))
+        assertEquals(null, HomeHero.seriesIdFromPoster(own.media.poster, episodeId))
+        assertEquals("/v1/img/jf/$episodeId/Primary?tag=still", HomeHero.from("continue", "Continue watching", own).backdrop)
     }
 
     @Test

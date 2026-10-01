@@ -50,7 +50,11 @@ class EpisodeCardView(
         /** null: no mark. Otherwise a ✓ or ○ in the corner, for pickers. */
         val marked: Boolean? = null,
         val available: Boolean = true,
-        val description: String = ""
+        val description: String = "",
+        /** A word in the corner: "UP NEXT" on the episode Play would start. */
+        val badge: String = "",
+        /** A small accent tick in the corner, when no badge or picker mark is there. */
+        val watched: Boolean = false
     )
 
     var onFocused: (() -> Unit)? = null
@@ -59,32 +63,66 @@ class EpisodeCardView(
     private val still = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
     private val progress = ArtworkProgressView(context, colors.accent)
     private val mark = TextView(context).apply {
-        gravity = Gravity.CENTER; textSize = 15f
-        background = Styler.cardBackground(context, colors, cornerDp = 14f)
+        gravity = Gravity.CENTER; textSize = 13f
+        background = ThemeGradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor((this@EpisodeCardView.colors.background and 0x00FFFFFF) or 0xC0000000.toInt())
+        }
         visibility = GONE
     }
-    private val title = text(14f, colors.primaryText, 1)
+    private val badge = TextView(context).apply {
+        textSize = 9f; textWeight(700); letterSpacing = .04f
+        setTextColor(colors.accentText)
+        setPadding(dp(7), dp(2), dp(7), dp(2))
+        background = ThemeGradientDrawable().apply { cornerRadius = Styler.dp(context, 999f); setColor(this@EpisodeCardView.colors.accent) }
+        visibility = GONE
+    }
+    /** The play mark a focused episode shows, where A would start it. */
+    private val playMark = android.widget.ImageView(context).apply {
+        setImageDrawable(AppIconDrawable(AppIcon.PLAY, colors.background).apply { })
+        val pad = dp(10)
+        setPadding(pad + dp(1), pad, pad - dp(1), pad)
+        background = ThemeGradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor((this@EpisodeCardView.colors.primaryText and 0x00FFFFFF) or 0xEB000000.toInt())
+        }
+        visibility = GONE
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+    private val title = text(12.5f, colors.primaryText, 1).apply { textWeight(600) }
     private val meta = text(11f, colors.mutedText, 1)
     private val overview = text(10f, colors.mutedText, 2)
+    /** Episode strips that play on A show the play mark on focus; pickers do not. */
+    var showsPlayOnFocus = false
 
     init {
+        // Focus is a ring round the still, as on every other card; the words
+        // under it are not boxed in.
         orientation = VERTICAL
-        background = Styler.cardBackground(context, colors)
+        background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
         Styler.makeFocusable(this)
         descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-        setPadding(dp(7), dp(7), dp(7), dp(9))
-        val art = ArtworkFrame(context, 16f / 9f)
+        setPadding(0, 0, 0, dp(4))
+        val art = ArtworkFrame(context, 16f / 9f).apply {
+            isDuplicateParentStateEnabled = true
+            foreground = Styler.focusOutline(context, colors)
+        }
         art.addView(still, FrameLayout.LayoutParams(MATCH, MATCH))
         art.addView(progress, FrameLayout.LayoutParams(MATCH, dp(3), Gravity.BOTTOM))
-        art.addView(mark, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.TOP or Gravity.END).apply {
+        art.addView(mark, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.END).apply {
             topMargin = dp(6); marginEnd = dp(6)
         })
+        art.addView(badge, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
+            topMargin = dp(6); marginEnd = dp(6)
+        })
+        art.addView(playMark, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER))
         addView(art, LayoutParams(MATCH, WRAP))
         addView(title, LayoutParams(MATCH, WRAP).apply { topMargin = dp(7) })
-        addView(meta, LayoutParams(MATCH, WRAP).apply { topMargin = dp(3) })
+        addView(meta, LayoutParams(MATCH, WRAP).apply { topMargin = dp(2) })
         if (!compact) addView(overview, LayoutParams(MATCH, WRAP).apply { topMargin = dp(3) })
         FocusDecorator.attach(this, ringVisible)
         FocusDecorator.listen(this, ringVisible) { _, focused ->
+            playMark.visibility = if (focused && showsPlayOnFocus) VISIBLE else GONE
             if (focused) onFocused?.invoke()
         }
         activateOnTap { onActivate?.invoke() }
@@ -105,7 +143,9 @@ class EpisodeCardView(
         overview.text = model.overview
         progress.fraction = model.progress
         alpha = if (model.available) 1f else .45f
-        setMarked(model.marked)
+        badge.text = model.badge
+        badge.visibility = if (model.badge.isNotBlank()) VISIBLE else GONE
+        setMarked(model.marked ?: if (model.watched && model.badge.isBlank()) true else null)
         contentDescription = model.description.ifBlank { listOf(model.title, model.meta).filter(String::isNotBlank).joinToString(", ") }
         Artwork.bind(still, loader, model.still, opaque = true, placeholderColor = colors.posterPlaceholder)
     }
@@ -119,7 +159,7 @@ class EpisodeCardView(
     private fun text(size: Float, color: Int, lines: Int) = TextView(context).apply {
         textSize = size; setTextColor(color); maxLines = lines
         ellipsize = TextUtils.TruncateAt.END
-        setPadding(dp(4), 0, dp(4), 0)
+        setPadding(dp(1), 0, dp(1), 0)
     }
 
     private fun dp(value: Int) = Styler.dpInt(context, value.toFloat())
@@ -127,6 +167,8 @@ class EpisodeCardView(
     companion object {
         const val WIDTH_DP = 270
         const val COMPACT_WIDTH_DP = 224
+        /** On a detail page, under the tabs: four and a bit across. */
+        const val STRIP_WIDTH_DP = 180
         private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
     }

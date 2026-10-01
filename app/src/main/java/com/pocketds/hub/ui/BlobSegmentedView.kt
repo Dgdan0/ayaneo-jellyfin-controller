@@ -122,6 +122,16 @@ class BlobSegmentedView(
         }
     }
 
+    /** Changes one option's words in place: "Season 1" becomes "Season 1 · 13 episodes" once known. */
+    fun relabel(id: String, label: String) {
+        val index = options.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: return
+        if (options[index].label == label) return
+        options = options.toMutableList().also { it[index] = it[index].copy(label = label) }
+        labels[index].text = label
+        paintLabels()
+        requestLayout()
+    }
+
     fun optionView(id: String): View? = options.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let(labels::get)
     fun focus(id: String? = selected): Boolean =
         (id?.let(::optionView) ?: labels.firstOrNull { it.isFocusable })?.requestFocus() == true

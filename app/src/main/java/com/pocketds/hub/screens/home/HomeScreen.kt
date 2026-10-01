@@ -155,12 +155,20 @@ class HomeScreen(
             )
         }
         mediaContent.addView(rows, FrameLayout.LayoutParams(MATCH, MATCH).apply { topMargin = dp(ROWS_TOP_DP) })
-        // What scrolls up out of the rows fades into the hero instead of
-        // leaving a sliver of the row above.
-        mediaContent.addView(View(host.viewContext).apply {
+        // What scrolls up out of the rows fades instead of leaving a sliver of
+        // the row above. Only once scrolled: at rest it would draw a band
+        // across the hero.
+        val topFade = View(host.viewContext).apply {
             background = com.pocketds.hub.ui.ScrimDrawable(colors, com.pocketds.hub.ui.ScrimDrawable.Edge.TOP, listOf(0f to 1f, 1f to 0f))
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, FrameLayout.LayoutParams(MATCH, dp(18), Gravity.TOP).apply { topMargin = dp(ROWS_TOP_DP) })
+            visibility = View.INVISIBLE
+        }
+        mediaContent.addView(topFade, FrameLayout.LayoutParams(MATCH, dp(18), Gravity.TOP).apply { topMargin = dp(ROWS_TOP_DP) })
+        rows.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
+                topFade.visibility = if (view.computeVerticalScrollOffset() > 0) View.VISIBLE else View.INVISIBLE
+            }
+        })
         // The next row's heading peeks in under a fade rather than being cut.
         mediaContent.addView(View(host.viewContext).apply {
             background = com.pocketds.hub.ui.ScrimDrawable(colors, com.pocketds.hub.ui.ScrimDrawable.Edge.BOTTOM, listOf(0f to 1f, 1f to 0f))
@@ -696,7 +704,7 @@ class HomeScreen(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         /** The hero's art; the rows start over its faded lower edge. */
-        const val HERO_DP = 300
+        const val HERO_DP = 262
         const val ROWS_TOP_DP = 218
         const val POSTER_DP = 150f
         const val POSTER_CARD_DP = 100

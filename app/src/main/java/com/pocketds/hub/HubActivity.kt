@@ -460,6 +460,11 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         views.remove(screen)?.let { content.removeView(it) }
     }
 
+    override fun setTopBarOverArtwork(over: Boolean) {
+        val top = sections.stack().peek() as? Screen ?: return
+        topBar.setOverArtwork(over && top.drawsUnderTopBar)
+    }
+
     override fun refreshChrome() {
         val top = sections.stack().peek() as? Screen ?: return
         views[top]?.let { layoutScreen(top, it) }

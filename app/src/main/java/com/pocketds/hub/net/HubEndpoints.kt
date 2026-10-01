@@ -91,6 +91,9 @@ object HubEndpoints {
     fun libraryFavorites(base: String, page: Int = 1): HubRequest =
         HubRequest(join(base, "/v1/library/favorites") + if (page > 1) "?page=$page" else "")
 
+    fun librarySimilar(base: String, itemId: String): HubRequest =
+        HubRequest(join(base, "/v1/library/items/" + encode(itemId) + "/similar"))
+
     fun libraryState(base: String, itemId: String): HubRequest =
         HubRequest(join(base, "/v1/library/items/" + encode(itemId) + "/state"), method = "POST")
 

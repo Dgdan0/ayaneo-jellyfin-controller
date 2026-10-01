@@ -121,6 +121,9 @@ interface HubApi {
     ): HubResult<LibraryEpisodesResponse>
     suspend fun librarySearch(query: String, page: Int = 1): HubResult<LibraryItemsResponse>
     suspend fun libraryFavorites(page: Int = 1): HubResult<LibraryItemsResponse>
+    /** Jellyfin's "more like this". Absent on a hub from before 2026-10, which answers 404. */
+    suspend fun librarySimilar(itemId: String): HubResult<LibraryItemsResponse> =
+        HubResult.Failed(FailureKind.UNKNOWN, "More like this is unavailable")
     suspend fun updateLibraryState(
         itemId: String,
         state: LibraryStateRequest
@@ -564,6 +567,11 @@ class HubClient(private val context: Context, private val connection: HubConnect
 
     override suspend fun librarySearch(query: String, page: Int): HubResult<LibraryItemsResponse> =
         get(HubEndpoints.librarySearch(base(), query, page), noCache = true) {
+            json.decodeFromString<LibraryItemsResponse>(it)
+        }
+
+    override suspend fun librarySimilar(itemId: String): HubResult<LibraryItemsResponse> =
+        get(HubEndpoints.librarySimilar(base(), itemId)) {
             json.decodeFromString<LibraryItemsResponse>(it)
         }
 

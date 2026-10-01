@@ -145,6 +145,11 @@ interface ScreenHost {
     fun refreshAppearance() = Unit
     /** Re-read [Screen.drawsUnderTopBar] and [Screen.showsOwnTitle] after they change. */
     fun refreshChrome() = Unit
+    /**
+     * For a page that draws under the tabs: true while artwork is behind them,
+     * false once it has scrolled away and the tabs need their solid ground.
+     */
+    fun setTopBarOverArtwork(over: Boolean) = Unit
 
     /**
      * Play a trailer in a floating window that survives navigation.

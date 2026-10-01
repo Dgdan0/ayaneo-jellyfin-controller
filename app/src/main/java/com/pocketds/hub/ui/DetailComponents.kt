@@ -33,17 +33,19 @@ private fun label(context: Context, size: Float, color: Int) = TextView(context)
 object DetailStyler {
     fun action(view: TextView, colors: PocketColors, primary: Boolean = false) {
         view.setTextColor(if (primary) colors.accentText else colors.primaryText)
+        // Round: a circle for an icon, a pill for words. The quiet fill shows
+        // the button is there before focus reaches it.
+        val quiet = androidx.core.graphics.ColorUtils.setAlphaComponent(colors.primaryText, 0x1C)
         fun face(fill: Int, stroke: Int = 0) = ThemeGradientDrawable().apply {
-            cornerRadius = view.dp(if (primary) 14 else 10).toFloat()
+            cornerRadius = view.dp(999).toFloat()
             setColor(fill)
             if (stroke != 0) setStroke(view.dp(2), stroke)
         }
         view.background = StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_pressed), face(if (primary) colors.accent else colors.focusFill, colors.focusRing))
             addState(intArrayOf(android.R.attr.state_focused), face(
-                if (primary) colors.accent else colors.focusFill,
-                if (primary) colors.primaryText else colors.focusRing))
-            addState(intArrayOf(), face(if (primary) colors.accent else Color.TRANSPARENT))
+                if (primary) colors.accent else quiet, colors.focusRing))
+            addState(intArrayOf(), face(if (primary) colors.accent else quiet))
         }
         view.minimumHeight = view.dp(48)
         view.minimumWidth = view.dp(48)
@@ -58,7 +60,7 @@ object DetailStyler {
 class DetailHeaderView(context: Context, private val colors: PocketColors, ringVisible: () -> Boolean) : FrameLayout(context) {
     val landscape = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
     val poster = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
-    val titleView = label(context, 27f, colors.primaryText)
+    val titleView = label(context, 27f, colors.primaryText).apply { typeRole(Type.Role.HERO); maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
     val subtitleView = label(context, 12f, colors.mutedText).apply { visibility = GONE }
     val metadataView = label(context, 12f, colors.mutedText).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END }
     val formatStatus = ReadingFormatStatusView(context, colors).apply { visibility=GONE }
@@ -75,6 +77,12 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         addView(actions, ViewGroup.LayoutParams(WRAP, WRAP))
     }
     var compact = false
+    /**
+     * Room above the words for a see-through tab bar, on a page that draws
+     * under it ([com.pocketds.hub.nav.Screen.drawsUnderTopBar]).
+     */
+    var topInsetDp = 0
+        set(value) { field = value; layoutKey = ""; requestLayout() }
     private var type = ""
     private var hasLandscape = false
     private var hasPoster = false
@@ -87,10 +95,12 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         clipChildren = true
         setBackgroundColor(colors.background)
         addView(landscape, LayoutParams(MATCH, MATCH))
-        masks.addView(View(context).apply { background = ThemeGradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(colors.background, colors.background and 0x00ffffff or 0xee000000.toInt(), Color.TRANSPARENT)) }, LayoutParams(MATCH, MATCH))
-        masks.addView(View(context).apply { background = ThemeGradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-            intArrayOf(colors.background, Color.TRANSPARENT)) }, LayoutParams(MATCH, MATCH))
+        // Solid behind the words, the art clear on the right, and the page
+        // colour again at the bottom where the tabs begin.
+        masks.addView(View(context).apply { background = ScrimDrawable(colors, ScrimDrawable.Edge.LEFT,
+            listOf(0f to 1f, .38f to .9f, .75f to .2f, 1f to .05f)) }, LayoutParams(MATCH, MATCH))
+        masks.addView(View(context).apply { background = ScrimDrawable(colors, ScrimDrawable.Edge.BOTTOM,
+            listOf(0f to 1f, .12f to 1f, .5f to 0f)) }, LayoutParams(MATCH, MATCH))
         addView(masks, LayoutParams(MATCH, MATCH))
         row.addView(poster, LinearLayout.LayoutParams(dp(92), dp(138)).apply { marginEnd = dp(20) })
         body.addView(titleView, LinearLayout.LayoutParams(MATCH, WRAP))
@@ -98,8 +108,9 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         body.addView(metadataView, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(7) })
         body.addView(formatStatus, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin=dp(4) })
         body.addView(stateView, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(5) })
-        body.addView(actionScroll, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(8) })
+        // The overview is read before acting on it, so it sits above the buttons.
         body.addView(overview, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6) })
+        body.addView(actionScroll, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6) })
         body.addView(continuation, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(10) })
         row.addView(body, LinearLayout.LayoutParams(0, WRAP, 1f))
         addView(row, LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
@@ -132,14 +143,14 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
             landscape.visibility = if (hero) VISIBLE else GONE
             masks.visibility = landscape.visibility
             poster.visibility = if (!hero && hasPoster) VISIBLE else GONE
-            row.setPadding(dp(24), dp(if (hero) 48 else if(compact) 8 else 16), dp(24), dp(if(compact)8 else 12))
+            row.setPadding(dp(24), dp(topInsetDp + if (hero) 18 else if(compact) 8 else 16), dp(24), dp(if(compact)8 else 12))
             (metadataView.layoutParams as LinearLayout.LayoutParams).topMargin=dp(if(compact)4 else 7)
             (overview.layoutParams as LinearLayout.LayoutParams).topMargin=dp(if(compact)2 else 6)
             (continuation.layoutParams as LinearLayout.LayoutParams).topMargin=dp(if(compact)6 else 10)
-            titleView.textSize = if (hero) 32f else if(compact)24f else 26f
+            titleView.textSize = if (hero) 34f else if(compact)24f else 28f
             overview.previewLines(if(compact)1 else 2)
-            body.layoutParams = LinearLayout.LayoutParams(if (hero) dp(((widthDp - 48) * .64f).toInt()) else 0, WRAP, if (hero) 0f else 1f)
-            minimumHeight = if (hero) dp(282) else 0
+            body.layoutParams = LinearLayout.LayoutParams(if (hero) dp(((widthDp - 48) * .6f).toInt()) else 0, WRAP, if (hero) 0f else 1f)
+            minimumHeight = if (hero) dp(topInsetDp + 250) else 0
         }
         actionScroll.visibility = if (actions.childCount > 0 && actions.visibility != GONE) VISIBLE else GONE
         continuation.visibility = if (continuation.childCount > 0) VISIBLE else GONE
