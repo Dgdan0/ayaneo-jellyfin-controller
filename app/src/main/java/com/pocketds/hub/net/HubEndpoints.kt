@@ -349,6 +349,14 @@ object HubEndpoints {
     fun image(base: String, hubPath: String): String = join(base, hubPath)
 
     /**
+     * A hub image path asking for [width] pixels, which the hub snaps to its
+     * nearest size. Unsized, a Jellyfin image comes back 360 wide: right for a
+     * poster, soft across a whole screen.
+     */
+    fun sized(hubPath: String, width: Int): String =
+        if (hubPath.isBlank() || "w=" in hubPath) hubPath else hubPath + (if ('?' in hubPath) "&" else "?") + "w=$width"
+
+    /**
      * Trims a trailing slash from the base and guarantees exactly one between
      * the two halves.
      */

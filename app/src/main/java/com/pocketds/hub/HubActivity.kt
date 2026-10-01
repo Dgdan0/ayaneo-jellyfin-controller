@@ -460,6 +460,12 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         views.remove(screen)?.let { content.removeView(it) }
     }
 
+    override fun refreshChrome() {
+        val top = sections.stack().peek() as? Screen ?: return
+        views[top]?.let { layoutScreen(top, it) }
+        topBar.setOverArtwork(top.drawsUnderTopBar)
+    }
+
     override fun refreshAppearance() {
         if (::overlay.isInitialized) Theme.refresh(this, overlay, (sections.stack().peek() as? Screen)?.contentDomain ?: ContentModeSettings.get(this))
     }

@@ -143,6 +143,8 @@ interface ScreenHost {
     fun refreshHints()
     /** Rebind theme tokens without replacing retained screens or active playback. */
     fun refreshAppearance() = Unit
+    /** Re-read [Screen.drawsUnderTopBar] and [Screen.showsOwnTitle] after they change. */
+    fun refreshChrome() = Unit
 
     /**
      * Play a trailer in a floating window that survives navigation.

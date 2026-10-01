@@ -33,7 +33,12 @@ class PosterCardView(
      * landscape screen that number is what decides whether you can see one row
      * of content or two.
      */
-    posterHeightDp: Float = 190f
+    posterHeightDp: Float = 190f,
+    /**
+     * Title and subtitle under the poster. Home turns them off: its hero names
+     * the focused card in large type, and a row without captions fits under it.
+     */
+    private val captions: Boolean = true
 ) : LinearLayout(context) {
 
     private val poster: ImageView
@@ -57,7 +62,7 @@ class PosterCardView(
         // Padding and type scale with the card. A 6dp inset and 13sp title look
         // right at 190dp and waste a third of a 140dp card.
         val compact = posterHeightDp < 170f
-        setPadding(0, 0, 0, Styler.dpInt(context, 6f))
+        setPadding(0, 0, 0, if (captions) Styler.dpInt(context, 6f) else 0)
 
         val posterWrap = ArtworkFrame(context, 2f / 3f).apply {
             isDuplicateParentStateEnabled = true
@@ -116,6 +121,7 @@ class PosterCardView(
             setPadding(0, Styler.dpInt(context, if (compact) 3f else 6f), 0, 0)
         }
         addView(title)
+        if (!captions) title.visibility = GONE
 
         subtitle = TextView(context).apply {
             textSize = 12f
@@ -126,7 +132,7 @@ class PosterCardView(
             visibility = if (compact) GONE else VISIBLE
         }
         addView(subtitle)
-        compactCard = compact
+        compactCard = compact || !captions
     }
 
     fun bind(hit: SearchHit, imageLoader: ImageLoader, imageUrl: (String) -> String) =
@@ -250,6 +256,20 @@ class PosterCardView(
         missingArt.text = title.text
         Artwork.bind(poster, imageLoader, if (path.isBlank()) null else imageUrl(path), opaque = true,
             onMissing = { if (token == bindToken) missingArt.visibility = VISIBLE })
+    }
+
+    /** A word in an accent pill at the top corner: "Fri" on a coming-up title. Null removes it. */
+    fun setCornerTag(text: String?) {
+        if (text.isNullOrBlank()) { badge.visibility = GONE; return }
+        badge.visibility = VISIBLE
+        badge.text = text
+        badge.minWidth = 0
+        badge.textSize = 10f
+        badge.background = ThemeGradientDrawable().apply {
+            cornerRadius = Styler.dp(context, 999f)
+            setColor(this@PosterCardView.colors.accent)
+        }
+        badge.setTextColor(colors.accentText)
     }
 
     /** A count or ✓ in a coloured circle: watched, unwatched episodes, books in a collection. */

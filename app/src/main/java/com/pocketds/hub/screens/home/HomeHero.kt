@@ -1,0 +1,77 @@
+package com.pocketds.hub.screens.home
+
+import com.pocketds.hub.model.LibraryItem
+import com.pocketds.hub.model.SearchHit
+import com.pocketds.hub.playback.ResumeRules
+import com.pocketds.hub.state.Fmt
+import java.util.Locale
+
+/**
+ * What the big area at the top of Home says about the focused card.
+ *
+ * Built first from the card alone, so the hero changes the instant focus moves,
+ * and again when the item's details arrive with the overview, runtime and
+ * certification the Home rows do not carry.
+ */
+data class HeroContent(
+    val itemId: String,
+    val type: String,
+    val eyebrow: String,
+    val title: String,
+    val meta: List<String>,
+    val overview: String,
+    val progress: Double,
+    val progressLabel: String,
+    val playLabel: String,
+    /** Hub-relative; empty when there is no artwork at all. */
+    val backdrop: String,
+    /** Coming-up titles are not in the library yet: Details only. */
+    val canPlay: Boolean = true
+)
+
+object HomeHero {
+    /** The row a card came from names the eyebrow. Library rows pass the library's own name. */
+    fun eyebrowFor(rowId: String, rowTitle: String): String = when (rowId) {
+        "continue" -> "CONTINUE WATCHING"
+        "nextup" -> "NEXT UP"
+        "latest" -> "RECENTLY ADDED"
+        "favourites" -> "FAVOURITE"
+        HomeRows.UPCOMING -> "COMING UP"
+        else -> rowTitle.uppercase(Locale.ROOT)
+    }
+
+    fun from(rowId: String, rowTitle: String, hit: SearchHit, detail: LibraryItem? = null): HeroContent {
+        val episode = hit.media.type == "episode"
+        // The hub writes an episode's card subtitle as "S1E4 · Title".
+        val code = if (episode) hit.subtitle.substringBefore(" · ").trim() else ""
+        val episodeTitle = if (episode) detail?.title?.takeIf(String::isNotBlank) ?: hit.subtitle.substringAfter(" · ", "").trim() else ""
+        val runtime = detail?.runtimeSeconds ?: 0
+        val watching = hit.progress > 0 && !ResumeRules.showsWatched(hit.played, hit.progress)
+        val meta = listOf(
+            episodeTitle,
+            (detail?.year ?: hit.media.year).takeIf { it > 0 }?.toString().orEmpty(),
+            detail?.officialRating.orEmpty(),
+            Fmt.runtime(runtime.toLong()),
+            hit.rating.takeIf { it > 0 }?.let { String.format(Locale.US, "★ %.1f", it) }.orEmpty()
+        ).filter(String::isNotBlank)
+        val left = if (watching && runtime > 0) Fmt.runtime((runtime * (1 - hit.progress)).toLong()).let { "$it left" } else ""
+        val backdrop = when {
+            episode && !detail?.seriesId.isNullOrBlank() -> "/v1/img/jf/${detail!!.seriesId}/Backdrop"
+            else -> detail?.backdrop?.takeIf(String::isNotBlank) ?: hit.media.backdrop.ifBlank { hit.media.poster }
+        }
+        return HeroContent(
+            itemId = hit.jellyfinItemId,
+            type = hit.media.type,
+            eyebrow = listOf(eyebrowFor(rowId, rowTitle), if (rowId == HomeRows.UPCOMING) hit.subtitle.uppercase(Locale.ROOT) else code)
+                .filter(String::isNotBlank).joinToString(" · "),
+            title = hit.media.title,
+            meta = meta,
+            overview = detail?.overview?.takeIf(String::isNotBlank) ?: hit.overview,
+            progress = if (watching) hit.progress else 0.0,
+            progressLabel = left,
+            playLabel = if (watching) "Resume" else "Play",
+            backdrop = backdrop,
+            canPlay = hit.jellyfinItemId.isNotEmpty()
+        )
+    }
+}

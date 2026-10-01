@@ -8,6 +8,14 @@ class HubEndpointsTest {
 
     private val base = "http://127.0.0.1:8791"
 
+    @Test
+    fun `a sized image asks for a width once and leaves blank paths alone`() {
+        assertEquals("/v1/img/jf/a/Backdrop?tag=t&w=1280", HubEndpoints.sized("/v1/img/jf/a/Backdrop?tag=t", 1280))
+        assertEquals("/v1/img/jf/a/Backdrop?w=1280", HubEndpoints.sized("/v1/img/jf/a/Backdrop", 1280))
+        assertEquals("/v1/img/jf/a/Backdrop?w=780", HubEndpoints.sized("/v1/img/jf/a/Backdrop?w=780", 1280))
+        assertEquals("", HubEndpoints.sized("", 1280))
+    }
+
     @Test fun `books always come as series whatever the sort`() {
         assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"series","asc").url.endsWith("&view=collections"))
         assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"title","desc").url.endsWith("&view=collections"))

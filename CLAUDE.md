@@ -891,40 +891,49 @@ The answer is `paddingTop = 28dp` with `clipToPadding = false`. RecyclerView bri
 card inside the **padded** bounds, so the label directly above it lands in the padding band,
 which is still drawn. One animated scroll, label always visible, no override.
 
-### Home rows, in this order
+### Home: a hero over rows
 
-The Infuse/Jellyfin shape. Deliberately ordered by how soon you'd act on the row:
+Since the 2026-10 redesign, Home (media) is a hero for the focused card over rows of cards. The
+hero (`screens/home/HomeHeroView`, content from the pure `HomeHero`) changes the moment focus
+moves, from what the card already carries, and fills in the overview, certification and runtime
+from `/v1/library/items/{id}` once focus rests for 220ms (cached per item). An episode's hero
+uses its series' backdrop (`/v1/img/jf/{seriesId}/Backdrop`, untagged) at `w=1280`. Play and
+Details sit in it: Up from the first row lands on Play, Down returns to the card you came from,
+and a series' Play resolves its resume/next/first episode through `seriesPlayTarget`. Cards carry
+no focus fill: a white ring round the artwork and a small lift, as everywhere.
 
-1. **Favourites** — Jellyfin `/Items?filters=IsFavorite&recursive=true`. Things you keep
-   coming back to belong above things the server guessed at.
-2. **Continue watching** — part-watched items. `/Items?filters=IsResumable`, carrying
+The rows, in the default order (`HomeRows.DEFAULT_ORDER`), are ordered by how soon you'd act:
+
+1. **Continue watching** — part-watched items. `/Items?filters=IsResumable`, carrying
    `positionSeconds` / `runtimeSeconds` so the card can draw a progress bar. It keeps the
    first, most recent unfinished episode per series.
-3. **Next up** — you finished an episode and the next one exists. Jellyfin has a purpose-built
+2. **Next up** — you finished an episode and the next one exists. Jellyfin has a purpose-built
    endpoint for exactly this, `/Shows/NextUp?userId=`; do **not** try to derive it from watch
    state, it handles specials, gaps and season boundaries. A series is removed from this row
    while it has an item in Continue watching; finishing that episode makes it eligible again.
-4. **Recently added** — `/Items/Latest?userId=&includeItemTypes=Movie,Episode&groupItems=true`.
+3. **Recently added** — `/Items/Latest?userId=&includeItemTypes=Movie,Episode&groupItems=true`.
    Episodes are promoted to their parent series and duplicate series are collapsed while keeping
    Jellyfin's recency order. Asking this endpoint for `Movie,Series` dropped episode-heavy results;
    the live Dgdan row contained one card before the fix and 19 after it.
+4. **Favourites** — Jellyfin `/Items?filters=IsFavorite&recursive=true`.
+5. **Coming up** — built on the handheld from `/v1/calendar` for the next 14 days: each monitored
+   series or film once, at its next release not yet on disk, with a day tag ("Tomorrow", "Fri").
+   Not in the library, so A opens its request-side page and the hero offers Details only.
 
-All four are rendered by the first app section from one `GET /v1/home` request, so the
-handheld makes one round trip per screen rather than four. Empty rows are hidden. The screen
-keeps its loaded rows and focused Jellyfin item across detail navigation and section switches,
-and retains successful old rows when a refresh is partial. Verified on the Pocket DS with
-three live rows and per-item watch progress.
+The first four come from one `GET /v1/home` request. Settings › Home (`HomeRowSettings`) reorders
+and hides rows and can add "From <library>", the newest 20 of one library. Empty rows are
+hidden; a row the hub could not refresh keeps its place. The screen keeps its loaded rows and
+focused item across detail navigation and section switches.
 
-Continue Watching and Next Up use 16:9 cards for the concrete playable movie or episode. Episodes
-carry their own still, series title, and `SxxEyy · episode title`; completed items have no progress
-line. Recently Added represents new movies and the parent series of new episodes, and A opens their
-detail screen. A on Continue/Next plays or resumes the concrete item and X opens its details.
+Continue Watching and Next Up use 16:9 cards (176dp) with the series title and
+`SxxEyy · episode title` under them; the other rows are caption-less posters (100 x 150dp),
+since the hero names the focused one. A opens details and X plays or resumes, on any row.
 
-Home shows the active Jellyfin profile in its heading. **Y / Users** opens the profile picker;
-the selection persists on the handheld and is sent as `X-Jellyfin-User`. The hub varies and
-keys Home and Library caches by that id. Changing profile recreates the section stacks so rows,
-detail progress and loaded Library pages cannot retain the previous user's state. With no
-device choice, the configured server default remains the fallback (Dgdan here).
+**Y / Profiles** opens the profile picker; the selection persists on the handheld and is sent as
+`X-Jellyfin-User`. The hub varies and keys Home and Library caches by that id. Changing profile
+recreates the section stacks so rows, detail progress and loaded Library pages cannot retain the
+previous user's state. With no device choice, the configured server default remains the
+fallback (Dgdan here).
 
 ### A richer request flow — built
 

@@ -1,0 +1,54 @@
+package com.pocketds.hub.screens.home
+
+import com.pocketds.hub.model.LibraryItem
+import com.pocketds.hub.model.MediaRef
+import com.pocketds.hub.model.SearchHit
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class HomeHeroTest {
+    private val episode = SearchHit(
+        media = MediaRef(type = "episode", title = "Drake & Josh", year = 2005,
+            poster = "/v1/img/jf/series/Primary?tag=p", backdrop = "/v1/img/jf/ep/Primary?tag=still"),
+        subtitle = "S3E4 · Mindy's Back", rating = 8.0, jellyfinItemId = "ep", progress = 0.2
+    )
+
+    @Test
+    fun `an episode shows its series as the title and its code in the eyebrow straight from the card`() {
+        val hero = HomeHero.from("continue", "Continue watching", episode)
+        assertEquals("CONTINUE WATCHING · S3E4", hero.eyebrow)
+        assertEquals("Drake & Josh", hero.title)
+        assertEquals(listOf("Mindy's Back", "2005", "★ 8.0"), hero.meta)
+        assertEquals("Resume", hero.playLabel)
+        // The still, until the details name the series and its backdrop.
+        assertEquals("/v1/img/jf/ep/Primary?tag=still", hero.backdrop)
+    }
+
+    @Test
+    fun `details add the overview, certification, runtime left and the series backdrop`() {
+        val detail = LibraryItem(id = "ep", type = "episode", title = "Mindy's Back", seriesId = "series", year = 2005,
+            overview = "Science fair.", runtimeSeconds = 1500, officialRating = "TV-Y7")
+        val hero = HomeHero.from("continue", "Continue watching", episode, detail)
+        assertEquals(listOf("Mindy's Back", "2005", "TV-Y7", "25 min", "★ 8.0"), hero.meta)
+        assertEquals("Science fair.", hero.overview)
+        assertEquals("20 min left", hero.progressLabel)
+        assertEquals("/v1/img/jf/series/Backdrop", hero.backdrop)
+    }
+
+    @Test
+    fun `a new movie plays from the start and a library row names its library`() {
+        val movie = SearchHit(media = MediaRef(type = "movie", title = "Iron Man 3", year = 2013, backdrop = "/b"), jellyfinItemId = "m")
+        val hero = HomeHero.from("library:abc", "Marvel Movies", movie)
+        assertEquals("MARVEL MOVIES", hero.eyebrow)
+        assertEquals("Play", hero.playLabel)
+        assertEquals(0.0, hero.progress, 0.0)
+        assertEquals("/b", hero.backdrop)
+    }
+
+    @Test
+    fun `a finished episode is not offered as a resume`() {
+        val watched = episode.copy(played = true, progress = 0.0)
+        assertEquals("Play", HomeHero.from("nextup", "Next up", watched).playLabel)
+        assertEquals("NEXT UP · S3E4", HomeHero.from("nextup", "Next up", watched).eyebrow)
+    }
+}

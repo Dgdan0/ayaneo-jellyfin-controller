@@ -42,7 +42,7 @@ object Styler {
     /** Above edge-to-edge artwork so the image cannot cover the focus outline. */
     fun focusOutline(context: Context, colors: PocketColors) = StateListDrawable().apply {
         addState(intArrayOf(android.R.attr.state_focused), ThemeGradientDrawable().apply {
-            cornerRadius=dp(context,8f);setColor(android.graphics.Color.TRANSPARENT);setStroke(dpInt(context,2f),colors.focusRing)
+            cornerRadius=dp(context,ArtworkFrame.CORNER_DP);setColor(android.graphics.Color.TRANSPARENT);setStroke(dpInt(context,2f),colors.focusRing)
         })
         addState(intArrayOf(), android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
     }
