@@ -185,7 +185,7 @@ class PosterCardView(
 
     fun bindReadingWork(work: ReadingWork, imageLoader: ImageLoader, imageUrl: (String) -> String) {
         title.text = work.title
-        subtitle.text = work.byline.ifBlank { work.subtitle }
+        subtitle.text = work.cardSubtitle
         subtitle.visibility = VISIBLE
         title.setBackgroundColor(colors.cardSurface)
         subtitle.setBackgroundColor(colors.cardSurface)

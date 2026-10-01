@@ -3,10 +3,13 @@ package com.pocketds.hub.screens.home
 import android.content.Context
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.model.ReadingProgress
+import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.settings.HubSettings
 import com.pocketds.hub.settings.Prefs
 import java.security.MessageDigest
 import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -137,13 +140,17 @@ data class ReadingShelfRow(
 )
 
 object ReadingShelves {
+    const val CURRENTLY_READING = "currently-reading"
+    const val NEXT_IN_SERIES = "next-in-series"
+    const val COMICS = "comics"
+    const val RECENTLY_ADDED = "recently-added"
+    /** Rows the app fills itself; every other row is one of the person's own lists. */
+    val BUILT_IN = setOf(CURRENTLY_READING, NEXT_IN_SERIES, COMICS, ReadingListsState.WANT_TO_READ, RECENTLY_ADDED)
+
+    /** Every book being read, newest first: series are opened up into their books. */
     fun current(works: List<ReadingWork>): List<ReadingWork> = works.flatMap { work ->
         if (work.entityType == "collection") work.sections.flatMap { section -> section.items.mapNotNull { child ->
-            if (child.workId.isBlank()) null else ReadingWork(
-                id = child.workId, entityType = "work", kind = child.kind, title = child.title,
-                series = work.title, artwork = child.artwork.ifBlank { work.artwork }, progress = child.progress,
-                libraryId = work.libraryId
-            )
+            if (child.workId.isBlank()) null else child.asWork(work)
         } } else listOf(work)
     }.filter { work -> work.id.isNotBlank() && work.progress?.let { !it.completed && it.percentage > 0.0 } == true }
         .distinctBy { it.id }
@@ -162,16 +169,70 @@ object ReadingShelves {
             if (readActivity > 0) readActivity else list.updatedAt, readActivity > 0)
     }
 
-    fun rows(current: List<ReadingWork>, state: ReadingListsState, resolved: Map<String, ReadingWork>): List<ReadingShelfRow> {
+    fun isComic(work: ReadingWork) = work.kind == "comic" || work.kind == "manga"
+
+    /**
+     * One card per series, the book of it read last. Red Rising read in three
+     * places at once filled the row with three Red Rising cards. [reads] is
+     * newest first, so the first book seen of a series is the one to keep.
+     */
+    fun onePerSeries(reads: List<ReadingWork>): List<ReadingWork> {
+        val seen = mutableSetOf<String>()
+        return reads.filter { it.series.isBlank() || seen.add(it.series) }
+    }
+
+    /**
+     * For each series with nothing in progress: the first available, unfinished
+     * book after the last one finished. Most recently finished series first.
+     */
+    fun nextInSeries(collections: List<ReadingWork>): List<ReadingWork> = collections
+        .filter { it.entityType == "collection" }
+        .mapNotNull { series ->
+            val books = series.sections.flatMap { it.items }
+            if (books.any { it.progress?.let { p -> !p.completed && p.percentage > 0.0 } == true }) return@mapNotNull null
+            val last = books.indexOfLast { it.progress?.completed == true }
+            if (last < 0) return@mapNotNull null
+            val next = books.drop(last + 1).firstOrNull { it.isAvailable && it.progress?.completed != true }
+                ?: return@mapNotNull null
+            timestamp(books[last].progress?.updatedAt) to next.asWork(series)
+        }
+        .sortedByDescending { it.first }
+        .map { it.second }
+
+    fun rows(
+        current: List<ReadingWork>,
+        state: ReadingListsState,
+        resolved: Map<String, ReadingWork>,
+        next: List<ReadingWork> = emptyList(),
+        recent: List<ReadingWork> = emptyList()
+    ): List<ReadingShelfRow> {
         val now = current(current)
-        val reading = if (now.isEmpty()) emptyList() else listOf(ReadingShelfRow("currently-reading", "Currently reading", now))
+        val comics = now.filter(::isComic)
+        val comicsTitle = when {
+            comics.all { it.kind == "manga" } -> "Manga"
+            comics.all { it.kind == "comic" } -> "Comics"
+            else -> "Comics and manga"
+        }
+        val builtIn = listOf(
+            ReadingShelfRow(CURRENTLY_READING, "Currently reading", onePerSeries(now.filterNot(::isComic))),
+            ReadingShelfRow(NEXT_IN_SERIES, "Next in series", next.filterNot { book -> now.any { it.id == book.id } }),
+            ReadingShelfRow(COMICS, comicsTitle, comics)
+        ).filter { it.items.isNotEmpty() }
         val wanted = state.wantToRead.map { resolved[it.workId] ?: it.snapshot() }
             .filterNot { work -> work.progress?.let { it.completed || it.percentage > 0.0 } == true || now.any { it.id == work.id } }
         val wantRow = ReadingShelfRow(ReadingListsState.WANT_TO_READ, "Want to Read", wanted)
-        return reading + wantRow + state.lists.map { listRow(it, resolved) }
+        val lists = state.lists.map { listRow(it, resolved) }
             .sortedWith(compareByDescending<ReadingShelfRow> { it.hasReadingActivity }
                 .thenByDescending { it.activity }.thenBy { it.title })
+        val added = if (recent.isEmpty()) emptyList() else listOf(ReadingShelfRow(RECENTLY_ADDED, "Recently added", recent))
+        return builtIn + wantRow + lists + added
     }
+
+    private fun ReadingSectionItem.asWork(series: ReadingWork) = ReadingWork(
+        id = workId, entityType = "work", kind = kind, title = title, series = series.title,
+        seriesIndex = number.toDoubleOrNull() ?: 0.0, authors = authors,
+        artwork = artwork.ifBlank { series.artwork }, progress = progress, libraryId = series.libraryId
+    )
 
     private fun ReadingListEntry.snapshot() = ReadingWork(
         id = workId, title = title, artwork = artwork, kind = kind, series = series,
@@ -181,6 +242,10 @@ object ReadingShelves {
     internal fun timestamp(raw: String?): Long {
         if (raw.isNullOrBlank()) return 0
         return raw.toLongOrNull()?.let { if (it < 10_000_000_000L) it * 1000 else it }
-            ?: try { Instant.parse(raw).toEpochMilli() } catch (_: Exception) { 0 }
+            ?: try { Instant.parse(raw).toEpochMilli() } catch (_: Exception) { null }
+            // Storyteller writes "2026-09-27 03:16:47": UTC, a space for the T and no zone.
+            // Unparsed, every read counted as never and Red Rising showed book 1 over book 6.
+            ?: try { LocalDateTime.parse(raw.trim().replace(' ', 'T')).toInstant(ZoneOffset.UTC).toEpochMilli() }
+            catch (_: Exception) { 0 }
     }
 }

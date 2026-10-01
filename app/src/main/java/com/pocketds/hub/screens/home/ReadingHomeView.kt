@@ -38,7 +38,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
-/** Books Home: individual current reads, Want to Read, then ordered personal lists. */
+/**
+ * Books Home: what you are reading (one card per series), the next book of a
+ * series you finished, comics apart, Want to Read, your own lists, then what
+ * was added lately.
+ */
 class ReadingHomeView(
     context: Context,
     private val api: HubApi,
@@ -66,6 +70,8 @@ class ReadingHomeView(
     private val headerActions = mutableMapOf<String, View>()
     private var observed: Map<String, ReadingWork> = emptyMap()
     private var current: List<ReadingWork> = emptyList()
+    private var next: List<ReadingWork> = emptyList()
+    private var recent: List<ReadingWork> = emptyList()
 
     init {
         setBackgroundColor(colors.background)
@@ -113,7 +119,7 @@ class ReadingHomeView(
             }
             activateOnTap { promptName("New reading list", "") { name ->
                 ReadingListsRepository.update(context) { it.create(name) }
-                render(ReadingShelves.rows(current, ReadingListsRepository.get(context), observed))
+                render(shelves())
             } }
         }
         header.addView(createButton)
@@ -148,7 +154,8 @@ class ReadingHomeView(
         greeting.text = HomeHeaderLabel.forUser(com.pocketds.hub.settings.HubSettings.userName(context))
         val state = ReadingListsRepository.get(context)
         val completion = ReadingCompletionRepository.get(context)
-        render(ReadingShelves.rows(current.map(completion::project), state, observed.mapValues { completion.project(it.value) }))
+        render(ReadingShelves.rows(current.map(completion::project), state, observed.mapValues { completion.project(it.value) },
+            next.map(completion::project), recent))
         load()
     }
 
@@ -200,7 +207,7 @@ class ReadingHomeView(
             return true
         } }
         val row = rows.firstOrNull { it.id == selectedRow && it.items.any { item -> item.id == selectedWork } }
-            ?: rows.firstOrNull { it.id == "currently-reading" && it.items.isNotEmpty() }
+            ?: rows.firstOrNull { it.id == ReadingShelves.CURRENTLY_READING && it.items.isNotEmpty() }
             ?: rows.firstOrNull { it.id != ReadingListsState.WANT_TO_READ && it.items.isNotEmpty() }
             ?: rows.firstOrNull { it.items.isNotEmpty() }
         if (row == null) return createButton.requestFocus()
@@ -231,6 +238,14 @@ class ReadingHomeView(
             for (library in libraries) {
                 when (val response = api.readingLibraryItems(library.id, sort = "last_read", direction = "desc")) {
                     is HubResult.Ok -> summaries += response.value.items
+                    is HubResult.Failed -> failures++
+                }
+                if (request != generation) return@launch
+            }
+            val added = mutableListOf<ReadingWork>()
+            for (library in libraries.filter { it.kind == "book" && "sort:added" in it.capabilities }) {
+                when (val response = api.readingLibraryItems(library.id, sort = "added", direction = "desc")) {
+                    is HubResult.Ok -> added += response.value.items.take(RECENT_LIMIT)
                     is HubResult.Failed -> failures++
                 }
                 if (request != generation) return@launch
@@ -281,7 +296,9 @@ class ReadingHomeView(
             val completion = ReadingCompletionRepository.get(context)
             observed = fresh.mapValues { completion.project(it.value) }
             current = ReadingShelves.current((pendingIds.mapNotNull(fresh::get) + candidates).map(completion::project))
-            render(ReadingShelves.rows(current, state, observed))
+            next = ReadingShelves.nextInSeries(candidates).map(completion::project)
+            recent = added.sortedByDescending { ReadingShelves.timestamp(it.addedAt) }.take(RECENT_LIMIT)
+            render(ReadingShelves.rows(current, state, observed, next, recent))
             status.text = when {
                 failures > 0 -> "Some reading progress is unavailable · showing saved items where possible"
                 current.isEmpty() && ids.isEmpty() && state.lists.isEmpty() -> "Start a book in Library, or make a reading list."
@@ -318,8 +335,7 @@ class ReadingHomeView(
         }
         val title = TextView(context).apply {
             text = when {
-                row.id == "currently-reading" -> row.title
-                row.id == ReadingListsState.WANT_TO_READ -> row.title
+                row.id in ReadingShelves.BUILT_IN -> row.title
                 else -> "${row.title}   ·   ${row.readCount}/${row.items.size} read"
             }
             textSize = 18f
@@ -327,7 +343,7 @@ class ReadingHomeView(
             setPadding(0, dp(4), 0, dp(2))
         }
         header.addView(title, LinearLayout.LayoutParams(0, WRAP, 1f))
-        if (row.id !in setOf("currently-reading", ReadingListsState.WANT_TO_READ)) {
+        if (row.id !in ReadingShelves.BUILT_IN) {
             val manage = TextView(context).apply {
                 text = "⋯"
                 textSize = 22f
@@ -389,13 +405,15 @@ class ReadingHomeView(
             line.addView(card)
         }
         addView(strip)
-        if (row.id != "currently-reading" && row.id != ReadingListsState.WANT_TO_READ) {
+        if (row.id !in ReadingShelves.BUILT_IN) {
             strip.post {
                 val target = line.getChildAt(row.nextIndex) ?: return@post
                 strip.scrollTo((target.left - dp(140)).coerceAtLeast(0), 0)
             }
         }
     }
+
+    private fun shelves() = ReadingShelves.rows(current, ReadingListsRepository.get(context), observed, next, recent)
 
     private fun focusedWork(): ReadingWork? = rows.firstOrNull { it.id == selectedRow }
         ?.items?.firstOrNull { it.id == selectedWork }
@@ -410,14 +428,14 @@ class ReadingHomeView(
                 "browse" -> host.switchSection(2)
                 "rename" -> promptName("Rename reading list", row.title) { name ->
                     ReadingListsRepository.update(context) { it.rename(row.id, name) }
-                    render(ReadingShelves.rows(current, ReadingListsRepository.get(context), observed))
+                    render(shelves())
                 }
                 "delete" -> AlertDialog.Builder(context).setTitle("Delete ${row.title}?")
                     .setMessage("The books remain in your library.")
                     .setNegativeButton("Cancel", null).setPositiveButton("Delete") { _, _ ->
                         ReadingListsRepository.update(context) { it.delete(row.id) }
                         focusedListHeader = null
-                        render(ReadingShelves.rows(current, ReadingListsRepository.get(context), observed))
+                        render(shelves())
                     }.show()
             }
             host.refreshHints()
@@ -430,8 +448,10 @@ class ReadingHomeView(
         val work = focusedWork() ?: return
         val choices = buildList {
             if (row.id != ReadingListsState.WANT_TO_READ) add(ChoiceOverlay.Choice("want", "Add to Want to Read"))
-            if (row.id != "currently-reading") add(ChoiceOverlay.Choice("remove", "Remove from ${row.title}"))
-            if (row.id !in setOf("currently-reading", ReadingListsState.WANT_TO_READ)) {
+            // Only Want to Read and the person's own lists hold what they put there.
+            val ownList = row.id !in ReadingShelves.BUILT_IN
+            if (ownList || row.id == ReadingListsState.WANT_TO_READ) add(ChoiceOverlay.Choice("remove", "Remove from ${row.title}"))
+            if (ownList) {
                 add(ChoiceOverlay.Choice("earlier", "Move earlier"))
                 add(ChoiceOverlay.Choice("later", "Move later"))
                 add(ChoiceOverlay.Choice("rename", "Rename list"))
@@ -448,16 +468,16 @@ class ReadingHomeView(
                 }
                 "rename" -> promptName("Rename reading list", row.title) { name ->
                     ReadingListsRepository.update(context) { it.rename(row.id, name) }
-                    render(ReadingShelves.rows(current, ReadingListsRepository.get(context), observed))
+                    render(shelves())
                 }
                 "delete" -> AlertDialog.Builder(context).setTitle("Delete ${row.title}?")
                     .setMessage("The books remain in your library.")
                     .setNegativeButton("Cancel", null).setPositiveButton("Delete") { _, _ ->
                         ReadingListsRepository.update(context) { it.delete(row.id) }
-                        render(ReadingShelves.rows(current, ReadingListsRepository.get(context), observed))
+                        render(shelves())
                     }.show()
             }
-            render(ReadingShelves.rows(current, ReadingListsRepository.get(context), observed))
+            render(shelves())
         }
         host.refreshHints()
     }
@@ -476,5 +496,6 @@ class ReadingHomeView(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        const val RECENT_LIMIT = 12
     }
 }

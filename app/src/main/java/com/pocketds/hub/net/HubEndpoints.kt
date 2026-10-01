@@ -170,6 +170,11 @@ object HubEndpoints {
     fun serverReadingLists(base: String, id: Int? = null): HubRequest =
         HubRequest(join(base, "/v1/reading/lists" + if (id == null) "" else "/$id"))
 
+    /**
+     * Storyteller books always come as series: the library's Series view groups
+     * them whatever the sort, and Books Home builds its rows from series. Sorting
+     * by title used to ask for loose books, so Mistborn fell apart into three cards.
+     */
     fun readingLibraryItems(
         base: String,
         libraryId: String,
@@ -178,7 +183,7 @@ object HubEndpoints {
         direction: String = "asc"
     ): HubRequest = HubRequest(
         join(base, "/v1/reading/libraries/" + encode(libraryId) + "/items") +
-            "?page=$page&sort=" + encode(sort) + "&direction=" + encode(direction) + (if(libraryId == "storyteller:books") "&view=" + (if(sort == "series") "collections" else "works") else "")
+            "?page=$page&sort=" + encode(sort) + "&direction=" + encode(direction) + (if (libraryId == "storyteller:books") "&view=collections" else "")
     )
 
     fun readingAuthors(base:String,libraryId:String,page:Int,direction:String,authorId:String=""):HubRequest =

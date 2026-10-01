@@ -8,9 +8,10 @@ class HubEndpointsTest {
 
     private val base = "http://127.0.0.1:8791"
 
-    @Test fun `book sort distinguishes collection view and individual work view`() {
+    @Test fun `books always come as series whatever the sort`() {
         assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"series","asc").url.endsWith("&view=collections"))
-        assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"title","desc").url.endsWith("&view=works"))
+        assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"title","desc").url.endsWith("&view=collections"))
+        assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"added","desc").url.endsWith("&view=collections"))
         assertTrue(HubEndpoints.readingAuthors(base,"storyteller:books",2,"desc","ra_123").url.endsWith("?page=2&direction=desc&authorId=ra_123"))
         assertTrue(HubEndpoints.readingResolve(base,"openlibrary","OL1W","9780345539786").url.contains("sourceId=OL1W&isbn=9780345539786"))
     }

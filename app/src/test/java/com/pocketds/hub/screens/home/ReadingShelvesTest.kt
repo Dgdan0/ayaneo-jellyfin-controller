@@ -156,6 +156,67 @@ class ReadingShelvesTest {
         assertEquals(listOf("recent", "renamed"), rows.drop(1).map { it.id })
     }
 
+    private fun series(id: String, vararg books: ReadingSectionItem) = ReadingWork(
+        id = id, entityType = "collection", title = id, sections = listOf(ReadingSection(items = books.toList()))
+    )
+
+    private fun book(id: String, number: String, percent: Double = 0.0, done: Boolean = false, updated: String = "",
+                     availability: String = "available") = ReadingSectionItem(
+        workId = if (availability == "available") id else "", title = id, number = number, availability = availability,
+        progress = if (percent > 0 || done) ReadingProgress(percent, done, updatedAt = updated) else null
+    )
+
+    @Test fun currentlyReadingShowsOneCardPerSeriesAndKeepsComicsApart() {
+        val redRising = series("Red Rising",
+            book("Red Rising", "1", .09, updated = "2026-09-21T16:00:00Z"),
+            book("Golden Son", "2", .02, updated = "2026-09-22T02:00:00Z"),
+            book("Light Bringer", "6", .49, updated = "2026-09-27T03:00:00Z"))
+        val comic = work("Fantastic Four", .2, "2026-09-28T10:00:00Z").copy(kind = "comic")
+        val rows = ReadingShelves.rows(listOf(redRising, comic, work("Dark Matter", .03, "2026-09-25T03:00:00Z")),
+            ReadingListsState(), emptyMap())
+        val reading = rows.first { it.id == ReadingShelves.CURRENTLY_READING }
+        assertEquals(listOf("Light Bringer", "Dark Matter"), reading.items.map { it.id })
+        assertEquals("Book 6 · Red Rising", reading.items.first().cardSubtitle)
+        assertEquals(listOf("Fantastic Four"), rows.first { it.id == ReadingShelves.COMICS }.items.map { it.id })
+        assertEquals("Comics", rows.first { it.id == ReadingShelves.COMICS }.title)
+    }
+
+    @Test fun nextInSeriesIsTheFirstUnreadBookAfterTheLastFinishedOne() {
+        val finishedOne = series("Mistborn",
+            book("Final Empire", "1", done = true, updated = "2026-09-20T10:00:00Z"),
+            book("Well of Ascension", "2"),
+            book("Hero of Ages", "3"))
+        val stillReading = series("Red Rising", book("Red Rising", "1", done = true), book("Golden Son", "2", .4))
+        val nothingFinished = series("Licanius", book("Shadow", "1"))
+        val nextMissing = series("Stormlight", book("Way of Kings", "1", done = true), book("Words", "2", availability = "missing"),
+            book("Oathbringer", "3"))
+        val next = ReadingShelves.nextInSeries(listOf(finishedOne, stillReading, nothingFinished, nextMissing))
+        assertEquals(listOf("Well of Ascension", "Oathbringer"), next.map { it.id })
+        assertEquals("Book 2 · Mistborn", next.first().cardSubtitle)
+    }
+
+    @Test fun builtInRowsComeFirstAndRecentlyAddedLast() {
+        val state = ReadingListsState(lists = listOf(ReadingList("mine", "Mine", listOf(ReadingListEntry("x", "X")))))
+        val rows = ReadingShelves.rows(listOf(work("reading", .3)), state, emptyMap(),
+            next = listOf(work("next")), recent = listOf(work("new")))
+        assertEquals(listOf(ReadingShelves.CURRENTLY_READING, ReadingShelves.NEXT_IN_SERIES, ReadingListsState.WANT_TO_READ,
+            "mine", ReadingShelves.RECENTLY_ADDED), rows.map { it.id })
+        assertTrue(rows.filter { it.id in ReadingShelves.BUILT_IN }.none { it.id == "mine" })
+    }
+
+    @Test fun storytellerTimesWithASpaceAndNoZoneAreRead() {
+        assertEquals(java.time.Instant.parse("2026-09-27T03:16:47Z").toEpochMilli(), ReadingShelves.timestamp("2026-09-27 03:16:47"))
+        val redRising = series("Red Rising",
+            book("Red Rising", "1", .09, updated = "2026-09-21 16:09:43"),
+            book("Light Bringer", "6", .49, updated = "2026-09-27 03:16:47"))
+        assertEquals("Light Bringer", ReadingShelves.rows(listOf(redRising), ReadingListsState(), emptyMap()).first().items.single().id)
+    }
+
+    @Test fun cardSubtitleNamesTheAuthorOutsideASeries() {
+        assertEquals("Blake Crouch", ReadingWork(title = "Dark Matter", authors = listOf("Blake Crouch")).cardSubtitle)
+        assertEquals("Book 1.5 · Saga", ReadingWork(title = "Novella", series = "Saga", seriesIndex = 1.5).cardSubtitle)
+    }
+
     @Test fun newlyCreatedUnreadListFollowsListsWithReadingActivity() {
         val active = ReadingList("active", "Active", listOf(ReadingListEntry("a", "A", lastReadAt = 100)), updatedAt = 10)
         val empty = ReadingList("empty", "Empty", updatedAt = 500)

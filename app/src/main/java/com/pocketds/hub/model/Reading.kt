@@ -356,6 +356,13 @@ data class ReadingWork(
             if (isEmpty() && year > 0) add(year.toString())
             if (isEmpty()) add(ReadingType.label(kind))
         }.joinToString(" · ")
+
+    /** Under a book's card: "Book 6 · Red Rising" inside a series, otherwise who wrote it. */
+    val cardSubtitle: String
+        get() = if (entityType != "collection" && series.isNotBlank() && seriesIndex > 0) {
+            val number = if (seriesIndex % 1.0 == 0.0) seriesIndex.toLong().toString() else seriesIndex.toString()
+            "Book $number · $series"
+        } else byline.ifBlank { subtitle }
 }
 
 @Serializable
