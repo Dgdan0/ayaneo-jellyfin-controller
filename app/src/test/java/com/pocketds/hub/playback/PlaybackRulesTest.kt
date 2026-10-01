@@ -55,21 +55,4 @@ class PlaybackRulesTest {
         assertEquals(listOf(0, 40_000_000, 20_000_000, 10_000_000, 5_000_000, 2_000_000),
             PlaybackRules.qualities.map { it.bitrate })
     }
-
-    @Test
-    fun `next episode counts down once and can be cancelled`() {
-        val state = NextEpisodeCountdown(3)
-        state.start()
-        assertEquals(3, state.remaining)
-        assertEquals(false, state.elapse())
-        assertEquals(2, state.remaining)
-        assertEquals(false, state.elapse())
-        assertEquals(true, state.elapse())
-        assertEquals(false, state.active)
-
-        state.start()
-        state.cancel()
-        assertEquals(false, state.elapse())
-        assertEquals(0, state.remaining)
-    }
 }

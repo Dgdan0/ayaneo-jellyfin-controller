@@ -53,6 +53,7 @@ import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
+import com.pocketds.hub.ui.activateOnTap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -95,7 +96,7 @@ class PlayerScreen(
     private lateinit var status: TextView
     private val position: TextView get() = chrome.position
     private val duration: TextView get() = chrome.duration
-    private val seekBar: SeekBar get() = chrome.seekBar
+    private val seekBar: ChapterSeekBar get() = chrome.seekBar
     private val playButton: PlayerIconButton get() = chrome.playButton
     private val tracksButton: PlayerIconButton get() = chrome.tracksButton
     private val menuState = PlayerMenuState()
@@ -107,12 +108,12 @@ class PlayerScreen(
     private val previousButton: PlayerIconButton get() = chrome.previousButton
     private val rewindButton: PlayerIconButton get() = chrome.rewindButton
     private val forwardButton: PlayerIconButton get() = chrome.forwardButton
-    private val skipButton: PlayerIconButton get() = chrome.skipButton
+    /** "Skip intro": shown over the video, with or without the rest of the controls. */
+    private lateinit var skipPill: TextView
     private val nextButton: PlayerIconButton get() = chrome.nextButton
     private lateinit var choiceOverlay: ChoiceOverlay
     private lateinit var subtitleOffsetOverlay: SubtitleOffsetOverlay
-    private val nextPanel: LinearLayout get() = chrome.nextPanel
-    private val nextText: TextView get() = chrome.nextText
+    private lateinit var upNext: UpNextCardView
     private val seekPreview: LinearLayout get() = chrome.seekPreview
     private val seekPreviewImage: ImageView get() = chrome.seekPreviewImage
     private val seekPreviewFrame: FrameLayout get() = chrome.seekPreviewFrame
@@ -149,7 +150,12 @@ class PlayerScreen(
     private var previewRequest: Disposable? = null
     private var pendingPreviewPosition = 0L
     private var lastPreviewThumbnail = -1
-    private val countdown = NextEpisodeCountdown(15)
+    /** Where the up-next card appears in this video, or null. */
+    private var upNextAt: Long? = null
+    /** Watch credits: the card stays away until the video ends. */
+    private var upNextDismissed = false
+    /** Segments already skipped by themselves, so seeking back into one does not skip it again. */
+    private val autoSkipped = mutableSetOf<String>()
     private var selectedQuality = 0
     private var padTimelineSeeking = false
     private var castTransferJob: Job? = null
@@ -192,18 +198,6 @@ class PlayerScreen(
     private val hideGestureFeedback = Runnable { gestureFeedback.visibility = View.GONE }
     private val hideLevelFeedback = Runnable { levelFeedback.visibility = View.GONE }
     private val loadPreviewImage = Runnable { loadTrickplayImage(pendingPreviewPosition) }
-    private val nextTick = object : Runnable {
-        override fun run() {
-            if (!countdown.active) return
-            if (countdown.elapse()) {
-                playNext()
-                return
-            }
-            val next = plan?.nextItem
-            nextText.text = "Next: ${next?.displayTitle().orEmpty()} · ${countdown.remaining}"
-            handler.postDelayed(this, 1_000L)
-        }
-    }
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -299,12 +293,42 @@ class PlayerScreen(
         root.addView(choiceOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
         subtitleOffsetOverlay = SubtitleOffsetOverlay(host.viewContext, colors, ringVisible)
         root.addView(subtitleOffsetOverlay, FrameLayout.LayoutParams(dp(320), WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(16) })
-        root.addView(
-            nextPanel,
-            FrameLayout.LayoutParams(dp(560), WRAP, Gravity.BOTTOM or Gravity.END).apply {
-                setMargins(dp(20), dp(20), dp(20), dp(28))
+        skipPill = TextView(host.viewContext).apply {
+            textSize = 13f
+            com.pocketds.hub.ui.Type.text(context, 700).let { typeface = it }
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setPadding(dp(18), 0, dp(18), 0)
+            minimumHeight = dp(40)
+            visibility = View.GONE
+            background = android.graphics.drawable.StateListDrawable().apply {
+                fun face(focused: Boolean) = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
+                    cornerRadius = dp(999).toFloat()
+                    setColor(if (focused) Color.WHITE else Color.argb(110, 0, 0, 0))
+                    setStroke(dp(2), Color.WHITE)
+                }
+                addState(intArrayOf(android.R.attr.state_focused), face(true))
+                addState(intArrayOf(), face(false))
             }
-        )
+            setOnFocusChangeListener { view, focused ->
+                (view as TextView).setTextColor(if (focused) Color.BLACK else Color.WHITE)
+                if (focused && controlsVisible) scheduleHide()
+            }
+            com.pocketds.hub.ui.Styler.makeFocusable(this)
+            activateOnTap { skipSegment() }
+        }
+        root.addView(skipPill, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.END).apply {
+            rightMargin = dp(24); bottomMargin = dp(SKIP_BOTTOM_HIDDEN_DP)
+        })
+        upNext = UpNextCardView(host.viewContext, colors, api, ringVisible).apply {
+            visibility = View.GONE
+            onPlayNow = { playNext() }
+            onFilled = { playNext() }
+            onWatchCredits = { dismissUpNext() }
+        }
+        root.addView(upNext, FrameLayout.LayoutParams(dp(340), WRAP, Gravity.BOTTOM or Gravity.END).apply {
+            setMargins(dp(20), dp(20), dp(24), dp(UP_NEXT_BOTTOM_DP))
+        })
         return root
     }
 
@@ -331,7 +355,7 @@ class PlayerScreen(
         handler.removeCallbacks(uiTick)
         handler.removeCallbacks(subtitleTick)
         handler.removeCallbacks(hideControls)
-        handler.removeCallbacks(nextTick)
+        upNext.stop()
         handler.removeCallbacks(hideSeekPreview)
         handler.removeCallbacks(hideGestureFeedback)
         handler.removeCallbacks(hideLevelFeedback)
@@ -361,7 +385,7 @@ class PlayerScreen(
     override fun onSystemBack(): Boolean {
         if (subtitleOffsetOverlay.onPad(PadAction.Back)) return true
         if (choiceOverlay.onPad(PadAction.Back)) return true
-        if (nextPanel.visibility == View.VISIBLE) { cancelNext(); return true }
+        if (upNext.visibility == View.VISIBLE) { dismissUpNext(); return true }
         if (controlsVisible) { setControls(false); return true }
         host.back()
         return true
@@ -373,7 +397,8 @@ class PlayerScreen(
             choiceOverlay.dismiss()
             topPanel.visibility = View.GONE
             controllerPanel.visibility = View.GONE
-            nextPanel.visibility = View.GONE
+            upNext.visibility = View.GONE
+            skipPill.visibility = View.GONE
             seekPreview.visibility = View.GONE
             gestureFeedback.visibility = View.GONE
             levelFeedback.visibility = View.GONE
@@ -392,7 +417,8 @@ class PlayerScreen(
         return when (action) {
             PadAction.Activate -> {
                 val focused = root.findFocus()
-                if (controlsVisible && focused is PlayerIconButton) focused.performClick()
+                if (focused != null && (upNext.hasFocus() || focused === skipPill)) focused.performClick()
+                else if (controlsVisible && focused is PlayerIconButton) focused.performClick()
                 else if (controlsVisible && focused === castButton) castButton.performClick()
                 else togglePlay()
                 true
@@ -414,7 +440,7 @@ class PlayerScreen(
             PadAction.Back -> {
                 when {
                     plan == null && prepareJob?.isActive != true -> host.back()
-                    nextPanel.visibility == View.VISIBLE -> cancelNext()
+                    upNext.visibility == View.VISIBLE -> dismissUpNext()
                     controlsVisible -> setControls(false)
                     else -> host.back()
                 }
@@ -601,6 +627,8 @@ class PlayerScreen(
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            // The bar fills only while the video plays: no next episode behind a pause.
+            if (isPlaying) upNext.resume() else upNext.pause()
             playButton.setIcon(if (isPlaying) PlayerControlIcon.PAUSE else PlayerControlIcon.PLAY)
             playButton.contentDescription = if (isPlaying) "Pause" else "Play"
             if (!suppressPlaybackChrome) showControls()
@@ -643,15 +671,30 @@ class PlayerScreen(
     }
 
     private fun moveControllerFocus(direction: Direction) {
+        val focused = root.findFocus()
+        if (upNext.visibility == View.VISIBLE && (upNext.hasFocus() || !controlsVisible)) {
+            // The card's two buttons, side by side.
+            when {
+                !upNext.hasFocus() -> upNext.playNow.requestFocus()
+                direction == Direction.LEFT -> upNext.playNow.requestFocus()
+                direction == Direction.RIGHT -> upNext.watchCredits.requestFocus()
+                direction == Direction.UP && controlsVisible -> playButton.requestFocus()
+            }
+            return
+        }
+        if (focused === skipPill && direction == Direction.LEFT && controlsVisible) {
+            playButton.requestFocus()
+            scheduleHide()
+            return
+        }
         if (!controlsVisible) {
             showControls()
             playButton.requestFocus()
             return
         }
-        val focused = root.findFocus()
         val top = listOf<View>(tracksButton, castButton, optionsButton, lockButton, pipButton, closeButton)
             .filter { it.visibility == View.VISIBLE && it.isEnabled }
-        val playback = listOf<View>(previousButton, rewindButton, playButton, forwardButton, skipButton, nextButton)
+        val playback = listOf<View>(previousButton, rewindButton, playButton, forwardButton, nextButton, skipPill)
             .filter { it.visibility == View.VISIBLE && it.isEnabled }
         when {
             focused === seekBar -> when (direction) {
@@ -972,19 +1015,75 @@ class PlayerScreen(
             seekBar.progress = if (end > 0) ((current.toDouble() / end) * 10_000).toInt().coerceIn(0, 10_000) else 0
         }
         updateSegmentSkip(current)
+        if (value.playbackState != Player.STATE_ENDED) updateUpNext(current, end)
     }
 
+    /**
+     * The Skip intro pill while an intro, recap, preview or ad plays; with
+     * Settings › Playback › Skip intros automatically, intros and recaps skip
+     * themselves once.
+     */
     private fun updateSegmentSkip(positionMillis: Long) {
         if (!::chrome.isInitialized) return
         val segment = PlaybackEnhancements.skipPrompt(plan?.segments.orEmpty(), positionMillis)
         val id = segment?.id.orEmpty()
         if (id == activeSegmentId) return
         activeSegmentId = id
-        skipButton.visibility = if (segment == null) View.GONE else View.VISIBLE
-        if (segment != null) {
-            skipButton.contentDescription = "Skip ${segment.type.ifBlank { "segment" }}"
-            showGestureFeedback("Skip ${segment.type.ifBlank { "segment" }}", PlayerGestureView.Side.CENTER)
+        if (segment != null && UpNext.skipsAutomatically(segment.type) && id !in autoSkipped &&
+            PlaybackSettings.autoSkipIntro(host.viewContext)) {
+            autoSkipped += id
+            controller?.seekTo(segment.endMillis)
+            showGestureFeedback("Skipped ${segment.type.lowercase()}", PlayerGestureView.Side.CENTER)
+            skipPill.visibility = View.GONE
+            return
         }
+        val label = segment?.let { UpNext.skipLabel(it.type) }
+        if (label == null) {
+            if (skipPill.hasFocus()) (if (controlsVisible) playButton else root).requestFocus()
+            skipPill.visibility = View.GONE
+            return
+        }
+        skipPill.text = label
+        skipPill.contentDescription = label
+        skipPill.visibility = View.VISIBLE
+        // With the controls away, A means Skip while the pill is up.
+        if (!controlsVisible && upNext.visibility != View.VISIBLE) skipPill.requestFocus()
+    }
+
+    private fun skipSegment() {
+        val segment = PlaybackEnhancements.skipPrompt(plan?.segments.orEmpty(), controller?.currentPosition ?: 0L) ?: return
+        controller?.seekTo(segment.endMillis)
+        if (skipPill.hasFocus()) (if (controlsVisible) playButton else root).requestFocus()
+        skipPill.visibility = View.GONE
+    }
+
+    /** Shows the up-next card when its moment comes, and puts it away after a seek back. */
+    private fun updateUpNext(positionMillis: Long, durationMillis: Long) {
+        if (plan?.nextItem == null || upNextDismissed) return
+        val shows = UpNext.showsCard(positionMillis, upNextAt, durationMillis)
+        if (shows && upNext.visibility != View.VISIBLE) showUpNext()
+        else if (!shows && upNext.visibility == View.VISIBLE && positionMillis < (upNextAt ?: 0L)) hideUpNext()
+    }
+
+    private fun showUpNext() {
+        val next = plan?.nextItem ?: return
+        upNext.bind(next)
+        upNext.visibility = View.VISIBLE
+        upNext.start()
+        if (controller?.isPlaying == false) upNext.pause()
+        if (!controlsVisible || root.findFocus() == null || root.findFocus() === root) upNext.playNow.requestFocus()
+    }
+
+    private fun hideUpNext() {
+        upNext.stop()
+        if (upNext.hasFocus()) (if (controlsVisible) playButton else root).requestFocus()
+        upNext.visibility = View.GONE
+    }
+
+    /** Watch credits, or B: away until the video ends, when it comes back to count down. */
+    private fun dismissUpNext() {
+        upNextDismissed = true
+        hideUpNext()
     }
 
     private fun syncServicePlan() {
@@ -1464,23 +1563,19 @@ class PlayerScreen(
         )
     }
 
+    /** The video ended: the card counts down to the next episode, even after Watch credits. */
     private fun showNextCountdown() {
         if (plan?.nextItem == null) {
             setControls(true)
             return
         }
-        handler.removeCallbacks(nextTick)
-        countdown.start()
-        nextPanel.visibility = View.VISIBLE
-        nextText.text = "Next: ${plan?.nextItem?.displayTitle().orEmpty()} · ${countdown.remaining}"
-        handler.postDelayed(nextTick, 1_000L)
-    }
-
-    private fun cancelNext() {
-        handler.removeCallbacks(nextTick)
-        countdown.cancel()
-        nextPanel.visibility = View.GONE
-        setControls(true)
+        upNextDismissed = false
+        if (upNext.visibility == View.VISIBLE && upNext.counting) {
+            upNext.resume()
+            return
+        }
+        showUpNext()
+        upNext.resume()
     }
 
     private fun playNext() = playAdjacent(plan?.nextItem, "next")
@@ -1513,9 +1608,7 @@ class PlayerScreen(
             }
             return
         }
-        handler.removeCallbacks(nextTick)
-        countdown.cancel()
-        nextPanel.visibility = View.GONE
+        hideUpNext()
         status.visibility = View.VISIBLE
         status.text = "Opening $direction episode…"
         if (old.offline) {
@@ -1578,15 +1671,7 @@ class PlayerScreen(
         override fun rewind() = seekBy(-configuredSeekMillis())
         override fun togglePlay() = this@PlayerScreen.togglePlay()
         override fun forward() = seekBy(configuredSeekMillis())
-        override fun skipSegment() {
-            val segment = PlaybackEnhancements.skipPrompt(
-                plan?.segments.orEmpty(), controller?.currentPosition ?: 0L
-            ) ?: return
-            controller?.seekTo(segment.endMillis)
-            skipButton.visibility = View.GONE
-        }
         override fun playNext() = this@PlayerScreen.playNext()
-        override fun cancelNext() = this@PlayerScreen.cancelNext()
         override fun controlFocused() = showControls()
     }
 
@@ -1633,6 +1718,13 @@ class PlayerScreen(
         seekPreviewImage.setImageDrawable(null)
         seekPreviewFrame.visibility = View.GONE
         activeSegmentId = ""
+        autoSkipped.clear()
+        skipPill.visibility = View.GONE
+        upNextDismissed = false
+        upNextAt = value.nextItem?.let { UpNext.cardAt(PlaybackSettings.nextTiming(host.viewContext), value.segments, value.durationMillis) }
+        if (upNext.visibility == View.VISIBLE) hideUpNext()
+        seekBar.marks = if (value.durationMillis > 0) PlaybackEnhancements.chapters(value.chapters, value.durationMillis)
+            .map { it.positionMillis.toFloat() / value.durationMillis } else emptyList()
         titleView.text = if (value.offline) "${value.item.displayTitle()}  ·  Offline" else value.item.displayTitle()
         val audio = value.audioTracks.firstOrNull { it.index == value.selectedAudioIndex }
         val subtitle = value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }
@@ -1660,6 +1752,15 @@ class PlayerScreen(
         controlsVisible = visible
         topPanel.visibility = if (visible) View.VISIBLE else View.GONE
         controllerPanel.visibility = if (visible) View.VISIBLE else View.GONE
+        // The pill and the card sit above the timeline while it shows.
+        (skipPill.layoutParams as FrameLayout.LayoutParams).let {
+            it.bottomMargin = dp(if (visible) SKIP_BOTTOM_SHOWN_DP else SKIP_BOTTOM_HIDDEN_DP)
+            skipPill.layoutParams = it
+        }
+        (upNext.layoutParams as FrameLayout.LayoutParams).let {
+            it.bottomMargin = dp(if (visible) UP_NEXT_BOTTOM_DP else SKIP_BOTTOM_HIDDEN_DP)
+            upNext.layoutParams = it
+        }
         placeSubtitles()
         if (!visible) {
             handler.removeCallbacks(hideControls)
@@ -1680,6 +1781,9 @@ class PlayerScreen(
 
     private companion object {
         const val SUBTITLE_TICK_MILLIS = 50L
+        const val SKIP_BOTTOM_HIDDEN_DP = 28
+        const val SKIP_BOTTOM_SHOWN_DP = 132
+        const val UP_NEXT_BOTTOM_DP = 132
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
     }

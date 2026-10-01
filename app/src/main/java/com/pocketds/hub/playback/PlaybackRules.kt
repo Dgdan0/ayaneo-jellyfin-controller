@@ -61,32 +61,3 @@ object PlaybackRules {
         )
     }
 }
-
-class NextEpisodeCountdown(private val seconds: Int = 15) {
-    var remaining: Int = 0
-        private set
-    var active: Boolean = false
-        private set
-
-    fun start() {
-        remaining = seconds.coerceAtLeast(1)
-        active = true
-    }
-
-    /** Returns true when the next episode should start now. */
-    fun elapse(): Boolean {
-        if (!active) return false
-        if (remaining <= 1) {
-            remaining = 0
-            active = false
-            return true
-        }
-        remaining--
-        return false
-    }
-
-    fun cancel() {
-        remaining = 0
-        active = false
-    }
-}

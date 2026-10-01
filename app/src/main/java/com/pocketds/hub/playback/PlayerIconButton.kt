@@ -26,8 +26,7 @@ internal enum class PlayerControlIcon {
     NEXT,
     CHAPTERS,
     LOCK,
-    UNLOCK,
-    SKIP
+    UNLOCK
 }
 
 internal class PlayerIconButton(
@@ -92,7 +91,6 @@ internal class PlayerIconButton(
             PlayerControlIcon.CHAPTERS -> drawChapters(canvas)
             PlayerControlIcon.LOCK -> drawLock(canvas, locked = true)
             PlayerControlIcon.UNLOCK -> drawLock(canvas, locked = false)
-            PlayerControlIcon.SKIP -> drawSkip(canvas)
         }
         canvas.restore()
     }
@@ -230,14 +228,6 @@ internal class PlayerIconButton(
         canvas.drawCircle(0f, 0.13f, 0.045f, paint)
     }
 
-    private fun drawSkip(canvas: Canvas) {
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 0.075f
-        canvas.drawLine(-0.35f, 0f, 0.24f, 0f, paint)
-        canvas.drawLine(0.07f, -0.18f, 0.29f, 0f, paint)
-        canvas.drawLine(0.07f, 0.18f, 0.29f, 0f, paint)
-        canvas.drawLine(0.34f, -0.27f, 0.34f, 0.27f, paint)
-    }
 
     private fun triangle(
         canvas: Canvas,

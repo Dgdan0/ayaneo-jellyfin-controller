@@ -23,7 +23,8 @@ import com.pocketds.hub.ui.activateOnTap
 
 /**
  * The player's on-screen controls: the top bar, the timeline and transport
- * row, the seek preview, the gesture readout and the next-episode panel.
+ * row, the seek preview and the gesture readout. The up-next card and the
+ * Skip intro button are [PlayerScreen]'s, since they show without the rest.
  *
  * Built here and handed to [PlayerScreen], which owns what they do. The
  * construction was 300 lines of PlayerScreen assigning 25 of its fields as it
@@ -47,9 +48,7 @@ internal class PlayerChrome(
         fun rewind()
         fun togglePlay()
         fun forward()
-        fun skipSegment()
         fun playNext()
-        fun cancelNext()
         /** A control took focus: keep the controls up. */
         fun controlFocused()
     }
@@ -62,26 +61,23 @@ internal class PlayerChrome(
     lateinit var pipButton: PlayerIconButton; private set
     lateinit var closeButton: PlayerIconButton; private set
     lateinit var position: TextView; private set
-    lateinit var seekBar: SeekBar; private set
+    lateinit var seekBar: ChapterSeekBar; private set
     lateinit var duration: TextView; private set
     lateinit var previousButton: PlayerIconButton; private set
     lateinit var rewindButton: PlayerIconButton; private set
     lateinit var playButton: PlayerIconButton; private set
     lateinit var forwardButton: PlayerIconButton; private set
-    lateinit var skipButton: PlayerIconButton; private set
     lateinit var nextButton: PlayerIconButton; private set
     lateinit var seekPreviewImage: ImageView; private set
     /** Holds the frame; hidden until a frame has loaded, so the preview is a picture or just the time. */
     lateinit var seekPreviewFrame: FrameLayout; private set
     lateinit var seekPreviewTime: TextView; private set
     lateinit var seekPreviewDelta: TextView; private set
-    lateinit var nextText: TextView; private set
 
     val top: LinearLayout = buildTop()
     val controller: LinearLayout = buildController(seekSeconds, timeline)
     val seekPreview: LinearLayout = buildSeekPreview()
     val gestureFeedback: TextView = buildGestureFeedback()
-    val nextPanel: LinearLayout = buildNextPanel()
 
     fun setLocked(locked: Boolean) {
         lockButton.setIcon(if (locked) PlayerControlIcon.LOCK else PlayerControlIcon.UNLOCK)
@@ -97,10 +93,9 @@ internal class PlayerChrome(
             intArrayOf(Color.argb(225, 0, 0, 0), Color.TRANSPARENT)
         )
         titleView = TextView(context).apply {
-            textSize = 18f
+            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 18f)
             setTextColor(Color.WHITE)
             maxLines = 2
-            setTypeface(typeface, Typeface.BOLD)
         }
         addView(titleView, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginEnd = dp(10) })
         tracksButton = control(PlayerControlIcon.TRACKS, "Audio and subtitles", actions::showTracks)
@@ -135,7 +130,7 @@ internal class PlayerChrome(
                 gravity = Gravity.CENTER_VERTICAL
                 position = timeText("0:00")
                 addView(position, LinearLayout.LayoutParams(dp(64), WRAP))
-                seekBar = SeekBar(context).apply {
+                seekBar = ChapterSeekBar(context).apply {
                     max = 10_000
                     contentDescription = "Playback position"
                     Styler.makeFocusable(this)
@@ -156,9 +151,6 @@ internal class PlayerChrome(
                 addView(playButton)
                 forwardButton = control(PlayerControlIcon.FORWARD, "Jump forward $seekSeconds seconds", actions::forward)
                 addView(forwardButton)
-                skipButton = control(PlayerControlIcon.SKIP, "Skip current segment", actions::skipSegment)
-                    .apply { visibility = View.GONE }
-                addView(skipButton)
                 nextButton = control(PlayerControlIcon.NEXT, "Play next episode", actions::playNext)
                 addView(nextButton)
             }, LinearLayout.LayoutParams(MATCH, WRAP))
@@ -210,24 +202,6 @@ internal class PlayerChrome(
             setColor(Color.argb(225, 22, 24, 29))
             setStroke(dp(1), Color.argb(110, 255, 255, 255))
         }
-    }
-
-    private fun buildNextPanel(): LinearLayout = LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
-        visibility = View.GONE
-        background = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 14f)
-            setColor(Color.argb(235, 25, 25, 30))
-            setStroke(dp(2), this@PlayerChrome.colors.accent)
-        }
-        setPadding(dp(18), dp(16), dp(18), dp(16))
-        nextText = TextView(context).apply { textSize = 16f; setTextColor(Color.WHITE) }
-        addView(nextText)
-        addView(LinearLayout(context).apply {
-            gravity = Gravity.END
-            addView(control(PlayerControlIcon.CLOSE, "Cancel next episode", actions::cancelNext))
-            addView(control(PlayerControlIcon.NEXT, "Play next episode now", actions::playNext))
-        })
     }
 
     private fun control(icon: PlayerControlIcon, description: String, action: () -> Unit) =

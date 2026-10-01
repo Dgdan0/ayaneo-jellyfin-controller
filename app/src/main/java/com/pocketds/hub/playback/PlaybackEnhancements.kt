@@ -70,6 +70,9 @@ object PlaybackEnhancements {
     fun previousChapter(chapters: List<PlaybackChapter>, positionMillis: Long): PlaybackChapter? =
         chapters.lastOrNull { it.positionMillis < positionMillis - 750L }
 
+    /** The segment a Skip button is for now: one that earns a button, and not in its last second. */
     fun skipPrompt(segments: List<PlaybackSegment>, positionMillis: Long): PlaybackSegment? =
-        segments.firstOrNull { positionMillis >= it.startMillis && positionMillis < it.endMillis - 1_000L }
+        segments.firstOrNull {
+            UpNext.skipLabel(it.type) != null && positionMillis >= it.startMillis && positionMillis < it.endMillis - 1_000L
+        }
 }
