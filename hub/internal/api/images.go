@@ -355,9 +355,11 @@ func (s *Server) handleJellyfinImage(w http.ResponseWriter, r *http.Request) {
 	s.writeImage(w, img, false)
 }
 
-// bucketWidth snaps to a small set of widths.
+// bucketWidth snaps to a small set of widths. 1280 is for artwork drawn
+// across the whole screen -- Home's hero and a detail page's backdrop -- where
+// 780 is visibly soft on the handheld's 1920px-wide panel.
 func bucketWidth(requested int) int {
-	buckets := []int{180, 270, 360, 540, 780}
+	buckets := []int{180, 270, 360, 540, 780, 1280}
 	if requested <= 0 {
 		return 360
 	}
