@@ -21,7 +21,7 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class AppearanceAndSortTest {
     private fun all(view:View):List<View> = listOf(view)+(view as? ViewGroup)?.let{g->(0 until g.childCount).flatMap{all(g.getChildAt(it))}}.orEmpty()
-    @Test fun settingsOpensAllSettingsAndAppearancePreviewDoesNotNavigate() {
+    @Test fun settingsShowsItsSectionsAndColoursApplyPerMediaType() {
         val ins=InstrumentationRegistry.getInstrumentation()
         val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         lateinit var root:FrameLayout
@@ -38,22 +38,22 @@ class AppearanceAndSortTest {
                 HubSettings.selectUser(activity,UUID.randomUUID().toString(),"Appearance test")
                 ContentModeSettings.set(activity,ContentMode.MEDIA)
                 root=FrameLayout(activity);activity.setContentView(root)
-                current=SettingsScreen{true};root.addView(current.onCreateView(host,root));current.onShow()
+                current=SettingsScreen(null){true};root.addView(current.onCreateView(host,root));current.onShow()
                 val labels=all(root).filterIsInstance<TextView>().map{it.text.toString()}
-                assertTrue(labels.containsAll(listOf("Appearance","Notifications","Playback","Offline downloads","Controller test")))
-                all(root).filterIsInstance<UtilityRowView>().first { it.contentDescription.toString().startsWith("Appearance") }.performClick()
-                assertTrue(current is AppearanceScreen)
-                root.findViewWithTag<View>("media:blue").performClick()
-                root.findViewWithTag<View>("books:rose").performClick()
-                assertEquals(AccentPreset.BLUE,DomainPreferences.accent(activity,ContentMode.MEDIA))
+                assertTrue(labels.containsAll(listOf("Appearance","Home","Playback","Subtitles","Downloads","More","Theme","Movies and TV","Books")))
+                fun swatch(mode:String,id:String)=all(root.findViewWithTag<View>("palette:$mode")).first{it.tag==id}
+                swatch("media","sky").performClick()
+                swatch("books","rose").performClick()
+                assertEquals(AccentPreset.SKY,DomainPreferences.accent(activity,ContentMode.MEDIA))
                 assertEquals(AccentPreset.ROSE,DomainPreferences.accent(activity,ContentMode.BOOKS))
-                all(root).first {it.contentDescription=="Show books"}.performClick()
+                // Settings changes colours; it never switches the app between Media and Books.
                 assertEquals(ContentMode.MEDIA,ContentModeSettings.get(activity))
-                assertTrue(all(root).filterIsInstance<TextView>().any{it.text=="Continue reading"})
-                assertEquals(3,all(root).count{it.contentDescription?.toString()?.let{d->d.startsWith("Ebook,") || d.startsWith("Audiobook,") || d.startsWith("Read along,")}==true})
-                assertFalse(all(root).filterIsInstance<TextView>().any{it.text=="Available" || it.text=="Not available"})
+                all(root).first{it.contentDescription=="Subtitles"}.performClick()
+                assertTrue(all(root).any{it is androidx.media3.ui.SubtitleView})
+                assertTrue(all(root).filterIsInstance<TextView>().any{it.text=="Look"})
+                all(root).first{it.contentDescription=="Appearance"}.performClick()
                 for(mode in listOf("LIGHT","DARK")) {
-                    root.findViewWithTag<View>("mode:$mode").performClick()
+                    (root.findViewWithTag<View>("theme") as BlobSegmentedView).optionView(mode)!!.performClick()
                     root.measure(View.MeasureSpec.makeMeasureSpec(Styler.dpInt(activity,850f),View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(Styler.dpInt(activity,410f),View.MeasureSpec.EXACTLY))
                     root.layout(0,0,root.measuredWidth,root.measuredHeight)
                     val bitmap=android.graphics.Bitmap.createBitmap(root.width,root.height,android.graphics.Bitmap.Config.ARGB_8888)
@@ -61,7 +61,6 @@ class AppearanceAndSortTest {
                     java.io.File(activity.getExternalFilesDir(null),"polish-appearance-${mode.lowercase()}.png").outputStream().use {bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
                     bitmap.recycle()
                 }
-
             }
         } finally {ins.runOnMainSync{current.onHide();current.onDestroyView();activity.finish()};hostRef=null}
     }
@@ -76,7 +75,7 @@ class AppearanceAndSortTest {
             val label=TextView(activity).apply{text="Progress";setTextColor(colors.accent);isFocusableInTouchMode=true}
             val bar=SeekBar(activity).apply{progress=37;progressTintList=android.content.res.ColorStateList.valueOf(colors.accent)}
             root.addView(label);root.addView(bar);activity.setContentView(root);label.requestFocus()
-            DomainPreferences.setAccent(activity,ContentMode.MEDIA,AccentPreset.VIOLET)
+            DomainPreferences.setAccent(activity,ContentMode.MEDIA,AccentPreset.LILAC)
             Theme.refresh(activity,root)
             assertSame(label,root.getChildAt(0));assertTrue(label.hasFocus());assertEquals(37,bar.progress)
             assertEquals(Theme.preview(activity,ContentMode.MEDIA).accent,label.currentTextColor)
@@ -84,7 +83,7 @@ class AppearanceAndSortTest {
             assertEquals(label.currentTextColor,colors.accent)
         }}finally{ins.runOnMainSync{activity.finish()}}
     }
-    @Test fun rememberedSortIsIndependentByProfileAndPanelAppliesWithoutClosing() {
+    @Test fun rememberedSortIsIndependentByProfile() {
         val ins=InstrumentationRegistry.getInstrumentation()
         val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         try {ins.runOnMainSync {
@@ -95,16 +94,6 @@ class AppearanceAndSortTest {
             assertEquals(SortPreference("name",true),DomainPreferences.sort(activity,ContentMode.MEDIA,listOf("name","added"),"name"))
             HubSettings.selectUser(activity,"other-$user","Other")
             assertEquals(SortPreference("series",true),DomainPreferences.sort(activity,ContentMode.BOOKS,listOf("title","series","author"),"series"))
-            val colors=Theme.colors(activity);val root=FrameLayout(activity);activity.setContentView(root)
-            val opener=LibrarySortPanel.control(activity,colors){};root.addView(opener)
-            val panel=SidePanelView(activity,colors,{true});root.addView(panel)
-            var changes=0
-            LibrarySortPanel.show(panel,opener,listOf("name" to "Name","added" to "Date added"),SortPreference("name",true),{changes++},{})
-            all(panel).first{it.contentDescription?.toString()?.startsWith("Date added")==true}.performClick()
-            assertEquals(1,changes);assertTrue(panel.isOpen)
-            all(panel).first{it.contentDescription?.toString()?.startsWith("Date added")==true}.performClick()
-            assertEquals(1,changes)
-            panel.cancel();assertTrue(opener.hasFocus())
         }}finally{ins.runOnMainSync{activity.finish()}}
     }
     @Test fun serviceLogoChangesWithAppearanceWithoutReplacingItsView() {

@@ -209,7 +209,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             }.also { attach(it) }
         )
         sections.select(6); sections.push(ManageScreen(api, ::ringVisible).also { attach(it) })
-        sections.select(7); sections.push(SettingsScreen(::ringVisible).also { attach(it) })
+        sections.select(7); sections.push(SettingsScreen(api, ::ringVisible).also { attach(it) })
         sections.select(
             savedInstanceState?.getInt(STATE_SECTION, 0)
                 ?.coerceIn(sectionTitles.indices) ?: 0

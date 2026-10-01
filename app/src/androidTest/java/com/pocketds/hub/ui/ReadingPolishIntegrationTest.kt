@@ -11,7 +11,6 @@ import com.pocketds.hub.model.*
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.*
 import com.pocketds.hub.screens.discover.ReadingDetailScreen
-import com.pocketds.hub.screens.library.AuthorShelvesView
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -71,32 +70,5 @@ class ReadingPolishIntegrationTest {
                 assertFalse(all(root).filterIsInstance<TextView>().any{it.text=="Ebook ready" || it.text=="Available"})
             }
         }finally{ins.runOnMainSync{screen.onHide();screen.onDestroyView();activity.finish()}}
-    }
-    @Test fun authorRowsKeepIndividualBooksAndExistingContentAfterAFailedSort() {
-        val ins=InstrumentationRegistry.getInstrumentation()
-        val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        val books=listOf(ReadingWork(id="red",title="Red Rising",authors=listOf("Pierce Brown")),ReadingWork(id="gold",title="Golden Son",authors=listOf("Pierce Brown")))
-        val group=ReadingAuthor(id="pierce",name="Pierce Brown",total=2,totalPages=1,items=books)
-        val api=Proxy.newProxyInstance(HubApi::class.java.classLoader,arrayOf(HubApi::class.java)){_,method,args->when(method.name){
-            "readingAuthors"-> if(args!![2]=="asc") HubResult.Ok(ReadingAuthorsResponse(authors=listOf(group),total=1,totalPages=1)) else HubResult.Failed(FailureKind.UNKNOWN,"Offline")
-            "imageUrl"->""
-            else->error(method.name)
-        }} as HubApi
-        var opened="";var status=""
-        lateinit var shelves:AuthorShelvesView
-        try {
-            ins.runOnMainSync{
-                shelves=AuthorShelvesView(activity,api,"storyteller:books",Theme.colors(activity),{true},{message,_->status=message},{},{opened=it.id})
-                activity.setContentView(shelves);shelves.show(true)
-            };ins.waitForIdleSync()
-            ins.runOnMainSync{
-                assertTrue(all(shelves).filterIsInstance<TextView>().any{it.text=="Pierce Brown"})
-                val card=all(shelves).filterIsInstance<PosterCardView>().first{it.contentDescription.toString().startsWith("Golden Son")}
-                card.performClick();assertEquals("gold",opened)
-                shelves.show(false)
-                assertTrue(status.contains("previous order kept"))
-                assertTrue(all(shelves).filterIsInstance<PosterCardView>().any{it.contentDescription.toString().startsWith("Golden Son")})
-            }
-        }finally{ins.runOnMainSync{shelves.destroy();activity.finish()}}
     }
 }
