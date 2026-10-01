@@ -47,6 +47,8 @@ class ConsolidationGuardTest {
             // The overview box takes focus on purpose so its text scrolls; the
             // hint bar is a HorizontalScrollView subclass.
             setOf("ui/FocusScroll.kt", "ui/DetailComponents.kt", "nav/HintBarView.kt")),
+        Rule(Regex("""\.played\)\s*0\.0|\.played\)\s*add\("Watched"\)|played -> "✓""""),
+            "ResumeRules.showsWatched / watchLabel: a saved position wins over watched (a rewatch)"),
         Rule(Regex("""delay\(\w*POLL\w*\)"""),
             "state/Poller with a PollCadence: backoff on failure, stop when hidden"),
     )

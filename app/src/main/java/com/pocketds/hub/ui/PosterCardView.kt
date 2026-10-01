@@ -1,5 +1,6 @@
 package com.pocketds.hub.ui
 
+import com.pocketds.hub.playback.ResumeRules
 import android.content.Context
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
@@ -144,13 +145,13 @@ class PosterCardView(
 
         val availability = Availability.fromWire(hit.availability)
         val libraryBadge = when {
-            hit.played -> "✓"
+            ResumeRules.showsWatched(hit.played, hit.progress) -> "✓"
             hit.unplayedCount > 0 -> hit.unplayedCount.toString()
             hit.favorite -> "★"
             else -> ""
         }
         if (!showAvailability && libraryBadge.isNotEmpty()) {
-            roundBadge(libraryBadge, if (hit.played) colors.badgeAvailable else colors.accent)
+            roundBadge(libraryBadge, if (libraryBadge == "✓") colors.badgeAvailable else colors.accent)
         } else if (showAvailability && availability.label.isNotEmpty()) {
             badge.visibility = VISIBLE
             badge.text = availability.label
@@ -160,7 +161,7 @@ class PosterCardView(
             badge.visibility = GONE
         }
 
-        progressBar.fraction = if (hit.played) 0.0 else hit.progress
+        progressBar.fraction = hit.progress
 
         loadPoster(hit.media.poster, imageLoader, imageUrl)
     }

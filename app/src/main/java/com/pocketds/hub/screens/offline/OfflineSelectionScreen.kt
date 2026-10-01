@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.offline
 
+import com.pocketds.hub.playback.ResumeRules
 import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.EpisodeCardView
@@ -406,11 +407,11 @@ class OfflineSelectionScreen(
                         buildList {
                             add(Fmt.bytes(value.estimatedSizeBytes))
                             if (local != null) add(local.state.wire.replaceFirstChar { it.uppercase() })
-                            if (value.item.played) add("Watched") else if (value.item.progress > 0) add("${(value.item.progress * 100).toInt()}% watched")
+                            ResumeRules.watchLabel(value.item.played, value.item.progress)?.let(::add)
                         }.joinToString(" · ")
                     } else "Unavailable",
                     still = api.imageUrl(value.item.thumb.ifEmpty { value.item.poster }).takeIf(String::isNotEmpty),
-                    progress = if (value.item.played) 0.0 else value.item.progress,
+                    progress = value.item.progress,
                     available = value.available
                 ),
                 Artwork.loader(api, view.context)

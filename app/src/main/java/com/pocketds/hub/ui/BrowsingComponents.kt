@@ -1,5 +1,6 @@
 package com.pocketds.hub.ui
 
+import com.pocketds.hub.playback.ResumeRules
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -58,9 +59,9 @@ class LandscapeCardView(context: Context, private val colors: PocketColors) : Li
     }
     fun bind(hit: SearchHit,loader: ImageLoader,url: (String)->String) {
         titleView.text=hit.media.title;subtitle.text=hit.subtitle
-        progress.fraction=if(hit.played) 0.0 else hit.progress
-        badge.visibility=if(hit.played) VISIBLE else GONE
-        contentDescription=listOf(hit.media.title,hit.subtitle,if(hit.played) "Watched" else if(progress.fraction>0) "${(progress.fraction*100).toInt()} percent watched" else "").filter(String::isNotBlank).joinToString(", ")
+        progress.fraction=hit.progress
+        badge.visibility=if(ResumeRules.showsWatched(hit.played,hit.progress)) VISIBLE else GONE
+        contentDescription=listOf(hit.media.title,hit.subtitle,ResumeRules.watchLabel(hit.played,hit.progress).orEmpty()).filter(String::isNotBlank).joinToString(", ")
         DetailStyler.image(image,url(hit.media.backdrop.ifBlank {hit.media.poster}).takeIf(String::isNotBlank),loader)
     }
     private fun dp(n:Int)=Styler.dpInt(context,n.toFloat())

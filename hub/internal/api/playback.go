@@ -396,8 +396,9 @@ func playbackStartPosition(item jellyfin.Item, prepare PlaybackPrepareBody, dura
 	if positionMillis == 0 && item.UserData != nil {
 		positionMillis = item.UserData.PlaybackPositionTicks / 10_000
 	}
-	if positionMillis < 30_000 || durationMillis-positionMillis <= 30_000 ||
-		(item.UserData != nil && item.UserData.Played) {
+	// A watched item with a position is a rewatch and resumes like Jellyfin's
+	// own clients; finishing or marking it watched clears the position.
+	if positionMillis < 30_000 || durationMillis-positionMillis <= 30_000 {
 		return 0
 	}
 	return positionMillis

@@ -34,8 +34,25 @@ object ResumeRules {
     }
 
     /** The position to resume from, or 0 to start at the beginning. */
-    fun resumePosition(positionMillis: Long, durationMillis: Long, played: Boolean = false): Long =
-        if (!played && judge(positionMillis, durationMillis) == Verdict.RESUME) positionMillis else 0L
+    fun resumePosition(positionMillis: Long, durationMillis: Long): Long =
+        if (judge(positionMillis, durationMillis) == Verdict.RESUME) positionMillis else 0L
+
+    /**
+     * Watched with a saved position is a rewatch in progress: Jellyfin keeps
+     * Played set while a watched episode is watched again, and offers Resume
+     * for it. So the position wins -- progress bar, "40% watched", Resume --
+     * and the watched tick shows only when there is nothing to resume. Cards
+     * used to hide the position of anything watched, so a rewatch sat in
+     * Continue watching with a tick and no bar, and its page offered Play.
+     */
+    fun showsWatched(played: Boolean, progress: Double): Boolean = played && progress <= 0.0
+
+    /** "40% watched", "Watched", or null when there is nothing to say. */
+    fun watchLabel(played: Boolean, progress: Double): String? = when {
+        progress > 0 -> "${(progress * 100).toInt()}% watched"
+        played -> "Watched"
+        else -> null
+    }
 
     fun isFinished(positionMillis: Long, durationMillis: Long): Boolean =
         judge(positionMillis, durationMillis) == Verdict.FINISHED

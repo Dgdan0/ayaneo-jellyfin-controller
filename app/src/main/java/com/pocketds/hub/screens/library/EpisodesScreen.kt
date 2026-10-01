@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.playback.ResumeRules
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.EpisodeCardView
 import com.pocketds.hub.ui.EpisodeLabel
@@ -291,8 +292,7 @@ class EpisodesScreen(
             val value = values[position]
             val meta = buildList {
                 if (value.runtimeSeconds > 0) add(Fmt.runtime(value.runtimeSeconds.toLong()))
-                if (value.played) add("Watched")
-                else if (value.progress > 0) add("${(value.progress * 100).toInt()}% watched")
+                ResumeRules.watchLabel(value.played, value.progress)?.let(::add)
             }.joinToString(" · ")
             holder.card.setTag(TAG_EPISODE, value)
             holder.card.bind(
@@ -300,7 +300,7 @@ class EpisodesScreen(
                     title = value.subtitle.ifEmpty { EpisodeLabel.of(value.seasonNumber, value.indexNumber, value.title) },
                     meta = meta,
                     still = api.imageUrl(value.thumb.ifEmpty { value.poster }).takeIf(String::isNotEmpty),
-                    progress = if (value.played) 0.0 else value.progress,
+                    progress = value.progress,
                     overview = value.overview,
                     description = "Episode ${value.indexNumber}, ${value.subtitle.ifEmpty { value.title }}, $meta"
                 ),

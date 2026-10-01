@@ -457,6 +457,14 @@ func TestResumeRulesRejectTinyAndNearlyFinishedPositions(t *testing.T) {
 	}
 }
 
+func TestResumeContinuesARewatch(t *testing.T) {
+	item := jellyfin.Item{RunTimeTicks: 1_440_000 * 10_000,
+		UserData: &jellyfin.UserData{Played: true, PlaybackPositionTicks: 192_000 * 10_000}}
+	if got := playbackStartPosition(item, PlaybackPrepareBody{StartMode: "resume"}, 1_440_000); got != 192_000 {
+		t.Fatalf("resume of a rewatch = %d, want 192000", got)
+	}
+}
+
 func TestForcedFallbackRemovesDirectPlayProfiles(t *testing.T) {
 	normal := buildDeviceProfile(PlaybackPrepareBody{Capabilities: PlaybackCapabilities{
 		VideoCodecs: []string{"h264"}, AudioCodecs: []string{"aac"},

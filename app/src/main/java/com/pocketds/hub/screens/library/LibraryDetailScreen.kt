@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.playback.ResumeRules
 import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.ProgressLine.showFraction
 import com.pocketds.hub.ui.Artwork
@@ -405,9 +406,9 @@ class LibraryDetailScreen(
             addAll(value.genres)
         }.joinToString(" · ")
         progress.text = buildList {
+            val watch = ResumeRules.watchLabel(value.played, value.progress)
             when {
-                value.played -> add("✓ Watched")
-                value.progress > 0 -> add("${(value.progress * 100).toInt()}% watched")
+                watch != null -> add(if (ResumeRules.showsWatched(value.played, value.progress)) "✓ $watch" else watch)
                 value.unplayedCount > 0 -> add("${value.unplayedCount} unwatched")
             }
             if (canResume(value)) add("Continue at ${Fmt.clock(value.positionSeconds.toLong() * 1_000)}")
@@ -598,12 +599,9 @@ class LibraryDetailScreen(
         episodePreviewTitle.text = "${episodePreviewLabel.text} · " + episode.subtitle.ifEmpty { episode.title }
         episodePreviewMeta.text = buildList {
             if (episode.runtimeSeconds > 0) add(Fmt.runtime(episode.runtimeSeconds.toLong()))
-            when {
-                episode.played -> add("Watched")
-                episode.progress > 0 -> add("${(episode.progress * 100).toInt()}% watched")
-            }
+            ResumeRules.watchLabel(episode.played, episode.progress)?.let(::add)
         }.joinToString(" · ")
-        episodePreviewProgress.showFraction(if (episode.played) 0.0 else episode.progress)
+        episodePreviewProgress.showFraction(episode.progress)
         loadImage(episodePreviewImage, episode.thumb.ifEmpty { episode.poster })
         episodePreview.contentDescription = "${episodePreviewLabel.text}, ${episodePreviewTitle.text}"
     }
@@ -804,8 +802,10 @@ class LibraryDetailScreen(
     // The position was already judged -- by the hub when it saved the stop, or
     // by ResumeRules in the checkpoint applyTo overlaid -- so judging it again
     // with another rule could only disagree with Home's Continue watching row.
+    // A watched item with a position is a rewatch, and resumes like Jellyfin's
+    // own clients (ResumeRules.showsWatched); "Mark watched" clears the position.
     private fun canResume(value: LibraryItem?): Boolean =
-        value != null && !value.played && value.positionSeconds > 0
+        value != null && value.positionSeconds > 0
 
 
     private fun loadSeasons() {

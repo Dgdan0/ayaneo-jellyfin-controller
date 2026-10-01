@@ -47,7 +47,8 @@ object PlaybackProgressStore {
             return item.copy(played = true, positionSeconds = 0, progress = 0.0)
         }
         val position = checkpoint.resumePosition(item.id, "resume", nowMillis)
-        if (position == 0L || item.played) return item
+        // A watched item with a checkpoint is being rewatched; see ResumeRules.showsWatched.
+        if (position == 0L) return item
         return item.copy(
             positionSeconds = (position / 1_000L).toInt(),
             progress = (position.toDouble() / checkpoint.durationMillis.toDouble()).coerceIn(0.0, 1.0)

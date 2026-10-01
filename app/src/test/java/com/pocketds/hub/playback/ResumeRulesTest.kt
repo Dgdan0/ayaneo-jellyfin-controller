@@ -3,6 +3,7 @@ package com.pocketds.hub.playback
 import com.pocketds.hub.playback.ResumeRules.Verdict
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -46,8 +47,18 @@ class ResumeRulesTest {
     }
 
     @Test
-    fun `a played item never resumes`() {
-        assertEquals(0L, ResumeRules.resumePosition(1_200_000, hour, played = true))
+    fun `a rewatch shows its progress, not the watched tick`() {
+        // Bleach S1E2: watched, then started again and stopped at 3:12 of 24 minutes.
+        assertFalse(ResumeRules.showsWatched(played = true, progress = 0.13))
+        assertEquals("13% watched", ResumeRules.watchLabel(played = true, progress = 0.13))
         assertFalse(ResumeRules.isFinished(1_200_000, hour))
+    }
+
+    @Test
+    fun `watched with nothing to resume shows the tick`() {
+        assertTrue(ResumeRules.showsWatched(played = true, progress = 0.0))
+        assertEquals("Watched", ResumeRules.watchLabel(played = true, progress = 0.0))
+        assertFalse(ResumeRules.showsWatched(played = false, progress = 0.0))
+        assertNull(ResumeRules.watchLabel(played = false, progress = 0.0))
     }
 }

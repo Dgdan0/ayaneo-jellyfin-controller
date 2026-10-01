@@ -193,9 +193,10 @@ func (s *Server) itemToHit(item jellyfin.Item) SearchHit {
 		hit.Played = item.UserData.Played
 		hit.Favorite = item.UserData.IsFavorite
 		hit.UnplayedCount = item.UserData.UnplayedItemCount
-		if hit.Played {
-			hit.Progress = 0
-		}
+		// Played with a position is a rewatch in progress, and its card keeps
+		// the bar (the app's ResumeRules.showsWatched). Jellyfin clears the
+		// position when an item is finished or marked watched, so a plain
+		// watched item already reports no progress.
 	}
 	if tmdb := item.Tmdb(); tmdb != "" {
 		hit.Media.Key = "tmdb:" + hit.Media.Type + ":" + tmdb
