@@ -570,6 +570,12 @@ Most of these exist because several screens had drifted copies of the same thing
 | On/off action icons (watched, favourite, downloaded) | `MediaActionIconDrawable.of` (`MediaActionIcon.isOn`): filled accent when on, outline when off; `DOWNLOADING` is a progress ring |
 | Reacting to offline downloads changing | `offline/OfflineChanges` (start in onShow, stop in onHide) |
 | Sorting a library | `ui/LibrarySortControls` (field button + one-press direction); wording from `SortPreference.directionLabel` |
+| A series' books as cards / their labels | `screens/library/SeriesBookStrip` + `SeriesBookLabels` ("Book 2 · 40% · Audio"); series page, author page and a book's own page |
+| A book's facts line | `ReadingBookFacts.line` ("Book 6 of Red Rising · 2023 · 735 pages") |
+| Books Home rows | `ReadingShelves`: `onePerSeries`, `nextInSeries`, `BUILT_IN` (rows the app fills; list actions only on the person's own) |
+| Reading times from the hub | `ReadingShelves.timestamp` (Storyteller writes `2026-09-27 03:16:47`, UTC with no zone) |
+| Hub: an author page id | `readingAuthorRef` (Authors view and a book's author link) |
+| Hub: a Storyteller title | `reconcileStorytellerBook` (file-name titles, `withoutSeriesNote`) and `storytellerPeople` (writers, not narrators, as First Last) |
 | Activating a focusable on the first tap | `activateOnTap`, never `setOnClickListener` on a focusable |
 | Paging with L2/R2 | `HubActivity.page` (moves focus with the scroll) |
 | Loading the next page of a list or row | `state/PagedLoadState`; one per row via `state/RowPaging` |
