@@ -38,4 +38,14 @@ class AppearancePolicyTest {
         assertFalse(SortPreference.forField("rating").ascending)
         assertTrue(SortPreference.forField("author").ascending)
     }
+
+    @Test
+    fun `the direction is named for what it does to the field`() {
+        assertEquals("Newest first", SortPreference("added", false).directionLabel())
+        assertEquals("Oldest first", SortPreference("added", true).directionLabel())
+        assertEquals("A to Z", SortPreference("name", true).directionLabel())
+        assertEquals("Highest first", SortPreference("rating", false).directionLabel())
+        // A new field keeps its own default direction; flipping keeps the field.
+        assertEquals(SortPreference("added", false), SortPreference.forField("added"))
+    }
 }

@@ -1,11 +1,11 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.LibrarySortControls
 import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.settings.DomainPreferences
 import com.pocketds.hub.settings.SortPreference
-import com.pocketds.hub.ui.LibrarySortPanel
 import com.pocketds.hub.ui.CenteredIconTextView
 import com.pocketds.hub.state.ContentMode
 import android.view.Gravity
@@ -89,7 +89,7 @@ class ReadingLibraryGridScreen(
     private val paging = PagedLoadState(PREFETCH_AHEAD)
     private val adapter = WorkAdapter()
     private lateinit var colors: PocketColors
-    private lateinit var sortControl: CenteredIconTextView
+    private lateinit var sortControls: LibrarySortControls
     private lateinit var status: TextView
     private lateinit var grid: RecyclerView
     private lateinit var authorShelves:AuthorShelvesView
@@ -118,11 +118,9 @@ class ReadingLibraryGridScreen(
             }
             val toolbar=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(dp(16),dp(2),dp(20),dp(2)) }
             toolbar.addView(status,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
-            sortControl=LibrarySortPanel.control(context,colors,::showSortPanel).apply {
-                text=LibrarySortPanel.label(sortFields,SortPreference(sortKey,sortAscending))
-                contentDescription="Sort library, $text"
-            }
-            toolbar.addView(sortControl)
+            sortControls=LibrarySortControls(context,colors,sortFields,SortPreference(sortKey,sortAscending),
+                {this@ReadingLibraryGridScreen.overlay},::applySort) {host?.refreshHints()}
+            toolbar.addView(sortControls)
             addView(toolbar)
             grid = RecyclerView(context).apply {
                 layoutManager = GridLayoutManager(context, MAX_COLUMNS)
@@ -203,7 +201,7 @@ class ReadingLibraryGridScreen(
     override fun requestInitialFocus(): Boolean {
         if (::overlay.isInitialized && overlay.isOpen) return true
         if(::authorShelves.isInitialized && authorShelves.visibility==View.VISIBLE)return authorShelves.restoreFocus()
-        if (!::grid.isInitialized || adapter.itemCount == 0) return if(::sortControl.isInitialized) sortControl.requestFocus() else false
+        if (!::grid.isInitialized || adapter.itemCount == 0) return if(::sortControls.isInitialized) sortControls.fieldButton.requestFocus() else false
         val target = focusState.resolve(adapter.ids())
         if (target < 0) return false
         grid.scrollToPosition(target)
@@ -230,7 +228,7 @@ class ReadingLibraryGridScreen(
         return when (action) {
             PadAction.Activate -> if(authorShelves.visibility==View.VISIBLE) false else focusedWork()?.let(::open) != null
             PadAction.Secondary -> {
-                showSortPanel()
+                sortControls.showFields()
                 true
             }
             PadAction.Refresh -> {
@@ -311,18 +309,12 @@ class ReadingLibraryGridScreen(
     private fun applySort(value:SortPreference) {
         sortKey=value.field;sortAscending=value.ascending
         DomainPreferences.setSort(requireNotNull(host).viewContext,ContentMode.BOOKS,value)
-        sortControl.text=LibrarySortPanel.label(sortFields,value)
-        sortControl.contentDescription="Sort library, ${sortControl.text}"
         reload(resetSelection=true)
-    }
-    private fun showSortPanel() {
-        LibrarySortPanel.show(overlay,sortControl,sortFields,SortPreference(sortKey,sortAscending),::applySort,{host?.refreshHints()})
-        host?.refreshHints()
     }
 
     private fun sortLabel(): String {
         val field = sortFields.firstOrNull { it.first == sortKey }?.second ?: "Title"
-        return "$field · ${ReadingSortFields.directionLabel(sortKey, sortAscending)}"
+        return "$field · ${SortPreference(sortKey, sortAscending).directionLabel()}"
     }
 
     private fun focusedPosition(): Int {
@@ -687,9 +679,9 @@ class ReadingWorkScreen(
                 textSize = 13f
                 DetailStyler.action(this, colors, primary = false)
                 setCenteredIcon(
-                    MediaActionIconDrawable(context,
+                    MediaActionIconDrawable.of(context,
                         if (work.progress?.completed == true) MediaActionIcon.WATCHED else MediaActionIcon.UNWATCHED,
-                        colors.primaryText), dp(21))
+                        colors), dp(21))
                 setPadding(dp(12), 0, dp(12), 0)
                 attachActionFocus(this)
                 activateOnTap {

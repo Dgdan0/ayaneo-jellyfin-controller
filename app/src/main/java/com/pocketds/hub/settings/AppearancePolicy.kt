@@ -37,6 +37,15 @@ object PreferenceScope {
 data class SortPreference(val field: String, val ascending: Boolean) {
     fun encode() = "$field:${if (ascending) "asc" else "desc"}"
     fun supported(fields: List<String>, fallback: String) = if (field in fields) this else forField(fallback)
+
+    /** What the direction means for this field: "A to Z", "Newest first", "Highest first". */
+    fun directionLabel(): String = when (field) {
+        "last_read" -> if (ascending) "Least recently read first" else "Most recently read first"
+        "name", "title", "author", "series" -> if (ascending) "A to Z" else "Z to A"
+        "added", "release", "played", "last_read", "year" -> if (ascending) "Oldest first" else "Newest first"
+        else -> if (ascending) "Lowest first" else "Highest first"
+    }
+
     companion object {
         fun forField(field: String) = SortPreference(field, field !in setOf("added","last_read","release","year","rating","played","progress"))
         fun decode(raw: String?, fallback: String): SortPreference {

@@ -1,15 +1,16 @@
 package com.pocketds.hub.screens.library
 
 import com.pocketds.hub.model.ReadingLibrary
+import com.pocketds.hub.settings.SortPreference
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ReadingSortFieldsTest {
     @Test fun `one sort sheet labels recent activity direction honestly`() {
-        assertEquals("Most recently read first", ReadingSortFields.directionLabel("last_read", ascending = false))
-        assertEquals("Least recently read first", ReadingSortFields.directionLabel("last_read", ascending = true))
-        assertEquals("A to Z", ReadingSortFields.directionLabel("title", ascending = true))
-        assertEquals("Z to A", ReadingSortFields.directionLabel("title", ascending = false))
+        assertEquals("Most recently read first", SortPreference("last_read", false).directionLabel())
+        assertEquals("Least recently read first", SortPreference("last_read", true).directionLabel())
+        assertEquals("A to Z", SortPreference("title", true).directionLabel())
+        assertEquals("Z to A", SortPreference("title", false).directionLabel())
     }
     @Test
     fun `storyteller exposes series author and last read sorts`() {
@@ -41,9 +42,9 @@ class ReadingSortFieldsTest {
 
     @Test
     fun `recent activity sorts default to newest first`() {
-        assertEquals(false, ReadingSortFields.defaultAscending("last_read"))
-        assertEquals(false, ReadingSortFields.defaultAscending("added"))
-        assertEquals(true, ReadingSortFields.defaultAscending("series"))
-        assertEquals(true, ReadingSortFields.defaultAscending("author"))
+        assertEquals(false, SortPreference.forField("last_read").ascending)
+        assertEquals(false, SortPreference.forField("added").ascending)
+        assertEquals(true, SortPreference.forField("series").ascending)
+        assertEquals(true, SortPreference.forField("author").ascending)
     }
 }

@@ -1,9 +1,9 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.LibrarySortControls
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.settings.DomainPreferences
 import com.pocketds.hub.settings.SortPreference
-import com.pocketds.hub.ui.LibrarySortPanel
 import com.pocketds.hub.ui.CenteredIconTextView
 import android.view.Gravity
 import android.view.View
@@ -482,7 +482,7 @@ class LibraryGridScreen(
     private val paging = PagedLoadState(PREFETCH_AHEAD)
     private val adapter = ItemAdapter()
     private lateinit var colors: PocketColors
-    private lateinit var sortControl: CenteredIconTextView
+    private lateinit var sortControls: LibrarySortControls
     private lateinit var status: TextView
     private lateinit var grid: RecyclerView
     private lateinit var overlay: ChoiceOverlay
@@ -514,12 +514,10 @@ class LibraryGridScreen(
             }
             val toolbar=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(dp(16),dp(2),dp(20),dp(2)) }
             toolbar.addView(status,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
-            sortControl=LibrarySortPanel.control(context,colors,::showSortPanel).apply {
-                text=LibrarySortPanel.label(SORT_FIELDS,SortPreference(sortKey,sortAscending))
-                contentDescription="Sort library, $text"
-            }
-            if(library.kind in setOf("search","favorites"))sortControl.visibility=View.GONE
-            toolbar.addView(sortControl)
+            sortControls=LibrarySortControls(context,colors,SORT_FIELDS,SortPreference(sortKey,sortAscending),
+                {this@LibraryGridScreen.overlay},::applySort) {host?.refreshHints()}
+            if(library.kind in setOf("search","favorites"))sortControls.visibility=View.GONE
+            toolbar.addView(sortControls)
             addView(toolbar)
             grid = RecyclerView(context).apply {
                 layoutManager = GridLayoutManager(context, MAX_COLUMNS)
@@ -606,7 +604,7 @@ class LibraryGridScreen(
 
     override fun requestInitialFocus(): Boolean {
         if (::overlay.isInitialized && overlay.isOpen) return true
-        if (!::grid.isInitialized || adapter.itemCount == 0) return if(::sortControl.isInitialized) sortControl.requestFocus() else false
+        if (!::grid.isInitialized || adapter.itemCount == 0) return if(::sortControls.isInitialized) sortControls.fieldButton.requestFocus() else false
         val target = selected.coerceIn(0, adapter.itemCount - 1)
         grid.scrollToPosition(target)
         grid.post { grid.findViewHolderForAdapterPosition(target)?.itemView?.requestFocus() }
@@ -633,7 +631,7 @@ class LibraryGridScreen(
             PadAction.Activate -> focusedHit()?.let(::open) != null
             PadAction.Secondary -> {
                 if (library.kind !in setOf("search", "favorites")) {
-                    showSortPanel()
+                    sortControls.showFields()
                     true
                 } else false
             }
@@ -733,18 +731,12 @@ class LibraryGridScreen(
     private fun applySort(value:SortPreference) {
         sortKey=value.field;sortAscending=value.ascending
         DomainPreferences.setSort(requireNotNull(host).viewContext,ContentMode.MEDIA,value)
-        sortControl.text=LibrarySortPanel.label(SORT_FIELDS,value)
-        sortControl.contentDescription="Sort library, ${sortControl.text}"
         reload(resetSelection=true)
-    }
-    private fun showSortPanel() {
-        LibrarySortPanel.show(overlay,sortControl,SORT_FIELDS,SortPreference(sortKey,sortAscending),::applySort,{host?.refreshHints()})
-        host?.refreshHints()
     }
 
     private fun sortLabel(): String {
         val field = SORT_FIELDS.firstOrNull { it.first == sortKey }?.second ?: "Name"
-        return "$field ${if (sortAscending) "ascending" else "descending"}"
+        return "$field · ${SortPreference(sortKey, sortAscending).directionLabel()}"
     }
 
     private fun restoreFocus() { if (adapter.itemCount > 0) requestInitialFocus() }

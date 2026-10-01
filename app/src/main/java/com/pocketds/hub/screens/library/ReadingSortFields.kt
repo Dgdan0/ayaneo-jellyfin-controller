@@ -22,12 +22,6 @@ object ReadingSortFields {
         return all.filter { it.first in advertised }
     }
 
-    fun defaultAscending(field: String): Boolean = field != "added" && field != "last_read"
-
-    fun directionLabel(field: String, ascending: Boolean): String = when (field) {
-        "last_read" -> if (ascending) "Least recently read first" else "Most recently read first"
-        "added" -> if (ascending) "Oldest added first" else "Newest added first"
-        "title", "series", "author" -> if (ascending) "A to Z" else "Z to A"
-        else -> if (ascending) "Ascending" else "Descending"
-    }
+    // Direction wording and each field's default direction are SortPreference's,
+    // shared with the video Library.
 }

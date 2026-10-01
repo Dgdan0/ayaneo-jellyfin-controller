@@ -1,43 +1,82 @@
 package com.pocketds.hub.ui
 
 import android.content.Context
-import android.view.View
+import android.view.Gravity
+import android.widget.LinearLayout
 import com.pocketds.hub.settings.SortPreference
 
-/** One immediate-apply panel, with durable selection independent of controller focus. */
-object LibrarySortPanel {
-    fun control(context:Context,colors:PocketColors,open:()->Unit) = CenteredIconTextView(context).apply {
-        textSize=12f; minimumHeight=Styler.dpInt(context,48f)
-        setTextColor(colors.primaryText);setPadding(Styler.dpInt(context,12f),0,Styler.dpInt(context,12f),0)
-        setCenteredIcon(AppIconDrawable(AppIcon.SORT,colors.mutedText),Styler.dpInt(context,20f),Styler.dpInt(context,8f))
-        background=Styler.chipBackground(context,colors);Styler.makeFocusable(this);activateOnTap(open)
-    }
-    fun label(fields:List<Pair<String,String>>,value:SortPreference) =
-        "${fields.firstOrNull { it.first==value.field }?.second ?: value.field} ${if(value.ascending) "↑" else "↓"}"
+/**
+ * Two buttons above a library grid: what to sort by, and which way.
+ *
+ * The field button opens a list of fields; the direction button flips with one
+ * press and opens nothing. They used to be one panel listing the fields and
+ * then Ascending / Descending underneath, so changing only the direction meant
+ * scrolling past every field, and the two choices read as one list.
+ */
+class LibrarySortControls(
+    context: Context,
+    private val colors: PocketColors,
+    private val fields: List<Pair<String, String>>,
+    initial: SortPreference,
+    private val overlay: () -> ChoiceOverlay,
+    private val onChange: (SortPreference) -> Unit,
+    /** The hint bar follows the menu opening and closing. */
+    private val onMenu: () -> Unit
+) : LinearLayout(context) {
+    var value: SortPreference = initial
+        private set
+    val fieldButton = button(AppIcon.SORT) { showFields() }
+    val directionButton = button(null) { set(value.copy(ascending = !value.ascending)) }
 
-    fun show(panel:SidePanelView,opener:View,fields:List<Pair<String,String>>,value:SortPreference,
-             apply:(SortPreference)->Unit,onDismiss:()->Unit,focus:String=value.field) {
-        if (!panel.isOpen) opener.requestFocus()
-        panel.resetBody();panel.open("Sort library",onDismiss={opener.requestFocus();onDismiss()})
-        val rows=linkedMapOf<String,View>()
-        fields.forEach { (id,label) -> rows[id]=panel.choice(label,selected=id==value.field) {
-            val next=if(id==value.field)value else SortPreference.forField(id)
-            if(next!=value)apply(next)
-            show(panel,opener,fields,next,apply,onDismiss,id)
-        } }
-        listOf(true to "Ascending",false to "Descending").forEach { (ascending,label) ->
-            val id=if(ascending)"asc" else "desc"
-            val detail=when(value.field) {
-                "name","title","author","series" -> if(ascending)"A to Z" else "Z to A"
-                "added","release","played","last_read","year" -> if(ascending)"Oldest first" else "Newest first"
-                else -> if(ascending)"Lowest first" else "Highest first"
-            }
-            rows[id]=panel.choice(label,detail,selected=value.ascending==ascending) {
-                val next=value.copy(ascending=ascending)
-                if(next!=value)apply(next)
-                show(panel,opener,fields,next,apply,onDismiss,id)
-            }
+    init {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(fieldButton)
+        addView(directionButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+            marginStart = Styler.dpInt(context, 8f)
+        })
+        refresh()
+    }
+
+    private fun set(next: SortPreference) {
+        if (next == value) return
+        value = next
+        refresh()
+        onChange(next)
+    }
+
+    private fun fieldLabel(field: String) = fields.firstOrNull { it.first == field }?.second ?: field
+
+    private fun refresh() {
+        fieldButton.text = "${fieldLabel(value.field)}  ▾"
+        fieldButton.contentDescription = "Sort by ${fieldLabel(value.field)}"
+        directionButton.text = "${if (value.ascending) "↑" else "↓"}  ${value.directionLabel()}"
+        directionButton.contentDescription = "${value.directionLabel()}, press to reverse"
+    }
+
+    /** Y on the grid opens this too. */
+    fun showFields() {
+        overlay().pickValue(
+            "Sort by", "",
+            fields.map { it.first }, value.field, ::fieldLabel,
+            onCancel = onMenu
+        ) { picked ->
+            // A new field starts in its own natural direction: newest first for dates.
+            set(if (picked == value.field) value else SortPreference.forField(picked))
+            onMenu()
         }
-        panel.focusBody(rows[focus])
+        onMenu()
+    }
+
+    private fun button(icon: AppIcon?, open: () -> Unit) = CenteredIconTextView(context).apply {
+        textSize = 12f
+        gravity = Gravity.CENTER
+        minimumHeight = Styler.dpInt(context, 48f)
+        setTextColor(colors.primaryText)
+        setPadding(Styler.dpInt(context, 12f), 0, Styler.dpInt(context, 12f), 0)
+        if (icon != null) setCenteredIcon(AppIconDrawable(icon, colors.mutedText), Styler.dpInt(context, 20f), Styler.dpInt(context, 8f))
+        background = Styler.chipBackground(context, colors)
+        Styler.makeFocusable(this)
+        activateOnTap(open)
     }
 }
