@@ -26,6 +26,22 @@ class OfflineCatalogTest {
     }
 
     @Test
+    fun `downloads group by the library their manifest or a later lookup names, unknown last`() {
+        val values = listOf(
+            row("m1", com.pocketds.hub.model.LibraryItem(id = "m1", type = "movie", title = "Iron Man 3",
+                library = com.pocketds.hub.model.LibraryRef("mv", "Marvel Movies"))),
+            episode("b1", "bleach", "Bleach", "season-1", 1, 1),
+            movie("m2", "Zodiac"),
+            episode("a1", "attack", "Attack on Titan", "season-1", 1, 1)
+        )
+        val entries = OfflineCatalog.titles(values, libraryNames = mapOf("bleach" to "Anime", "attack" to "Anime"))
+        val groups = OfflineCatalog.byLibrary(entries)
+        assertEquals(listOf("Anime", "Marvel Movies", "Movies"), groups.map { it.first })
+        assertEquals(listOf("Attack on Titan", "Bleach"), groups.first().second.map { it.title })
+        assertEquals(listOf("Zodiac"), groups.last().second.map { it.title })
+    }
+
+    @Test
     fun `seasons include only stored rows for the selected series`() {
         val values = listOf(
             episode("s1e4", "lanterns", "Lanterns", "season-1", 1, 4),

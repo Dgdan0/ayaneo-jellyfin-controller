@@ -40,22 +40,33 @@ import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.state.Fmt
+import kotlinx.coroutines.launch
 
-/** Persistent transfer manager and the device's offline library. */
+/**
+ * Downloads: what is on this handheld, grouped by the Jellyfin library each
+ * title came from, and the queue of what is still coming. A bar shows the
+ * space used against what is left.
+ */
 class OfflineScreen(
     private val api: HubApi,
     private val ringVisible: () -> Boolean,
     private val targetItemId: String = ""
 ) : Screen {
-    override val title = "Offline"
+    override val title = "Downloads"
     override val focusOnShow = true
+    override val showsOwnTitle = true
+
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
+    /** Library lookups for downloads made before manifests named one; each asked once. */
+    private val lookedUp = mutableSetOf<String>()
 
     private lateinit var host: ScreenHost
     private lateinit var colors: PocketColors
     private lateinit var repository: OfflineRepository
-    private lateinit var queueTab: TextView
-    private lateinit var libraryTab: TextView
+    private lateinit var tabs: com.pocketds.hub.ui.BlobSegmentedView
     private lateinit var summary: TextView
+    private lateinit var storageLabel: TextView
+    private lateinit var storageFill: View
     private lateinit var scroll: ScrollView
     private lateinit var content: LinearLayout
     private lateinit var overlay: ChoiceOverlay
@@ -75,20 +86,45 @@ class OfflineScreen(
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
         val page = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(10), dp(16), 0)
+            setPadding(dp(24), dp(10), dp(20), 0)
             addView(LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                addView(TextView(context).apply {
-                    text = "On your Pocket"; textSize = 23f; setTextColor(colors.primaryText)
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(TextView(context).apply {
+                        text = "On your Pocket"
+                        com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.SCREEN, 24f)
+                        setTextColor(colors.primaryText)
+                    })
+                    summary = TextView(context).apply {
+                        textSize = 12f; setTextColor(colors.mutedText); setPadding(0, dp(4), 0, 0)
+                    }
+                    addView(summary)
                 }, LinearLayout.LayoutParams(0, WRAP, 1f))
-                libraryTab = tab("Downloaded", MODE_LIBRARY)
-                queueTab = tab("Download manager", MODE_QUEUE)
-                addView(libraryTab); addView(queueTab)
+                // Space used on the chosen storage against what is left.
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    storageLabel = TextView(context).apply { textSize = 11f; setTextColor(colors.mutedText) }
+                    addView(storageLabel)
+                    storageFill = View(context).apply {
+                        background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(4).toFloat(), colors.accent)
+                    }
+                    addView(FrameLayout(context).apply {
+                        background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(4).toFloat(), colors.posterPlaceholder)
+                        clipToOutline = true
+                        addView(storageFill, FrameLayout.LayoutParams(0, MATCH))
+                    }, LinearLayout.LayoutParams(dp(200), dp(8)).apply { topMargin = dp(5) })
+                }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(16); bottomMargin = dp(6) })
+                tabs = com.pocketds.hub.ui.BlobSegmentedView(context, colors, ringVisible).apply {
+                    trackColor = colors.cardSurface
+                    setOptions(listOf(com.pocketds.hub.ui.BlobSegmentedView.Option("library", "Downloaded"),
+                        com.pocketds.hub.ui.BlobSegmentedView.Option("queue", "Queue")), "library")
+                    onPick = { id -> switchTo(if (id == "queue") MODE_QUEUE else MODE_LIBRARY) }
+                    onOptionFocused = { host.refreshHints() }
+                }
+                addView(tabs, LinearLayout.LayoutParams(WRAP, WRAP))
             })
-            summary = TextView(context).apply {
-                textSize = 11f; setTextColor(colors.mutedText); setPadding(0, dp(6), 0, dp(5))
-            }
-            addView(summary)
+            addView(View(context), LinearLayout.LayoutParams(MATCH, dp(6)))
             content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
             scroll = FocusScrollView(context).apply {
                 clipToPadding = false; setPadding(0, 0, 0, dp(20)); addView(content)
@@ -114,12 +150,14 @@ class OfflineScreen(
     override fun onShow() {
         offlineChanges.start(host.viewContext)
         render(force = true)
+        lookUpLibraries()
         if (repository.batches().any { batch ->
                 !batch.paused && batch.jobs.any { it.state in setOf(OfflineState.QUEUED, OfflineState.WAITING) }
             } || repository.outbox().isNotEmpty()
         ) OfflineDownloadService.start(host.viewContext)
     }
     override fun onHide() {
+        scope.coroutineContext[kotlinx.coroutines.Job]?.children?.forEach { it.cancel() }
         cancelScheduledRender()
         offlineChanges.stop()
         if (::overlay.isInitialized) overlay.dismiss()
@@ -131,22 +169,22 @@ class OfflineScreen(
         selectedId = ""
         scroll.scrollTo(0, 0)
         render(force = true)
-        queueTab.post { requestInitialFocus() }
+        tabs.post { requestInitialFocus() }
     }
     override fun onDestroyView() {
         cancelScheduledRender()
         offlineChanges.stop()
+        scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
     }
 
     override fun requestInitialFocus(): Boolean {
         val selected = findTagged(content, selectedId)
-        return selected?.requestFocus() == true || firstFocusable(content)?.requestFocus() == true || libraryTab.requestFocus()
+        return selected?.requestFocus() == true || firstFocusable(content)?.requestFocus() == true || tabs.focus()
     }
 
     override fun hints(): List<ButtonHint> {
         if (overlay.isOpen) return listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
-        if (libraryTab.hasFocus()) return listOf(ButtonHint.activate("Show downloads"), ButtonHint.back())
-        if (queueTab.hasFocus()) return listOf(ButtonHint.activate("Open download manager"), ButtonHint.back())
+        if (tabs.hasFocus()) return listOf(ButtonHint.activate("Show"), ButtonHint.back())
         val row = focusedRow()
         return buildList {
             when (row) {
@@ -175,10 +213,8 @@ class OfflineScreen(
 
     override fun onPad(action: PadAction): Boolean {
         if (overlay.onPad(action)) return true
-        if (action is PadAction.Step && (queueTab.hasFocus() || libraryTab.hasFocus())) {
-            if (action.direction == Direction.LEFT) libraryTab.requestFocus()
-            if (action.direction == Direction.RIGHT) queueTab.requestFocus()
-            return action.direction == Direction.LEFT || action.direction == Direction.RIGHT
+        if (action is PadAction.Step && action.direction == Direction.DOWN && tabs.hasFocus()) {
+            return firstFocusable(content)?.requestFocus() == true
         }
         val row = focusedRow()
         return when (action) {
@@ -241,12 +277,10 @@ class OfflineScreen(
         content.removeAllViews()
         queueRows.clear()
         queueHeaders.clear()
-        queueTab.background = tabBackground(mode == MODE_QUEUE)
-        libraryTab.background = tabBackground(mode == MODE_LIBRARY)
-        queueTab.isSelected = mode == MODE_QUEUE
-        libraryTab.isSelected = mode == MODE_LIBRARY
-        queueTab.contentDescription = if (queueTab.isSelected) "Download manager, selected" else "Download manager"
-        libraryTab.contentDescription = if (libraryTab.isSelected) "Downloaded, selected" else "Downloaded"
+        tabs.select(if (mode == MODE_QUEUE) "queue" else "library")
+        val pending = batches.sumOf { it.jobs.count { job -> job.state != OfflineState.COMPLETE } }
+        tabs.relabel("queue", if (pending > 0) "Queue · $pending" else "Queue")
+        renderStorage()
         if (mode == MODE_QUEUE) renderQueue(batches) else renderLibrary(completed, batches)
         content.post {
             val restoredFocus = if (hadFocus != null &&
@@ -304,7 +338,7 @@ class OfflineScreen(
 
     private fun setQueueSummary(batches: List<OfflineBatch>) {
         val queued = batches.sumOf { it.jobs.count { job -> job.state != OfflineState.COMPLETE } }
-        summary.text = "$queued pending \u00b7 ${Fmt.bytes(repository.availableBytes())} free \u00b7 downloads run one at a time"
+        summary.text = if (queued == 0) "Nothing waiting" else "$queued waiting \u00b7 one at a time, in this order"
     }
 
     private fun queueStructureSignature(batches: List<OfflineBatch>): String =
@@ -314,23 +348,67 @@ class OfflineScreen(
 
     private fun renderLibrary(completed: List<OfflineDownload>, batches: List<OfflineBatch>) {
         val batchTitles = batches.associate { it.id to it.title }
-        val groups = OfflineCatalog.titles(completed, batchTitles)
-        val complete = groups.sumOf { it.rows.size }
-        val size = groups.sumOf { entry -> entry.rows.sumOf { it.totalBytes } }
-        summary.text = "${groups.size} title${if (groups.size == 1) "" else "s"} · $complete file${if (complete == 1) "" else "s"} · ${Fmt.bytes(size)}"
-        if (groups.isEmpty()) { empty("Downloaded movies and series will appear here and remain playable without a network."); return }
-        val grid = com.pocketds.hub.ui.PosterGridLayout(host.viewContext).apply {
-            setPadding(dp(8), dp(12), dp(8), dp(22))
+        val entries = OfflineCatalog.titles(completed, batchTitles, com.pocketds.hub.offline.OfflineLibraryNames.all(host.viewContext))
+        summary.text = "Plays without the server · grouped by library"
+        if (entries.isEmpty()) { empty("Downloaded movies and series will appear here and stay playable without a network."); return }
+        OfflineCatalog.byLibrary(entries).forEach { (library, group) ->
+            val size = group.sumOf { entry -> entry.rows.sumOf { it.totalBytes } }
+            content.addView(sectionLabel(library, "${group.size} title${if (group.size == 1) "" else "s"} · ${Fmt.bytes(size)}"))
+            val grid = com.pocketds.hub.ui.PosterGridLayout(host.viewContext).apply {
+                setPadding(0, dp(2), dp(8), dp(10))
+            }
+            group.forEach { value ->
+                grid.addView(catalogCard(value), GridLayout.LayoutParams().apply {
+                    width = 0
+                    height = WRAP
+                    columnSpec = GridLayout.spec(GridLayout.UNDEFINED)
+                    setMargins(dp(7), dp(7), dp(7), dp(7))
+                })
+            }
+            content.addView(grid, LinearLayout.LayoutParams(MATCH, WRAP))
         }
-        groups.forEach { value ->
-            grid.addView(catalogCard(value), GridLayout.LayoutParams().apply {
-                width = 0
-                height = WRAP
-                columnSpec = GridLayout.spec(GridLayout.UNDEFINED)
-                setMargins(dp(8), dp(8), dp(8), dp(8))
-            })
+    }
+
+    private fun renderStorage() {
+        val used = repository.completed().sumOf { it.totalBytes }
+        val free = repository.availableBytes()
+        storageLabel.text = "${Fmt.bytes(used)} used  ·  ${Fmt.bytes(free)} free"
+        val fraction = if (used + free > 0) used.toDouble() / (used + free) else 0.0
+        storageFill.post {
+            val width = ((storageFill.parent as View).width * fraction).toInt().coerceAtLeast(if (used > 0) dp(4) else 0)
+            (storageFill.layoutParams as FrameLayout.LayoutParams).let { if (it.width != width) { it.width = width; storageFill.layoutParams = it } }
         }
-        content.addView(grid, LinearLayout.LayoutParams(MATCH, WRAP))
+    }
+
+    private fun switchTo(target: Int) {
+        if (mode == target) return
+        mode = target
+        selectedId = ""
+        renderedSignature = ""
+        render(force = true)
+        host.refreshHints()
+    }
+
+    /**
+     * Downloads made before manifests named their library ask the hub once,
+     * while it is reachable, and remember the answer.
+     */
+    private fun lookUpLibraries() {
+        val known = com.pocketds.hub.offline.OfflineLibraryNames.all(host.viewContext)
+        val missing = OfflineCatalog.titles(repository.completed()).filter { it.library.isBlank() && it.key !in known && lookedUp.add(it.key) }
+        if (missing.isEmpty()) return
+        scope.launch {
+            var found = false
+            missing.forEach { entry ->
+                val item = (api.libraryItem(entry.key) as? com.pocketds.hub.net.HubResult.Ok)?.value?.item ?: return@forEach
+                val name = item.library?.name.orEmpty()
+                if (name.isNotBlank()) {
+                    com.pocketds.hub.offline.OfflineLibraryNames.remember(host.viewContext, entry.key, name)
+                    found = true
+                }
+            }
+            if (found && mode == MODE_LIBRARY) { renderedSignature = ""; render(force = true) }
+        }
     }
 
     private fun catalogCard(value: OfflineCatalogEntry): View {
@@ -371,8 +449,9 @@ class OfflineScreen(
             clipChildren=false; clipToPadding=false
             addView(card,LinearLayout.LayoutParams(MATCH,WRAP))
             addView(TextView(context).apply {
-                text="⋯";textSize=12f;setTextColor(colors.accent)
-                setPadding(dp(8),dp(5),dp(8),dp(5))
+                // The size, and a ⋯ a finger can tap for the actions Y opens.
+                text="${Fmt.bytes(size)}   ⋯";textSize=11f;setTextColor(colors.mutedText)
+                setPadding(dp(2),dp(3),dp(8),dp(5))
                 contentDescription="More actions for ${value.title}"
                 activateOnTap { value.rows.firstOrNull()?.let(::showMediaOptions) }
             })
@@ -492,10 +571,13 @@ class OfflineScreen(
 
     private fun sectionLabel(title: String, detail: String) = LinearLayout(host.viewContext).apply {
         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM
-        addView(TextView(context).apply { text = title; textSize = 17f; setTextColor(colors.primaryText) },
-            LinearLayout.LayoutParams(0, WRAP, 1f))
-        addView(TextView(context).apply { text = detail; textSize = 10f; setTextColor(colors.mutedText) })
-        setPadding(dp(2), dp(10), dp(2), dp(4))
+        addView(TextView(context).apply {
+            text = title
+            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 15f)
+            setTextColor(colors.primaryText)
+        })
+        addView(TextView(context).apply { text = detail; textSize = 11f; setTextColor(colors.mutedText); setPadding(dp(10), 0, 0, dp(1)) })
+        setPadding(0, dp(12), dp(2), dp(2))
     }
 
     private fun empty(message: String) {
@@ -503,21 +585,6 @@ class OfflineScreen(
             text = message; textSize = 14f; gravity = Gravity.CENTER; setTextColor(colors.mutedText)
             setPadding(dp(40), dp(70), dp(40), dp(40))
         })
-    }
-
-    private fun tab(label: String, target: Int) = TextView(host.viewContext).apply {
-        text = label; textSize = 12f; gravity = Gravity.CENTER; setTextColor(colors.primaryText)
-        setPadding(dp(14), dp(7), dp(14), dp(7)); Styler.makeFocusable(this)
-        layoutParams = LinearLayout.LayoutParams(WRAP, dp(48)).apply { marginStart = dp(7) }
-        FocusDecorator.attach(this, ringVisible, scale = false)
-        FocusDecorator.listen(this, ringVisible) { view, _ -> host.refreshHints() }
-        activateOnTap {
-            mode = target
-            selectedId = ""
-            renderedSignature = ""
-            render(force = true)
-            requestInitialFocus()
-        }
     }
 
     private fun decorate(view: View) {
@@ -674,9 +741,6 @@ class OfflineScreen(
                 opaque = true, placeholderColor = colors.posterPlaceholder)
         } else loadImage(view, row.manifest.item.thumb.ifEmpty { row.manifest.item.poster })
     }
-    private fun tabBackground(selected: Boolean) = Styler.selectionBackground(
-        host.viewContext, colors, selected, baseFill = colors.cardSurface,
-        selectedFill = colors.focusFill, selectedStrokeDp = 1f, cornerDp = 10f)
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
 
     private data class TaggedDownload(val value: OfflineDownload)

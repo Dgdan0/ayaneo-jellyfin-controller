@@ -6,7 +6,9 @@ data class OfflineCatalogEntry(
     val key: String,
     val title: String,
     val isSeries: Boolean,
-    val rows: List<OfflineDownload>
+    val rows: List<OfflineDownload>,
+    /** The Jellyfin library, or empty when no manifest or lookup has named one yet. */
+    val library: String = ""
 )
 
 data class OfflineCatalogSeason(
@@ -54,7 +56,9 @@ data class OfflineCatalogProgress(
 object OfflineCatalog {
     fun titles(
         completed: List<OfflineDownload>,
-        batchTitles: Map<String, String> = emptyMap()
+        batchTitles: Map<String, String> = emptyMap(),
+        /** Libraries looked up for downloads made before manifests carried one. */
+        libraryNames: Map<String, String> = emptyMap()
     ): List<OfflineCatalogEntry> = completed
         .groupBy { row -> row.manifest.item.seriesId.ifBlank { row.manifest.item.id } }
         .values
@@ -69,10 +73,24 @@ object OfflineCatalog {
                     batchTitles[first.batchId] ?: first.manifest.item.title
                 },
                 isSeries = first.manifest.item.seriesId.isNotBlank(),
-                rows = ordered
+                rows = ordered,
+                library = ordered.firstNotNullOfOrNull { it.manifest.item.library?.name?.takeIf(String::isNotBlank) }
+                    ?: libraryNames[first.manifest.item.seriesId.ifBlank { first.manifest.item.id }].orEmpty()
             )
         }
         .sortedBy { it.title.lowercase() }
+
+    /**
+     * Downloads grouped the way Library shows them, libraries A to Z. A title
+     * whose library is not known yet goes under Movies or Series, last.
+     */
+    fun byLibrary(entries: List<OfflineCatalogEntry>): List<Pair<String, List<OfflineCatalogEntry>>> =
+        entries.groupBy { it.library.ifBlank { if (it.isSeries) FALLBACK_SERIES else FALLBACK_MOVIES } }
+            .toList()
+            .sortedWith(compareBy({ it.second.all { entry -> entry.library.isBlank() } }, { it.first.lowercase() }))
+
+    const val FALLBACK_MOVIES = "Movies"
+    const val FALLBACK_SERIES = "Series"
 
     fun seasons(seriesId: String, completed: List<OfflineDownload>): List<OfflineCatalogSeason> =
         completed

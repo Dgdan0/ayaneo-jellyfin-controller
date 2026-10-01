@@ -66,8 +66,13 @@ data class LibraryItem(
     val lastPlayedAt: Long = 0,
     val poster: String = "",
     val thumb: String = "",
-    val backdrop: String = ""
+    val backdrop: String = "",
+    /** The Jellyfin library it lives in; absent from hubs before 2026-10 and on old downloads. */
+    val library: LibraryRef? = null
 )
+
+@Serializable
+data class LibraryRef(val id: String = "", val name: String = "")
 
 @Serializable
 data class LibraryPerson(
