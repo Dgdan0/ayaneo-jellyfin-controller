@@ -85,6 +85,18 @@ type AuthConfig struct {
 // debugging -- then costs nothing. Raw is accepted for a first run and refused
 // unless it is strong, because the alternative is people leaving the example
 // value in place.
+// KnownScopes is every scope the API checks, and the full set a new device
+// token gets. hubctl used to print four of these, so a device set up from its
+// output could not download for offline or open the reading features.
+var KnownScopes = []string{
+	"read",     // browse everything
+	"request",  // Jellyseerr and reading requests, release grabs
+	"control",  // stop/start/delete transfers, library scans, server deletion
+	"play",     // streaming playback sessions
+	"download", // offline downloads and progress sync
+	"reading",  // books, comics and audiobooks
+}
+
 type TokenConfig struct {
 	Label  string   `yaml:"label"`
 	SHA256 string   `yaml:"sha256"`

@@ -364,3 +364,16 @@ func TestAPublicHostIsFineWithVerificationOn(t *testing.T) {
 	}
 	wantOK(t, c)
 }
+
+func TestRefusesAMisspeltScope(t *testing.T) {
+	// "downlaod" silently switched offline downloads off for that device.
+	c := base()
+	c.Auth.Tokens = []TokenConfig{{Label: "x", SHA256: HashToken(goodToken), Scopes: []string{"read", "downlaod"}}}
+	wantError(t, c, "downlaod")
+}
+
+func TestAcceptsEveryKnownScope(t *testing.T) {
+	c := base()
+	c.Auth.Tokens = []TokenConfig{{Label: "x", SHA256: HashToken(goodToken), Scopes: KnownScopes}}
+	wantOK(t, c)
+}

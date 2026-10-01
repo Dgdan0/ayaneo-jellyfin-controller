@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -132,6 +133,18 @@ func (c *Config) validateAuth() error {
 			}
 		}
 		seenLabels[token.Label] = true
+
+		for _, scope := range token.Scopes {
+			if !slices.Contains(KnownScopes, scope) {
+				// A misspelt scope silently switched a feature off for that
+				// device, which looked like the feature being broken.
+				return &Error{
+					Path:    path + ".scopes",
+					Problem: fmt.Sprintf("%q is not a scope the hub knows", scope),
+					Fix:     "use any of: " + strings.Join(KnownScopes, ", "),
+				}
+			}
+		}
 
 		hash := strings.ToLower(strings.TrimSpace(token.SHA256))
 		switch {

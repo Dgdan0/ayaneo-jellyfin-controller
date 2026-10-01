@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,13 +82,22 @@ Add this to hub.yaml (the hash, never the token):
     tokens:
       - label: %q
         sha256: %q
-        scopes: ["read", "request", "control", "play"]
+        scopes: [%s]
 
 And on the handheld, scripts/dev.env:
 
   HUB_TOKEN=%s
 
-`, *label, token, *label, config.HashToken(token), token)
+`, *label, token, *label, config.HashToken(token), quotedScopes(), token)
+}
+
+// quotedScopes is config.KnownScopes as a YAML flow list body.
+func quotedScopes() string {
+	quoted := make([]string, len(config.KnownScopes))
+	for i, scope := range config.KnownScopes {
+		quoted[i] = strconv.Quote(scope)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 func doctorCmd(args []string) {
