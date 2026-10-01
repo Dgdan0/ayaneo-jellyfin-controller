@@ -92,13 +92,19 @@ class ReadingLibraryGridScreen(
     private lateinit var sortControls: LibrarySortControls
     private lateinit var status: TextView
     private lateinit var grid: RecyclerView
-    private lateinit var authorShelves:AuthorShelvesView
+    private lateinit var authorGrid:AuthorGridView
+    private lateinit var groupSeries: TextView
+    private lateinit var groupAuthors: TextView
     private lateinit var overlay: ChoiceOverlay
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
     private val focusState = StableItemFocus()
     private val sortFields = ReadingSortFields.forLibrary(library)
     private var sortKey = if (sortFields.any { it.first == "series" }) "series" else "title"
+    /** Author is a view, not a sort: Series | Authors switches it and the sort list leaves it out. */
+    private val canGroupByAuthor = sortFields.any { it.first == "author" }
+    private val gridFields = sortFields.filter { it.first != "author" }
+    private var seriesSort = SortPreference.forField(if (sortFields.any { it.first == "series" }) "series" else "title")
     private var sortAscending = true
     private var loadGeneration = 0
     private var refreshing = false
@@ -118,9 +124,11 @@ class ReadingLibraryGridScreen(
             }
             val toolbar=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(dp(16),dp(2),dp(20),dp(2)) }
             toolbar.addView(status,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
-            sortControls=LibrarySortControls(context,colors,sortFields,SortPreference(sortKey,sortAscending),
+            if (canGroupByAuthor) toolbar.addView(groupSwitch(context), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) })
+            sortControls=LibrarySortControls(context,colors,gridFields,SortPreference(sortKey,sortAscending),
                 {this@ReadingLibraryGridScreen.overlay},::applySort) {host?.refreshHints()}
             toolbar.addView(sortControls)
+            showGrouping()
             addView(toolbar)
             grid = RecyclerView(context).apply {
                 layoutManager = GridLayoutManager(context, MAX_COLUMNS)
@@ -155,11 +163,11 @@ class ReadingLibraryGridScreen(
             }
             val shelfArea=FrameLayout(context)
             shelfArea.addView(grid,FrameLayout.LayoutParams(MATCH,MATCH))
-            authorShelves=AuthorShelvesView(context,api,library.id,colors,ringVisible,
+            authorGrid=AuthorGridView(context,api,library.id,colors,ringVisible,
                 {message,failed->status.text=message;status.setTextColor(if(failed)colors.dangerText else colors.mutedText)},
-                {if(sortKey=="author"){grid.visibility=View.GONE;authorShelves.visibility=View.VISIBLE}},
-                {work->host.push(ReadingWorkScreen(api,work.id,work.title,ringVisible))}).apply {visibility=View.GONE}
-            shelfArea.addView(authorShelves,FrameLayout.LayoutParams(MATCH,MATCH))
+                {if(sortKey=="author"){grid.visibility=View.GONE;authorGrid.visibility=View.VISIBLE}},
+                {author->host.push(ReadingAuthorScreen(api,library.id,author,ringVisible))}).apply {visibility=View.GONE}
+            shelfArea.addView(authorGrid,FrameLayout.LayoutParams(MATCH,MATCH))
             addView(shelfArea,LinearLayout.LayoutParams(MATCH,0,1f))
         }
         root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -172,7 +180,7 @@ class ReadingLibraryGridScreen(
         if(libraryRevision != MediaLibraryChanges.revision) {libraryRevision=MediaLibraryChanges.revision;reload();return}
         val saved=DomainPreferences.sort(requireNotNull(host).viewContext,ContentMode.BOOKS,sortFields.map { it.first },if (sortFields.any { it.first == "series" }) "series" else "title")
         if(saved!=SortPreference(sortKey,sortAscending)) { applySort(saved); return }
-        if(sortKey=="author"){authorShelves.show(sortAscending);return}
+        if(sortKey=="author"){authorGrid.show(sortAscending);return}
         if (paging.loadedPage > 0 && ::grid.isInitialized) adapter.notifyDataSetChanged()
         if (paging.loadedPage == 0 && loadJob?.isActive != true) {
             (paging.retry() ?: paging.initial())?.let(::loadPage)
@@ -183,7 +191,7 @@ class ReadingLibraryGridScreen(
 
     override fun onHide() {
         loadGeneration++
-        if(::authorShelves.isInitialized)authorShelves.hide()
+        if(::authorGrid.isInitialized)authorGrid.hide()
         val position = focusedPosition()
         focusedWork()?.let { focusState.remember(position, it.id) }
         if (::overlay.isInitialized && overlay.isOpen) overlay.dismiss()
@@ -193,14 +201,14 @@ class ReadingLibraryGridScreen(
     }
 
     override fun onDestroyView() {
-        if(::authorShelves.isInitialized)authorShelves.destroy()
+        if(::authorGrid.isInitialized)authorGrid.destroy()
         scope.cancel()
         host = null
     }
 
     override fun requestInitialFocus(): Boolean {
         if (::overlay.isInitialized && overlay.isOpen) return true
-        if(::authorShelves.isInitialized && authorShelves.visibility==View.VISIBLE)return authorShelves.restoreFocus()
+        if(::authorGrid.isInitialized && authorGrid.visibility==View.VISIBLE)return authorGrid.restoreFocus()
         if (!::grid.isInitialized || adapter.itemCount == 0) return if(::sortControls.isInitialized) sortControls.fieldButton.requestFocus() else false
         val target = focusState.resolve(adapter.ids())
         if (target < 0) return false
@@ -226,13 +234,13 @@ class ReadingLibraryGridScreen(
             return true
         }
         return when (action) {
-            PadAction.Activate -> if(authorShelves.visibility==View.VISIBLE) false else focusedWork()?.let(::open) != null
+            PadAction.Activate -> if(authorGrid.visibility==View.VISIBLE) false else focusedWork()?.let(::open) != null
             PadAction.Secondary -> {
                 sortControls.showFields()
                 true
             }
             PadAction.Refresh -> {
-                if(sortKey=="author"){authorShelves.show(sortAscending,force=true);return true}
+                if(sortKey=="author"){authorGrid.show(sortAscending,force=true);return true}
                 if (loadJob?.isActive != true) paging.retry()?.let(::loadPage) ?: reload()
                 true
             }
@@ -252,7 +260,7 @@ class ReadingLibraryGridScreen(
             focusedWork()?.let { focusState.remember(position, it.id) }
         }
         refreshing = true
-        if(sortKey=="author")authorShelves.show(sortAscending,force=true) else {authorShelves.hide();paging.initial()?.let(::loadPage)}
+        if(sortKey=="author")authorGrid.show(sortAscending,force=true) else {authorGrid.hide();paging.initial()?.let(::loadPage)}
     }
 
     private fun loadPage(page: Int) {
@@ -274,7 +282,7 @@ class ReadingLibraryGridScreen(
                 is HubResult.Ok -> {
                     if (generation != loadGeneration) return@launch
                     paging.complete(page, result.value.totalPages)
-                    if(page==1){authorShelves.visibility=View.GONE;grid.visibility=View.VISIBLE}
+                    if(page==1){authorGrid.visibility=View.GONE;grid.visibility=View.VISIBLE}
                     if (page == 1 && refreshing) {
                         adapter.replace(result.value.items)
                         refreshing = false
@@ -307,9 +315,40 @@ class ReadingLibraryGridScreen(
     }
 
     private fun applySort(value:SortPreference) {
+        if (value.field != "author") seriesSort = value
         sortKey=value.field;sortAscending=value.ascending
         DomainPreferences.setSort(requireNotNull(host).viewContext,ContentMode.BOOKS,value)
+        sortControls.update(value)
+        showGrouping()
         reload(resetSelection=true)
+    }
+
+    /** Series (the default) or Authors; each keeps its own order. */
+    private fun groupSwitch(context: android.content.Context) = LinearLayout(context).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        fun option(label: String, authors: Boolean) = TextView(context).apply {
+            text = label; textSize = 12f; gravity = Gravity.CENTER; minHeight = dp(48)
+            setPadding(dp(14), 0, dp(14), 0)
+            Styler.makeFocusable(this)
+            activateOnTap {
+                val inAuthors = sortKey == "author"
+                if (authors != inAuthors) applySort(if (authors) SortPreference("author", true) else seriesSort)
+            }
+        }
+        groupSeries = option("Series", false); groupAuthors = option("Authors", true)
+        addView(groupSeries); addView(groupAuthors, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(4) })
+    }
+
+    private fun showGrouping() {
+        val authors = sortKey == "author"
+        sortControls.fieldButton.visibility = if (authors) View.GONE else View.VISIBLE
+        if (!::groupSeries.isInitialized) return
+        listOf(groupSeries to !authors, groupAuthors to authors).forEach { (view, selected) ->
+            view.isSelected = selected
+            view.background = Styler.selectionBackground(view.context, colors, selected, cornerDp = 8f)
+            view.setTextColor(if (selected) colors.accent else colors.primaryText)
+            view.contentDescription = if (selected) "${view.text}, selected" else "Group by ${view.text}"
+        }
     }
 
     private fun sortLabel(): String {
@@ -946,43 +985,20 @@ class ReadingWorkScreen(
     }
 
     private fun bookRow(section: ReadingSection): View =
-        FocusHorizontalScrollView(requireNotNull(host).viewContext).apply {
-            isHorizontalScrollBarEnabled = false; clipToPadding = false; clipChildren = false
-            val clearance = DetailLayout.focusClearance(DetailLayout.posterCardHeight(120, resources.configuration.fontScale)).coerceAtLeast(10)
-            setPadding(dp(24), dp(clearance), dp(24), dp(clearance))
-            descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
-            addView(LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL; clipChildren = false
-                section.items.forEach { item ->
-                    addView(DetailArtworkCardView(context, colors, ringVisible).apply {
-                        artworkHeight(120)
-                        layoutParams = LinearLayout.LayoutParams(dp(88), WRAP).apply { marginEnd = dp(14) }
-                        titleView.text = item.title; titleView.minLines = 2
-                        subtitleView.text = buildList {
-                            if (item.number.isNotBlank()) add("Book ${item.number}")
-                            if (!item.isAvailable) add("Missing") else progressText(item.progress)?.removeSuffix(" read")?.let(::add)
-                        }.joinToString(" · ")
-                        subtitleView.maxLines = 1
-                        available(item.isAvailable)
-                        contentDescription = "${item.title}, ${subtitleView.text}"
-                        DetailStyler.image(image, item.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
-                            Artwork.loader(api, context))
-                        if (ReadingWorkPresentation.canOpen(item)) {
-                            val key = "book:${item.workId}"
-                            actionViews[key] = this
-                            FocusDecorator.listen(this, ringVisible) { view, focused ->
-                                if (focused) { lastActionKey = key; host?.refreshHints() }
-                            }
-                            activateOnTap { host?.push(ReadingWorkScreen(api, item.workId, item.title, ringVisible)) }
-                        } else {
-                            val key="missing:${item.number}:${item.title}"
-                            actionViews[key]=this;hasChildLinks=true
-                            FocusDecorator.listen(this,ringVisible) { view,focused -> if(focused){lastActionKey=key;host?.refreshHints()} }
-                            activateOnTap { host?.push(MissingReadingItemScreen(api,item,ringVisible)) }
-                        }
-                    })
+        SeriesBookStrip.create(requireNotNull(host).viewContext, colors, ringVisible, api, section.items) { card, item ->
+            if (ReadingWorkPresentation.canOpen(item)) {
+                val key = "book:${item.workId}"
+                actionViews[key] = card
+                FocusDecorator.listen(card, ringVisible) { _, focused ->
+                    if (focused) { lastActionKey = key; host?.refreshHints() }
                 }
-            })
+                card.activateOnTap { host?.push(ReadingWorkScreen(api, item.workId, item.title, ringVisible)) }
+            } else {
+                val key = "missing:${item.number}:${item.title}"
+                actionViews[key] = card; hasChildLinks = true
+                FocusDecorator.listen(card, ringVisible) { _, focused -> if (focused) { lastActionKey = key; host?.refreshHints() } }
+                card.activateOnTap { host?.push(MissingReadingItemScreen(api, item, ringVisible)) }
+            }
         }
 
     private fun sectionTitle(text: String): TextView = TextView(requireNotNull(host).viewContext).apply {

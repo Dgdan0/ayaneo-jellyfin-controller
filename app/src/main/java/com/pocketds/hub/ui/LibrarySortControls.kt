@@ -38,6 +38,12 @@ class LibrarySortControls(
         refresh()
     }
 
+    /** Shows [next] without reporting a change: the screen changed it itself. */
+    fun update(next: SortPreference) {
+        value = next
+        refresh()
+    }
+
     private fun set(next: SortPreference) {
         if (next == value) return
         value = next

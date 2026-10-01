@@ -294,7 +294,9 @@ data class ReadingSectionItem(
     val authors: List<String> = emptyList(),
     val pageCount: Int = 0,
     val progress: ReadingProgress? = null,
-    val availability: String = "available"
+    val availability: String = "available",
+    /** What this book can be opened as: ebook, audiobook, readaloud. One book, all its editions. */
+    val formats: List<String> = emptyList()
 ) {
     val isAvailable: Boolean get() = availability.equals("available", ignoreCase = true) && workId.isNotBlank()
 }
@@ -419,7 +421,9 @@ data class EpubPositionBody(
 )
 
 @Serializable
-data class ReadingAuthor(val id:String="",val name:String="",val artwork:String="",val total:Int=0,
+data class ReadingAuthor(val id:String="",val name:String="",val artwork:String="",
+    /** The author's shelf: "2 series", "6 books". */
+    val seriesCount:Int=0,val bookCount:Int=0,val total:Int=0,
     val page:Int=1,val totalPages:Int=0,val items:List<ReadingWork> = emptyList())
 @Serializable
 data class ReadingAuthorsResponse(val authors:List<ReadingAuthor> = emptyList(),val page:Int=1,
