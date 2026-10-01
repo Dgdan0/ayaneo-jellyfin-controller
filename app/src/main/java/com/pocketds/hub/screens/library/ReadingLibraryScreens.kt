@@ -1,5 +1,11 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.typeRole
+
+import com.pocketds.hub.ui.ProgressLine.showFraction
+
+import com.pocketds.hub.ui.PillButton
+
 import com.pocketds.hub.ui.BlobSegmentedView
 
 import com.pocketds.hub.ui.LibrarySortControls
@@ -662,7 +668,6 @@ class ReadingWorkScreen(
         actionViews.clear()
         hasChildLinks = false
         content.addView(hero(work))
-        if (work.entityType != "collection") bookLinks(work)?.let(content::addView)
         val primaryRead = ReadingWorkPresentation.primaryRead(work)
         if (work.entityType == "collection") work.continueAt?.let { point ->
             detailHeader.continuation.addView(continueCard(work, point))
@@ -684,7 +689,7 @@ class ReadingWorkScreen(
             val books = seriesBooks?.takeIf { it.first == work.seriesId }?.second
             if (books == null) loadSeries(work.seriesId)
             else if (books.size > 1) {
-                content.addView(sectionTitle(work.series))
+                content.addView(sectionTitle("More in ${work.series}"))
                 content.addView(seriesStrip(work, books))
             }
         }
@@ -715,7 +720,7 @@ class ReadingWorkScreen(
         overview.onChanged = { host?.refreshHints() }
         titleView.text = work.title
         subtitleView.visibility = View.GONE
-        metadataView.text = if (work.entityType != "collection") ReadingBookFacts.line(work, progressText(work.progress))
+        metadataView.text = if (work.entityType != "collection") ReadingBookFacts.line(work, null)
         else buildList {
             if (work.authors.isNotEmpty()) add(work.authors.joinToString(", "))
             if (work.entityType == "collection") {
@@ -727,6 +732,13 @@ class ReadingWorkScreen(
             progressText(work.progress)?.let(::add)
         }.joinToString(" · ")
         overview.bind(work.overview)
+        if (work.entityType != "collection") {
+            val fraction = work.progress?.let { if (it.completed) 1.0 else it.percentage } ?: 0.0
+            progressBar.showFraction(fraction)
+            progressLabel.text = ReadingBookFacts.progress(work).orEmpty()
+            progressRow.visibility = if (fraction > 0) View.VISIBLE else View.GONE
+            bookLinks(work, links)
+        }
         bindArtwork("book", null, work.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
             Artwork.loader(api, context))
         if (work.entityType != "collection") {
@@ -1079,40 +1091,43 @@ class ReadingWorkScreen(
      * page and its series page. Keys start "list:" so they never outrank Read
      * for first focus.
      */
-    private fun bookLinks(work: ReadingWork): View? {
-        if (work.authorRefs.isEmpty() && work.seriesId.isBlank()) return null
+    /**
+     * The author and the series as chips under the title, each opening its
+     * page: "Pierce Brown", and "Red Rising #6" with the number in the accent.
+     */
+    private fun bookLinks(work: ReadingWork, into: LinearLayout) {
+        into.removeAllViews()
+        into.visibility = if (work.authorRefs.isEmpty() && work.seriesId.isBlank()) View.GONE else View.VISIBLE
         val context = requireNotNull(host).viewContext
-        fun link(key: String, label: String, description: String, open: () -> Unit) = TextView(context).apply {
-            text = "$label  ›"
-            textSize = 14f
-            contentDescription = description
-            gravity = Gravity.CENTER_VERTICAL
-            minHeight = dp(40)
-            setTextColor(colors.primaryText)
-            background = Styler.chipBackground(context, colors)
-            setPadding(dp(12), 0, dp(12), 0)
-            Styler.makeFocusable(this)
-            FocusDecorator.attach(this, ringVisible, scale = false)
-            FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) { lastActionKey = key; host?.refreshHints() } }
-            actionViews[key] = this
-            hasChildLinks = true
-            activateOnTap { open() }
+        fun link(key: String, label: CharSequence, icon: AppIcon, description: String, open: () -> Unit) =
+            PillButton.create(context, colors, description, icon, heightDp = 30f).apply {
+                text = label
+                textSize = 12f
+                contentDescription = description
+                FocusDecorator.attach(this, ringVisible, scale = false)
+                FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) { lastActionKey = key; host?.refreshHints() } }
+                actionViews[key] = this
+                hasChildLinks = true
+                activateOnTap { open() }
+            }
+        val libraryId = work.libraryId.ifBlank { "storyteller:books" }
+        work.authorRefs.forEach { ref ->
+            into.addView(link("list:author:${ref.id}", ref.name, AppIcon.PERSON, "Open author ${ref.name}") {
+                host?.push(ReadingAuthorScreen(api, libraryId, ReadingAuthor(id = ref.id, name = ref.name), ringVisible))
+            }, LinearLayout.LayoutParams(WRAP, WRAP))
         }
-        return LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            clipChildren = false
-            setPadding(dp(24), dp(8), dp(24), 0)
-            val libraryId = work.libraryId.ifBlank { "storyteller:books" }
-            work.authorRefs.forEach { ref ->
-                addView(link("list:author:${ref.id}", ref.name, "Open author ${ref.name}") {
-                    host?.push(ReadingAuthorScreen(api, libraryId, ReadingAuthor(id = ref.id, name = ref.name), ringVisible))
-                }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(8) })
+        if (work.seriesId.isNotBlank()) {
+            val label = android.text.SpannableStringBuilder(work.series.ifBlank { "Series" }).apply {
+                if (work.seriesNumber.isNotBlank()) {
+                    val from = length
+                    append("  #").append(work.seriesNumber)
+                    setSpan(android.text.style.ForegroundColorSpan(colors.accent), from, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), from, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
             }
-            if (work.seriesId.isNotBlank()) {
-                addView(link("list:series", work.series.ifBlank { "Series" }, "Open series ${work.series}") {
-                    host?.push(ReadingWorkScreen(api, work.seriesId, work.series, ringVisible))
-                }, LinearLayout.LayoutParams(WRAP, WRAP))
-            }
+            into.addView(link("list:series", label, AppIcon.SERIES, "Open series ${work.series}, book ${work.seriesNumber}") {
+                host?.push(ReadingWorkScreen(api, work.seriesId, work.series, ringVisible))
+            }, LinearLayout.LayoutParams(WRAP, WRAP))
         }
     }
 
@@ -1147,7 +1162,7 @@ class ReadingWorkScreen(
 
     private fun sectionTitle(text: String): TextView = TextView(requireNotNull(host).viewContext).apply {
         this.text = text
-        textSize = 17f
+        typeRole(com.pocketds.hub.ui.Type.Role.HEADING, 16f)
         setTextColor(colors.primaryText)
         setPadding(dp(24), dp(14), dp(24), dp(2))
     }

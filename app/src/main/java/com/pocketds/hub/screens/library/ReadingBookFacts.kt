@@ -44,7 +44,8 @@ object ReadingBookFacts {
      */
     fun line(work: ReadingWork, progress: String?): String = buildList {
         if (work.authorRefs.isEmpty() && work.authors.isNotEmpty()) add(work.authors.joinToString(", "))
-        place(work)?.let(::add)
+        // A series the hub links to is a chip of its own under the title.
+        if (work.seriesId.isBlank()) place(work)?.let(::add)
         if (work.year > 0) add(work.year.toString())
         addAll(length(work))
         if (work.genres.isNotEmpty()) add(work.genres.joinToString(", "))

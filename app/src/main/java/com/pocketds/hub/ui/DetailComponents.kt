@@ -62,6 +62,16 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
     val poster = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
     val titleView = label(context, 27f, colors.primaryText).apply { typeRole(Type.Role.HERO); maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
     val subtitleView = label(context, 12f, colors.mutedText).apply { visibility = GONE }
+    /** Links under the title: a book's author and series. */
+    val links = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; clipChildren = false; visibility = GONE }
+    /** How far through, as a bar and words: "49% · page 363 of 735". */
+    val progressBar = ProgressLine.create(context, colors)
+    val progressLabel = label(context, 11f, colors.mutedText)
+    val progressRow = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = GONE
+        addView(progressBar, LinearLayout.LayoutParams(Styler.dpInt(context, 220f), Styler.dpInt(context, 6f)))
+        addView(progressLabel, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = Styler.dpInt(context, 10f) })
+    }
     val metadataView = label(context, 12f, colors.mutedText).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END }
     val formatStatus = ReadingFormatStatusView(context, colors).apply { visibility=GONE }
     val stateView = label(context, 11f, colors.accent).apply { visibility = GONE }
@@ -104,10 +114,12 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         addView(masks, LayoutParams(MATCH, MATCH))
         row.addView(poster, LinearLayout.LayoutParams(dp(92), dp(138)).apply { marginEnd = dp(20) })
         body.addView(titleView, LinearLayout.LayoutParams(MATCH, WRAP))
+        body.addView(links, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6) })
         body.addView(subtitleView, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(4) })
         body.addView(metadataView, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(7) })
         body.addView(formatStatus, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin=dp(4) })
         body.addView(stateView, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(5) })
+        body.addView(progressRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(8) })
         // The overview is read before acting on it, so it sits above the buttons.
         body.addView(overview, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6) })
         body.addView(actionScroll, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6) })
