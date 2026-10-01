@@ -9,7 +9,6 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import coil.request.ImageRequest
 import com.pocketds.hub.model.*
 import com.pocketds.hub.net.*
 import com.pocketds.hub.reader.ReadingCompletionRepository
@@ -128,7 +127,7 @@ class AuthorShelvesView(context:Context,private val api:HubApi,private val libra
             avatar.addView(TextView(context).apply {text=group.name.split(' ').filter(String::isNotBlank).take(2).map{it.first()}.joinToString("").uppercase();textSize=17f;gravity=Gravity.CENTER;setTextColor(colors.accent)},FrameLayout.LayoutParams(-1,-1))
             if(group.artwork.isNotBlank())avatar.addView(ImageView(context).apply {
                 scaleType=ImageView.ScaleType.CENTER_CROP
-                loader.enqueue(ImageRequest.Builder(context).data(api.imageUrl(group.artwork)).target(this).build())
+                Artwork.bind(this,loader,api.imageUrl(group.artwork),opaque=true)
             },FrameLayout.LayoutParams(-1,-1))
             heading.addView(avatar,LinearLayout.LayoutParams(dp(44),dp(44)))
             val copy=LinearLayout(context).apply {orientation=LinearLayout.VERTICAL;setPadding(dp(12),0,0,0)}

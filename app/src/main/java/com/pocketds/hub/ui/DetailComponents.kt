@@ -51,10 +51,7 @@ object DetailStyler {
         Styler.makeFocusable(view)
     }
 
-    fun image(view: ImageView, data: Any?, loader: ImageLoader) {
-        // Coil disposes the ImageView's previous request when a new one is enqueued.
-        loader.enqueue(ImageRequest.Builder(view.context).data(data).target(view).build())
-    }
+    fun image(view: ImageView, data: Any?, loader: ImageLoader) = Artwork.bind(view, loader, data)
 }
 
 /** One header for media, books and downloaded items. It grows with text instead of clipping it. */

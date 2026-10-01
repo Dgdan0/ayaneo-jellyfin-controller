@@ -9,8 +9,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import coil.request.Disposable
-import coil.request.ImageRequest
+import coil.dispose
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.CalendarResponse
@@ -48,8 +47,8 @@ class UpcomingScreen(private val api:HubApi,private val ringVisible:()->Boolean)
  private lateinit var next:TextView
  private var detailAction:View?=null
  private val rows=mutableListOf<Pair<View,UpcomingPresentation.Group>>()
- private val artwork=mutableListOf<Disposable>()
- private var detailArtwork:Disposable?=null
+ private val artwork=mutableListOf<ImageView>()
+ private var detailArtwork:ImageView?=null
  private var body:CalendarResponse?=null
  private var week=0
  private var selectedId=""
@@ -180,10 +179,8 @@ class UpcomingScreen(private val api:HubApi,private val ringVisible:()->Boolean)
  }
  private fun poster(path:String,detail:Boolean=false):ImageView=ImageView(checkNotNull(host).viewContext).apply{
   scaleType=ImageView.ScaleType.CENTER_CROP;setBackgroundColor(colors.posterPlaceholder)
-  if(path.isNotBlank()){
-   val d=imageLoader.enqueue(ImageRequest.Builder(context).data(api.imageUrl(path)).target(this).build())
-   if(detail)detailArtwork=d else artwork.add(d)
-  }
+  Artwork.bind(this,imageLoader,api.imageUrl(path).takeIf{path.isNotBlank()},opaque=true)
+  if(detail)detailArtwork=this else artwork.add(this)
  }
  private fun label(value:String,size:Float,muted:Boolean=false)=TextView(checkNotNull(host).viewContext).apply{
   text=value;textSize=size;setTextColor(if(muted)colors.mutedText else colors.primaryText)

@@ -8,7 +8,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import coil.ImageLoader
-import coil.request.ImageRequest
 
 /** A single editorial-looking treatment of an existing Discover result. */
 class DiscoverFeatureCardView(
@@ -77,7 +76,7 @@ class DiscoverFeatureCardView(
         art.layoutParams = params
         if (artworkUrl != imageKey) {
             imageKey = artworkUrl
-            loader.enqueue(ImageRequest.Builder(context).data(artworkUrl).target(art).build())
+            Artwork.bind(art, loader, artworkUrl, opaque = true)
         }
     }
 }

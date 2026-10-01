@@ -28,6 +28,12 @@ class ConsolidationGuardTest {
             "EpisodeLabel.season(number)", setOf("ui/EpisodeCardView.kt")),
         Rule(Regex(""""S\$\{?[\w.]+\}?E\$\{?"""),
             "EpisodeLabel.of / EpisodeLabel.code", setOf("ui/EpisodeCardView.kt", "model/Playback.kt")),
+        Rule(Regex("""\.enqueue\(\s*(ImageRequest|request\b)|^\s*ImageRequest\.Builder\("""),
+            "Artwork.bind: it clears a blank path and cancels the view's previous request",
+            // Seek and page previews keep their Disposable to cancel a stale scrub;
+            // the detail header's backdrop falls back to the poster when it fails.
+            setOf("ui/Artwork.kt", "playback/PlayerScreen.kt", "reader/PagedImageReaderScreen.kt",
+                "ui/DetailComponents.kt")),
         Rule(Regex("""progressBarStyleHorizontal"""),
             "ProgressLine.create (or a stateful download row's own tint)",
             setOf("ui/ProgressLine.kt", "screens/downloads/DownloadRowView.kt",

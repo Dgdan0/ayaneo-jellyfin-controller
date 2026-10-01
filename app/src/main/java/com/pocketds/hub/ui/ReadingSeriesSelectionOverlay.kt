@@ -1,7 +1,6 @@
 package com.pocketds.hub.ui
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
@@ -14,7 +13,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.ReadingSeriesPreview
@@ -309,15 +307,10 @@ class ReadingSeriesSelectionOverlay(
         }
     }
 
-    private fun load(path: String, target: ImageView) {
-        if (path.isBlank()) return
-        val url = imageUrl(path)
-        if (url.isBlank()) return
-        imageLoader.enqueue(
-            ImageRequest.Builder(context).data(url).target(target)
-                .bitmapConfig(Bitmap.Config.RGB_565).build()
-        )
-    }
+    // A blank path still goes through Artwork.bind, which cancels and clears the
+    // view's previous cover rather than leaving it in place.
+    private fun load(path: String, target: ImageView) =
+        Artwork.bind(target, imageLoader, imageUrl(path).takeIf { path.isNotBlank() }, opaque = true)
 
     private fun dp(value: Int) = Styler.dpInt(context, value.toFloat())
 
