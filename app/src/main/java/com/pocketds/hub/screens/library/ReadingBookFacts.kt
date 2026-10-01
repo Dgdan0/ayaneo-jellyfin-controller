@@ -11,9 +11,21 @@ object ReadingBookFacts {
     /** "Book 6 of Red Rising", "Red Rising" without a number, or null outside a series. */
     fun place(work: ReadingWork): String? {
         if (work.series.isBlank()) return null
-        if (work.seriesIndex <= 0) return work.series
-        val number = if (work.seriesIndex % 1.0 == 0.0) work.seriesIndex.toLong().toString() else work.seriesIndex.toString()
-        return "Book $number of ${work.series}"
+        if (work.seriesNumber.isBlank()) return work.series
+        return "Book ${work.seriesNumber} of ${work.series}"
+    }
+
+    /**
+     * How far through: "49% · page 363 of 735" when the book's length is
+     * known, "49% read" otherwise, "Finished" once done; null before starting.
+     */
+    fun progress(work: ReadingWork): String? {
+        val p = work.progress ?: return null
+        if (p.completed) return "Finished"
+        if (p.percentage <= 0) return null
+        val percent = "${(p.percentage * 100).toInt()}%"
+        val pages = work.editions.filter { it.kind != "audiobook" }.maxOfOrNull { it.pageCount } ?: 0
+        return if (pages > 0) "$percent · page ${(p.percentage * pages).toInt().coerceIn(1, pages)} of $pages" else "$percent read"
     }
 
     /** Pages of the longest text edition and the length of the audiobook, with its narrator. */

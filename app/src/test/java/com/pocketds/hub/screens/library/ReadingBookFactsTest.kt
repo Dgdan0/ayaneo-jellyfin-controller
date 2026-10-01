@@ -31,4 +31,14 @@ class ReadingBookFactsTest {
         assertEquals("Saga", ReadingBookFacts.place(ReadingWork(series = "Saga")))
         assertEquals("Book 1.5 of Saga", ReadingBookFacts.place(ReadingWork(series = "Saga", seriesIndex = 1.5)))
     }
+
+    @Test
+    fun `progress names the page when the book's length is known`() {
+        val book = ReadingWork(title = "Light Bringer", progress = com.pocketds.hub.model.ReadingProgress(percentage = 0.4945),
+            editions = listOf(ReadingEdition(kind = "ebook", pageCount = 735)))
+        assertEquals("49% · page 363 of 735", ReadingBookFacts.progress(book))
+        assertEquals("49% read", ReadingBookFacts.progress(book.copy(editions = emptyList())))
+        assertEquals("Finished", ReadingBookFacts.progress(book.copy(progress = com.pocketds.hub.model.ReadingProgress(completed = true))))
+        assertNull(ReadingBookFacts.progress(book.copy(progress = null)))
+    }
 }

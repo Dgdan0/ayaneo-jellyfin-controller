@@ -437,8 +437,11 @@ class ReadingWorkScreen(
     private val api: HubApi,
     private val workId: String,
     initialTitle: String,
-    private val ringVisible: () -> Boolean
+    private val ringVisible: () -> Boolean,
+    /** Resume reading from Home: open the reader as the page arrives, as its main button would. Back returns here. */
+    private val openReader: Boolean = false
 ) : Screen {
+    private var readerOpened = false
     override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val title = initialTitle
     override val focusOnShow = true
@@ -643,6 +646,10 @@ class ReadingWorkScreen(
             if (visible) {
                 scroll.scrollTo(0, previousScrollY)
                 actionViews[preferredSource]?.requestFocus()
+                if (openReader && !readerOpened) {
+                    readerOpened = true
+                    actionViews["entry"]?.performClick()
+                }
             }
         }
         status.showStatus(StatusText.caveat(work.cache, work.partial.map { it.service }), colors)

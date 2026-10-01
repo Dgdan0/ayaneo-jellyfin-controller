@@ -30,6 +30,13 @@ import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.PosterCardView
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.activateOnTap
+import com.pocketds.hub.ui.ProgressLine
+import com.pocketds.hub.ui.ProgressLine.showFraction
+import com.pocketds.hub.ui.ThemeGradientDrawable
+import com.pocketds.hub.ui.Type
+import com.pocketds.hub.ui.textWeight
+import com.pocketds.hub.ui.typeRole
+import com.pocketds.hub.screens.library.ReadingBookFacts
 import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,9 +46,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Books Home: what you are reading (one card per series), the next book of a
- * series you finished, comics apart, Want to Read, your own lists, then what
- * was added lately.
+ * Books Home: the book you are reading as a card with Resume reading, the
+ * others you are reading beside it, your series as fans of their covers, then
+ * the next book of a series you finished, comics apart, Want to Read, your own
+ * lists and what was added lately.
  */
 class ReadingHomeView(
     context: Context,
@@ -56,7 +64,13 @@ class ReadingHomeView(
     private val scroll: ScrollView
     private val overlay = ChoiceOverlay(context, colors, ringVisible, sidePanel = true)
     private val loader = Artwork.loader(api, context)
-    private lateinit var greeting: TextView
+    private var continueView: ContinueReadingView? = null
+    /** Buttons that act themselves on A, rather than opening the selected book's details. */
+    private val selfActing = mutableSetOf<View>()
+    private var seriesShelf: List<ReadingShelves.SeriesShelfItem> = emptyList()
+    private var renderedSeries: List<ReadingShelves.SeriesShelfItem>? = null
+    /** Full details of the book on the Continue reading card: its length, for "page 363 of 735". */
+    private val heroDetails = mutableMapOf<String, ReadingWork>()
     private val createButton: TextView
     private val profileButton: TextView
     var onChooseProfile: (() -> Unit)? = null
@@ -77,19 +91,6 @@ class ReadingHomeView(
         setBackgroundColor(colors.background)
         val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         addView(column, LayoutParams(MATCH, MATCH))
-        val header = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(24), dp(5), dp(24), dp(3))
-        }
-        header.addView(TextView(context).apply {
-            greeting = this
-            text = HomeHeaderLabel.forUser(com.pocketds.hub.settings.HubSettings.userName(context))
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            textSize = 23f
-            setTextColor(colors.primaryText)
-        }, LinearLayout.LayoutParams(0, WRAP, 1f))
         profileButton = TextView(context).apply {
             text = "Choose profile"
             textSize = 12f
@@ -103,7 +104,6 @@ class ReadingHomeView(
             FocusDecorator.attach(this, ringVisible, scale = false)
             activateOnTap { onChooseProfile?.invoke() }
         }
-        header.addView(profileButton, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(8) })
         createButton = TextView(context).apply {
             text = "＋  New list"
             textSize = 13f
@@ -122,8 +122,6 @@ class ReadingHomeView(
                 render(shelves())
             } }
         }
-        header.addView(createButton)
-        column.addView(header)
         status = TextView(context).apply {
             textSize = 11f
             setTextColor(colors.mutedText)
@@ -156,12 +154,10 @@ class ReadingHomeView(
 
     fun setUserName(name:String?) {
         reportedName = name
-        greeting.text = HomeHeaderLabel.forUser(name)
         profileButton.visibility = if (name.isNullOrBlank()) View.VISIBLE else View.GONE
     }
 
     fun onShow() {
-        greeting.text = HomeHeaderLabel.forUser(reportedName ?: com.pocketds.hub.settings.HubSettings.userName(context))
         val state = ReadingListsRepository.get(context)
         val completion = ReadingCompletionRepository.get(context)
         render(ReadingShelves.rows(current.map(completion::project), state, observed.mapValues { completion.project(it.value) },
@@ -180,8 +176,15 @@ class ReadingHomeView(
 
     fun hints(): List<ButtonHint> = if (overlay.isOpen) {
         listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
+    } else if (findFocus() is SeriesStackView) {
+        listOf(ButtonHint.activate("Open series"), ButtonHint.refresh())
     } else listOf(
-        ButtonHint.activate(if (profileButton.hasFocus()) "Choose profile" else if (createButton.hasFocus()) "Create list" else "Details"),
+        ButtonHint.activate(when {
+            profileButton.hasFocus() -> "Choose profile"
+            createButton.hasFocus() -> "Create list"
+            continueView?.resume?.hasFocus() == true -> "Resume reading"
+            else -> "Details"
+        }),
         ButtonHint.secondary("List actions"),
         ButtonHint.refresh()
     )
@@ -195,7 +198,8 @@ class ReadingHomeView(
         }
         return when (action) {
             PadAction.Activate -> {
-                if (profileButton.hasFocus()) { profileButton.performClick(); true }
+                if (findFocus() in selfActing) false
+                else if (profileButton.hasFocus()) { profileButton.performClick(); true }
                 else if (createButton.hasFocus()) { createButton.performClick(); true }
                 else if (focusedListHeader?.let { headerActions[it]?.hasFocus() } == true) false
                 else focusedWork()?.let { host.push(ReadingWorkScreen(api, it.id, it.title, ringVisible)); true } ?: false
@@ -307,6 +311,7 @@ class ReadingHomeView(
             observed = fresh.mapValues { completion.project(it.value) }
             current = ReadingShelves.current((pendingIds.mapNotNull(fresh::get) + candidates).map(completion::project))
             next = ReadingShelves.nextInSeries(candidates).map(completion::project)
+            seriesShelf = ReadingShelves.yourSeries(candidates)
             recent = added.sortedByDescending { ReadingShelves.timestamp(it.addedAt) }.take(RECENT_LIMIT)
             render(ReadingShelves.rows(current, state, observed, next, recent))
             status.text = when {
@@ -320,14 +325,30 @@ class ReadingHomeView(
     }
 
     private fun render(next: List<ReadingShelfRow>) {
-        if (rows == next && content.childCount > 0) return
+        if (rows == next && renderedSeries == seriesShelf && content.childCount > 0) return
         val scrollY = scroll.scrollY
         val hadFocus = findFocus() != null
         rows = next
+        renderedSeries = seriesShelf
         cards.clear()
         headerActions.clear()
+        selfActing.clear()
+        continueView = null
         content.removeAllViews()
-        next.forEach { row -> content.addView(buildRow(row)) }
+        val reading = next.any { it.id == ReadingShelves.CURRENTLY_READING }
+        next.forEachIndexed { i, row ->
+            if (row.id == ReadingShelves.CURRENTLY_READING) content.addView(buildCurrent(row))
+            else content.addView(buildRow(row))
+            // Your series sits under the book you are reading, or first when nothing is.
+            if (row.id == ReadingShelves.CURRENTLY_READING || (!reading && i == 0)) buildSeries()?.let(content::addView)
+        }
+        listOf(createButton, profileButton).forEach { (it.parent as? ViewGroup)?.removeView(it) }
+        content.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(24), dp(14), dp(24), 0)
+            addView(createButton)
+            addView(profileButton, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(8) })
+        })
         scroll.post {
             scroll.scrollTo(0, scrollY)
             if (hadFocus) requestInitialFocus()
@@ -348,9 +369,9 @@ class ReadingHomeView(
                 row.id in ReadingShelves.BUILT_IN -> row.title
                 else -> "${row.title}   ·   ${row.readCount}/${row.items.size} read"
             }
-            textSize = 18f
+            typeRole(Type.Role.HEADING, 16f)
             setTextColor(colors.primaryText)
-            setPadding(0, dp(4), 0, dp(2))
+            setPadding(0, dp(10), 0, dp(2))
         }
         header.addView(title, LinearLayout.LayoutParams(0, WRAP, 1f))
         if (row.id !in ReadingShelves.BUILT_IN) {
@@ -420,6 +441,147 @@ class ReadingHomeView(
                 val target = line.getChildAt(row.nextIndex) ?: return@post
                 strip.scrollTo((target.left - dp(140)).coerceAtLeast(0), 0)
             }
+        }
+    }
+
+    /**
+     * The book read last as the Continue reading card, and every other book in
+     * progress as a short list beside it, which scrolls when there are many.
+     */
+    private fun buildCurrent(row: ReadingShelfRow): View = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        clipChildren = false
+        setPadding(dp(24), dp(10), dp(24), dp(4))
+        val hero = row.items.first()
+        val card = ContinueReadingView(context, colors, ringVisible).apply {
+            bind(heroDetails[hero.id]?.let { it.copy(progress = hero.progress ?: it.progress) } ?: hero, loader, api::imageUrl)
+            resume.activateOnTap { host.push(ReadingWorkScreen(api, hero.id, hero.title, ringVisible, openReader = true)) }
+            details.activateOnTap { host.push(ReadingWorkScreen(api, hero.id, hero.title, ringVisible)) }
+            listOf(resume, details).forEach { button ->
+                FocusDecorator.listen(button, ringVisible) { _, focused ->
+                    if (focused) { focusedListHeader = null; selectedRow = row.id; selectedWork = hero.id; host.refreshHints() }
+                }
+            }
+        }
+        continueView = card
+        selfActing += listOf(card.resume, card.details)
+        cards[row.id to hero.id] = card.resume
+        addView(card, LinearLayout.LayoutParams(0, WRAP, 1f))
+        if (hero.id !in heroDetails) loadHeroDetail(hero)
+        val others = row.items.drop(1)
+        if (others.isEmpty()) return@apply
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            clipChildren = false
+            addView(TextView(context).apply {
+                text = "Also reading · ${others.size}"
+                isAllCaps = true
+                typeRole(Type.Role.EYEBROW)
+                setTextColor(colors.mutedText)
+                setPadding(dp(4), dp(4), 0, dp(8))
+            })
+            val list = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                clipChildren = false
+                setPadding(dp(4), dp(2), dp(4), dp(4))
+            }
+            others.forEach { work -> list.addView(alsoReading(row, work)) }
+            addView(FocusScrollView(context).apply {
+                isVerticalScrollBarEnabled = false
+                clipToPadding = false
+                clipChildren = false
+                addView(list)
+            }, LinearLayout.LayoutParams(MATCH, if (others.size > 3) dp(204) else WRAP))
+        }, LinearLayout.LayoutParams(dp(228), WRAP).apply { marginStart = dp(12) })
+    }
+
+    private fun alsoReading(row: ReadingShelfRow, work: ReadingWork): View = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(8), dp(8), dp(10), dp(8))
+        background = Styler.cardBackground(context, colors, cornerDp = 14f)
+        contentDescription = listOfNotNull(work.title, work.cardSubtitle, ReadingBookFacts.progress(work)).joinToString(", ")
+        addView(android.widget.ImageView(context).apply {
+            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            background = ThemeGradientDrawable.rounded(Styler.dp(context, 5f), colors.posterPlaceholder)
+            clipToOutline = true
+            Artwork.bind(this, loader, work.artwork.takeIf(String::isNotBlank)?.let(api::imageUrl), opaque = true)
+        }, LinearLayout.LayoutParams(dp(40), dp(60)))
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), 0, 0, 0)
+            addView(TextView(context).apply {
+                text = work.title
+                textSize = 12f
+                textWeight(600)
+                setTextColor(colors.primaryText)
+                isSingleLine = true
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            addView(TextView(context).apply {
+                text = work.cardSubtitle
+                textSize = 11f
+                setTextColor(colors.mutedText)
+                isSingleLine = true
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            addView(ProgressLine.create(context, colors).apply {
+                showFraction(work.progress?.percentage ?: 0.0)
+                visibility = View.VISIBLE
+            }, LinearLayout.LayoutParams(MATCH, dp(4)).apply { topMargin = dp(6) })
+        }, LinearLayout.LayoutParams(0, WRAP, 1f))
+        Styler.makeFocusable(this)
+        FocusDecorator.attach(this, ringVisible, scale = false)
+        FocusDecorator.listen(this, ringVisible) { _, focused ->
+            if (focused) { focusedListHeader = null; selectedRow = row.id; selectedWork = work.id; host.refreshHints() }
+        }
+        activateOnTap { host.push(ReadingWorkScreen(api, work.id, work.title, ringVisible)) }
+        cards[row.id to work.id] = this
+        layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(8) }
+    }
+
+    /** "Your series": each series being read, as a fan of its covers. */
+    private fun buildSeries(): View? {
+        if (seriesShelf.isEmpty()) return null
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            clipChildren = false
+            addView(TextView(context).apply {
+                text = "Your series"
+                typeRole(Type.Role.HEADING, 16f)
+                setTextColor(colors.primaryText)
+                setPadding(dp(24), dp(14), dp(24), dp(2))
+            })
+            val line = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                clipChildren = false
+            }
+            seriesShelf.forEach { item ->
+                line.addView(SeriesStackView(context, colors, ringVisible).apply {
+                    bind(item, loader, api::imageUrl)
+                    activateOnTap { host.push(ReadingWorkScreen(api, item.id, item.title, ringVisible)) }
+                    // A series is not a book on a list: Y has nothing to act on here.
+                    onFocused = { focusedListHeader = null; selectedRow = ""; selectedWork = ""; host.refreshHints() }
+                    selfActing += this
+                }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(22) })
+            }
+            addView(FocusHorizontalScrollView(context).apply {
+                isHorizontalScrollBarEnabled = false
+                clipToPadding = false
+                clipChildren = false
+                setPadding(dp(24), dp(10), dp(24), dp(6))
+                addView(line)
+            })
+        }
+    }
+
+    /** The hero's own page carries its length; fetched once per book, then the card rebinds. */
+    private fun loadHeroDetail(hero: ReadingWork) {
+        scope.launch {
+            val detail = (api.readingWork(hero.id) as? HubResult.Ok)?.value ?: return@launch
+            heroDetails[hero.id] = detail
+            continueView?.takeIf { it.work?.id == hero.id }
+                ?.bind(detail.copy(progress = hero.progress ?: detail.progress), loader, api::imageUrl)
         }
     }
 

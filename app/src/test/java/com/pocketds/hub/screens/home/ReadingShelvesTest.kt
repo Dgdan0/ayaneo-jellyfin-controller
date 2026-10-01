@@ -176,7 +176,7 @@ class ReadingShelvesTest {
             ReadingListsState(), emptyMap())
         val reading = rows.first { it.id == ReadingShelves.CURRENTLY_READING }
         assertEquals(listOf("Light Bringer", "Dark Matter"), reading.items.map { it.id })
-        assertEquals("Book 6 · Red Rising", reading.items.first().cardSubtitle)
+        assertEquals("Red Rising #6", reading.items.first().cardSubtitle)
         assertEquals(listOf("Fantastic Four"), rows.first { it.id == ReadingShelves.COMICS }.items.map { it.id })
         assertEquals("Comics", rows.first { it.id == ReadingShelves.COMICS }.title)
     }
@@ -192,7 +192,7 @@ class ReadingShelvesTest {
             book("Oathbringer", "3"))
         val next = ReadingShelves.nextInSeries(listOf(finishedOne, stillReading, nothingFinished, nextMissing))
         assertEquals(listOf("Well of Ascension", "Oathbringer"), next.map { it.id })
-        assertEquals("Book 2 · Mistborn", next.first().cardSubtitle)
+        assertEquals("Mistborn #2", next.first().cardSubtitle)
     }
 
     @Test fun builtInRowsComeFirstAndRecentlyAddedLast() {
@@ -214,7 +214,7 @@ class ReadingShelvesTest {
 
     @Test fun cardSubtitleNamesTheAuthorOutsideASeries() {
         assertEquals("Blake Crouch", ReadingWork(title = "Dark Matter", authors = listOf("Blake Crouch")).cardSubtitle)
-        assertEquals("Book 1.5 · Saga", ReadingWork(title = "Novella", series = "Saga", seriesIndex = 1.5).cardSubtitle)
+        assertEquals("Saga #1.5", ReadingWork(title = "Novella", series = "Saga", seriesIndex = 1.5).cardSubtitle)
     }
 
     @Test fun newlyCreatedUnreadListFollowsListsWithReadingActivity() {
@@ -222,5 +222,27 @@ class ReadingShelvesTest {
         val empty = ReadingList("empty", "Empty", updatedAt = 500)
         val rows = ReadingShelves.rows(emptyList(), ReadingListsState(lists = listOf(empty, active)), emptyMap())
         assertEquals(listOf("active", "empty"), rows.drop(1).map { it.id })
+    }
+
+    @Test
+    fun `your series fans the book you are on in front and says where you are`() {
+        fun book(n: Int, pct: Double?, done: Boolean = false, at: String = "") = ReadingSectionItem(
+            workId = "b$n", title = "Book $n", number = "$n", artwork = "/art/$n",
+            progress = pct?.let { ReadingProgress(percentage = it, completed = done, updatedAt = at) })
+        val redRising = ReadingWork(id = "rr", entityType = "collection", title = "Red Rising", bookCount = 6,
+            sections = listOf(ReadingSection(items = listOf(book(1, 0.1, at = "2026-09-21 16:09:43"), book(2, 0.02), book(3, null),
+                book(4, null), book(5, null), book(6, 0.49, at = "2026-09-27 03:16:47")))),
+            continueAt = com.pocketds.hub.model.ReadingContinue(number = "6", artwork = "/art/6"))
+        val mistborn = ReadingWork(id = "mb", entityType = "collection", title = "Mistborn", bookCount = 3,
+            sections = listOf(ReadingSection(items = listOf(book(1, 0.02, at = "2026-09-21 13:48:57"), book(2, null), book(3, null)))))
+        val unread = ReadingWork(id = "lt", entityType = "collection", title = "Licanius", bookCount = 1,
+            sections = listOf(ReadingSection(items = listOf(book(1, null)))))
+        val finished = ReadingWork(id = "f", entityType = "collection", title = "Done",
+            sections = listOf(ReadingSection(items = listOf(book(1, 1.0, done = true)))))
+        val shelf = ReadingShelves.yourSeries(listOf(mistborn, unread, redRising, finished))
+        assertEquals(listOf("Red Rising", "Mistborn"), shelf.map { it.title })
+        assertEquals("6 books · on #6", shelf[0].line)
+        assertEquals(listOf("/art/6", "/art/1", "/art/2"), shelf[0].covers)
+        assertEquals("3 books · on #1", shelf[1].line)
     }
 }

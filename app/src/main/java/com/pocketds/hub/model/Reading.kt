@@ -360,12 +360,18 @@ data class ReadingWork(
             if (isEmpty()) add(ReadingType.label(kind))
         }.joinToString(" · ")
 
-    /** Under a book's card: "Book 6 · Red Rising" inside a series, otherwise who wrote it. */
+    /** "6", "1.5", or empty outside a numbered series. */
+    val seriesNumber: String
+        get() = when {
+            series.isBlank() || seriesIndex <= 0 -> ""
+            seriesIndex % 1.0 == 0.0 -> seriesIndex.toLong().toString()
+            else -> seriesIndex.toString()
+        }
+
+    /** Under a book's card: "Red Rising #6" inside a series, otherwise who wrote it. */
     val cardSubtitle: String
-        get() = if (entityType != "collection" && series.isNotBlank() && seriesIndex > 0) {
-            val number = if (seriesIndex % 1.0 == 0.0) seriesIndex.toLong().toString() else seriesIndex.toString()
-            "Book $number · $series"
-        } else byline.ifBlank { subtitle }
+        get() = if (entityType != "collection" && seriesNumber.isNotBlank()) "$series #$seriesNumber"
+            else byline.ifBlank { subtitle }
 }
 
 /** An author page a book links to. */

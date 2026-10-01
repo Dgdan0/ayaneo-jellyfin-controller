@@ -168,6 +168,8 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
         diskRows = column()
         storage.body(diskRows, 6f, fill = true)
         storage.apply {
+            // The card's own focused state carries the ring.
+            background = Styler.cardBackground(context, colors, cornerDp = 16f)
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, false)
             contentDescription = "Storage. Opens the server monitor"
@@ -563,10 +565,11 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
         LinearLayout(checkNotNull(host).viewContext).apply {
             tag = id
             setPadding(dp(6), dp(5), dp(6), dp(6))
-            background = Styler.chipBackground(context, colors).apply { alpha = 0 }
+            background = Styler.selectionBackground(context, colors, selected = false, cornerDp = 8f)
             contentDescription = description
             Styler.makeFocusable(this)
-            FocusDecorator.listen(this, ringVisible) { v, focused -> v.background?.alpha = if (focused) 255 else 0; host?.refreshHints() }
+            FocusDecorator.attach(this, ringVisible, scale = false)
+            FocusDecorator.listen(this, ringVisible) { _, _ -> host?.refreshHints() }
             activateOnTap { onActivate() }
             layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(2) }
         }
@@ -578,6 +581,7 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
         setTextColor(colors.accent)
         setPadding(dp(8), dp(5), dp(6), dp(5))
         tag = "link:$label"
+        background = Styler.selectionBackground(context, colors, selected = false, cornerDp = 99f)
         Styler.makeFocusable(this)
         FocusDecorator.attach(this, ringVisible, false)
         activateOnTap { onActivate() }

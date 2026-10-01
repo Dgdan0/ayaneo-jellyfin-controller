@@ -171,6 +171,37 @@ object ReadingShelves {
 
     fun isComic(work: ReadingWork) = work.kind == "comic" || work.kind == "manga"
 
+    /** A series on Home: up to three covers to fan out, front first, and "6 books · on #6". */
+    data class SeriesShelfItem(val id: String, val title: String, val covers: List<String>, val line: String)
+
+    /**
+     * The series being read, last read first: those with a book started and
+     * not every book finished. The front cover is the book you are on.
+     */
+    fun yourSeries(collections: List<ReadingWork>): List<SeriesShelfItem> = collections
+        .filter { it.entityType == "collection" }
+        .distinctBy { it.id }
+        .mapNotNull { series ->
+            val books = series.sections.flatMap { it.items }
+            if (books.none { (it.progress?.percentage ?: 0.0) > 0.0 || it.progress?.completed == true }) return@mapNotNull null
+            if (books.isNotEmpty() && books.all { it.progress?.completed == true }) return@mapNotNull null
+            val on = series.continueAt?.number?.takeIf(String::isNotBlank)
+                ?: books.lastOrNull { (it.progress?.percentage ?: 0.0) > 0.0 && it.progress?.completed != true }?.number.orEmpty()
+            val front = series.continueAt?.artwork?.takeIf(String::isNotBlank)
+                ?: books.firstOrNull { it.number == on }?.artwork.orEmpty()
+            val covers = (listOf(front) + books.map { it.artwork }).filter(String::isNotBlank).distinct().take(3)
+                .ifEmpty { listOf(series.artwork).filter(String::isNotBlank) }
+            val count = series.bookCount.takeIf { it > 0 } ?: books.size
+            val line = listOfNotNull(
+                "$count ${if (count == 1) "book" else "books"}".takeIf { count > 0 },
+                on.takeIf(String::isNotBlank)?.let { "on #$it" }
+            ).joinToString(" · ")
+            val last = books.maxOfOrNull { timestamp(it.progress?.updatedAt) } ?: timestamp(series.progress?.updatedAt)
+            last to SeriesShelfItem(series.id, series.title, covers, line)
+        }
+        .sortedByDescending { it.first }
+        .map { it.second }
+
     /**
      * One card per series, the book of it read last. Red Rising read in three
      * places at once filled the row with three Red Rising cards. [reads] is
