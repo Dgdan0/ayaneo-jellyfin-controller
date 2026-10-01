@@ -148,6 +148,24 @@ func (c *Client) Items(ctx context.Context, q ItemsQuery) (*ItemsPage, error) {
 	return out, nil
 }
 
+// Similar is Jellyfin's own "more like this" for a movie or series, with
+// the configured user's watch state, as a page of ordinary items.
+func (c *Client) Similar(ctx context.Context, itemID string, limit int) (*ItemsPage, error) {
+	if err := c.requireUser(); err != nil {
+		return nil, err
+	}
+	out := &ItemsPage{}
+	query := url.Values{
+		"userId": {c.userID},
+		"limit":  {strconv.Itoa(limit)},
+		"fields": {"ProviderIds"},
+	}
+	if err := c.base.GetJSON(ctx, "/Items/"+itemID+"/Similar", query, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Item returns one library object with user state. Jellyfin exposes this under
 // /Items/{id}; using the configured user keeps played/progress fields aligned
 // with Home and the rest of Library.

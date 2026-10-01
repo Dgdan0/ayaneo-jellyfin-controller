@@ -131,6 +131,9 @@ func (s *Server) handleLibraryRoute(w http.ResponseWriter, r *http.Request) {
 	case len(parts) == 2 && parts[0] == "items":
 		r.SetPathValue("itemId", parts[1])
 		s.handleLibraryItem(w, r)
+	case len(parts) == 3 && parts[0] == "items" && parts[2] == "similar":
+		r.SetPathValue("itemId", parts[1])
+		s.handleLibrarySimilar(w, r)
 	case len(parts) == 3 && parts[0] == "series" && parts[2] == "seasons":
 		r.SetPathValue("seriesId", parts[1])
 		s.handleLibrarySeasons(w, r)
@@ -248,6 +251,39 @@ func (s *Server) handleLibraryCollection(
 	writeJSON(w, http.StatusOK, LibraryItemsResponse{
 		ViewID: id, Title: title, Page: pageNumber, TotalPages: totalPages,
 		Total: result.TotalRecordCount, SortedBy: "name", SortOrder: "asc",
+		Items: s.itemsToHits(result.Items), Partial: []Partial{}, Cache: cacheInfoFrom(meta),
+	})
+}
+
+// similarLimit is one row on a detail page: enough to scroll, few enough to
+// arrive with the page.
+const similarLimit = 16
+
+// handleLibrarySimilar serves GET /v1/library/items/{itemId}/similar, the
+// detail page's "More like this", as library cards with watch state.
+func (s *Server) handleLibrarySimilar(w http.ResponseWriter, r *http.Request) {
+	client, ok := s.jellyfinForRequest(w, r)
+	if !ok {
+		return
+	}
+	itemID := r.PathValue("itemId")
+	if !isHex32(itemID) {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "bad item id"})
+		return
+	}
+	ctx, cancel := timeoutFor(r, s.cfg.Server.RequestTimeout.OrDefault(20*time.Second))
+	defer cancel()
+	result, meta, err := cache.Fetch(ctx, s.cache, "library:similar:"+client.UserID()+":"+itemID, cache.UserData,
+		func(ctx context.Context) (*jellyfin.ItemsPage, error) {
+			return client.Similar(ctx, itemID, similarLimit)
+		})
+	if err != nil {
+		writeUpstreamError(w, r, "jellyfin", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, LibraryItemsResponse{
+		ViewID: "similar", Title: "More like this", Page: 1, TotalPages: 1,
+		Total: len(result.Items), SortedBy: "similarity", SortOrder: "desc",
 		Items: s.itemsToHits(result.Items), Partial: []Partial{}, Cache: cacheInfoFrom(meta),
 	})
 }
