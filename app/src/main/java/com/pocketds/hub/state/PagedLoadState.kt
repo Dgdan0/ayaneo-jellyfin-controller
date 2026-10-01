@@ -24,6 +24,17 @@ class PagedLoadState(private val prefetchAhead: Int = 6) {
 
     fun initial(): Int? = begin(1)
 
+    /**
+     * Pages that arrived some other way -- Discover's first page of every row
+     * comes in one combined response, a search's first page with its summary.
+     */
+    fun seed(page: Int, serverTotalPages: Int) {
+        if (loadingPage != null || page <= loadedPage) return
+        loadedPage = page
+        totalPages = maxOf(1, serverTotalPages)
+        failedPage = null
+    }
+
     fun next(lastVisible: Int, itemCount: Int): Int? {
         if (itemCount <= 0 || lastVisible < itemCount - prefetchAhead) return null
         val candidate = failedPage ?: (loadedPage + 1)

@@ -56,6 +56,8 @@ import kotlinx.coroutines.launch
 import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.state.RequestedTitles
+import com.pocketds.hub.state.PagedLoadState
+import com.pocketds.hub.state.RowPaging
 import com.pocketds.hub.ui.showStatus
 
 /**
@@ -142,8 +144,8 @@ class DiscoverScreen(
     private var focusTarget: RecyclerView? = null
 
     /** Row id -> job, so two flings at one row do not both fetch its next page. */
-    private val rowLoads = mutableMapOf<String, Job>()
-    private val readingRowLoads = mutableMapOf<String, Job>()
+    private val rowPaging = RowPaging(PREFETCH_AHEAD)
+    private val readingRowPaging = RowPaging(PREFETCH_AHEAD)
 
     /**
      * Highest page already asked for, per row.
@@ -153,8 +155,6 @@ class DiscoverScreen(
      * the strip is holding has not been re-bound yet -- and page 2 gets fetched
      * twice. Measured exactly that, 48ms apart.
      */
-    private val requestedPages = mutableMapOf<String, Int>()
-    private val readingRequestedPages = mutableMapOf<String, Int>()
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -419,9 +419,7 @@ class DiscoverScreen(
         readingType = type
         activeState.focusedKey = ""
         updateReadingFilterStyles()
-        readingRowLoads.values.forEach(Job::cancel)
-        readingRowLoads.clear()
-        readingRequestedPages.clear()
+        readingRowPaging.clear()
         if (searching) {
             runSearch(lastQuery, force = true)
         } else {
@@ -592,10 +590,9 @@ class DiscoverScreen(
         // Backing out must kill the in-flight search and every poster load it
         // started. This is the reason coroutines are in this project at all.
         scope.coroutineContext.cancelChildren()
-        rowLoads.clear()
-        requestedPages.clear()
-        readingRowLoads.clear()
-        readingRequestedPages.clear()
+        rowPaging.clear()
+        readingRowPaging.clear()
+        searchPaging.cancelLoading()
         focusTarget = null
     }
 
@@ -779,25 +776,25 @@ class DiscoverScreen(
      * fires this on every step and four concurrent fetches of page 2 would all
      * append the same twenty titles.
      */
-    private fun loadMoreRow(row: DiscoverRow) {
-        if (!row.hasMore) return
-        if (rowLoads[row.id]?.isActive == true) return
-        val next = row.page + 1
-        if (next <= (requestedPages[row.id] ?: 0)) return
-        requestedPages[row.id] = next
+    private fun loadMoreRow(row: DiscoverRow, lastVisible: Int, itemCount: Int) {
+        val next = rowPaging.next(row.id, row.page, row.totalPages, lastVisible, itemCount) ?: return
         // Scroll callbacks can run during RecyclerView layout. A cached response
         // must still wait until that layout finishes before notifying adapters.
-        rowLoads[row.id] = scope.launch(Dispatchers.Main) {
+        scope.launch(Dispatchers.Main) {
             DebugLog.log("net", "discover ${row.id} page $next")
             when (val result = api.discoverRow(row.id, next)) {
                 is HubResult.Ok -> {
-                    val fetched = result.value.rows.firstOrNull() ?: return@launch
+                    val fetched = result.value.rows.firstOrNull()
+                    if (fetched == null) {
+                        rowPaging.fail(row.id, next)
+                        return@launch
+                    }
+                    rowPaging.complete(row.id, next, fetched.totalPages)
                     rowsAdapter.append(row.id, fetched)
                 }
                 is HubResult.Failed -> {
-                    // Let it be retried: a failed page must not permanently cap
-                    // how far this row can scroll.
-                    requestedPages[row.id] = next - 1
+                    // A failed page must not permanently cap how far this row can scroll.
+                    rowPaging.fail(row.id, next)
                     DebugLog.log("net", "discover ${row.id} page $next failed: ${result.message}")
                 }
             }
@@ -835,15 +832,12 @@ class DiscoverScreen(
         }
     }
 
-    private fun loadMoreReadingRow(row: ReadingDiscoverRow) {
-        if (!row.hasMore) return
+    private fun loadMoreReadingRow(row: ReadingDiscoverRow, lastVisible: Int, itemCount: Int) {
         val requestedType = readingType
         val loadKey = row.contentType + ":" + row.id
-        if (readingRowLoads[loadKey]?.isActive == true) return
-        val next = row.page + 1
-        if (next <= (readingRequestedPages[loadKey] ?: 0)) return
-        readingRequestedPages[loadKey] = next
-        readingRowLoads[loadKey] = scope.launch(Dispatchers.Main) {
+        val total = if (row.hasMore) row.page + 1 else row.page
+        val next = readingRowPaging.next(loadKey, row.page, total, lastVisible, itemCount) ?: return
+        scope.launch(Dispatchers.Main) {
             when (val result = api.readingDiscoverRow(row.id, row.contentType, next)) {
                 is HubResult.Ok -> {
                     val fetched = result.value.rows.firstOrNull() ?: return@launch
@@ -851,15 +845,16 @@ class DiscoverScreen(
                     // RecyclerView layout. Adapter notifications must run later.
                     readingRowsList.post {
                         if (host == null || mode != ContentMode.BOOKS || searching || readingType != requestedType) {
-                            readingRequestedPages[loadKey] = next - 1
+                            readingRowPaging.fail(loadKey, next)
                             return@post
                         }
+                        readingRowPaging.complete(loadKey, next, if (fetched.hasMore) next + 1 else next)
                         readingRowsAdapter.append(loadKey, fetched)
                         readingRowsByType[requestedType] = readingRowsAdapter.snapshot()
                     }
                 }
                 is HubResult.Failed -> {
-                    readingRequestedPages[loadKey] = next - 1
+                    readingRowPaging.fail(loadKey, next)
                     DebugLog.log("net", "reading discover $loadKey page $next failed: ${result.message}")
                 }
             }
@@ -897,8 +892,6 @@ class DiscoverScreen(
         }
         lastQuery = trimmed
         searching = true
-        searchPage = 1
-        searchTotalPages = 1
         applyModeVisibility()
         statusLine.setTextColor(colors.mutedText)
         statusLine.text = "Searching…"
@@ -906,8 +899,8 @@ class DiscoverScreen(
         // Supersede whatever was in flight; the old query's results are no
         // longer what anyone is looking at.
         scope.coroutineContext.cancelChildren()
-        rowLoads.clear()
-        requestedPages.clear()
+        rowPaging.clear()
+        searchPaging.reset()
         focusTarget = if (requestedMode == ContentMode.MEDIA) resultsGrid else readingResultsGrid
         scope.launch {
             DebugLog.log("net", "search \"$trimmed\"")
@@ -937,8 +930,7 @@ class DiscoverScreen(
                 is HubResult.Ok -> {
                     if (modeStates.recall(ContentMode.MEDIA)?.query != trimmed) return@launch
                     val body = result.value
-                    searchPage = body.page
-                    searchTotalPages = body.totalPages
+                    searchPaging.seed(body.page, body.totalPages)
                     resultsAdapter.submit(body.results)
                     if (mode == ContentMode.MEDIA) {
                         statusLine.showStatus(StatusText.loaded("${body.totalResults} results", body.cache), colors)
@@ -965,31 +957,24 @@ class DiscoverScreen(
         }
     }
 
-    private var searchPage = 1
-    private var searchTotalPages = 1
-    private var loadingMoreResults = false
+    private val searchPaging = PagedLoadState(SEARCH_COLUMNS * 2)
 
     private fun maybeLoadMoreResults() {
-        if (mode != ContentMode.MEDIA || !searching || loadingMoreResults || searchPage >= searchTotalPages) return
+        if (mode != ContentMode.MEDIA || !searching) return
         val manager = resultsGrid.layoutManager as? GridLayoutManager ?: return
-        val last = manager.findLastVisibleItemPosition()
-        if (last < resultsAdapter.itemCount - SEARCH_COLUMNS * 2) return
-        loadingMoreResults = true
+        val next = searchPaging.next(manager.findLastVisibleItemPosition(), resultsAdapter.itemCount) ?: return
         val query = modeStates.recall(ContentMode.MEDIA)?.query.orEmpty()
         scope.launch {
-            try {
-                val next = searchPage + 1
-                when (val result = api.search(query, next)) {
-                    is HubResult.Ok -> {
-                        if (modeStates.recall(ContentMode.MEDIA)?.query != query) return@launch
-                        searchPage = result.value.page
-                        resultsAdapter.append(result.value.results)
-                    }
-                    is HubResult.Failed ->
-                        DebugLog.log("net", "search page $next failed: ${result.message}")
+            when (val result = api.search(query, next)) {
+                is HubResult.Ok -> {
+                    if (modeStates.recall(ContentMode.MEDIA)?.query != query) return@launch
+                    searchPaging.complete(next, result.value.totalPages)
+                    resultsAdapter.append(result.value.results)
                 }
-            } finally {
-                loadingMoreResults = false
+                is HubResult.Failed -> {
+                    searchPaging.fail(next)
+                    DebugLog.log("net", "search page $next failed: ${result.message}")
+                }
             }
         }
     }
@@ -1144,9 +1129,7 @@ class DiscoverScreen(
                     override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
                         val manager = view.layoutManager as? LinearLayoutManager ?: return
                         val row = current ?: return
-                        if (manager.findLastVisibleItemPosition() >= stripAdapter.itemCount - PREFETCH_AHEAD) {
-                            loadMoreReadingRow(row)
-                        }
+                        loadMoreReadingRow(row, manager.findLastVisibleItemPosition(), stripAdapter.itemCount)
                     }
                 })
             }
@@ -1342,11 +1325,7 @@ class DiscoverScreen(
                     override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
                         val manager = view.layoutManager as? LinearLayoutManager ?: return
                         val row = current ?: return
-                        if (manager.findLastVisibleItemPosition() >=
-                            stripAdapter.itemCount - PREFETCH_AHEAD
-                        ) {
-                            loadMoreRow(row)
-                        }
+                        loadMoreRow(row, manager.findLastVisibleItemPosition(), stripAdapter.itemCount)
                     }
                 })
             }
