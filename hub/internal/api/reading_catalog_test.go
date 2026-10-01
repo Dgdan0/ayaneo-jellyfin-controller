@@ -583,6 +583,16 @@ func TestReadingDescriptionTextRemovesMarkupAndKeepsParagraphs(t *testing.T) {
 	}
 }
 
+func TestReadingDescriptionTextDropsACatalogueLabel(t *testing.T) {
+	got := readingDescriptionText(`SUMMARY: Brandon Sanderson, fantasy's newest master`)
+	if got != "Brandon Sanderson, fantasy's newest master" {
+		t.Fatalf("description = %q", got)
+	}
+	if kept := readingDescriptionText("Summary of events: none"); kept != "Summary of events: none" {
+		t.Fatalf("description = %q", kept)
+	}
+}
+
 func TestStorytellerAuthorSortUsesFirstAuthorThenSeriesPosition(t *testing.T) {
 	books := []storyteller.Book{
 		{ID: 3, Title: "B", Authors: []storyteller.Creator{{Name: "Zed"}}},

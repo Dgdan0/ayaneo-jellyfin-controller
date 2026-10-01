@@ -263,3 +263,30 @@ func TestScanAllUsesBookProcessRouteAndRenewsExpiredToken(t *testing.T) {
 		t.Fatalf("token calls = %d, scan calls = %d", tokenCalls, scanCalls)
 	}
 }
+
+func TestCoverFallsBackToTheAudiobookCover(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/token":
+			_, _ = io.WriteString(w, `{"access_token":"token","token_type":"Bearer","expires_in":3600}`)
+		case "/api/v2/books/7/cover":
+			if _, audio := r.URL.Query()["audio"]; !audio {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write([]byte("audio-cover"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	client, err := New(config.ServiceConfig{BaseURL: upstream.URL, Username: "reader", Password: config.Secret("secret")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, contentType, err := client.Cover(context.Background(), 7)
+	if err != nil || string(body) != "audio-cover" || contentType != "image/png" {
+		t.Fatalf("Cover() = %q, %q, %v", body, contentType, err)
+	}
+}

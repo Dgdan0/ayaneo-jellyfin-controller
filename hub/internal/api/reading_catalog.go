@@ -1169,6 +1169,8 @@ var (
 	readingLineBreakTag = regexp.MustCompile(`(?is)<\s*br\s*/?\s*>`)
 	readingBlockEndTag  = regexp.MustCompile(`(?is)<\s*/\s*(p|div|li|h[1-6])\s*>`)
 	readingHTMLTag      = regexp.MustCompile(`(?is)<[^>]*>`)
+	// Blurbs copied from catalogue records arrive as "SUMMARY: ...".
+	readingDescriptionLabel = regexp.MustCompile(`(?i)^(?:summary|description|synopsis)\s*:\s*`)
 )
 
 // Reading providers commonly return an HTML fragment even though the Hub's
@@ -1194,6 +1196,9 @@ func readingDescriptionText(value string) string {
 	}
 	for len(out) > 0 && out[len(out)-1] == "" {
 		out = out[:len(out)-1]
+	}
+	if len(out) > 0 {
+		out[0] = readingDescriptionLabel.ReplaceAllString(out[0], "")
 	}
 	return strings.Join(out, "\n")
 }

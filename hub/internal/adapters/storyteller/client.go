@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -230,11 +231,20 @@ func (c *Client) StartReadaloud(ctx context.Context, id int64) error {
 	return nil
 }
 
+// Cover returns the book's ebook cover, or its audiobook cover when it has no
+// ebook one. Storyteller serves the ebook cover unless the query names audio,
+// so an audiobook-only book (Well of Ascension here) answered 404 and showed a
+// blank card although its audiobook carried a cover.
 func (c *Client) Cover(ctx context.Context, id int64) ([]byte, string, error) {
 	if id <= 0 {
 		return nil, "", fmt.Errorf("storyteller: invalid book id")
 	}
-	resp, err := c.get(ctx, "/api/v2/books/"+strconv.FormatInt(id, 10)+"/cover")
+	path := "/api/v2/books/" + strconv.FormatInt(id, 10) + "/cover"
+	resp, err := c.get(ctx, path)
+	var upstream *httpx.Error
+	if errors.As(err, &upstream) && upstream.Status == http.StatusNotFound {
+		resp, err = c.requestWith(ctx, c.http, http.MethodGet, path, url.Values{"audio": []string{"true"}}, nil, nil)
+	}
 	if err != nil {
 		return nil, "", err
 	}
