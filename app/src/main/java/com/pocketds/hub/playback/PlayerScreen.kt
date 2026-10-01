@@ -735,7 +735,7 @@ class PlayerScreen(
         val end = value.duration.takeIf { it > 0 } ?: plan?.durationMillis ?: return
         val target = PlaybackRules.clampSeek(value.currentPosition + delta, end)
         seekBy(delta, showChrome = false)
-        showGestureFeedback("${signedTime(delta)}  ·  ${Fmt.clock(target)}", side)
+        showGestureFeedback("${PlayerLabels.signedTime(delta)}  ·  ${Fmt.clock(target)}", side)
     }
 
     private fun beginHorizontalScrub() {
@@ -851,7 +851,7 @@ class PlayerScreen(
         seekPreview.visibility = View.VISIBLE
         seekPreviewTime.text = Fmt.clock(targetMillis)
         seekPreviewDelta.visibility = if (showDelta) View.VISIBLE else View.GONE
-        if (showDelta) seekPreviewDelta.text = signedTime(targetMillis - scrubStartMillis)
+        if (showDelta) seekPreviewDelta.text = PlayerLabels.signedTime(targetMillis - scrubStartMillis)
         pendingPreviewPosition = targetMillis
         updateSeekPreviewAnchor(targetMillis)
         handler.removeCallbacks(loadPreviewImage)
@@ -966,11 +966,6 @@ class PlayerScreen(
     private fun imageLoader(): ImageLoader =
         Artwork.loader(api, host.viewContext)
 
-    private fun signedTime(deltaMillis: Long): String {
-        val sign = if (deltaMillis < 0) "−" else "+"
-        return sign + Fmt.clock(abs(deltaMillis))
-    }
-
     private fun updateTimeline() {
         if (CastPlaybackCoordinator.isActive) {
             val current = CastPlaybackCoordinator.positionMillis
@@ -1049,11 +1044,11 @@ class PlayerScreen(
         if (tab == "audio" && tracks.isEmpty()) choiceOverlay.choice("No selectable audio tracks") { choiceOverlay.cancel() }
         if (tab == "subtitles" && selectedSubtitleSupportsOffset(current)) {
             addSheetSection("TIMING")
-            choiceOverlay.choice("Adjust subtitle timing", subtitleOffsetLabel(subtitleOffsetMillis)) { showSubtitleOffsetSheet() }
+            choiceOverlay.choice("Adjust subtitle timing", PlayerLabels.subtitleOffset(subtitleOffsetMillis)) { showSubtitleOffsetSheet() }
         }
         if (tab == "subtitles") {
             addSheetSection("APPEARANCE")
-            choiceOverlay.choice("Subtitle appearance", subtitleAppearanceLabel(subtitleAppearance)) { showSubtitleAppearanceSheet() }
+            choiceOverlay.choice("Subtitle appearance", PlayerLabels.subtitleAppearance(subtitleAppearance)) { showSubtitleAppearanceSheet() }
         }
         choiceOverlay.focusBody(selected)
         handler.removeCallbacks(hideControls)
@@ -1209,12 +1204,6 @@ class PlayerScreen(
     private fun selectedSubtitleSupportsOffset(value: PlaybackPrepareResponse): Boolean =
         value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }?.external == true
 
-    private fun subtitleOffsetLabel(offsetMillis: Long): String = when {
-        offsetMillis == 0L -> "No offset"
-        offsetMillis < 0 -> "%.1f seconds earlier".format(abs(offsetMillis) / 1_000.0)
-        else -> "%.1f seconds later".format(offsetMillis / 1_000.0)
-    }
-
     private fun showPlaybackSheet() = showPlaybackPanel("quality")
 
     private fun showCastPanel() {
@@ -1247,7 +1236,7 @@ class PlayerScreen(
     private fun showSubtitleAppearanceSheet() {
         choiceOverlay.pickValue(
             "Subtitle appearance", "Changes apply without reloading the video.",
-            PlaybackEnhancements.subtitleAppearances, subtitleAppearance, ::subtitleAppearanceLabel,
+            PlaybackEnhancements.subtitleAppearances, subtitleAppearance, PlayerLabels::subtitleAppearance,
             onCancel = ::showControls
         ) { picked ->
             subtitleAppearance = picked
@@ -1255,12 +1244,6 @@ class PlayerScreen(
             showControls()
         }
         handler.removeCallbacks(hideControls)
-    }
-
-    private fun subtitleAppearanceLabel(value: SubtitleAppearance) = when (value) {
-        SubtitleAppearance.SYSTEM -> "System"
-        SubtitleAppearance.LARGE -> "Large"
-        SubtitleAppearance.HIGH_CONTRAST -> "High contrast"
     }
 
     private fun applySubtitleAppearance() {
@@ -1327,7 +1310,7 @@ class PlayerScreen(
             }
             "source" -> current.sources.forEach { source ->
                 val active = source.id == current.selectedMediaSourceId
-                val row = choiceOverlay.choice(source.name.ifEmpty { source.container.uppercase() }, sourceDetail(source.container, source.bitrate), selected = active) {
+                val row = choiceOverlay.choice(source.name.ifEmpty { source.container.uppercase() }, PlayerLabels.sourceDetail(source.container, source.bitrate), selected = active) {
                     choiceOverlay.dismiss(); changeSelection(source = source.id)
                 }
                 if (active) selected = row
@@ -1338,11 +1321,11 @@ class PlayerScreen(
                     "Chapters",
                     if (chapterCount == 0) "Unavailable" else "$chapterCount markers"
                 ) { showChapterSheet() }
-                choiceOverlay.choice("Speed", speedLabel(playbackSpeed)) { showSpeedSheet() }
-                choiceOverlay.choice("Aspect", aspectLabel(playbackAspect)) { showAspectSheet() }
+                choiceOverlay.choice("Speed", PlayerLabels.speed(playbackSpeed)) { showSpeedSheet() }
+                choiceOverlay.choice("Aspect", PlayerLabels.aspect(playbackAspect)) { showAspectSheet() }
             }
             else -> choiceOverlay.body.addView(TextView(host.viewContext).apply {
-                text = diagnostic(current); textSize = 14f; setTextColor(colors.primaryText)
+                text = PlayerLabels.diagnostic(current); textSize = 14f; setTextColor(colors.primaryText)
                 setPadding(dp(10), dp(12), dp(10), dp(16)); setTextIsSelectable(true)
             })
         }
@@ -1409,7 +1392,7 @@ class PlayerScreen(
     private fun showSpeedSheet() {
         choiceOverlay.pickValue(
             "Playback speed", "Changes apply without reloading the video.",
-            PlaybackEnhancements.speeds, playbackSpeed, ::speedLabel, onCancel = ::showControls
+            PlaybackEnhancements.speeds, playbackSpeed, PlayerLabels::speed, onCancel = ::showControls
         ) { picked ->
             playbackSpeed = picked
             controller?.setPlaybackSpeed(playbackSpeed)
@@ -1421,22 +1404,13 @@ class PlayerScreen(
     private fun showAspectSheet() {
         choiceOverlay.pickValue(
             "Aspect", "Fit keeps the whole picture visible.",
-            PlaybackAspect.entries, playbackAspect, ::aspectLabel, onCancel = ::showControls
+            PlaybackAspect.entries, playbackAspect, PlayerLabels::aspect, onCancel = ::showControls
         ) { picked ->
             playbackAspect = picked
             applyAspect()
             showControls()
         }
         handler.removeCallbacks(hideControls)
-    }
-
-    private fun speedLabel(value: Float) = if (value == 1f) "Normal" else "${value}×"
-
-    private fun aspectLabel(value: PlaybackAspect) = when (value) {
-        PlaybackAspect.FIT -> "Fit"
-        PlaybackAspect.FILL -> "Fill"
-        PlaybackAspect.ZOOM -> "Zoom"
-        PlaybackAspect.ORIGINAL -> "Original aspect"
     }
 
     private fun applyAspect() {
@@ -1868,7 +1842,7 @@ class PlayerScreen(
         val subtitle = value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }
         tracksButton.contentDescription = "Audio and subtitles. " +
             (audio?.let { "Audio ${it.label}. " } ?: "") +
-            (subtitle?.let { "Subtitles ${it.label}, ${subtitleOffsetLabel(subtitleOffsetMillis)}" } ?: "Subtitles off")
+            (subtitle?.let { "Subtitles ${it.label}, ${PlayerLabels.subtitleOffset(subtitleOffsetMillis)}" } ?: "Subtitles off")
         previousButton.visibility = if (value.previousItem == null) View.GONE else View.VISIBLE
         previousButton.contentDescription = value.previousItem?.let { "Play previous episode, ${it.displayTitle()}" }
             ?: "Previous episode unavailable"
@@ -1906,28 +1880,6 @@ class PlayerScreen(
         handler.removeCallbacks(hideControls)
         if (controller?.isPlaying == true && !choiceOverlay.isOpen) handler.postDelayed(hideControls, 3_500L)
     }
-
-    private fun diagnostic(value: PlaybackPrepareResponse): String = buildList {
-        add(value.playMethod.ifEmpty { "Playback" })
-        if (value.width > 0) add("${value.width}×${value.height}")
-        if (value.videoCodec.isNotEmpty()) add(value.videoCodec.uppercase())
-        if (value.audioCodec.isNotEmpty()) add(value.audioCodec.uppercase())
-        if (value.frameRate > 0) add("%.2f fps".format(value.frameRate))
-        if (value.bitrate > 0) add(Fmt.mbps(value.bitrate.toLong()))
-        if (value.hdr.isNotEmpty()) add(value.hdr)
-        if (value.transcodeReason.isNotEmpty()) add(value.transcodeReason)
-    }.joinToString(" · ")
-
-    private fun trackDetail(codec: String, channels: Int) = buildList {
-        if (codec.isNotEmpty()) add(codec.uppercase())
-        if (channels > 0) add("$channels channels")
-    }.joinToString(" · ")
-
-    private fun sourceDetail(container: String, bitrate: Int) = buildList {
-        if (container.isNotEmpty()) add(container.uppercase())
-        if (bitrate > 0) add(Fmt.mbps(bitrate.toLong()))
-    }.joinToString(" · ")
-
 
     private fun configuredSeekSeconds(): Int = PlaybackSettings.seekSeconds(host.viewContext)
 

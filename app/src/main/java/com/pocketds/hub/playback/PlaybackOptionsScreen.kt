@@ -171,10 +171,10 @@ class PlaybackOptionsScreen(
             subtitle = "Choose the streams before playback starts.",
             choices = listOf(
                 ChoiceOverlay.Choice("play", if (value.positionMillis > 0) "Resume" else "Play", if (value.positionMillis > 0) Fmt.clock(value.positionMillis) else ""),
-                ChoiceOverlay.Choice("source", "Media version", source?.let { sourceLabel(it.name, it.container, it.bitrate) }.orEmpty()),
+                ChoiceOverlay.Choice("source", "Media version", source?.let { PlayerLabels.source(it.name, it.container, it.bitrate) }.orEmpty()),
                 ChoiceOverlay.Choice("audio", "Audio", audio),
                 ChoiceOverlay.Choice("subtitle", "Subtitles", subtitle),
-                ChoiceOverlay.Choice("quality", "Quality", qualityLabel(value))
+                ChoiceOverlay.Choice("quality", "Quality", PlayerLabels.quality(value))
             ).filter { localPlan == null || it.id !in setOf("source", "quality") },
             onCancel = { host.back() }
         ) { choice ->
@@ -195,7 +195,7 @@ class PlaybackOptionsScreen(
 
     private fun showSources(value: PlaybackPrepareResponse) = submenu(
         "Media version",
-        value.sources.map { ChoiceOverlay.Choice(it.id, it.name.ifEmpty { it.container.uppercase() }, sourceLabel("", it.container, it.bitrate), selected = it.id == value.selectedMediaSourceId) },
+        value.sources.map { ChoiceOverlay.Choice(it.id, it.name.ifEmpty { it.container.uppercase() }, PlayerLabels.source("", it.container, it.bitrate), selected = it.id == value.selectedMediaSourceId) },
         value.sources.indexOfFirst { it.id == value.selectedMediaSourceId }
     ) { source -> select(PlaybackSelectBody(value.positionMillis, mediaSourceId = source)) }
 
@@ -272,24 +272,6 @@ class PlaybackOptionsScreen(
             value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }
         )
     }
-
-    private fun qualityLabel(value: PlaybackPrepareResponse): String = buildString {
-        append(if (value.playMethod.isEmpty()) "Original" else value.playMethod)
-        if (value.width > 0 && value.height > 0) append(" · ${value.width}×${value.height}")
-        if (value.bitrate > 0) append(" · ${Fmt.mbps(value.bitrate.toLong())}")
-    }
-
-    private fun sourceLabel(name: String, container: String, bitrate: Int) = buildList {
-        if (name.isNotEmpty()) add(name)
-        if (container.isNotEmpty()) add(container.uppercase())
-        if (bitrate > 0) add(Fmt.mbps(bitrate.toLong()))
-    }.joinToString(" · ")
-
-    private fun trackDetail(codec: String, channels: Int) = buildList {
-        if (codec.isNotEmpty()) add(codec.uppercase())
-        if (channels > 0) add("$channels channels")
-    }.joinToString(" · ")
-
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
