@@ -557,6 +557,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Status line wording and tone | `state/StatusText` + `TextView.showStatus` |
 | Numbers, times, sizes | `state/Fmt` |
 | Resume point / finished / not started | `playback/ResumeRules` (mirrors the hub's `decideWatchPosition`) |
+| Watched tick vs progress bar | `ResumeRules.showsWatched` / `watchLabel`: a saved position wins, because watched + position is a rewatch |
 | Which watch is newer, local or server | `OfflineCatalogProgress.newer` / `fromServer` |
 | Titles requested this session | `state/RequestedTitles` (applied at card bind) |
 | Patching cards already on screen | `state/HitRefresh` |
