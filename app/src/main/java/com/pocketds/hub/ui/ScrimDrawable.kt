@@ -19,7 +19,7 @@ class ScrimDrawable(
     private val edge: Edge,
     private val stops: List<Pair<Float, Float>>
 ) : Drawable() {
-    enum class Edge { LEFT, BOTTOM, TOP }
+    enum class Edge { LEFT, RIGHT, BOTTOM, TOP }
 
     private val paint = Paint()
     private var shaderFor = 0L
@@ -34,6 +34,7 @@ class ScrimDrawable(
             val positions = stops.map { it.first }.toFloatArray()
             paint.shader = when (edge) {
                 Edge.LEFT -> LinearGradient(b.left.toFloat(), 0f, b.right.toFloat(), 0f, colorsAt, positions, Shader.TileMode.CLAMP)
+                Edge.RIGHT -> LinearGradient(b.right.toFloat(), 0f, b.left.toFloat(), 0f, colorsAt, positions, Shader.TileMode.CLAMP)
                 Edge.BOTTOM -> LinearGradient(0f, b.bottom.toFloat(), 0f, b.top.toFloat(), colorsAt, positions, Shader.TileMode.CLAMP)
                 Edge.TOP -> LinearGradient(0f, b.top.toFloat(), 0f, b.bottom.toFloat(), colorsAt, positions, Shader.TileMode.CLAMP)
             }

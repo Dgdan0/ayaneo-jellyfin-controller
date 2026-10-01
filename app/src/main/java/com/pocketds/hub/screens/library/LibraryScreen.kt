@@ -1,48 +1,51 @@
 package com.pocketds.hub.screens.library
 
-import com.pocketds.hub.ui.LibrarySortControls
 import com.pocketds.hub.ui.Artwork
-import com.pocketds.hub.settings.DomainPreferences
-import com.pocketds.hub.settings.SortPreference
-import com.pocketds.hub.ui.CenteredIconTextView
+import com.pocketds.hub.settings.Prefs
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.HorizontalMode
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.LibraryResponse
 import com.pocketds.hub.model.LibraryView
 import com.pocketds.hub.model.ReadingLibrariesResponse
 import com.pocketds.hub.model.ReadingLibrary
-import com.pocketds.hub.model.SearchHit
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ContentModeScreen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubResult
-import com.pocketds.hub.state.LibraryGridSizing
 import com.pocketds.hub.state.ContentMode
-import com.pocketds.hub.state.PagedLoadState
-import com.pocketds.hub.state.HitRefresh
+import com.pocketds.hub.ui.AppIcon
+import com.pocketds.hub.ui.AppIconDrawable
+import com.pocketds.hub.ui.BlobSegmentedView
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.ui.LibraryCardView
 import com.pocketds.hub.ui.LibraryTileSizing
 import com.pocketds.hub.ui.LibraryArtworkRefresh
 import com.pocketds.hub.ui.PocketColors
-import com.pocketds.hub.ui.PosterCardView
 import com.pocketds.hub.ui.ChoiceOverlay
+import com.pocketds.hub.ui.ScrimDrawable
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
+import com.pocketds.hub.ui.ThemeGradientDrawable
+import com.pocketds.hub.ui.Type
 import com.pocketds.hub.ui.activateOnTap
+import com.pocketds.hub.ui.typeRole
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -55,115 +58,80 @@ import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.showStatus
 
-/** Media and reading folders exactly as their servers name and order them. */
+/**
+ * Library. Movies and TV: the server's libraries as a row of chips across the
+ * top, the chosen one's posters right under them, sorted on the same row.
+ * More libraries than fit scroll sideways under a darkened right edge with a
+ * › that says so. Books: the reading libraries as cards, each opening its own
+ * page.
+ */
 class LibraryScreen(
     private val api: HubApi,
     private val ringVisible: () -> Boolean
 ) : Screen, ContentModeScreen {
     override val title = "Library"
     override val horizontalMode = HorizontalMode.GRID
+    override val showsOwnTitle = true
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val mediaAdapter = ViewAdapter()
     private val readingAdapter = ReadingViewAdapter()
     private lateinit var colors: PocketColors
+    private lateinit var mediaContent: LinearLayout
+    private lateinit var booksContent: LinearLayout
     private lateinit var heading: TextView
-    private lateinit var mediaTools: LinearLayout
     private lateinit var status: TextView
     private lateinit var list: RecyclerView
+    private lateinit var chips: BlobSegmentedView
+    private lateinit var chipScroll: FocusHorizontalScrollView
+    private lateinit var edge: View
+    private lateinit var searchButton: View
     private lateinit var searchBox: EditText
-    private lateinit var favourites: TextView
+    private lateinit var gridView: LibraryGridView
+    private lateinit var overlay: ChoiceOverlay
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
     private var mode = ContentMode.MEDIA
-    private var selectedMedia = 0
     private var selectedBooks = 0
     private var loadGeneration = 0
     private var mediaArtworkDay = ""
     private var readingArtworkDay = ""
+    private var views: List<LibraryView> = emptyList()
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
         mode = ContentModeSettings.get(host.viewContext)
-        return LinearLayout(host.viewContext).apply {
+        val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
+        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
+        mediaContent = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(colors.background)
-            val header=LinearLayout(context).apply {orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(dp(24),dp(8),dp(24),0)}
-            addView(header)
+            visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
+        }
+        buildMedia(host)
+        root.addView(mediaContent, FrameLayout.LayoutParams(MATCH, MATCH))
+        booksContent = LinearLayout(host.viewContext).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
             heading = TextView(context).apply {
-                text = headingText()
-                textSize = 22f
+                text = "Your reading libraries"
+                typeRole(Type.Role.SCREEN)
                 setTextColor(colors.primaryText)
-                setPadding(0,0,0,0)
+                setPadding(dp(24), dp(10), dp(24), dp(2))
             }
-            header.addView(heading,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
-            mediaTools = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(dp(12), dp(2), dp(12), dp(7))
-                visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
-                searchBox = EditText(context).apply {
-                    hint = "Search your Jellyfin library"
-                    textSize = 13f
-                    setSingleLine()
-                    imeOptions = EditorInfo.IME_ACTION_SEARCH
-                    setTextColor(colors.primaryText)
-                    setHintTextColor(colors.mutedText)
-                    background = Styler.chipBackground(context, colors)
-                    setPadding(dp(12), dp(5), dp(12), dp(5))
-                    Styler.makeFocusable(this)
-                    setOnEditorActionListener { _, actionId, _ ->
-                        if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                            openSearch(text.toString())
-                            true
-                        } else false
-                    }
-                    setOnKeyListener { _, keyCode, event ->
-                        if (event.action == android.view.KeyEvent.ACTION_UP &&
-                            (keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
-                                keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER)) {
-                            openSearch(text.toString())
-                            true
-                        } else false
-                    }
-                    FocusDecorator.attach(this, ringVisible, scale = false)
-                    FocusDecorator.listen(this, ringVisible) { view, _ ->
-                        host.refreshHints()
-                    }
-                }
-                addView(searchBox, LinearLayout.LayoutParams(0, dp(48), 1f))
-                favourites = TextView(context).apply {
-                    text = "★  Favourites"
-                    textSize = 13f
-                    gravity = android.view.Gravity.CENTER
-                    setTextColor(colors.primaryText)
-                    background = Styler.cardBackground(context, colors)
-                    setPadding(dp(14), 0, dp(14), 0)
-                    Styler.makeFocusable(this)
-                    FocusDecorator.attach(this, ringVisible, scale = false)
-                    FocusDecorator.listen(this, ringVisible) { view, _ ->
-                        host.refreshHints()
-                    }
-                    activateOnTap { openFavourites() }
-                }
-                addView(favourites, LinearLayout.LayoutParams(WRAP, dp(48)).apply {
-                    marginStart = dp(8)
-                })
-            }
-            addView(mediaTools)
+            addView(heading)
             status = TextView(context).apply {
                 textSize = 11f
                 setTextColor(colors.mutedText)
-                setPadding(dp(16), 0, dp(16), dp(8))
+                setPadding(dp(24), 0, dp(24), dp(4))
             }
             addView(status)
             list = RecyclerView(context).apply {
                 layoutManager = GridLayoutManager(context, LIBRARY_COLUMNS)
-                adapter = activeAdapter()
+                adapter = readingAdapter
                 setItemViewCacheSize(LIBRARY_COLUMNS * 2)
                 clipToPadding = false
                 clipChildren = false
-                setPadding(dp(16), dp(12), dp(16), dp(20))
+                setPadding(dp(16), dp(8), dp(16), dp(20))
                 layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
                 addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
                     val widthDp = ((right - left) / resources.displayMetrics.density).toInt()
@@ -173,86 +141,220 @@ class LibraryScreen(
             }
             addView(list)
         }
+        root.addView(booksContent, FrameLayout.LayoutParams(MATCH, MATCH))
+        root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
+        return root
+    }
+
+    private fun buildMedia(host: ScreenHost) {
+        val context = host.viewContext
+        gridView = LibraryGridView(context, api, colors, ringVisible, host) { overlay }.apply {
+            // A late page must not pull focus out of the chips or the search box.
+            wantsFocus = { !chips.hasFocus() && !searchBox.hasFocus() && !searchButton.hasFocus() }
+        }
+        val bar = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), dp(20), dp(2))
+        }
+        val chipFrame = FrameLayout(context)
+        chips = BlobSegmentedView(context, colors, ringVisible, BlobSegmentedView.Style.PILL).apply {
+            onPick = { id -> views.firstOrNull { it.id == id }?.let(::showLibrary) }
+            onOptionFocused = { host.refreshHints() }
+        }
+        chipScroll = FocusHorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            setPadding(dp(24), dp(4), dp(64), dp(4))
+            addView(chips)
+            setOnScrollChangeListener { _, _, _, _, _ -> syncEdge() }
+            addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncEdge() }
+        }
+        chipFrame.addView(chipScroll, FrameLayout.LayoutParams(MATCH, WRAP))
+        // The darker right edge and a ›: there are more libraries than fit.
+        edge = FrameLayout(context).apply {
+            background = ScrimDrawable(colors, ScrimDrawable.Edge.RIGHT, listOf(0f to 1f, .3f to .85f, 1f to 0f))
+            addView(ImageView(context).apply {
+                setImageDrawable(AppIconDrawable(AppIcon.NEXT, colors.primaryText))
+                val pad = dp(5)
+                setPadding(pad, pad, pad, pad)
+                background = ThemeGradientDrawable.oval(androidx.core.graphics.ColorUtils.setAlphaComponent(colors.primaryText, 0x1F))
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER_VERTICAL or Gravity.END).apply { marginEnd = dp(6) })
+            isClickable = true
+            setOnClickListener { chipScroll.smoothScrollBy(chipScroll.width / 2, 0) }
+            visibility = View.GONE
+        }
+        chipFrame.addView(edge, FrameLayout.LayoutParams(dp(76), MATCH, Gravity.END))
+        bar.addView(chipFrame, LinearLayout.LayoutParams(0, WRAP, 1f))
+        searchButton = TextView(context).apply {
+            contentDescription = "Search your Jellyfin library"
+            val icon = AppIconDrawable(AppIcon.SEARCH, colors.primaryText).apply { setBounds(0, 0, dp(18), dp(18)) }
+            setCompoundDrawables(icon, null, null, null)
+            gravity = Gravity.CENTER
+            setPadding(dp(11), 0, dp(11), 0)
+            minimumHeight = dp(40)
+            background = Styler.chipBackground(context, colors)
+            Styler.makeFocusable(this)
+            FocusDecorator.attach(this, ringVisible, scale = false)
+            FocusDecorator.listen(this, ringVisible) { _, _ -> host.refreshHints() }
+            activateOnTap { openSearchBox() }
+        }
+        bar.addView(searchButton, LinearLayout.LayoutParams(WRAP, dp(40)).apply { marginEnd = dp(8) })
+        bar.addView(gridView.sortControls)
+        mediaContent.addView(bar, LinearLayout.LayoutParams(MATCH, WRAP))
+        searchBox = EditText(context).apply {
+            hint = "Search your Jellyfin library"
+            textSize = 13f
+            setSingleLine()
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            setTextColor(colors.primaryText)
+            setHintTextColor(colors.mutedText)
+            background = Styler.chipBackground(context, colors)
+            setPadding(dp(14), dp(5), dp(14), dp(5))
+            visibility = View.GONE
+            Styler.makeFocusable(this)
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_SEARCH) { openSearch(text.toString()); true } else false
+            }
+            setOnKeyListener { _, keyCode, event ->
+                if (event.action == android.view.KeyEvent.ACTION_UP &&
+                    (keyCode == android.view.KeyEvent.KEYCODE_ENTER || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER)) {
+                    openSearch(text.toString()); true
+                } else false
+            }
+            FocusDecorator.attach(this, ringVisible, scale = false)
+            FocusDecorator.listen(this, ringVisible) { _, _ -> host.refreshHints() }
+        }
+        mediaContent.addView(searchBox, LinearLayout.LayoutParams(MATCH, dp(44)).apply { setMargins(dp(24), dp(4), dp(24), dp(2)) })
+        mediaContent.addView(gridView.status.apply { setPadding(dp(26), dp(2), dp(24), 0) })
+        mediaContent.addView(gridView, LinearLayout.LayoutParams(MATCH, 0, 1f))
+    }
+
+    private fun syncEdge() {
+        if (!::edge.isInitialized) return
+        edge.visibility = if (chipScroll.canScrollHorizontally(1)) View.VISIBLE else View.GONE
+    }
+
+    private fun showLibrary(view: LibraryView) {
+        host?.viewContext?.let { Prefs.of(it).edit().putString(KEY_LAST_LIBRARY, view.id).apply() }
+        chips.select(view.id)
+        gridView.show(view)
+        host?.refreshHints()
+    }
+
+    private fun openSearchBox() {
+        searchBox.visibility = View.VISIBLE
+        searchBox.requestFocus()
+        (searchBox.context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+            .showSoftInput(searchBox, InputMethodManager.SHOW_IMPLICIT)
+        host?.refreshHints()
+    }
+
+    private fun closeSearchBox(): Boolean {
+        if (searchBox.visibility != View.VISIBLE) return false
+        searchBox.visibility = View.GONE
+        searchButton.requestFocus()
+        host?.refreshHints()
+        return true
     }
 
     override fun onShow() {
         val stored = host?.viewContext?.let(ContentModeSettings::get) ?: mode
         if (stored != mode) switchMode(stored, persist = false)
-        if (loadJob?.isActive != true &&
-            (activeAdapter().itemCount == 0 || LibraryArtworkRefresh.needed(loadedArtworkDay(), LocalDate.now().toString()))) {
-            load(force = activeAdapter().itemCount > 0)
+        if (mode == ContentMode.MEDIA) {
+            if (views.isEmpty() || LibraryArtworkRefresh.needed(mediaArtworkDay, LocalDate.now().toString())) {
+                if (loadJob?.isActive != true) load(force = views.isNotEmpty())
+            } else {
+                gridView.onShow()
+                restoreFocus()
+            }
+            return
         }
-        else restoreFocus()
+        if (loadJob?.isActive != true &&
+            (readingAdapter.itemCount == 0 || LibraryArtworkRefresh.needed(readingArtworkDay, LocalDate.now().toString()))) {
+            load(force = readingAdapter.itemCount > 0)
+        } else restoreFocus()
     }
 
     override fun onHide() {
         rememberSelection()
+        if (::gridView.isInitialized) gridView.onHide()
+        if (::overlay.isInitialized && overlay.isOpen) overlay.dismiss()
         scope.coroutineContext.cancelChildren()
         loadJob = null
     }
 
     override fun onDestroyView() {
+        if (::gridView.isInitialized) gridView.destroy()
         scope.cancel()
         host = null
     }
 
     override fun requestInitialFocus(): Boolean {
-        val count = activeAdapter().itemCount
+        if (mode == ContentMode.MEDIA) {
+            if (::overlay.isInitialized && overlay.isOpen) return true
+            // While the first posters load, focus waits for them rather than
+            // settling on the chips, where a late page could no longer claim it.
+            if (gridView.requestInitialFocus()) return true
+            if (views.isEmpty() || gridView.loading) return true
+            return chips.focus()
+        }
+        val count = readingAdapter.itemCount
         if (!::list.isInitialized || count == 0) return false
-        val target = selectedIndex().coerceIn(0, count - 1)
+        val target = selectedBooks.coerceIn(0, count - 1)
         list.scrollToPosition(target)
         list.post { list.findViewHolderForAdapterPosition(target)?.itemView?.requestFocus() }
         return true
     }
 
-    override fun hints() = listOf(
-        ButtonHint.activate(
-            when {
-                ::searchBox.isInitialized && searchBox.hasFocus() -> "Search"
-                ::favourites.isInitialized && favourites.hasFocus() -> "Favourites"
-                else -> "Open"
-            }
-        ),
-        ButtonHint.secondary(if (mode == ContentMode.MEDIA) "Search" else "Books search"),
-        ButtonHint.refresh()
-    )
+    override fun hints(): List<ButtonHint> = when {
+        ::overlay.isInitialized && overlay.isOpen -> listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
+        mode == ContentMode.BOOKS -> listOf(ButtonHint.activate("Open"), ButtonHint.refresh())
+        chips.hasFocus() -> listOf(ButtonHint.activate("Show library"), ButtonHint.refresh())
+        searchBox.hasFocus() -> listOf(ButtonHint.activate("Search"), ButtonHint.back("Close search"))
+        searchButton.hasFocus() -> listOf(ButtonHint.activate("Search"))
+        gridView.sortControls.hasFocus() -> listOf(ButtonHint.activate("Change"), ButtonHint.refresh())
+        else -> gridView.hints()
+    }
 
-    override fun onPad(action: PadAction): Boolean = when (action) {
-        PadAction.Activate -> focusedView()?.let { open(it) } != null
-        PadAction.Secondary -> {
-            if (mode == ContentMode.MEDIA) searchBox.requestFocus()
-            else host?.switchSection(-1)
-            true
+    override fun onPad(action: PadAction): Boolean {
+        if (::overlay.isInitialized && overlay.onPad(action)) { host?.refreshHints(); return true }
+        if (mode == ContentMode.BOOKS) return when (action) {
+            PadAction.Activate -> readingAdapter.at(focusedPosition())?.let { open(it) } != null
+            PadAction.Refresh -> { load(force = true); true }
+            else -> false
         }
-        PadAction.Refresh -> { load(force = true); true }
-        else -> false
+        return when {
+            action == PadAction.Back && closeSearchBox() -> true
+            action is PadAction.Step && action.direction == Direction.UP && gridView.grid.hasFocus() && gridView.inFirstRow() ->
+                chips.focus(gridView.library?.id)
+            action is PadAction.Step && action.direction == Direction.DOWN && (chips.hasFocus() || searchButton.hasFocus() ||
+                gridView.sortControls.hasFocus()) -> gridView.requestInitialFocus()
+            action == PadAction.Refresh && (chips.hasFocus() || !gridView.hasItems) -> { load(force = true); true }
+            else -> gridView.onPad(action)
+        }
     }
 
     private fun load(force: Boolean = false) {
         if (loadJob?.isActive == true) return
         val generation = ++loadGeneration
         val requestedMode = mode
-        status.showStatus(
-            StatusText.loading(if (mode == ContentMode.MEDIA) "libraries" else "reading libraries", refreshing = force),
-            colors
-        )
+        if (mode == ContentMode.BOOKS) status.showStatus(StatusText.loading("reading libraries", refreshing = force), colors)
+        else gridView.status.showStatus(StatusText.loading("libraries", refreshing = force), colors)
         loadJob = scope.launch {
             if (requestedMode == ContentMode.MEDIA) {
                 when (val result = api.library()) {
-                    is HubResult.Ok -> if (generation == loadGeneration && requestedMode == mode) {
-                        renderMedia(result.value)
-                    }
+                    is HubResult.Ok -> if (generation == loadGeneration && requestedMode == mode) renderMedia(result.value)
                     is HubResult.Failed -> if (generation == loadGeneration && requestedMode == mode) {
-                        renderFailure(result)
+                        gridView.status.showStatus(StatusText.failed(result.message, result.kind, hasData = views.isNotEmpty()), colors)
                     }
                 }
             } else {
                 when (val result = api.readingLibraries()) {
-                    is HubResult.Ok -> if (generation == loadGeneration && requestedMode == mode) {
-                        renderReading(result.value)
-                    }
+                    is HubResult.Ok -> if (generation == loadGeneration && requestedMode == mode) renderReading(result.value)
                     is HubResult.Failed -> if (generation == loadGeneration && requestedMode == mode) {
-                        renderFailure(result)
+                        status.showStatus(StatusText.failed(result.message, result.kind, hasData = readingAdapter.itemCount > 0), colors)
                     }
                 }
             }
@@ -260,22 +362,18 @@ class LibraryScreen(
         }
     }
 
-    private fun renderFailure(result: HubResult.Failed) {
-        status.showStatus(StatusText.failed(result.message, result.kind, hasData = activeAdapter().itemCount > 0), colors)
-    }
-
     private fun renderMedia(body: LibraryResponse) {
-        mediaAdapter.submit(body.views)
         mediaArtworkDay = LocalDate.now().toString()
-        status.showStatus(
-            if (body.views.isEmpty()) StatusMessage("No movie or TV libraries were found.")
-            else StatusText.loaded("${body.views.size} libraries", body.cache, body.partial.map { it.service }),
-            colors
-        )
-        restoreFocus()
-        // The list is empty when showCurrent first draws the bar. Refresh after
-        // its first focus settles as well, because this device can complete the
-        // RecyclerView layout after the host's posted refresh.
+        views = body.views + LibraryView(id = FAVOURITES, name = "Favourites", kind = "favorites")
+        if (body.views.isEmpty()) {
+            gridView.status.showStatus(StatusMessage("No movie or TV libraries were found."), colors)
+            return
+        }
+        val remembered = host?.viewContext?.let { Prefs.of(it).getString(KEY_LAST_LIBRARY, null) }
+        val chosen = views.firstOrNull { it.id == (gridView.library?.id ?: remembered) } ?: views.first()
+        chips.setOptions(views.map { BlobSegmentedView.Option(it.id, if (it.kind == "favorites") "★ Favourites" else it.name, it.name) }, chosen.id)
+        chipScroll.post { syncEdge(); chips.optionView(chosen.id)?.let { chipScroll.smoothScrollTo((it.left - dp(40)).coerceAtLeast(0), 0) } }
+        if (gridView.library?.id == chosen.id) gridView.onShow() else gridView.show(chosen)
         host?.refreshHints()
     }
 
@@ -294,7 +392,7 @@ class LibraryScreen(
     }
 
     private fun restoreFocus() {
-        if (activeAdapter().itemCount == 0) return
+        if (mode == ContentMode.BOOKS && readingAdapter.itemCount == 0) return
         requestInitialFocus()
     }
 
@@ -302,62 +400,34 @@ class LibraryScreen(
         val focused = list.focusedChild ?: return -1
         return list.getChildAdapterPosition(focused)
     }
-    private fun focusedView(): Any? = when (mode) {
-        ContentMode.MEDIA -> mediaAdapter.at(focusedPosition())
-        ContentMode.BOOKS -> readingAdapter.at(focusedPosition())
-    }
 
-    private fun open(view: Any) {
+    private fun open(view: ReadingLibrary) {
         rememberSelection()
-        when (view) {
-            is LibraryView -> host?.push(LibraryGridScreen(api, view, ringVisible))
-            is ReadingLibrary -> if(view.id=="kavita:reading-lists") host?.push(ServerReadingListsScreen(api,ringVisible)) else host?.push(ReadingLibraryGridScreen(api, view, ringVisible))
-        }
+        if (view.id == "kavita:reading-lists") host?.push(ServerReadingListsScreen(api, ringVisible))
+        else host?.push(ReadingLibraryGridScreen(api, view, ringVisible))
     }
 
     private fun switchMode(next: ContentMode, persist: Boolean) {
         if (next == mode) return
         rememberSelection()
+        if (mode == ContentMode.MEDIA) gridView.onHide()
         scope.coroutineContext.cancelChildren()
         loadJob = null
         loadGeneration++
         mode = next
         if (persist) ContentModeSettings.set(requireNotNull(host).viewContext, mode)
-        heading.text = headingText()
-        mediaTools.visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
-        list.adapter = activeAdapter()
-        status.setTextColor(colors.mutedText)
-        if (activeAdapter().itemCount == 0 || LibraryArtworkRefresh.needed(loadedArtworkDay(), LocalDate.now().toString())) {
-            load(force = activeAdapter().itemCount > 0)
-        }
-        else {
-            status.text = if (mode == ContentMode.MEDIA) "${mediaAdapter.itemCount} libraries"
-            else "${readingAdapter.itemCount} reading libraries"
-            restoreFocus()
-        }
+        mediaContent.visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
+        booksContent.visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
+        onShow()
         host?.refreshHints()
     }
 
     override fun selectContentMode(mode: ContentMode) = switchMode(mode, persist = true)
 
-    private fun headingText(): String = if (mode == ContentMode.MEDIA) {
-        "Your Jellyfin libraries"
-    } else {
-        "Your reading libraries"
-    }
-
-    private fun activeAdapter(): RecyclerView.Adapter<*> = when (mode) {
-        ContentMode.MEDIA -> mediaAdapter
-        ContentMode.BOOKS -> readingAdapter
-    }
-
-    private fun loadedArtworkDay(): String = if (mode == ContentMode.MEDIA) mediaArtworkDay else readingArtworkDay
-
-    private fun selectedIndex(): Int = if (mode == ContentMode.MEDIA) selectedMedia else selectedBooks
-
     private fun rememberSelection() {
+        if (mode != ContentMode.BOOKS || !::list.isInitialized) return
         val position = focusedPosition().takeIf { it >= 0 } ?: return
-        if (mode == ContentMode.MEDIA) selectedMedia = position else selectedBooks = position
+        selectedBooks = position
     }
 
     private fun openSearch(raw: String) {
@@ -366,52 +436,8 @@ class LibraryScreen(
             host?.notify("Type at least two characters")
             return
         }
-        host?.push(
-            LibraryGridScreen(
-                api,
-                LibraryView(id = query, name = "Search · $query", kind = "search"),
-                ringVisible
-            )
-        )
-    }
-
-    private fun openFavourites() {
-        host?.push(
-            LibraryGridScreen(
-                api,
-                LibraryView(id = "favorites", name = "Favourites", kind = "favorites"),
-                ringVisible
-            )
-        )
-    }
-
-    private inner class ViewAdapter : RecyclerView.Adapter<ViewHolder>() {
-        private val values = mutableListOf<LibraryView>()
-        fun submit(next: List<LibraryView>) { values.clear(); values.addAll(next); notifyDataSetChanged() }
-        fun at(position: Int): LibraryView? = values.getOrNull(position)
-        override fun getItemCount() = values.size
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            val row = LibraryCardView(parent.context, colors).apply {
-                layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
-                    setMargins(dp(12), dp(10), dp(12), dp(10))
-                }
-                FocusDecorator.attach(this, ringVisible)
-                FocusDecorator.listen(this, ringVisible) { _, focused ->
-                    if (focused) {
-                        selectedMedia = list.getChildAdapterPosition(this)
-                        host?.refreshHints()
-                    }
-                }
-                activateOnTap { (getTag(TAG_VIEW) as? LibraryView)?.let(::open) }
-            }
-            return ViewHolder(row)
-        }
-        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val value = values[position]
-            val row = holder.itemView as LibraryCardView
-            row.setTag(TAG_VIEW, value)
-            row.bind(value, Artwork.loader(api, row.context), api::imageUrl)
-        }
+        closeSearchBox()
+        host?.push(LibraryGridScreen(api, LibraryView(id = query, name = "Search · $query", kind = "search"), ringVisible))
     }
 
     private inner class ReadingViewAdapter : RecyclerView.Adapter<ViewHolder>() {
@@ -447,11 +473,7 @@ class LibraryScreen(
             val value = values[position]
             val row = holder.itemView as LibraryCardView
             row.setTag(TAG_READING_VIEW, value)
-            row.bindReading(
-                value,
-                Artwork.loader(api, row.context),
-                api::imageUrl
-            )
+            row.bindReading(value, Artwork.loader(api, row.context), api::imageUrl)
         }
     }
 
@@ -462,371 +484,58 @@ class LibraryScreen(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val LIBRARY_COLUMNS = 3
-        const val TAG_VIEW = -0x7fffffe1
         const val TAG_READING_VIEW = -0x7fffffe0
+        const val FAVOURITES = "favorites"
+        const val KEY_LAST_LIBRARY = "library_last_view"
     }
 }
 
-/** One server folder, alphabetically paged sixty titles at a time. */
+/** A search's or a folder's posters on a page of their own. */
 class LibraryGridScreen(
     private val api: HubApi,
     private val library: LibraryView,
     private val ringVisible: () -> Boolean
 ) : Screen {
-    override val contentDomain = com.pocketds.hub.state.ContentMode.MEDIA
+    override val contentDomain = ContentMode.MEDIA
     override val title = library.name
     override val horizontalMode = HorizontalMode.GRID
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var libraryRevision = MediaLibraryChanges.revision
-    private val paging = PagedLoadState(PREFETCH_AHEAD)
-    private val adapter = ItemAdapter()
-    private lateinit var colors: PocketColors
-    private lateinit var sortControls: LibrarySortControls
-    private lateinit var status: TextView
-    private lateinit var grid: RecyclerView
+    private lateinit var gridView: LibraryGridView
     private lateinit var overlay: ChoiceOverlay
-    private var host: ScreenHost? = null
-    private var loadJob: Job? = null
-    private var selected = 0
-    private var selectedItemId = ""
-    private var refreshing = false
-    private var sortKey = "name"
-    private var sortAscending = true
-    private var loadGeneration = 0
-    private var refreshOnReturn = false
-    /** Where each loaded page begins in the grid, so a return can patch just that page. */
-    private val pageStarts = HashMap<Int, Int>()
-    private var patchJob: Job? = null
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
-        this.host = host
-        val remembered=DomainPreferences.sort(host.viewContext,ContentMode.MEDIA,SORT_FIELDS.map { it.first },"name")
-        sortKey=remembered.field;sortAscending=remembered.ascending
-        colors = Theme.colors(host.viewContext)
+        val colors = Theme.colors(host.viewContext)
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
+        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
+        gridView = LibraryGridView(host.viewContext, api, colors, ringVisible, host) { overlay }
         val content = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
-            status = TextView(context).apply {
-                textSize = 11f
-                setTextColor(colors.mutedText)
-                setPadding(dp(12), dp(6), dp(12), dp(4))
+            val toolbar = LinearLayout(context).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(Styler.dpInt(context, 24f), Styler.dpInt(context, 4f), Styler.dpInt(context, 20f), 0)
+                addView(gridView.status, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(gridView.sortControls)
             }
-            val toolbar=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(dp(16),dp(2),dp(20),dp(2)) }
-            toolbar.addView(status,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
-            sortControls=LibrarySortControls(context,colors,SORT_FIELDS,SortPreference(sortKey,sortAscending),
-                {this@LibraryGridScreen.overlay},::applySort) {host?.refreshHints()}
-            if(library.kind in setOf("search","favorites"))sortControls.visibility=View.GONE
-            toolbar.addView(sortControls)
             addView(toolbar)
-            grid = RecyclerView(context).apply {
-                layoutManager = GridLayoutManager(context, MAX_COLUMNS)
-                adapter = this@LibraryGridScreen.adapter
-                setItemViewCacheSize(MAX_COLUMNS * 3)
-                clipToPadding = false
-                clipChildren = false
-                setPadding(dp(16), dp(12), dp(16), dp(20))
-                layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
-                addOnScrollListener(object : RecyclerView.OnScrollListener() {
-                    override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
-                        if(refreshing) return
-                        val manager = view.layoutManager as GridLayoutManager
-                        paging.next(
-                            manager.findLastVisibleItemPosition(),
-                            this@LibraryGridScreen.adapter.itemCount
-                        )?.let(::loadPage)
-                    }
-                })
-                addOnLayoutChangeListener { view, left, _, right, _, oldLeft, _, oldRight, _ ->
-                    if (right - left == oldRight - oldLeft) return@addOnLayoutChangeListener
-                    val columns = LibraryGridSizing.columns(
-                        widthPx = view.width,
-                        horizontalPaddingPx = view.paddingLeft + view.paddingRight,
-                        density = resources.displayMetrics.density,
-                        maxColumns = MAX_COLUMNS
-                    )
-                    val manager = layoutManager as GridLayoutManager
-                    if (manager.spanCount != columns) manager.spanCount = columns
-                }
-            }
-            addView(grid)
+            addView(gridView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         }
-        root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
-        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel=true)
-        root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
+        root.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        root.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        gridView.show(library)
         return root
     }
 
-    override fun onShow() {
-        if(libraryRevision != MediaLibraryChanges.revision) {libraryRevision=MediaLibraryChanges.revision;reload();return}
-        val saved=DomainPreferences.sort(requireNotNull(host).viewContext,ContentMode.MEDIA,SORT_FIELDS.map { it.first },"name")
-        if(saved!=SortPreference(sortKey,sortAscending)) { applySort(saved); return }
-        if (refreshOnReturn && library.kind in setOf("search", "favorites")) {
-            refreshOnReturn = false
-            reload()
-        } else if (paging.loadedPage == 0 && loadJob?.isActive != true) {
-            (paging.retry() ?: paging.initial())?.let(::loadPage)
-        } else {
-            restoreFocus()
-            if (refreshOnReturn) {
-                refreshOnReturn = false
-                patchReturnedPage()
-            }
-        }
-    }
-
-    /**
-     * Back from a detail page -- often from playing it -- the card's watched
-     * badge and progress are out of date. Search and Favourites reload because
-     * their membership can change; a folder keeps its scroll and focus and
-     * re-reads only the page the opened title came from.
-     */
-    private fun patchReturnedPage() {
-        val page = HitRefresh.pageOf(selected, pageStarts) ?: return
-        patchJob?.cancel()
-        patchJob = scope.launch {
-            val result = api.libraryItems(library.id, page, sortKey, if (sortAscending) "asc" else "desc")
-            if (result is HubResult.Ok) adapter.patch(HitRefresh.changes(adapter.values(), result.value.items) { it.jellyfinItemId })
-        }
-    }
-
+    override fun onShow() = gridView.onShow()
     override fun onHide() {
-        loadGeneration++
-        selected = focusedPosition().takeIf { it >= 0 } ?: selected
-        selectedItemId = focusedHit()?.jellyfinItemId ?: selectedItemId
-        if (::overlay.isInitialized && overlay.isOpen) overlay.dismiss()
-        paging.cancelLoading()
-        scope.coroutineContext.cancelChildren()
-        loadJob = null
+        gridView.onHide()
+        if (overlay.isOpen) overlay.dismiss()
     }
+    override fun onDestroyView() = gridView.destroy()
+    override fun requestInitialFocus(): Boolean = (::overlay.isInitialized && overlay.isOpen) || gridView.requestInitialFocus() ||
+        gridView.sortControls.fieldButton.takeIf { it.isShown }?.requestFocus() == true
 
-    override fun onDestroyView() { scope.cancel(); host = null }
+    override fun hints() = if (::overlay.isInitialized && overlay.isOpen) listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
+        else gridView.hints() + ButtonHint.back()
 
-    override fun requestInitialFocus(): Boolean {
-        if (::overlay.isInitialized && overlay.isOpen) return true
-        if (!::grid.isInitialized || adapter.itemCount == 0) return if(::sortControls.isInitialized) sortControls.fieldButton.requestFocus() else false
-        val target = selected.coerceIn(0, adapter.itemCount - 1)
-        grid.scrollToPosition(target)
-        grid.post { grid.findViewHolderForAdapterPosition(target)?.itemView?.requestFocus() }
-        return true
-    }
-
-    override fun hints() = if (::overlay.isInitialized && overlay.isOpen) {
-        listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
-    } else {
-        buildList {
-            add(ButtonHint.activate("Details"))
-            add(ButtonHint.back())
-            if (library.kind !in setOf("search", "favorites")) add(ButtonHint.secondary("Sort"))
-            add(ButtonHint.refresh())
-        }
-    }
-
-    override fun onPad(action: PadAction): Boolean {
-        if (::overlay.isInitialized && overlay.onPad(action)) {
-            host?.refreshHints()
-            return true
-        }
-        return when (action) {
-            PadAction.Activate -> focusedHit()?.let(::open) != null
-            PadAction.Secondary -> {
-                if (library.kind !in setOf("search", "favorites")) {
-                    sortControls.showFields()
-                    true
-                } else false
-            }
-            PadAction.Refresh -> {
-                if (loadJob?.isActive != true) {
-                    val retry = paging.retry()
-                    if (retry != null) loadPage(retry) else reload()
-                }
-                true
-            }
-            else -> false
-        }
-    }
-
-    private fun reload(resetSelection: Boolean = false) {
-        loadGeneration++
-        loadJob?.cancel()
-        loadJob = null
-        paging.reset()
-        pageStarts.clear()
-        if (resetSelection) {
-            selected = 0
-            selectedItemId = ""
-        } else {
-            selectedItemId = focusedHit()?.jellyfinItemId ?: selectedItemId
-        }
-        refreshing = true
-        paging.initial()?.let(::loadPage)
-    }
-
-    private fun loadPage(page: Int) {
-        if (loadJob?.isActive == true) return
-        val generation = loadGeneration
-        status.setTextColor(colors.mutedText)
-        status.text = when {
-            refreshing -> "Refreshing ${library.name}…"
-            adapter.itemCount == 0 -> "Loading ${library.name}…"
-            else -> "Loading more…"
-        }
-        loadJob = scope.launch {
-            val request = when (library.kind) {
-                "search" -> api.librarySearch(library.id, page)
-                "favorites" -> api.libraryFavorites(page)
-                else -> api.libraryItems(
-                    library.id,
-                    page,
-                    sortKey,
-                    if (sortAscending) "asc" else "desc"
-                )
-            }
-            when (val result = request) {
-                is HubResult.Ok -> {
-                    if (generation != loadGeneration) return@launch
-                    paging.complete(page, result.value.totalPages)
-                    if (page == 1 && refreshing) {
-                        pageStarts.clear()
-                        pageStarts[1] = 0
-                        adapter.replace(result.value.items)
-                        selected = adapter.indexOf(selectedItemId).takeIf { it >= 0 } ?: 0
-                        refreshing = false
-                    } else {
-                        pageStarts[page] = adapter.itemCount
-                        adapter.append(result.value.items)
-                    }
-                    val empty = result.value.items.isEmpty() && adapter.itemCount == 0
-                    status.showStatus(
-                        when {
-                            empty && library.kind == "favorites" -> StatusMessage("No favourites yet.")
-                            empty && library.kind == "search" -> StatusMessage("No Jellyfin matches.")
-                            empty -> StatusMessage("This library is empty.")
-                            else -> StatusText.loaded(
-                                when (library.kind) {
-                                    "search" -> "${adapter.itemCount} of ${result.value.total} matches"
-                                    "favorites" -> "${adapter.itemCount} of ${result.value.total} favourites"
-                                    else -> "${adapter.itemCount} of ${result.value.total} · ${sortLabel()}"
-                                },
-                                result.value.cache,
-                                result.value.partial.map { it.service }
-                            )
-                        },
-                        colors
-                    )
-                    if (page == 1 && !overlay.isOpen) restoreFocus()
-                    host?.refreshHints()
-                }
-                is HubResult.Failed -> {
-                    if (generation != loadGeneration) return@launch
-                    paging.fail(page)
-                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = adapter.itemCount > 0), colors)
-                    host?.refreshHints()
-                }
-            }
-            loadJob = null
-        }
-    }
-
-    private fun applySort(value:SortPreference) {
-        sortKey=value.field;sortAscending=value.ascending
-        DomainPreferences.setSort(requireNotNull(host).viewContext,ContentMode.MEDIA,value)
-        reload(resetSelection=true)
-    }
-
-    private fun sortLabel(): String {
-        val field = SORT_FIELDS.firstOrNull { it.first == sortKey }?.second ?: "Name"
-        return "$field · ${SortPreference(sortKey, sortAscending).directionLabel()}"
-    }
-
-    private fun restoreFocus() { if (adapter.itemCount > 0) requestInitialFocus() }
-    private fun focusedPosition(): Int {
-        val focused = grid.focusedChild ?: return -1
-        return grid.getChildAdapterPosition(focused)
-    }
-    private fun focusedHit(): SearchHit? = adapter.at(focusedPosition())
-    private fun open(hit: SearchHit) {
-        if (hit.jellyfinItemId.isEmpty()) {
-            host?.notify("This Jellyfin item no longer exists")
-            return
-        }
-        selected = focusedPosition().coerceAtLeast(0)
-        refreshOnReturn = true
-        host?.push(LibraryDetailScreen(api, hit.jellyfinItemId, hit.media.title, hit.media.type, ringVisible))
-    }
-
-    private inner class ItemAdapter : RecyclerView.Adapter<ItemHolder>() {
-        private val values = mutableListOf<SearchHit>()
-        fun at(position: Int) = values.getOrNull(position)
-        fun values(): List<SearchHit> = values
-        fun indexOf(itemId: String) = values.indexOfFirst { it.jellyfinItemId == itemId }
-        /** A payload keeps each card's holder, so the focused card stays focused. */
-        fun patch(changes: List<IndexedValue<SearchHit>>) = changes.forEach { (position, value) ->
-            values[position] = value
-            notifyItemChanged(position, PAYLOAD_STATE)
-        }
-        fun replace(next: List<SearchHit>) {
-            values.clear()
-            values.addAll(next.distinctBy { it.jellyfinItemId })
-            notifyDataSetChanged()
-        }
-        fun append(next: List<SearchHit>) {
-            val known = values.asSequence().map { it.jellyfinItemId }.toHashSet()
-            val added = next.filter { known.add(it.jellyfinItemId) }
-            val start = values.size
-            values.addAll(added)
-            if (added.isNotEmpty()) notifyItemRangeInserted(start, added.size)
-        }
-        override fun getItemCount() = values.size
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ItemHolder {
-            val card = PosterCardView(parent.context, colors, POSTER_DP).apply {
-                layoutParams = RecyclerView.LayoutParams(dp(CARD_DP), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    setMargins(dp(8), dp(8), dp(8), dp(8))
-                }
-                FocusDecorator.attach(this, ringVisible)
-                FocusDecorator.listen(this, ringVisible) { _, focused ->
-                    if (focused) {
-                        selected = grid.getChildAdapterPosition(this)
-                        selectedItemId = (getTag(TAG_HIT) as? SearchHit)?.jellyfinItemId.orEmpty()
-                        host?.refreshHints()
-                    }
-                }
-                activateOnTap { (getTag(TAG_HIT) as? SearchHit)?.let(::open) }
-            }
-            return ItemHolder(card)
-        }
-        override fun onBindViewHolder(holder: ItemHolder, position: Int) {
-            val hit = values[position]
-            val card = holder.itemView as PosterCardView
-            card.setTag(TAG_HIT, hit)
-            card.bind(
-                hit,
-                Artwork.loader(api, card.context),
-                api::imageUrl,
-                showAvailability = false
-            )
-        }
-    }
-
-    private class ItemHolder(view: View) : RecyclerView.ViewHolder(view)
-    private fun dp(value: Int) = Styler.dpInt(requireNotNull(host).viewContext, value.toFloat())
-
-    private companion object {
-        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
-        const val MAX_COLUMNS = 7
-        const val PREFETCH_AHEAD = 6
-        const val PAYLOAD_STATE = "state"
-        const val POSTER_DP = 150f
-        const val CARD_DP = 104
-        const val TAG_HIT = -0x7fffffe2
-        val SORT_FIELDS = listOf(
-            "name" to "Name",
-            "release" to "Release date",
-            "added" to "Date added",
-            "year" to "Year",
-            "rating" to "Rating",
-            "played" to "Last played",
-            "parental" to "Parental rating"
-        )
-    }
+    override fun onPad(action: PadAction): Boolean = overlay.onPad(action) || gridView.onPad(action)
 }
