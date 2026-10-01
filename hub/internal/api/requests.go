@@ -278,11 +278,7 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Every cached search page and the detail entry now describe this title
-	// wrongly. Dropping them means the screen the user returns to shows the
-	// request they just made rather than "not in library".
-	s.cache.InvalidatePrefix("search:")
-	s.cache.Invalidate("detail:" + key.String())
+	s.invalidateTitle(key)
 
 	out := createRequestResponse{
 		RequestID:    created.ID,
@@ -331,8 +327,18 @@ func requestMessage(status int) string {
 //
 // "You already requested this" and "you are over quota" are both 409s upstream,
 // and both deserve better than a generic error toast.
+// invalidateTitle drops every cached view that embeds this title's request
+// state: search pages, the Discover rows and its detail. Discover was missed --
+// cached for half an hour, its card kept saying "not in library" and offering
+// Request after a request or a grab.
+func (s *Server) invalidateTitle(key MediaKey) {
+	s.cache.InvalidatePrefix("search:")
+	s.cache.InvalidatePrefix("discover:")
+	s.cache.Invalidate("detail:" + key.String())
+}
+
 func writeRequestError(w http.ResponseWriter, r *http.Request, err error) {
-	text := strings.ToLower(err.Error())
+	text := strings.ToLower(upstreamText(err))
 	switch {
 	case strings.Contains(text, "duplicate"), strings.Contains(text, "already exists"):
 		writeError(w, r, http.StatusConflict, Error{

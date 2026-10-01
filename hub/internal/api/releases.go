@@ -454,7 +454,7 @@ func (s *Server) handleGrab(w http.ResponseWriter, r *http.Request) {
 	// The queue now has something new in it, and the title's availability
 	// changed. Both screens the user might go to next were about to lie.
 	s.cache.Invalidate("activity")
-	s.cache.Invalidate("detail:" + key.String())
+	s.invalidateTitle(key)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
@@ -672,7 +672,7 @@ func writeTargetError(w http.ResponseWriter, r *http.Request, err error) {
 			Code: CodeNotFound, Service: "sonarr", Message: typed.Error(),
 		})
 	default:
-		writeUpstreamError(w, r, "arr", err)
+		writeUpstreamError(w, r, serviceOf(err, "radarr or sonarr"), err)
 	}
 }
 
