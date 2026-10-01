@@ -8,6 +8,20 @@ import org.junit.Test
 
 class PlaybackEnhancementsTest {
     @Test
+    fun subtitles_rise_above_the_controls_only_while_they_show() {
+        val large = PlaybackEnhancements.subtitleBottomFraction(SubtitleAppearance.LARGE)
+        // Hidden controls: the appearance's own place.
+        assertEquals(large, PlaybackEnhancements.subtitleLift(large, coveredPx = 0, heightPx = 1080), 0f)
+        // A 216px panel on a 1080px picture covers 20%; subtitles sit 2% above it.
+        assertEquals(.22f, PlaybackEnhancements.subtitleLift(large, coveredPx = 216, heightPx = 1080), 1e-4f)
+        // Already clear of a short panel: unchanged.
+        assertEquals(large, PlaybackEnhancements.subtitleLift(large, coveredPx = 54, heightPx = 1080), 0f)
+        // Before layout, or a panel taller than sense: no lift, or a capped one.
+        assertEquals(large, PlaybackEnhancements.subtitleLift(large, coveredPx = 216, heightPx = 0), 0f)
+        assertEquals(.6f, PlaybackEnhancements.subtitleLift(large, coveredPx = 1000, heightPx = 1080), 0f)
+    }
+
+    @Test
     fun chapters_are_ordered_clamped_and_have_stable_navigation() {
         val chapters = PlaybackEnhancements.chapters(
             listOf(

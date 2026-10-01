@@ -82,6 +82,8 @@ class PlayerScreen(
     private lateinit var playerView: PlayerView
     private lateinit var videoDimmer: View
     private lateinit var dynamicSubtitleView: SubtitleView
+    /** The bottom padding last given to both subtitle views. */
+    private var subtitleFraction = -1f
     private lateinit var gestureView: PlayerGestureView
     /** The controls; the fields below are views it owns. */
     private lateinit var chrome: PlayerChrome
@@ -273,6 +275,9 @@ class PlayerScreen(
         titleView.text = plan?.item?.displayTitle().orEmpty()
         root.addView(topPanel, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
         root.addView(controllerPanel, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+        // The panel's height is known only after it lays out, and changes when
+        // the skip or next buttons appear.
+        controllerPanel.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> placeSubtitles() }
 
         root.addView(
             seekPreview,
@@ -1247,14 +1252,12 @@ class PlayerScreen(
                     view.setApplyEmbeddedFontSizes(true)
                     view.setUserDefaultStyle()
                     view.setUserDefaultTextSize()
-                    view.setBottomPaddingFraction(0.08f)
                 }
                 SubtitleAppearance.LARGE -> {
                     view.setApplyEmbeddedStyles(false)
                     view.setApplyEmbeddedFontSizes(false)
                     view.setStyle(CaptionStyleCompat.DEFAULT)
                     view.setFractionalTextSize(0.075f)
-                    view.setBottomPaddingFraction(0.11f)
                 }
                 SubtitleAppearance.HIGH_CONTRAST -> {
                     view.setApplyEmbeddedStyles(false)
@@ -1268,10 +1271,21 @@ class PlayerScreen(
                         null
                     ))
                     view.setFractionalTextSize(0.062f)
-                    view.setBottomPaddingFraction(0.09f)
                 }
             }
         }
+        placeSubtitles()
+    }
+
+    /** The appearance's own height, or just above the timeline while it shows. */
+    private fun placeSubtitles() {
+        val covered = if (controlsVisible && controllerPanel.height > 0) root.height - controllerPanel.top else 0
+        val fraction = PlaybackEnhancements.subtitleLift(
+            PlaybackEnhancements.subtitleBottomFraction(subtitleAppearance), covered, root.height
+        )
+        if (fraction == subtitleFraction) return
+        subtitleFraction = fraction
+        listOfNotNull(playerView.subtitleView, dynamicSubtitleView).forEach { it.setBottomPaddingFraction(fraction) }
     }
 
     private fun showPlaybackPanel(tab: String) {
@@ -1683,6 +1697,7 @@ class PlayerScreen(
         controlsVisible = visible
         topPanel.visibility = if (visible) View.VISIBLE else View.GONE
         controllerPanel.visibility = if (visible) View.VISIBLE else View.GONE
+        placeSubtitles()
         if (!visible) {
             handler.removeCallbacks(hideControls)
             if (topPanel.hasFocus() || controllerPanel.hasFocus()) root.requestFocus()

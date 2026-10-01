@@ -19,6 +19,28 @@ object PlaybackEnhancements {
     )
     val defaultSubtitleAppearance = SubtitleAppearance.SYSTEM
 
+    /** Where an appearance puts subtitles: their bottom edge, as a fraction of the video's height. */
+    fun subtitleBottomFraction(appearance: SubtitleAppearance): Float = when (appearance) {
+        SubtitleAppearance.SYSTEM -> .08f
+        SubtitleAppearance.LARGE -> .11f
+        SubtitleAppearance.HIGH_CONTRAST -> .09f
+    }
+
+    /**
+     * Subtitles sit just above the timeline while it is showing, rather than
+     * under it: the controls cover the bottom fifth of the picture, and Large
+     * text at 11% drew straight through the seek bar. [coveredPx] is how much
+     * of the bottom the controls cover, 0 when they are hidden.
+     */
+    fun subtitleLift(baseFraction: Float, coveredPx: Int, heightPx: Int): Float {
+        if (coveredPx <= 0 || heightPx <= 0) return baseFraction
+        val clear = coveredPx.toFloat() / heightPx + SUBTITLE_GAP
+        return maxOf(baseFraction, clear).coerceAtMost(MAX_SUBTITLE_LIFT)
+    }
+
+    private const val SUBTITLE_GAP = .02f
+    private const val MAX_SUBTITLE_LIFT = .6f
+
     fun chapters(values: List<PlaybackChapter>, durationMillis: Long): List<PlaybackChapter> {
         val seen = hashSetOf<Long>()
         return values.asSequence()
