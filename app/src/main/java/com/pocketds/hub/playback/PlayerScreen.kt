@@ -1,13 +1,9 @@
 package com.pocketds.hub.playback
 
 import com.pocketds.hub.ui.Artwork
-import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.StateListDrawable
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
@@ -31,7 +27,6 @@ import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
 import androidx.mediarouter.app.MediaRouteButton
-import com.google.android.gms.cast.framework.CastButtonFactory
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastState
 import com.google.android.gms.cast.framework.CastStateListener
@@ -56,14 +51,12 @@ import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
-import com.pocketds.hub.ui.activateOnTap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import com.pocketds.hub.state.Fmt
 
@@ -90,36 +83,38 @@ class PlayerScreen(
     private lateinit var videoDimmer: View
     private lateinit var dynamicSubtitleView: SubtitleView
     private lateinit var gestureView: PlayerGestureView
-    private lateinit var topPanel: LinearLayout
-    private lateinit var controllerPanel: LinearLayout
-    private lateinit var titleView: TextView
+    /** The controls; the fields below are views it owns. */
+    private lateinit var chrome: PlayerChrome
+    private val topPanel: LinearLayout get() = chrome.top
+    private val controllerPanel: LinearLayout get() = chrome.controller
+    private val titleView: TextView get() = chrome.titleView
     private lateinit var status: TextView
-    private lateinit var position: TextView
-    private lateinit var duration: TextView
-    private lateinit var seekBar: SeekBar
-    private lateinit var playButton: PlayerIconButton
-    private lateinit var tracksButton: PlayerIconButton
+    private val position: TextView get() = chrome.position
+    private val duration: TextView get() = chrome.duration
+    private val seekBar: SeekBar get() = chrome.seekBar
+    private val playButton: PlayerIconButton get() = chrome.playButton
+    private val tracksButton: PlayerIconButton get() = chrome.tracksButton
     private val menuState = PlayerMenuState()
-    private lateinit var optionsButton: PlayerIconButton
-    private lateinit var castButton: MediaRouteButton
-    private lateinit var lockButton: PlayerIconButton
-    private lateinit var pipButton: PlayerIconButton
-    private lateinit var closeButton: PlayerIconButton
-    private lateinit var previousButton: PlayerIconButton
-    private lateinit var rewindButton: PlayerIconButton
-    private lateinit var forwardButton: PlayerIconButton
-    private lateinit var skipButton: PlayerIconButton
-    private lateinit var nextButton: PlayerIconButton
+    private val optionsButton: PlayerIconButton get() = chrome.optionsButton
+    private val castButton: MediaRouteButton get() = chrome.castButton
+    private val lockButton: PlayerIconButton get() = chrome.lockButton
+    private val pipButton: PlayerIconButton get() = chrome.pipButton
+    private val closeButton: PlayerIconButton get() = chrome.closeButton
+    private val previousButton: PlayerIconButton get() = chrome.previousButton
+    private val rewindButton: PlayerIconButton get() = chrome.rewindButton
+    private val forwardButton: PlayerIconButton get() = chrome.forwardButton
+    private val skipButton: PlayerIconButton get() = chrome.skipButton
+    private val nextButton: PlayerIconButton get() = chrome.nextButton
     private lateinit var choiceOverlay: ChoiceOverlay
     private lateinit var subtitleOffsetOverlay: SubtitleOffsetOverlay
-    private lateinit var nextPanel: LinearLayout
-    private lateinit var nextText: TextView
-    private lateinit var seekPreview: LinearLayout
-    private lateinit var seekPreviewImage: ImageView
-    private lateinit var seekPreviewUnavailable: TextView
-    private lateinit var seekPreviewTime: TextView
-    private lateinit var seekPreviewDelta: TextView
-    private lateinit var gestureFeedback: TextView
+    private val nextPanel: LinearLayout get() = chrome.nextPanel
+    private val nextText: TextView get() = chrome.nextText
+    private val seekPreview: LinearLayout get() = chrome.seekPreview
+    private val seekPreviewImage: ImageView get() = chrome.seekPreviewImage
+    private val seekPreviewUnavailable: TextView get() = chrome.seekPreviewUnavailable
+    private val seekPreviewTime: TextView get() = chrome.seekPreviewTime
+    private val seekPreviewDelta: TextView get() = chrome.seekPreviewDelta
+    private val gestureFeedback: TextView get() = chrome.gestureFeedback
     private lateinit var levelFeedback: PlayerLevelView
 
     private var plan: PlaybackPrepareResponse? = initialPlan
@@ -274,19 +269,17 @@ class PlayerScreen(
                     if (!touchLocked) finishVerticalGesture(side, cancelled) else Unit
             })
         root.addView(gestureView, FrameLayout.LayoutParams(MATCH, MATCH))
-        topPanel = buildTopController()
+        chrome = PlayerChrome(host.viewContext, colors, ChromeActions(), configuredSeekSeconds(), TimelineListener())
+        titleView.text = plan?.item?.displayTitle().orEmpty()
         root.addView(topPanel, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
-        controllerPanel = buildController()
         root.addView(controllerPanel, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
 
-        seekPreview = buildSeekPreview()
         root.addView(
             seekPreview,
             FrameLayout.LayoutParams(dp(190), WRAP, Gravity.BOTTOM or Gravity.START).apply {
                 bottomMargin = dp(122)
             }
         )
-        gestureFeedback = buildGestureFeedback()
         root.addView(
             gestureFeedback,
             FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER)
@@ -303,7 +296,6 @@ class PlayerScreen(
         root.addView(choiceOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
         subtitleOffsetOverlay = SubtitleOffsetOverlay(host.viewContext, colors, ringVisible)
         root.addView(subtitleOffsetOverlay, FrameLayout.LayoutParams(dp(320), WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(16) })
-        nextPanel = buildNextPanel()
         root.addView(
             nextPanel,
             FrameLayout.LayoutParams(dp(560), WRAP, Gravity.BOTTOM or Gravity.END).apply {
@@ -944,7 +936,7 @@ class PlayerScreen(
 
     private fun updateSeekPreviewAnchor(targetMillis: Long) {
         seekBar.post {
-            if (!::seekPreview.isInitialized || seekBar.width <= 0 || root.width <= 0) return@post
+            if (!::chrome.isInitialized || seekBar.width <= 0 || root.width <= 0) return@post
             val end = controller?.duration?.takeIf { it > 0 } ?: plan?.durationMillis ?: return@post
             val rootLocation = IntArray(2)
             val barLocation = IntArray(2)
@@ -990,7 +982,7 @@ class PlayerScreen(
     }
 
     private fun updateSegmentSkip(positionMillis: Long) {
-        if (!::skipButton.isInitialized) return
+        if (!::chrome.isInitialized) return
         val segment = PlaybackEnhancements.skipPrompt(plan?.segments.orEmpty(), positionMillis)
         val id = segment?.id.orEmpty()
         if (id == activeSegmentId) return
@@ -1593,244 +1585,71 @@ class PlayerScreen(
         }
     }
 
-    private fun buildTopController(): LinearLayout = LinearLayout(host.viewContext).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(22), dp(14), dp(16), dp(18))
-        background = ThemeGradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(Color.argb(225, 0, 0, 0), Color.TRANSPARENT)
-        )
-        titleView = TextView(context).apply {
-            text = plan?.item?.displayTitle().orEmpty()
-            textSize = 18f
-            setTextColor(Color.WHITE)
-            maxLines = 2
-            setTypeface(typeface, Typeface.BOLD)
-        }
-        addView(titleView, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginEnd = dp(10) })
-        tracksButton = control(PlayerControlIcon.TRACKS, "Audio and subtitles") { showTrackSheet() }
-        addView(tracksButton)
-        castButton = MediaRouteButton(context).apply {
-            contentDescription = "Play on a TV"
-            isFocusable = true
-            isFocusableInTouchMode = true
-            CastButtonFactory.setUpMediaRouteButton(context, this)
-        }
-        addView(castButton, LinearLayout.LayoutParams(dp(48), dp(48)))
-        optionsButton = control(
-            PlayerControlIcon.OPTIONS, "Playback options, chapters, speed and aspect"
-        ) { showPlaybackSheet() }
-        addView(optionsButton)
-        lockButton = control(PlayerControlIcon.UNLOCK, "Lock touch controls") {
+    /** What the controls do; PlayerChrome only builds them. */
+    private inner class ChromeActions : PlayerChrome.Actions {
+        override fun showTracks() = showTrackSheet()
+        override fun showOptions() = showPlaybackSheet()
+        override fun toggleLock() {
             touchLocked = !touchLocked
-            lockButton.setIcon(if (touchLocked) PlayerControlIcon.LOCK else PlayerControlIcon.UNLOCK)
-            lockButton.contentDescription = if (touchLocked) "Unlock touch controls" else "Lock touch controls"
+            chrome.setLocked(touchLocked)
             host.notify(if (touchLocked) "Touch controls locked" else "Touch controls unlocked")
             showControls()
         }
-        addView(lockButton)
-        pipButton = control(PlayerControlIcon.PICTURE_IN_PICTURE, "Open picture in picture") {
+        override fun enterPictureInPicture() {
             setControls(false)
             if (!host.enterPictureInPicture(playerView)) showControls()
         }
-        addView(pipButton)
-        closeButton = control(PlayerControlIcon.CLOSE, "Close playback") {
-            host.back()
+        override fun close() { host.back() }
+        override fun playPrevious() = this@PlayerScreen.playPrevious()
+        override fun rewind() = seekBy(-configuredSeekMillis())
+        override fun togglePlay() = this@PlayerScreen.togglePlay()
+        override fun forward() = seekBy(configuredSeekMillis())
+        override fun skipSegment() {
+            val segment = PlaybackEnhancements.skipPrompt(
+                plan?.segments.orEmpty(), controller?.currentPosition ?: 0L
+            ) ?: return
+            controller?.seekTo(segment.endMillis)
+            skipButton.visibility = View.GONE
         }
-        addView(closeButton)
+        override fun playNext() = this@PlayerScreen.playNext()
+        override fun cancelNext() = this@PlayerScreen.cancelNext()
+        override fun controlFocused() = showControls()
     }
 
-    private fun buildController(): LinearLayout = LinearLayout(host.viewContext).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(26), dp(18), dp(26), dp(20))
-        background = ThemeGradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(Color.TRANSPARENT, Color.argb(225, 0, 0, 0))
-        )
-        addView(LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            position = timeText("0:00")
-            addView(position, LinearLayout.LayoutParams(dp(64), WRAP))
-            seekBar = SeekBar(context).apply {
-                max = 10_000
-                contentDescription = "Playback position"
-                Styler.makeFocusable(this)
-                setOnFocusChangeListener { _, focused -> if (focused) showControls() }
-                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                    override fun onStartTrackingTouch(seekBar: SeekBar) {
-                        seekingByTouch = true
-                        suppressPlaybackChrome = true
-                        if (CastPlaybackCoordinator.isActive) {
-                            scrubStartMillis = CastPlaybackCoordinator.positionMillis
-                            showSeekPreview(scrubStartMillis, showDelta = false)
-                            return
-                        }
-                        timelineWasPlaying = controller?.isPlaying == true
-                        controller?.pause()
-                        val current = controller?.currentPosition?.coerceAtLeast(0) ?: 0
-                        scrubStartMillis = current
-                        showSeekPreview(current, showDelta = false)
-                    }
-
-                    override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                        if (!fromUser) return
-                        val end = controller?.duration?.takeIf { it > 0 } ?: plan?.durationMillis ?: 0
-                        showSeekPreview((end * progress) / 10_000L, showDelta = false)
-                    }
-
-                    override fun onStopTrackingTouch(seekBar: SeekBar) {
-                        val end = controller?.duration?.takeIf { it > 0 } ?: plan?.durationMillis ?: 0
-                        if (CastPlaybackCoordinator.isActive) {
-                            CastPlaybackCoordinator.seekTo((end * seekBar.progress) / 10_000L)
-                        } else controller?.seekTo((end * seekBar.progress) / 10_000L)
-                        seekingByTouch = false
-                        if (timelineWasPlaying) controller?.play()
-                        suppressPlaybackChrome = false
-                        handler.removeCallbacks(hideSeekPreview)
-                        handler.postDelayed(hideSeekPreview, 450L)
-                        showControls()
-                    }
-                })
+    /** Dragging the timeline: pause, preview the frame, seek on release. */
+    private inner class TimelineListener : SeekBar.OnSeekBarChangeListener {
+        override fun onStartTrackingTouch(seekBar: SeekBar) {
+            seekingByTouch = true
+            suppressPlaybackChrome = true
+            if (CastPlaybackCoordinator.isActive) {
+                scrubStartMillis = CastPlaybackCoordinator.positionMillis
+                showSeekPreview(scrubStartMillis, showDelta = false)
+                return
             }
-            addView(seekBar, LinearLayout.LayoutParams(0, WRAP, 1f))
-            duration = timeText("0:00")
-            addView(duration, LinearLayout.LayoutParams(dp(64), WRAP))
-        }, LinearLayout.LayoutParams(MATCH, WRAP))
-        addView(LinearLayout(context).apply {
-            gravity = Gravity.CENTER
-            previousButton = control(PlayerControlIcon.PREVIOUS, "Play previous episode") { playPrevious() }
-            addView(previousButton)
-            val seekSeconds = configuredSeekSeconds()
-            rewindButton = control(PlayerControlIcon.REWIND, "Jump back $seekSeconds seconds") {
-                seekBy(-configuredSeekMillis())
-            }
-            addView(rewindButton)
-            playButton = control(PlayerControlIcon.PLAY, "Play") { togglePlay() }
-            addView(playButton)
-            forwardButton = control(PlayerControlIcon.FORWARD, "Jump forward $seekSeconds seconds") {
-                seekBy(configuredSeekMillis())
-            }
-            addView(forwardButton)
-            skipButton = control(PlayerControlIcon.SKIP, "Skip current segment") {
-                val segment = PlaybackEnhancements.skipPrompt(
-                    plan?.segments.orEmpty(), controller?.currentPosition ?: 0L
-                ) ?: return@control
-                controller?.seekTo(segment.endMillis)
-                skipButton.visibility = View.GONE
-            }.apply { visibility = View.GONE }
-            addView(skipButton)
-            nextButton = control(PlayerControlIcon.NEXT, "Play next episode") { playNext() }
-            addView(nextButton)
-        }, LinearLayout.LayoutParams(MATCH, WRAP))
-    }
-
-    private fun buildSeekPreview(): LinearLayout = LinearLayout(host.viewContext).apply {
-        orientation = LinearLayout.VERTICAL
-        gravity = Gravity.CENTER_HORIZONTAL
-        visibility = View.GONE
-        isClickable = false
-        background = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 12f)
-            setColor(Color.argb(235, 22, 24, 29))
-            setStroke(dp(1), Color.argb(120, 255, 255, 255))
-        }
-        setPadding(dp(10), dp(10), dp(10), dp(9))
-        addView(FrameLayout(context).apply {
-            seekPreviewImage = ImageView(context).apply {
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                setImageDrawable(ColorDrawable(Color.rgb(28, 30, 36)))
-            }
-            addView(seekPreviewImage, FrameLayout.LayoutParams(MATCH, MATCH))
-            seekPreviewUnavailable = TextView(context).apply {
-                text = "Preview unavailable"
-                textSize = 12f
-                gravity = Gravity.CENTER
-                setTextColor(Color.argb(185, 255, 255, 255))
-            }
-            addView(seekPreviewUnavailable, FrameLayout.LayoutParams(MATCH, MATCH))
-        }, LinearLayout.LayoutParams(MATCH, dp(94)))
-        addView(LinearLayout(context).apply {
-            gravity = Gravity.CENTER
-            seekPreviewTime = TextView(context).apply {
-                textSize = 17f
-                setTextColor(Color.WHITE)
-                setTypeface(typeface, Typeface.BOLD)
-            }
-            addView(seekPreviewTime)
-            seekPreviewDelta = TextView(context).apply {
-                textSize = 13f
-                setTextColor(this@PlayerScreen.colors.accent)
-                setPadding(dp(12), 0, 0, 0)
-            }
-            addView(seekPreviewDelta)
-        }, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(7) })
-    }
-
-    private fun buildGestureFeedback(): TextView = TextView(host.viewContext).apply {
-        visibility = View.GONE
-        gravity = Gravity.CENTER
-        textSize = 17f
-        setTextColor(Color.WHITE)
-        setTypeface(typeface, Typeface.BOLD)
-        setPadding(dp(18), dp(12), dp(18), dp(12))
-        background = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 18f)
-            setColor(Color.argb(225, 22, 24, 29))
-            setStroke(dp(1), Color.argb(110, 255, 255, 255))
-        }
-    }
-
-    private fun buildNextPanel(): LinearLayout = LinearLayout(host.viewContext).apply {
-        orientation = LinearLayout.VERTICAL
-        visibility = View.GONE
-        background = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 14f)
-            setColor(Color.argb(235, 25, 25, 30))
-            setStroke(dp(2), this@PlayerScreen.colors.accent)
-        }
-        setPadding(dp(18), dp(16), dp(18), dp(16))
-        nextText = TextView(context).apply { textSize = 16f; setTextColor(Color.WHITE) }
-        addView(nextText)
-        addView(LinearLayout(context).apply {
-            gravity = Gravity.END
-            addView(control(PlayerControlIcon.CLOSE, "Cancel next episode") { cancelNext() })
-            addView(control(PlayerControlIcon.NEXT, "Play next episode now") { playNext() })
-        })
-    }
-
-    private fun control(
-        icon: PlayerControlIcon,
-        description: String,
-        action: () -> Unit
-    ) =
-        PlayerIconButton(host.viewContext, icon).apply {
-            contentDescription = description
-            // Player controls sit directly on the video. A focused control gets
-            // a thin, high-contrast ring but never becomes an opaque blue tile.
-            background = playerBareButtonBackground()
-            Styler.makeFocusable(this)
-            minimumWidth = dp(48)
-            minimumHeight = dp(48)
-            activateOnTap(action)
-            setOnFocusChangeListener { _, focused -> if (focused) showControls() }
-            layoutParams = LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(7) }
+            timelineWasPlaying = controller?.isPlaying == true
+            controller?.pause()
+            val current = controller?.currentPosition?.coerceAtLeast(0) ?: 0
+            scrubStartMillis = current
+            showSeekPreview(current, showDelta = false)
         }
 
-    private fun playerBareButtonBackground(): StateListDrawable {
-        fun face(fill: Int, strokeWidth: Int = 0, strokeColor: Int = 0) = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(host.viewContext, 11f)
-            setColor(fill)
-            if (strokeWidth > 0) setStroke(strokeWidth, strokeColor)
+        override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+            if (!fromUser) return
+            val end = controller?.duration?.takeIf { it > 0 } ?: plan?.durationMillis ?: 0
+            showSeekPreview((end * progress) / 10_000L, showDelta = false)
         }
-        return StateListDrawable().apply {
-            addState(
-                intArrayOf(android.R.attr.state_focused),
-                face(Color.argb(80, 0, 0, 0), dp(2), colors.focusRing)
-            )
-            addState(intArrayOf(android.R.attr.state_pressed), face(Color.argb(75, 0, 0, 0)))
-            addState(intArrayOf(), face(Color.TRANSPARENT))
+
+        override fun onStopTrackingTouch(seekBar: SeekBar) {
+            val end = controller?.duration?.takeIf { it > 0 } ?: plan?.durationMillis ?: 0
+            if (CastPlaybackCoordinator.isActive) {
+                CastPlaybackCoordinator.seekTo((end * seekBar.progress) / 10_000L)
+            } else controller?.seekTo((end * seekBar.progress) / 10_000L)
+            seekingByTouch = false
+            if (timelineWasPlaying) controller?.play()
+            suppressPlaybackChrome = false
+            handler.removeCallbacks(hideSeekPreview)
+            handler.postDelayed(hideSeekPreview, 450L)
+            showControls()
         }
     }
 
@@ -1854,12 +1673,6 @@ class PlayerScreen(
         applySubtitleAppearance()
     }
 
-    private fun timeText(value: String) = TextView(host.viewContext).apply {
-        text = value
-        textSize = 12f
-        gravity = Gravity.CENTER
-        setTextColor(Color.WHITE)
-    }
 
     private fun showControls() {
         setControls(true)
