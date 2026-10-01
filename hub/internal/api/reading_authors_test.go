@@ -116,3 +116,41 @@ func TestWorkGridKeepsBooksSeparateWhileSeriesViewKeepsCollections(t *testing.T)
 		t.Fatalf("collections: %+v, %v", collections, err)
 	}
 }
+
+// A book's detail links to its series page and its author's page; both ids
+// must be the ones those pages are served under.
+func TestBookDetailLinksToItsSeriesAndAuthorPages(t *testing.T) {
+	s := NewServer(readingCatalogConfig("http://127.0.0.1", "", []string{"reading"}))
+	brown := []storyteller.Creator{{Name: "Brown, Pierce"}}
+	books := []storyteller.Book{
+		{ID: 1, Title: "Red Rising", Authors: brown, Series: []storyteller.Series{{Name: "Red Rising", Position: 1}}},
+		{ID: 6, Title: "Light Bringer", Authors: brown, Series: []storyteller.Series{{Name: "Red Rising", Position: 6}}},
+		{ID: 9, Title: "Dark Matter", Authors: []storyteller.Creator{{Name: "Blake Crouch"}}},
+	}
+	shelf, err := s.storytellerShelf("storyteller:books", books)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seriesPage := ""
+	for _, work := range shelf {
+		if work.EntityType == "collection" {
+			seriesPage = work.ID
+		}
+	}
+	detail, err := s.storytellerWork("storyteller:books", books[1], true)
+	if err != nil || seriesPage == "" || detail.SeriesID != seriesPage {
+		t.Fatalf("seriesId = %q, series page %q, %v", detail.SeriesID, seriesPage, err)
+	}
+	if len(detail.AuthorRefs) != 1 || detail.AuthorRefs[0] != readingAuthorRef("Pierce Brown") {
+		t.Fatalf("authorRefs = %+v", detail.AuthorRefs)
+	}
+	standalone, err := s.storytellerWork("storyteller:books", books[2], true)
+	if err != nil || standalone.SeriesID != "" {
+		t.Fatalf("standalone seriesId = %q, %v", standalone.SeriesID, err)
+	}
+	// The list shelf stays lean: links are for a book's own page.
+	listed, _ := s.storytellerWork("storyteller:books", books[1], false)
+	if listed.SeriesID != "" || listed.AuthorRefs != nil {
+		t.Fatalf("listed work carries links: %+v", listed)
+	}
+}

@@ -96,29 +96,33 @@ type ReadingContinue struct {
 }
 
 type ReadingWork struct {
-	ID           string           `json:"id"`
-	LibraryID    string           `json:"libraryId,omitempty"`
-	EntityType   string           `json:"entityType,omitempty"`
-	Kind         string           `json:"kind"`
-	Title        string           `json:"title"`
-	SortTitle    string           `json:"sortTitle,omitempty"`
-	Authors      []string         `json:"authors"`
-	Series       string           `json:"series,omitempty"`
-	SeriesIndex  float64          `json:"seriesIndex,omitempty"`
-	Overview     string           `json:"overview,omitempty"`
-	Artwork      string           `json:"artwork,omitempty"`
-	Genres       []string         `json:"genres"`
-	Year         int              `json:"year,omitempty"`
-	AddedAt      string           `json:"addedAt,omitempty"`
-	BookCount    int              `json:"bookCount,omitempty"`
-	Languages    []string         `json:"languages"`
-	Editions     []ReadingEdition `json:"editions"`
-	Progress     *ReadingProgress `json:"progress,omitempty"`
-	Availability []string         `json:"availability"`
-	Sections     []ReadingSection `json:"sections,omitempty"`
-	Continue     *ReadingContinue `json:"continue,omitempty"`
-	Partial      []Partial        `json:"partial,omitempty"`
-	Cache        CacheInfo        `json:"cache"`
+	ID          string   `json:"id"`
+	LibraryID   string   `json:"libraryId,omitempty"`
+	EntityType  string   `json:"entityType,omitempty"`
+	Kind        string   `json:"kind"`
+	Title       string   `json:"title"`
+	SortTitle   string   `json:"sortTitle,omitempty"`
+	Authors     []string `json:"authors"`
+	Series      string   `json:"series,omitempty"`
+	SeriesIndex float64  `json:"seriesIndex,omitempty"`
+	// SeriesID is the series page a book belongs to, and AuthorRefs the author
+	// pages, so a book's detail can link to both. Set on a book's detail only.
+	SeriesID     string             `json:"seriesId,omitempty"`
+	AuthorRefs   []ReadingAuthorRef `json:"authorRefs,omitempty"`
+	Overview     string             `json:"overview,omitempty"`
+	Artwork      string             `json:"artwork,omitempty"`
+	Genres       []string           `json:"genres"`
+	Year         int                `json:"year,omitempty"`
+	AddedAt      string             `json:"addedAt,omitempty"`
+	BookCount    int                `json:"bookCount,omitempty"`
+	Languages    []string           `json:"languages"`
+	Editions     []ReadingEdition   `json:"editions"`
+	Progress     *ReadingProgress   `json:"progress,omitempty"`
+	Availability []string           `json:"availability"`
+	Sections     []ReadingSection   `json:"sections,omitempty"`
+	Continue     *ReadingContinue   `json:"continue,omitempty"`
+	Partial      []Partial          `json:"partial,omitempty"`
+	Cache        CacheInfo          `json:"cache"`
 }
 
 type ReadingLibraryItemsResponse struct {
@@ -678,6 +682,17 @@ func (s *Server) storytellerWork(libraryID string, book storyteller.Book, includ
 	work.Year = readingYear(book.PublicationDate)
 	if includeEditions {
 		work.Editions = storytellerEditions(id, book)
+		for _, name := range authors {
+			work.AuthorRefs = append(work.AuthorRefs, readingAuthorRef(name))
+		}
+		if sourceID, _, grouped := storytellerSeriesSource(book); grouped && !isReadingFixture(book) {
+			// The same binding storytellerCollection makes, so this is that page's id.
+			seriesID, err := s.readingCatalog.Bind(readingdomain.WorkBinding{Source: "storyteller-series", SourceID: sourceID})
+			if err != nil {
+				return ReadingWork{}, err
+			}
+			work.SeriesID = seriesID
+		}
 	}
 	return work, nil
 }
@@ -1546,6 +1561,12 @@ func mergeReadingWork(target *ReadingWork, source ReadingWork) {
 	}
 	if len(target.Authors) == 0 {
 		target.Authors = source.Authors
+	}
+	if len(target.AuthorRefs) == 0 {
+		target.AuthorRefs = source.AuthorRefs
+	}
+	if target.SeriesID == "" {
+		target.SeriesID = source.SeriesID
 	}
 	if len(target.Genres) == 0 {
 		target.Genres = source.Genres

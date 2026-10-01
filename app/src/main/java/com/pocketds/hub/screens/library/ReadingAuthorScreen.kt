@@ -57,6 +57,8 @@ class ReadingAuthorScreen(
     private lateinit var status: TextView
     private lateinit var counts: TextView
     private lateinit var shelves: LinearLayout
+    private lateinit var portrait: ImageView
+    private var portraitArtwork = author.artwork
     private var items: List<ReadingWork>? = null
     private val focusables = linkedMapOf<String, View>()
     private var lastFocusKey = ""
@@ -75,11 +77,9 @@ class ReadingAuthorScreen(
             addView(FrameLayout(context).apply {
                 clipToOutline = true
                 background = Styler.cardBackground(context, colors)
-                addView(ImageView(context).apply {
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    Artwork.bind(this, Artwork.loader(api, context), author.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
-                        onMissing = { setImageDrawable(InitialsDrawable(author.name, colors)) }, opaque = true)
-                }, FrameLayout.LayoutParams(MATCH, MATCH))
+                portrait = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+                addView(portrait, FrameLayout.LayoutParams(MATCH, MATCH))
+                bindPortrait()
             }, LinearLayout.LayoutParams(dp(64), dp(64)))
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -137,7 +137,11 @@ class ReadingAuthorScreen(
                         val shelf = result.value.authors.firstOrNull()
                         collected += shelf?.items.orEmpty()
                         pages = shelf?.totalPages ?: 1
-                        shelf?.let { counts.text = AuthorLabels.shelf(it.seriesCount, it.bookCount, it.total) }
+                        shelf?.let {
+                            counts.text = AuthorLabels.shelf(it.seriesCount, it.bookCount, it.total)
+                            // Opened from a book's author link, only the name was known.
+                            if (portraitArtwork.isBlank() && it.artwork.isNotBlank()) { portraitArtwork = it.artwork; bindPortrait() }
+                        }
                     }
                     is HubResult.Failed -> {
                         status.showStatus(StatusText.failed(result.message, result.kind, hasData = items != null), colors)
@@ -203,6 +207,12 @@ class ReadingAuthorScreen(
             remember("missing:${item.number}:${item.title}", card)
             card.activateOnTap { host?.push(MissingReadingItemScreen(api, item, ringVisible)) }
         }
+    }
+
+    private fun bindPortrait() {
+        val context = requireNotNull(host).viewContext
+        Artwork.bind(portrait, Artwork.loader(api, context), portraitArtwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
+            onMissing = { portrait.setImageDrawable(InitialsDrawable(author.name, colors)) }, opaque = true)
     }
 
     /** Book cards draw their own ring; the series title needs one. */

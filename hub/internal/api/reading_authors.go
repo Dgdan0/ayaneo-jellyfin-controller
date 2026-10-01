@@ -11,6 +11,24 @@ import (
 	"time"
 )
 
+// ReadingAuthorRef names an author page: what a book links to.
+type ReadingAuthorRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// readingAuthorRef is the one place an author's page id is made, so the
+// Authors view and a book's author link agree. Callers pass names from
+// storytellerPeople, which has already turned "Brown, Pierce" into "Pierce Brown".
+func readingAuthorRef(name string) ReadingAuthorRef {
+	key := normalizeReadingIdentity(name)
+	if key == "" {
+		name, key = "Unknown author", "unknown"
+	}
+	digest := sha256.Sum256([]byte("name:" + key))
+	return ReadingAuthorRef{ID: "ra_" + hex.EncodeToString(digest[:16]), Name: name}
+}
+
 type ReadingAuthor struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
@@ -69,16 +87,12 @@ func (s *Server) handleReadingAuthors(w http.ResponseWriter, r *http.Request) {
 	standalone, seriesGroups := s.storytellerShelfGroups(books, true)
 	groups := map[string]*ReadingAuthor{}
 	add := func(name string, work ReadingWork, artworkBook *storyteller.Book) {
-		key := normalizeReadingIdentity(name)
-		if key == "" {
-			name, key = "Unknown author", "unknown"
-		}
-		digest := sha256.Sum256([]byte("name:" + key))
-		id := "ra_" + hex.EncodeToString(digest[:16])
-		group := groups[id]
+		ref := readingAuthorRef(name)
+		name = ref.Name
+		group := groups[ref.ID]
 		if group == nil {
-			group = &ReadingAuthor{ID: id, Name: name, Items: []ReadingWork{}}
-			groups[id] = group
+			group = &ReadingAuthor{ID: ref.ID, Name: name, Items: []ReadingWork{}}
+			groups[ref.ID] = group
 		}
 		if group.Artwork == "" && artworkBook != nil {
 			group.Artwork = s.readingAuthorArtwork(*artworkBook, name)

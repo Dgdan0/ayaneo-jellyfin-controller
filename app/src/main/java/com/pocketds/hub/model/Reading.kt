@@ -332,6 +332,9 @@ data class ReadingWork(
     val authors: List<String> = emptyList(),
     val series: String = "",
     val seriesIndex: Double = 0.0,
+    /** A book's series page and author pages, sent with a book's own detail. */
+    val seriesId: String = "",
+    val authorRefs: List<ReadingAuthorRef> = emptyList(),
     val overview: String = "",
     val artwork: String = "",
     val genres: List<String> = emptyList(),
@@ -364,6 +367,10 @@ data class ReadingWork(
             "Book $number · $series"
         } else byline.ifBlank { subtitle }
 }
+
+/** An author page a book links to. */
+@Serializable
+data class ReadingAuthorRef(val id: String = "", val name: String = "")
 
 @Serializable
 data class ReadingLibraryItemsResponse(

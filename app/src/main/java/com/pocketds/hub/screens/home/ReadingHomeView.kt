@@ -130,7 +130,9 @@ class ReadingHomeView(
             setPadding(dp(24), 0, dp(24), 0)
         }
         column.addView(status)
-        scroll = FocusScrollView(context).apply {
+        // Room for a row's title above its focused cards; "Currently reading"
+        // scrolled out of sight when its first card took focus.
+        scroll = FocusScrollView(context, revealAbove = dp(36)).apply {
             isFillViewport = true
             clipToPadding = false
             content = LinearLayout(context).apply {

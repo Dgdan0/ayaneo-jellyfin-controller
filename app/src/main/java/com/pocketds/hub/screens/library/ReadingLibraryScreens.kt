@@ -27,6 +27,7 @@ import com.pocketds.hub.model.ReadingContinue
 import com.pocketds.hub.model.ReadingLibrary
 import com.pocketds.hub.model.ReadingProgress
 import com.pocketds.hub.model.ReadingSection
+import com.pocketds.hub.model.ReadingAuthor
 import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.screens.home.ReadingListEntry
@@ -456,6 +457,9 @@ class ReadingWorkScreen(
     private val actionViews = linkedMapOf<String, View>()
     @Volatile private var refreshOnShow = false
     private var lastWork: ReadingWork? = null
+    /** A book's series and its books, for the strip under the book. */
+    private var seriesBooks: Pair<String, List<ReadingSectionItem>>? = null
+    private var seriesJob: Job? = null
     private var previewFormatWorkId = ""
     private var previewFormat: ReadingEntryChoice? = null
     private val completionSession = ReadingCompletionSession()
@@ -603,6 +607,7 @@ class ReadingWorkScreen(
         actionViews.clear()
         hasChildLinks = false
         content.addView(hero(work))
+        if (work.entityType != "collection") bookLinks(work)?.let(content::addView)
         val primaryRead = ReadingWorkPresentation.primaryRead(work)
         if (work.entityType == "collection") work.continueAt?.let { point ->
             detailHeader.continuation.addView(continueCard(work, point))
@@ -618,6 +623,14 @@ class ReadingWorkScreen(
                 content.addView(bookRow(section))
             } else {
                 section.items.forEach { content.addView(sectionItemCard(work, it)) }
+            }
+        }
+        if (work.entityType != "collection" && work.seriesId.isNotBlank()) {
+            val books = seriesBooks?.takeIf { it.first == work.seriesId }?.second
+            if (books == null) loadSeries(work.seriesId)
+            else if (books.size > 1) {
+                content.addView(sectionTitle(work.series))
+                content.addView(seriesStrip(work, books))
             }
         }
         val preferredSource = previouslyFocusedSource?.takeIf { it.startsWith("list:") && it in actionViews }
@@ -643,7 +656,8 @@ class ReadingWorkScreen(
         overview.onChanged = { host?.refreshHints() }
         titleView.text = work.title
         subtitleView.visibility = View.GONE
-        metadataView.text = buildList {
+        metadataView.text = if (work.entityType != "collection") ReadingBookFacts.line(work, progressText(work.progress))
+        else buildList {
             if (work.authors.isNotEmpty()) add(work.authors.joinToString(", "))
             if (work.entityType == "collection") {
                 add("${work.bookCount} available")
@@ -1000,6 +1014,77 @@ class ReadingWorkScreen(
                 card.activateOnTap { host?.push(MissingReadingItemScreen(api, item, ringVisible)) }
             }
         }
+
+    /**
+     * "Pierce Brown ›" and "Red Rising ›" under a book's actions: its author's
+     * page and its series page. Keys start "list:" so they never outrank Read
+     * for first focus.
+     */
+    private fun bookLinks(work: ReadingWork): View? {
+        if (work.authorRefs.isEmpty() && work.seriesId.isBlank()) return null
+        val context = requireNotNull(host).viewContext
+        fun link(key: String, label: String, description: String, open: () -> Unit) = TextView(context).apply {
+            text = "$label  ›"
+            textSize = 14f
+            contentDescription = description
+            gravity = Gravity.CENTER_VERTICAL
+            minHeight = dp(40)
+            setTextColor(colors.primaryText)
+            background = Styler.chipBackground(context, colors)
+            setPadding(dp(12), 0, dp(12), 0)
+            Styler.makeFocusable(this)
+            FocusDecorator.attach(this, ringVisible, scale = false)
+            FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) { lastActionKey = key; host?.refreshHints() } }
+            actionViews[key] = this
+            hasChildLinks = true
+            activateOnTap { open() }
+        }
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            clipChildren = false
+            setPadding(dp(24), dp(8), dp(24), 0)
+            val libraryId = work.libraryId.ifBlank { "storyteller:books" }
+            work.authorRefs.forEach { ref ->
+                addView(link("list:author:${ref.id}", ref.name, "Open author ${ref.name}") {
+                    host?.push(ReadingAuthorScreen(api, libraryId, ReadingAuthor(id = ref.id, name = ref.name), ringVisible))
+                }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(8) })
+            }
+            if (work.seriesId.isNotBlank()) {
+                addView(link("list:series", work.series.ifBlank { "Series" }, "Open series ${work.series}") {
+                    host?.push(ReadingWorkScreen(api, work.seriesId, work.series, ringVisible))
+                }, LinearLayout.LayoutParams(WRAP, WRAP))
+            }
+        }
+    }
+
+    /** The book's series in order, this book marked and the rest a press away. */
+    private fun seriesStrip(work: ReadingWork, books: List<ReadingSectionItem>): View =
+        SeriesBookStrip.create(requireNotNull(host).viewContext, colors, ringVisible, api, books) { card, item ->
+            if (item.workId == work.id) {
+                card.subtitleView.text = listOfNotNull(item.number.takeIf { it.isNotBlank() }?.let { "Book $it" }, "This book")
+                    .joinToString(" · ")
+                card.isFocusable = false
+                card.isFocusableInTouchMode = false
+                return@create
+            }
+            val key = if (ReadingWorkPresentation.canOpen(item)) "list:book:${item.workId}" else "list:missing:${item.number}:${item.title}"
+            actionViews[key] = card
+            hasChildLinks = true
+            FocusDecorator.listen(card, ringVisible) { _, focused -> if (focused) { lastActionKey = key; host?.refreshHints() } }
+            card.activateOnTap {
+                if (ReadingWorkPresentation.canOpen(item)) host?.push(ReadingWorkScreen(api, item.workId, item.title, ringVisible))
+                else host?.push(MissingReadingItemScreen(api, item, ringVisible))
+            }
+        }
+
+    private fun loadSeries(seriesId: String) {
+        if (seriesJob?.isActive == true) return
+        seriesJob = scope.launch {
+            val series = (api.readingWork(seriesId) as? HubResult.Ok)?.value ?: return@launch
+            seriesBooks = seriesId to series.sections.flatMap { it.items }
+            if (visible) lastWork?.let(::render)
+        }
+    }
 
     private fun sectionTitle(text: String): TextView = TextView(requireNotNull(host).viewContext).apply {
         this.text = text
