@@ -34,8 +34,9 @@ object HdrOutput {
         C.COLOR_TRANSFER_SDR, C.COLOR_TRANSFER_SRGB, C.COLOR_TRANSFER_GAMMA_2_2, C.COLOR_TRANSFER_LINEAR
     )
 
-    fun wantsSdrConversion(isVideo: Boolean, colorTransfer: Int, sdkInt: Int): Boolean =
-        isVideo && sdkInt >= Build.VERSION_CODES.S && colorTransfer !in SDR_TRANSFERS
+    /** [enabled] is the HDR setting: off shows HDR as the file has it. */
+    fun wantsSdrConversion(isVideo: Boolean, colorTransfer: Int, sdkInt: Int, enabled: Boolean = true): Boolean =
+        enabled && isVideo && sdkInt >= Build.VERSION_CODES.S && colorTransfer !in SDR_TRANSFERS
 }
 
 /**
@@ -47,14 +48,15 @@ object HdrOutput {
  */
 @OptIn(UnstableApi::class)
 internal class HdrToSdrCodecFactory(
-    private val base: MediaCodecAdapter.Factory
+    private val base: MediaCodecAdapter.Factory,
+    private val enabled: () -> Boolean
 ) : MediaCodecAdapter.Factory {
 
     override fun createAdapter(configuration: MediaCodecAdapter.Configuration): MediaCodecAdapter {
         val format = configuration.format
         val isVideo = MimeTypes.isVideo(format.sampleMimeType)
         val transfer = format.colorInfo?.colorTransfer ?: C.INDEX_UNSET
-        val convert = HdrOutput.wantsSdrConversion(isVideo, transfer, Build.VERSION.SDK_INT)
+        val convert = HdrOutput.wantsSdrConversion(isVideo, transfer, Build.VERSION.SDK_INT, enabled())
         if (convert) {
             configuration.mediaFormat.setInteger(
                 MediaFormat.KEY_COLOR_TRANSFER_REQUEST,

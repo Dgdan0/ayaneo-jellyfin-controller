@@ -67,6 +67,7 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
             }
             addGroup("Playback & storage")
             addSetting("playback", "Playback") { showSeekChoices() }
+            addSetting("hdr", "HDR video") { showHdrChoices() }
             addSetting("cast", "Public Hub address", "Used for TV playback and offline downloads") { editCastAddress() }
             addSetting("offline", "Offline downloads", "Wi-Fi, charging and storage rules") {
                 host.push(OfflineSettingsScreen(ringVisible))
@@ -123,7 +124,7 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
         activate: () -> Unit
     ) {
         val row = UtilityRowView(host.viewContext, colors, label, initialDetail,
-            when(id){"appearance"->AppIcon.APPEARANCE;"playback"->AppIcon.TV;"reader"->AppIcon.BOOK;else->AppIcon.SETTINGS}).apply {
+            when(id){"appearance"->AppIcon.APPEARANCE;"playback","hdr"->AppIcon.TV;"reader"->AppIcon.BOOK;else->AppIcon.SETTINGS}).apply {
             when(id) {
                 "notifications"->setIconResource(com.pocketds.hub.R.drawable.ic_nav_notifications)
                 "offline"->setIconResource(com.pocketds.hub.R.drawable.ic_nav_offline)
@@ -153,6 +154,7 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
             rows["notifications"]?.detail = "Sonarr ${it.sonarr} · Radarr ${it.radarr} · Bazarr ${it.bazarr}"
         }
         rows["playback"]?.detail = "Seek ${PlaybackSettings.seekSeconds(host.viewContext)} seconds"
+        rows["hdr"]?.detail = hdrLabel(PlaybackSettings.convertHdr(host.viewContext))
         rows["cast"]?.detail = HubSettings.publicBaseUrl(host.viewContext).ifEmpty { "Uses private Hub address" }
         rows["offline"]?.detail = buildList {
             add(if (com.pocketds.hub.settings.OfflineSettings.wifiOnly(host.viewContext)) "Wi-Fi only" else "Any network")
@@ -162,21 +164,39 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
     }
 
     private fun showSeekChoices() {
-        val current = PlaybackSettings.seekSeconds(host.viewContext)
-        val values = listOf(5, 10, 15, 30)
-        overlay.show(
+        overlay.pickValue(
             title = "Seek distance",
             subtitle = "Used by double-tap and the skip buttons in the player.",
-            choices = values.map { ChoiceOverlay.Choice(it.toString(), "$it seconds", selected = it == current) },
-            startIndex = values.indexOf(current).coerceAtLeast(0),
+            values = listOf(5, 10, 15, 30),
+            current = PlaybackSettings.seekSeconds(host.viewContext),
+            label = { "$it seconds" },
             onCancel = host::refreshHints
         ) { picked ->
-            PlaybackSettings.setSeekSeconds(host.viewContext, picked.toInt())
+            PlaybackSettings.setSeekSeconds(host.viewContext, picked)
             updateDetails()
             host.refreshHints()
         }
         host.refreshHints()
     }
+
+    private fun showHdrChoices() {
+        overlay.pickValue(
+            title = "HDR video",
+            subtitle = "This screen shows HDR dim. Applies from the next video.",
+            values = listOf(true, false),
+            current = PlaybackSettings.convertHdr(host.viewContext),
+            label = ::hdrLabel,
+            detail = { if (it) "Brightness matches other video" else "As the file has it; may look dark" },
+            onCancel = host::refreshHints
+        ) { picked ->
+            PlaybackSettings.setConvertHdr(host.viewContext, picked)
+            updateDetails()
+            host.refreshHints()
+        }
+        host.refreshHints()
+    }
+
+    private fun hdrLabel(convert: Boolean) = if (convert) "Convert to SDR" else "Show as HDR"
 
     private fun editCastAddress() {
         val field = EditText(host.viewContext).apply {

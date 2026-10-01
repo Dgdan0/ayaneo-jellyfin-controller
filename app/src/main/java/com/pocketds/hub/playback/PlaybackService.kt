@@ -34,6 +34,7 @@ import com.pocketds.hub.model.PlaybackPrepareResponse
 import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.settings.HubSettings
+import com.pocketds.hub.settings.PlaybackSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -130,10 +131,13 @@ class PlaybackService : MediaSessionService() {
         val mediaSources = DefaultMediaSourceFactory(DefaultDataSource.Factory(this, upstream))
             .experimentalParseSubtitlesDuringExtraction(false)
         val trackSelector = DefaultTrackSelector(this)
-        // HDR titles looked dim on this panel; decode them as SDR instead (see HdrOutput).
+        // HDR titles looked dim on this panel; decode them as SDR unless the
+        // Playback setting says otherwise (see HdrOutput).
         val renderers = object : DefaultRenderersFactory(this) {
             override fun getCodecAdapterFactory(): MediaCodecAdapter.Factory =
-                HdrToSdrCodecFactory(super.getCodecAdapterFactory())
+                HdrToSdrCodecFactory(super.getCodecAdapterFactory()) {
+                    PlaybackSettings.convertHdr(this@PlaybackService)
+                }
 
             @Suppress("DEPRECATION")
             override fun buildTextRenderers(

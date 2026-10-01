@@ -38,6 +38,13 @@ class HdrOutputTest {
     }
 
     @Test
+    fun `the setting turned off shows hdr as it is`() {
+        assertFalse(HdrOutput.wantsSdrConversion(
+            isVideo = true, colorTransfer = C.COLOR_TRANSFER_HLG, sdkInt = 33, enabled = false
+        ))
+    }
+
+    @Test
     fun `devices before Android 12 have no such request`() {
         assertFalse(HdrOutput.wantsSdrConversion(isVideo = true, colorTransfer = C.COLOR_TRANSFER_HLG, sdkInt = 30))
     }
