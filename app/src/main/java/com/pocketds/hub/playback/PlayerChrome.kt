@@ -71,7 +71,8 @@ internal class PlayerChrome(
     lateinit var skipButton: PlayerIconButton; private set
     lateinit var nextButton: PlayerIconButton; private set
     lateinit var seekPreviewImage: ImageView; private set
-    lateinit var seekPreviewUnavailable: TextView; private set
+    /** Holds the frame; hidden until a frame has loaded, so the preview is a picture or just the time. */
+    lateinit var seekPreviewFrame: FrameLayout; private set
     lateinit var seekPreviewTime: TextView; private set
     lateinit var seekPreviewDelta: TextView; private set
     lateinit var nextText: TextView; private set
@@ -174,20 +175,12 @@ internal class PlayerChrome(
             setStroke(dp(1), Color.argb(120, 255, 255, 255))
         }
         setPadding(dp(10), dp(10), dp(10), dp(9))
-        addView(FrameLayout(context).apply {
-            seekPreviewImage = ImageView(context).apply {
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                setImageDrawable(ColorDrawable(Color.rgb(28, 30, 36)))
-            }
+        seekPreviewFrame = FrameLayout(context).apply {
+            visibility = View.GONE
+            seekPreviewImage = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
             addView(seekPreviewImage, FrameLayout.LayoutParams(MATCH, MATCH))
-            seekPreviewUnavailable = TextView(context).apply {
-                text = "Preview unavailable"
-                textSize = 12f
-                gravity = Gravity.CENTER
-                setTextColor(Color.argb(185, 255, 255, 255))
-            }
-            addView(seekPreviewUnavailable, FrameLayout.LayoutParams(MATCH, MATCH))
-        }, LinearLayout.LayoutParams(MATCH, dp(94)))
+        }
+        addView(seekPreviewFrame, LinearLayout.LayoutParams(MATCH, dp(94)))
         addView(LinearLayout(context).apply {
             gravity = Gravity.CENTER
             seekPreviewTime = TextView(context).apply {

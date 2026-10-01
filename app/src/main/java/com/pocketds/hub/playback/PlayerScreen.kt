@@ -3,6 +3,7 @@ package com.pocketds.hub.playback
 import com.pocketds.hub.ui.Artwork
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
 import android.media.AudioManager
 import android.os.Handler
@@ -113,7 +114,7 @@ class PlayerScreen(
     private val nextText: TextView get() = chrome.nextText
     private val seekPreview: LinearLayout get() = chrome.seekPreview
     private val seekPreviewImage: ImageView get() = chrome.seekPreviewImage
-    private val seekPreviewUnavailable: TextView get() = chrome.seekPreviewUnavailable
+    private val seekPreviewFrame: FrameLayout get() = chrome.seekPreviewFrame
     private val seekPreviewTime: TextView get() = chrome.seekPreviewTime
     private val seekPreviewDelta: TextView get() = chrome.seekPreviewDelta
     private val gestureFeedback: TextView get() = chrome.gestureFeedback
@@ -862,24 +863,16 @@ class PlayerScreen(
             loadExtractedPreview(positionMillis)
             return
         }
-        seekPreviewImage.visibility = View.VISIBLE
-        seekPreviewUnavailable.visibility = View.GONE
         if (frame.thumbnailIndex == lastPreviewThumbnail) return
         lastPreviewThumbnail = frame.thumbnailIndex
         previewRequest?.dispose()
-        seekPreviewImage.setImageDrawable(ColorDrawable(Color.rgb(28, 30, 36)))
         val requestedThumbnail = frame.thumbnailIndex
         val request = ImageRequest.Builder(host.viewContext)
             .data(api.playbackUrl("${info.tileUrl}/${frame.tileIndex}"))
             .allowHardware(false)
             .bitmapConfig(Bitmap.Config.RGB_565)
+            // A missing frame keeps the last one: the preview is a picture or just the time.
             .target(
-                onError = {
-                    if (lastPreviewThumbnail == requestedThumbnail) {
-                        seekPreviewImage.setImageDrawable(ColorDrawable(Color.rgb(28, 30, 36)))
-                        seekPreviewUnavailable.visibility = View.VISIBLE
-                    }
-                },
                 onSuccess = { drawable ->
                     if (lastPreviewThumbnail != requestedThumbnail) return@target
                     val sheet = drawable.toBitmap()
@@ -890,10 +883,8 @@ class PlayerScreen(
                     if (cellWidth > 0 && cellHeight > 0 &&
                         left + cellWidth <= sheet.width && top + cellHeight <= sheet.height
                     ) {
-                        seekPreviewImage.setImageBitmap(
-                            Bitmap.createBitmap(sheet, left, top, cellWidth, cellHeight)
-                        )
-                        seekPreviewUnavailable.visibility = View.GONE
+                        showPreviewFrame(BitmapDrawable(host.viewContext.resources,
+                            Bitmap.createBitmap(sheet, left, top, cellWidth, cellHeight)))
                     }
                 }
             )
@@ -903,34 +894,34 @@ class PlayerScreen(
 
     private fun loadExtractedPreview(positionMillis: Long) {
         val previewUrl = plan?.previewUrl.orEmpty()
-        if (previewUrl.isEmpty()) {
-            seekPreviewImage.setImageDrawable(ColorDrawable(Color.rgb(28, 30, 36)))
-            seekPreviewUnavailable.visibility = View.VISIBLE
-            return
-        }
+        if (previewUrl.isEmpty()) return
         val bucket = (positionMillis.coerceAtLeast(0) / 5_000L) * 5_000L
         val previewKey = -(bucket / 5_000L).toInt() - 2
         if (previewKey == lastPreviewThumbnail) return
         lastPreviewThumbnail = previewKey
         previewRequest?.dispose()
-        seekPreviewImage.setImageDrawable(ColorDrawable(Color.rgb(28, 30, 36)))
-        seekPreviewUnavailable.visibility = View.GONE
         val request = ImageRequest.Builder(host.viewContext)
             .data(api.playbackUrl(previewUrl) + "?positionMillis=$bucket")
             .allowHardware(false)
             .bitmapConfig(Bitmap.Config.RGB_565)
             .target(
-                onError = {
-                    if (lastPreviewThumbnail == previewKey) seekPreviewUnavailable.visibility = View.VISIBLE
-                },
                 onSuccess = { drawable ->
-                    if (lastPreviewThumbnail != previewKey) return@target
-                    seekPreviewImage.setImageDrawable(drawable)
-                    seekPreviewUnavailable.visibility = View.GONE
+                    if (lastPreviewThumbnail == previewKey) showPreviewFrame(drawable)
                 }
             )
             .build()
         previewRequest = imageLoader().enqueue(request)
+    }
+
+    /**
+     * Frames arrive about a second apart when the hub extracts them, and each
+     * request used to blank the preview to a grey box, or "Preview unavailable"
+     * when one failed, so a drag flickered. The last good frame stays until the
+     * next one arrives; before the first, the preview is just the time.
+     */
+    private fun showPreviewFrame(drawable: android.graphics.drawable.Drawable) {
+        seekPreviewImage.setImageDrawable(drawable)
+        seekPreviewFrame.visibility = View.VISIBLE
     }
 
     private fun setSeekBarTarget(targetMillis: Long, durationMillis: Long) {
@@ -1234,7 +1225,7 @@ class PlayerScreen(
         choiceOverlay.pickValue(
             "Subtitle appearance", "Changes apply without reloading the video.",
             PlaybackEnhancements.subtitleAppearances, subtitleAppearance, PlayerLabels::subtitleAppearance,
-            onCancel = ::showControls
+            onCancel = { showTracks("subtitles") }
         ) { picked ->
             subtitleAppearance = picked
             applySubtitleAppearance()
@@ -1388,7 +1379,7 @@ class PlayerScreen(
             ChoiceOverlay.Choice(chapter.positionMillis.toString(), chapter.name, Fmt.clock(chapter.positionMillis))
         }
         val selected = chapters.indexOfLast { it.positionMillis <= at }.coerceAtLeast(0)
-        choiceOverlay.show("Chapters", "Jump to a chapter.", choices, selected, ::showControls) { id ->
+        choiceOverlay.show("Chapters", "Jump to a chapter.", choices, selected, { showPlaybackPanel("view") }) { id ->
             controller?.seekTo(id.toLong())
             showControls()
         }
@@ -1398,7 +1389,7 @@ class PlayerScreen(
     private fun showSpeedSheet() {
         choiceOverlay.pickValue(
             "Playback speed", "Changes apply without reloading the video.",
-            PlaybackEnhancements.speeds, playbackSpeed, PlayerLabels::speed, onCancel = ::showControls
+            PlaybackEnhancements.speeds, playbackSpeed, PlayerLabels::speed, onCancel = { showPlaybackPanel("view") }
         ) { picked ->
             playbackSpeed = picked
             controller?.setPlaybackSpeed(playbackSpeed)
@@ -1410,7 +1401,7 @@ class PlayerScreen(
     private fun showAspectSheet() {
         choiceOverlay.pickValue(
             "Aspect", "Fit keeps the whole picture visible.",
-            PlaybackAspect.entries, playbackAspect, PlayerLabels::aspect, onCancel = ::showControls
+            PlaybackAspect.entries, playbackAspect, PlayerLabels::aspect, onCancel = { showPlaybackPanel("view") }
         ) { picked ->
             playbackAspect = picked
             applyAspect()
@@ -1668,7 +1659,10 @@ class PlayerScreen(
     }
 
     private fun updateControlLabels(value: PlaybackPrepareResponse) {
+        // A new item starts with no frame rather than the last one's.
         lastPreviewThumbnail = -1
+        seekPreviewImage.setImageDrawable(null)
+        seekPreviewFrame.visibility = View.GONE
         activeSegmentId = ""
         titleView.text = if (value.offline) "${value.item.displayTitle()}  ·  Offline" else value.item.displayTitle()
         val audio = value.audioTracks.firstOrNull { it.index == value.selectedAudioIndex }
