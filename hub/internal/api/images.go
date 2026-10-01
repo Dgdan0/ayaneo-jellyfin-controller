@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"ayaneohub/internal/adapters/jellyfin"
 	"ayaneohub/internal/cache"
 )
 
@@ -273,6 +274,29 @@ func (p *imageProxy) put(key string, img *cachedImage) {
 // Jellyfin poster. Never a direct Jellyfin URL: the server is on loopback with
 // a self-signed certificate, and its images need the hub's credential.
 const jellyfinImagePrefix = "/v1/img/jf"
+
+// jellyfinImage is the hub path for one Jellyfin image, or "" when there is no
+// image to show. Ten places concatenated this by hand.
+func jellyfinImage(itemID, imageType, tag string) string {
+	if itemID == "" || tag == "" {
+		return ""
+	}
+	return jellyfinImagePrefix + "/" + itemID + "/" + imageType + "?tag=" + url.QueryEscape(tag)
+}
+
+// posterImage is the poster a title card shows: the series' own for an
+// episode, since an episode's Primary image is a still.
+func posterImage(item jellyfin.Item) string {
+	return jellyfinImage(item.PosterItemID(), "Primary", item.PosterTag())
+}
+
+// backdropImage is the item's first backdrop, if it has one.
+func backdropImage(item jellyfin.Item) string {
+	if len(item.BackdropImageTags) == 0 {
+		return ""
+	}
+	return jellyfinImage(item.ID, "Backdrop", item.BackdropImageTags[0])
+}
 
 // allowedJellyfinImageTypes is a whitelist for the same reason the TMDB sizes
 // are: the segment goes straight into an upstream path.

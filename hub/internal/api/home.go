@@ -329,7 +329,7 @@ func (s *Server) libraryViewArtwork(
 		// If Jellyfin cannot describe the source, retaining its current art is
 		// safer than throwing away a possible user choice.
 		if err != nil || hasExplicitLibraryArtwork(images) {
-			return jellyfinImagePrefix + "/" + view.ID + "/Primary?tag=" + tag, "banner", nil
+			return jellyfinImage(view.ID, "Primary", tag), "banner", nil
 		}
 	}
 
@@ -380,8 +380,8 @@ func (s *Server) libraryViewArtwork(
 	if err != nil || item == nil {
 		return "", "", err
 	}
-	if tag := item.PosterTag(); tag != "" {
-		return jellyfinImagePrefix + "/" + item.PosterItemID() + "/Primary?tag=" + tag, "poster", nil
+	if poster := posterImage(*item); poster != "" {
+		return poster, "poster", nil
 	}
 	return "", "", nil
 }

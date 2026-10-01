@@ -203,18 +203,14 @@ func (s *Server) itemToHit(item jellyfin.Item) SearchHit {
 			hit.Media.IDs.Tmdb = n
 		}
 	}
-	if tag := item.PosterTag(); tag != "" {
-		hit.Media.Poster = jellyfinImagePrefix + "/" + item.PosterItemID() + "/Primary?tag=" + tag
-	}
+	hit.Media.Poster = posterImage(item)
 	// Home's Continue Watching and Next Up rows use landscape cards. An
 	// episode's own Primary image is its still, while movies and series use a
 	// real backdrop when Jellyfin has one. Poster remains the fallback.
-	if item.Type == "Episode" && item.ImageTags != nil && item.ImageTags["Primary"] != "" {
-		hit.Media.Backdrop = jellyfinImagePrefix + "/" + item.ID +
-			"/Primary?tag=" + item.ImageTags["Primary"]
-	} else if len(item.BackdropImageTags) > 0 && item.BackdropImageTags[0] != "" {
-		hit.Media.Backdrop = jellyfinImagePrefix + "/" + item.ID +
-			"/Backdrop?tag=" + item.BackdropImageTags[0]
+	if item.Type == "Episode" && item.ImageTags["Primary"] != "" {
+		hit.Media.Backdrop = jellyfinImage(item.ID, "Primary", item.ImageTags["Primary"])
+	} else {
+		hit.Media.Backdrop = backdropImage(item)
 	}
 	return hit
 }

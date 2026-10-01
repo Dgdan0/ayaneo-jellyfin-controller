@@ -429,9 +429,7 @@ func libraryItemFrom(item jellyfin.Item) LibraryItem {
 			continue
 		}
 		mapped := LibraryPerson{ID: person.ID, Name: person.Name, Role: person.Role, Type: person.Type}
-		if person.ID != "" && person.PrimaryImageTag != "" {
-			mapped.Image = jellyfinImagePrefix + "/" + person.ID + "/Primary?tag=" + person.PrimaryImageTag
-		}
+		mapped.Image = jellyfinImage(person.ID, "Primary", person.PrimaryImageTag)
 		out.People = append(out.People, mapped)
 	}
 	for _, source := range item.MediaSources {
@@ -450,17 +448,13 @@ func libraryItemFrom(item jellyfin.Item) LibraryItem {
 		}
 		out.MediaVersions = append(out.MediaVersions, version)
 	}
-	if tag := item.PosterTag(); tag != "" {
-		out.Poster = jellyfinImagePrefix + "/" + item.PosterItemID() + "/Primary?tag=" + tag
-	}
+	out.Poster = posterImage(item)
 	if tag := item.ImageTags["Thumb"]; tag != "" {
-		out.Thumb = jellyfinImagePrefix + "/" + item.ID + "/Thumb?tag=" + tag
-	} else if tag := item.ImageTags["Primary"]; tag != "" && item.Type == "Episode" {
-		out.Thumb = jellyfinImagePrefix + "/" + item.ID + "/Primary?tag=" + tag
+		out.Thumb = jellyfinImage(item.ID, "Thumb", tag)
+	} else if item.Type == "Episode" {
+		out.Thumb = jellyfinImage(item.ID, "Primary", item.ImageTags["Primary"])
 	}
-	if len(item.BackdropImageTags) > 0 {
-		out.Backdrop = jellyfinImagePrefix + "/" + item.ID + "/Backdrop?tag=" + item.BackdropImageTags[0]
-	}
+	out.Backdrop = backdropImage(item)
 	return out
 }
 
