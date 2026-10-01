@@ -143,7 +143,8 @@ class PlaybackService : MediaSessionService() {
                 extensionRendererMode: Int,
                 out: ArrayList<Renderer>
             ) {
-                out.add(TextRenderer(output, outputLooper).apply { experimentalSetLegacyDecodingEnabled(true) })
+                out.add(TextRenderer(output, outputLooper, TolerantSubtitleDecoderFactory)
+                    .apply { experimentalSetLegacyDecodingEnabled(true) })
             }
         }
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
