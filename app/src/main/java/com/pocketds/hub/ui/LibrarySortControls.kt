@@ -16,7 +16,7 @@ import com.pocketds.hub.settings.SortPreference
 class LibrarySortControls(
     context: Context,
     private val colors: PocketColors,
-    private val fields: List<Pair<String, String>>,
+    fields: List<Pair<String, String>>,
     initial: SortPreference,
     private val overlay: () -> ChoiceOverlay,
     private val onChange: (SortPreference) -> Unit,
@@ -25,6 +25,9 @@ class LibrarySortControls(
 ) : LinearLayout(context) {
     var value: SortPreference = initial
         private set
+    /** The fields on offer; Books Library's views offer different ones. */
+    var fields: List<Pair<String, String>> = fields
+        set(next) { field = next; refresh() }
     val fieldButton = button(AppIcon.SORT) { showFields() }
     val directionButton = button(null) { set(value.copy(ascending = !value.ascending)) }
 

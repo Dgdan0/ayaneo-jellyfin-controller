@@ -1,5 +1,7 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.BlobSegmentedView
+
 import com.pocketds.hub.ui.LibrarySortControls
 import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.ui.FocusScrollView
@@ -83,7 +85,7 @@ class ReadingLibraryGridScreen(
 ) : Screen {
     override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val title = library.title
-    override val horizontalMode get() = if(sortKey=="author") HorizontalMode.CONFINED else HorizontalMode.GRID
+    override val horizontalMode get() = if(view==VIEW_AUTHORS) HorizontalMode.CONFINED else HorizontalMode.GRID
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var libraryRevision = MediaLibraryChanges.revision
@@ -94,19 +96,23 @@ class ReadingLibraryGridScreen(
     private lateinit var status: TextView
     private lateinit var grid: RecyclerView
     private lateinit var authorGrid:AuthorGridView
-    private lateinit var groupSeries: TextView
-    private lateinit var groupAuthors: TextView
+    private var viewSwitch: BlobSegmentedView? = null
+    private lateinit var screenRoot: FrameLayout
+    private lateinit var toolbarRow: LinearLayout
+    /** Series, Authors or Books: the library grouped into series, its writers, or every book on its own. */
+    private var view = VIEW_SERIES
     private lateinit var overlay: ChoiceOverlay
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
     private val focusState = StableItemFocus()
     private val sortFields = ReadingSortFields.forLibrary(library)
     private var sortKey = if (sortFields.any { it.first == "series" }) "series" else "title"
-    /** Author is a view, not a sort: Series | Authors switches it and the sort list leaves it out. */
+    /** Author is a view, not a sort, in Series: Series | Authors | Books switches it and that sort list leaves it out. */
     private val canGroupByAuthor = sortFields.any { it.first == "author" }
     private val gridFields = sortFields.filter { it.first != "author" }
     private var seriesSort = SortPreference.forField(if (sortFields.any { it.first == "series" }) "series" else "title")
     private var sortAscending = true
+    private var booksSort = SortPreference.forField("title")
     private var loadGeneration = 0
     private var refreshing = false
 
@@ -114,8 +120,18 @@ class ReadingLibraryGridScreen(
         this.host = host
         val remembered=DomainPreferences.sort(host.viewContext,ContentMode.BOOKS,sortFields.map { it.first },if (sortFields.any { it.first == "series" }) "series" else "title")
         sortKey=remembered.field;sortAscending=remembered.ascending
+        if (canGroupByAuthor) {
+            booksSort = DomainPreferences.bookSort(host.viewContext, sortFields.map { it.first }, "title")
+            view = when {
+                DomainPreferences.readingView(host.viewContext) == VIEW_BOOKS -> VIEW_BOOKS
+                sortKey == "author" -> VIEW_AUTHORS
+                else -> VIEW_SERIES
+            }
+            if (view == VIEW_BOOKS) { sortKey = booksSort.field; sortAscending = booksSort.ascending }
+        }
         colors = Theme.colors(host.viewContext)
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
+        screenRoot = root
         val content = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             status = TextView(context).apply {
@@ -124,9 +140,10 @@ class ReadingLibraryGridScreen(
                 setPadding(dp(12), dp(6), dp(12), dp(4))
             }
             val toolbar=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(dp(16),dp(2),dp(20),dp(2)) }
+            toolbarRow = toolbar
             toolbar.addView(status,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
-            if (canGroupByAuthor) toolbar.addView(groupSwitch(context), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) })
-            sortControls=LibrarySortControls(context,colors,gridFields,SortPreference(sortKey,sortAscending),
+            if (canGroupByAuthor) toolbar.addView(viewSwitch(context), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(10) })
+            sortControls=LibrarySortControls(context,colors,if (view == VIEW_BOOKS) sortFields else gridFields,SortPreference(sortKey,sortAscending),
                 {this@ReadingLibraryGridScreen.overlay},::applySort) {host?.refreshHints()}
             toolbar.addView(sortControls)
             showGrouping()
@@ -166,7 +183,7 @@ class ReadingLibraryGridScreen(
             shelfArea.addView(grid,FrameLayout.LayoutParams(MATCH,MATCH))
             authorGrid=AuthorGridView(context,api,library.id,colors,ringVisible,
                 {message,failed->status.text=message;status.setTextColor(if(failed)colors.dangerText else colors.mutedText)},
-                {if(sortKey=="author"){grid.visibility=View.GONE;authorGrid.visibility=View.VISIBLE}},
+                {if(view==VIEW_AUTHORS){grid.visibility=View.GONE;authorGrid.visibility=View.VISIBLE}},
                 {author->host.push(ReadingAuthorScreen(api,library.id,author,ringVisible))}).apply {visibility=View.GONE}
             shelfArea.addView(authorGrid,FrameLayout.LayoutParams(MATCH,MATCH))
             addView(shelfArea,LinearLayout.LayoutParams(MATCH,0,1f))
@@ -180,8 +197,8 @@ class ReadingLibraryGridScreen(
     override fun onShow() {
         if(libraryRevision != MediaLibraryChanges.revision) {libraryRevision=MediaLibraryChanges.revision;reload();return}
         val saved=DomainPreferences.sort(requireNotNull(host).viewContext,ContentMode.BOOKS,sortFields.map { it.first },if (sortFields.any { it.first == "series" }) "series" else "title")
-        if(saved!=SortPreference(sortKey,sortAscending)) { applySort(saved); return }
-        if(sortKey=="author"){authorGrid.show(sortAscending);return}
+        if(view!=VIEW_BOOKS && saved!=SortPreference(sortKey,sortAscending)) { applySort(saved); return }
+        if(view==VIEW_AUTHORS){authorGrid.show(sortAscending);return}
         if (paging.loadedPage > 0 && ::grid.isInitialized) adapter.notifyDataSetChanged()
         if (paging.loadedPage == 0 && loadJob?.isActive != true) {
             (paging.retry() ?: paging.initial())?.let(::loadPage)
@@ -222,7 +239,7 @@ class ReadingLibraryGridScreen(
         listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
     } else {
         listOf(
-            ButtonHint.activate("Details"),
+            ButtonHint.activate(if (viewSwitch?.hasFocus() == true) "Show" else "Details"),
             ButtonHint.back(),
             ButtonHint.secondary("Sort"),
             ButtonHint.refresh()
@@ -235,13 +252,14 @@ class ReadingLibraryGridScreen(
             return true
         }
         return when (action) {
+            is PadAction.Step -> action.direction == com.pocketds.hub.input.Direction.UP && upToToolbar()
             PadAction.Activate -> if(authorGrid.visibility==View.VISIBLE) false else focusedWork()?.let(::open) != null
             PadAction.Secondary -> {
                 sortControls.showFields()
                 true
             }
             PadAction.Refresh -> {
-                if(sortKey=="author"){authorGrid.show(sortAscending,force=true);return true}
+                if(view==VIEW_AUTHORS){authorGrid.show(sortAscending,force=true);return true}
                 if (loadJob?.isActive != true) paging.retry()?.let(::loadPage) ?: reload()
                 true
             }
@@ -261,7 +279,7 @@ class ReadingLibraryGridScreen(
             focusedWork()?.let { focusState.remember(position, it.id) }
         }
         refreshing = true
-        if(sortKey=="author")authorGrid.show(sortAscending,force=true) else {authorGrid.hide();paging.initial()?.let(::loadPage)}
+        if(view==VIEW_AUTHORS)authorGrid.show(sortAscending,force=true) else {authorGrid.hide();paging.initial()?.let(::loadPage)}
     }
 
     private fun loadPage(page: Int) {
@@ -278,7 +296,8 @@ class ReadingLibraryGridScreen(
                 library.id,
                 page,
                 sortKey,
-                if (sortAscending) "asc" else "desc"
+                if (sortAscending) "asc" else "desc",
+                if (view == VIEW_BOOKS) "works" else ""
             )) {
                 is HubResult.Ok -> {
                     if (generation != loadGeneration) return@launch
@@ -316,40 +335,70 @@ class ReadingLibraryGridScreen(
     }
 
     private fun applySort(value:SortPreference) {
-        if (value.field != "author") seriesSort = value
+        val context = requireNotNull(host).viewContext
+        when {
+            view == VIEW_BOOKS -> { booksSort = value; DomainPreferences.setBookSort(context, value) }
+            else -> {
+                if (value.field != "author") seriesSort = value
+                DomainPreferences.setSort(context,ContentMode.BOOKS,value)
+            }
+        }
         sortKey=value.field;sortAscending=value.ascending
-        DomainPreferences.setSort(requireNotNull(host).viewContext,ContentMode.BOOKS,value)
+        sortControls.fields = if (view == VIEW_BOOKS) sortFields else gridFields
         sortControls.update(value)
         showGrouping()
         reload(resetSelection=true)
     }
 
-    /** Series (the default) or Authors; each keeps its own order. */
-    private fun groupSwitch(context: android.content.Context) = LinearLayout(context).apply {
-        gravity = Gravity.CENTER_VERTICAL
-        fun option(label: String, authors: Boolean) = TextView(context).apply {
-            text = label; textSize = 12f; gravity = Gravity.CENTER; minHeight = dp(48)
-            setPadding(dp(14), 0, dp(14), 0)
-            Styler.makeFocusable(this)
-            activateOnTap {
-                val inAuthors = sortKey == "author"
-                if (authors != inAuthors) applySort(if (authors) SortPreference("author", true) else seriesSort)
-            }
-        }
-        groupSeries = option("Series", false); groupAuthors = option("Authors", true)
-        addView(groupSeries); addView(groupAuthors, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(4) })
+    /**
+     * Up from the top row goes to the view switch and sort. The switch sits at
+     * the right, so a plain focus search from a card on the left found the tabs
+     * above it instead and the switch could not be reached.
+     */
+    private fun upToToolbar(): Boolean {
+        val focused = screenRoot.findFocus() ?: return false
+        if (isInside(focused, toolbarRow)) return false
+        val above = android.view.FocusFinder.getInstance().findNextFocus(screenRoot, focused, View.FOCUS_UP)
+        // A card above is the app's ordinary move; only the last step up is taken here.
+        if (above != null && !isInside(above, toolbarRow)) return false
+        return viewSwitch?.focus() ?: sortControls.fieldButton.requestFocus()
+    }
+
+    private fun isInside(view: View, parent: View): Boolean {
+        var v: View? = view
+        while (v != null) { if (v === parent) return true; v = v.parent as? View }
+        return false
+    }
+
+    /** Series (the default), Authors, or Books; each keeps its own order. */
+    private fun viewSwitch(context: android.content.Context) = BlobSegmentedView(context, colors, ringVisible).apply {
+        heightDp = 34f
+        textSp = 12f
+        trackColor = colors.cardSurface
+        setOptions(listOf(
+            BlobSegmentedView.Option(VIEW_SERIES, "Series"),
+            BlobSegmentedView.Option(VIEW_AUTHORS, "Authors"),
+            BlobSegmentedView.Option(VIEW_BOOKS, "Books", "Every book on its own")
+        ), view)
+        onPick = ::showView
+        onOptionFocused = { host?.refreshHints() }
+    }.also { viewSwitch = it }
+
+    private fun showView(next: String) {
+        if (next == view) return
+        view = next
+        viewSwitch?.select(next)
+        DomainPreferences.setReadingView(requireNotNull(host).viewContext, next)
+        applySort(when (next) {
+            VIEW_AUTHORS -> SortPreference("author", true)
+            VIEW_BOOKS -> booksSort
+            else -> seriesSort
+        })
+        host?.refreshHints()
     }
 
     private fun showGrouping() {
-        val authors = sortKey == "author"
-        sortControls.fieldButton.visibility = if (authors) View.GONE else View.VISIBLE
-        if (!::groupSeries.isInitialized) return
-        listOf(groupSeries to !authors, groupAuthors to authors).forEach { (view, selected) ->
-            view.isSelected = selected
-            view.background = Styler.selectionBackground(view.context, colors, selected, cornerDp = 8f)
-            view.setTextColor(if (selected) colors.accent else colors.primaryText)
-            view.contentDescription = if (selected) "${view.text}, selected" else "Group by ${view.text}"
-        }
+        sortControls.fieldButton.visibility = if (view == VIEW_AUTHORS) View.GONE else View.VISIBLE
     }
 
     private fun sortLabel(): String {
@@ -429,6 +478,9 @@ class ReadingLibraryGridScreen(
         const val CARD_DP = 104
         const val POSTER_DP = 150f
         const val TAG_WORK = -0x7fffffdf
+        const val VIEW_SERIES = "series"
+        const val VIEW_AUTHORS = "authors"
+        const val VIEW_BOOKS = "books"
     }
 }
 

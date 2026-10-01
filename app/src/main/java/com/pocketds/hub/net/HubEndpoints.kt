@@ -183,10 +183,16 @@ object HubEndpoints {
         libraryId: String,
         page: Int = 1,
         sort: String = "title",
-        direction: String = "asc"
+        direction: String = "asc",
+        /** "works" lists every book on its own; otherwise Storyteller's books come grouped into series. */
+        view: String = ""
     ): HubRequest = HubRequest(
         join(base, "/v1/reading/libraries/" + encode(libraryId) + "/items") +
-            "?page=$page&sort=" + encode(sort) + "&direction=" + encode(direction) + (if (libraryId == "storyteller:books") "&view=collections" else "")
+            "?page=$page&sort=" + encode(sort) + "&direction=" + encode(direction) + when {
+                view.isNotBlank() -> "&view=" + encode(view)
+                libraryId == "storyteller:books" -> "&view=collections"
+                else -> ""
+            }
     )
 
     fun readingAuthors(base:String,libraryId:String,page:Int,direction:String,authorId:String=""):HubRequest =

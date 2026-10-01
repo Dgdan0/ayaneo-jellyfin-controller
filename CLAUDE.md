@@ -573,6 +573,8 @@ Most of these exist because several screens had drifted copies of the same thing
 | A series' books as cards / their labels | `screens/library/SeriesBookStrip` + `SeriesBookLabels` ("Book 2 · 40% · Audio"); series page, author page and a book's own page |
 | A book's facts line | `ReadingBookFacts.line` ("Book 6 of Red Rising · 2023 · 735 pages"); how far through: `ReadingBookFacts.progress` ("49% · page 363 of 735") |
 | A book's place in its series on a card | `ReadingWork.cardSubtitle` ("Red Rising #6") and `seriesNumber` |
+| Books Library's view: Series, Authors, or every book on its own | `ReadingLibraryGridScreen` (`view`; Books asks the hub for `view=works`); each view's order in `DomainPreferences` (`sort`, `bookSort`, `readingView`) |
+| A person as a round portrait, the ring round it | `DetailArtworkCardView.portrait` |
 | Books Home's top: the book being read, the series being read | `screens/home/ContinueReadingView` (Resume reading opens `ReadingWorkScreen(openReader = true)`), `SeriesStackView` fed by `ReadingShelves.yourSeries` |
 | Books Home rows | `ReadingShelves`: `onePerSeries`, `nextInSeries`, `BUILT_IN` (rows the app fills; list actions only on the person's own) |
 | Reading times from the hub | `ReadingShelves.timestamp` (Storyteller writes `2026-09-27 03:16:47`, UTC with no zone) |

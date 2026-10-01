@@ -175,7 +175,8 @@ interface HubApi {
         libraryId: String,
         page: Int = 1,
         sort: String = "title",
-        direction: String = "asc"
+        direction: String = "asc",
+        view: String = ""
     ): HubResult<ReadingLibraryItemsResponse>
     suspend fun readingAuthors(libraryId:String,page:Int=1,direction:String="asc",authorId:String=""):HubResult<ReadingAuthorsResponse> =
         HubResult.Failed(FailureKind.UNKNOWN,"Author shelves are unavailable")
@@ -847,9 +848,10 @@ class HubClient(private val context: Context, private val connection: HubConnect
         libraryId: String,
         page: Int,
         sort: String,
-        direction: String
+        direction: String,
+        view: String
     ): HubResult<ReadingLibraryItemsResponse> =
-        get(HubEndpoints.readingLibraryItems(base(), libraryId, page, sort, direction)) {
+        get(HubEndpoints.readingLibraryItems(base(), libraryId, page, sort, direction, view)) {
             json.decodeFromString<ReadingLibraryItemsResponse>(it)
         }
 

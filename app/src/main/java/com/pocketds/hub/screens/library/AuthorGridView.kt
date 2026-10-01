@@ -115,7 +115,7 @@ class AuthorGridView(
         override fun getItemCount() = authors.size
         override fun onCreateViewHolder(parent: ViewGroup, type: Int): ViewHolder =
             object : ViewHolder(DetailArtworkCardView(context, colors, ringVisible).apply {
-                artworkHeight(CARD_DP)
+                portrait(PORTRAIT_DP)
                 layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
                     .apply { setMargins(dp(6), dp(6), dp(6), dp(10)) }
             }) {}
@@ -137,7 +137,8 @@ class AuthorGridView(
 
     private companion object {
         const val MAX_COLUMNS = 7
-        const val CARD_DP = 118
+        /** A writer is a round portrait, or their initials in one. */
+        const val PORTRAIT_DP = 100
     }
 }
 

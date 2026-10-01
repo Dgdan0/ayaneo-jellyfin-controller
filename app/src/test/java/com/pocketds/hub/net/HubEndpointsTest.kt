@@ -20,6 +20,8 @@ class HubEndpointsTest {
         assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"series","asc").url.endsWith("&view=collections"))
         assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"title","desc").url.endsWith("&view=collections"))
         assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"added","desc").url.endsWith("&view=collections"))
+        // Books Library's Books view: every book on its own.
+        assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"last_read","desc","works").url.endsWith("&view=works"))
         assertTrue(HubEndpoints.readingAuthors(base,"storyteller:books",2,"desc","ra_123").url.endsWith("?page=2&direction=desc&authorId=ra_123"))
         assertTrue(HubEndpoints.readingResolve(base,"openlibrary","OL1W","9780345539786").url.contains("sourceId=OL1W&isbn=9780345539786"))
     }

@@ -276,7 +276,8 @@ class ContinuationCardView(context: Context, colors: PocketColors, private val r
 }
 
 /** Artwork has no inset white frame; captions and focus clearance are measured together. */
-class DetailArtworkCardView(context: Context, private val colors: PocketColors, ringVisible: () -> Boolean) : LinearLayout(context) {
+class DetailArtworkCardView(context: Context, private val colors: PocketColors, private val ringVisible: () -> Boolean) : LinearLayout(context) {
+    private var portraitRing: android.graphics.drawable.Drawable? = null
     val image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
     val titleView = label(context, 13f, colors.primaryText).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
     val subtitleView = label(context, 11f, colors.mutedText).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
@@ -300,6 +301,21 @@ class DetailArtworkCardView(context: Context, private val colors: PocketColors, 
         image.layoutParams = image.layoutParams.apply { height = dp(heightDp) }
         minimumHeight = dp(DetailLayout.posterCardHeight(heightDp, resources.configuration.fontScale))
     }
+    /**
+     * A person: a round portrait with the name centred under it. The ring goes
+     * round the portrait, not a box round the whole card.
+     */
+    fun portrait(sizeDp: Int) {
+        image.layoutParams = LayoutParams(dp(sizeDp), dp(sizeDp)).apply { gravity = Gravity.CENTER_HORIZONTAL }
+        image.background = ThemeGradientDrawable.oval(colors.posterPlaceholder)
+        image.outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+        titleView.gravity = Gravity.CENTER_HORIZONTAL
+        subtitleView.gravity = Gravity.CENTER_HORIZONTAL
+        background = null
+        portraitRing = ThemeGradientDrawable.oval(Color.TRANSPARENT, dp(3), colors.focusRing)
+        minimumHeight = 0
+    }
+
     fun available(available: Boolean) {
         image.alpha = if (available) 1f else .42f
         image.colorFilter = if (available) null else android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0f) })
@@ -307,6 +323,7 @@ class DetailArtworkCardView(context: Context, private val colors: PocketColors, 
 
     override fun onFocusChanged(gainFocus: Boolean, direction: Int, previouslyFocusedRect: Rect?) {
         super.onFocusChanged(gainFocus, direction, previouslyFocusedRect)
+        portraitRing?.let { image.foreground = if (gainFocus && ringVisible()) it else null }
         if (gainFocus) post {
             if (hasFocus() && height > 0) {
                 // ScrollView normally reveals only the unscaled rectangle. Reserve the
