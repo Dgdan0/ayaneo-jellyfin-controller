@@ -3,6 +3,7 @@ package jellyfin
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -195,11 +196,29 @@ func (c *Client) MediaSegments(ctx context.Context, itemID string) ([]MediaSegme
 	if err := c.requireUser(); err != nil {
 		return nil, err
 	}
-	var out []MediaSegment
-	if err := c.base.GetJSON(ctx, "/MediaSegments/"+itemID, nil, &out); err != nil {
+	var raw json.RawMessage
+	if err := c.base.GetJSON(ctx, "/MediaSegments/"+itemID, nil, &raw); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return decodeMediaSegments(raw)
+}
+
+// decodeMediaSegments reads Jellyfin's answer, which 10.11 wraps as a query
+// result ({"Items": [...]}). This read it as a bare array, so the decode
+// failed, the caller treated that as "no provider", and Skip intro never had
+// a segment to offer. A bare array is still accepted.
+func decodeMediaSegments(raw json.RawMessage) ([]MediaSegment, error) {
+	var page struct {
+		Items []MediaSegment `json:"Items"`
+	}
+	if err := json.Unmarshal(raw, &page); err == nil {
+		return page.Items, nil
+	}
+	var list []MediaSegment
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, err
+	}
+	return list, nil
 }
 
 // SetPlayed and SetFavorite use Jellyfin's idempotent user-item endpoints.

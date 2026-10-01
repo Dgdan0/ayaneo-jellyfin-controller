@@ -574,6 +574,7 @@ func (s *Server) playbackPlan(
 			previous, next = adjacentPlaybackItems(session.Item, page.Items)
 		}
 	}
+	chapters := playbackChapters(session.Item, durationMillis)
 	return PlaybackPrepareResponse{
 		SessionID: session.ID, Item: playbackItem(session.Item), PositionMillis: positionMillis,
 		DurationMillis: durationMillis, MediaURL: mediaURL, MIMEType: playbackMIME(source, resource),
@@ -585,8 +586,8 @@ func (s *Server) playbackPlan(
 		SelectedSubtitleIndex: selectedSubtitle, PreviousItem: previous, NextItem: next,
 		Trickplay:  playbackTrickplay(session),
 		PreviewURL: "/v1/playback/sessions/" + session.ID + "/preview",
-		Chapters:   playbackChapters(session.Item, durationMillis),
-		Segments:   playbackSegments(session.Segments, durationMillis),
+		Chapters:   chapters,
+		Segments:   segmentsOrChapters(playbackSegments(session.Segments, durationMillis), chapters, durationMillis),
 	}
 }
 
