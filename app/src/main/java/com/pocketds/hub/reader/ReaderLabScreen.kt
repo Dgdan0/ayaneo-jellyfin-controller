@@ -1,5 +1,6 @@
 package com.pocketds.hub.reader
 
+import com.pocketds.hub.ui.FocusScrollView
 import android.graphics.Typeface
 import android.view.Gravity
 import android.view.ViewGroup
@@ -67,7 +68,7 @@ class ReaderLabScreen(private val ringVisible: () -> Boolean) : Screen {
                     "Text and audio shell · timeline, highlight and audio controls"
                 )
             }
-            addView(ScrollView(context).apply {
+            addView(FocusScrollView(context).apply {
                 isFillViewport = true
                 clipToPadding = false
                 addView(page, FrameLayout.LayoutParams(MATCH, WRAP))

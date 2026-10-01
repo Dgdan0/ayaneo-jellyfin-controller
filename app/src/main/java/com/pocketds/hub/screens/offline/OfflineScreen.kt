@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.offline
 
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.ProgressLine
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.EpisodeLabel
@@ -96,8 +97,8 @@ class OfflineScreen(
             }
             addView(summary)
             content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-            scroll = ScrollView(context).apply {
-                isFocusable = false; clipToPadding = false; setPadding(0, 0, 0, dp(20)); addView(content)
+            scroll = FocusScrollView(context).apply {
+                clipToPadding = false; setPadding(0, 0, 0, dp(20)); addView(content)
             }
             addView(scroll, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }

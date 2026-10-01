@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.manage
 
+import com.pocketds.hub.ui.FocusScrollView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
@@ -35,7 +36,7 @@ class ServerMonitorScreen(private val api: HubApi, private val ringVisible: () -
             refresh=label("Refresh",14f).apply {minHeight=dp(44);gravity=android.view.Gravity.CENTER;setPadding(dp(14),0,dp(14),0);background=Styler.chipBackground(context,colors);Styler.makeFocusable(this);FocusDecorator.attach(this,ringVisible,false);activateOnTap{load()}}
             header.addView(refresh);addView(header)
             body=LinearLayout(context).apply {orientation=LinearLayout.VERTICAL}
-            addView(ScrollView(context).apply {isFocusable=false;addView(body)},LinearLayout.LayoutParams(-1,0,1f))
+            addView(FocusScrollView(context).apply {addView(body)},LinearLayout.LayoutParams(-1,0,1f))
         }
     }
     override fun onShow() {load();scope.launch {while(isActive){delay(15000);load()}}}

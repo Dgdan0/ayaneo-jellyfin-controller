@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.Artwork
 import android.view.View
 import android.view.ViewGroup
@@ -41,7 +42,7 @@ class MissingReadingItemScreen(private val api:HubApi,private val item:ReadingSe
         header.actions.addView(button)
         status=TextView(context).apply{textSize=13f;setTextColor(colors.mutedText)}
         header.continuation.addView(status)
-        root.addView(ScrollView(context).apply{addView(header)},FrameLayout.LayoutParams(-1,-1))
+        root.addView(FocusScrollView(context).apply{addView(header)},FrameLayout.LayoutParams(-1,-1))
         choices=ChoiceOverlay(context,colors,ring,sidePanel=true);root.addView(choices,FrameLayout.LayoutParams(-1,-1))
         return root
     }

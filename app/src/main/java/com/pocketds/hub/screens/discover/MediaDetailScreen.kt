@@ -1,5 +1,7 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.ui.FocusHorizontalScrollView
+import com.pocketds.hub.ui.FocusScrollView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.HorizontalScrollView
@@ -91,12 +93,7 @@ class MediaDetailScreen(
         val context = host.viewContext
         colors = Theme.colors(context)
 
-        val scroller = ScrollView(context).apply {
-            // ScrollView and HorizontalScrollView are focusable by default, which
-            // makes them invisible focus stops: a directional press lands on the
-            // scroller, draws no ring, and reads as the pad being broken. They
-            // should pass focus straight through to their contents.
-            isFocusable = false
+        val scroller = FocusScrollView(context).apply {
             isFillViewport = true
             setBackgroundColor(colors.background)
             // Or a focused cast card has its ring clipped by the scroll bounds.
@@ -162,8 +159,7 @@ class MediaDetailScreen(
             setPadding(0, Styler.dpInt(context, 12f), 0, Styler.dpInt(context, 2f))
         }
         headerText.addView(
-            HorizontalScrollView(context).apply {
-                isFocusable = false
+            FocusHorizontalScrollView(context).apply {
                 isHorizontalScrollBarEnabled = false
                 addView(stageStrip)
             }
@@ -215,8 +211,7 @@ class MediaDetailScreen(
             clipChildren = false
             setPadding(Styler.dpInt(context, 8f), Styler.dpInt(context, 8f), Styler.dpInt(context, 8f), Styler.dpInt(context, 8f))
         }
-        castScroller = HorizontalScrollView(context).apply {
-            isFocusable = false
+        castScroller = FocusHorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             clipChildren = false
             addView(castRow)

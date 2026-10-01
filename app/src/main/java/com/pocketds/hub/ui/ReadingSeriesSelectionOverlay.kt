@@ -100,8 +100,7 @@ class ReadingSeriesSelectionOverlay(
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.BOTTOM
         }
-        scroller = HorizontalScrollView(context).apply {
-            isFocusable = false
+        scroller = FocusHorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             addView(bookRow)
         }

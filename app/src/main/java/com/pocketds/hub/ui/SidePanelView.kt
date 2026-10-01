@@ -24,7 +24,7 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     private val close=AppIcons.button(context,colors,AppIcon.CLOSE,"Close panel")
     private val subtitle=TextView(context).apply {textSize=12f;setTextColor(colors.mutedText);setPadding(dp(4),0,dp(4),dp(8));maxLines=3;ellipsize=android.text.TextUtils.TruncateAt.END}
     private val tabRow=LinearLayout(context).apply {orientation=LinearLayout.HORIZONTAL}
-    private val scroll=ScrollView(context).apply {isFocusable=false;isFocusableInTouchMode=false;clipToPadding=false;addView(body)}
+    private val scroll=FocusScrollView(context).apply {clipToPadding=false;addView(body)}
     private var opener:View?=null
     private var dismissed:(()->Unit)?=null
     private val hiddenAccessibility=mutableMapOf<View,Int>()

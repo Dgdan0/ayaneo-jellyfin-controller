@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.Artwork
 import android.view.Gravity
 import android.view.View
@@ -69,14 +70,15 @@ class UpcomingScreen(private val api:HubApi,private val ringVisible:()->Boolean)
     rangeLabel=label("",14f).apply{gravity=Gravity.CENTER}
     addView(previous);addView(rangeLabel,LinearLayout.LayoutParams(0,dp(42),1f));addView(next)
    },LinearLayout.LayoutParams(MATCH,dp(46)))
-   status=label("Loading schedule…",11f,true)
+   status=label("Loading schedule…",11f,true).apply{setPadding(dp(4),0,0,dp(4))}
    addView(status)
    addView(LinearLayout(context).apply {
     orientation=LinearLayout.HORIZONTAL
     agenda=LinearLayout(context).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(3),dp(3),dp(8),dp(12))}
     details=LinearLayout(context).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(12),dp(12),dp(12));background=Styler.cardBackground(context,colors)}
-    addView(ScrollView(context).apply{isFocusable=false;addView(agenda)},LinearLayout.LayoutParams(0,MATCH,1.1f))
-    addView(ScrollView(context).apply{isFocusable=false;addView(details)},LinearLayout.LayoutParams(0,MATCH,1f))
+    // Room for the day heading above a row, or it scrolls half under the status line.
+    addView(FocusScrollView(context,revealAbove=dp(34)).apply{addView(agenda)},LinearLayout.LayoutParams(0,MATCH,1.1f))
+    addView(FocusScrollView(context).apply{addView(details)},LinearLayout.LayoutParams(0,MATCH,1f))
    },LinearLayout.LayoutParams(MATCH,0,1f))
   }
  }

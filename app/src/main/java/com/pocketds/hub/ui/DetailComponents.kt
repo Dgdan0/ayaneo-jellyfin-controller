@@ -72,8 +72,8 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
     private val body = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.TOP }
     private val masks = FrameLayout(context)
-    private val actionScroll = HorizontalScrollView(context).apply {
-        isFocusable = false; isFocusableInTouchMode = false; isHorizontalScrollBarEnabled = false
+    private val actionScroll = FocusHorizontalScrollView(context).apply {
+        isHorizontalScrollBarEnabled = false
         clipToPadding = false; setPadding(dp(3), dp(4), dp(3), dp(4))
         addView(actions, ViewGroup.LayoutParams(WRAP, WRAP))
     }

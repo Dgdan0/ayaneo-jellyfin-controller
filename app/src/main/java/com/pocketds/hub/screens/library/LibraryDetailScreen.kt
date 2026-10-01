@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.ProgressLine.showFraction
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.EpisodeLabel
@@ -123,8 +124,8 @@ class LibraryDetailScreen(
         this.host = host
         colors = Theme.colors(host.viewContext)
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
-        root.addView(ScrollView(host.viewContext).apply {
-            isFocusable = false; isFillViewport = true; clipChildren = false
+        root.addView(FocusScrollView(host.viewContext).apply {
+            isFillViewport = true; clipChildren = false
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL; clipChildren = false
                 header = DetailHeaderView(context, colors, ringVisible)

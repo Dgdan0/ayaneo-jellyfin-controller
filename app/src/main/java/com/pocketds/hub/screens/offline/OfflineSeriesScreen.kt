@@ -1,5 +1,7 @@
 package com.pocketds.hub.screens.offline
 
+import com.pocketds.hub.ui.FocusHorizontalScrollView
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.EpisodeLabel
 import android.content.BroadcastReceiver
@@ -69,8 +71,8 @@ class OfflineSeriesScreen(
         colors = Theme.colors(host.viewContext)
         repository = OfflineRepository.get(host.viewContext)
         content = LinearLayout(host.viewContext).apply { orientation = LinearLayout.VERTICAL; clipChildren = false }
-        scroll = ScrollView(host.viewContext).apply {
-            setBackgroundColor(colors.background); isFocusable = false; isFillViewport = true
+        scroll = FocusScrollView(host.viewContext).apply {
+            setBackgroundColor(colors.background); isFillViewport = true
             clipToPadding = false; clipChildren = false; setPadding(0, 0, 0, dp(18))
             addView(content, ViewGroup.LayoutParams(MATCH, WRAP))
         }
@@ -210,8 +212,8 @@ class OfflineSeriesScreen(
             text = "Downloaded seasons"; textSize = 17f; setTextColor(colors.primaryText)
             setPadding(dp(24), dp(16), dp(24), dp(2))
         })
-        content.addView(HorizontalScrollView(host.viewContext).apply {
-            isFocusable = false; isHorizontalScrollBarEnabled = false; clipToPadding = false; clipChildren = false
+        content.addView(FocusHorizontalScrollView(host.viewContext).apply {
+            isHorizontalScrollBarEnabled = false; clipToPadding = false; clipChildren = false
             val clearance = DetailLayout.focusClearance(DetailLayout.posterCardHeight(156, resources.configuration.fontScale)).coerceAtLeast(10)
             setPadding(dp(24), dp(clearance), dp(24), dp(clearance))
             addView(LinearLayout(context).apply {

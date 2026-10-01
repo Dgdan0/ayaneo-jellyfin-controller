@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.offline
 
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.EpisodeCardView
 import com.pocketds.hub.ui.EpisodeLabel
@@ -112,8 +113,7 @@ class OfflineSelectionScreen(
             loading = ProgressBar(context).apply { isIndeterminate = true }
             addView(loading, LinearLayout.LayoutParams(MATCH, dp(26)))
             content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-            addView(ScrollView(context).apply {
-                isFocusable = false
+            addView(FocusScrollView(context).apply {
                 clipToPadding = false
                 setPadding(0, 0, 0, dp(76))
                 addView(content)

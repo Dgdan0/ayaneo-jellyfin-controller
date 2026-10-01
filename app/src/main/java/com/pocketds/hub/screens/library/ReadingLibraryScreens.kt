@@ -1,5 +1,7 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.FocusHorizontalScrollView
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.settings.DomainPreferences
 import com.pocketds.hub.settings.SortPreference
@@ -440,12 +442,10 @@ class ReadingWorkScreen(
                 setPadding(dp(16), dp(6), dp(16), dp(4))
             }
             addView(status)
-            scroll = ScrollView(context).apply {
+            scroll = FocusScrollView(context).apply {
                 isFillViewport = true
                 clipToPadding = false
                 setPadding(0, 0, 0, dp(16))
-                isFocusable = false
-                isFocusableInTouchMode = false
                 clipChildren = false
                 content = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
@@ -954,8 +954,7 @@ class ReadingWorkScreen(
     }
 
     private fun bookRow(section: ReadingSection): View =
-        HorizontalScrollView(requireNotNull(host).viewContext).apply {
-            isFocusable = false; isFocusableInTouchMode = false
+        FocusHorizontalScrollView(requireNotNull(host).viewContext).apply {
             isHorizontalScrollBarEnabled = false; clipToPadding = false; clipChildren = false
             val clearance = DetailLayout.focusClearance(DetailLayout.posterCardHeight(120, resources.configuration.fontScale)).coerceAtLeast(10)
             setPadding(dp(24), dp(clearance), dp(24), dp(clearance))

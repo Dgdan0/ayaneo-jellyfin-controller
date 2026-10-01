@@ -1,5 +1,6 @@
 package com.pocketds.hub.nav
 
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.animation.ValueAnimator
 import android.content.Context
@@ -62,8 +63,8 @@ class SectionRailView(context: Context, private val colors: PocketColors) : Line
         badges.clear()
         addView(buildHeader(), LayoutParams(MATCH, dp(48)).apply { bottomMargin = dp(4) })
         val destinations=LinearLayout(context).apply {orientation=VERTICAL}
-        addView(ScrollView(context).apply {
-            isFocusable=false;isFocusableInTouchMode=false;isVerticalScrollBarEnabled=false
+        addView(FocusScrollView(context).apply {
+            isVerticalScrollBarEnabled=false
             addView(destinations,FrameLayout.LayoutParams(MATCH,WRAP))
         },LayoutParams(MATCH,0,1f))
         items.forEachIndexed { index, item ->

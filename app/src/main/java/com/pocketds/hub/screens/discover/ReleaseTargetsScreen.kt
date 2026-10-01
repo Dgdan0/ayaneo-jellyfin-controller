@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.DetailArtworkCardView
 import com.pocketds.hub.ui.EpisodeCardView
@@ -197,9 +198,7 @@ class ReleaseTargetsScreen(
         // A page that scrolls: the episode row sits below the season card, and
         // on this 456dp-tall screen a focused episode's title and air date were
         // below the edge with no way to reach them.
-        return ScrollView(host.viewContext).apply {
-            isFocusable = false
-            isFocusableInTouchMode = false
+        return FocusScrollView(host.viewContext).apply {
             isVerticalScrollBarEnabled = false
             setBackgroundColor(colors.background)
             addView(LinearLayout(host.viewContext).apply {

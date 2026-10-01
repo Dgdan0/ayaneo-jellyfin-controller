@@ -89,12 +89,7 @@ class FormOverlay(
         card.addView(subtitleView)
 
         list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        scroller = ScrollView(context).apply {
-            // Not focusable, and it does not need to be: focus in here is an
-            // index in FormModel, so none of a ScrollView's own focus handling
-            // -- which is what broke the cast row on the detail screen -- is in
-            // play.
-            isFocusable = false
+        scroller = FocusScrollView(context).apply {
             addView(list)
         }
         card.addView(scroller)

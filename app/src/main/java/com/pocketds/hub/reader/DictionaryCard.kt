@@ -1,5 +1,6 @@
 package com.pocketds.hub.reader
 
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.content.Context
 import android.graphics.Color
@@ -71,7 +72,7 @@ class DictionaryCard(context: Context) : FrameLayout(context) {
             setTextColor(0xFF8FAEB4.toInt())
         })
         panel.addView(heading)
-        panel.addView(ScrollView(context).apply {
+        panel.addView(FocusScrollView(context).apply {
             addView(definition)
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(68)).apply {
             topMargin = dp(6)

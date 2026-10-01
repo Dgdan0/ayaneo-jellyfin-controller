@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.view.Gravity
@@ -169,8 +170,7 @@ class DiscoverScreen(
         }
         frame.addView(root, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
 
-        readingFilters = HorizontalScrollView(context).apply {
-            isFocusable = false
+        readingFilters = FocusHorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
             addView(buildReadingFilters())

@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.offline
 
+import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.EpisodeCardView
 import com.pocketds.hub.ui.EpisodeLabel
@@ -72,8 +73,8 @@ class OfflineSeasonScreen(
                 orientation = LinearLayout.HORIZONTAL; clipChildren = false; clipToPadding = false
                 setPadding(dp(10), dp(10), dp(16), dp(16))
             }
-            addView(HorizontalScrollView(context).apply {
-                isFocusable = false; isHorizontalScrollBarEnabled = false
+            addView(FocusHorizontalScrollView(context).apply {
+                isHorizontalScrollBarEnabled = false
                 clipToPadding = false; clipChildren = false; addView(row)
             }, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }, FrameLayout.LayoutParams(MATCH, MATCH))

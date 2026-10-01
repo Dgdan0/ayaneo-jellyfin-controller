@@ -42,6 +42,11 @@ class ConsolidationGuardTest {
             "FocusDecorator.listen(view, ringVisible) { view, focused -> … }: it keeps the ring itself",
             // The overview box skips its own ring while its text scrolls.
             setOf("ui/FocusDecorator.kt", "ui/DetailComponents.kt")),
+        Rule(Regex("""(?<![\w.])(?:android\.widget\.)?(?:Horizontal)?ScrollView\("""),
+            "FocusScrollView / FocusHorizontalScrollView: a bare one is an invisible focus stop",
+            // The overview box takes focus on purpose so its text scrolls; the
+            // hint bar is a HorizontalScrollView subclass.
+            setOf("ui/FocusScroll.kt", "ui/DetailComponents.kt", "nav/HintBarView.kt")),
         Rule(Regex("""delay\(\w*POLL\w*\)"""),
             "state/Poller with a PollCadence: backoff on failure, stop when hidden"),
     )

@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.settings
 
+import com.pocketds.hub.ui.FocusScrollView
 import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
@@ -72,7 +73,7 @@ class NotificationSettingsScreen(private val ringVisible: () -> Boolean) : Scree
                 addView(row, LinearLayout.LayoutParams(MATCH, dp(64)).apply { bottomMargin = dp(8) })
             }
         }
-        root.addView(android.widget.ScrollView(host.viewContext).apply {isFocusable=false;addView(page)}, FrameLayout.LayoutParams(MATCH, MATCH))
+        root.addView(FocusScrollView(host.viewContext).apply {addView(page)}, FrameLayout.LayoutParams(MATCH, MATCH))
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         refreshValues()

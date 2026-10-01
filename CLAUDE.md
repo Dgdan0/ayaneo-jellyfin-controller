@@ -568,6 +568,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Activating a focusable on the first tap | `activateOnTap`, never `setOnClickListener` on a focusable |
 | Paging with L2/R2 | `HubActivity.page` (moves focus with the scroll) |
 | Loading the next page of a list or row | `state/PagedLoadState`; one per row via `state/RowPaging` |
+| A scrolling container | `ui/FocusScrollView` / `FocusHorizontalScrollView` (never a focus stop; `revealAbove` keeps a heading over the focused row visible) |
 | Reacting to focus while keeping the ring | `FocusDecorator.listen(view, ringVisible) { view, focused -> … }` |
 | Player and playback-option wording | `playback/PlayerLabels` (Locale.US decimals) |
 | Subtitle decoding | `TolerantSubtitleDecoderFactory` in the text renderer (a broken ASS line is skipped, not fatal) |
@@ -582,7 +583,7 @@ Cards measure at their natural height (`EpisodeCardView`, `DetailArtworkCardView
 
 `ConsolidationGuardTest` (part of `dev.sh test`) fails when a removed copy comes back -- a new
 `HubClient(context)`, a hand-built image loader, a hand-written episode code or "Specials", a
-`"Selected"` detail line, an untinted progress bar, or a `delay(POLL…)` loop -- and names the owner
+`"Selected"` detail line, an untinted progress bar, a bare `ScrollView(`, or a `delay(POLL…)` loop -- and names the owner
 to use instead. Extend its rules when you consolidate something new.
 
 ---

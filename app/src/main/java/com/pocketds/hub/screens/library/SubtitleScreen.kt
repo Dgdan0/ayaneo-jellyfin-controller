@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.FocusScrollView
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -62,7 +63,7 @@ class SubtitleScreen(private val api: HubApi, private val itemId: String, privat
             column.addView(locations)
             status = label("Loading installed subtitles…",12f);column.addView(status)
             body = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
-            column.addView(ScrollView(context).apply { isFocusable=false;addView(body) },LinearLayout.LayoutParams(-1,0,1f))
+            column.addView(FocusScrollView(context).apply {addView(body) },LinearLayout.LayoutParams(-1,0,1f))
             addView(column,FrameLayout.LayoutParams(-1,-1))
             panel = ChoiceOverlay(context,colors,ringVisible,sidePanel=true);addView(panel,FrameLayout.LayoutParams(-1,-1))
         }

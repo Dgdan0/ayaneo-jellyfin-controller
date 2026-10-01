@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.system
 
+import com.pocketds.hub.ui.FocusScrollView
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -144,7 +145,7 @@ class PadTestScreen : Screen {
         return root
     }
 
-    private fun scroller(child: View): ScrollView = ScrollView(context).apply {
+    private fun scroller(child: View): ScrollView = FocusScrollView(context).apply {
         isFillViewport = true
         addView(child, ViewGroup.LayoutParams(MATCH, WRAP))
     }

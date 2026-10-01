@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.downloads
 
+import com.pocketds.hub.ui.FocusScrollView
 import android.text.InputType
 import android.view.View
 import android.view.ViewGroup
@@ -38,7 +39,7 @@ class BandwidthScreen(private val api: HubApi, private val ringVisible: () -> Bo
             status = label("Loading qBittorrent settings…", 13f)
             column.addView(status)
             body = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
-            column.addView(ScrollView(context).apply { isFocusable=false;addView(body) }, LinearLayout.LayoutParams(-1,0,1f))
+            column.addView(FocusScrollView(context).apply {addView(body) }, LinearLayout.LayoutParams(-1,0,1f))
             addView(column,FrameLayout.LayoutParams(-1,-1))
             panel=ChoiceOverlay(context,colors,ringVisible,sidePanel=true)
             addView(panel,FrameLayout.LayoutParams(-1,-1))

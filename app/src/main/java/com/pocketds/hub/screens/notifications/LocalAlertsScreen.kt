@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.notifications
 
+import com.pocketds.hub.ui.FocusScrollView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -22,7 +23,7 @@ class LocalAlertsScreen(private val api: HubApi, private val ringVisible: () -> 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host=host
         body=LinearLayout(host.viewContext).apply {orientation=LinearLayout.VERTICAL;setPadding(Styler.dpInt(context,16f),Styler.dpInt(context,12f),Styler.dpInt(context,16f),Styler.dpInt(context,12f))}
-        return ScrollView(host.viewContext).apply {isFocusable=false;addView(body)}
+        return FocusScrollView(host.viewContext).apply {addView(body)}
     }
     override fun onShow() {
         body.removeAllViews()

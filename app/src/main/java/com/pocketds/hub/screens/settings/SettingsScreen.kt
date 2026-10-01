@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.settings
 
+import com.pocketds.hub.ui.FocusScrollView
 import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
@@ -85,7 +86,7 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
                 )) { }
             }
         }
-        root.addView(ScrollView(host.viewContext).apply {
+        root.addView(FocusScrollView(host.viewContext).apply {
             isFillViewport = true
             clipToPadding = false
             addView(page, FrameLayout.LayoutParams(MATCH, WRAP))

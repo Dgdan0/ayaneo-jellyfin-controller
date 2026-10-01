@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.FocusScrollView
 import android.view.*
 import android.widget.*
 import com.pocketds.hub.input.PadAction
@@ -29,7 +30,7 @@ class ServerReadingListsScreen(private val api: HubApi, private val ring: () -> 
             orientation=LinearLayout.VERTICAL; setBackgroundColor(colors.background)
             status=TextView(context).apply { textSize=13f; setTextColor(colors.mutedText); setPadding(dp(22),dp(10),dp(22),dp(8)) }
             addView(status)
-            val scroll=ScrollView(context).apply { isFocusable=false; clipToPadding=false }
+            val scroll=FocusScrollView(context).apply { clipToPadding=false }
             body=LinearLayout(context).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(5),dp(20),dp(24)); clipChildren=false }
             scroll.addView(body); addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         }

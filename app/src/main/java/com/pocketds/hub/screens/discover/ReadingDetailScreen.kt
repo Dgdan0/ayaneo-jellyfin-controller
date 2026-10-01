@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.Artwork
 import android.view.View
 import android.view.ViewGroup
@@ -113,7 +114,7 @@ class ReadingDetailScreen(
         val frame = FrameLayout(context)
         rootFrame=frame
         frame.addView(
-            ScrollView(context).apply { isFocusable = false; addView(header) },
+            FocusScrollView(context).apply { addView(header) },
             FrameLayout.LayoutParams(MATCH, MATCH)
         )
         form = FormOverlay(context, colors, ringVisible)

@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.settings
 
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -37,10 +38,10 @@ class AppearanceScreen(private val ringVisible:()->Boolean) : Screen {
             orientation=LinearLayout.HORIZONTAL;setPadding(dp(20),dp(12),dp(20),dp(16));setBackgroundColor(colors.background)
         }
         controls=LinearLayout(host.viewContext).apply {orientation=LinearLayout.VERTICAL;setPadding(dp(3),0,dp(16),dp(12))}
-        val scroll=ScrollView(host.viewContext).apply { isFocusable=false;clipToPadding=false;addView(controls) }
+        val scroll=FocusScrollView(host.viewContext).apply {clipToPadding=false;addView(controls) }
         root.addView(scroll,LinearLayout.LayoutParams(0,-1,1f))
         preview=LinearLayout(host.viewContext).apply {orientation=LinearLayout.VERTICAL;setTag(AccentRebinder.PREVIEW_TAG,true);setPadding(dp(16),dp(8),dp(16),dp(12))}
-        val previewScroll=ScrollView(host.viewContext).apply {isFocusable=false;clipToPadding=false;addView(preview)}
+        val previewScroll=FocusScrollView(host.viewContext).apply {clipToPadding=false;addView(preview)}
         root.addView(previewScroll,LinearLayout.LayoutParams(0,-1,1.1f))
         root.addOnLayoutChangeListener { _,left,_,right,_,_,_,_,_->
             val stacked=(right-left)/host.viewContext.resources.displayMetrics.density<620

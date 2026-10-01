@@ -1,5 +1,7 @@
 package com.pocketds.hub.screens.home
 
+import com.pocketds.hub.ui.FocusHorizontalScrollView
+import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.Artwork
 import android.app.AlertDialog
 import android.content.Context
@@ -122,8 +124,7 @@ class ReadingHomeView(
             setPadding(dp(24), 0, dp(24), 0)
         }
         column.addView(status)
-        scroll = ScrollView(context).apply {
-            isFocusable = false
+        scroll = FocusScrollView(context).apply {
             isFillViewport = true
             clipToPadding = false
             content = LinearLayout(context).apply {
@@ -356,9 +357,8 @@ class ReadingHomeView(
             })
             return@apply
         }
-        val strip = HorizontalScrollView(context).apply {
+        val strip = FocusHorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
-            isFocusable = false
             clipToPadding = false
             clipChildren = false
             setPadding(dp(16), dp(6), dp(16), dp(6))

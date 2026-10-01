@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.FocusScrollView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
@@ -29,7 +30,7 @@ class MediaRemovalScreen(private val api: HubApi, private val kind: String, priv
             setBackgroundColor(colors.background)
             body=LinearLayout(context).apply {orientation=LinearLayout.VERTICAL;setPadding(dp(24),dp(16),dp(24),dp(24))}
             status=label("Loading the deletion preview…",16f);body.addView(status)
-            addView(ScrollView(context).apply {isFocusable=false;addView(body)},FrameLayout.LayoutParams(-1,-1))
+            addView(FocusScrollView(context).apply {addView(body)},FrameLayout.LayoutParams(-1,-1))
             this@MediaRemovalScreen.overlay=ChoiceOverlay(context,colors,ring);addView(this@MediaRemovalScreen.overlay,FrameLayout.LayoutParams(-1,-1))
         }
     }
