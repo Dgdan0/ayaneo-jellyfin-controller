@@ -37,9 +37,7 @@ import com.pocketds.hub.nav.ContentModeScreen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.nav.SectionStacks
 import com.pocketds.hub.nav.StatusStripView
-import com.pocketds.hub.nav.SectionRailItem
-import com.pocketds.hub.nav.SectionRailView
-import com.pocketds.hub.ui.UtilityHeaderView
+import com.pocketds.hub.nav.TopBarView
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubClient
@@ -99,7 +97,6 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private lateinit var ticker: PadTicker
     private lateinit var sections: SectionStacks
 
-    private lateinit var sectionRail: SectionRailView
     private lateinit var hintBar: HintBarView
     private lateinit var overlay: FrameLayout
     private lateinit var player: FloatingPlayerView
@@ -118,7 +115,9 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private var enteringPictureInPicture = false
     private var pictureInPictureSessionActive = false
     private lateinit var statusStrip: StatusStripView
-    private lateinit var utilityHeader: UtilityHeaderView
+    private lateinit var topBar: TopBarView
+    /** "‹ Title" under the tabs, for a pushed page that does not draw its own heading. */
+    private lateinit var pageTitle: android.widget.TextView
     private lateinit var content: FrameLayout
     private var lastContentSection = 0
     private var utilityReturnFocus: View? = null
@@ -140,17 +139,12 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private val localPlanCheck = com.pocketds.hub.state.JobSlot()
     private val notificationBadge = com.pocketds.hub.state.Poller(com.pocketds.hub.state.PollCadence.BADGE)
 
-    private val sectionItems = listOf(
-        SectionRailItem("Home", R.drawable.ic_nav_home),
-        SectionRailItem("Discover", R.drawable.ic_nav_discover),
-        SectionRailItem("Library", R.drawable.ic_nav_library),
-        SectionRailItem("Offline", R.drawable.ic_nav_offline),
-        SectionRailItem("Transfers", R.drawable.ic_nav_transfers),
-        SectionRailItem("Notifications", R.drawable.ic_nav_notifications),
-        SectionRailItem("Manage", R.drawable.ic_nav_manage),
-        SectionRailItem("Settings", R.drawable.ic_nav_settings)
-    )
-    private val sectionTitles get() = sectionItems.map { it.title }
+    /**
+     * The five tabs, then the three utility pages behind the top bar's icons.
+     * Downloads is what is on this device; Activity is the server's transfers.
+     */
+    private val sectionTitles = listOf("Home", "Discover", "Library", "Downloads", "Activity",
+        "Notifications", "Services", "Settings")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // An EPUB navigator has constructor dependencies supplied by Readium's
@@ -211,14 +205,14 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         sections.select(4); sections.push(DownloadsScreen(api, ::ringVisible).also { attach(it) })
         sections.select(NOTIFICATIONS_SECTION); sections.push(
             NotificationsScreen(api, ::ringVisible) { count ->
-                if (::utilityHeader.isInitialized) utilityHeader.setBadge(count)
+                if (::topBar.isInitialized) topBar.setBadge(count)
             }.also { attach(it) }
         )
         sections.select(6); sections.push(ManageScreen(api, ::ringVisible).also { attach(it) })
         sections.select(7); sections.push(SettingsScreen(::ringVisible).also { attach(it) })
         sections.select(
             savedInstanceState?.getInt(STATE_SECTION, 0)
-                ?.coerceIn(sectionItems.indices) ?: 0
+                ?.coerceIn(sectionTitles.indices) ?: 0
         )
 
         showCurrent()
@@ -295,33 +289,18 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         // laid over all of it, hint bar included.
         overlay = FrameLayout(this)
         val root = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(colors.background)
-        }
-
-        sectionRail = SectionRailView(this, colors).apply {
-            setExpanded(HubSettings.navigationExpanded(this@HubActivity), animate = false)
-            setSections(sectionItems.take(CONTENT_SECTION_COUNT))
-            onSelect = { index ->
-                router.onPointer()
-                if (sections.select(index)) showCurrent()
-            }
-            onExpandedChange = { expanded ->
-                HubSettings.setNavigationExpanded(this@HubActivity, expanded)
-                refreshHints()
-            }
-        }
-        root.addView(sectionRail, LinearLayout.LayoutParams(sectionRail.preferredWidth, MATCH))
-
-        val main = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(colors.background)
         }
 
-        statusStrip = StatusStripView(this, colors)
-        main.addView(statusStrip)
+        // The tabs float over the content rather than sitting above it, so
+        // Home's hero can run to the top edge under a see-through bar. Every
+        // other screen is pushed down by the bar's height (layoutScreen).
+        val stage = FrameLayout(this).apply { clipChildren = false }
+        content = FrameLayout(this).apply { clipChildren = false }
+        stage.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        utilityHeader = UtilityHeaderView(this, colors).apply {
+        topBar = TopBarView(this, colors, ::ringVisible, sectionTitles.take(CONTENT_SECTION_COUNT)).apply {
             onModeSelected = { mode ->
                 ContentModeSettings.set(this@HubActivity, mode)
                 refreshAppearance()
@@ -333,16 +312,32 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             onSelect = { index ->
                 router.onPointer()
                 if (sections.select(index)) showCurrent()
+                else if (index < CONTENT_SECTION_COUNT && sections.depth > 1) {
+                    // The tab you are already on takes you back to its top.
+                    while (sections.depth > 1) back()
+                }
             }
             onFocused = { refreshHints() }
         }
-        main.addView(utilityHeader, LinearLayout.LayoutParams(MATCH, Styler.dpInt(this, 48f)))
+        stage.addView(topBar, FrameLayout.LayoutParams(MATCH, Styler.dpInt(this, TopBarView.HEIGHT_DP), android.view.Gravity.TOP))
 
-        content = FrameLayout(this).apply {
-            layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
-            clipChildren = false
+        pageTitle = android.widget.TextView(this).apply {
+            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.SUBHEADING, 15f)
+            setTextColor(colors.primaryText)
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(Styler.dpInt(this@HubActivity, 22f), 0, Styler.dpInt(this@HubActivity, 22f), 0)
+            setBackgroundColor(colors.background)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            visibility = View.GONE
+            // A tap target for going back, for anyone without the pad in hand.
+            isClickable = true
+            setOnClickListener { router.onPointer(); back() }
         }
-        main.addView(content)
+        stage.addView(pageTitle, FrameLayout.LayoutParams(MATCH, Styler.dpInt(this, PAGE_TITLE_DP), android.view.Gravity.TOP).apply {
+            topMargin = Styler.dpInt(this@HubActivity, TopBarView.HEIGHT_DP)
+        })
+        root.addView(stage, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
         hintBar = HintBarView(this, colors).apply {
             // A pointer user reaches every contextual action through the same
@@ -352,11 +347,16 @@ class HubActivity : AppCompatActivity(), ScreenHost {
                 onPadAction(action)
             }
         }
-        main.addView(hintBar)
-
-        root.addView(main, LinearLayout.LayoutParams(0, MATCH, 1f))
+        root.addView(hintBar)
 
         overlay.addView(root, FrameLayout.LayoutParams(MATCH, MATCH))
+
+        statusStrip = StatusStripView(this, colors)
+        overlay.addView(statusStrip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL).apply {
+            bottomMargin = Styler.dpInt(this@HubActivity, HintBarView.HEIGHT_DP + 10f)
+            leftMargin = Styler.dpInt(this@HubActivity, 24f); rightMargin = leftMargin
+        })
 
         player = FloatingPlayerView(
             context = this,
@@ -415,8 +415,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         overlay.getLocationInWindow(outer)
         content.getLocationInWindow(inner)
         val left = inner[0] - outer[0]
-        val top = inner[1] - outer[1]
-        return android.graphics.Rect(left, top, left + content.width, top + content.height)
+        val top = inner[1] - outer[1] + if (topBar.visibility == View.VISIBLE) topBar.height else 0
+        return android.graphics.Rect(left, top, left + content.width, inner[1] - outer[1] + content.height)
     }
 
     private fun returnFocusToScreen() {
@@ -479,10 +479,10 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         }
         val view = views[top]
         view?.visibility = View.VISIBLE
-        sectionRail.setCurrent(sections.current)
-        utilityHeader.setCurrent(sections.current)
-        utilityHeader.setTitle(top.title)
-        utilityHeader.setMode(if (top is ContentModeScreen) ContentModeSettings.get(this) else null)
+        view?.let { layoutScreen(top, it) }
+        topBar.setCurrent(sections.current)
+        topBar.setMode(if (top is ContentModeScreen) ContentModeSettings.get(this) else null)
+        topBar.setOverArtwork(top.drawsUnderTopBar)
         hintBar.setHints(top.hints())
         view?.post {
             if (top.focusOnShow && view.findFocus() == null) {
@@ -496,9 +496,26 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         }
     }
 
+    /** Below the tabs, and below "‹ Title" for a pushed page with no heading of its own. */
+    private fun layoutScreen(screen: Screen, view: View) {
+        val titled = !screen.immersive && sections.depth > 1 && !screen.showsOwnTitle
+        pageTitle.visibility = if (titled) View.VISIBLE else View.GONE
+        if (titled) pageTitle.text = "‹  ${screen.title}"
+        val top = when {
+            screen.immersive || screen.drawsUnderTopBar -> 0f
+            titled -> TopBarView.HEIGHT_DP + PAGE_TITLE_DP
+            else -> TopBarView.HEIGHT_DP
+        }.let { Styler.dpInt(this, it) }
+        val params = view.layoutParams as? FrameLayout.LayoutParams ?: return
+        if (params.topMargin != top) {
+            params.topMargin = top
+            view.layoutParams = params
+        }
+    }
+
     private fun applyImmersive(active: Boolean) {
-        sectionRail.visibility = if (active) View.GONE else View.VISIBLE
-        utilityHeader.visibility = if (active) View.GONE else View.VISIBLE
+        topBar.visibility = if (active) View.GONE else View.VISIBLE
+        if (active) pageTitle.visibility = View.GONE
         statusStrip.setChromeVisible(!active)
         hintBar.visibility = if (active) View.GONE else View.VISIBLE
         WindowCompat.setDecorFitsSystemWindows(window, !active)
@@ -627,7 +644,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             refreshHints()
             return
         }
-        if (utilityHeader.hasFocus()) {
+        if (topBar.hasFocus()) {
             when (action) {
                 is PadAction.Step -> { moveFocus(action.direction); return }
                 PadAction.Activate -> { currentFocus?.performClick(); return }
@@ -650,16 +667,13 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             PadAction.Back -> if (!back()) DebugLog.log("nav", "back at section root")
             PadAction.Primary -> notify("X does nothing yet")
             PadAction.Secondary -> notify("Y does nothing yet")
-            PadAction.Menu -> {
-                sectionRail.toggle()
-                refreshHints()
-            }
+            PadAction.Menu -> Unit
             PadAction.Refresh -> notify("refresh")
         }
     }
 
     private fun handleSystemBack() {
-        if (::utilityHeader.isInitialized && utilityHeader.hasFocus()) {
+        if (::topBar.isInitialized && topBar.hasFocus()) {
             returnFocusFromUtilities()
             return
         }
@@ -674,10 +688,10 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     }
 
     private fun moveFocus(direction: Direction) {
-        if (utilityHeader.hasFocus()) {
+        if (topBar.hasFocus()) {
             when (direction) {
-                Direction.LEFT -> utilityHeader.moveHorizontal(-1)
-                Direction.RIGHT -> utilityHeader.moveHorizontal(1)
+                Direction.LEFT -> topBar.moveHorizontal(-1)
+                Direction.RIGHT -> topBar.moveHorizontal(1)
                 Direction.DOWN -> returnFocusFromUtilities()
                 Direction.UP -> Unit
             }
@@ -719,10 +733,10 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         }
         val candidate = from.focusSearch(direction.toFocusConstant())
         if (direction == Direction.UP && candidate != null &&
-            generateSequence(candidate) { it.parent as? View }.any { it === utilityHeader }
+            generateSequence(candidate) { it.parent as? View }.any { it === topBar }
         ) {
             utilityReturnFocus = from
-            if (utilityHeader.focusFirst()) refreshHints()
+            if (topBar.focusFirst()) refreshHints()
             return
         }
         val next = candidate?.takeIf {
@@ -986,8 +1000,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             hintBar.setHints(emptyList())
             return
         }
-        if (utilityHeader.hasFocus()) {
-            val action = currentFocus?.contentDescription?.toString().orEmpty()
+        if (topBar.hasFocus()) {
+            val action = currentFocus?.contentDescription?.toString().orEmpty().removeSuffix(", selected")
             hintBar.setHints(listOf(ButtonHint.activate(action.ifBlank { "Open" }),
                 ButtonHint.back("Return to content")))
             return
@@ -999,13 +1013,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         if (player.isOpen) {
             hints.removeAll { it.action == PadAction.Menu }
             hints.add(ButtonHint("⏵", "Trailer", PadAction.Menu))
-        } else if (hints.none { it.action == PadAction.Menu }) hints.add(
-            ButtonHint(
-                "Start",
-                if (sectionRail.isExpanded) "Collapse menu" else "Expand menu",
-                PadAction.Menu
-            )
-        )
+        }
         hintBar.setHints(hints)
     }
 
@@ -1050,7 +1058,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             when (val result = api.notifications(NotificationSettings.limits(this@HubActivity))) {
                 is com.pocketds.hub.net.HubResult.Ok -> {
                     val unread = NotificationReadStore(this@HubActivity).observe(result.value.sections)
-                    utilityHeader.setBadge(unread.size + com.pocketds.hub.settings.LocalAlerts.unread(this@HubActivity))
+                    topBar.setBadge(unread.size + com.pocketds.hub.settings.LocalAlerts.unread(this@HubActivity))
                     com.pocketds.hub.state.PollOutcome(ok = true)
                 }
                 is com.pocketds.hub.net.HubResult.Failed -> com.pocketds.hub.state.PollOutcome(ok = false)
@@ -1083,6 +1091,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val NOTIFICATIONS_SECTION = 5
         const val CONTENT_SECTION_COUNT = 5
+        const val PAGE_TITLE_DP = 30f
         const val STATE_SECTION = "current_section"
     }
 }

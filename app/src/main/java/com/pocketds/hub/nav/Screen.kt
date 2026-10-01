@@ -75,6 +75,19 @@ interface Screen : StackScreen {
      */
     val horizontalMode: HorizontalMode get() = HorizontalMode.CONFINED
 
+    /**
+     * Draw from the top edge, under a see-through tab bar, rather than below it.
+     * For a page that opens on artwork (Home's hero, a detail backdrop).
+     */
+    val drawsUnderTopBar: Boolean get() = false
+
+    /**
+     * Whether this page shows its own title. When it does not, a pushed page
+     * gets "‹ Title" under the tabs, so you can always see where you are and a
+     * pointer user has something to tap to go back.
+     */
+    val showsOwnTitle: Boolean get() = false
+
     /** Full-screen media owns the whole display and hides the normal app chrome. */
     val immersive: Boolean get() = false
 
@@ -169,6 +182,6 @@ data class ButtonHint(
         fun primary(label: String) = ButtonHint("Ⓧ", label, PadAction.Primary)      // Ⓧ
         fun secondary(label: String) = ButtonHint("Ⓨ", label, PadAction.Secondary)  // Ⓨ
         /** Select reloads the screen. One spelling and glyph, instead of eleven copies and a stray ↻. */
-        fun refresh(label: String = "Refresh (Select)") = ButtonHint("⟳", label, PadAction.Refresh)
+        fun refresh(label: String = "Refresh") = ButtonHint("⟳", label, PadAction.Refresh)
     }
 }

@@ -4,19 +4,42 @@ import com.pocketds.hub.state.ContentMode
 import java.net.URI
 import java.security.MessageDigest
 
-/** Stable IDs are persisted; names and ordering may change without losing a choice. */
+/**
+ * Stable IDs are persisted; names and ordering may change without losing a choice.
+ *
+ * Pastels on the dark theme, because a colour that fills the Play button and
+ * the selected tab has to sit quietly on near-black artwork; each has a deep
+ * variant for the light theme that still reads at 4.5:1 on white.
+ */
 enum class AccentPreset(val id: String, val label: String, val dark: Int, val light: Int) {
-    TEAL("teal","Teal",0xff4ed6bf.toInt(),0xff08796c.toInt()),
-    BLUE("blue","Blue",0xff80b9ff.toInt(),0xff2266ba.toInt()),
-    INDIGO("indigo","Indigo",0xffa5b4fc.toInt(),0xff4f46b9.toInt()),
-    VIOLET("violet","Violet",0xffc0a3ff.toInt(),0xff773db8.toInt()),
-    ROSE("rose","Rose",0xfff9a8c7.toInt(),0xffa12b60.toInt()),
-    CORAL("coral","Coral",0xffffaaa0.toInt(),0xffac4035.toInt()),
-    AMBER("amber","Amber",0xfff7ce73.toInt(),0xff85600a.toInt()),
-    OLIVE("olive","Olive",0xffcedb8a.toInt(),0xff667520.toInt()),
-    GREEN("green","Green",0xff7ddd9b.toInt(),0xff267746.toInt()),
-    CYAN("cyan","Cyan",0xff76d5ef.toInt(),0xff15738a.toInt());
-    companion object { fun fromStored(id: String?) = entries.firstOrNull { it.id == id } ?: TEAL }
+    TEAL("teal","Teal",0xff3ddbc6.toInt(),0xff08796c.toInt()),
+    MINT("mint","Mint",0xff8ee3cf.toInt(),0xff0f7a64.toInt()),
+    SKY("sky","Sky",0xffa5c8ff.toInt(),0xff2a5fb3.toInt()),
+    LAVENDER("lavender","Lavender",0xffc7b8ff.toInt(),0xff5a45c0.toInt()),
+    LILAC("lilac","Lilac",0xffe3b8f5.toInt(),0xff8a35a6.toInt()),
+    ROSE("rose","Rose",0xffffb4c6.toInt(),0xffad3157.toInt()),
+    PEACH("peach","Peach",0xffffc6a5.toInt(),0xffa84f1f.toInt()),
+    BUTTER("butter","Butter",0xfff6e3a1.toInt(),0xff7d6510.toInt()),
+    GOLD("gold","Gold",0xffe9c46a.toInt(),0xff85600a.toInt()),
+    SAGE("sage","Sage",0xffbfd8b0.toInt(),0xff4a6e36.toInt());
+
+    fun color(dark: Boolean) = if (dark) this.dark else light
+
+    /** Text and icons drawn on the accent: a deep shade of it on a pastel, white on a deep one. */
+    fun ink(dark: Boolean): Int = if (!dark) -1 else {
+        fun channel(shift: Int) = (((this.dark shr shift) and 255) * 0.2f).toInt()
+        (0xff shl 24) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
+    }
+
+    companion object {
+        /** The first palette's names, so a choice made before the pastels keeps its nearest colour. */
+        private val retired = mapOf("blue" to SKY, "indigo" to LAVENDER, "violet" to LILAC, "coral" to PEACH,
+            "amber" to GOLD, "olive" to SAGE, "green" to MINT, "cyan" to TEAL)
+        /** Books are gold until chosen otherwise, so reading reads as its own space. */
+        fun defaultFor(mode: ContentMode) = if (mode == ContentMode.BOOKS) GOLD else TEAL
+        fun fromStored(id: String?, fallback: AccentPreset = TEAL) =
+            entries.firstOrNull { it.id == id } ?: retired[id] ?: fallback
+    }
 }
 
 object PreferenceScope {

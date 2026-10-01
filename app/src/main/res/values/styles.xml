@@ -7,5 +7,12 @@
           app draws its own ring instead, via ui/Styler.
         -->
         <item name="android:defaultFocusHighlightEnabled">false</item>
+        <!--
+          Every TextView falls back to the theme, so this one line sets body text
+          everywhere, including the setTypeface(typeface, BOLD) calls, which pick
+          the family's 700. Titles use ui/Type explicitly.
+        -->
+        <item name="android:fontFamily">@font/figtree</item>
+        <item name="fontFamily">@font/figtree</item>
     </style>
 </resources>

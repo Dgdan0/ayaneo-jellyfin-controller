@@ -5,10 +5,10 @@ import android.content.res.Configuration
 import com.pocketds.hub.settings.ThemeSettings
 
 /**
- * The palette. Keeps the sibling keyboard project's teal accent so the two apps
- * read as a set, and adds what a focus-driven, poster-heavy UI needs on top:
- * a ring colour, a card surface distinct from the page, a poster placeholder,
- * and the availability badge colours.
+ * The palette. Teal stays the default accent so this and the sibling keyboard
+ * project read as a set; each media type can pick its own pastel instead
+ * (settings/AccentPreset). On top of that: a ring colour, a card surface
+ * distinct from the page, a poster placeholder, and the availability badges.
  */
 data class PocketColors(
     var background: Int,
@@ -19,7 +19,7 @@ data class PocketColors(
     var accent: Int,
     var accentText: Int,
     var stripBackground: Int,
-    /** The focus ring. Deliberately the accent: one colour means one meaning. */
+    /** The focus ring: the text colour, so it reads on any poster and any accent. */
     var focusRing: Int,
     /** Behind a focused card, under the poster. */
     var focusFill: Int,
@@ -49,17 +49,17 @@ data class PocketColors(
 
 object Theme {
     private val LIGHT = PocketColors(
-        background = 0xFFF5F6F4.toInt(),
+        background = 0xFFF4F5F7.toInt(),
         cardSurface = 0xFFFFFFFF.toInt(),
-        cardSurfacePressed = 0xFFD8D8DE.toInt(),
-        primaryText = 0xFF1B1B1F.toInt(),
-        mutedText = 0xFF6E6E76.toInt(),
+        cardSurfacePressed = 0xFFDDE1E7.toInt(),
+        primaryText = 0xFF12161C.toInt(),
+        mutedText = 0xFF5F6873.toInt(),
         accent = 0xFF087D73.toInt(),
         accentText = 0xFFFFFFFF.toInt(),
-        stripBackground = 0xFFE3E3E8.toInt(),
-        focusRing = 0xFF087D73.toInt(),
+        stripBackground = 0xFFE6E9EE.toInt(),
+        focusRing = 0xFF12161C.toInt(),
         focusFill = 0xFFE2F6F4.toInt(),
-        posterPlaceholder = 0xFFDCDCE2.toInt(),
+        posterPlaceholder = 0xFFDDE1E7.toInt(),
         badgeAvailable = 0xFF1E9E5A.toInt(),
         badgePartial = 0xFF5B1E96.toInt(),
         badgePending = 0xFFC98A1B.toInt(),
@@ -70,26 +70,30 @@ object Theme {
         unreadSurface = 0xFFFFE5E2.toInt()
     )
 
+    /**
+     * Near-black rather than the old blue-grey: artwork is the colour on every
+     * screen, and a neutral ground lets a poster or a pastel accent carry it.
+     */
     private val DARK = PocketColors(
-        background = 0xFF151C23.toInt(),
-        cardSurface = 0xFF202B35.toInt(),
-        cardSurfacePressed = 0xFF3A3A42.toInt(),
-        primaryText = 0xFFF1F1F3.toInt(),
-        mutedText = 0xFF9A9AA4.toInt(),
-        accent = 0xFF2BE0CE.toInt(),
-        accentText = 0xFF0A0A0B.toInt(),
-        stripBackground = 0xFF19232C.toInt(),
-        focusRing = 0xFF2BE0CE.toInt(),
+        background = 0xFF0A0D12.toInt(),
+        cardSurface = 0xFF131821.toInt(),
+        cardSurfacePressed = 0xFF222A36.toInt(),
+        primaryText = 0xFFF3F5F8.toInt(),
+        mutedText = 0xFFA3ADBB.toInt(),
+        accent = 0xFF3DDBC6.toInt(),
+        accentText = 0xFF0C2C28.toInt(),
+        stripBackground = 0xFF141922.toInt(),
+        focusRing = 0xFFF3F5F8.toInt(),
         focusFill = 0xFF15302E.toInt(),
-        posterPlaceholder = 0xFF2A2A31.toInt(),
+        posterPlaceholder = 0xFF1A212C.toInt(),
         badgeAvailable = 0xFF3ECB80.toInt(),
         badgePartial = 0xFF7B34C4.toInt(),
         badgePending = 0xFFE0AE4A.toInt(),
         badgeFailed = 0xFFE0685C.toInt(),
         warningStrip = 0xFF123C38.toInt(),
         warningStripText = 0xFFA7F3E8.toInt(),
-        dangerText = 0xFFE0685C.toInt(),
-        unreadSurface = 0xFF422628.toInt()
+        dangerText = 0xFFFF7A7A.toInt(),
+        unreadSurface = 0xFF3A1D1D.toInt()
     )
 
     private val palettes = java.util.WeakHashMap<Context, PocketColors>()
@@ -103,10 +107,12 @@ object Theme {
         val dark = isDark(context)
         val base = if (dark) DARK else LIGHT
         val preset = com.pocketds.hub.settings.DomainPreferences.accent(context, domain)
-        val accent = if (dark) preset.dark else preset.light
-        return base.copy(accent=accent, focusRing=accent,
-            accentText=if (dark) 0xff132c32.toInt() else -1,
-            focusFill=androidx.core.graphics.ColorUtils.blendARGB(base.cardSurface,accent,if(dark) .16f else .09f))
+        val accent = preset.color(dark)
+        // The focus ring is the text colour, not the accent: white on the dark
+        // theme reads on every poster and every pastel, where an accent ring
+        // vanished into artwork of the same hue.
+        return base.copy(accent=accent, focusRing=base.primaryText, accentText=preset.ink(dark),
+            focusFill=androidx.core.graphics.ColorUtils.blendARGB(base.cardSurface,accent,if(dark) .14f else .09f))
     }
 
     /** Repaint existing views only. This never replaces a screen, WebView or media session. */

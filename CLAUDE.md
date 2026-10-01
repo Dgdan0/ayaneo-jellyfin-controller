@@ -19,7 +19,7 @@ The full plan lives at `~/.claude/plans/hey-claude-i-know-shiny-boole.md`.
 | Phase | State |
 |---|---|
 | **A0** app skeleton + input probe | **Done**, verified on the hardware |
-| **A1** input + navigation | **Done.** Collapsible left rail plus L1/R1, compact controller hints and reliable focus; shell drivable on the device |
+| **A1** input + navigation | **Done.** Tabs across the top plus L1/R1 (the left rail was retired in the 2026-10 redesign), compact controller hints and reliable focus; shell drivable on the device |
 | **A2** networking spine | **Done.** HubClient, models, retry, failure mapping |
 | **A3** search screen | **Done.** Real posters and availability on the device |
 | **H0** hub skeleton + auth | **Done.** Running, serving six service states |
@@ -577,6 +577,10 @@ Most of these exist because several screens had drifted copies of the same thing
 | Hub: an author page id | `readingAuthorRef` (Authors view and a book's author link) |
 | Hub: a Storyteller title | `reconcileStorytellerBook` (file-name titles, `withoutSeriesNote`) and `storytellerPeople` (writers, not narrators, as First Last) |
 | Activating a focusable on the first tap | `activateOnTap`, never `setOnClickListener` on a focusable |
+| Pick one of a few (tabs, seasons, a setting's value, Media/Books) | `ui/BlobSegmentedView` (`PILL`, `ACCENT`, `UNDERLINE`; `followFocus` for tabs that switch on focus); geometry in `SegmentGeometry` |
+| Title and heading type | `ui/Type` (`typeRole(Type.Role.HERO …)`); body text is Figtree from the theme, never set per view |
+| An accent and the ink drawn on it | `AccentPreset.color(dark)` / `ink(dark)` via `Theme.colors`; Books default to gold (`AccentPreset.defaultFor`) |
+| A controller button drawn in the hint bar | `ui/KeyGlyphDrawable` |
 | Paging with L2/R2 | `HubActivity.page` (moves focus with the scroll) |
 | Loading the next page of a list or row | `state/PagedLoadState`; one per row via `state/RowPaging` |
 | A scrolling container | `ui/FocusScrollView` / `FocusHorizontalScrollView` (never a focus stop; `revealAbove` keeps a heading over the focused row visible) |
@@ -865,9 +869,11 @@ Three separate escapes had to be closed before a row of posters behaved. All thr
   `HubActivity` now consumes DPAD keys itself — except in a text field, where left and right
   move the caret.
 
-**The side rail is deliberately not focusable**, like the hint-bar chips: sections switch with
-L1/R1 or a tap, and Start/app-mark tap toggles its 68dp/190dp collapsed/expanded width. Keeping it
-out of focus search closes the whole "orphaned focus lands in navigation" class of bug.
+**The top bar is reached only with Up, and left only with Down or B.** It replaced the side rail
+(2026-10 redesign: the rail cost a poster column on every page). `HubActivity.moveFocus` notices a
+focus search that would land in `nav/TopBarView` and hands over to `TopBarView.focusFirst` (the
+current tab); inside the bar left and right walk tabs, Media/Books and the icons in order. The bar
+is added to the window after the content, so a cleared focus lands in the content first.
 
 **`hints()` reads the focused item, so it has to be recomputed after focus lands** — in
 `moveFocus`, in `showCurrent`'s post, and in each adapter's own focus settling. And that
@@ -1060,8 +1066,7 @@ project as a trackpad + keyboard, so pointer and text input are first-class, not
 | Back | `BUTTON_B`, `KEYCODE_BACK` | tap the Back chip in the hint bar |
 | Primary action | `BUTTON_X` | tap its hint-bar chip |
 | Secondary action | `BUTTON_Y` | long-press the card, or Right Click |
-| Switch section | `L1` / `R1` | tap a rail item |
-| Expand/collapse navigation | `Start` | tap the app mark |
+| Switch section | `L1` / `R1` | tap a tab |
 | Page | `L2` / `R2` | two-finger scroll / fling |
 | Text entry | focus a field, press `A` | tap the field |
 
@@ -1101,8 +1106,8 @@ Design consequences:
 - **Focus settling must run even when nothing was focused before.** Restoring focus only when
   there was a previous id meant that on first load — an empty list — no row was ever focused by
   us and the hint bar was never recomputed.
-- **Clearing focus hands it to the first focusable in the window.** The rail is deliberately
-  nonfocusable so this cannot strand the selection in top-level navigation.
+- **Clearing focus hands it to the first focusable in the window.** The top bar is added after
+  the content for exactly this reason, so a clear cannot strand the selection in the tabs.
   Expect focus to be *somewhere* after a clear, not nowhere.
 - **Neither form of `requestFocus` gives traversal order inside a ScrollView.** It overrides
   `onRequestFocusInDescendants` to prefer whatever is nearest the current scroll position. A

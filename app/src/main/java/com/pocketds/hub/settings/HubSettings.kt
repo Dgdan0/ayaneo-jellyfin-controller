@@ -24,7 +24,6 @@ object HubSettings {
     private const val KEY_TOKEN = "hub_token"
     private const val KEY_USER_ID = "jellyfin_user_id"
     private const val KEY_USER_NAME = "jellyfin_user_name"
-    private const val KEY_NAV_EXPANDED = "navigation_expanded"
     @Volatile private var debugBaseUrlOverride: String? = null
 
     fun baseUrl(context: Context): String =
@@ -60,13 +59,6 @@ object HubSettings {
             .putString(KEY_USER_ID, id.trim())
             .putString(KEY_USER_NAME, name.trim())
             .apply()
-    }
-
-    fun navigationExpanded(context: Context): Boolean =
-        Prefs.of(context).getBoolean(KEY_NAV_EXPANDED, false)
-
-    fun setNavigationExpanded(context: Context, expanded: Boolean) {
-        Prefs.of(context).edit().putBoolean(KEY_NAV_EXPANDED, expanded).apply()
     }
 
     val isConfigured: (Context) -> Boolean = { baseUrl(it).isNotEmpty() && token(it).isNotEmpty() }

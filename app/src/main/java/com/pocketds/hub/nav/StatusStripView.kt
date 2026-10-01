@@ -9,9 +9,10 @@ import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 
 /**
- * A thin in-layout strip for transient messages and for staleness.
+ * A small pill above the hint bar for transient messages and for staleness.
  *
- * Not a `Toast`: a Toast opens its own window with its own focus rules, and on a
+ * It floats over the content rather than pushing it down, so a message never
+ * moves the row you are looking at. Not a `Toast`: a Toast opens its own window with its own focus rules, and on a
  * gamepad-driven UI a second window is how the hint bar goes stale behind it.
  * This one is part of the layout and cannot steal anything.
  *
@@ -32,12 +33,18 @@ class StatusStripView(context: Context, private val colors: PocketColors) : AppC
 
     init {
         textSize = 12f
-        gravity = Gravity.CENTER_VERTICAL
-        setBackgroundColor(colors.warningStrip)
-        setTextColor(colors.warningStripText)
-        val padH = Styler.dpInt(context, 12f)
-        val padV = Styler.dpInt(context, 6f)
+        gravity = Gravity.CENTER
+        typeface = com.pocketds.hub.ui.Type.text(context, 600)
+        background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
+            cornerRadius = Styler.dp(context, 18f)
+            setColor(this@StatusStripView.colors.primaryText)
+        }
+        setTextColor(colors.background)
+        maxLines = 2
+        val padH = Styler.dpInt(context, 16f)
+        val padV = Styler.dpInt(context, 8f)
         setPadding(padH, padV, padH, padV)
+        elevation = Styler.dp(context, 10f)
         visibility = GONE
     }
 

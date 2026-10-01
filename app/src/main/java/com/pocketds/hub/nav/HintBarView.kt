@@ -9,7 +9,9 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.ui.PocketColors
+import com.pocketds.hub.ui.KeyGlyphDrawable
 import com.pocketds.hub.ui.Styler
+import com.pocketds.hub.ui.Type
 
 /**
  * What A/B/X/Y do right now -- and, for anyone driving the trackpad, the buttons
@@ -36,18 +38,26 @@ class HintBarView(context: Context, private val colors: PocketColors) : Horizont
     private val row = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        val inset = Styler.dpInt(context, 8f)
+        val inset = Styler.dpInt(context, 14f)
         setPadding(inset, 0, inset, 0)
     }
+    private val divider = android.graphics.Paint()
 
     init {
-        setBackgroundColor(colors.stripBackground)
+        setBackgroundColor(colors.background)
         isFocusable = false
         isHorizontalScrollBarEnabled = false
-        val height = Styler.dpInt(context, 48f)
+        setWillNotDraw(false)
+        val height = Styler.dpInt(context, HEIGHT_DP)
         minimumHeight = height
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
         addView(row, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, height))
+    }
+
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        super.onDraw(canvas)
+        divider.color = (colors.primaryText and 0x00FFFFFF) or 0x10000000
+        canvas.drawRect(scrollX.toFloat(), 0f, scrollX + width.toFloat(), Styler.dp(context, 1f), divider)
     }
 
     fun setHints(hints: List<ButtonHint>) {
@@ -66,30 +76,41 @@ class HintBarView(context: Context, private val colors: PocketColors) : Horizont
     }
 
     private fun chip(): TextView = TextView(context).apply {
-        // Glyphs rather than drawables, following the sibling project: an icon
-        // set for every button on every screen is a lot of assets to keep
-        // consistent, and these read fine at this size.
-        textSize = 13f
+        textSize = 11.5f
         isAllCaps = false
         setSingleLine(true)
-        minimumHeight = Styler.dpInt(context, 48f)
-        background = Styler.chipBackground(context, colors)
-        val padH = Styler.dpInt(context, 12f)
-        val padV = Styler.dpInt(context, 7f)
-        setPadding(padH, padV, padH, padV)
+        // The bar is slim, but every chip is still a button: it takes the bar's
+        // full height for touch even though it draws only the glyph and label.
+        background = Styler.chipBackground(context, colors).let { chips ->
+            android.graphics.drawable.StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_pressed), chips)
+                addState(intArrayOf(), android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            }
+        }
+        val padH = Styler.dpInt(context, 6f)
+        setPadding(padH, 0, padH, 0)
+        compoundDrawablePadding = Styler.dpInt(context, 6f)
         isFocusable = false
         gravity = Gravity.CENTER_VERTICAL
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.MATCH_PARENT
-        ).apply { rightMargin = Styler.dpInt(context, 8f) }
+        ).apply { rightMargin = Styler.dpInt(context, 10f) }
     }
 
     private fun bind(view: TextView, hint: ButtonHint) = with(view) {
-        text = "${hint.glyph}  ${hint.label}"
-        setTextColor(if (hint.enabled) colors.primaryText else colors.mutedText)
+        val glyph = KeyGlyphDrawable(colors, hint.glyph, Styler.dpInt(context, 17f), Type.text(context, 800))
+        glyph.setBounds(0, 0, glyph.intrinsicWidth, glyph.intrinsicHeight)
+        setCompoundDrawables(glyph, null, null, null)
+        text = hint.label
+        contentDescription = "${glyph.label}: ${hint.label}"
+        setTextColor(if (hint.enabled) androidx.core.graphics.ColorUtils.blendARGB(colors.mutedText, colors.primaryText, 0.55f) else colors.mutedText)
         isClickable = hint.enabled
         alpha = if (hint.enabled) 1f else 0.5f
         setOnClickListener(if (hint.enabled) View.OnClickListener { onAction?.invoke(hint.action) } else null)
+    }
+
+    companion object {
+        const val HEIGHT_DP = 36f
     }
 }
