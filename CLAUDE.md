@@ -567,6 +567,15 @@ Most of these exist because several screens had drifted copies of the same thing
 | A value menu / a destructive confirm | `ChoiceOverlay.pickValue` / `confirm` (harmless answer first) |
 | Activating a focusable on the first tap | `activateOnTap`, never `setOnClickListener` on a focusable |
 | Paging with L2/R2 | `HubActivity.page` (moves focus with the scroll) |
+| Loading the next page of a list or row | `state/PagedLoadState`; one per row via `state/RowPaging` |
+| Reacting to focus while keeping the ring | `FocusDecorator.listen(view, ringVisible) { view, focused -> … }` |
+| Player and playback-option wording | `playback/PlayerLabels` (Locale.US decimals) |
+| Subtitle decoding | `TolerantSubtitleDecoderFactory` in the text renderer (a broken ASS line is skipped, not fatal) |
+| Hub: permission check | `requireScope(w, r, scope, action)` (403 `forbidden_scope`) |
+| Hub: a screen built from several cached reads | `cacheSummary` (keeps stale/degraded) |
+| Hub: a Jellyfin image path | `jellyfinImage` / `posterImage` / `backdropImage` |
+| Hub: a service's own error sentence | `upstreamText` / `upstreamMessage` / `serviceOf` |
+| Hub: a title's request state changed | `invalidateTitle` (search, Discover, detail) |
 
 Cards measure at their natural height (`EpisodeCardView`, `DetailArtworkCardView`); give a row
 `WRAP` height rather than leftover space.
