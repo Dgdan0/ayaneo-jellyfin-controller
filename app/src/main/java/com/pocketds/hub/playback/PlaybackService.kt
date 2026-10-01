@@ -3,6 +3,7 @@ package com.pocketds.hub.playback
 import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
+import android.os.Looper
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -17,6 +18,9 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.decoder.ffmpeg.FfmpegLibrary
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.text.TextOutput
+import androidx.media3.exoplayer.text.TextRenderer
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
@@ -116,12 +120,31 @@ class PlaybackService : MediaSessionService() {
             }
             .build()
         val upstream = OkHttpDataSource.Factory(http).setDefaultRequestProperties(headers)
+        // Subtitles are decoded by the text renderer, not while the file is read.
+        // Media3 1.4.1 parsing during extraction hit an IllegalStateException on
+        // the embedded ASS tracks of a downloaded Bleach episode, and an exception
+        // there is a source error: the whole video failed to start. In the
+        // renderer a bad cue is logged and skipped. Upgrading Media3 is not the
+        // fix here: the FFmpeg audio AAR is built against exactly 1.4.1.
+        @Suppress("DEPRECATION")
         val mediaSources = DefaultMediaSourceFactory(DefaultDataSource.Factory(this, upstream))
+            .experimentalParseSubtitlesDuringExtraction(false)
         val trackSelector = DefaultTrackSelector(this)
         // HDR titles looked dim on this panel; decode them as SDR instead (see HdrOutput).
         val renderers = object : DefaultRenderersFactory(this) {
             override fun getCodecAdapterFactory(): MediaCodecAdapter.Factory =
                 HdrToSdrCodecFactory(super.getCodecAdapterFactory())
+
+            @Suppress("DEPRECATION")
+            override fun buildTextRenderers(
+                context: Context,
+                output: TextOutput,
+                outputLooper: Looper,
+                extensionRendererMode: Int,
+                out: ArrayList<Renderer>
+            ) {
+                out.add(TextRenderer(output, outputLooper).apply { experimentalSetLegacyDecodingEnabled(true) })
+            }
         }
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
