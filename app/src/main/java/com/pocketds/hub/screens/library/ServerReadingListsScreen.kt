@@ -82,7 +82,7 @@ class ServerReadingListsScreen(private val api: HubApi, private val ring: () -> 
             addView(TextView(context).apply { text=title; textSize=17f; setTextColor(colors.primaryText) })
             addView(TextView(context).apply { text=detail; textSize=12f; setTextColor(colors.mutedText);setPadding(0,dp(5),0,0) })
             Styler.makeFocusable(this); FocusDecorator.attach(this,ring,scale=false)
-            setOnFocusChangeListener { v,focused -> FocusDecorator.refresh(v,focused && ring()); if(focused)focusId=id }
+            FocusDecorator.listen(this,ring) { v,focused -> if(focused)focusId=id }
             activateOnTap(action)
         }
         body.addView(view,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(10)});rows+=view

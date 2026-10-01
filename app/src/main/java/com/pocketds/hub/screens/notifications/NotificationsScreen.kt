@@ -438,8 +438,7 @@ class NotificationsScreen(
                     markSeen(notice.id, card)
                     host.notify(if (notice.detail.isEmpty()) notice.title else "${notice.title} · ${notice.detail}")
                 }
-                card.setOnFocusChangeListener { _, focused ->
-                    FocusDecorator.refresh(card, ringVisible())
+                FocusDecorator.listen(card, ringVisible) { _, focused ->
                     if (focused) {
                         selectedID = notice.id
                         markSeen(notice.id, card)

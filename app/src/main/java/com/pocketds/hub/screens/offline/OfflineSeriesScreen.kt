@@ -229,8 +229,7 @@ class OfflineSeriesScreen(
             tag = TaggedSeason(season)
             layoutParams = LinearLayout.LayoutParams(dp(112), WRAP).apply { marginEnd = dp(12) }
             contentDescription = "${seasonName(season.number)}, ${season.rows.size} downloaded episodes"
-            setOnFocusChangeListener { view, focused ->
-                FocusDecorator.refresh(view, ringVisible())
+            FocusDecorator.listen(this, ringVisible) { view, focused ->
                 if (focused) { selectedKey = (view.tag as TaggedKey).key; host.refreshHints() }
             }
             activateOnTap { host.push(OfflineSeasonScreen(api, seriesTitle, season, ringVisible)) }

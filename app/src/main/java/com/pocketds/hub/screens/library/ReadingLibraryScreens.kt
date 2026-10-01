@@ -360,8 +360,7 @@ class ReadingLibraryGridScreen(
                     setMargins(dp(8), dp(8), dp(8), dp(8))
                 }
                 FocusDecorator.attach(this, ringVisible)
-                setOnFocusChangeListener { _, focused ->
-                    FocusDecorator.refresh(this, ringVisible())
+                FocusDecorator.listen(this, ringVisible) { _, focused ->
                     if (focused) {
                         val position = grid.getChildAdapterPosition(this)
                         val itemId = (getTag(TAG_WORK) as? ReadingWork)?.id.orEmpty()
@@ -517,8 +516,7 @@ class ReadingWorkScreen(
 
     private fun attachActionFocus(view: TextView) {
         FocusDecorator.attach(view, ringVisible, scale = false)
-        view.setOnFocusChangeListener { focused, _ ->
-            FocusDecorator.refresh(focused, ringVisible())
+        FocusDecorator.listen(view, ringVisible) { focused, _ ->
             host?.refreshHints()
         }
     }
@@ -981,15 +979,14 @@ class ReadingWorkScreen(
                         if (ReadingWorkPresentation.canOpen(item)) {
                             val key = "book:${item.workId}"
                             actionViews[key] = this
-                            setOnFocusChangeListener { view, focused ->
-                                FocusDecorator.refresh(view, ringVisible())
+                            FocusDecorator.listen(this, ringVisible) { view, focused ->
                                 if (focused) { lastActionKey = key; host?.refreshHints() }
                             }
                             activateOnTap { host?.push(ReadingWorkScreen(api, item.workId, item.title, ringVisible)) }
                         } else {
                             val key="missing:${item.number}:${item.title}"
                             actionViews[key]=this;hasChildLinks=true
-                            setOnFocusChangeListener { view,focused->FocusDecorator.refresh(view,ringVisible());if(focused){lastActionKey=key;host?.refreshHints()} }
+                            FocusDecorator.listen(this,ringVisible) { view,focused -> if(focused){lastActionKey=key;host?.refreshHints()} }
                             activateOnTap { host?.push(MissingReadingItemScreen(api,item,ringVisible)) }
                         }
                     })

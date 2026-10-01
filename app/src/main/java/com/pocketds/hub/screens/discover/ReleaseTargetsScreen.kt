@@ -129,8 +129,7 @@ class SeasonReleasePickerScreen(
             // The same season card as a Library series page.
             val card = DetailArtworkCardView(parent.context, colors, ringVisible).apply {
                 layoutParams = RecyclerView.LayoutParams(dp(112), WRAP).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) }
-                setOnFocusChangeListener { view, focused ->
-                    FocusDecorator.refresh(view, ringVisible())
+                FocusDecorator.listen(this, ringVisible) { view, focused ->
                     if (focused) {
                         selected = list.getChildAdapterPosition(view)
                         host?.refreshHints()
@@ -253,8 +252,7 @@ class ReleaseTargetsScreen(
                 }, LinearLayout.LayoutParams(0, WRAP, 1f))
                 // This is a fixed-width, full-detail action card, not a poster.
                 FocusDecorator.attach(this, ringVisible, scale = false)
-                setOnFocusChangeListener { view, _ ->
-                    FocusDecorator.refresh(view, ringVisible())
+                FocusDecorator.listen(this, ringVisible) { view, _ ->
                     host.refreshHints()
                 }
                 activateOnTap { openSeason() }

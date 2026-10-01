@@ -207,8 +207,7 @@ class ReaderScreen(
                 contentDescription = "Reading position"
                 Styler.makeFocusable(this)
                 FocusDecorator.attach(this, ringVisible, scale = false)
-                setOnFocusChangeListener { view, focused ->
-                    FocusDecorator.refresh(view, focused && ringVisible())
+                FocusDecorator.listen(this, ringVisible) { view, focused ->
                     if (focused) focusedControl = ReaderControl.SCRUBBER
                 }
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -283,8 +282,7 @@ class ReaderScreen(
         background = readerControlBackground()
         Styler.makeFocusable(this)
         FocusDecorator.attach(this, ringVisible, scale = false)
-        setOnFocusChangeListener { view, focused ->
-            FocusDecorator.refresh(view, focused && ringVisible())
+        FocusDecorator.listen(this, ringVisible) { view, focused ->
             if (focused) focusedControl = id
         }
         activateOnTap(click)

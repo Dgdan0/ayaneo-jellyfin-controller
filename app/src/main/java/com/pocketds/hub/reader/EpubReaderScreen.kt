@@ -515,8 +515,7 @@ class EpubReaderScreen(
                 layoutParams = LinearLayout.LayoutParams(dp(56), MATCH)
                 Styler.makeFocusable(this)
                 FocusDecorator.attach(this, ringVisible, scale = false)
-                setOnFocusChangeListener { view, focused ->
-                    FocusDecorator.refresh(view, focused && ringVisible())
+                FocusDecorator.listen(this, ringVisible) { view, focused ->
                     if (focused) focusedControl = controls.indexOf(view).coerceAtLeast(0)
                 }
                 activateOnTap { showReadingModes() }
@@ -568,8 +567,7 @@ class EpubReaderScreen(
                 }
                 override fun onStopTrackingTouch(bar: SeekBar) { seekBook() }
             })
-            setOnFocusChangeListener { view, focused ->
-                FocusDecorator.refresh(view, focused && ringVisible())
+            FocusDecorator.listen(this, ringVisible) { view, focused ->
                 if (!focused) updatePosition()
             }
         }
@@ -599,8 +597,7 @@ class EpubReaderScreen(
         })
         narrationDock.focusableControls.forEach { view ->
             FocusDecorator.attach(view, ringVisible, scale = false)
-            view.setOnFocusChangeListener { focusedView, focused ->
-                FocusDecorator.refresh(focusedView, focused && ringVisible())
+            FocusDecorator.listen(view, ringVisible) { focusedView, focused ->
                 if (focused) focusedControl = controls.indexOf(focusedView).coerceAtLeast(0)
             }
             controls += view
@@ -618,8 +615,7 @@ class EpubReaderScreen(
             background = controlBackground()
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
-            setOnFocusChangeListener { view, focused ->
-                FocusDecorator.refresh(view, focused && ringVisible())
+            FocusDecorator.listen(this, ringVisible) { view, focused ->
                 if (focused) focusedControl = controls.indexOf(view).coerceAtLeast(0)
             }
             activateOnTap(click)

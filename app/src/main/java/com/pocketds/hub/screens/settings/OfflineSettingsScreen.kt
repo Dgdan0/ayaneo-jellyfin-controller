@@ -70,7 +70,7 @@ class OfflineSettingsScreen(private val ringVisible: () -> Boolean) : Screen {
         background = Styler.cardBackground(context, colors); setPadding(dp(14), 0, dp(14), 0)
         layoutParams = LinearLayout.LayoutParams(MATCH, dp(50)).apply { bottomMargin = dp(6) }
         Styler.makeFocusable(this); FocusDecorator.attach(this, ringVisible, scale = false)
-        setOnFocusChangeListener { view, _ -> FocusDecorator.refresh(view, ringVisible()); host.refreshHints() }
+        FocusDecorator.listen(this, ringVisible) { view, _ -> host.refreshHints() }
         activateOnTap(action); tag = label
     }
 

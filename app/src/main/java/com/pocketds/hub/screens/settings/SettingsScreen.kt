@@ -129,8 +129,7 @@ class SettingsScreen(private val ringVisible: () -> Boolean) : Screen {
                 "controller"->setIconResource(com.pocketds.hub.R.drawable.ic_nav_pad)
             }
             FocusDecorator.attach(this, ringVisible, scale = false)
-            setOnFocusChangeListener { view, focused ->
-                FocusDecorator.refresh(view, ringVisible())
+            FocusDecorator.listen(this, ringVisible) { view, focused ->
                 if (focused) {
                     selected = id
                     host.refreshHints()

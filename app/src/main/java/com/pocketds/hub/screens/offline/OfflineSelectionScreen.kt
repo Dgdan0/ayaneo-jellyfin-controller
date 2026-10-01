@@ -98,7 +98,7 @@ class OfflineSelectionScreen(
                     contentDescription = "Download selected episodes"
                     background = Styler.cardBackground(context, colors, cornerDp = 10f)
                     Styler.makeFocusable(this); FocusDecorator.attach(this, ringVisible, scale = false)
-                    setOnFocusChangeListener { view, _ -> FocusDecorator.refresh(view, ringVisible()); host.refreshHints() }
+                    FocusDecorator.listen(this, ringVisible) { view, _ -> host.refreshHints() }
                     activateOnTap { confirmSelection() }
                 }, LinearLayout.LayoutParams(dp(48), dp(42)).apply { marginStart = dp(7) })
             })

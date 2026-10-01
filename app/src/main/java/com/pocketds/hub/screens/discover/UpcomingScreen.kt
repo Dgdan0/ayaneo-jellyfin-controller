@@ -136,7 +136,7 @@ class UpcomingScreen(private val api:HubApi,private val ringVisible:()->Boolean)
       addView(label(group.label,12f,true))
       addView(label(timeLabel(group),11f,true))
      },LinearLayout.LayoutParams(0,WRAP,1f))
-     setOnFocusChangeListener {v,focused->FocusDecorator.refresh(v,ringVisible());if(focused){select(group);host?.refreshHints()}}
+     FocusDecorator.listen(this,ringVisible) { v,focused -> if(focused){select(group);host?.refreshHints()}}
      activateOnTap {select(group);open(group)}
      contentDescription=group.first.media.title+", "+group.label+", "+timeLabel(group)
     }

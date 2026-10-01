@@ -272,8 +272,7 @@ class PagedImageReaderScreen(
             contentDescription = "Publication position"
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
-            setOnFocusChangeListener { view, focused ->
-                FocusDecorator.refresh(view, focused && ringVisible())
+            FocusDecorator.listen(this, ringVisible) { view, focused ->
                 if (focused) focusedControl = focusables.indexOf(view).coerceAtLeast(0)
             }
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -316,8 +315,7 @@ class PagedImageReaderScreen(
             background = controlBackground()
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
-            setOnFocusChangeListener { view, focused ->
-                FocusDecorator.refresh(view, focused && ringVisible())
+            FocusDecorator.listen(this, ringVisible) { view, focused ->
                 if (focused) focusedControl = focusables.indexOf(view).coerceAtLeast(0)
             }
             activateOnTap(click)

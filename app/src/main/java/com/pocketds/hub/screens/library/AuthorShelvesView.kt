@@ -158,8 +158,8 @@ class AuthorShelvesView(context:Context,private val api:HubApi,private val libra
             val work=group.items.getOrNull(position)
             if(work==null) {(holder.itemView as TextView).text=if(errors.containsKey(group.id))"Retry books" else "More books";return}
             (holder.itemView as PosterCardView).bindReadingWork(ReadingCompletionRepository.get(context).project(work),loader,api::imageUrl)
-            holder.itemView.setOnFocusChangeListener { v,focused ->
-                FocusDecorator.refresh(v,ringVisible());if(focused){selectedAuthor=group.id;selectedWork=work.id;rowPositions[group.id]=position}
+            FocusDecorator.listen(holder.itemView,ringVisible) { v,focused ->
+                if(focused){selectedAuthor=group.id;selectedWork=work.id;rowPositions[group.id]=position}
             }
             holder.itemView.activateOnTap {selectedAuthor=group.id;selectedWork=work.id;onOpen(work)}
         }

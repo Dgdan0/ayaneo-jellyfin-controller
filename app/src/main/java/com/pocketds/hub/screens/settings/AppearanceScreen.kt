@@ -90,7 +90,7 @@ class AppearanceScreen(private val ringVisible:()->Boolean) : Screen {
         isSelected=checked;contentDescription="$text${if(checked)", selected" else ""}"
         background=Styler.selectionBackground(context,colors,checked);Styler.makeFocusable(this)
         FocusDecorator.attach(this,ringVisible,scale=false)
-        setOnFocusChangeListener { view,focused -> FocusDecorator.refresh(view,ringVisible());if(focused)selected=id }
+        FocusDecorator.listen(this,ringVisible) { view,focused -> if(focused)selected=id }
         activateOnTap(action);choices[id]=this
     }
     private fun renderPreview() {

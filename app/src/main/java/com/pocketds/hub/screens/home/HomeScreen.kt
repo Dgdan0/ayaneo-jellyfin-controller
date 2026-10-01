@@ -518,8 +518,7 @@ class HomeScreen(
                 }
                 card.setTag(TAG_HIT, hit)
                 card.activateOnTap { open(hit) }
-                card.setOnFocusChangeListener { _, focused ->
-                    FocusDecorator.refresh(card, ringVisible())
+                FocusDecorator.listen(card, ringVisible) { _, focused ->
                     if (focused) {
                         selectedRowId = row?.id.orEmpty()
                         selectedItemId = hit.jellyfinItemId

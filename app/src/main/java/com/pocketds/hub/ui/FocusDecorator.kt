@@ -46,6 +46,19 @@ object FocusDecorator {
         }
     }
 
+    /**
+     * Replaces the view's focus listener with one that keeps the decoration and
+     * then calls [onChange]. Screens that also track the selection used to
+     * replace [attach]'s listener and call [refresh] themselves -- 49 times --
+     * and a view that forgot the refresh simply never showed its ring.
+     */
+    fun listen(view: View, ringVisible: () -> Boolean, onChange: (view: View, focused: Boolean) -> Unit) {
+        view.setOnFocusChangeListener { v, hasFocus ->
+            refresh(v, ringVisible())
+            onChange(v, hasFocus)
+        }
+    }
+
     /** Re-run the decoration after the input mode flips, without a focus change. */
     fun refresh(view: View, ringVisible: Boolean) {
         val decorate = view.hasFocus() && ringVisible

@@ -98,8 +98,7 @@ class ReaderLabScreen(private val ringVisible: () -> Boolean) : Screen {
             contentDescription = "$label reader fixture. $detail"
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
-            setOnFocusChangeListener { view, focused ->
-                FocusDecorator.refresh(view, focused && ringVisible())
+            FocusDecorator.listen(this, ringVisible) { view, focused ->
                 if (focused) selected = profile
             }
             activateOnTap { open(profile, label) }

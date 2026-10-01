@@ -106,8 +106,7 @@ class ReadingHomeView(
             setPadding(dp(14), 0, dp(14), 0)
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
-            setOnFocusChangeListener { view, focused ->
-                FocusDecorator.refresh(view, ringVisible())
+            FocusDecorator.listen(this, ringVisible) { view, focused ->
                 if (focused) focusedListHeader = null
             }
             activateOnTap { promptName("New reading list", "") { name ->
@@ -339,8 +338,7 @@ class ReadingHomeView(
                 Styler.makeFocusable(this)
                 FocusDecorator.attach(this, ringVisible, scale = false)
                 activateOnTap { showListManagement(row) }
-                setOnFocusChangeListener { view, focused ->
-                    FocusDecorator.refresh(view, ringVisible())
+                FocusDecorator.listen(this, ringVisible) { view, focused ->
                     if (focused) { focusedListHeader = row.id; host.refreshHints() }
                 }
             }
@@ -378,8 +376,7 @@ class ReadingHomeView(
                 bindReadingWork(work, loader, api::imageUrl)
                 FocusDecorator.attach(this, ringVisible)
                 activateOnTap { host.push(ReadingWorkScreen(api, work.id, work.title, ringVisible)) }
-                setOnFocusChangeListener { view, focused ->
-                    FocusDecorator.refresh(view, ringVisible())
+                FocusDecorator.listen(this, ringVisible) { view, focused ->
                     if (focused) {
                         focusedListHeader = null
                         selectedRow = row.id

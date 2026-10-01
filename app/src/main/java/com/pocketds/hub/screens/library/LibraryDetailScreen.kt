@@ -763,8 +763,7 @@ class LibraryDetailScreen(
         setActionIcon(this, iconForAction(action))
         layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(8) }
         FocusDecorator.attach(this, ringVisible, scale = false)
-        setOnFocusChangeListener { view, _ ->
-            FocusDecorator.refresh(view, ringVisible())
+        FocusDecorator.listen(this, ringVisible) { view, _ ->
             host?.refreshHints()
         }
         activateOnTap { performAction(action) }
@@ -899,8 +898,7 @@ class LibraryDetailScreen(
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SeasonHolder {
             val card = DetailArtworkCardView(parent.context, colors, ringVisible).apply {
                 layoutParams = RecyclerView.LayoutParams(dp(112), WRAP).apply { marginEnd = dp(12) }
-                setOnFocusChangeListener { view, focused ->
-                    FocusDecorator.refresh(view, ringVisible())
+                FocusDecorator.listen(this, ringVisible) { view, focused ->
                     if (focused) {
                         selectedSeason = seasons.getChildAdapterPosition(view)
                         (view.getTag(TAG_SEASON) as? LibraryItem)?.let { lastFocusKey = "season:${it.id}" }

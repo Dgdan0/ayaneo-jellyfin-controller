@@ -127,8 +127,7 @@ class LibraryScreen(
                         } else false
                     }
                     FocusDecorator.attach(this, ringVisible, scale = false)
-                    setOnFocusChangeListener { view, _ ->
-                        FocusDecorator.refresh(view, ringVisible())
+                    FocusDecorator.listen(this, ringVisible) { view, _ ->
                         host.refreshHints()
                     }
                 }
@@ -142,8 +141,7 @@ class LibraryScreen(
                     setPadding(dp(14), 0, dp(14), 0)
                     Styler.makeFocusable(this)
                     FocusDecorator.attach(this, ringVisible, scale = false)
-                    setOnFocusChangeListener { view, _ ->
-                        FocusDecorator.refresh(view, ringVisible())
+                    FocusDecorator.listen(this, ringVisible) { view, _ ->
                         host.refreshHints()
                     }
                     activateOnTap { openFavourites() }
@@ -398,8 +396,7 @@ class LibraryScreen(
                     setMargins(dp(12), dp(10), dp(12), dp(10))
                 }
                 FocusDecorator.attach(this, ringVisible)
-                setOnFocusChangeListener { _, focused ->
-                    FocusDecorator.refresh(this, ringVisible())
+                FocusDecorator.listen(this, ringVisible) { _, focused ->
                     if (focused) {
                         selectedMedia = list.getChildAdapterPosition(this)
                         host?.refreshHints()
@@ -435,8 +432,7 @@ class LibraryScreen(
                     setMargins(dp(12), dp(10), dp(12), dp(10))
                 }
                 FocusDecorator.attach(this, ringVisible)
-                setOnFocusChangeListener { _, focused ->
-                    FocusDecorator.refresh(this, ringVisible())
+                FocusDecorator.listen(this, ringVisible) { _, focused ->
                     if (focused) {
                         selectedBooks = list.getChildAdapterPosition(this)
                         host?.refreshHints()
@@ -796,8 +792,7 @@ class LibraryGridScreen(
                     setMargins(dp(8), dp(8), dp(8), dp(8))
                 }
                 FocusDecorator.attach(this, ringVisible)
-                setOnFocusChangeListener { _, focused ->
-                    FocusDecorator.refresh(this, ringVisible())
+                FocusDecorator.listen(this, ringVisible) { _, focused ->
                     if (focused) {
                         selected = grid.getChildAdapterPosition(this)
                         selectedItemId = (getTag(TAG_HIT) as? SearchHit)?.jellyfinItemId.orEmpty()

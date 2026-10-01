@@ -323,8 +323,7 @@ class AudiobookScreen(
             layoutParams = LinearLayout.LayoutParams(dp(55), dp(55))
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
-            setOnFocusChangeListener { view, focused ->
-                FocusDecorator.refresh(view, focused && ringVisible())
+            FocusDecorator.listen(this, ringVisible) { view, focused ->
                 if (focused) focusedControl = controls.indexOf(view).coerceAtLeast(0)
             }
             activateOnTap(click)
@@ -338,8 +337,7 @@ class AudiobookScreen(
         background = Styler.cardBackground(context, colors, 10f)
         Styler.makeFocusable(this)
         FocusDecorator.attach(this, ringVisible, scale = false)
-        setOnFocusChangeListener { view, focused ->
-            FocusDecorator.refresh(view, focused && ringVisible())
+        FocusDecorator.listen(this, ringVisible) { view, focused ->
             if (focused) focusedControl = controls.indexOf(view).coerceAtLeast(0)
         }
         activateOnTap(click)

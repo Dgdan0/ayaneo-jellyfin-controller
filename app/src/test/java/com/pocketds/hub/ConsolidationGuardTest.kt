@@ -38,6 +38,10 @@ class ConsolidationGuardTest {
             "ChoiceOverlay.pickValue, or Choice(selected = …): the panel draws the check mark",
             // The panel itself, saying "Selected" to a screen reader.
             setOf("ui/SidePanelView.kt")),
+        Rule(Regex("""FocusDecorator\.refresh\("""),
+            "FocusDecorator.listen(view, ringVisible) { view, focused -> … }: it keeps the ring itself",
+            // The overview box skips its own ring while its text scrolls.
+            setOf("ui/FocusDecorator.kt", "ui/DetailComponents.kt")),
         Rule(Regex("""delay\(\w*POLL\w*\)"""),
             "state/Poller with a PollCadence: backoff on failure, stop when hidden"),
     )

@@ -60,8 +60,7 @@ class NotificationSettingsScreen(private val ringVisible: () -> Boolean) : Scree
             listOf("sonarr" to "Sonarr", "radarr" to "Radarr", "bazarr" to "Bazarr").forEach { (id, label) ->
                 val row = LimitRow(label).apply {
                     FocusDecorator.attach(this, ringVisible, scale = false)
-                    setOnFocusChangeListener { view, focused ->
-                        FocusDecorator.refresh(view, ringVisible())
+                    FocusDecorator.listen(this, ringVisible) { view, focused ->
                         if (focused) {
                             selected = id
                             host.refreshHints()

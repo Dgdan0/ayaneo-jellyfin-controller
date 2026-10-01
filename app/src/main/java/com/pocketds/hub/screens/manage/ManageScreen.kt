@@ -354,8 +354,7 @@ class ManageScreen(
             val card = holder.itemView as ServiceCardView
             card.bind(row)
             card.activateOnTap { activate(row) }
-            card.setOnFocusChangeListener { _, focused ->
-                FocusDecorator.refresh(card, ringVisible())
+            FocusDecorator.listen(card, ringVisible) { _, focused ->
                 if (focused) {
                     selectedService = row.id
                     host.refreshHints()

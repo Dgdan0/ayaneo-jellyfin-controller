@@ -377,8 +377,7 @@ class OfflineScreen(
             val loader = Artwork.loader(api, context)
             bind(hit, loader, { it }, showAvailability = false)
             FocusDecorator.attach(this, ringVisible)
-            setOnFocusChangeListener { view, hasFocus ->
-                FocusDecorator.refresh(view, ringVisible())
+            FocusDecorator.listen(this, ringVisible) { view, hasFocus ->
                 if (hasFocus) {
                     selectedId = value.key
                     host.refreshHints()
@@ -531,7 +530,7 @@ class OfflineScreen(
         setPadding(dp(14), dp(7), dp(14), dp(7)); Styler.makeFocusable(this)
         layoutParams = LinearLayout.LayoutParams(WRAP, dp(48)).apply { marginStart = dp(7) }
         FocusDecorator.attach(this, ringVisible, scale = false)
-        setOnFocusChangeListener { view, _ -> FocusDecorator.refresh(view, ringVisible()); host.refreshHints() }
+        FocusDecorator.listen(this, ringVisible) { view, _ -> host.refreshHints() }
         activateOnTap {
             mode = target
             selectedId = ""
@@ -543,8 +542,7 @@ class OfflineScreen(
 
     private fun decorate(view: View) {
         FocusDecorator.attach(view, ringVisible, scale = false)
-        view.setOnFocusChangeListener { focused, hasFocus ->
-            FocusDecorator.refresh(focused, ringVisible())
+        FocusDecorator.listen(view, ringVisible) { focused, hasFocus ->
             if (hasFocus) {
                 when (val value = focused.tag) {
                     is TaggedCatalog -> selectedId = value.value.key

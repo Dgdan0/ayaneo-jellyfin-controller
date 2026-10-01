@@ -84,8 +84,7 @@ class EpisodeCardView(
         addView(meta, LayoutParams(MATCH, WRAP).apply { topMargin = dp(3) })
         if (!compact) addView(overview, LayoutParams(MATCH, WRAP).apply { topMargin = dp(3) })
         FocusDecorator.attach(this, ringVisible)
-        setOnFocusChangeListener { _, focused ->
-            FocusDecorator.refresh(this, ringVisible())
+        FocusDecorator.listen(this, ringVisible) { _, focused ->
             if (focused) onFocused?.invoke()
         }
         activateOnTap { onActivate?.invoke() }

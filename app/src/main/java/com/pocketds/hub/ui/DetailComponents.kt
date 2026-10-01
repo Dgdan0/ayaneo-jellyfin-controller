@@ -257,8 +257,7 @@ class ContinuationCardView(context: Context, colors: PocketColors, private val r
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LayoutParams(dp(21), dp(21)).apply { marginStart = dp(12) })
         FocusDecorator.attach(this, ringVisible, scale = false)
-        setOnFocusChangeListener { view, focused ->
-            FocusDecorator.refresh(view, ringVisible()); if (focused) onFocused?.invoke()
+        FocusDecorator.listen(this, ringVisible) { view, focused -> if (focused) onFocused?.invoke()
         }
     }
     fun bind(title: String, metadata: String, fraction: Double, completed: Boolean) {

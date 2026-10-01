@@ -1018,8 +1018,7 @@ class DiscoverScreen(
         ) { path -> api.imageUrl(path) }
         card.setTag(TAG_HIT, hit)
         card.activateOnTap { openDetail(hit) }
-        card.setOnFocusChangeListener { _, hasFocus ->
-            FocusDecorator.refresh(card, ringVisible())
+        FocusDecorator.listen(card, ringVisible) { _, hasFocus ->
             if (hasFocus) {
                 modeStates.recall(ContentMode.MEDIA)?.focusedKey = hit.media.key
                 host?.refreshHints()
@@ -1034,8 +1033,7 @@ class DiscoverScreen(
         ) { path -> api.imageUrl(path) }
         card.setTag(TAG_READING_ITEM, item)
         card.activateOnTap { openReadingDetail(item) }
-        card.setOnFocusChangeListener { _, hasFocus ->
-            FocusDecorator.refresh(card, ringVisible())
+        FocusDecorator.listen(card, ringVisible) { _, hasFocus ->
             if (hasFocus) {
                 modeStates.recall(ContentMode.BOOKS)?.focusedKey = item.key
                 host?.refreshHints()
@@ -1165,8 +1163,7 @@ class DiscoverScreen(
                     landscape = false, loader = Artwork.loader(api, context))
                 feature.setTag(TAG_READING_ITEM, item)
                 feature.activateOnTap { openReadingDetail(item) }
-                feature.setOnFocusChangeListener { _, focused ->
-                    FocusDecorator.refresh(feature, ringVisible())
+                FocusDecorator.listen(feature, ringVisible) { _, focused ->
                     if (focused) { modeStates.recall(ContentMode.BOOKS)?.focusedKey = item.key; host?.refreshHints() }
                 }
             }
@@ -1370,8 +1367,7 @@ class DiscoverScreen(
                     Artwork.loader(api, context))
                 feature.setTag(TAG_HIT, hit)
                 feature.activateOnTap { openDetail(hit) }
-                feature.setOnFocusChangeListener { _, focused ->
-                    FocusDecorator.refresh(feature, ringVisible())
+                FocusDecorator.listen(feature, ringVisible) { _, focused ->
                     if (focused) { modeStates.recall(ContentMode.MEDIA)?.focusedKey = hit.media.key; host?.refreshHints() }
                 }
             }
