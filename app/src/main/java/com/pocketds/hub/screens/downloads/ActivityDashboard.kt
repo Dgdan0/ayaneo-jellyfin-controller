@@ -9,13 +9,13 @@ import com.pocketds.hub.model.MediaRef
 import com.pocketds.hub.model.ServiceHealth
 import com.pocketds.hub.model.ServiceNames
 import com.pocketds.hub.model.Stages
+import com.pocketds.hub.screens.discover.UpcomingPresentation
 import com.pocketds.hub.state.Fmt
 import com.pocketds.hub.ui.EpisodeLabel
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /**
@@ -122,13 +122,6 @@ object ActivityDashboard {
         return host.isNotBlank() && host != "localhost" && host != "::1" && host != "[::1]" && !host.startsWith("127.")
     }
 
-    enum class AgendaState(val label: String) {
-        MISSING("Missing"),
-        AIRED("Aired"),
-        IN_LIBRARY("In library"),
-        SOON("Soon")
-    }
-
     data class AgendaEntry(
         val id: String,
         val media: MediaRef,
@@ -136,7 +129,7 @@ object ActivityDashboard {
         val heading: String,
         /** "S2E6 · 07:00". */
         val line: String,
-        val state: AgendaState
+        val state: UpcomingPresentation.ReleaseState
     )
 
     /**
@@ -153,23 +146,13 @@ object ActivityDashboard {
     ): List<AgendaEntry> {
         val today = now.atZone(zone).toLocalDate()
         fun date(item: CalendarItem) = runCatching { LocalDate.parse(item.date) }.getOrNull()
-        fun released(item: CalendarItem): Instant? =
-            runCatching { Instant.parse(item.at) }.getOrNull() ?: date(item)?.atStartOfDay(zone)?.toInstant()
         val dated = items.filter { date(it) != null }
             .sortedWith(compareBy({ it.date }, { it.at }, { it.season }, { it.episode }))
             .distinctBy { "${it.date}:${it.media.key.ifBlank { it.id }}" }
-        fun state(item: CalendarItem): AgendaState {
-            val at = released(item) ?: return AgendaState.SOON
-            return when {
-                item.hasFile -> AgendaState.IN_LIBRARY
-                at.isAfter(now) -> AgendaState.SOON
-                ChronoUnit.HOURS.between(at, now) < 24 -> AgendaState.AIRED
-                else -> AgendaState.MISSING
-            }
-        }
+        fun state(item: CalendarItem) = UpcomingPresentation.state(item, now, zone)
         val missed = dated.filter {
             val d = date(it)!!
-            d.isBefore(today.minusDays(1)) && !d.isBefore(today.minusDays(missedDays)) && state(it) == AgendaState.MISSING
+            d.isBefore(today.minusDays(1)) && !d.isBefore(today.minusDays(missedDays)) && state(it) == UpcomingPresentation.ReleaseState.MISSING
         }.takeLast(2)
         val coming = dated.filter { !date(it)!!.isBefore(today.minusDays(1)) }
         return (missed + coming).take(limit).map { item ->
@@ -180,7 +163,7 @@ object ActivityDashboard {
             AgendaEntry(
                 id = item.id.ifBlank { "${item.date}:${item.media.key}" },
                 media = item.media,
-                heading = heading(d, today, missed = st == AgendaState.MISSING && d.isBefore(today.minusDays(1))),
+                heading = heading(d, today, missed = st == UpcomingPresentation.ReleaseState.MISSING && d.isBefore(today.minusDays(1))),
                 line = listOf(what, time).filter(String::isNotBlank).joinToString(" · "),
                 state = st
             )

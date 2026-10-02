@@ -595,6 +595,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | When the up-next card shows, what gets a Skip button | `playback/UpNext` (`cardAt`, `skipLabel`); the card is `UpNextCardView` |
 | A service's name on screen and its place in a list | `model/ServiceNames.display` / `rank` |
 | What the Activity dashboard shows: what needs attention, the short agenda, service lines, low disk space, an address the Pocket can open | `screens/downloads/ActivityDashboard` |
+| The calendar: weeks and their labels, releases grouped per title and day, whether one has arrived (Soon, Aired, Missing, In library) | `screens/discover/UpcomingPresentation` (Upcoming and the Activity dashboard) |
 | Hub: intro/credits segments | Jellyfin's own, else `segmentsOrChapters` from whole chapter names ("OP", "Ending", "Credits") |
 | Paging with L2/R2 | `HubActivity.page` (moves focus with the scroll) |
 | Loading the next page of a list or row | `state/PagedLoadState`; one per row via `state/RowPaging` |

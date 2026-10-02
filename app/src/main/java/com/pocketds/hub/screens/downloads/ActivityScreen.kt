@@ -28,6 +28,7 @@ import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.screens.discover.MediaDetailScreen
+import com.pocketds.hub.screens.discover.UpcomingPresentation
 import com.pocketds.hub.screens.discover.UpcomingScreen
 import com.pocketds.hub.screens.manage.ServerMonitorScreen
 import com.pocketds.hub.settings.ContentModeSettings
@@ -373,7 +374,7 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
             val today = entry.heading.startsWith("Today")
             // One heading per day, however many titles share it.
             if (i == 0 || entries[i - 1].heading != entry.heading) agendaRows.addView(text(entry.heading, 9.5f, when {
-                entry.state == ActivityDashboard.AgendaState.MISSING -> colors.dangerText
+                entry.state == UpcomingPresentation.ReleaseState.MISSING -> colors.dangerText
                 today -> colors.accent
                 else -> colors.mutedText
             }, 700).apply { isAllCaps = true; letterSpacing = 0.1f; setPadding(dp(6), dp(8), 0, dp(3)) })
@@ -587,15 +588,15 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
         activateOnTap { onActivate() }
     }
 
-    private fun badge(state: ActivityDashboard.AgendaState): TextView = TextView(checkNotNull(host).viewContext).apply {
+    private fun badge(state: UpcomingPresentation.ReleaseState): TextView = TextView(checkNotNull(host).viewContext).apply {
         text = state.label
         textSize = 9.5f
         textWeight(700)
         val tone = when (state) {
-            ActivityDashboard.AgendaState.MISSING -> colors.dangerText
-            ActivityDashboard.AgendaState.AIRED -> colors.badgePending
-            ActivityDashboard.AgendaState.IN_LIBRARY -> colors.badgeAvailable
-            ActivityDashboard.AgendaState.SOON -> colors.mutedText
+            UpcomingPresentation.ReleaseState.MISSING -> colors.dangerText
+            UpcomingPresentation.ReleaseState.AIRED -> colors.badgePending
+            UpcomingPresentation.ReleaseState.IN_LIBRARY -> colors.badgeAvailable
+            UpcomingPresentation.ReleaseState.SOON -> colors.mutedText
         }
         setTextColor(tone)
         background = ThemeGradientDrawable.rounded(Styler.dp(context, 99f), ColorUtils.setAlphaComponent(tone, 40))

@@ -9,6 +9,7 @@ import com.pocketds.hub.model.HostDisk
 import com.pocketds.hub.model.MediaRef
 import com.pocketds.hub.model.ServiceHealth
 import com.pocketds.hub.model.Stages
+import com.pocketds.hub.screens.discover.UpcomingPresentation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -39,14 +40,14 @@ class ActivityDashboardTest {
         val agenda = ActivityDashboard.agenda(items, now, zone)
         assertEquals(listOf("Last Seen", "Last Seen", "Dark Matter", "Shogun"), agenda.map { it.media.title })
         assertEquals("Missed · Thu 24 Sep", agenda[0].heading)
-        assertEquals(ActivityDashboard.AgendaState.MISSING, agenda[0].state)
+        assertEquals(UpcomingPresentation.ReleaseState.MISSING, agenda[0].state)
         assertEquals("Yesterday · Thu 1 Oct", agenda[1].heading)
-        assertEquals(ActivityDashboard.AgendaState.IN_LIBRARY, agenda[1].state)
+        assertEquals(UpcomingPresentation.ReleaseState.IN_LIBRARY, agenda[1].state)
         // Aired three hours ago: not missing yet, Sonarr has barely had time to look.
-        assertEquals(ActivityDashboard.AgendaState.AIRED, agenda[2].state)
+        assertEquals(UpcomingPresentation.ReleaseState.AIRED, agenda[2].state)
         assertEquals("S2E6 · 07:00", agenda[2].line)
         assertEquals("Tomorrow · Sat 3 Oct", agenda[3].heading)
-        assertEquals(ActivityDashboard.AgendaState.SOON, agenda[3].state)
+        assertEquals(UpcomingPresentation.ReleaseState.SOON, agenda[3].state)
     }
 
     @Test

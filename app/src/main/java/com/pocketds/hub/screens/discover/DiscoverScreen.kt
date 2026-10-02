@@ -92,8 +92,9 @@ class DiscoverScreen(
     /** Discover | Upcoming, at the start of the search row. */
     private lateinit var tabs: com.pocketds.hub.ui.BlobSegmentedView
     /** Upcoming lives here as a tab: the calendar screen, embedded. */
-    private val upcoming = UpcomingScreen(api, ringVisible)
+    private val upcoming = UpcomingScreen(api, ringVisible, embedded = true)
     private lateinit var upcomingView: View
+    private lateinit var topRow: LinearLayout
     private lateinit var searchStatus: View
     private var tab = TAB_DISCOVER
     private val readingFilterButtons = mutableMapOf<String, ReadingCategoryTabView>()
@@ -246,6 +247,7 @@ class DiscoverScreen(
         }
         searchBox.minimumHeight=Styler.dpInt(context,48f)
         root.addView(LinearLayout(context).apply {
+            topRow = this
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             clipChildren = false
@@ -292,6 +294,8 @@ class DiscoverScreen(
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
         }
         root.addView(upcomingView)
+        // Upcoming's week switch takes the search box's place beside the tabs.
+        topRow.addView(upcoming.weekSwitch, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = Styler.dpInt(context, 8f) })
 
         rowsList = RecyclerView(context).apply {
             layoutManager = LinearLayoutManager(context)
@@ -487,6 +491,7 @@ class DiscoverScreen(
         val upcomingTab = mode == ContentMode.MEDIA && tab == TAB_UPCOMING
         tabs.visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
         searchBox.visibility = if (upcomingTab) View.GONE else View.VISIBLE
+        upcoming.weekSwitch.visibility = if (upcomingTab) View.VISIBLE else View.GONE
         searchStatus.visibility = if (upcomingTab) View.GONE else View.VISIBLE
         upcomingView.visibility = if (upcomingTab) View.VISIBLE else View.GONE
         rowsList.visibility = if (mode == ContentMode.MEDIA && !searching && !upcomingTab) View.VISIBLE else View.GONE
