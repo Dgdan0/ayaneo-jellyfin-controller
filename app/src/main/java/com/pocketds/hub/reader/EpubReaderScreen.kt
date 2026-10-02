@@ -491,28 +491,29 @@ class EpubReaderScreen(
         topBar = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(5), dp(8), dp(5))
-            setBackgroundColor(0xD9141518.toInt())
+            setPadding(dp(14), dp(5), dp(14), dp(5))
+            setBackgroundColor(BAR)
         }
         root.addView(topBar, FrameLayout.LayoutParams(MATCH, dp(58), Gravity.TOP))
         topBar.addView(control("×", "Close reader", click = { host.back() }))
         topBar.addView(TextView(host.viewContext).apply {
             text = title
-            textSize = 15f
+            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 17f)
             setTextColor(Color.WHITE)
             maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), 0, dp(8), 0)
+            setPadding(dp(10), 0, dp(8), 0)
         }, LinearLayout.LayoutParams(0, MATCH, 1f))
         topBar.addView(control("☷", "Table of contents", click = {
             showNavigator()
         }))
         topBar.addView(control("search", "Search this book", { showSearch() }))
-        topBar.addView(View(host.viewContext).apply { setBackgroundColor(0x665C717A) }, LinearLayout.LayoutParams(dp(1), dp(22)).apply { setMargins(dp(5), 0, dp(5), 0) })
         if (audioEditions.isNotEmpty() || alignedEditions.isNotEmpty() || readAlong) {
             topBar.addView(PlayerIconButton(host.viewContext, PlayerControlIcon.AUDIO).apply {
                 contentDescription = "Reading and listening"
-                layoutParams = LinearLayout.LayoutParams(dp(56), MATCH)
+                background = com.pocketds.hub.ui.OverlayButtons.disc(host.viewContext, colors.focusRing)
+                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(4) }
                 Styler.makeFocusable(this)
                 FocusDecorator.attach(this, ringVisible, scale = false)
                 FocusDecorator.listen(this, ringVisible) { view, focused ->
@@ -531,8 +532,8 @@ class EpubReaderScreen(
         bottomBar = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(5), dp(10), dp(5))
-            setBackgroundColor(0xD9141518.toInt())
+            setPadding(dp(14), dp(5), dp(14), dp(5))
+            setBackgroundColor(BAR)
         }
         root.addView(bottomBar, FrameLayout.LayoutParams(MATCH, dp(88), Gravity.BOTTOM))
         val navigationRow = LinearLayout(host.viewContext).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -541,7 +542,7 @@ class EpubReaderScreen(
         position = TextView(host.viewContext).apply {
             text = "Opening…"
             textSize = 12f
-            setTextColor(Color.WHITE)
+            setTextColor(SOFT_TEXT)
             gravity = Gravity.CENTER
             contentDescription = "Reading position and navigation"
             Styler.makeFocusable(this); FocusDecorator.attach(this, ringVisible, scale = false)
@@ -558,7 +559,8 @@ class EpubReaderScreen(
         bookSeek = SeekBar(host.viewContext).apply {
             max = 100; contentDescription = "Browse book percentage"; minimumHeight = dp(34)
             progressTintList = android.content.res.ColorStateList.valueOf(colors.accent)
-            thumbTintList = android.content.res.ColorStateList.valueOf(colors.accent)
+            thumbTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.argb(90, 255, 255, 255))
             Styler.makeFocusable(this); FocusDecorator.attach(this, ringVisible, scale = false)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onStartTrackingTouch(bar: SeekBar) = Unit
@@ -607,19 +609,20 @@ class EpubReaderScreen(
     private fun control(glyph: String, label: String, click: () -> Unit): TextView =
         TextView(host.viewContext).apply {
             val icon = when (glyph) { "×" -> AppIcon.CLOSE; "☷" -> AppIcon.CONTENTS; "search" -> AppIcon.SEARCH; "return" -> AppIcon.PREVIOUS_ITEM; "☆" -> AppIcon.BOOKMARK; "Aa" -> AppIcon.APPEARANCE; "‹" -> AppIcon.PREVIOUS; "▣" -> AppIcon.BOOK; else -> AppIcon.NEXT }
-            setCompoundDrawables(AppIconDrawable(icon, Color.WHITE).apply { setBounds(0,0,dp(22),dp(22)) },null,null,null)
-            setPadding(dp(17),0,dp(17),0)
-            gravity = Gravity.CENTER
+            setCompoundDrawables(AppIconDrawable(icon, Color.WHITE).apply { setBounds(0,0,dp(20),dp(20)) },null,null,null)
+            // A 44dp disc with the 20dp icon in its middle.
+            setPadding(dp(12),0,0,0)
+            gravity = Gravity.CENTER_VERTICAL
             setTextColor(Color.WHITE)
             contentDescription = label
-            background = controlBackground()
+            background = com.pocketds.hub.ui.OverlayButtons.disc(host.viewContext, colors.focusRing)
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
             FocusDecorator.listen(this, ringVisible) { view, focused ->
                 if (focused) focusedControl = controls.indexOf(view).coerceAtLeast(0)
             }
             activateOnTap(click)
-            layoutParams = LinearLayout.LayoutParams(dp(56), MATCH)
+            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(4) }
             controls += this
         }
 
@@ -876,7 +879,7 @@ class EpubReaderScreen(
         val saved = runCatching { latestLocator?.let { bookmarks.contains(checkpointKey, locatorJson(it)) } == true }
             .getOrDefault(false)
         bookmarkButton.contentDescription = if (saved) "Remove bookmark" else "Add bookmark"
-        bookmarkButton.setCompoundDrawables(AppIconDrawable(if (saved) AppIcon.BOOKMARK_FILLED else AppIcon.BOOKMARK, Color.WHITE).apply { setBounds(0,0,dp(22),dp(22)) },null,null,null)
+        bookmarkButton.setCompoundDrawables(AppIconDrawable(if (saved) AppIcon.BOOKMARK_FILLED else AppIcon.BOOKMARK, Color.WHITE).apply { setBounds(0,0,dp(20),dp(20)) },null,null,null)
     }
 
     private fun toggleBookmark() {
@@ -1173,24 +1176,14 @@ class EpubReaderScreen(
         loading.text = "$message\n\nSelect retries"
     }
 
-    private fun controlBackground(): StateListDrawable {
-        fun face(fill: Int, stroke: Int = 0): GradientDrawable = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(host.viewContext, 9f)
-            setColor(fill)
-            if (stroke != 0) setStroke(dp(2), stroke)
-        }
-        return StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_pressed), face(0x443CDBC9))
-            addState(intArrayOf(android.R.attr.state_focused), face(0x2216B9A8, colors.focusRing))
-            addState(intArrayOf(), face(Color.TRANSPARENT))
-        }
-    }
-
     private fun fragmentTag() = "epub:$workId:$sourceItemId"
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        /** The bars over the page: the app's ground, nearly opaque. */
+        val BAR = Color.argb(235, 10, 13, 18)
+        val SOFT_TEXT = Color.rgb(213, 219, 227)
     }
 }
