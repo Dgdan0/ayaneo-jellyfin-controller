@@ -59,6 +59,7 @@ class ReadingAuthorScreen(
     private lateinit var shelves: LinearLayout
     private lateinit var portrait: ImageView
     private var portraitArtwork = author.artwork
+    private var shelfLine = AuthorLabels.shelf(author.seriesCount, author.bookCount, author.total)
     private var items: List<ReadingWork>? = null
     private val focusables = linkedMapOf<String, View>()
     private var lastFocusKey = ""
@@ -140,7 +141,8 @@ class ReadingAuthorScreen(
                         collected += shelf?.items.orEmpty()
                         pages = shelf?.totalPages ?: 1
                         shelf?.let {
-                            counts.text = AuthorLabels.shelf(it.seriesCount, it.bookCount, it.total)
+                            shelfLine = AuthorLabels.shelf(it.seriesCount, it.bookCount, it.total)
+                            counts.text = shelfLine
                             // Opened from a book's author link, only the name was known.
                             if (portraitArtwork.isBlank() && it.artwork.isNotBlank()) { portraitArtwork = it.artwork; bindPortrait() }
                         }
@@ -164,10 +166,20 @@ class ReadingAuthorScreen(
         val values = items.orEmpty()
         val series = values.filter { it.entityType == "collection" }
         val books = values.filter { it.entityType != "collection" }
+        // Under the name: the shelf, then how far through it you are.
+        val everyBook = series.flatMap { it.sections.firstOrNull()?.items.orEmpty().map { item -> item.progress } } +
+            books.map { it.progress }
+        counts.text = listOfNotNull(shelfLine.ifEmpty { null }, AuthorLabels.reading(everyBook)).joinToString(" · ")
         for (collection in series) {
             val heading = seriesHeading(collection)
             shelves.addView(heading, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
                 .apply { setMargins(dp(20), dp(16), dp(20), 0) })
+            // "On #6 · 0 of 6 finished", as the series page says it.
+            ReadingBookFacts.seriesProgress(collection)?.let { line ->
+                shelves.addView(TextView(context).apply {
+                    text = line; textSize = 12f; setTextColor(colors.mutedText); setPadding(dp(32), dp(2), dp(24), 0)
+                })
+            }
             val members = collection.sections.firstOrNull()?.items?.takeIf { it.isNotEmpty() }
                 ?: listOf(SeriesBookStrip.itemOf(collection))
             shelves.addView(SeriesBookStrip.create(context, colors, ringVisible, api, members) { card, item -> bindBook(card, item) })

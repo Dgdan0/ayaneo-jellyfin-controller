@@ -26,4 +26,13 @@ class BookShelfLabelsTest {
         // An older hub sends only the item total.
         assertEquals("3 books", AuthorLabels.shelf(0, 0, 3))
     }
+
+    @Test
+    fun `an authors page says how far through their books you are`() {
+        val started = com.pocketds.hub.model.ReadingProgress(percentage = .1)
+        val done = com.pocketds.hub.model.ReadingProgress(percentage = 1.0, completed = true)
+        assertEquals("2 in progress · 1 finished", AuthorLabels.reading(listOf(started, started, done, null)))
+        assertEquals("All 2 finished", AuthorLabels.reading(listOf(done, done)))
+        assertEquals(null, AuthorLabels.reading(listOf(null, com.pocketds.hub.model.ReadingProgress())))
+    }
 }

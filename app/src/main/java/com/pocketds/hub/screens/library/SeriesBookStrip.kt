@@ -77,6 +77,7 @@ object SeriesBookStrip {
                     titleView.text = item.title; titleView.minLines = 2
                     subtitleView.text = SeriesBookLabels.subtitle(item.number, item.isAvailable, item.progress, item.formats)
                     available(item.isAvailable)
+                    marks(item.progress?.percentage ?: 0.0, item.progress?.completed == true)
                     contentDescription = "${item.title}, ${subtitleView.text}"
                     DetailStyler.image(image, item.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl), Artwork.loader(api, context))
                     bind(this, item)

@@ -152,4 +152,18 @@ object AuthorLabels {
             if (books > 0) add(if (books == 1) "1 book" else "$books books")
         }.joinToString(" · ")
     }
+
+    /**
+     * How far through their books you are: "3 in progress · 1 finished",
+     * "All 6 finished"; null before any is started, so the line says nothing.
+     */
+    fun reading(progress: List<com.pocketds.hub.model.ReadingProgress?>): String? {
+        val finished = progress.count { it?.completed == true }
+        val going = progress.count { it != null && !it.completed && it.percentage > 0 }
+        if (progress.isNotEmpty() && finished == progress.size) return "All $finished finished"
+        return listOfNotNull(
+            "$going in progress".takeIf { going > 0 },
+            "$finished finished".takeIf { finished > 0 }
+        ).joinToString(" · ").ifEmpty { null }
+    }
 }

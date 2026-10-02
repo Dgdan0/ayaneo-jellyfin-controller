@@ -338,6 +338,19 @@ class DetailArtworkCardView(context: Context, private val colors: PocketColors, 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) =
         super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
 
+    /**
+     * On the cover: a check in the corner once finished, else a slim bar along
+     * the bottom for how far in -- the marks a media card carries, so a book
+     * you have finished no longer looks like one you have not opened.
+     */
+    fun marks(fraction: Double, finished: Boolean) {
+        image.foreground = when {
+            finished -> CoverMarks(colors, 0.0, true, resources.displayMetrics.density)
+            fraction > 0 -> CoverMarks(colors, fraction, false, resources.displayMetrics.density)
+            else -> null
+        }
+    }
+
     fun artworkHeight(heightDp: Int) {
         image.layoutParams = image.layoutParams.apply { height = dp(heightDp) }
         minimumHeight = dp(DetailLayout.posterCardHeight(heightDp, resources.configuration.fontScale))
@@ -374,4 +387,41 @@ class DetailArtworkCardView(context: Context, private val colors: PocketColors, 
             }
         }
     }
+}
+
+/** [DetailArtworkCardView.marks]: drawn over the cover, sized from its bounds. */
+private class CoverMarks(
+    private val colors: PocketColors,
+    private val fraction: Double,
+    private val finished: Boolean,
+    private val density: Float
+) : android.graphics.drawable.Drawable() {
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val check = AppIconDrawable(AppIcon.CHECK, SemanticColor.foreground(colors.badgeAvailable))
+
+    override fun draw(canvas: android.graphics.Canvas) {
+        val b = bounds
+        if (finished) {
+            val size = 22 * density
+            val inset = 6 * density
+            val cx = b.right - inset - size / 2
+            val cy = b.top + inset + size / 2
+            paint.color = colors.badgeAvailable
+            canvas.drawCircle(cx, cy, size / 2, paint)
+            val pad = (5 * density).toInt()
+            check.setBounds((cx - size / 2).toInt() + pad, (cy - size / 2).toInt() + pad, (cx + size / 2).toInt() - pad, (cy + size / 2).toInt() - pad)
+            check.draw(canvas)
+            return
+        }
+        val height = 3 * density
+        paint.color = android.graphics.Color.argb(115, 0, 0, 0)
+        canvas.drawRect(b.left.toFloat(), b.bottom - height, b.right.toFloat(), b.bottom.toFloat(), paint)
+        paint.color = colors.accent
+        canvas.drawRect(b.left.toFloat(), b.bottom - height, b.left + (b.width() * fraction.coerceIn(0.0, 1.0)).toFloat(), b.bottom.toFloat(), paint)
+    }
+
+    override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+    override fun setColorFilter(filter: android.graphics.ColorFilter?) { paint.colorFilter = filter }
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
 }
