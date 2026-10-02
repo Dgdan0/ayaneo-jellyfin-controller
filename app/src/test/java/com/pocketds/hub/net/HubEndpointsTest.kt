@@ -20,6 +20,9 @@ class HubEndpointsTest {
         assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"series","asc").url.endsWith("&view=collections"))
         assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"title","desc").url.endsWith("&view=collections"))
         assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"added","desc").url.endsWith("&view=collections"))
+        // A TMDB backdrop asks for TMDB's larger size rather than a width parameter it would ignore.
+        assertEquals("/v1/img/tmdb/w1280/abc.jpg", HubEndpoints.sized("/v1/img/tmdb/w780/abc.jpg", 1920))
+        assertEquals("/v1/img/tmdb/w780/abc.jpg", HubEndpoints.sized("/v1/img/tmdb/w1280/abc.jpg", 600))
         // Books Library's Books view: every book on its own.
         assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"last_read","desc","works").url.endsWith("&view=works"))
         assertTrue(HubEndpoints.readingAuthors(base,"storyteller:books",2,"desc","ra_123").url.endsWith("?page=2&direction=desc&authorId=ra_123"))

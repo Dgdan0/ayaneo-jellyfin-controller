@@ -1,5 +1,21 @@
 package com.pocketds.hub.screens.discover
 
+import com.pocketds.hub.net.HubEndpoints
+
+import com.pocketds.hub.nav.TopBarView
+
+import com.pocketds.hub.ui.typeRole
+
+import com.pocketds.hub.ui.Type
+
+import com.pocketds.hub.ui.AppIcon
+
+import com.pocketds.hub.ui.PillButton
+
+import com.pocketds.hub.ui.CastRowView
+
+import com.pocketds.hub.ui.DetailHeaderView
+
 import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.ui.FocusScrollView
 import android.view.View
@@ -64,18 +80,14 @@ class MediaDetailScreen(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private lateinit var colors: PocketColors
-    private lateinit var backdrop: ImageView
-    private lateinit var poster: ImageView
-    private lateinit var heading: TextView
-    private lateinit var meta: TextView
+    private lateinit var header: DetailHeaderView
+    private lateinit var scroll: FocusScrollView
     private lateinit var stageStrip: LinearLayout
     private lateinit var actionRow: LinearLayout
     private lateinit var rootFrame: FrameLayout
     private lateinit var summary: TextView
-    private lateinit var overview: TextView
     private lateinit var castLabel: TextView
-    private lateinit var castScroller: HorizontalScrollView
-    private lateinit var castRow: LinearLayout
+    private lateinit var cast: CastRowView
     private lateinit var status: TextView
 
     private var host: ScreenHost? = null
@@ -88,146 +100,81 @@ class MediaDetailScreen(
     private lateinit var picker: ChoiceOverlay
     private lateinit var flow: RequestFlow
 
+    override val drawsUnderTopBar = true
+    override val showsOwnTitle = true
+
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         val context = host.viewContext
         colors = Theme.colors(context)
 
-        val scroller = FocusScrollView(context).apply {
+        // The same header as a Library title: artwork to the edges behind the
+        // tabs, the title over it, the overview and the actions under it.
+        scroll = FocusScrollView(context, revealAbove = Styler.dpInt(context, 56f)).apply {
             isFillViewport = true
             setBackgroundColor(colors.background)
             // Or a focused cast card has its ring clipped by the scroll bounds.
             clipChildren = false
         }
+        val scroller = scroll
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = false
-            val pad = Styler.dpInt(context, 16f)
-            setPadding(pad, pad, pad, Styler.dpInt(context, 90f))
+            setPadding(0, 0, 0, Styler.dpInt(context, 40f))
         }
-
-        backdrop = ImageView(context).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            // Dimmed, because text sits under it. A full-brightness backdrop
-            // makes the overview unreadable and looks like a rendering bug.
-            alpha = 0.35f
-            setBackgroundColor(colors.posterPlaceholder)
-            layoutParams = LinearLayout.LayoutParams(MATCH, Styler.dpInt(context, 118f))
+        header = DetailHeaderView(context, colors, ringVisible).apply {
+            topInsetDp = TopBarView.HEIGHT_DP.toInt()
+            titleView.text = fallbackTitle
+            overview.onChanged = { host.refreshHints() }
         }
-        root.addView(backdrop)
+        root.addView(header, LinearLayout.LayoutParams(MATCH, WRAP))
+        // Real, focusable buttons -- not only hint-bar chips: the hint bar is
+        // invisible to anyone driving the trackpad.
+        actionRow = header.actions
 
-        // Poster beside the title rather than above everything. The backdrop is
-        // atmosphere; the poster is what the eye actually uses to recognise a
-        // title, so it belongs next to the name, and putting them side by side
-        // buys back a good deal of vertical space on a 456dp-tall screen.
-        val header = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, Styler.dpInt(context, 12f), 0, 0)
-        }
-
-        poster = ImageView(context).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(colors.posterPlaceholder)
-            // 2:3, the aspect every poster is.
-            layoutParams = LinearLayout.LayoutParams(
-                Styler.dpInt(context, 104f), Styler.dpInt(context, 156f)
-            ).apply { rightMargin = Styler.dpInt(context, 14f) }
-        }
-        header.addView(poster)
-
-        val headerText = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
-        }
-
-        heading = TextView(context).apply {
-            textSize = 23f
-            maxLines = 2
-            setTextColor(colors.primaryText)
-            text = fallbackTitle
-        }
-        headerText.addView(heading)
-
-        meta = TextView(context).apply {
-            textSize = 13f
-            setTextColor(colors.mutedText)
-        }
-        headerText.addView(meta)
-
+        // Where a request has got to, under the actions: the stages as chips,
+        // and a sentence only while something is moving or wrong.
         stageStrip = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, Styler.dpInt(context, 12f), 0, Styler.dpInt(context, 2f))
+            setPadding(0, Styler.dpInt(context, 2f), 0, Styler.dpInt(context, 2f))
         }
-        headerText.addView(
-            FocusHorizontalScrollView(context).apply {
-                isHorizontalScrollBarEnabled = false
-                addView(stageStrip)
-            }
-        )
-
+        header.continuation.addView(FocusHorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(stageStrip)
+        })
         summary = TextView(context).apply {
-            textSize = 15f
+            textSize = 13f
             setTextColor(colors.accent)
             setPadding(0, Styler.dpInt(context, 2f), 0, 0)
         }
-        headerText.addView(summary)
-
-        // Real, focusable buttons -- not only hint-bar chips.
-        //
-        // The hint bar tells a pad user what A/B/X/Y do, which is necessary but
-        // invisible to anyone driving the trackpad, and it leaves the screen's
-        // main actions with nothing on it you can point at. These are the same
-        // actions, on screen, reachable both ways.
-        actionRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            clipChildren = false
-            setPadding(0, Styler.dpInt(context, 10f), 0, 0)
-        }
-        headerText.addView(actionRow)
-
-        header.addView(headerText)
-        root.addView(header)
-
-        overview = TextView(context).apply {
-            textSize = 14f
-            maxLines = 4
-            setPadding(0, Styler.dpInt(context, 12f), 0, 0)
-            setTextColor(colors.primaryText)
-            setLineSpacing(0f, 1.15f)
-        }
-        root.addView(overview)
+        header.continuation.addView(summary)
 
         castLabel = TextView(context).apply {
-            textSize = 11f
-            setTextColor(colors.mutedText)
-            setPadding(0, Styler.dpInt(context, 16f), 0, Styler.dpInt(context, 6f))
-            text = "CAST"
+            text = "Cast"
+            typeRole(Type.Role.HEADING, 16f)
+            setTextColor(colors.primaryText)
+            setPadding(Styler.dpInt(context, 24f), Styler.dpInt(context, 14f), 0, 0)
             visibility = View.GONE
         }
         root.addView(castLabel)
-
-        castRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            clipChildren = false
-            setPadding(Styler.dpInt(context, 8f), Styler.dpInt(context, 8f), Styler.dpInt(context, 8f), Styler.dpInt(context, 8f))
-        }
-        castScroller = FocusHorizontalScrollView(context).apply {
-            isHorizontalScrollBarEnabled = false
-            clipChildren = false
-            addView(castRow)
+        cast = CastRowView(context, colors, ringVisible).apply {
             visibility = View.GONE
+            onOpen = { person -> person.key.toIntOrNull()?.let { host.push(PersonScreen(api, it, person.name, ringVisible)) } }
+            onFocused = { host.refreshHints() }
         }
-        root.addView(castScroller)
+        root.addView(cast, LinearLayout.LayoutParams(MATCH, WRAP))
 
         status = TextView(context).apply {
             textSize = 12f
             setTextColor(colors.mutedText)
-            setPadding(0, Styler.dpInt(context, 14f), 0, 0)
+            setPadding(Styler.dpInt(context, 24f), Styler.dpInt(context, 14f), Styler.dpInt(context, 24f), 0)
             text = "Loading…"
         }
         root.addView(status)
 
         scroller.addView(root)
+        // Once the backdrop has scrolled away, the tabs above need solid ground.
+        scroller.setOnScrollChangeListener { _, _, y, _, _ -> host.setTopBarOverArtwork(y < Styler.dpInt(context, 24f)) }
 
         // The scroller goes inside a frame so the request dialog can sit over
         // it. An AlertDialog would be a second window with its own focus rules
@@ -260,6 +207,7 @@ class MediaDetailScreen(
 
     override fun onShow() {
         visible = true
+        scroll.post { host?.setTopBarOverArtwork(scroll.scrollY < Styler.dpInt(scroll.context, 24f)) }
         load()
     }
 
@@ -318,8 +266,8 @@ class MediaDetailScreen(
         if (::actionRow.isInitialized && actionRow.childCount > 0) {
             return actionRow.getChildAt(0).requestFocus()
         }
-        if (!::castRow.isInitialized || castRow.childCount == 0) return false
-        return castRow.getChildAt(0).requestFocus()
+        if (!::cast.isInitialized || cast.visibility != View.VISIBLE) return false
+        return cast.requestFocus()
     }
 
     override fun onPad(action: PadAction): Boolean {
@@ -363,8 +311,8 @@ class MediaDetailScreen(
 
     private fun render(d: MediaDetail) {
         detail = d
-        heading.text = d.media.title
-        meta.text = describe(d)
+        header.titleView.text = d.media.title
+        header.metadataView.text = describe(d)
 
         stageStrip.removeAllViews()
         d.pipeline.stages.forEach { stageStrip.addView(stageChip(it)) }
@@ -390,17 +338,12 @@ class MediaDetailScreen(
         )
 
         buildActions(d)
-        overview.text = d.overview
+        header.overview.bind(d.overview)
 
-        castRow.removeAllViews()
-        if (d.cast.isEmpty()) {
-            castLabel.visibility = View.GONE
-            castScroller.visibility = View.GONE
-        } else {
-            castLabel.visibility = View.VISIBLE
-            castScroller.visibility = View.VISIBLE
-            d.cast.forEach { castRow.addView(castCard(it)) }
-        }
+        castLabel.visibility = if (d.cast.isEmpty()) View.GONE else View.VISIBLE
+        cast.visibility = castLabel.visibility
+        cast.bind(d.cast.map { CastRowView.Person(it.id.toString(), it.name, it.character,
+            it.profile.takeIf(String::isNotBlank)?.let(api::imageUrl)) }, Artwork.loader(api, cast.context))
 
         val availability = Availability.fromWire(d.availability)
         status.showStatus(
@@ -414,14 +357,12 @@ class MediaDetailScreen(
             colors
         )
 
-        loadImage(d.media.backdrop, backdrop)
-        loadImage(d.media.poster, poster)
+        header.bindArtwork(d.media.type,
+            d.media.backdrop.takeIf(String::isNotBlank)?.let { api.imageUrl(HubEndpoints.sized(it, ART_WIDTH_PX)) },
+            d.media.poster.takeIf(String::isNotBlank)?.let(api::imageUrl), Artwork.loader(api, header.context))
 
         host?.refreshHints()
     }
-
-    private fun loadImage(hubPath: String, into: ImageView) =
-        Artwork.bindHub(into, api, hubPath, opaque = true)
 
     private fun describe(d: MediaDetail): String = buildString {
         if (d.media.year > 0) append(d.media.year)
@@ -478,57 +419,6 @@ class MediaDetailScreen(
         }
     }
 
-    /** One performer. Focusable, and opens their filmography. */
-    private fun castCard(member: CastMember): View {
-        val context = castRow.context
-        val card = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            background = Styler.cardBackground(context, colors)
-            Styler.makeFocusable(this)
-            isClickable = true
-            // One focus target per person, not three.
-            descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-            val pad = Styler.dpInt(context, 6f)
-            setPadding(pad, pad, pad, pad)
-            layoutParams = LinearLayout.LayoutParams(Styler.dpInt(context, 100f), WRAP).apply {
-                marginStart = Styler.dpInt(context, 4f)
-                rightMargin = Styler.dpInt(context, 12f)
-            }
-        }
-
-        val photo = ImageView(context).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(colors.posterPlaceholder)
-            layoutParams = LinearLayout.LayoutParams(MATCH, Styler.dpInt(context, 112f))
-        }
-        card.addView(photo)
-        card.addView(
-            TextView(context).apply {
-                textSize = 12f
-                maxLines = 2
-                setTextColor(colors.primaryText)
-                text = member.name
-                setPadding(0, Styler.dpInt(context, 4f), 0, 0)
-            }
-        )
-        card.addView(
-            TextView(context).apply {
-                textSize = 10f
-                maxLines = 1
-                setTextColor(colors.mutedText)
-                text = member.character
-            }
-        )
-
-        FocusDecorator.attach(card, ringVisible)
-        card.activateOnTap {
-            host?.push(PersonScreen(api, member.id, member.name, ringVisible))
-        }
-
-        Artwork.bindHub(photo, api, member.profile, opaque = true)
-        return card
-    }
-
     /**
      * Buttons for what the hub says is possible, plus the one thing it does not
      * model: finding a release by hand.
@@ -544,13 +434,13 @@ class MediaDetailScreen(
         val focusedLabel = (actionRow.findFocus() as? TextView)?.text?.toString()
         actionRow.removeAllViews()
         if (attention) {
-            actionRow.addView(actionButton("Transfers needing attention") {
+            actionRow.addView(actionButton("Transfers needing attention", AppIcon.INFO) {
                 host?.push(com.pocketds.hub.screens.downloads.DownloadsScreen(api, ringVisible, startWithAttention = true, targetMediaKey = mediaKey))
             })
         }
         if (d.canRequest) {
             actionRow.addView(
-                actionButton(if (flow.busy) "Requesting…" else "Request") {
+                actionButton(if (flow.busy) "Requesting…" else "Request", null, primary = true) {
                     if (!flow.busy) flow.start(mediaKey, d.media.title)
                 }
             )
@@ -559,12 +449,12 @@ class MediaDetailScreen(
         // about titles that are already requested at least as often as about new
         // ones. The hub answers with a plain sentence when the title is not in
         // Radarr or Sonarr yet.
-        actionRow.addView(actionButton("Find release") { findRelease() })
+        actionRow.addView(actionButton("Find release", AppIcon.SEARCH) { findRelease() })
         // Only when there is one. TMDB has no trailer for plenty of titles --
         // The Mentalist carries nothing but behind-the-scenes clips -- and a
         // button that goes nowhere is worse than no button.
         if (d.trailerUrl.isNotEmpty()) {
-            actionRow.addView(actionButton("Trailer") {
+            actionRow.addView(actionButton("Trailer", AppIcon.PLAY) {
                 // Handed to the Activity, which owns the floating window, so the
                 // trailer keeps playing when you back out of this screen.
                 host?.openTrailer(d.trailerKey, d.trailerUrl, d.media.title)
@@ -589,23 +479,15 @@ class MediaDetailScreen(
     }
 
 
-    private fun actionButton(label: String, onClick: () -> Unit): View =
-        TextView(actionRow.context).apply {
-            text = label
-            textSize = 14f
-            setTextColor(colors.primaryText)
-            background = Styler.chipBackground(context, colors)
-            val h = Styler.dpInt(context, 16f)
-            val v = Styler.dpInt(context, 8f)
-            setPadding(h, v, h, v)
-            Styler.makeFocusable(this)
-            isClickable = true
+    /** A pill like every detail page's; the first lines up with the title, its ring gap pulled back. */
+    private fun actionButton(label: String, icon: AppIcon?, primary: Boolean = false, onClick: () -> Unit): View =
+        PillButton.create(actionRow.context, colors, label, icon, primary = primary, heightDp = 40f).apply {
             activateOnTap { onClick() }
-            // No scale: these sit in a row of text and growing one shoves the
-            // next along.
+            // No scale: these sit in a row and growing one shoves the next along.
             FocusDecorator.attach(this, ringVisible, scale = false)
             layoutParams = LinearLayout.LayoutParams(WRAP, WRAP).apply {
-                rightMargin = Styler.dpInt(context, 8f)
+                if (actionRow.childCount == 0) marginStart = -Styler.dpInt(context, PillButton.RING_DP)
+                marginEnd = Styler.dpInt(context, 6f)
             }
         }
 
@@ -635,5 +517,6 @@ class MediaDetailScreen(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        const val ART_WIDTH_PX = 1920
     }
 }

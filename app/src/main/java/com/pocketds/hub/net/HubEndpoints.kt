@@ -362,8 +362,19 @@ object HubEndpoints {
      * nearest size. Unsized, a Jellyfin image comes back 360 wide: right for a
      * poster, soft across a whole screen.
      */
-    fun sized(hubPath: String, width: Int): String =
-        if (hubPath.isBlank() || "w=" in hubPath) hubPath else hubPath + (if ('?' in hubPath) "&" else "?") + "w=$width"
+    fun sized(hubPath: String, width: Int): String {
+        // A TMDB image names its size in the path, from the hub's fixed set; w1280 is the
+        // largest worth fetching (original runs to 4K and several megabytes).
+        if (hubPath.startsWith(TMDB_IMAGES)) {
+            val rest = hubPath.removePrefix(TMDB_IMAGES)
+            val slash = rest.indexOf('/')
+            if (slash <= 0) return hubPath
+            return TMDB_IMAGES + (if (width > 780) "w1280" else "w780") + rest.substring(slash)
+        }
+        return if (hubPath.isBlank() || "w=" in hubPath) hubPath else hubPath + (if ('?' in hubPath) "&" else "?") + "w=$width"
+    }
+
+    private const val TMDB_IMAGES = "/v1/img/tmdb/"
 
     /**
      * Trims a trailing slash from the base and guarantees exactly one between
