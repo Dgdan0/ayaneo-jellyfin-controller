@@ -609,7 +609,9 @@ Most of these exist because several screens had drifted copies of the same thing
 | Paging with L2/R2 | `HubActivity.page` (moves focus with the scroll) |
 | Loading the next page of a list or row | `state/PagedLoadState`; one per row via `state/RowPaging` |
 | A scrolling container | `ui/FocusScrollView` / `FocusHorizontalScrollView` (never a focus stop; `revealAbove` keeps a heading over the focused row visible) |
-| A list of rows whose focused row rests at the top, heading and all (Home) | `ui/PinnedRows` (`RecyclerView.pinFocusedRows`; leaves room under the last row; put the list in a clipping frame) |
+| A list of rows whose focused row rests at the top, heading and all (Home, Discover) | `ui/PinnedRows` (`RecyclerView.pinFocusedRows`; leaves room under the last row; put the list in a clipping frame; a row with two parts implements `PinnedRowsLayoutManager.Anchor`) |
+| Up/Down through a scrolling page of rows (past an empty row, to rows scrolled away) | `ui/RowStep.move(rows, focused, up)` (Books home) |
+| A comic or manga among books: the pill on its cover and its line | `ReadingBookFacts.kindTag` / `comicLine`; `PosterCardView.bindReadingWork(showKind = true)` on Books home only |
 | Reacting to focus while keeping the ring | `FocusDecorator.listen(view, ringVisible) { view, focused -> … }` |
 | Player and playback-option wording | `playback/PlayerLabels` (Locale.US decimals) |
 | Subtitle decoding | `TolerantSubtitleDecoderFactory` in the text renderer (a broken ASS line is skipped, not fatal) |

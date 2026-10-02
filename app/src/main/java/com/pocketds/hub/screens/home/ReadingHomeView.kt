@@ -15,6 +15,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.pocketds.hub.input.PadAction
+import com.pocketds.hub.ui.RowStep
+import com.pocketds.hub.input.Direction
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.ScreenHost
@@ -211,6 +213,9 @@ class ReadingHomeView(
                 true
             }
             PadAction.Refresh -> { load(); true }
+            // Row by row, past an empty list and to rows scrolled out of sight.
+            is PadAction.Step -> action.direction in setOf(Direction.UP, Direction.DOWN) &&
+                RowStep.move(content, findFocus(), up = action.direction == Direction.UP)
             else -> false
         }
     }
@@ -420,7 +425,7 @@ class ReadingHomeView(
                 layoutParams = LinearLayout.LayoutParams(dp(105), WRAP).apply {
                     setMargins(dp(8), dp(5), dp(8), dp(5))
                 }
-                bindReadingWork(work, loader, api::imageUrl)
+                bindReadingWork(work, loader, api::imageUrl, showKind = true)
                 FocusDecorator.attach(this, ringVisible)
                 activateOnTap { host.push(ReadingWorkScreen(api, work.id, work.title, ringVisible)) }
                 FocusDecorator.listen(this, ringVisible) { view, focused ->

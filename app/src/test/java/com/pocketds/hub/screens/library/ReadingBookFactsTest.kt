@@ -53,4 +53,16 @@ class ReadingBookFactsTest {
         assertNull(ReadingBookFacts.seriesProgress(series.copy(continueAt = null,
             sections = listOf(com.pocketds.hub.model.ReadingSection(items = listOf(book(1, null)))))))
     }
+
+    @Test
+    fun `a comic says its kind on the cover and how far in under it`() {
+        assertEquals("Comic", ReadingBookFacts.kindTag("comic"))
+        assertEquals("Manga", ReadingBookFacts.kindTag("manga"))
+        assertEquals(null, ReadingBookFacts.kindTag("book"))
+        assertEquals("Not started", ReadingBookFacts.comicLine(null))
+        // One page of a 4,437-page run is still "started".
+        assertEquals("1% read", ReadingBookFacts.comicLine(com.pocketds.hub.model.ReadingProgress(percentage = 0.000225)))
+        assertEquals("35% read", ReadingBookFacts.comicLine(com.pocketds.hub.model.ReadingProgress(percentage = 0.347)))
+        assertEquals("Finished", ReadingBookFacts.comicLine(com.pocketds.hub.model.ReadingProgress(percentage = 1.0, completed = true)))
+    }
 }

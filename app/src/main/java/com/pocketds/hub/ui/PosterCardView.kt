@@ -46,6 +46,8 @@ class PosterCardView(
     /** Which bind a late load failure belongs to, so it cannot label a recycled card. */
     private var bindToken = 0
     private val badge: TextView
+    /** "Comic" or "Manga" on the cover's lower corner, as the design marks them. */
+    private val kindTag: TextView
     private val title: TextView
     private val subtitle: TextView
     private val progressBar: ArtworkProgressView
@@ -106,6 +108,22 @@ class PosterCardView(
         }
         posterWrap.addView(badge)
 
+        kindTag = TextView(context).apply {
+            textSize = 9f
+            textWeight(700)
+            setTextColor(android.graphics.Color.rgb(243, 245, 248))
+            setPadding(Styler.dpInt(context, 6f), Styler.dpInt(context, 1f), Styler.dpInt(context, 6f), Styler.dpInt(context, 1f))
+            background = ThemeGradientDrawable.rounded(Styler.dp(context, 999f), android.graphics.Color.argb(204, 10, 13, 18))
+            visibility = GONE
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            layoutParams = FrameLayout.LayoutParams(WRAP, WRAP).apply {
+                gravity = Gravity.BOTTOM or Gravity.START
+                marginStart = Styler.dpInt(context, 6f)
+                bottomMargin = Styler.dpInt(context, 8f)
+            }
+        }
+        posterWrap.addView(kindTag)
+
         // A thin bar along the bottom of the poster while something is actually
         // downloading -- readable at a glance without reading any text.
         progressBar = ArtworkProgressView(context, colors.accent)
@@ -147,6 +165,7 @@ class PosterCardView(
         imageUrl: (String) -> String,
         showAvailability: Boolean
     ) {
+        kindTag.visibility = GONE
         title.text = hit.media.title
         contentDescription = listOf(hit.media.title, hit.subtitle).filter { it.isNotBlank() }.joinToString(", ")
         subtitle.text = hit.subtitle
@@ -176,6 +195,7 @@ class PosterCardView(
     }
 
     fun bindReading(item: ReadingItem, imageLoader: ImageLoader, imageUrl: (String) -> String) {
+        kindTag.visibility = GONE
         title.text = item.title
         contentDescription = listOf(item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(", ")
         subtitle.text = item.subtitle
@@ -192,9 +212,13 @@ class PosterCardView(
         loadPoster(item.cover, imageLoader, imageUrl)
     }
 
-    fun bindReadingWork(work: ReadingWork, imageLoader: ImageLoader, imageUrl: (String) -> String) {
+    /** [showKind]: the Comic/Manga pill, where comics sit among books (Books home), not in a comics library. */
+    fun bindReadingWork(work: ReadingWork, imageLoader: ImageLoader, imageUrl: (String) -> String, showKind: Boolean = false) {
         title.text = work.title
-        subtitle.text = work.cardSubtitle
+        val kind = com.pocketds.hub.screens.library.ReadingBookFacts.kindTag(work.kind)
+        kindTag.text = kind
+        kindTag.visibility = if (kind != null && showKind) VISIBLE else GONE
+        subtitle.text = if (kind != null) com.pocketds.hub.screens.library.ReadingBookFacts.comicLine(work.progress) else work.cardSubtitle
         subtitle.visibility = VISIBLE
         title.setBackgroundColor(colors.cardSurface)
         subtitle.setBackgroundColor(colors.cardSurface)

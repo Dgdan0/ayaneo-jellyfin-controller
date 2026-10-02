@@ -42,6 +42,7 @@ import com.pocketds.hub.ui.ShelfFocusLane
 import com.pocketds.hub.ui.ShelfFocusRow
 import com.pocketds.hub.ui.FormOverlay
 import com.pocketds.hub.ui.PocketColors
+import com.pocketds.hub.ui.pinFocusedRows
 import com.pocketds.hub.ui.useResponsivePosterColumns
 import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.PosterCardView
@@ -298,28 +299,22 @@ class DiscoverScreen(
         topRow.addView(upcoming.weekSwitch, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = Styler.dpInt(context, 8f) })
 
         rowsList = RecyclerView(context).apply {
-            layoutManager = LinearLayoutManager(context)
             adapter = rowsAdapter
+            // The focused row rests at the top, as on Home, so each row comes
+            // to the same place rather than wherever its cards first fit.
+            pinFocusedRows(SHORTEST_ROW_DP)
             // A row's focused card is scaled up and its ring must not be clipped
             // by the row above.
-            clipToPadding = false
             clipChildren = false
             setItemViewCacheSize(6)
-            // Top padding the height of a row label, with clipToPadding off.
+            // No top padding: the focused row's own label sits above its cards,
+            // and a band there would show a sliver of the row before it.
             //
-            // This is what keeps "Trending now" on screen, and it is the only
-            // approach that also scrolls *smoothly*. RecyclerView brings a
-            // focused card inside the **padded** bounds, so a label sitting
-            // directly above that card lands in the padding band -- which is
-            // still drawn, because clipToPadding is false.
-            //
-            // The two overrides tried before this were both worse.
-            // requestChildRectangleOnScreen is never consulted on the focus
-            // path at all, so expanding its rectangle did nothing. Correcting
-            // the position in requestChildFocus did work, but only after
-            // RecyclerView had already scrolled: two scrolls per press, the
-            // second an instant jump, which is the stutter you noticed.
-            setPadding(0, Styler.dpInt(context, 10f), 0, Styler.dpInt(context, 20f))
+            // The pinning is PinnedRowsLayoutManager's requestChildRectangleOnScreen,
+            // the LayoutManager's, which RecyclerView.requestChildFocus does call.
+            // The View-level override tried here before is never consulted on the
+            // focus path, which is why that attempt did nothing; correcting the
+            // position in requestChildFocus scrolled twice per press.
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
             addOnChildAttachStateChangeListener(claimFocusOnFirstChild(this))
         }
@@ -1141,13 +1136,16 @@ class DiscoverScreen(
     private inner class ReadingPosterRowView(
         context: android.content.Context,
         colors: PocketColors
-    ) : LinearLayout(context), ShelfFocusRow {
+    ) : LinearLayout(context), ShelfFocusRow, com.pocketds.hub.ui.PinnedRowsLayoutManager.Anchor {
         private val feature = DiscoverFeatureCardView(context, colors, ringVisible)
         private val label: TextView
         private val strip: RecyclerView
         override val featureFocusView: View get() = feature
         override val posterFocusList: RecyclerView get() = strip
         override val shelfHeadingView: View get() = label
+        /** On the featured card the row's top rests at the top; in the posters, the label does. */
+        override fun pinOffset(focused: android.graphics.Rect): Int =
+            if (feature.visibility == View.VISIBLE && focused.top < label.top) 0 else label.top
         private val stripAdapter = ReadingStripAdapter()
         private var current: ReadingDiscoverRow? = null
         private var featuredRow = false
@@ -1333,7 +1331,7 @@ class DiscoverScreen(
     private inner class PosterRowView(
         context: android.content.Context,
         colors: PocketColors
-    ) : LinearLayout(context), ShelfFocusRow {
+    ) : LinearLayout(context), ShelfFocusRow, com.pocketds.hub.ui.PinnedRowsLayoutManager.Anchor {
         private val feature = DiscoverFeatureCardView(context, colors, ringVisible)
 
         private val label: TextView
@@ -1341,6 +1339,9 @@ class DiscoverScreen(
         override val featureFocusView: View get() = feature
         override val posterFocusList: RecyclerView get() = strip
         override val shelfHeadingView: View get() = label
+        /** On the featured card the row's top rests at the top; in the posters, the label does. */
+        override fun pinOffset(focused: android.graphics.Rect): Int =
+            if (feature.visibility == View.VISIBLE && focused.top < label.top) 0 else label.top
         private val stripAdapter = StripAdapter()
         private var featuredRow = false
         private val featureWidthDp get() = (resources.configuration.screenWidthDp - 180).coerceAtLeast(0)
@@ -1487,6 +1488,8 @@ class DiscoverScreen(
         const val TAB_UPCOMING = "upcoming"
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        /** A poster row: its label and a 118dp poster with two lines under it. */
+        const val SHORTEST_ROW_DP = 170f
 
         /**
          * Card geometry, measured against this hardware.

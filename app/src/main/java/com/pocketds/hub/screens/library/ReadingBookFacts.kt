@@ -63,4 +63,22 @@ object ReadingBookFacts {
         if (work.genres.isNotEmpty()) add(work.genres.joinToString(", "))
         progress?.let(::add)
     }.joinToString(" · ")
+
+    /** The pill on a comic's cover: "Comic", "Manga"; null for a book. */
+    fun kindTag(kind: String): String? = when (kind) {
+        "comic" -> "Comic"
+        "manga" -> "Manga"
+        else -> null
+    }
+
+    /**
+     * Under a comic or manga's cover: "Not started", "1% read", "Finished".
+     * Its library name said nothing the row heading did not, and a run of
+     * hundreds of issues read one page shows as 0% unless rounded up.
+     */
+    fun comicLine(progress: com.pocketds.hub.model.ReadingProgress?): String = when {
+        progress?.completed == true -> "Finished"
+        (progress?.percentage ?: 0.0) > 0 -> "${kotlin.math.ceil(progress!!.percentage * 100).toInt().coerceIn(1, 99)}% read"
+        else -> "Not started"
+    }
 }

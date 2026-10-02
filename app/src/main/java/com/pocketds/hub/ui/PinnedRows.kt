@@ -21,6 +21,15 @@ import androidx.recyclerview.widget.RecyclerView
  */
 class PinnedRowsLayoutManager(context: Context) : LinearLayoutManager(context) {
     /**
+     * A row with more than one part, such as Discover's first row with its
+     * featured card above the label: which line of it rests at the top for
+     * focus at [focused] (in the row's own coordinates). 0 is the row's top.
+     */
+    interface Anchor {
+        fun pinOffset(focused: Rect): Int
+    }
+
+    /**
      * RecyclerView asks this whenever focus lands inside one of its rows
      * ([RecyclerView.requestChildFocus]); [child] is the row, not the card.
      */
@@ -31,7 +40,7 @@ class PinnedRowsLayoutManager(context: Context) : LinearLayoutManager(context) {
         immediate: Boolean,
         focusedChildVisible: Boolean
     ): Boolean {
-        val dy = getDecoratedTop(child) - paddingTop
+        val dy = getDecoratedTop(child) + ((child as? Anchor)?.pinOffset(rect) ?: 0) - paddingTop
         if (dy == 0) return false
         if (immediate) parent.scrollBy(0, dy) else parent.smoothScrollBy(0, dy)
         return true
