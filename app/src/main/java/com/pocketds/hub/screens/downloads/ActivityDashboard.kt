@@ -103,8 +103,8 @@ object ActivityDashboard {
         else -> service.state.replaceFirstChar { it.uppercase() }
     }
 
-    /** Radarr's "6.4.4.10685" is "6.4.4": the build number is noise on a phone-sized row. */
-    fun shortVersion(version: String): String = version.split('.').take(3).joinToString(".")
+    /** Radarr's "6.4.4.10685" is "6.4.4" and qBittorrent's "v5.0.4" is "5.0.4": a row reads one way. */
+    fun shortVersion(version: String): String = version.removePrefix("v").split('.').take(3).joinToString(".")
 
     /** "All 11 up", or how many are not. */
     fun servicesSummary(health: HealthResponse): String {

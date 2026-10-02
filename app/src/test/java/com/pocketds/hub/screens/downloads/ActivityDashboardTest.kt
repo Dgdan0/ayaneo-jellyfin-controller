@@ -108,6 +108,7 @@ class ActivityDashboardTest {
     @Test
     fun `service lines are short`() {
         assertEquals("6.4.4 · 3 ms", ActivityDashboard.serviceMeta(ServiceHealth(name = "radarr", state = "up", version = "6.4.4.10685", latencyMs = 3)))
+        assertEquals("5.0.4 · 1 ms", ActivityDashboard.serviceMeta(ServiceHealth(name = "qbittorrent", state = "up", version = "v5.0.4", latencyMs = 1)))
         assertEquals("21 ms", ActivityDashboard.serviceMeta(ServiceHealth(name = "kavita", state = "up", latencyMs = 21)))
         assertEquals("Not responding", ActivityDashboard.serviceMeta(ServiceHealth(name = "qbittorrent", state = "down")))
         assertEquals("All 2 up", ActivityDashboard.servicesSummary(HealthResponse(services = listOf(

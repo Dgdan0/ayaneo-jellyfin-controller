@@ -31,6 +31,8 @@ data class HeroContent(
 
 object HomeHero {
     private val jellyfinPoster = Regex("^/v1/img/jf/([0-9a-f]{32})/Primary")
+    /** What EpisodeLabel.code writes: "S1E4". */
+    private val EPISODE_CODE = Regex("""S\d+E\d+""")
 
     /** The series behind an episode card's poster, or null when the poster is the episode's own. */
     fun seriesIdFromPoster(poster: String, itemId: String): String? =
@@ -48,9 +50,11 @@ object HomeHero {
 
     fun from(rowId: String, rowTitle: String, hit: SearchHit, detail: LibraryItem? = null): HeroContent {
         val episode = hit.media.type == "episode"
-        // The hub writes an episode's card subtitle as "S1E4 · Title".
-        val code = if (episode) hit.subtitle.substringBefore(" · ").trim() else ""
-        val episodeTitle = if (episode) detail?.title?.takeIf(String::isNotBlank) ?: hit.subtitle.substringAfter(" · ", "").trim() else ""
+        // The hub writes an episode's card subtitle as "S1E4 · Title", or just the title when the
+        // episode has no numbers; then there is no code, and the title belongs in the facts, once.
+        val code = if (episode) hit.subtitle.substringBefore(" · ").trim().takeIf(EPISODE_CODE::matches).orEmpty() else ""
+        val episodeTitle = if (!episode) "" else detail?.title?.takeIf(String::isNotBlank)
+            ?: if (code.isEmpty()) hit.subtitle.trim() else hit.subtitle.substringAfter(" · ", "").trim()
         val runtime = detail?.runtimeSeconds ?: 0
         val watching = hit.progress > 0 && !ResumeRules.showsWatched(hit.played, hit.progress)
         val meta = listOf(

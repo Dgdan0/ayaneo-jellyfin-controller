@@ -159,6 +159,8 @@ class EpisodeCardView(
     private fun text(size: Float, color: Int, lines: Int) = TextView(context).apply {
         textSize = size; setTextColor(color); maxLines = lines
         ellipsize = TextUtils.TruncateAt.END
+        // A Hebrew title starts at the card's left edge like every other, not its right.
+        textAlignment = android.view.View.TEXT_ALIGNMENT_VIEW_START
         setPadding(dp(1), 0, dp(1), 0)
     }
 

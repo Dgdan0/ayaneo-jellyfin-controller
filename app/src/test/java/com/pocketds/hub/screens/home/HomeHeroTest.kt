@@ -27,6 +27,13 @@ class HomeHeroTest {
     }
 
     @Test
+    fun `an episode without numbers keeps its title out of the eyebrow`() {
+        val hero = HomeHero.from("nextup", "Next up", episode.copy(subtitle = "בלאגן ועד אילת - פרק 6 "))
+        assertEquals("NEXT UP", hero.eyebrow)
+        assertEquals(listOf("בלאגן ועד אילת - פרק 6", "2005", "★ 8.0"), hero.meta)
+    }
+
+    @Test
     fun `details add the overview, certification, runtime left and the series backdrop`() {
         val detail = LibraryItem(id = episodeId, type = "episode", title = "Mindy's Back", seriesId = seriesId, year = 2005,
             overview = "Science fair.", runtimeSeconds = 1500, officialRating = "TV-Y7")

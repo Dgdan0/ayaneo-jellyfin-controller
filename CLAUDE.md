@@ -583,6 +583,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Hub: a Storyteller title | `reconcileStorytellerBook` (file-name titles, `withoutSeriesNote`) and `storytellerPeople` (writers, not narrators, as First Last) |
 | Activating a focusable on the first tap | `activateOnTap`, never `setOnClickListener` on a focusable |
 | Pick one of a few (tabs, seasons, a setting's value, Media/Books) | `ui/BlobSegmentedView` (`PILL`, `ACCENT`, `UNDERLINE`; `followFocus` for tabs that switch on focus); geometry in `SegmentGeometry` |
+| A line mixing a Hebrew title with English facts ("… פרק 6 · 11 min") | `ui/Bidi.join` / `isolateParts` (each part isolated); captions under cards align to the view's start, not the text's |
 | Title and heading type | `ui/Type` (`typeRole(Type.Role.HERO …)`); body text is Figtree from the theme, never set per view |
 | An accent and the ink drawn on it | `AccentPreset.color(dark)` / `ink(dark)` via `Theme.colors`; Books default to gold (`AccentPreset.defaultFor`) |
 | A controller button drawn in the hint bar | `ui/KeyGlyphDrawable` |

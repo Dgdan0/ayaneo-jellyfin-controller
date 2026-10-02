@@ -513,12 +513,28 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
         val index = columns.indexOfFirst { isInside(current, it) }
         if (index < 0) return false
         val here = focusables(columns[index])
-        val at = here.indexOfFirst { it === current || isInside(current, it) }
         return when (direction) {
-            Direction.UP -> here.getOrNull(at - 1)?.requestFocus() ?: false
-            Direction.DOWN -> { here.getOrNull(at + 1)?.requestFocus(); true }
+            // To the row above or below, never along this one, and to the nearest thing on it.
+            Direction.UP, Direction.DOWN -> {
+                val sign = if (direction == Direction.DOWN) 1 else -1
+                val cy = centreY(current)
+                val cx = centreX(current)
+                val next = here.filter { (centreY(it) - cy) * sign > current.height / 2 }
+                    .minWithOrNull(compareBy({ kotlin.math.abs(centreY(it) - cy) }, { kotlin.math.abs(centreX(it) - cx) }))
+                when {
+                    next != null -> next.requestFocus()
+                    // Up from the top of a column is the app's: it goes to the tabs.
+                    direction == Direction.UP -> false
+                    else -> true
+                }
+            }
             Direction.LEFT, Direction.RIGHT -> {
                 val delta = if (direction == Direction.LEFT) -1 else 1
+                // First along the row you are on (Normal speed | Quiet, All transfers), then across columns.
+                val cx = centreX(current)
+                val along = here.filter { it !== current && kotlin.math.abs(centreY(it) - centreY(current)) <= current.height / 2 &&
+                    (centreX(it) - cx) * delta > 0 }.minByOrNull { kotlin.math.abs(centreX(it) - cx) }
+                if (along != null) { along.requestFocus(); return true }
                 val target = generateSequence(index + delta) { it + delta }.takeWhile { it in columns.indices }
                     .map { focusables(columns[it]) }.firstOrNull { it.isNotEmpty() }
                 target?.minByOrNull { kotlin.math.abs(centreY(it) - centreY(current)) }?.requestFocus()
@@ -528,7 +544,13 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
     }
 
     private fun focusables(column: ViewGroup): List<View> =
-        column.getFocusables(View.FOCUS_DOWN).filter { it.isShown }.sortedBy { centreY(it) }
+        column.getFocusables(View.FOCUS_DOWN).filter { it.isShown }.sortedWith(compareBy({ centreY(it) }, { centreX(it) }))
+
+    private fun centreX(view: View): Int {
+        val at = IntArray(2)
+        view.getLocationOnScreen(at)
+        return at[0] + view.width / 2
+    }
 
     private fun centreY(view: View): Int {
         val at = IntArray(2)

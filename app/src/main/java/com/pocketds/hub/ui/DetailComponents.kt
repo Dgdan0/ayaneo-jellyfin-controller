@@ -28,6 +28,8 @@ private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 private fun View.dp(value: Int) = Styler.dpInt(context, value.toFloat())
 private fun label(context: Context, size: Float, color: Int) = TextView(context).apply {
     textSize = size; setTextColor(color); includeFontPadding = false
+    // Right-to-left titles start where the rest of the page does.
+    textAlignment = View.TEXT_ALIGNMENT_VIEW_START
 }
 
 object DetailStyler {

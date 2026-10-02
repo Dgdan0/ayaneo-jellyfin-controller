@@ -113,6 +113,8 @@ class PosterCardView(
         addView(posterWrap, LayoutParams(MATCH, WRAP))
 
         title = TextView(context).apply {
+            // A Hebrew title starts at the card's left edge like every other, not its right.
+            textAlignment = android.view.View.TEXT_ALIGNMENT_VIEW_START
             textSize = if (compact) 12f else 13f
             maxLines = 2
             minLines = 2
@@ -124,6 +126,7 @@ class PosterCardView(
         if (!captions) title.visibility = GONE
 
         subtitle = TextView(context).apply {
+            textAlignment = android.view.View.TEXT_ALIGNMENT_VIEW_START
             textSize = 12f
             maxLines = 1
             setTextColor(colors.mutedText)

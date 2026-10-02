@@ -63,6 +63,8 @@ class LandscapeCardView(context: Context, private val colors: PocketColors) : Li
     }
     private fun caption(size: Float,color: Int)=TextView(context).apply {
         textSize=size;setTextColor(color);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
+        // A Hebrew title starts at the card's left edge like every other, not its right.
+        textAlignment=android.view.View.TEXT_ALIGNMENT_VIEW_START
         includeFontPadding=false;setPadding(dp(1),0,dp(1),0)
     }
     fun bind(hit: SearchHit,loader: ImageLoader,url: (String)->String) {

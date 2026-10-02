@@ -134,6 +134,9 @@ class HomeHeroView(
         // A Hebrew title is right-to-left text, but it still starts at the
         // hero's left edge; its own direction would push it to mid-screen.
         listOf(eyebrow, title, meta, overview, progressLabel).forEach { it.textAlignment = TEXT_ALIGNMENT_VIEW_START }
+        // These lines are English with a Hebrew part: read left to right, "11 min"
+        // stays "11 min" instead of becoming "min 11" in a right-to-left line.
+        listOf(eyebrow, meta, progressLabel).forEach { it.textDirection = TEXT_DIRECTION_LTR }
         listOf(play, details).forEach { button ->
             FocusDecorator.attach(button, ringVisible, scale = false)
             FocusDecorator.listen(button, ringVisible) { _, focused -> if (focused) onButtonFocused?.invoke() }
@@ -148,9 +151,9 @@ class HomeHeroView(
         content = next
         visibility = if (next == null) INVISIBLE else VISIBLE
         if (next == null) return
-        eyebrow.text = next.eyebrow
+        eyebrow.text = com.pocketds.hub.ui.Bidi.isolateParts(next.eyebrow, " · ")
         title.text = next.title
-        meta.text = next.meta.joinToString("  ·  ")
+        meta.text = com.pocketds.hub.ui.Bidi.join(next.meta, "  ·  ")
         progressRow.visibility = if (next.progress > 0) VISIBLE else GONE
         progress.fraction = next.progress
         progressLabel.text = next.progressLabel
