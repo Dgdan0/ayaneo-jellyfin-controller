@@ -62,4 +62,21 @@ class PlayerLabelsTest {
         assertEquals("−22:53", PlayerLabels.remainingLine(334_000, 1_707_000))
         assertEquals("", PlayerLabels.remainingLine(0, 0))
     }
+
+    @Test
+    fun thisVideosQualityRowSaysTheChoiceAndTheHeightDelivered() {
+        assertEquals("Original · 1080p", PlayerLabels.qualityValue("Original", 1080, offline = false))
+        assertEquals("10 Mbps", PlayerLabels.qualityValue("10 Mbps", 0, offline = false))
+        assertEquals("Original · downloaded", PlayerLabels.qualityValue("Original", 1080, offline = true))
+    }
+
+    @Test
+    fun aChaptersLineSaysWhereItStartsHowLongAndWhatItIs() {
+        assertEquals("3:58 · 2 min · Intro", PlayerLabels.chapterDetail(238_000, 331_000, "Intro"))
+        assertEquals("0:00 · 45 s", PlayerLabels.chapterDetail(0, 45_000, null))
+        // The last chapter has no end to measure to.
+        assertEquals("26:56", PlayerLabels.chapterDetail(1_616_000, 0, null))
+        assertEquals("Credits", PlayerLabels.segmentKind("Outro"))
+        assertEquals(null, PlayerLabels.segmentKind("Unknown"))
+    }
 }

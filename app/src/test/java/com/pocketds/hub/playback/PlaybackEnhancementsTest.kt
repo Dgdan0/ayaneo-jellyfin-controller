@@ -66,4 +66,23 @@ class PlaybackEnhancementsTest {
         assertEquals(listOf(.5f, .75f, 1f, 1.25f, 1.5f, 2f), PlaybackEnhancements.speeds)
         assertEquals(PlaybackAspect.FIT, PlaybackEnhancements.defaultAspect)
     }
+
+    @Test
+    fun a_chapters_picture_comes_from_inside_it_on_the_hubs_frame_grid() {
+        // A quarter of the way into a 93-second opening, rounded down to five-second frames.
+        assertEquals(260_000L, PlaybackEnhancements.chapterFrameMillis(238_000, 331_000))
+        // A four-minute cold open: thirty seconds in, past the fade from black.
+        assertEquals(30_000L, PlaybackEnhancements.chapterFrameMillis(0, 238_000))
+        // A twelve-second chapter stays inside itself.
+        assertEquals(0L, PlaybackEnhancements.chapterFrameMillis(0, 12_000))
+        // The last chapter, with no end known.
+        assertEquals(1_630_000L, PlaybackEnhancements.chapterFrameMillis(1_616_000, 0))
+    }
+
+    @Test
+    fun a_segment_belongs_to_the_chapter_it_starts_with() {
+        val intro = PlaybackSegment(type = "Intro", startMillis = 238_500, endMillis = 331_000)
+        assertEquals(intro, PlaybackEnhancements.segmentAt(listOf(intro), 238_000))
+        assertNull(PlaybackEnhancements.segmentAt(listOf(intro), 0))
+    }
 }

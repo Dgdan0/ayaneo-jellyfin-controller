@@ -566,6 +566,8 @@ Most of these exist because several screens had drifted copies of the same thing
 | An episode | `ui/EpisodeCardView`; names via `EpisodeLabel.of` / `code` / `season` ("S1E4 · Title", "Specials") |
 | A season or poster-shaped detail card | `ui/DetailArtworkCardView` |
 | A value menu / a destructive confirm | `ChoiceOverlay.pickValue` / `confirm` (harmless answer first) |
+| A side panel's look and parts | `ui/SidePanelView`: a full-height sheet at the right edge (centred card for `confirm`), heading and small round close; `choice` and `setting` (label, value, chevron) rows share a raised card until a `section`, `startGroup`, `note` or hand-added view starts the next; `choice(leading =)` puts a picture before the words; tabs are a `BlobSegmentedView` |
+| Anything drawn over video | `Theme.onVideo` (the dark palette with the media accent, whatever the app theme) |
 | A menu's cursor after a submenu | `SidePanelView` remembers the row last chosen per menu and tab; pass no start row and Back lands where you were |
 | On/off action icons (watched, favourite, downloaded) | `MediaActionIconDrawable.of` (`MediaActionIcon.isOn`): filled accent when on, outline when off; `DOWNLOADING` is a progress ring |
 | Reacting to offline downloads changing | `offline/OfflineChanges` (start in onShow, stop in onHide) |
@@ -1014,7 +1016,13 @@ session ownership and 30-minute abandoned-session cleanup.
 
 The player overlay (2026-10 redesign, `playback/PlayerChrome`) has a round Back at the top left, the
 title with the episode under it ("S1E1 · Somewhere Not Here", `PlayerLabels.title`/`subtitle`), pills
-for Audio & subtitles, Chapters and This video, and round Cast, Lock and PiP buttons. Previous, −10,
+for Audio & subtitles, Chapters and This video, and round Cast, Lock and PiP buttons. Their panels
+are the shared side panel: Audio & subtitles lists the audio tracks, Off and the subtitle tracks, then
+subtitle timing and look, in one list (the cursor starts on the kind changed last); This video has
+Quality ("Original · 1080p"), Version (several sources only), Speed, Aspect, Subtitle timing and
+Stream rows, each opening its own list with Back returning there; Chapters shows a frame from a
+quarter of the way into each chapter (the hub's extracted preview, `chapterFrameMillis`), its start,
+length and Intro/Credits when a skip segment starts with it. Previous, −10,
 a white Play disc, +10 and Next sit in the middle of the picture (a missing neighbour keeps its slot,
 so Play stays centred), using a configurable 5/10/15/30-second seek step (10 seconds by default).
 The timeline runs the full width with "5:34 · Part A" and "−22:53" under it

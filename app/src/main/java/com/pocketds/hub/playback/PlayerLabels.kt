@@ -88,6 +88,39 @@ object PlayerLabels {
     fun source(name: String, container: String, bitrate: Int): String =
         listOf(name, sourceDetail(container, bitrate)).filter(String::isNotEmpty).joinToString(" · ")
 
+    /** This video's Quality row: "Original · 1080p", "10 Mbps · 720p", or the downloaded file. */
+    fun qualityValue(qualityLabel: String, height: Int, offline: Boolean): String = when {
+        offline -> "Original · downloaded"
+        height > 0 -> "$qualityLabel · ${height}p"
+        else -> qualityLabel
+    }
+
+    /**
+     * Under a chapter's name: where it starts, how long it runs, and what it is
+     * when a skip segment starts with it ("3:58 · 2 min · Intro").
+     */
+    fun chapterDetail(startMillis: Long, endMillis: Long, kind: String?): String = listOfNotNull(
+        Fmt.clock(startMillis),
+        (endMillis - startMillis).takeIf { it > 0 }?.let(::chapterLength),
+        kind
+    ).joinToString(" · ")
+
+    /** "45 s" under a minute, else whole minutes: "2 min". */
+    fun chapterLength(millis: Long): String {
+        val seconds = (millis / 1_000).coerceAtLeast(1)
+        return if (seconds < 60) "$seconds s" else "${(seconds + 30) / 60} min"
+    }
+
+    /** A segment's kind in a chapter's line; credits rather than Jellyfin's "Outro". */
+    fun segmentKind(type: String): String? = when (type.trim().lowercase(Locale.US)) {
+        "intro" -> "Intro"
+        "outro" -> "Credits"
+        "recap" -> "Recap"
+        "preview" -> "Preview"
+        "commercial" -> "Ad"
+        else -> null
+    }
+
     /** How the stream will be delivered: method, resolution, bitrate. */
     fun quality(value: PlaybackPrepareResponse): String = buildString {
         append(value.playMethod.ifEmpty { "Original" })

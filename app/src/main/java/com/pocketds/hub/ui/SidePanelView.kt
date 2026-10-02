@@ -3,27 +3,58 @@ package com.pocketds.hub.ui
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.view.FocusFinder
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
 
-/** Modal in the existing window: stable content underneath, bounded body and real accessible focus. */
+/**
+ * Modal in the existing window: stable content underneath, bounded body and real accessible focus.
+ *
+ * The side panel is a sheet down the right edge, the page colour, with a
+ * heading and a small round close. Its rows sit on raised cards: consecutive
+ * [choice] and [setting] rows share one card, and a [section] heading, a
+ * [note] or anything added to [body] by hand starts the next. Short questions
+ * use the centred form of the same panel.
+ */
 open class SidePanelView(context:Context, protected val colors:PocketColors, private val ringVisible:()->Boolean,
     private val side:Boolean=true) : FrameLayout(context) {
-    val body=LinearLayout(context).apply {orientation=LinearLayout.VERTICAL;setPadding(dp(4),0,dp(4),dp(12))}
+    val body=LinearLayout(context).apply {orientation=LinearLayout.VERTICAL;setPadding(0,dp(2),0,dp(12))}
     val footer=LinearLayout(context).apply {orientation=LinearLayout.HORIZONTAL}
-    private val card=LinearLayout(context).apply {orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(8),dp(12),dp(4));isClickable=true
-        background=ThemeGradientDrawable().apply {cornerRadius=dp(16).toFloat();setColor(this@SidePanelView.colors.cardSurface)}}
-    private val titleView=TextView(context).apply {textSize=20f;setTextColor(colors.primaryText);maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END}
-    private val close=AppIcons.button(context,colors,AppIcon.CLOSE,"Close panel")
-    private val subtitle=TextView(context).apply {textSize=12f;setTextColor(colors.mutedText);setPadding(dp(4),0,dp(4),dp(8));maxLines=3;ellipsize=android.text.TextUtils.TruncateAt.END}
-    private val tabRow=LinearLayout(context).apply {orientation=LinearLayout.HORIZONTAL}
+    private val card=LinearLayout(context).apply {
+        orientation=LinearLayout.VERTICAL;isClickable=true
+        if(side) {
+            setPadding(dp(18),dp(14),dp(18),dp(6))
+            // Flush with the edge; a hairline where it meets the page or the video.
+            background=ThemeGradientDrawable.rounded(0f,ColorUtils.setAlphaComponent(this@SidePanelView.colors.background,0xF7),
+                dp(1),ColorUtils.setAlphaComponent(this@SidePanelView.colors.primaryText,0x14))
+        } else {
+            setPadding(dp(18),dp(14),dp(18),dp(6))
+            background=ThemeGradientDrawable.rounded(dp(16).toFloat(),this@SidePanelView.colors.background,
+                dp(1),ColorUtils.setAlphaComponent(this@SidePanelView.colors.primaryText,0x1A))
+        }
+    }
+    private val titleView=TextView(context).apply {
+        typeRole(Type.Role.HEADING,18f);setTextColor(colors.primaryText);maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END
+    }
+    /** A small round close, the size of the design's; the view around it stays finger-sized. */
+    private val close=ImageView(context).apply {
+        setImageDrawable(AppIconDrawable(AppIcon.CLOSE,colors.primaryText));scaleType=ImageView.ScaleType.CENTER_INSIDE
+        val pad=dp(11);setPadding(pad,pad,pad,pad);contentDescription="Close panel"
+        background=android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_focused),ThemeGradientDrawable.oval(
+                ColorUtils.setAlphaComponent(this@SidePanelView.colors.primaryText,0x29),dp(2),this@SidePanelView.colors.focusRing))
+            addState(intArrayOf(),ThemeGradientDrawable.oval(ColorUtils.setAlphaComponent(this@SidePanelView.colors.primaryText,0x1A)))
+        }
+        Styler.makeFocusable(this)
+    }
+    private val subtitle=TextView(context).apply {textSize=12f;setTextColor(colors.mutedText);setPadding(0,dp(2),0,dp(10));maxLines=3;ellipsize=android.text.TextUtils.TruncateAt.END}
+    private val tabRow=FrameLayout(context)
     private val scroll=FocusScrollView(context).apply {clipToPadding=false;addView(body)}
     private var opener:View?=null
     private var dismissed:(()->Unit)?=null
@@ -41,6 +72,8 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     private var returning:Pair<String,Int>?=null
     private var menuKey=""
     private val choiceRows=mutableListOf<View>()
+    /** The choice and setting rows, in order: what a test or a screen means by "the first row". */
+    val rows:List<View> get()=choiceRows
     val isOpen get()=visibility==VISIBLE
     /** Optional reader preview hook; called for both cancel and successful selection. */
     var onPanelGeometryChanged: (() -> Unit)? = null
@@ -49,21 +82,25 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     init {
         visibility=GONE;isClickable=true;setBackgroundColor(Color.argb(if(side) 75 else 145,0,0,0))
         setOnClickListener {cancel()}
-        val header=LinearLayout(context).apply {orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
-        header.addView(titleView,LinearLayout.LayoutParams(0,-2,1f));header.addView(close,LinearLayout.LayoutParams(dp(48),dp(48)))
+        val header=LinearLayout(context).apply {orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;minimumHeight=dp(40)}
+        header.addView(titleView,LinearLayout.LayoutParams(0,-2,1f).apply {marginEnd=dp(8)})
+        header.addView(close,LinearLayout.LayoutParams(dp(36),dp(36)))
         close.activateOnTap(::cancel);FocusDecorator.attach(close,ringVisible,scale=false)
-        card.addView(header);card.addView(subtitle);card.addView(tabRow)
+        card.addView(header,LinearLayout.LayoutParams(-1,-2).apply {bottomMargin=dp(4)})
+        card.addView(subtitle);card.addView(tabRow,LinearLayout.LayoutParams(-1,-2))
         card.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         card.addView(footer,LinearLayout.LayoutParams(-1,-2))
-        addView(card,LayoutParams(dp(if(side)320 else 420),-1,if(side) Gravity.END else Gravity.CENTER).apply {setMargins(dp(12),dp(12),dp(12),dp(12))})
+        addView(card,if(side) LayoutParams(dp(320),-1,Gravity.END) else
+            LayoutParams(dp(420),-1,Gravity.CENTER).apply {setMargins(dp(12),dp(12),dp(12),dp(12))})
         card.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> if(isOpen) onPanelGeometryChanged?.invoke() }
     }
     override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int) {
         val available=MeasureSpec.getSize(widthMeasureSpec)
         card.layoutParams.width=if(side) dp(PanelGeometry.width((available/resources.displayMetrics.density).toInt())) else minOf(dp(420),(available-dp(24)).coerceAtLeast(1))
-        card.layoutParams.height=if(side) -1 else minOf(dp(minOf(340,108+body.childCount*72)),(MeasureSpec.getSize(heightMeasureSpec)-dp(24)).coerceAtLeast(1))
+        card.layoutParams.height=if(side) -1 else minOf(dp(minOf(360,100+choiceRows.size*54+(body.childCount-groups())*44)),(MeasureSpec.getSize(heightMeasureSpec)-dp(24)).coerceAtLeast(1))
         super.onMeasure(widthMeasureSpec,heightMeasureSpec)
     }
+    private fun groups()=(0 until body.childCount).count {body.getChildAt(it) is RowGroup}
     fun open(title:String,detail:String="",onDismiss:()->Unit={}) {
         if(!isOpen) {
             opener=rootView.findFocus()
@@ -75,7 +112,10 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
         dismissed=onDismiss;titleView.text=title;menuKey=title;subtitle.text=detail;subtitle.visibility=if(detail.isBlank()) GONE else VISIBLE
         visibility=VISIBLE;bringToFront();ViewCompat.setAccessibilityPaneTitle(this,title)
         onPanelGeometryChanged?.invoke()
-        if(ValueAnimator.areAnimatorsEnabled()){card.alpha=0f;card.animate().alpha(1f).setDuration(180).start()}
+        if(ValueAnimator.areAnimatorsEnabled()){
+            card.alpha=0f;card.translationX=if(side) dp(24).toFloat() else 0f
+            card.animate().alpha(1f).translationX(0f).setDuration(180).start()
+        }
     }
     fun resetBody() {body.removeAllViews();tabRow.removeAllViews();footer.removeAllViews();choiceRows.clear();scroll.scrollTo(0,0)}
     /** Focuses [preferred], else the row last chosen in this menu, else the first row. */
@@ -86,29 +126,61 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     }
     fun tabs(values:List<Pair<String,String>>,selected:String,onPick:(String)->Unit) = tabs(values, selected, false, onPick)
 
+    /** Two or three views of one menu, as the app's pick-one pill. [dividers] is no longer drawn; the pill separates them. */
+    @Suppress("UNUSED_PARAMETER")
     fun tabs(values:List<Pair<String,String>>,selected:String,dividers:Boolean,onPick:(String)->Unit) {
         tabRow.removeAllViews()
         menuKey="${titleView.text}/$selected"
-        values.forEachIndexed { index,(id,label)->
-            if(dividers && index>0) tabRow.addView(View(context).apply {setBackgroundColor(colors.mutedText)},LinearLayout.LayoutParams(dp(1),dp(20)).apply {gravity=Gravity.CENTER_VERTICAL})
-            tabRow.addView(TextView(context).apply {
-            tag="tab:$id"
-            text=label;textSize=14f;gravity=Gravity.CENTER;minimumHeight=dp(48);isSelected=id==selected
-            setTextColor(if(isSelected) colors.accent else colors.mutedText)
-            background=Styler.selectionBackground(context,colors,isSelected,cornerDp=8f)
-            contentDescription=if(isSelected) "$label, selected" else label
-            if(isSelected)foreground=android.graphics.drawable.LayerDrawable(arrayOf(android.graphics.drawable.ColorDrawable(colors.accent))).apply {
-                setLayerHeight(0,dp(2));setLayerGravity(0,Gravity.BOTTOM);setLayerInsetLeft(0,dp(10));setLayerInsetRight(0,dp(10))
-            }
-            Styler.makeFocusable(this)
-            activateOnTap {onPick(id)}
-        },LinearLayout.LayoutParams(0,dp(48),1f).apply {setMargins(dp(2),dp(2),dp(2),dp(10))})}
+        val current=selected;val pick=onPick
+        tabRow.addView(BlobSegmentedView(context,colors,ringVisible).apply {
+            heightDp=36f;textSp=13f;padXDp=14f
+            setOptions(values.map {(id,label)->BlobSegmentedView.Option(id,label)},current)
+            this.onPick={id->if(id!=current)pick(id)}
+        },FrameLayout.LayoutParams(-2,-2).apply {bottomMargin=dp(12)})
     }
-    fun choice(label:String,detail:String="",selected:Boolean=false,danger:Boolean=false,onPick:()->Unit):View {
+    /** A small capital heading; the rows after it start a new card. */
+    fun section(label:String) {
+        body.addView(TextView(context).apply {
+            text=label.uppercase();typeRole(Type.Role.EYEBROW,10.5f);setTextColor(colors.mutedText)
+            setPadding(dp(4),dp(if(body.childCount==0) 2 else 10),dp(4),dp(7))
+        })
+    }
+    /** The next row starts a new card, with no heading between. */
+    fun startGroup() { body.addView(Space(context),LinearLayout.LayoutParams(-1,0)) }
+    /** Small print under the rows: what the panel does not cover, and where that lives instead. */
+    fun note(text:String) {
+        body.addView(TextView(context).apply {
+            this.text=text;textSize=11f;setTextColor(colors.mutedText);setLineSpacing(0f,1.2f)
+            setPadding(dp(4),dp(2),dp(4),dp(8))
+        })
+    }
+    /**
+     * One option. [leading] sits before the words: a chapter's frame. A
+     * selected option shows the check mark; there is no "Selected" text.
+     */
+    fun choice(label:String,detail:String="",selected:Boolean=false,danger:Boolean=false,leading:View?=null,onPick:()->Unit):View {
+        val row=row(label,detail,selected,danger,onPick)
+        leading?.let {row.addView(it,0,LinearLayout.LayoutParams(dp(96),dp(54)).apply {marginEnd=dp(12)})}
+        if(selected)row.addView(ImageView(context).apply {setImageDrawable(AppIconDrawable(AppIcon.CHECK,colors.accent));importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO},LinearLayout.LayoutParams(dp(20),dp(20)).apply{marginStart=dp(8)})
+        return row
+    }
+    /** A row that opens its own menu: the setting, its current value, and a chevron. */
+    fun setting(label:String,value:String,onPick:()->Unit):View {
+        val row=row(label,"",false,false,onPick)
+        row.contentDescription=listOf(label,value).filter(String::isNotBlank).joinToString(", ")
+        row.addView(TextView(context).apply {
+            text=value;textSize=12f;setTextColor(colors.mutedText);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
+            textDirection=TEXT_DIRECTION_LTR;importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO
+        },LinearLayout.LayoutParams(-2,-2).apply {marginStart=dp(8)})
+        row.addView(ImageView(context).apply {setImageDrawable(AppIconDrawable(AppIcon.NEXT,colors.mutedText));importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO},
+            LinearLayout.LayoutParams(dp(14),dp(14)).apply{marginStart=dp(6)})
+        return row
+    }
+    private fun row(label:String,detail:String,selected:Boolean,danger:Boolean,onPick:()->Unit):LinearLayout {
         val row=LinearLayout(context).apply {
-            orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;minimumHeight=dp(52);setPadding(dp(10),dp(8),dp(10),dp(8))
+            orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;minimumHeight=dp(48);setPadding(dp(12),dp(8),dp(12),dp(8))
             val key=menuKey;val index=choiceRows.size
-            background=Styler.selectionBackground(context,colors,selected);Styler.makeFocusable(this)
+            background=Styler.selectionBackground(context,colors,selected,cornerDp=12f);Styler.makeFocusable(this)
             activateOnTap {
                 if(danger){lastChosen.remove(key);returning=null} else {lastChosen[key]=index;returning=key to index}
                 onPick()
@@ -117,13 +189,21 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
             isSelected=selected;FocusDecorator.attach(this,ringVisible,scale=false)
         }
         val copy=LinearLayout(context).apply {orientation=LinearLayout.VERTICAL}
-        copy.addView(TextView(context).apply {text=label;textSize=14f;setTextColor(if(danger) colors.dangerText else colors.primaryText)})
-        if(detail.isNotBlank())copy.addView(TextView(context).apply {text=detail;textSize=12f;setTextColor(colors.mutedText);setPadding(0,dp(3),0,0)})
+        copy.addView(TextView(context).apply {text=label;textSize=14f;textWeight(600);setTextColor(if(danger) colors.dangerText else colors.primaryText)})
+        if(detail.isNotBlank())copy.addView(TextView(context).apply {text=detail;textSize=12f;setTextColor(colors.mutedText);setPadding(0,dp(2),0,0)})
         row.addView(copy,LinearLayout.LayoutParams(0,-2,1f))
-        if(selected)row.addView(ImageView(context).apply {setImageDrawable(AppIconDrawable(AppIcon.CHECK,colors.accent));importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO},LinearLayout.LayoutParams(dp(22),dp(22)).apply{marginStart=dp(8)})
-        body.addView(row,LinearLayout.LayoutParams(-1,-2).apply {bottomMargin=dp(3)})
+        currentGroup().addView(row,LinearLayout.LayoutParams(-1,-2))
         choiceRows+=row
         return row
+    }
+    /** The card the next row joins: the last thing in [body] if it is one, else a new one. */
+    private fun currentGroup():RowGroup =
+        (body.getChildAt(body.childCount-1) as? RowGroup) ?: RowGroup(context).also {
+            it.background=ThemeGradientDrawable.rounded(dp(14).toFloat(),colors.cardSurface)
+            body.addView(it,LinearLayout.LayoutParams(-1,-2).apply {bottomMargin=dp(10)})
+        }
+    private class RowGroup(context:Context) : LinearLayout(context) {
+        init {orientation=VERTICAL;val pad=Styler.dpInt(context,3f);setPadding(pad,pad,pad,pad)}
     }
     open fun dismiss() {
         if(!isOpen)return

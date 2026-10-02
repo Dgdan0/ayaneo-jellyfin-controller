@@ -64,6 +64,21 @@ object PlaybackEnhancements {
             .toList()
     }
 
+    /**
+     * Where to take a chapter's picture: a quarter of the way in, at most
+     * thirty seconds, on the hub's five-second frame grid. Ten seconds in was
+     * still the fade from black on an episode's cold open.
+     */
+    fun chapterFrameMillis(startMillis: Long, endMillis: Long): Long {
+        val length = (endMillis - startMillis).takeIf { it > 0 } ?: 60_000L
+        val at = startMillis + minOf(30_000L, length / 4)
+        return (at / 5_000L) * 5_000L
+    }
+
+    /** The segment that starts with this chapter, within two seconds, if any. */
+    fun segmentAt(segments: List<PlaybackSegment>, startMillis: Long): PlaybackSegment? =
+        segments.firstOrNull { kotlin.math.abs(it.startMillis - startMillis) <= 2_000L }
+
     fun nextChapter(chapters: List<PlaybackChapter>, positionMillis: Long): PlaybackChapter? =
         chapters.firstOrNull { it.positionMillis > positionMillis + 750L }
 

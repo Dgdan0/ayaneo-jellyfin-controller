@@ -103,8 +103,17 @@ object Theme {
         preview(context, com.pocketds.hub.settings.ContentModeSettings.get(context))
     }
 
-    fun preview(context: Context, domain: com.pocketds.hub.state.ContentMode): PocketColors {
-        val dark = isDark(context)
+    fun preview(context: Context, domain: com.pocketds.hub.state.ContentMode): PocketColors =
+        palette(context, domain, isDark(context))
+
+    /**
+     * For anything drawn over video -- the player's controls and panels: the
+     * dark palette whatever the app's theme, since the picture behind is dark,
+     * with the person's media accent.
+     */
+    fun onVideo(context: Context): PocketColors = palette(context, com.pocketds.hub.state.ContentMode.MEDIA, dark = true)
+
+    private fun palette(context: Context, domain: com.pocketds.hub.state.ContentMode, dark: Boolean): PocketColors {
         val base = if (dark) DARK else LIGHT
         val preset = com.pocketds.hub.settings.DomainPreferences.accent(context, domain)
         val accent = preset.color(dark)

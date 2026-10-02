@@ -53,6 +53,7 @@ import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
+import com.pocketds.hub.ui.ThemeGradientDrawable
 import com.pocketds.hub.ui.activateOnTap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -205,7 +206,8 @@ class PlayerScreen(
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
-        colors = Theme.colors(host.viewContext)
+        // Over video, whatever the app theme: a white panel on a dark film glared.
+        colors = Theme.onVideo(host.viewContext)
         subtitleLook = SubtitleSettings.look(host.viewContext)
         root = FrameLayout(host.viewContext).apply {
             setBackgroundColor(Color.BLACK)
@@ -1100,45 +1102,59 @@ class PlayerScreen(
         duration.text = PlayerLabels.remainingLine(controller?.currentPosition ?: 0L, active.durationMillis)
     }
 
-    private fun showTrackSheet() = showTracks(menuState.trackTab)
-
-    private fun showTracks(tab: String) {
+    /**
+     * Audio & subtitles: every audio track, then Off and every subtitle track,
+     * then subtitle timing and look. One list, where two tabs hid the other
+     * half; the cursor starts on whichever kind you changed last.
+     */
+    private fun showTrackSheet() {
         if (CastPlaybackCoordinator.isActive) {
-            showCastTracks(tab)
+            showCastTracks(menuState.trackTab)
             return
         }
         if (subtitleOffsetOverlay.isOpen) subtitleOffsetOverlay.onPad(PadAction.Back)
         val current = plan ?: return
-        menuState.selectTrackTab(tab)
         choiceOverlay.resetBody()
         choiceOverlay.open("Audio & subtitles", onDismiss = ::showControls)
-        choiceOverlay.tabs(listOf("audio" to "Audio", "subtitles" to "Subtitles"), menuState.trackTab, ::showTracks)
-        var selected: View? = null
-        if (tab == "subtitles") {
-            val off = current.selectedSubtitleIndex == null || current.selectedSubtitleIndex == -1
-            val row = choiceOverlay.choice("Off", selected = off) { choiceOverlay.dismiss(); changeSelection(subtitle = -1) }
-            if (off) selected = row
-        }
-        val tracks = if (tab == "audio") current.audioTracks else current.subtitleTracks
-        tracks.forEach { track ->
+        var audioRow: View? = null
+        var subtitleRow: View? = null
+        choiceOverlay.section("Audio")
+        if (current.audioTracks.isEmpty()) choiceOverlay.choice("No selectable audio tracks") { choiceOverlay.cancel() }
+        current.audioTracks.forEach { track ->
             val copy = TrackPresentation.of(track)
-            val active = track.index == if (tab == "audio") current.selectedAudioIndex else current.selectedSubtitleIndex
+            val active = track.index == current.selectedAudioIndex
             val row = choiceOverlay.choice(copy.title, copy.detail, selected = active) {
+                menuState.selectTrackTab("audio")
                 choiceOverlay.dismiss()
-                if (tab == "audio") changeSelection(audio = track.index) else changeSelection(subtitle = track.index)
+                changeSelection(audio = track.index)
             }
-            if (active) selected = row
+            if (active) audioRow = row
         }
-        if (tab == "audio" && tracks.isEmpty()) choiceOverlay.choice("No selectable audio tracks") { choiceOverlay.cancel() }
-        if (tab == "subtitles" && selectedSubtitleSupportsOffset(current)) {
-            addSheetSection("TIMING")
-            choiceOverlay.choice("Adjust subtitle timing", PlayerLabels.subtitleOffset(subtitleOffsetMillis)) { showSubtitleOffsetSheet() }
+        choiceOverlay.section("Subtitles")
+        val off = current.selectedSubtitleIndex == null || current.selectedSubtitleIndex == -1
+        val offRow = choiceOverlay.choice("Off", selected = off) {
+            menuState.selectTrackTab("subtitles")
+            choiceOverlay.dismiss()
+            changeSelection(subtitle = -1)
         }
-        if (tab == "subtitles") {
-            addSheetSection("APPEARANCE")
-            choiceOverlay.choice("Subtitle look", PlayerLabels.subtitleLook(subtitleLook)) { showSubtitleAppearanceSheet() }
+        if (off) subtitleRow = offRow
+        current.subtitleTracks.forEach { track ->
+            val copy = TrackPresentation.of(track)
+            val active = track.index == current.selectedSubtitleIndex
+            val row = choiceOverlay.choice(copy.title, copy.detail, selected = active) {
+                menuState.selectTrackTab("subtitles")
+                choiceOverlay.dismiss()
+                changeSelection(subtitle = track.index)
+            }
+            if (active) subtitleRow = row
         }
-        choiceOverlay.focusBody(selected)
+        choiceOverlay.startGroup()
+        if (selectedSubtitleSupportsOffset(current)) {
+            choiceOverlay.setting("Subtitle timing", PlayerLabels.subtitleOffset(subtitleOffsetMillis)) { showSubtitleOffsetSheet() }
+        }
+        choiceOverlay.setting("Subtitle look", PlayerLabels.subtitleLook(subtitleLook)) { showSubtitleAppearanceSheet() }
+        choiceOverlay.note("Timing is kept for this series. The look applies to every video, as in Settings › Subtitles.")
+        choiceOverlay.focusBody(if (menuState.trackTab == "audio") audioRow ?: subtitleRow else subtitleRow ?: audioRow)
         handler.removeCallbacks(hideControls)
     }
 
@@ -1292,7 +1308,7 @@ class PlayerScreen(
     private fun selectedSubtitleSupportsOffset(value: PlaybackPrepareResponse): Boolean =
         value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }?.external == true
 
-    private fun showPlaybackSheet() = showPlaybackPanel("quality")
+    private fun showPlaybackSheet() = showPlaybackPanel()
 
     private fun showCastPanel() {
         choiceOverlay.resetBody()
@@ -1310,23 +1326,12 @@ class PlayerScreen(
         choiceOverlay.focusBody()
     }
 
-    /** A small uppercase heading between groups of rows in a player side panel. */
-    private fun addSheetSection(label: String) {
-        choiceOverlay.body.addView(TextView(host.viewContext).apply {
-            text = label
-            textSize = 11f
-            letterSpacing = 0.12f
-            setTextColor(colors.mutedText)
-            setPadding(dp(10), dp(20), dp(10), dp(6))
-        })
-    }
-
     private fun showSubtitleAppearanceSheet() {
         val looks = SubtitleStyle.entries.flatMap { style -> SubtitleSize.entries.map { subtitleLook.copy(style = style, size = it) } }
         choiceOverlay.pickValue(
             "Subtitle look", "For every video. Also in Settings › Subtitles.",
             looks, subtitleLook, PlayerLabels::subtitleLook,
-            onCancel = { showTracks("subtitles") }
+            onCancel = ::showTrackSheet
         ) { picked ->
             subtitleLook = picked
             SubtitleSettings.save(host.viewContext, picked)
@@ -1351,54 +1356,79 @@ class PlayerScreen(
         listOfNotNull(playerView.subtitleView, dynamicSubtitleView).forEach { it.setBottomPaddingFraction(fraction) }
     }
 
-    private fun showPlaybackPanel(tab: String) {
+    /**
+     * This video: what can change for what is playing, each row with its
+     * current value and opening its own list. Back from that list returns
+     * here. Settings that apply to every video are pointed to, not repeated.
+     */
+    private fun showPlaybackPanel() {
         if (CastPlaybackCoordinator.isActive) {
             showCastPanel()
             return
         }
         val current = plan ?: return
         choiceOverlay.resetBody()
-        choiceOverlay.open("Playback", onDismiss = ::showControls)
-        choiceOverlay.tabs(
-            listOf("quality" to "Quality", "source" to "Version", "view" to "View", "info" to "Info"),
-            tab,
-            ::showPlaybackPanel
-        )
-        var selected: View? = null
-        when (tab) {
-            "quality" -> if (current.offline) {
-                selected = choiceOverlay.choice("Original", "Downloaded file · no network required", selected = true) { choiceOverlay.cancel() }
-            } else PlaybackRules.qualities.forEach { quality ->
-                val active = quality.bitrate == selectedQuality
-                val row = choiceOverlay.choice(quality.label, selected = active) {
-                    choiceOverlay.dismiss()
-                    selectedQuality = quality.bitrate
-                    changeSelection(quality = selectedQuality)
-                }
-                if (active) selected = row
-            }
-            "source" -> current.sources.forEach { source ->
-                val active = source.id == current.selectedMediaSourceId
-                val row = choiceOverlay.choice(source.name.ifEmpty { source.container.uppercase() }, PlayerLabels.sourceDetail(source.container, source.bitrate), selected = active) {
-                    choiceOverlay.dismiss(); changeSelection(source = source.id)
-                }
-                if (active) selected = row
-            }
-            "view" -> {
-                val chapterCount = current.chapters.size
-                choiceOverlay.choice(
-                    "Chapters",
-                    if (chapterCount == 0) "Unavailable" else "$chapterCount markers"
-                ) { showChapterSheet() }
-                choiceOverlay.choice("Speed", PlayerLabels.speed(playbackSpeed)) { showSpeedSheet() }
-                choiceOverlay.choice("Aspect", PlayerLabels.aspect(playbackAspect)) { showAspectSheet() }
-            }
-            else -> choiceOverlay.body.addView(TextView(host.viewContext).apply {
-                text = PlayerLabels.diagnostic(current); textSize = 14f; setTextColor(colors.primaryText)
-                setPadding(dp(10), dp(12), dp(10), dp(16)); setTextIsSelectable(true)
-            })
+        choiceOverlay.open("This video", onDismiss = ::showControls)
+        choiceOverlay.setting("Quality", PlayerLabels.qualityValue(currentQuality().label, current.height, current.offline)) { showQualitySheet() }
+        if (current.sources.size > 1) {
+            val source = current.sources.firstOrNull { it.id == current.selectedMediaSourceId } ?: current.sources.first()
+            choiceOverlay.setting("Version", source.name.ifEmpty { source.container.uppercase() }) { showVersionSheet() }
         }
-        choiceOverlay.focusBody(selected)
+        choiceOverlay.setting("Speed", PlayerLabels.speed(playbackSpeed)) { showSpeedSheet() }
+        choiceOverlay.setting("Aspect", PlayerLabels.aspect(playbackAspect)) { showAspectSheet() }
+        if (selectedSubtitleSupportsOffset(current)) {
+            choiceOverlay.setting("Subtitle timing", PlayerLabels.subtitleOffset(subtitleOffsetMillis)) { showSubtitleOffsetSheet() }
+        }
+        choiceOverlay.setting("Stream", current.playMethod.ifEmpty { "Playback" }) { showStreamDetails() }
+        choiceOverlay.note("These change only this video. Skip distance, intros, up next and how subtitles look live in Settings › Playback and Subtitles.")
+        choiceOverlay.focusBody()
+        handler.removeCallbacks(hideControls)
+    }
+
+    private fun currentQuality() = PlaybackRules.qualities.firstOrNull { it.bitrate == selectedQuality } ?: PlaybackRules.qualities.first()
+
+    private fun showQualitySheet() {
+        val current = plan ?: return
+        if (current.offline) {
+            host.notify("A downloaded video plays its original file")
+            return
+        }
+        choiceOverlay.pickValue(
+            "Quality", "Lower uses less of your connection; Original plays the file as it is.",
+            PlaybackRules.qualities, currentQuality(), { it.label }, onCancel = ::showPlaybackPanel
+        ) { picked ->
+            selectedQuality = picked.bitrate
+            changeSelection(quality = selectedQuality)
+        }
+        handler.removeCallbacks(hideControls)
+    }
+
+    private fun showVersionSheet() {
+        val current = plan ?: return
+        val active = current.sources.firstOrNull { it.id == current.selectedMediaSourceId } ?: current.sources.firstOrNull() ?: return
+        choiceOverlay.pickValue(
+            "Version", "", current.sources, active,
+            { it.name.ifEmpty { it.container.uppercase() } },
+            { PlayerLabels.sourceDetail(it.container, it.bitrate) },
+            onCancel = ::showPlaybackPanel
+        ) { picked -> changeSelection(source = picked.id) }
+        handler.removeCallbacks(hideControls)
+    }
+
+    /** How it is being delivered: method, size, codecs, bitrate, and why the server converts it. */
+    private fun showStreamDetails() {
+        val current = plan ?: return
+        choiceOverlay.resetBody()
+        choiceOverlay.open("Stream", onDismiss = ::showPlaybackPanel)
+        choiceOverlay.body.addView(TextView(host.viewContext).apply {
+            text = PlayerLabels.diagnostic(current).replace(" · ", "\n")
+            textSize = 14f
+            setLineSpacing(0f, 1.25f)
+            setTextColor(colors.primaryText)
+            setPadding(dp(4), dp(4), dp(4), dp(16))
+            setTextIsSelectable(true)
+        })
+        choiceOverlay.focusBody()
         handler.removeCallbacks(hideControls)
     }
 
@@ -1438,8 +1468,8 @@ class PlayerScreen(
         }
     }
 
-    /** [fromOptions]: opened from This video, so Back returns there; from its own pill, Back just closes it. */
-    private fun showChapterSheet(fromOptions: Boolean = true) {
+    /** Chapters: a frame from each, where it starts, how long, and what it is; A jumps there. */
+    private fun showChapterSheet() {
         val durationMillis = controller?.duration?.takeIf { it > 0 } ?: plan?.durationMillis ?: 0
         val chapters = PlaybackEnhancements.chapters(plan?.chapters.orEmpty(), durationMillis)
         if (chapters.isEmpty()) {
@@ -1448,22 +1478,45 @@ class PlayerScreen(
             return
         }
         val at = controller?.currentPosition ?: 0L
-        val choices = chapters.map { chapter ->
-            ChoiceOverlay.Choice(chapter.positionMillis.toString(), chapter.name, Fmt.clock(chapter.positionMillis))
+        val now = chapters.indexOfLast { it.positionMillis <= at }.coerceAtLeast(0)
+        choiceOverlay.resetBody()
+        choiceOverlay.open("Chapters", onDismiss = ::showControls)
+        var selected: View? = null
+        chapters.forEachIndexed { index, chapter ->
+            val end = chapters.getOrNull(index + 1)?.positionMillis ?: durationMillis
+            val kind = PlaybackEnhancements.segmentAt(plan?.segments.orEmpty(), chapter.positionMillis)
+                ?.type?.let(PlayerLabels::segmentKind)
+            val row = choiceOverlay.choice(
+                chapter.name, PlayerLabels.chapterDetail(chapter.positionMillis, end, kind),
+                selected = index == now, leading = chapterFrame(chapter.positionMillis, end)
+            ) {
+                choiceOverlay.dismiss()
+                controller?.seekTo(chapter.positionMillis)
+                showControls()
+            }
+            if (index == now) selected = row
         }
-        val selected = chapters.indexOfLast { it.positionMillis <= at }.coerceAtLeast(0)
-        choiceOverlay.show("Chapters", "Jump to a chapter.", choices, selected,
-            { if (fromOptions) showPlaybackPanel("view") else showControls() }) { id ->
-            controller?.seekTo(id.toLong())
-            showControls()
-        }
+        choiceOverlay.focusBody(selected)
         handler.removeCallbacks(hideControls)
+    }
+
+    /** A chapter's picture, from the hub's frame a little way in; a plain tile when it has none (a downloaded file). */
+    private fun chapterFrame(startMillis: Long, endMillis: Long): View = ImageView(host.viewContext).apply {
+        scaleType = ImageView.ScaleType.CENTER_CROP
+        background = ThemeGradientDrawable.rounded(dp(8).toFloat(), colors.posterPlaceholder)
+        clipToOutline = true
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        val previewUrl = plan?.previewUrl.orEmpty()
+        val at = PlaybackEnhancements.chapterFrameMillis(startMillis, endMillis)
+        Artwork.bind(this, imageLoader(), previewUrl.takeIf(String::isNotEmpty)?.let { api.playbackUrl(it) + "?positionMillis=$at" }, opaque = true) {
+            size(dp(96), dp(54))
+        }
     }
 
     private fun showSpeedSheet() {
         choiceOverlay.pickValue(
             "Playback speed", "Changes apply without reloading the video.",
-            PlaybackEnhancements.speeds, playbackSpeed, PlayerLabels::speed, onCancel = { showPlaybackPanel("view") }
+            PlaybackEnhancements.speeds, playbackSpeed, PlayerLabels::speed, onCancel = ::showPlaybackPanel
         ) { picked ->
             playbackSpeed = picked
             controller?.setPlaybackSpeed(playbackSpeed)
@@ -1475,7 +1528,7 @@ class PlayerScreen(
     private fun showAspectSheet() {
         choiceOverlay.pickValue(
             "Aspect", "Fit keeps the whole picture visible.",
-            PlaybackAspect.entries, playbackAspect, PlayerLabels::aspect, onCancel = { showPlaybackPanel("view") }
+            PlaybackAspect.entries, playbackAspect, PlayerLabels::aspect, onCancel = ::showPlaybackPanel
         ) { picked ->
             playbackAspect = picked
             applyAspect()
@@ -1661,7 +1714,7 @@ class PlayerScreen(
     /** What the controls do; PlayerChrome only builds them. */
     private inner class ChromeActions : PlayerChrome.Actions {
         override fun showTracks() = showTrackSheet()
-        override fun showChapters() = showChapterSheet(fromOptions = false)
+        override fun showChapters() = showChapterSheet()
         override fun showOptions() = showPlaybackSheet()
         override fun toggleLock() {
             touchLocked = !touchLocked

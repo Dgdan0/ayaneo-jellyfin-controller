@@ -35,7 +35,7 @@ class SidePanelTest {
             i.waitForIdleSync()
             i.runOnMainSync {
                 assertTrue(panel.hasFocus())
-                assertTrue((panel.body.getChildAt(0) as View).isSelected)
+                assertTrue(panel.rows[0].isSelected)
                 repeat(10) {panel.onPad(PadAction.Step(Direction.LEFT))}
                 assertTrue(panel.hasFocus());assertFalse(opener.hasFocus())
                 panel.onPad(PadAction.Back)
