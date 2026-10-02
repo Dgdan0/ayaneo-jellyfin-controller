@@ -159,6 +159,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
                 ThemeSettings.Mode.DARK -> AppCompatDelegate.MODE_NIGHT_YES
             }
         )
+        builtDark = Theme.isDark(this)
         super.onCreate(savedInstanceState)
 
         // Intent extras first: scripts/dev.sh seed pushes the URL and token in
@@ -479,9 +480,24 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         topBar.setOverArtwork(top.drawsUnderTopBar)
     }
 
+    /**
+     * An accent change repaints the views in place. Dark to light (or back)
+     * rebuilds the Activity, as Android does for night mode: a live repaint
+     * only maps colours it can recognise, so lines drawn in a shade derived
+     * from the old palette (the Home hero's facts, a panel's heading) stayed
+     * pale grey on the new white until the app restarted. The section comes
+     * back from the saved state, so Settings reopens where it was.
+     */
     override fun refreshAppearance() {
+        if (builtDark != null && builtDark != Theme.isDark(this)) {
+            recreate()
+            return
+        }
         if (::overlay.isInitialized) Theme.refresh(this, overlay, (sections.stack().peek() as? Screen)?.contentDomain ?: ContentModeSettings.get(this))
     }
+
+    /** Whether the views were built dark; null until onCreate has run. */
+    private var builtDark: Boolean? = null
 
     private fun showCurrent() {
         refreshAppearance()
