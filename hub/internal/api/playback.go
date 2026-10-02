@@ -461,10 +461,14 @@ func buildDeviceProfile(body PlaybackPrepareBody) jellyfin.DeviceProfile {
 			EnableSubtitlesInManifest: true,
 		}},
 		CodecProfiles: []jellyfin.CodecProfile{},
+		// Text subtitles, ASS included, are drawn by the app in the style Settings chose, so
+		// Jellyfin must never burn them in as well: with "Encode" for ASS, a transcoded episode
+		// (Vinland Saga S1E1, 2026-10-02) showed every line twice, once burned into the picture
+		// and once on top. Only picture subtitles, which the app cannot draw, are burned in.
 		SubtitleProfiles: []jellyfin.SubtitleProfile{
 			{Format: "srt", Method: "External"}, {Format: "subrip", Method: "External"},
 			{Format: "vtt", Method: "External"}, {Format: "webvtt", Method: "External"},
-			{Format: "ass", Method: "Encode"}, {Format: "ssa", Method: "Encode"},
+			{Format: "ass", Method: "External"}, {Format: "ssa", Method: "External"},
 			{Format: "pgssub", Method: "Encode"}, {Format: "dvdsub", Method: "Encode"},
 		},
 	}

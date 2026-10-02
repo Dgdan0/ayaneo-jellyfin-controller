@@ -1723,6 +1723,9 @@ class PlayerScreen(
         upNextDismissed = false
         upNextAt = value.nextItem?.let { UpNext.cardAt(PlaybackSettings.nextTiming(host.viewContext), value.segments, value.durationMillis) }
         if (upNext.visibility == View.VISIBLE) hideUpNext()
+        // Bound now, at the start, so the next episode's still has arrived by the time the
+        // card shows: bound at that moment, the card sat on its placeholder for seconds.
+        value.nextItem?.let(upNext::bind)
         seekBar.marks = if (value.durationMillis > 0) PlaybackEnhancements.chapters(value.chapters, value.durationMillis)
             .map { it.positionMillis.toFloat() / value.durationMillis } else emptyList()
         titleView.text = if (value.offline) "${value.item.displayTitle()}  ·  Offline" else value.item.displayTitle()

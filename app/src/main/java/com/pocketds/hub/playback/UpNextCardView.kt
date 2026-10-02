@@ -110,7 +110,9 @@ class UpNextCardView(
         title.text = next.title.ifBlank { next.displayTitle() }
         meta.text = next.seriesTitle
         meta.visibility = if (next.seriesTitle.isBlank()) GONE else VISIBLE
-        Artwork.bindHub(still, api, "/v1/img/jf/${next.id}/Primary?w=360", opaque = true)
+        // A fixed size: bound while the card is hidden, a size taken from the view would
+        // wait for its first layout and only start loading once the card showed.
+        Artwork.bindHub(still, api, "/v1/img/jf/${next.id}/Primary?w=360", opaque = true) { size(dp(128), dp(72)) }
         contentDescription = "Up next: ${next.displayTitle()}"
     }
 

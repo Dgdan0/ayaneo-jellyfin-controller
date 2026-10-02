@@ -465,6 +465,24 @@ func TestResumeContinuesARewatch(t *testing.T) {
 	}
 }
 
+func TestTextSubtitlesAreNeverBurnedIn(t *testing.T) {
+	profile := buildDeviceProfile(PlaybackPrepareBody{})
+	methods := map[string]string{}
+	for _, sub := range profile.SubtitleProfiles {
+		methods[sub.Format] = sub.Method
+	}
+	for _, format := range []string{"srt", "subrip", "vtt", "webvtt", "ass", "ssa"} {
+		if methods[format] != "External" {
+			t.Fatalf("%s is %q: the app draws it, so burning it in shows every line twice", format, methods[format])
+		}
+	}
+	for _, format := range []string{"pgssub", "dvdsub"} {
+		if methods[format] != "Encode" {
+			t.Fatalf("%s is %q: a picture subtitle can only be burned in", format, methods[format])
+		}
+	}
+}
+
 func TestForcedFallbackRemovesDirectPlayProfiles(t *testing.T) {
 	normal := buildDeviceProfile(PlaybackPrepareBody{Capabilities: PlaybackCapabilities{
 		VideoCodecs: []string{"h264"}, AudioCodecs: []string{"aac"},
