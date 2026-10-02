@@ -297,6 +297,7 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("DELETE /v1/reading/downloads/{transferId}", s.handleReadingDownloadCancel)
 	authed.HandleFunc("GET /v1/img/reading/kavita/{seriesId}", s.handleKavitaReadingImage)
 	authed.HandleFunc("GET /v1/img/reading/kavita-library/{libraryId}", s.handleKavitaLibraryImage)
+	authed.HandleFunc("GET /v1/img/reading/kavita-chapter/{chapterId}", s.handleKavitaChapterImage)
 	authed.HandleFunc("GET /v1/img/reading/storyteller/{bookId}", s.handleStorytellerReadingImage)
 	authed.HandleFunc("GET /v1/img/reading/{token}", s.handleReadingImage)
 	authed.HandleFunc("GET /v1/media/{key}", s.handleMediaDetail)

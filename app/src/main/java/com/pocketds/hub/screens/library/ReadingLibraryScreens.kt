@@ -683,6 +683,14 @@ class ReadingWorkScreen(
             if (work.entityType == "collection" && section.items.isNotEmpty()) {
                 hasChildLinks = hasChildLinks || section.items.any(ReadingWorkPresentation::canOpen)
                 content.addView(bookRow(section))
+            } else if (ReadingBookFacts.kindTag(work.kind) != null && section.items.isNotEmpty()) {
+                // A comic's issues, a manga's chapters: covers in a strip, opening the reader.
+                hasChildLinks = true
+                content.addView(IssueStrip.create(requireNotNull(host).viewContext, colors, ringVisible, api,
+                    section.items, work.kind, work.artwork) { item ->
+                    if (canReadPublication(item.kind.ifBlank { work.kind }, item.sourceItemId))
+                        openPublication(work, item.sourceItemId, ReadingBookFacts.issueTitle(item, work.kind), "kavita")
+                })
             } else {
                 section.items.forEach { content.addView(sectionItemCard(work, it)) }
             }
@@ -756,6 +764,8 @@ class ReadingWorkScreen(
             val selectedOption = formatMenu.options.firstOrNull { it.key == previewKey }
             val entry = selectedOption?.choice ?: formatMenu.defaultChoice.also { previewFormat = null }
             formatStatus.bind(ReadingFormatStatus.forWork(work))
+            // Ebook, audiobook and read-along say nothing about a comic.
+            if (ReadingBookFacts.kindTag(work.kind) != null) formatStatus.visibility = View.GONE
             stateView.visibility = View.GONE
             stateView.isFocusable = false
             entry?.let { choice ->

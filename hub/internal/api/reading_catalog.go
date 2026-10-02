@@ -477,6 +477,20 @@ func (s *Server) handleKavitaLibraryImage(w http.ResponseWriter, r *http.Request
 	s.writeReadingServiceImage(w, r, "kavita-library", strconv.Itoa(id), func(ctx context.Context) ([]byte, string, error) { return s.kavita.LibraryCover(ctx, id) })
 }
 
+// handleKavitaChapterImage serves one issue's cover, so a series page can show
+// each issue rather than the series cover on every one.
+func (s *Server) handleKavitaChapterImage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireReading(w, r) {
+		return
+	}
+	id, err := strconv.Atoi(r.PathValue("chapterId"))
+	if err != nil || id <= 0 || s.kavita == nil {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "invalid Kavita chapter cover"})
+		return
+	}
+	s.writeReadingServiceImage(w, r, "kavita-chapter", strconv.Itoa(id), func(ctx context.Context) ([]byte, string, error) { return s.kavita.ChapterCover(ctx, id) })
+}
+
 func (s *Server) handleStorytellerReadingImage(w http.ResponseWriter, r *http.Request) {
 	if !s.requireReading(w, r) {
 		return
@@ -619,6 +633,7 @@ func (s *Server) kavitaWork(ctx context.Context, workID string, detail *kavita.D
 				SourceItemID: strconv.Itoa(chapter.ID),
 				Title:        kavitaChapterTitle(chapter.Title, chapter.Number, kavitaVolumeTitle(volume)),
 				Number:       kavitaChapterNumber(chapter.Number), Kind: kind,
+				Artwork:   "/v1/img/reading/kavita-chapter/" + strconv.Itoa(chapter.ID),
 				PageCount: chapter.Pages, Progress: pageProgress(chapter.PagesRead, chapter.Pages),
 			})
 		}

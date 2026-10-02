@@ -62,8 +62,13 @@ data class ReadingWorkPresentation private constructor(
                 ?: continued?.source?.takeIf { it.isNotBlank() }
                 ?: if (section?.sourceItemId == id) "kavita" else first?.source.orEmpty()
             val progress = work.progress
+            // A comic run: the issue you are on, since one page of 4,437 is "0%".
+            val issue = if (work.kind in setOf("comic", "manga")) work.sections.asSequence().flatMap { it.items.asSequence() }
+                .firstOrNull { it.sourceItemId == id }?.let { ReadingBookFacts.issueTitle(it, work.kind) } else null
             val label = when {
                 progress?.completed == true -> "Read again"
+                issue != null && (progress?.percentage ?: 0.0) > 0 -> "Continue · $issue"
+                issue != null -> "Start · $issue"
                 progress != null && progress.percentage > 0 -> "Resume · ${(progress.percentage * 100).roundToInt()}%"
                 else -> "Read book"
             }

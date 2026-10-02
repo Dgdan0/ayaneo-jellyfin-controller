@@ -35,6 +35,11 @@ object ReadingBookFacts {
         val p = work.progress ?: return null
         if (p.completed) return "Finished"
         if (p.percentage <= 0) return null
+        // "On issue 51 · 1% read": a page count across a whole run says nothing.
+        if (kindTag(work.kind) != null) return listOfNotNull(
+            work.continueAt?.number?.takeIf(String::isNotBlank)?.let { if (work.kind == "manga") "On chapter $it" else "On issue $it" },
+            comicLine(p)
+        ).joinToString(" · ")
         val percent = "${(p.percentage * 100).toInt()}%"
         val pages = work.editions.filter { it.kind != "audiobook" }.maxOfOrNull { it.pageCount } ?: 0
         return if (pages > 0) "$percent · page ${(p.percentage * pages).toInt().coerceIn(1, pages)} of $pages" else "$percent read"
@@ -42,6 +47,13 @@ object ReadingBookFacts {
 
     /** Pages of the longest text edition and the length of the audiobook, with its narrator. */
     fun length(work: ReadingWork): List<String> = buildList {
+        // A comic run is counted in issues (chapters for manga): 4,437 pages
+        // across 147 issues said nothing useful.
+        val issues = work.sections.sumOf { it.items.size }
+        if (kindTag(work.kind) != null && issues > 0) {
+            add(if (work.kind == "manga") plural(issues, "chapter") else plural(issues, "issue"))
+            return@buildList
+        }
         work.editions.filter { it.kind != "audiobook" }.maxOfOrNull { it.pageCount }
             ?.takeIf { it > 0 }?.let { add("$it pages") }
         work.editions.firstOrNull { it.kind == "audiobook" }?.let { audio ->
@@ -81,4 +93,22 @@ object ReadingBookFacts {
         (progress?.percentage ?: 0.0) > 0 -> "${kotlin.math.ceil(progress!!.percentage * 100).toInt().coerceIn(1, 99)}% read"
         else -> "Not started"
     }
+
+    /**
+     * An issue's name on its card: Kavita's own title when it has one, else
+     * "Issue 7" (or "Chapter 11" for manga). The page used to say "7 · 7".
+     */
+    fun issueTitle(item: com.pocketds.hub.model.ReadingSectionItem, kind: String): String {
+        val title = item.title.trim()
+        if (item.number.isBlank()) return title
+        return if (title.isEmpty() || title == item.number) (if (kind == "manga") "Chapter " else "Issue ") + item.number else title
+    }
+
+    /** Under an issue's cover: "36 pages · Not started". */
+    fun issueLine(item: com.pocketds.hub.model.ReadingSectionItem): String = listOfNotNull(
+        item.pageCount.takeIf { it > 0 }?.let { "$it pages" },
+        comicLine(item.progress)
+    ).joinToString(" · ")
+
+    private fun plural(n: Int, one: String) = if (n == 1) "1 $one" else "$n ${one}s"
 }

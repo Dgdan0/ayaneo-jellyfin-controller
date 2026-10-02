@@ -15,6 +15,37 @@ object ReaderTitleFormatter {
             else -> "$series · $publication"
         }
     }
+
+    /** The reader's heading: the series, or the publication when it has none. */
+    fun heading(seriesTitle: String, publicationTitle: String, fallback: String): String =
+        seriesTitle.trim().ifBlank { publicationTitle.trim() }.ifBlank { fallback.trim() }
+
+    /**
+     * Under the heading, which issue this is: Kavita names a comic's chapters
+     * "Chapter 51", but a comic has issues. A manga keeps chapters. Empty when
+     * the publication is the series itself.
+     */
+    fun issue(kind: String, seriesTitle: String, publicationTitle: String, number: String): String {
+        val title = publicationTitle.trim()
+        val n = number.trim().ifBlank { CHAPTER.matchEntire(title)?.groupValues?.get(1).orEmpty() }
+        val generic = title.isBlank() || title == n || CHAPTER.matches(title)
+        return when {
+            title.equals(seriesTitle.trim(), ignoreCase = true) && n.isBlank() -> ""
+            !generic -> title
+            n.isBlank() -> ""
+            kind == "manga" -> "Chapter $n"
+            else -> "Issue $n"
+        }
+    }
+
+    /** "Issue 51 · Page 2 of 24", and the third of the page when reading in thirds. */
+    fun subtitle(issue: String, page: Int, pageCount: Int, third: Int? = null): String = listOfNotNull(
+        issue.ifBlank { null },
+        "Page $page of $pageCount".takeIf { pageCount > 0 },
+        third?.let { "$it/3" }
+    ).joinToString(" · ")
+
+    private val CHAPTER = Regex("""(?i)chapter\s*(\S+)""")
 }
 
 object ReaderControlFocusPolicy {

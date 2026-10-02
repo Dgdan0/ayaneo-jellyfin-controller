@@ -65,4 +65,16 @@ class ReadingBookFactsTest {
         assertEquals("35% read", ReadingBookFacts.comicLine(com.pocketds.hub.model.ReadingProgress(percentage = 0.347)))
         assertEquals("Finished", ReadingBookFacts.comicLine(com.pocketds.hub.model.ReadingProgress(percentage = 1.0, completed = true)))
     }
+
+    @Test
+    fun `a comic run is counted in issues and each issue is named`() {
+        val issue = com.pocketds.hub.model.ReadingSectionItem(sourceItemId = "8338", title = "7", number = "7", kind = "comic", pageCount = 36)
+        val run = com.pocketds.hub.model.ReadingWork(id = "w", kind = "comic", year = 1961,
+            sections = listOf(com.pocketds.hub.model.ReadingSection(items = listOf(issue, issue.copy(number = "8", title = "8")))))
+        assertEquals(listOf("2 issues"), ReadingBookFacts.length(run))
+        assertEquals("Issue 7", ReadingBookFacts.issueTitle(issue, "comic"))
+        assertEquals("Chapter 7", ReadingBookFacts.issueTitle(issue, "manga"))
+        assertEquals("Annual 1965", ReadingBookFacts.issueTitle(issue.copy(title = "Annual 1965"), "comic"))
+        assertEquals("36 pages · Not started", ReadingBookFacts.issueLine(issue))
+    }
 }

@@ -32,6 +32,8 @@ import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
+import com.pocketds.hub.ui.OverlayButtons
+import com.pocketds.hub.ui.Type
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
 import kotlinx.coroutines.CoroutineScope
@@ -67,6 +69,9 @@ class PagedImageReaderScreen(
     private lateinit var topBar: LinearLayout
     private lateinit var bottomBar: LinearLayout
     private lateinit var titleView: TextView
+    /** Under the title: "Issue 51 · Page 2 of 24". */
+    private lateinit var subtitleView: TextView
+    private var issueName = ""
     private lateinit var positionView: TextView
     private lateinit var seek: SeekBar
     private lateinit var thirdsButton: TextView
@@ -231,45 +236,64 @@ class PagedImageReaderScreen(
     // Android edge-back leaves the reader; physical B follows the reading flow.
     override fun onSystemBack(): Boolean { if(options.isOpen) { options.cancel(); return true }; return false }
 
+    /**
+     * The player's look over the page: a round Close, the series with the
+     * issue and page under it, round steps between issues and zoom, and the
+     * tools that open something named in words. Was a row of square glyphs
+     * with "Fantastic Four · Chapter 51" between them.
+     */
     private fun buildTopBar() {
         topBar = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(5), dp(8), dp(5))
-            setBackgroundColor(0xD9141518.toInt())
+            setPadding(dp(14), dp(6), dp(14), dp(6))
+            setBackgroundColor(BAR)
         }
-        root.addView(topBar, FrameLayout.LayoutParams(MATCH, dp(58), Gravity.TOP))
-        topBar.addView(control("×", "Close reader", { host.back() }))
-        topBar.addView(control("↶", "Previous issue", { movePublication(-1) }))
-        titleView = TextView(host.viewContext).apply {
-            text = title
-            textSize = 15f
-            gravity = Gravity.CENTER_VERTICAL
-            setTextColor(Color.WHITE)
-            maxLines = 1
-            setPadding(dp(8), 0, dp(8), 0)
-        }
-        topBar.addView(titleView, LinearLayout.LayoutParams(0, MATCH, 1f))
-        thirdsButton = control("⅓", "Toggle reading in thirds", ::toggleThirds)
-        topBar.addView(thirdsButton)
-        topBar.addView(control("zoom-out", "Zoom out", { zoom(.8f) }))
-        topBar.addView(control("zoom-in", "Zoom in", { zoom(1.25f) }))
-        topBar.addView(control("options", "Reading options", ::showReadingOptions))
-        topBar.addView(control("↷", "Next issue", { movePublication(1) }))
+        root.addView(topBar, FrameLayout.LayoutParams(MATCH, dp(60), Gravity.TOP))
+        topBar.addView(round(AppIcon.CLOSE, "Close reader") { host.back() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        topBar.addView(LinearLayout(host.viewContext).apply {
+            orientation = LinearLayout.VERTICAL
+            titleView = TextView(context).apply {
+                text = title
+                Type.apply(this, Type.Role.HEADING, 17f)
+                setTextColor(Color.WHITE)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            addView(titleView)
+            subtitleView = TextView(context).apply {
+                textSize = 12f
+                setTextColor(SOFT_TEXT)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(0, dp(2), 0, 0)
+            }
+            addView(subtitleView)
+        }, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = dp(10); marginEnd = dp(8) })
+        topBar.addView(round(AppIcon.PREVIOUS_ITEM, "Previous issue") { movePublication(-1) }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        thirdsButton = pill("Thirds", "Read each page in thirds", ::toggleThirds)
+        topBar.addView(thirdsButton, LinearLayout.LayoutParams(WRAP, dp(44)).apply { marginStart = dp(2) })
+        topBar.addView(round(AppIcon.ZOOM_OUT, "Zoom out") { zoom(.8f) }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
+        topBar.addView(round(AppIcon.ZOOM_IN, "Zoom in") { zoom(1.25f) }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
+        topBar.addView(pill("Display", "Reading options", { showReadingOptions() }), LinearLayout.LayoutParams(WRAP, dp(44)).apply { marginStart = dp(2) })
+        topBar.addView(round(AppIcon.NEXT_ITEM, "Next issue") { movePublication(1) }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
     }
 
     private fun buildBottomBar() {
         bottomBar = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(5), dp(10), dp(5))
-            setBackgroundColor(0xD9141518.toInt())
+            setPadding(dp(14), dp(6), dp(14), dp(6))
+            setBackgroundColor(BAR)
         }
-        root.addView(bottomBar, FrameLayout.LayoutParams(MATCH, dp(66), Gravity.BOTTOM))
-        bottomBar.addView(control("‹", "Previous page", { turnWholePage(-1) }))
+        root.addView(bottomBar, FrameLayout.LayoutParams(MATCH, dp(64), Gravity.BOTTOM))
+        bottomBar.addView(round(AppIcon.PREVIOUS, "Previous page") { turnWholePage(-1) }, LinearLayout.LayoutParams(dp(48), dp(48)))
         seek = SeekBar(host.viewContext).apply {
             max = 1
             contentDescription = "Publication position"
+            progressTintList = android.content.res.ColorStateList.valueOf(colors.accent)
+            thumbTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.argb(90, 255, 255, 255))
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
             FocusDecorator.listen(this, ringVisible) { view, focused ->
@@ -292,36 +316,33 @@ class PagedImageReaderScreen(
         }
         focusables += seek
         bottomBar.addView(seek, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
-            marginStart = dp(5)
-            marginEnd = dp(5)
+            marginStart = dp(8)
+            marginEnd = dp(8)
         })
         positionView = TextView(host.viewContext).apply {
             textSize = 12f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            setTextColor(SOFT_TEXT)
         }
-        bottomBar.addView(positionView, LinearLayout.LayoutParams(dp(128), MATCH))
-        bottomBar.addView(control("›", "Next page", { turnWholePage(1) }))
+        bottomBar.addView(positionView, LinearLayout.LayoutParams(WRAP, MATCH).apply { marginEnd = dp(10) })
+        // The last control registered is the forward page (ReaderControlFocusPolicy).
+        bottomBar.addView(round(AppIcon.NEXT, "Next page") { turnWholePage(1) }, LinearLayout.LayoutParams(dp(48), dp(48)))
     }
 
-    private fun control(glyph: String, label: String, click: () -> Unit): TextView =
-        TextView(host.viewContext).apply {
-            val icon=when(glyph){ "×"->AppIcon.CLOSE; "↶"->AppIcon.PREVIOUS_ITEM; "↷"->AppIcon.NEXT_ITEM; "⅓"->AppIcon.THIRDS; "‹"->AppIcon.PREVIOUS; "›"->AppIcon.NEXT; "zoom-in"->AppIcon.ZOOM_IN; "zoom-out"->AppIcon.ZOOM_OUT; else->AppIcon.SETTINGS }
-            setCompoundDrawables(AppIconDrawable(icon,Color.WHITE).apply{setBounds(0,0,dp(22),dp(22))},null,null,null)
-            setPadding(dp(15),0,dp(15),0)
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            contentDescription = label
-            background = controlBackground()
-            Styler.makeFocusable(this)
-            FocusDecorator.attach(this, ringVisible, scale = false)
-            FocusDecorator.listen(this, ringVisible) { view, focused ->
-                if (focused) focusedControl = focusables.indexOf(view).coerceAtLeast(0)
-            }
-            activateOnTap(click)
-            layoutParams = LinearLayout.LayoutParams(dp(52), dp(48)).apply { marginEnd = dp(3) }
-            focusables += this
+    private fun round(icon: AppIcon, label: String, click: () -> Unit): View =
+        register(OverlayButtons.round(host.viewContext, colors.focusRing, icon, label, click))
+
+    private fun pill(label: String, description: String, click: () -> Unit): TextView =
+        register(OverlayButtons.pill(host.viewContext, colors.focusRing, label, description, click))
+
+    /** In the pad's order through the controls, remembering which one had focus. */
+    private fun <T : View> register(view: T): T = view.apply {
+        FocusDecorator.attach(this, ringVisible, scale = false)
+        FocusDecorator.listen(this, ringVisible) { v, focused ->
+            if (focused) focusedControl = focusables.indexOf(v).coerceAtLeast(0)
         }
+        focusables += this
+    }
 
     private fun loadManifest(sourceItemId: String, startAtEnd: Boolean = false) {
         manifestJob?.cancel()
@@ -378,7 +399,8 @@ class PagedImageReaderScreen(
             return
         }
         manifest = value
-        titleView.text = ReaderTitleFormatter.format(value.seriesTitle, value.title, title)
+        titleView.text = ReaderTitleFormatter.heading(value.seriesTitle, value.title, title)
+        issueName = ReaderTitleFormatter.issue(value.kind, value.seriesTitle, value.title, value.number)
         val start = if (startAtEnd) value.pageCount - 1 else value.currentPage
         state = PagedImageState(value.pageCount, start, if (thirdsEnabled) 3 else 1)
         seek.max = max(1, value.pageCount - 1)
@@ -564,7 +586,10 @@ class PagedImageReaderScreen(
         val page = state?.pageIndex ?: value.currentPage
         thirdsEnabled = !thirdsEnabled
         state = PagedImageState(value.pageCount, page, if (thirdsEnabled) 3 else 1)
-        thirdsButton.setCompoundDrawables(AppIconDrawable(AppIcon.THIRDS,if(thirdsEnabled)colors.accent else Color.WHITE).apply{setBounds(0,0,dp(22),dp(22))},null,null,null)
+        // Lit while on, like a filter.
+        thirdsButton.background = if (thirdsEnabled) OverlayButtons.ringed(host.viewContext, colors.focusRing,
+            android.graphics.drawable.GradientDrawable.RECTANGLE, colors.accent) else OverlayButtons.pillFace(host.viewContext, colors.focusRing)
+        thirdsButton.setTextColor(if (thirdsEnabled) colors.accentText else Color.WHITE)
         thirdsButton.isSelected=thirdsEnabled
         if (thirdsEnabled) applyViewport() else { image.resetScaleAndCenter();applyViewport() }
         updatePosition()
@@ -665,10 +690,9 @@ class PagedImageReaderScreen(
         suppressSeek = true
         seek.progress = position.pageIndex
         suppressSeek = false
-        positionView.text = buildString {
-            append("Page ${position.pageIndex + 1} of ${value.pageCount}")
-            if (thirdsEnabled) append(" · ${position.viewportIndex + 1}/3")
-        }
+        val third = if (thirdsEnabled) position.viewportIndex + 1 else null
+        positionView.text = ReaderTitleFormatter.subtitle("", position.pageIndex + 1, value.pageCount, third)
+        subtitleView.text = ReaderTitleFormatter.subtitle(issueName, position.pageIndex + 1, value.pageCount)
     }
 
     private fun toggleControls() = setControlsVisible(!controlsVisible)
@@ -693,23 +717,13 @@ class PagedImageReaderScreen(
         focusables[focusedControl].requestFocus()
     }
 
-    private fun controlBackground(): StateListDrawable {
-        fun face(fill: Int, stroke: Int = 0): GradientDrawable = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(host.viewContext, 9f)
-            setColor(fill)
-            if (stroke != 0) setStroke(dp(2), stroke)
-        }
-        return StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_pressed), face(0x443CDBC9))
-            addState(intArrayOf(android.R.attr.state_focused), face(0x2216B9A8, colors.focusRing))
-            addState(intArrayOf(), face(Color.TRANSPARENT))
-        }
-    }
-
     private fun dp(value: Int): Int = Styler.dpInt(host.viewContext, value.toFloat())
 
     private companion object {
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+        /** The bars over the page: the app's ground, nearly opaque. */
+        val BAR = Color.argb(235, 10, 13, 18)
+        val SOFT_TEXT = Color.rgb(213, 219, 227)
     }
 }

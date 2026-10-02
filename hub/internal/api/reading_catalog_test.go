@@ -76,6 +76,12 @@ func newReadingCatalogUpstream(t *testing.T) *httptest.Server {
 		case "/api/Image/series-cover":
 			w.Header().Set("Content-Type", "image/png")
 			_, _ = w.Write([]byte("kavita-cover"))
+		case "/api/Image/chapter-cover":
+			if r.URL.Query().Get("chapterId") != "6" {
+				t.Errorf("chapterId = %q", r.URL.Query().Get("chapterId"))
+			}
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write([]byte("issue-cover"))
 		default:
 			http.NotFound(w, r)
 		}
@@ -329,6 +335,10 @@ func TestReadingLibraryItemsAndDetailsUseStableHubWorkIDs(t *testing.T) {
 	}
 	if len(detail.Sections) != 1 || len(detail.Sections[0].Items) != 1 || detail.Continue == nil || detail.Continue.SourceItemID != "6" {
 		t.Fatalf("detail hierarchy = %+v / continue %+v", detail.Sections, detail.Continue)
+	}
+	// Each issue has its own cover, not only the series'.
+	if got := detail.Sections[0].Items[0].Artwork; got != "/v1/img/reading/kavita-chapter/6" {
+		t.Fatalf("issue artwork = %q", got)
 	}
 
 	restarted := NewServer(readingCatalogConfig(upstream.URL, catalogPath, []string{"reading"})).Handler()
@@ -629,8 +639,9 @@ func TestReadingCatalogImagesProxyAuthenticatedSources(t *testing.T) {
 	defer upstream.Close()
 	handler := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})).Handler()
 	for path, expected := range map[string][2]string{
-		"/v1/img/reading/kavita/9":       {"image/png", "kavita-cover"},
-		"/v1/img/reading/storyteller/12": {"image/jpeg", "story-cover"},
+		"/v1/img/reading/kavita/9":         {"image/png", "kavita-cover"},
+		"/v1/img/reading/kavita-chapter/6": {"image/png", "issue-cover"},
+		"/v1/img/reading/storyteller/12":   {"image/jpeg", "story-cover"},
 	} {
 		got := libraryRequest(handler, path)
 		if got.Code != http.StatusOK || got.Header().Get("Content-Type") != expected[0] || got.Body.String() != expected[1] {

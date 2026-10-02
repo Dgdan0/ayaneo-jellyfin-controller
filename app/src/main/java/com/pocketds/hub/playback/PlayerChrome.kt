@@ -262,20 +262,11 @@ internal class PlayerChrome(
         }
 
     /** "Audio & subtitles", "Chapters", "This video": what a tool opens, in words. */
-    private fun pill(label: String, description: String, action: () -> Unit) = TextView(context).apply {
-        text = label
-        contentDescription = description
-        textSize = 12f
-        typeface = com.pocketds.hub.ui.Type.text(context, 600)
-        setTextColor(Color.WHITE)
-        gravity = Gravity.CENTER
-        setPadding(dp(16), 0, dp(16), 0)
-        background = pillBackground()
-        Styler.makeFocusable(this)
-        activateOnTap(action)
-        setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
-        layoutParams = LinearLayout.LayoutParams(WRAP, dp(44)).apply { marginStart = dp(2) }
-    }
+    private fun pill(label: String, description: String, action: () -> Unit) =
+        com.pocketds.hub.ui.OverlayButtons.pill(context, colors.focusRing, label, description, action).apply {
+            setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
+            layoutParams = LinearLayout.LayoutParams(WRAP, dp(44)).apply { marginStart = dp(2) }
+        }
 
     /** −10 and +10: the jump, written on the disc. */
     private fun seekCircle(label: String, description: String, action: () -> Unit) = TextView(context).apply {
@@ -291,33 +282,11 @@ internal class PlayerChrome(
         setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
     }
 
-    private fun roundBackground(): StateListDrawable = ringed(GradientDrawable.OVAL, Color.argb(46, 255, 255, 255))
-
-    private fun pillBackground(): StateListDrawable = ringed(GradientDrawable.RECTANGLE, Color.argb(46, 255, 255, 255))
+    private fun roundBackground(): StateListDrawable = com.pocketds.hub.ui.OverlayButtons.disc(context, colors.focusRing)
 
     /** Play: a white disc. */
-    private fun discBackground(): StateListDrawable =
-        ringed(GradientDrawable.OVAL, Color.WHITE, pressed = Color.argb(255, 214, 219, 226))
-
-    /**
-     * A shape on the video. Focused, the white ring stands a few dp outside the
-     * fill, so it shows round a white disc and over bright video alike.
-     */
-    private fun ringed(shape: Int, fill: Int, pressed: Int = Color.argb(90, 255, 255, 255)): StateListDrawable {
-        val gap = dp(4)
-        fun shaped(color: Int, stroke: Boolean = false) = ThemeGradientDrawable().apply {
-            this.shape = shape
-            if (shape == GradientDrawable.RECTANGLE) cornerRadius = Styler.dp(context, 999f)
-            setColor(color)
-            if (stroke) setStroke(dp(2), this@PlayerChrome.colors.focusRing)
-        }
-        return StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_pressed), InsetDrawable(shaped(pressed), gap))
-            addState(intArrayOf(android.R.attr.state_focused),
-                LayerDrawable(arrayOf(shaped(Color.TRANSPARENT, stroke = true), InsetDrawable(shaped(fill), gap))))
-            addState(intArrayOf(), InsetDrawable(shaped(fill), gap))
-        }
-    }
+    private fun discBackground(): StateListDrawable = com.pocketds.hub.ui.OverlayButtons.ringed(
+        context, colors.focusRing, GradientDrawable.OVAL, Color.WHITE, pressed = Color.argb(255, 214, 219, 226))
 
     private fun timeText(value: String) = TextView(context).apply {
         text = value

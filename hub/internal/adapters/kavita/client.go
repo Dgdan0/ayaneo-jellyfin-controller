@@ -361,6 +361,14 @@ func (c *Client) Cover(ctx context.Context, seriesID int) ([]byte, string, error
 	return c.cover(ctx, "/api/Image/series-cover", url.Values{"seriesId": []string{strconv.Itoa(seriesID)}})
 }
 
+// ChapterCover is one issue's or chapter's own cover.
+func (c *Client) ChapterCover(ctx context.Context, chapterID int) ([]byte, string, error) {
+	if chapterID <= 0 {
+		return nil, "", fmt.Errorf("kavita: invalid chapter id")
+	}
+	return c.cover(ctx, "/api/Image/chapter-cover", url.Values{"chapterId": []string{strconv.Itoa(chapterID)}})
+}
+
 func (c *Client) LibraryCover(ctx context.Context, libraryID int) ([]byte, string, error) {
 	if libraryID <= 0 {
 		return nil, "", fmt.Errorf("kavita: invalid library id")

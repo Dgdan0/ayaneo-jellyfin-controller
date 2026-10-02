@@ -177,4 +177,18 @@ class ReadingWorkPresentationTest {
             )
         )
     }
+
+    @Test fun `a comic run names the issue to continue rather than a percentage of every page`() {
+        val issue51 = ReadingSectionItem(sourceItemId = "8959", title = "51", number = "51", kind = "comic", availability = "")
+        val work = ReadingWork(
+            id = "ff", kind = "comic",
+            progress = ReadingProgress(percentage = 0.0002),
+            editions = listOf(ReadingEdition(availability = "available", source = "kavita", kind = "comic", sourceItemId = "series-9")),
+            sections = listOf(ReadingSection(items = listOf(issue51))),
+            continueAt = ReadingContinue(source = "kavita", sourceItemId = "8959", number = "51", kind = "comic")
+        )
+        assertEquals("Continue · Issue 51", ReadingWorkPresentation.primaryRead(work)?.label)
+        assertEquals("On issue 51 · 1% read", ReadingBookFacts.progress(work))
+        assertEquals("Start · Issue 51", ReadingWorkPresentation.primaryRead(work.copy(progress = null, continueAt = null))?.label)
+    }
 }

@@ -140,4 +140,15 @@ class PagedImageStateTest {
         assertEquals(6, ReaderControlFocusPolicy.initialIndex(controlCount = 7))
         assertEquals(null, ReaderControlFocusPolicy.initialIndex(controlCount = 0))
     }
+
+    @Test
+    fun `the reader heads a comic with its series and names the issue under it`() {
+        assertEquals("Fantastic Four", ReaderTitleFormatter.heading("Fantastic Four", "Chapter 51", "Fallback"))
+        assertEquals("Issue 51", ReaderTitleFormatter.issue("comic", "Fantastic Four", "Chapter 51", "51"))
+        assertEquals("Chapter 11", ReaderTitleFormatter.issue("manga", "Chainsaw Man", "11", "11"))
+        assertEquals("Annual 1965", ReaderTitleFormatter.issue("comic", "Fantastic Four", "Annual 1965", "1"))
+        assertEquals("", ReaderTitleFormatter.issue("comic", "Saga", "Saga", ""))
+        assertEquals("Issue 51 · Page 2 of 24", ReaderTitleFormatter.subtitle("Issue 51", 2, 24))
+        assertEquals("Page 2 of 24 · 1/3", ReaderTitleFormatter.subtitle("", 2, 24, third = 1))
+    }
 }

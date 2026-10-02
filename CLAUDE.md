@@ -612,6 +612,9 @@ Most of these exist because several screens had drifted copies of the same thing
 | A list of rows whose focused row rests at the top, heading and all (Home, Discover) | `ui/PinnedRows` (`RecyclerView.pinFocusedRows`; leaves room under the last row; put the list in a clipping frame; a row with two parts implements `PinnedRowsLayoutManager.Anchor`) |
 | Up/Down through a scrolling page of rows (past an empty row, to rows scrolled away) | `ui/RowStep.move(rows, focused, up)` (Books home) |
 | A comic or manga among books: the pill on its cover and its line | `ReadingBookFacts.kindTag` / `comicLine`; `PosterCardView.bindReadingWork(showKind = true)` on Books home only |
+| A comic run's issues on its page; their names and counts | `screens/library/IssueStrip` (a lazy strip per volume, opening at the issue you are on); `ReadingBookFacts.issueTitle` / `issueLine`, "162 issues" in `length`, "On issue 51 · 1% read" in `progress`; the hub's `/v1/img/reading/kavita-chapter/{id}` cover per issue |
+| Controls drawn over a picture (the player, the comic reader) | `ui/OverlayButtons` (`round`, `pill`, `disc`, `ringed`: a soft disc or pill, the ring standing outside it) |
+| The comic reader's heading | `ReaderTitleFormatter.heading` / `issue` / `subtitle` ("Fantastic Four" over "Issue 51 · Page 2 of 24"; Kavita's "Chapter 51" is an issue for a comic) |
 | Reacting to focus while keeping the ring | `FocusDecorator.listen(view, ringVisible) { view, focused -> … }` |
 | Player and playback-option wording | `playback/PlayerLabels` (Locale.US decimals) |
 | Subtitle decoding | `TolerantSubtitleDecoderFactory` in the text renderer (a broken ASS line is skipped, not fatal) |
