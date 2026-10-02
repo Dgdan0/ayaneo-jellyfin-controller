@@ -41,4 +41,25 @@ class PlayerLabelsTest {
         assertEquals("Normal", PlayerLabels.speed(1f))
         assertEquals("1.5×", PlayerLabels.speed(1.5f))
     }
+
+    @Test
+    fun theTitleBarNamesTheSeriesAndUnderItTheEpisode() {
+        val episode = com.pocketds.hub.model.PlaybackItem(title = "Somewhere Not Here", seriesTitle = "Vinland Saga", seasonNumber = 1, episodeNumber = 1)
+        assertEquals("Vinland Saga", PlayerLabels.title(episode))
+        assertEquals("S1E1 · Somewhere Not Here", PlayerLabels.subtitle(episode, offline = false))
+        assertEquals("S1E1 · Somewhere Not Here · Offline", PlayerLabels.subtitle(episode, offline = true))
+        val film = com.pocketds.hub.model.PlaybackItem(title = "Gran Torino")
+        assertEquals("Gran Torino", PlayerLabels.title(film))
+        assertEquals("", PlayerLabels.subtitle(film, offline = false))
+    }
+
+    @Test
+    fun underTheTimelineThePositionWithItsChapterAndTheTimeLeft() {
+        assertEquals("5:34 · Part A", PlayerLabels.positionLine(334_000, "Part A"))
+        // "Chapter 2" says nothing the marks on the timeline do not.
+        assertEquals("5:34", PlayerLabels.positionLine(334_000, "Chapter 2"))
+        assertEquals("5:34", PlayerLabels.positionLine(334_000, null))
+        assertEquals("−22:53", PlayerLabels.remainingLine(334_000, 1_707_000))
+        assertEquals("", PlayerLabels.remainingLine(0, 0))
+    }
 }

@@ -5,6 +5,8 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
+import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.StateListDrawable
 import android.view.Gravity
 import android.view.View
@@ -40,6 +42,7 @@ internal class PlayerChrome(
 ) {
     interface Actions {
         fun showTracks()
+        fun showChapters()
         fun showOptions()
         fun toggleLock()
         fun enterPictureInPicture()
@@ -54,9 +57,12 @@ internal class PlayerChrome(
     }
 
     lateinit var titleView: TextView; private set
-    lateinit var tracksButton: PlayerIconButton; private set
+    /** Under the title: "S1E1 · Somewhere Not Here", or Offline. */
+    lateinit var subtitleView: TextView; private set
+    lateinit var tracksButton: TextView; private set
+    lateinit var chaptersButton: TextView; private set
     lateinit var castButton: MediaRouteButton; private set
-    lateinit var optionsButton: PlayerIconButton; private set
+    lateinit var optionsButton: TextView; private set
     lateinit var lockButton: PlayerIconButton; private set
     lateinit var pipButton: PlayerIconButton; private set
     lateinit var closeButton: PlayerIconButton; private set
@@ -64,9 +70,9 @@ internal class PlayerChrome(
     lateinit var seekBar: ChapterSeekBar; private set
     lateinit var duration: TextView; private set
     lateinit var previousButton: PlayerIconButton; private set
-    lateinit var rewindButton: PlayerIconButton; private set
+    lateinit var rewindButton: TextView; private set
     lateinit var playButton: PlayerIconButton; private set
-    lateinit var forwardButton: PlayerIconButton; private set
+    lateinit var forwardButton: TextView; private set
     lateinit var nextButton: PlayerIconButton; private set
     lateinit var seekPreviewImage: ImageView; private set
     /** Holds the frame; hidden until a frame has loaded, so the preview is a picture or just the time. */
@@ -75,7 +81,9 @@ internal class PlayerChrome(
     lateinit var seekPreviewDelta: TextView; private set
 
     val top: LinearLayout = buildTop()
-    val controller: LinearLayout = buildController(seekSeconds, timeline)
+    /** Previous, back, play, forward, next: in the middle of the picture. */
+    val center: LinearLayout = buildCenter(seekSeconds)
+    val controller: LinearLayout = buildController(timeline)
     val seekPreview: LinearLayout = buildSeekPreview()
     val gestureFeedback: TextView = buildGestureFeedback()
 
@@ -84,75 +92,114 @@ internal class PlayerChrome(
         lockButton.contentDescription = if (locked) "Unlock touch controls" else "Lock touch controls"
     }
 
+    /**
+     * Back at the left, the title and what is playing, then the tools: text
+     * pills for what they open, round buttons for the rest.
+     */
     private fun buildTop(): LinearLayout = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(22), dp(14), dp(16), dp(18))
+        setPadding(dp(18), dp(14), dp(18), dp(26))
         background = ThemeGradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(Color.argb(225, 0, 0, 0), Color.TRANSPARENT)
+            intArrayOf(Color.argb(190, 0, 0, 0), Color.TRANSPARENT)
         )
-        titleView = TextView(context).apply {
-            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 18f)
-            setTextColor(Color.WHITE)
-            maxLines = 2
-        }
-        addView(titleView, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginEnd = dp(10) })
-        tracksButton = control(PlayerControlIcon.TRACKS, "Audio and subtitles", actions::showTracks)
+        closeButton = round(PlayerControlIcon.BACK, "Close playback", actions::close)
+        addView(closeButton, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(10) })
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            titleView = TextView(context).apply {
+                com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 17f)
+                setTextColor(Color.WHITE)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                textAlignment = View.TEXT_ALIGNMENT_VIEW_START
+                setShadowLayer(4f, 0f, 0f, Color.argb(160, 0, 0, 0))
+            }
+            addView(titleView)
+            subtitleView = TextView(context).apply {
+                textSize = 12f
+                setTextColor(Color.argb(255, 213, 219, 227))
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                textAlignment = View.TEXT_ALIGNMENT_VIEW_START
+                textDirection = View.TEXT_DIRECTION_LTR
+                setPadding(0, dp(2), 0, 0)
+                setShadowLayer(4f, 0f, 0f, Color.argb(160, 0, 0, 0))
+            }
+            addView(subtitleView)
+        }, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginEnd = dp(8) })
+        tracksButton = pill("Audio & subtitles", "Audio and subtitles", actions::showTracks)
         addView(tracksButton)
+        chaptersButton = pill("Chapters", "Chapters", actions::showChapters)
+        addView(chaptersButton)
+        optionsButton = pill("This video", "Quality, speed and aspect for this video", actions::showOptions)
+        addView(optionsButton)
         castButton = MediaRouteButton(context).apply {
             contentDescription = "Play on a TV"
             isFocusable = true
             isFocusableInTouchMode = true
+            background = roundBackground()
             CastButtonFactory.setUpMediaRouteButton(context, this)
+            setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
         }
-        addView(castButton, LinearLayout.LayoutParams(dp(48), dp(48)))
-        optionsButton = control(PlayerControlIcon.OPTIONS, "Playback options, chapters, speed and aspect", actions::showOptions)
-        addView(optionsButton)
-        lockButton = control(PlayerControlIcon.UNLOCK, "Lock touch controls", actions::toggleLock)
-        addView(lockButton)
-        pipButton = control(PlayerControlIcon.PICTURE_IN_PICTURE, "Open picture in picture", actions::enterPictureInPicture)
-        addView(pipButton)
-        closeButton = control(PlayerControlIcon.CLOSE, "Close playback", actions::close)
-        addView(closeButton)
+        addView(castButton, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(4) })
+        lockButton = round(PlayerControlIcon.UNLOCK, "Lock touch controls", actions::toggleLock)
+        addView(lockButton, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
+        pipButton = round(PlayerControlIcon.PICTURE_IN_PICTURE, "Open picture in picture", actions::enterPictureInPicture)
+        addView(pipButton, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
     }
 
-    private fun buildController(seekSeconds: Int, timeline: SeekBar.OnSeekBarChangeListener): LinearLayout =
+    private fun buildCenter(seekSeconds: Int): LinearLayout = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+        clipChildren = false
+        clipToPadding = false
+        setPadding(dp(8), dp(8), dp(8), dp(8))
+        previousButton = round(PlayerControlIcon.PREVIOUS, "Play previous episode", actions::playPrevious)
+        addView(previousButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(20) })
+        rewindButton = seekCircle("−$seekSeconds", "Jump back $seekSeconds seconds", actions::rewind)
+        addView(rewindButton, LinearLayout.LayoutParams(dp(58), dp(58)))
+        playButton = PlayerIconButton(context, PlayerControlIcon.PLAY).apply {
+            contentDescription = "Play"
+            setIconColor(Color.argb(255, 10, 13, 18), halo = false)
+            background = discBackground()
+            Styler.makeFocusable(this)
+            activateOnTap(actions::togglePlay)
+            setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
+        }
+        addView(playButton, LinearLayout.LayoutParams(dp(80), dp(80)).apply { marginStart = dp(28); marginEnd = dp(28) })
+        forwardButton = seekCircle("+$seekSeconds", "Jump forward $seekSeconds seconds", actions::forward)
+        addView(forwardButton, LinearLayout.LayoutParams(dp(58), dp(58)))
+        nextButton = round(PlayerControlIcon.NEXT, "Play next episode", actions::playNext)
+        addView(nextButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(20) })
+    }
+
+    /** The timeline across the whole width; the time and chapter under its start, the time left under its end. */
+    private fun buildController(timeline: SeekBar.OnSeekBarChangeListener): LinearLayout =
         LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(26), dp(18), dp(26), dp(20))
+            setPadding(dp(20), dp(34), dp(20), dp(12))
             background = ThemeGradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(Color.TRANSPARENT, Color.argb(225, 0, 0, 0))
+                intArrayOf(Color.TRANSPARENT, Color.argb(215, 0, 0, 0))
             )
+            seekBar = ChapterSeekBar(context).apply {
+                max = 10_000
+                contentDescription = "Playback position"
+                Styler.makeFocusable(this)
+                setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
+                setOnSeekBarChangeListener(timeline)
+            }
+            addView(seekBar, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                position = timeText("0:00")
-                addView(position, LinearLayout.LayoutParams(dp(64), WRAP))
-                seekBar = ChapterSeekBar(context).apply {
-                    max = 10_000
-                    contentDescription = "Playback position"
-                    Styler.makeFocusable(this)
-                    setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
-                    setOnSeekBarChangeListener(timeline)
-                }
-                addView(seekBar, LinearLayout.LayoutParams(0, WRAP, 1f))
-                duration = timeText("0:00")
-                addView(duration, LinearLayout.LayoutParams(dp(64), WRAP))
-            }, LinearLayout.LayoutParams(MATCH, WRAP))
-            addView(LinearLayout(context).apply {
-                gravity = Gravity.CENTER
-                previousButton = control(PlayerControlIcon.PREVIOUS, "Play previous episode", actions::playPrevious)
-                addView(previousButton)
-                rewindButton = control(PlayerControlIcon.REWIND, "Jump back $seekSeconds seconds", actions::rewind)
-                addView(rewindButton)
-                playButton = control(PlayerControlIcon.PLAY, "Play", actions::togglePlay)
-                addView(playButton)
-                forwardButton = control(PlayerControlIcon.FORWARD, "Jump forward $seekSeconds seconds", actions::forward)
-                addView(forwardButton)
-                nextButton = control(PlayerControlIcon.NEXT, "Play next episode", actions::playNext)
-                addView(nextButton)
+                setPadding(dp(8), dp(2), dp(8), 0)
+                position = timeText("0:00").apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL }
+                addView(position, LinearLayout.LayoutParams(0, WRAP, 1f))
+                duration = timeText("0:00").apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
+                addView(duration)
             }, LinearLayout.LayoutParams(MATCH, WRAP))
         }
 
@@ -204,30 +251,71 @@ internal class PlayerChrome(
         }
     }
 
-    private fun control(icon: PlayerControlIcon, description: String, action: () -> Unit) =
+    /** A round button on a soft disc: back, cast, lock, picture in picture, previous and next. */
+    private fun round(icon: PlayerControlIcon, description: String, action: () -> Unit) =
         PlayerIconButton(context, icon).apply {
             contentDescription = description
-            // Player controls sit directly on the video. A focused control gets
-            // a thin, high-contrast ring but never becomes an opaque blue tile.
-            background = bareButtonBackground()
+            background = roundBackground()
             Styler.makeFocusable(this)
-            minimumWidth = dp(48)
-            minimumHeight = dp(48)
             activateOnTap(action)
             setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
-            layoutParams = LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(7) }
         }
 
-    private fun bareButtonBackground(): StateListDrawable {
-        fun face(fill: Int, strokeWidth: Int = 0, strokeColor: Int = 0) = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 11f)
-            setColor(fill)
-            if (strokeWidth > 0) setStroke(strokeWidth, strokeColor)
+    /** "Audio & subtitles", "Chapters", "This video": what a tool opens, in words. */
+    private fun pill(label: String, description: String, action: () -> Unit) = TextView(context).apply {
+        text = label
+        contentDescription = description
+        textSize = 12f
+        typeface = com.pocketds.hub.ui.Type.text(context, 600)
+        setTextColor(Color.WHITE)
+        gravity = Gravity.CENTER
+        setPadding(dp(16), 0, dp(16), 0)
+        background = pillBackground()
+        Styler.makeFocusable(this)
+        activateOnTap(action)
+        setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
+        layoutParams = LinearLayout.LayoutParams(WRAP, dp(44)).apply { marginStart = dp(2) }
+    }
+
+    /** −10 and +10: the jump, written on the disc. */
+    private fun seekCircle(label: String, description: String, action: () -> Unit) = TextView(context).apply {
+        text = label
+        contentDescription = description
+        textSize = 13f
+        typeface = com.pocketds.hub.ui.Type.text(context, 700)
+        setTextColor(Color.WHITE)
+        gravity = Gravity.CENTER
+        background = roundBackground()
+        Styler.makeFocusable(this)
+        activateOnTap(action)
+        setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
+    }
+
+    private fun roundBackground(): StateListDrawable = ringed(GradientDrawable.OVAL, Color.argb(46, 255, 255, 255))
+
+    private fun pillBackground(): StateListDrawable = ringed(GradientDrawable.RECTANGLE, Color.argb(46, 255, 255, 255))
+
+    /** Play: a white disc. */
+    private fun discBackground(): StateListDrawable =
+        ringed(GradientDrawable.OVAL, Color.WHITE, pressed = Color.argb(255, 214, 219, 226))
+
+    /**
+     * A shape on the video. Focused, the white ring stands a few dp outside the
+     * fill, so it shows round a white disc and over bright video alike.
+     */
+    private fun ringed(shape: Int, fill: Int, pressed: Int = Color.argb(90, 255, 255, 255)): StateListDrawable {
+        val gap = dp(4)
+        fun shaped(color: Int, stroke: Boolean = false) = ThemeGradientDrawable().apply {
+            this.shape = shape
+            if (shape == GradientDrawable.RECTANGLE) cornerRadius = Styler.dp(context, 999f)
+            setColor(color)
+            if (stroke) setStroke(dp(2), this@PlayerChrome.colors.focusRing)
         }
         return StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_focused), face(Color.argb(80, 0, 0, 0), dp(2), colors.focusRing))
-            addState(intArrayOf(android.R.attr.state_pressed), face(Color.argb(75, 0, 0, 0)))
-            addState(intArrayOf(), face(Color.TRANSPARENT))
+            addState(intArrayOf(android.R.attr.state_pressed), InsetDrawable(shaped(pressed), gap))
+            addState(intArrayOf(android.R.attr.state_focused),
+                LayerDrawable(arrayOf(shaped(Color.TRANSPARENT, stroke = true), InsetDrawable(shaped(fill), gap))))
+            addState(intArrayOf(), InsetDrawable(shaped(fill), gap))
         }
     }
 
@@ -235,7 +323,8 @@ internal class PlayerChrome(
         text = value
         textSize = 12f
         gravity = Gravity.CENTER
-        setTextColor(Color.WHITE)
+        setTextColor(Color.argb(255, 213, 219, 227))
+        textDirection = View.TEXT_DIRECTION_LTR
     }
 
     private fun dp(value: Int) = Styler.dpInt(context, value.toFloat())

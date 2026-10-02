@@ -1007,9 +1007,14 @@ media version, audio, subtitles and Original/40/20/10/5/2 Mbps quality. The hub 
 streaming, HLS manifest rewriting, external subtitle extraction, ordered Jellyfin events,
 session ownership and 30-minute abandoned-session cleanup.
 
-The player overlay has a compact title/action strip with box-free, dark-outlined Audio, CC,
-Quality, PiP and Close symbols. Its bottom timeline uses Play/Pause, a configurable 5/10/15/30-second seek step
-(10 seconds by default), and available Previous/Next episode actions. A tap outside a control
+The player overlay (2026-10 redesign, `playback/PlayerChrome`) has a round Back at the top left, the
+title with the episode under it ("S1E1 · Somewhere Not Here", `PlayerLabels.title`/`subtitle`), pills
+for Audio & subtitles, Chapters and This video, and round Cast, Lock and PiP buttons. Previous, −10,
+a white Play disc, +10 and Next sit in the middle of the picture (a missing neighbour keeps its slot,
+so Play stays centred), using a configurable 5/10/15/30-second seek step (10 seconds by default).
+The timeline runs the full width with "5:34 · Part A" and "−22:53" under it
+(`PlayerLabels.positionLine`/`remainingLine`; generic "Chapter 2" names are left out). Focus runs
+top bar, middle row, timeline; A clicks any focused overlay control and plays/pauses on the timeline. A tap outside a control
 toggles the overlay. Android system Back, including the Pocket DS edge gesture, exits playback
 immediately and restores the originating Library/Home focus; physical B retains the layered
 sheet/hide/exit behavior. Native Android PiP keeps the same MediaSession playback running;

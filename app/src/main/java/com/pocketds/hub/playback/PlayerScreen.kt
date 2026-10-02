@@ -92,22 +92,26 @@ class PlayerScreen(
     private lateinit var chrome: PlayerChrome
     private val topPanel: LinearLayout get() = chrome.top
     private val controllerPanel: LinearLayout get() = chrome.controller
+    private val centerPanel: LinearLayout get() = chrome.center
+    /** Everything that shows and hides together: the top bar, the middle row, the timeline. */
+    private val controlPanels: List<LinearLayout> get() = listOf(topPanel, centerPanel, controllerPanel)
     private val titleView: TextView get() = chrome.titleView
     private lateinit var status: TextView
     private val position: TextView get() = chrome.position
     private val duration: TextView get() = chrome.duration
     private val seekBar: ChapterSeekBar get() = chrome.seekBar
     private val playButton: PlayerIconButton get() = chrome.playButton
-    private val tracksButton: PlayerIconButton get() = chrome.tracksButton
+    private val tracksButton: TextView get() = chrome.tracksButton
+    private val chaptersButton: TextView get() = chrome.chaptersButton
     private val menuState = PlayerMenuState()
-    private val optionsButton: PlayerIconButton get() = chrome.optionsButton
+    private val optionsButton: TextView get() = chrome.optionsButton
     private val castButton: MediaRouteButton get() = chrome.castButton
     private val lockButton: PlayerIconButton get() = chrome.lockButton
     private val pipButton: PlayerIconButton get() = chrome.pipButton
     private val closeButton: PlayerIconButton get() = chrome.closeButton
     private val previousButton: PlayerIconButton get() = chrome.previousButton
-    private val rewindButton: PlayerIconButton get() = chrome.rewindButton
-    private val forwardButton: PlayerIconButton get() = chrome.forwardButton
+    private val rewindButton: TextView get() = chrome.rewindButton
+    private val forwardButton: TextView get() = chrome.forwardButton
     /** "Skip intro": shown over the video, with or without the rest of the controls. */
     private lateinit var skipPill: TextView
     private val nextButton: PlayerIconButton get() = chrome.nextButton
@@ -264,8 +268,9 @@ class PlayerScreen(
             })
         root.addView(gestureView, FrameLayout.LayoutParams(MATCH, MATCH))
         chrome = PlayerChrome(host.viewContext, colors, ChromeActions(), configuredSeekSeconds(), TimelineListener())
-        titleView.text = plan?.item?.displayTitle().orEmpty()
+        plan?.let { showTitle(it.item, it.offline) }
         root.addView(topPanel, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
+        root.addView(centerPanel, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER))
         root.addView(controllerPanel, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
         // The panel's height is known only after it lays out, and changes when
         // the skip or next buttons appear.
@@ -395,8 +400,7 @@ class PlayerScreen(
         if (active) {
             handler.removeCallbacks(hideControls)
             choiceOverlay.dismiss()
-            topPanel.visibility = View.GONE
-            controllerPanel.visibility = View.GONE
+            controlPanels.forEach { it.visibility = View.GONE }
             upNext.visibility = View.GONE
             skipPill.visibility = View.GONE
             seekPreview.visibility = View.GONE
@@ -418,8 +422,9 @@ class PlayerScreen(
             PadAction.Activate -> {
                 val focused = root.findFocus()
                 if (focused != null && (upNext.hasFocus() || focused === skipPill)) focused.performClick()
-                else if (controlsVisible && focused is PlayerIconButton) focused.performClick()
-                else if (controlsVisible && focused === castButton) castButton.performClick()
+                // Any control on the overlay does its own thing; on the timeline, or with nothing
+                // focused, A plays and pauses. The pills and -10/+10 are text, not icon buttons.
+                else if (controlsVisible && focused != null && focused !== seekBar && inControls(focused)) focused.performClick()
                 else togglePlay()
                 true
             }
@@ -511,7 +516,7 @@ class PlayerScreen(
         restoreSubtitleOffset(current)
         prepareDynamicSubtitle(current)
         updateControlLabels(current)
-        duration.text = Fmt.clock(current.durationMillis)
+        duration.text = PlayerLabels.remainingLine(controller?.currentPosition ?: 0L, current.durationMillis)
         status.setTextColor(Color.WHITE)
         status.text = "Opening ${current.playMethod.lowercase().ifEmpty { "media" }}…"
         if (!serviceLoaded) {
@@ -549,7 +554,7 @@ class PlayerScreen(
     }
 
     private fun showRemotePlayback() {
-        titleView.text = plan?.item?.displayTitle().orEmpty()
+        plan?.let { showTitle(it.item, it.offline) }
         status.visibility = View.VISIBLE
         status.setTextColor(Color.WHITE)
         status.text = "Playing on ${CastPlaybackCoordinator.deviceName}"
@@ -692,25 +697,26 @@ class PlayerScreen(
             playButton.requestFocus()
             return
         }
-        val top = listOf<View>(tracksButton, castButton, optionsButton, lockButton, pipButton, closeButton)
+        // Top to bottom: the top bar, the middle row (play and its neighbours), the timeline.
+        val top = listOf<View>(closeButton, tracksButton, chaptersButton, optionsButton, castButton, lockButton, pipButton)
             .filter { it.visibility == View.VISIBLE && it.isEnabled }
         val playback = listOf<View>(previousButton, rewindButton, playButton, forwardButton, nextButton, skipPill)
             .filter { it.visibility == View.VISIBLE && it.isEnabled }
         when {
             focused === seekBar -> when (direction) {
                 Direction.LEFT, Direction.RIGHT -> seekTimeline(direction)
-                Direction.UP -> top.firstOrNull()?.requestFocus()
-                Direction.DOWN -> playButton.requestFocus()
+                Direction.UP -> playButton.requestFocus()
+                Direction.DOWN -> Unit
             }
             focused in top -> when (direction) {
                 Direction.LEFT, Direction.RIGHT -> moveWithin(top, focused, direction)
-                Direction.DOWN -> seekBar.requestFocus()
+                Direction.DOWN -> playButton.requestFocus()
                 Direction.UP -> Unit
             }
             focused in playback -> when (direction) {
                 Direction.LEFT, Direction.RIGHT -> moveWithin(playback, focused, direction)
-                Direction.UP -> seekBar.requestFocus()
-                Direction.DOWN -> Unit
+                Direction.UP -> (top.firstOrNull { it === tracksButton } ?: top.firstOrNull())?.requestFocus()
+                Direction.DOWN -> seekBar.requestFocus()
             }
             else -> playButton.requestFocus()
         }
@@ -998,8 +1004,7 @@ class PlayerScreen(
         if (CastPlaybackCoordinator.isActive) {
             val current = CastPlaybackCoordinator.positionMillis
             val end = CastPlaybackCoordinator.activePlan?.durationMillis ?: 0
-            position.text = Fmt.clock(current)
-            duration.text = Fmt.clock(end)
+            showTimes(current, end)
             playButton.setIcon(if (CastPlaybackCoordinator.isPlaying) PlayerControlIcon.PAUSE else PlayerControlIcon.PLAY)
             playButton.contentDescription = if (CastPlaybackCoordinator.isPlaying) "Pause on TV" else "Play on TV"
             if (!seekingByTouch && !padTimelineSeeking && end > 0) setSeekBarTarget(current, end)
@@ -1008,8 +1013,7 @@ class PlayerScreen(
         val value = controller ?: return
         val current = value.currentPosition.coerceAtLeast(0)
         val end = value.duration.takeIf { it > 0 } ?: plan?.durationMillis ?: 0
-        position.text = Fmt.clock(current)
-        duration.text = Fmt.clock(end)
+        showTimes(current, end)
         if (!seekingByTouch && !padTimelineSeeking) {
             seekBar.max = 10_000
             seekBar.progress = if (end > 0) ((current.toDouble() / end) * 10_000).toInt().coerceIn(0, 10_000) else 0
@@ -1093,7 +1097,7 @@ class PlayerScreen(
         plan = active
         prepareDynamicSubtitle(active)
         updateControlLabels(active)
-        duration.text = Fmt.clock(active.durationMillis)
+        duration.text = PlayerLabels.remainingLine(controller?.currentPosition ?: 0L, active.durationMillis)
     }
 
     private fun showTrackSheet() = showTracks(menuState.trackTab)
@@ -1166,7 +1170,7 @@ class PlayerScreen(
                     pendingFallbackSubtitleOffset = false
                 }
                 showControls()
-                if (!topPanel.hasFocus() && !controllerPanel.hasFocus()) playButton.requestFocus()
+                if (controlPanels.none { it.hasFocus() }) playButton.requestFocus()
             }
         )
         scheduleHide()
@@ -1434,7 +1438,8 @@ class PlayerScreen(
         }
     }
 
-    private fun showChapterSheet() {
+    /** [fromOptions]: opened from This video, so Back returns there; from its own pill, Back just closes it. */
+    private fun showChapterSheet(fromOptions: Boolean = true) {
         val durationMillis = controller?.duration?.takeIf { it > 0 } ?: plan?.durationMillis ?: 0
         val chapters = PlaybackEnhancements.chapters(plan?.chapters.orEmpty(), durationMillis)
         if (chapters.isEmpty()) {
@@ -1447,7 +1452,8 @@ class PlayerScreen(
             ChoiceOverlay.Choice(chapter.positionMillis.toString(), chapter.name, Fmt.clock(chapter.positionMillis))
         }
         val selected = chapters.indexOfLast { it.positionMillis <= at }.coerceAtLeast(0)
-        choiceOverlay.show("Chapters", "Jump to a chapter.", choices, selected, { showPlaybackPanel("view") }) { id ->
+        choiceOverlay.show("Chapters", "Jump to a chapter.", choices, selected,
+            { if (fromOptions) showPlaybackPanel("view") else showControls() }) { id ->
             controller?.seekTo(id.toLong())
             showControls()
         }
@@ -1619,7 +1625,7 @@ class PlayerScreen(
                 PlaybackService.load(host.viewContext, local, subtitleOffsetMillis = subtitleOffsetMillis)
                 prepareDynamicSubtitle(local)
                 updateControlLabels(local)
-                duration.text = Fmt.clock(local.durationMillis)
+                duration.text = PlayerLabels.remainingLine(controller?.currentPosition ?: 0L, local.durationMillis)
                 status.visibility = View.GONE
                 return
             }
@@ -1640,7 +1646,7 @@ class PlayerScreen(
                     )
                     prepareDynamicSubtitle(requireNotNull(plan))
                     updateControlLabels(requireNotNull(plan))
-                    duration.text = Fmt.clock(requireNotNull(plan).durationMillis)
+                    duration.text = PlayerLabels.remainingLine(controller?.currentPosition ?: 0L, requireNotNull(plan).durationMillis)
                     status.visibility = View.GONE
                 }
                 is HubResult.Failed -> {
@@ -1655,6 +1661,7 @@ class PlayerScreen(
     /** What the controls do; PlayerChrome only builds them. */
     private inner class ChromeActions : PlayerChrome.Actions {
         override fun showTracks() = showTrackSheet()
+        override fun showChapters() = showChapterSheet(fromOptions = false)
         override fun showOptions() = showPlaybackSheet()
         override fun toggleLock() {
             touchLocked = !touchLocked
@@ -1728,16 +1735,18 @@ class PlayerScreen(
         value.nextItem?.let(upNext::bind)
         seekBar.marks = if (value.durationMillis > 0) PlaybackEnhancements.chapters(value.chapters, value.durationMillis)
             .map { it.positionMillis.toFloat() / value.durationMillis } else emptyList()
-        titleView.text = if (value.offline) "${value.item.displayTitle()}  ·  Offline" else value.item.displayTitle()
+        showTitle(value.item, value.offline)
+        chaptersButton.visibility = if (value.chapters.isEmpty()) View.GONE else View.VISIBLE
         val audio = value.audioTracks.firstOrNull { it.index == value.selectedAudioIndex }
         val subtitle = value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }
         tracksButton.contentDescription = "Audio and subtitles. " +
             (audio?.let { "Audio ${it.label}. " } ?: "") +
             (subtitle?.let { "Subtitles ${it.label}, ${PlayerLabels.subtitleOffset(subtitleOffsetMillis)}" } ?: "Subtitles off")
-        previousButton.visibility = if (value.previousItem == null) View.GONE else View.VISIBLE
+        // Invisible rather than gone: the row keeps its shape, so Play stays in the middle.
+        previousButton.visibility = if (value.previousItem == null) View.INVISIBLE else View.VISIBLE
         previousButton.contentDescription = value.previousItem?.let { "Play previous episode, ${it.displayTitle()}" }
             ?: "Previous episode unavailable"
-        nextButton.visibility = if (value.nextItem == null) View.GONE else View.VISIBLE
+        nextButton.visibility = if (value.nextItem == null) View.INVISIBLE else View.VISIBLE
         nextButton.contentDescription = value.nextItem?.let { "Play next episode, ${it.displayTitle()}" }
             ?: "Next episode unavailable"
         controller?.setPlaybackSpeed(playbackSpeed)
@@ -1751,10 +1760,32 @@ class PlayerScreen(
         scheduleHide()
     }
 
+    private fun inControls(view: View): Boolean {
+        var v: View? = view
+        while (v != null) {
+            if (controlPanels.any { it === v }) return true
+            v = v.parent as? View
+        }
+        return false
+    }
+
+    /** The title bar: the series or film, and under it the episode (and Offline). */
+    private fun showTitle(item: com.pocketds.hub.model.PlaybackItem, offline: Boolean) {
+        titleView.text = PlayerLabels.title(item)
+        chrome.subtitleView.text = PlayerLabels.subtitle(item, offline)
+        chrome.subtitleView.visibility = if (chrome.subtitleView.text.isNullOrEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /** "5:34 · Part A" under the timeline's start, "−22:53" under its end. */
+    private fun showTimes(current: Long, end: Long) {
+        val chapter = plan?.chapters.orEmpty().lastOrNull { it.positionMillis <= current }?.name
+        position.text = PlayerLabels.positionLine(current, chapter)
+        duration.text = PlayerLabels.remainingLine(current, end)
+    }
+
     private fun setControls(visible: Boolean) {
         controlsVisible = visible
-        topPanel.visibility = if (visible) View.VISIBLE else View.GONE
-        controllerPanel.visibility = if (visible) View.VISIBLE else View.GONE
+        controlPanels.forEach { it.visibility = if (visible) View.VISIBLE else View.GONE }
         // The pill and the card sit above the timeline while it shows.
         (skipPill.layoutParams as FrameLayout.LayoutParams).let {
             it.bottomMargin = dp(if (visible) SKIP_BOTTOM_SHOWN_DP else SKIP_BOTTOM_HIDDEN_DP)
@@ -1767,7 +1798,7 @@ class PlayerScreen(
         placeSubtitles()
         if (!visible) {
             handler.removeCallbacks(hideControls)
-            if (topPanel.hasFocus() || controllerPanel.hasFocus()) root.requestFocus()
+            if (controlPanels.any { it.hasFocus() }) root.requestFocus()
         }
     }
 

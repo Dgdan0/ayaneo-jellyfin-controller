@@ -18,6 +18,7 @@ internal enum class PlayerControlIcon {
     OPTIONS,
     PICTURE_IN_PICTURE,
     CLOSE,
+    BACK,
     PREVIOUS,
     REWIND,
     PLAY,
@@ -52,6 +53,16 @@ internal class PlayerIconButton(
         paint.setShadowLayer(2.5f, 0f, 0f, Color.BLACK)
     }
 
+    /**
+     * The symbol's colour, and whether it keeps the dark halo it needs over
+     * bright video. Play on its white disc is dark and has no halo.
+     */
+    fun setIconColor(color: Int, halo: Boolean = true) {
+        paint.color = color
+        if (halo) paint.setShadowLayer(2.5f, 0f, 0f, Color.BLACK) else paint.clearShadowLayer()
+        invalidate()
+    }
+
     fun setIcon(value: PlayerControlIcon) {
         if (icon == value) return
         icon = value
@@ -82,6 +93,7 @@ internal class PlayerIconButton(
             PlayerControlIcon.OPTIONS -> drawOptions(canvas)
             PlayerControlIcon.PICTURE_IN_PICTURE -> drawPictureInPicture(canvas)
             PlayerControlIcon.CLOSE -> drawClose(canvas)
+            PlayerControlIcon.BACK -> drawBack(canvas)
             PlayerControlIcon.PREVIOUS -> drawPrevious(canvas)
             PlayerControlIcon.REWIND -> drawRewind(canvas)
             PlayerControlIcon.PLAY -> drawPlay(canvas)
@@ -169,6 +181,16 @@ internal class PlayerIconButton(
         paint.strokeWidth = 0.085f
         canvas.drawLine(-0.27f, -0.27f, 0.27f, 0.27f, paint)
         canvas.drawLine(0.27f, -0.27f, -0.27f, 0.27f, paint)
+    }
+
+    private fun drawBack(canvas: Canvas) {
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 0.09f
+        path.reset()
+        path.moveTo(0.1f, -0.3f)
+        path.lineTo(-0.2f, 0f)
+        path.lineTo(0.1f, 0.3f)
+        canvas.drawPath(path, paint)
     }
 
     private fun drawPrevious(canvas: Canvas) {

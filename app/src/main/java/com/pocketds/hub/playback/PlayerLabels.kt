@@ -11,6 +11,30 @@ import kotlin.math.abs
  * "23,98 fps" because of a device setting.
  */
 object PlayerLabels {
+    /** The player's title: the series, or the film. */
+    fun title(item: com.pocketds.hub.model.PlaybackItem): String = item.seriesTitle.ifEmpty { item.title }
+
+    /** Under it: "S1E1 · Somewhere Not Here" for an episode, nothing for a film; " · Offline" when it plays from the device. */
+    fun subtitle(item: com.pocketds.hub.model.PlaybackItem, offline: Boolean): String = listOfNotNull(
+        if (item.seriesTitle.isNotEmpty()) com.pocketds.hub.ui.EpisodeLabel.of(item.seasonNumber, item.episodeNumber, item.title) else null,
+        "Offline".takeIf { offline }
+    ).filter(String::isNotBlank).joinToString(" · ")
+
+    /**
+     * Under the timeline's start: "5:34 · Part A". A chapter called only
+     * "Chapter 2" says nothing the marks do not, so it is left out.
+     */
+    fun positionLine(positionMillis: Long, chapterName: String?): String {
+        val name = chapterName?.trim().orEmpty().takeUnless { it.isEmpty() || GENERIC_CHAPTER.matches(it) }
+        return listOfNotNull(Fmt.clock(positionMillis), name).joinToString(" · ")
+    }
+
+    /** Under the timeline's end: the time left, "−22:53". */
+    fun remainingLine(positionMillis: Long, durationMillis: Long): String =
+        if (durationMillis <= 0) "" else "\u2212" + Fmt.clock((durationMillis - positionMillis).coerceAtLeast(0))
+
+    private val GENERIC_CHAPTER = Regex("""(?i)chapter\s*\d+""")
+
 
     fun signedTime(deltaMillis: Long): String =
         (if (deltaMillis < 0) "−" else "+") + Fmt.clock(abs(deltaMillis))
