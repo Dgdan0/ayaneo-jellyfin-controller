@@ -568,6 +568,12 @@ Most of these exist because several screens had drifted copies of the same thing
 | A value menu / a destructive confirm | `ChoiceOverlay.pickValue` / `confirm` (harmless answer first) |
 | A side panel's look and parts | `ui/SidePanelView`: a full-height sheet at the right edge (centred card for `confirm`), heading and small round close; `choice` and `setting` (label, value, chevron) rows share a raised card until a `section`, `startGroup`, `note` or hand-added view starts the next; `choice(leading =)` puts a picture before the words; tabs are a `BlobSegmentedView` |
 | Anything drawn over video | `Theme.onVideo` (the dark palette with the media accent, whatever the app theme) |
+| A dashboard's pieces: status dot and its colour, a disk with its bar, a figure card, a focusable row | `ui/DashboardParts` (`dot`, `stateColor`, `disk`, `stat`, `row`): Activity, Server monitor, Services, Notifications |
+| A service's logo | `ServiceLogo.resource(service)` (and `bind`, which follows the theme) |
+| A torrent's release name as words ("Dark Matter (2024) · S2E6 · 1080p") | `model/ReleaseNames.readable`; `ActivityItem.headline` uses it when the *arr has no title |
+| How long the PC has been up ("1 day 4 hours") | `Fmt.uptime` |
+| A pill that is a filter, lit while on | `PillButton.setPrimary` (a new background otherwise resets the padding) |
+| A pushed page's header | `HubActivity.pageTitle`: a round back mark and the screen's `title` in the heading face; a page with its own heading sets `showsOwnTitle` |
 | A menu's cursor after a submenu | `SidePanelView` remembers the row last chosen per menu and tab; pass no start row and Back lands where you were |
 | On/off action icons (watched, favourite, downloaded) | `MediaActionIconDrawable.of` (`MediaActionIcon.isOn`): filled accent when on, outline when off; `DOWNLOADING` is a progress ring |
 | Reacting to offline downloads changing | `offline/OfflineChanges` (start in onShow, stop in onHide) |

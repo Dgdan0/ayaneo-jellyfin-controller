@@ -29,7 +29,12 @@ import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.ui.AppIcon
 import com.pocketds.hub.ui.AppIconDrawable
 import com.pocketds.hub.settings.ContentModeSettings
+import com.pocketds.hub.ui.DashboardParts
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.PillButton
+import com.pocketds.hub.ui.Type
+import com.pocketds.hub.ui.textWeight
+import com.pocketds.hub.ui.typeRole
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
@@ -84,26 +89,38 @@ class NotificationsScreen(
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(colors.background)
 
-            status = TextView(context).apply {
-                text = "Loading activity…"
-                textSize = 11f
-                setTextColor(colors.mutedText)
-                setPadding(dp(16), dp(2), dp(16), dp(8))
-            }
-            addView(status)
-            deviceAlerts=TextView(context).apply {
-                textSize=13f;setTextColor(colors.primaryText);minHeight=dp(44)
-                setPadding(dp(12),dp(8),dp(12),dp(8));gravity=Gravity.CENTER_VERTICAL
-                background=Styler.chipBackground(context,colors)
-                Styler.makeFocusable(this);FocusDecorator.attach(this,ringVisible,false)
-                activateOnTap { host.push(LocalAlertsScreen(api,ringVisible)) }
-            }
-            addView(deviceAlerts,LinearLayout.LayoutParams(MATCH,WRAP).apply {setMargins(dp(14),dp(2),dp(14),dp(8))})
+            // A heading with the summary under it, and this Pocket's own alerts as a pill beside it.
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                clipChildren = false
+                setPadding(dp(24), dp(10), dp(24) - dp(PillButton.RING_DP.toInt()), dp(10))
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(TextView(context).apply {
+                        text = "Notifications"
+                        typeRole(Type.Role.SCREEN)
+                        setTextColor(colors.primaryText)
+                    })
+                    status = TextView(context).apply {
+                        text = "Loading activity…"
+                        textSize = 12f
+                        setTextColor(colors.mutedText)
+                        setPadding(0, dp(4), 0, 0)
+                    }
+                    addView(status)
+                }, LinearLayout.LayoutParams(0, WRAP, 1f))
+                deviceAlerts = PillButton.create(context, colors, "On this Pocket", heightDp = 36f).apply {
+                    FocusDecorator.attach(this, ringVisible, false)
+                    activateOnTap { host.push(LocalAlertsScreen(api, ringVisible)) }
+                }
+                addView(deviceAlerts)
+            }, LinearLayout.LayoutParams(MATCH, WRAP))
 
             mediaColumns = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
-                setPadding(dp(8), 0, dp(8), dp(16))
+                setPadding(dp(18), 0, dp(18), dp(14))
                 MEDIA_SERVICES.forEach { service ->
                     val column = ServiceColumnView(service)
                     columns[service] = column
@@ -114,7 +131,7 @@ class NotificationsScreen(
             }
             bookColumns = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
-                setPadding(dp(8), 0, dp(8), dp(16))
+                setPadding(dp(18), 0, dp(18), dp(14))
                 BOOK_SERVICES.forEach { service ->
                     val column = ServiceColumnView(service)
                     columns[service] = column
@@ -130,7 +147,9 @@ class NotificationsScreen(
     }
 
     override fun onShow() {
-        deviceAlerts.text="Downloads & subtitles on this AYANEO · ${com.pocketds.hub.settings.LocalAlerts.unread(host.viewContext)} new"
+        val local = com.pocketds.hub.settings.LocalAlerts.unread(host.viewContext)
+        deviceAlerts.text = if (local > 0) "On this Pocket · $local new" else "On this Pocket"
+        deviceAlerts.contentDescription = "Downloads and subtitles on this Pocket, $local new"
         showMode(ContentModeSettings.get(host.viewContext))
         visible = true
         startPolling(showLoading = !hasContent)
@@ -281,17 +300,15 @@ class NotificationsScreen(
     private inner class ServiceColumnView(private val service: String) : LinearLayout(host.viewContext) {
         private val count: TextView
         private val state: TextView
+        private lateinit var stateDot: View
         private val empty: TextView
         private val list: RecyclerView
         private val adapter = NoticeAdapter()
 
         init {
             orientation = VERTICAL
-            background = ThemeGradientDrawable().apply {
-                cornerRadius = Styler.dp(context, 14f)
-                setColor(this@NotificationsScreen.colors.stripBackground)
-            }
-            setPadding(dp(7), dp(8), dp(7), dp(7))
+            background = ThemeGradientDrawable.rounded(Styler.dp(context, 16f), this@NotificationsScreen.colors.cardSurface)
+            setPadding(dp(8), dp(10), dp(8), dp(6))
 
             addView(LinearLayout(context).apply {
                 orientation = HORIZONTAL
@@ -306,15 +323,21 @@ class NotificationsScreen(
                     orientation = VERTICAL
                     addView(TextView(context).apply {
                         text = displayName(service)
-                        textSize = 15f
-                        setTypeface(typeface, Typeface.BOLD)
+                        typeRole(Type.Role.HEADING, 15f)
                         setTextColor(colors.primaryText)
                     })
-                    state = TextView(context).apply {
-                        textSize = 10f
-                        setTextColor(colors.mutedText)
-                    }
-                    addView(state)
+                    addView(LinearLayout(context).apply {
+                        orientation = HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(0, dp(3), 0, 0)
+                        stateDot = DashboardParts.dot(context, colors.mutedText)
+                        addView(stateDot)
+                        state = TextView(context).apply {
+                            textSize = 11f
+                            setTextColor(colors.mutedText)
+                        }
+                        addView(state)
+                    })
                 }, LayoutParams(0, WRAP, 1f))
                 count = TextView(context).apply {
                     textSize = 10f
@@ -360,6 +383,7 @@ class NotificationsScreen(
                     else -> colors.dangerText
                 }
             )
+            stateDot.background = com.pocketds.hub.ui.ThemeGradientDrawable.oval(DashboardParts.stateColor(colors, section.state))
             updateUnreadCount()
             empty.text = when (section.state) {
                 "disabled" -> "Not configured"
@@ -461,24 +485,25 @@ class NotificationsScreen(
             isFocusable = true
             isFocusableInTouchMode = true
             isClickable = true
-            background = Styler.cardBackground(context, colors, 10f)
-            minimumHeight=dp(76)
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            dot = View(context)
-            addView(dot, LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(9) })
+            minimumHeight = dp(64)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            dot = DashboardParts.dot(context, colors.mutedText)
+            addView(dot)
             addView(LinearLayout(context).apply {
                 orientation = VERTICAL
                 headline = TextView(context).apply {
                     textSize = 13f
-                    setTypeface(typeface, Typeface.BOLD)
+                    textWeight(600)
                     setTextColor(colors.primaryText)
                     maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
                 }
                 addView(headline)
                 detail = TextView(context).apply {
-                    textSize = 12f
+                    textSize = 11.5f
                     setTextColor(colors.mutedText)
                     maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
                 }
                 addView(detail)
                 meta = TextView(context).apply {
@@ -494,7 +519,7 @@ class NotificationsScreen(
         fun bind(notice: ServiceNotice, unread: Boolean) {
             setTag(TAG_NOTICE, notice)
             setUnread(unread)
-            dot.background = pill(severityColor(notice.severity))
+            dot.background = ThemeGradientDrawable.oval(severityColor(notice.severity))
             headline.text = if (notice.kind == "health") humanizeHealthTitle(notice.title) else notice.title
             detail.text = notice.detail
             detail.visibility = if (notice.detail.isEmpty()) View.GONE else View.VISIBLE
@@ -507,11 +532,10 @@ class NotificationsScreen(
         }
 
         fun setUnread(unread: Boolean) {
-            background = Styler.cardBackground(
-                context = context,
-                colors = colors,
-                cornerDp = 10f,
-                baseFill = if (unread) colors.unreadSurface else colors.cardSurface
+            background = Styler.selectionBackground(
+                context, colors, selected = false,
+                baseFill = if (unread) colors.unreadSurface else android.graphics.Color.TRANSPARENT,
+                cornerDp = 10f
             )
         }
     }
@@ -547,22 +571,9 @@ class NotificationsScreen(
         else -> state.replaceFirstChar { it.uppercase() }
     }
 
-    private fun displayName(service: String): String = when (service) {
-        "sonarr" -> "Sonarr"
-        "radarr" -> "Radarr"
-        "bazarr" -> "Bazarr"
-        "bookkeeprr" -> "BookKeeprr"
-        "storyteller" -> "Storyteller"
-        "kavita" -> "Kavita"
-        else -> service.replaceFirstChar { it.uppercase() }
-    }
+    private fun displayName(service: String): String = com.pocketds.hub.model.ServiceNames.display(service)
 
-    private fun serviceLogo(service: String): Int = when (service) {
-        "sonarr" -> R.drawable.logo_sonarr
-        "radarr" -> R.drawable.logo_radarr
-        "bazarr" -> R.drawable.logo_bazarr
-        else -> R.drawable.ic_launcher_foreground
-    }
+    private fun serviceLogo(service: String): Int = com.pocketds.hub.ui.ServiceLogo.resource(service)
 
     private fun pill(color: Int) = ThemeGradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE

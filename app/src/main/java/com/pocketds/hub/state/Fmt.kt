@@ -85,6 +85,23 @@ object Fmt {
         return if (minutes < 60) "$minutes min" else "${minutes / 60}h ${minutes % 60}m"
     }
 
+    /**
+     * How long a machine has been up: "1 day 4 hours", "3 hours 12 min",
+     * "8 min". The server monitor wrote "1 days 0 hours".
+     */
+    fun uptime(seconds: Long): String {
+        if (seconds <= 0) return ""
+        val days = seconds / 86_400
+        val hours = seconds % 86_400 / 3_600
+        val minutes = seconds % 3_600 / 60
+        fun unit(n: Long, one: String) = if (n == 1L) "1 $one" else "$n ${one}s"
+        return when {
+            days > 0 -> listOfNotNull(unit(days, "day"), hours.takeIf { it > 0 }?.let { unit(it, "hour") }).joinToString(" ")
+            hours > 0 -> listOfNotNull(unit(hours, "hour"), minutes.takeIf { it > 0 }?.let { "$it min" }).joinToString(" ")
+            else -> "${minutes.coerceAtLeast(1)} min"
+        }
+    }
+
     /** A stream or file bitrate. Empty when the server did not report one. */
     fun mbps(bitsPerSecond: Long): String =
         if (bitsPerSecond <= 0) "" else String.format(Locale.US, "%.1f Mbps", bitsPerSecond / 1_000_000.0)

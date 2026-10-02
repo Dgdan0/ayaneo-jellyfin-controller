@@ -372,7 +372,7 @@ class MediaDetailScreen(
         }
         if (d.seasons > 0) {
             if (isNotEmpty()) append(" · ")
-            append(d.seasons).append(" seasons")
+            append(d.seasons).append(if (d.seasons == 1) " season" else " seasons")
         }
         if (d.genres.isNotEmpty()) {
             if (isNotEmpty()) append(" · ")

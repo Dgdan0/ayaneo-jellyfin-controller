@@ -54,9 +54,11 @@ class FormOverlay(
 
         card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            background = Styler.cardBackground(context, colors, cornerDp = 14f)
-            val p = Styler.dpInt(context, 16f)
-            setPadding(p, p, p, p)
+            // The centred panel's look: the page colour, a hairline, rows on a raised card.
+            background = ThemeGradientDrawable.rounded(Styler.dp(context, 16f), colors.background,
+                Styler.dpInt(context, 1f), androidx.core.graphics.ColorUtils.setAlphaComponent(colors.primaryText, 0x1A))
+            val p = Styler.dpInt(context, 18f)
+            setPadding(p, Styler.dpInt(context, 16f), p, Styler.dpInt(context, 14f))
             isClickable = true
             layoutParams = LayoutParams(
                 Styler.dpInt(context, 460f),
@@ -74,7 +76,7 @@ class FormOverlay(
         addView(card)
 
         titleView = TextView(context).apply {
-            textSize = 16f
+            typeRole(Type.Role.HEADING, 18f)
             setTextColor(colors.primaryText)
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -84,7 +86,7 @@ class FormOverlay(
         subtitleView = TextView(context).apply {
             textSize = 12f
             setTextColor(colors.mutedText)
-            setPadding(0, Styler.dpInt(context, 3f), 0, Styler.dpInt(context, 8f))
+            setPadding(0, Styler.dpInt(context, 4f), 0, Styler.dpInt(context, 12f))
         }
         card.addView(subtitleView)
 
@@ -176,34 +178,64 @@ class FormOverlay(
         rebuild()
     }
 
+    /**
+     * The rows that set something share one raised card; an action ends it and
+     * is a pill of its own. The model's index still names the row, so the
+     * views are kept in order beside the cards that hold them.
+     */
     private fun rebuild() {
         val model = model ?: return
         list.removeAllViews()
+        val views = mutableListOf<View>()
+        var group: LinearLayout? = null
         model.rows().forEachIndexed { position, row ->
-            list.addView(buildRow(row, position, position == model.index))
+            val view = buildRow(row, position, position == model.index)
+            views += view
+            if (row is FormRow.Action) {
+                group = null
+                list.addView(view)
+            } else {
+                val card = group ?: LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    val pad = Styler.dpInt(context, 3f)
+                    setPadding(pad, pad, pad, pad)
+                    background = ThemeGradientDrawable.rounded(Styler.dp(context, 14f), colors.cardSurface)
+                }.also {
+                    group = it
+                    list.addView(it, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, WRAP).apply {
+                        bottomMargin = Styler.dpInt(context, 12f)
+                    })
+                }
+                card.addView(view)
+            }
         }
-        val selected = list.getChildAt(model.index) ?: return
+        val selected = views.getOrNull(model.index) ?: return
         scroller.post {
-            scroller.smoothScrollTo(
-                0,
-                (selected.top - (scroller.height - selected.height) / 2).coerceAtLeast(0)
-            )
+            val rect = android.graphics.Rect()
+            selected.getDrawingRect(rect)
+            list.offsetDescendantRectToMyCoords(selected, rect)
+            scroller.smoothScrollTo(0, (rect.top - (scroller.height - rect.height()) / 2).coerceAtLeast(0))
         }
     }
 
     private fun buildRow(row: FormRow, position: Int, selected: Boolean): View {
+        val focused = selected && ringVisible()
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = Styler.dpInt(context, 48f)
             val h = Styler.dpInt(context, 12f)
-            val v = Styler.dpInt(context, 9f)
+            val v = Styler.dpInt(context, 8f)
             setPadding(h, v, h, v)
-            background = if (selected && ringVisible()) selectedFace() else plainFace()
-            alpha = if (selected) 1f else 0.62f
+            background = when {
+                row is FormRow.Action -> actionFace(row.danger, focused)
+                focused -> selectedFace()
+                else -> null
+            }
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = Styler.dpInt(context, 5f) }
+            ).apply { if (row is FormRow.Action) topMargin = Styler.dpInt(context, 2f) }
             setOnClickListener {
                 val current = this@FormOverlay.model ?: return@setOnClickListener
                 current.focus(position)
@@ -220,21 +252,25 @@ class FormOverlay(
             is FormRow.Action -> {
                 container.addView(TextView(context).apply {
                     text = row.label
-                    textSize = 15f
+                    textSize = 14f
+                    textWeight(700)
                     gravity = Gravity.CENTER
-                    setTextColor(if (row.danger) colors.dangerText else colors.accent)
+                    setTextColor(if (row.danger) colors.dangerText else colors.accentText)
                 }, wide())
             }
             is FormRow.Toggle -> {
-                container.addView(TextView(context).apply {
-                    // A box rather than a tick glyph: an empty box reads as
-                    // "you may choose this", where a missing tick reads as
-                    // nothing at all.
-                    text = if (row.checked) "☑" else "☐"
-                    textSize = 17f
-                    setTextColor(if (row.checked) colors.accent else colors.mutedText)
-                }, LinearLayout.LayoutParams(WRAP, WRAP).apply {
-                    rightMargin = Styler.dpInt(context, 10f)
+                // A box rather than a bare tick: an empty box reads as "you may
+                // choose this", where a missing tick reads as nothing at all.
+                container.addView(android.widget.ImageView(context).apply {
+                    val size = Styler.dpInt(context, 22f)
+                    background = if (row.checked) ThemeGradientDrawable.rounded(Styler.dp(context, 6f), colors.accent)
+                        else ThemeGradientDrawable.rounded(Styler.dp(context, 6f), android.graphics.Color.TRANSPARENT,
+                            Styler.dpInt(context, 2f), colors.mutedText)
+                    if (row.checked) setImageDrawable(AppIconDrawable(AppIcon.CHECK, colors.accentText))
+                    val pad = Styler.dpInt(context, 4f)
+                    setPadding(pad, pad, pad, pad)
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    layoutParams = LinearLayout.LayoutParams(size, size).apply { rightMargin = Styler.dpInt(context, 12f) }
                 })
                 container.addView(labelBlock(row.label, row.detail), wide())
             }
@@ -242,15 +278,17 @@ class FormOverlay(
                 container.addView(TextView(context).apply {
                     text = row.label
                     textSize = 14f
-                    setTextColor(colors.mutedText)
+                    textWeight(600)
+                    setTextColor(colors.primaryText)
                 }, LinearLayout.LayoutParams(0, WRAP, 1f))
                 container.addView(
                     labelBlock(
                         // The arrows are the affordance. Without them nothing on
                         // screen says this row is a list rather than a label.
-                        if (selected) "‹ ${row.value} ›" else row.value,
+                        if (selected) "‹  ${row.value}  ›" else row.value,
                         row.detail,
-                        alignEnd = true
+                        alignEnd = true,
+                        quiet = !selected
                     ),
                     LinearLayout.LayoutParams(0, WRAP, 1.4f)
                 )
@@ -259,13 +297,13 @@ class FormOverlay(
         return container
     }
 
-    private fun labelBlock(text: String, detail: String, alignEnd: Boolean = false): View =
+    private fun labelBlock(text: String, detail: String, alignEnd: Boolean = false, quiet: Boolean = false): View =
         LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(context).apply {
                 this.text = text
                 textSize = 14f
-                setTextColor(colors.primaryText)
+                setTextColor(if (quiet) colors.mutedText else colors.primaryText)
                 if (alignEnd) gravity = Gravity.END
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
@@ -282,18 +320,15 @@ class FormOverlay(
 
     private fun wide() = LinearLayout.LayoutParams(0, WRAP, 1f)
 
-    // Qualified: GradientDrawable has its own `colors`, and an unqualified
-    // reference inside apply{} silently resolves to that one instead.
-    private fun plainFace() = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
-        cornerRadius = Styler.dp(context, 10f)
-        setColor(this@FormOverlay.colors.stripBackground)
-    }
+    private fun selectedFace() = ThemeGradientDrawable.rounded(Styler.dp(context, 11f), colors.focusFill,
+        Styler.dpInt(context, 2f), colors.focusRing)
 
-    private fun selectedFace() = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
-        cornerRadius = Styler.dp(context, 10f)
-        setColor(this@FormOverlay.colors.focusFill)
-        setStroke(Styler.dpInt(context, 3f), this@FormOverlay.colors.focusRing)
-    }
+    /** Request: an accent pill; a destructive answer: a quiet one in the danger colour. Focused, both get the ring. */
+    private fun actionFace(danger: Boolean, focused: Boolean) = ThemeGradientDrawable.rounded(
+        Styler.dp(context, 999f),
+        if (danger) androidx.core.graphics.ColorUtils.setAlphaComponent(colors.dangerText, 0x24) else colors.accent,
+        if (focused) Styler.dpInt(context, 2f) else 0, colors.focusRing
+    )
 
     private companion object {
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT

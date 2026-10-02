@@ -56,8 +56,8 @@ data class ActivityItem(
     /** Computed by the hub from this token's scopes. Never inferred here. */
     val actions: List<String> = emptyList()
 ) {
-    /** The heading. Falls back to the release name when there is no *arr row. */
-    val headline: String get() = mediaTitle.ifEmpty { title }
+    /** The heading. Falls back to the release name, as words, when there is no *arr row. */
+    val headline: String get() = mediaTitle.ifEmpty { ReleaseNames.readable(title) }
 
     /** The line under it -- empty when it would just repeat the heading. */
     val subline: String get() = if (mediaTitle.isEmpty()) "" else title

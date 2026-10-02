@@ -1,24 +1,53 @@
 package com.pocketds.hub.screens.downloads
 
-import com.pocketds.hub.ui.FocusScrollView
 import android.text.InputType
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.*
-import com.pocketds.hub.state.JobSlot
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.BandwidthChange
 import com.pocketds.hub.model.BandwidthState
-import com.pocketds.hub.nav.*
-import com.pocketds.hub.net.*
+import com.pocketds.hub.nav.ButtonHint
+import com.pocketds.hub.nav.Screen
+import com.pocketds.hub.nav.ScreenHost
+import com.pocketds.hub.net.HubApi
+import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.state.ContentMode
-import com.pocketds.hub.ui.*
-import kotlinx.coroutines.*
+import com.pocketds.hub.state.JobSlot
+import com.pocketds.hub.ui.AppIcon
+import com.pocketds.hub.ui.BlobSegmentedView
+import com.pocketds.hub.ui.ChoiceOverlay
+import com.pocketds.hub.ui.DashboardParts
+import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.FocusScrollView
+import com.pocketds.hub.ui.PillButton
+import com.pocketds.hub.ui.PocketColors
+import com.pocketds.hub.ui.SettingsCard
+import com.pocketds.hub.ui.Styler
+import com.pocketds.hub.ui.Theme
+import com.pocketds.hub.ui.ThemeGradientDrawable
+import com.pocketds.hub.ui.Type
+import com.pocketds.hub.ui.activateOnTap
+import com.pocketds.hub.ui.typeRole
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
 import java.util.Locale
 import kotlin.math.roundToLong
 
+/**
+ * qBittorrent's two sets of limits, by the names Activity uses: Normal speed
+ * and Quiet (its "alternative" limits). The switch at the top picks which is
+ * in use; each card shows its download and upload caps and edits them.
+ */
 class BandwidthScreen(private val api: HubApi, private val ringVisible: () -> Boolean) : Screen {
-    override val title = "Bandwidth"
+    override val title = "Speed limits"
     override val contentDomain = ContentMode.MEDIA
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var host: ScreenHost? = null
@@ -35,96 +64,190 @@ class BandwidthScreen(private val api: HubApi, private val ringVisible: () -> Bo
         colors = Theme.colors(host.viewContext)
         return FrameLayout(host.viewContext).apply {
             setBackgroundColor(colors.background)
-            val column = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(12),dp(18),dp(12)) }
-            status = label("Loading qBittorrent settings…", 13f)
-            column.addView(status)
-            body = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
-            column.addView(FocusScrollView(context).apply {addView(body) }, LinearLayout.LayoutParams(-1,0,1f))
-            addView(column,FrameLayout.LayoutParams(-1,-1))
-            panel=ChoiceOverlay(context,colors,ringVisible,sidePanel=true)
-            addView(panel,FrameLayout.LayoutParams(-1,-1))
+            val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(2), dp(24), 0) }
+            status = DashboardParts.text(context, "Asking qBittorrent…", 12f, colors.mutedText)
+            column.addView(status, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(10) })
+            body = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; clipChildren = false; setPadding(0, 0, 0, dp(16)) }
+            column.addView(FocusScrollView(context).apply { clipToPadding = false; addView(body) }, LinearLayout.LayoutParams(MATCH, 0, 1f))
+            addView(column, FrameLayout.LayoutParams(MATCH, MATCH))
+            panel = ChoiceOverlay(context, colors, ringVisible, sidePanel = true)
+            addView(panel, FrameLayout.LayoutParams(MATCH, MATCH))
         }
     }
-    override fun onShow() { load() }
-    override fun onHide() { scope.coroutineContext.cancelChildren();panel.dismiss() }
-    override fun onDestroyView() { scope.cancel();host=null }
-    override fun hints()=listOf(ButtonHint.activate(if(busy) "Saving…" else "Choose"),ButtonHint.back(),ButtonHint("⟳","Refresh",PadAction.Refresh))
-    override fun requestInitialFocus():Boolean=body.getFocusables(View.FOCUS_FORWARD).firstOrNull()?.requestFocus() ?: false
-    override fun onPad(action:PadAction):Boolean {
-        if(panel.onPad(action)) return true
-        if(action==PadAction.Refresh) { if(!busy) load();return true }
+
+    override fun onShow() = load()
+    override fun onHide() { scope.coroutineContext.cancelChildren(); panel.dismiss() }
+    override fun onDestroyView() { scope.cancel(); host = null }
+    override fun hints() = listOf(ButtonHint.activate(if (busy) "Saving…" else "Choose"), ButtonHint.back(), ButtonHint.refresh())
+    override fun requestInitialFocus(): Boolean = body.getFocusables(View.FOCUS_FORWARD).firstOrNull()?.requestFocus() ?: false
+    override fun onPad(action: PadAction): Boolean {
+        if (panel.onPad(action)) return true
+        if (action == PadAction.Refresh) { if (!busy) load(); return true }
         return false
     }
+
     private fun load() {
-        if(busy) return
-        status.text="Loading qBittorrent settings…"
+        if (busy) return
         work.launch(scope) {
-            val response=api.bandwidth()
-            when(response) {
+            when (val response = api.bandwidth()) {
                 is HubResult.Ok -> render(response.value)
-                is HubResult.Failed -> {status.text=response.message;body.removeAllViews();body.addView(button("Try again"){load()})}
+                is HubResult.Failed -> {
+                    status.text = response.message
+                    status.setTextColor(colors.dangerText)
+                    body.removeAllViews()
+                    body.addView(PillButton.create(checkNotNull(host).viewContext, colors, "Try again", AppIcon.REFRESH).apply {
+                        FocusDecorator.attach(this, ringVisible, scale = false)
+                        activateOnTap { load() }
+                    })
+                }
             }
         }
     }
-    private fun render(value:BandwidthState) {
-        state=value;body.removeAllViews()
-        status.text="Global qBittorrent limits · ${if(value.mode=="alternative") "Alternative mode active" else "Normal mode active"}"
-        body.addView(label("Normal · ↓ ${rate(value.downloadBps)}  ↑ ${rate(value.uploadBps)}",16f))
-        body.addView(label("Alternative (quiet) · ↓ ${rate(value.alternativeDownloadBps)}  ↑ ${rate(value.alternativeUploadBps)}",16f))
-        if(value.schedulerEnabled) body.addView(label("qBittorrent's schedule is enabled and may change the active mode.",13f))
-        body.addView(label(if(value.queueingEnabled) "Queue priority is available in each transfer's actions." else "Torrent queueing is disabled in qBittorrent. Priority controls are unavailable.",13f))
-        if(!value.canControl) body.addView(label("This connection has read-only access to bandwidth settings.",13f))
-        else {
-            if(value.modeSwitchSupported) {
-                body.addView(button("Use normal limits${if(value.mode=="normal") " · active" else ""}"){save(BandwidthChange(mode="normal"))})
-                body.addView(button("Use alternative limits${if(value.mode=="alternative") " · active" else ""}"){save(BandwidthChange(mode="alternative"))})
-            } else body.addView(label("Switching modes here requires qBittorrent 5 or later.",13f))
-            body.addView(button("Edit normal limits"){edit("normal",value.downloadBps,value.uploadBps)})
-            body.addView(button("Edit alternative limits"){edit("alternative",value.alternativeDownloadBps,value.alternativeUploadBps)})
+
+    private fun render(value: BandwidthState) {
+        val context = checkNotNull(host).viewContext
+        val focused = body.findFocus()?.tag
+        state = value
+        body.removeAllViews()
+        val quiet = value.mode == "alternative"
+        status.setTextColor(colors.mutedText)
+        status.text = "qBittorrent · these limits apply to every transfer"
+
+        if (value.canControl && value.modeSwitchSupported) {
+            body.addView(card("In use", "").apply {
+                body(BlobSegmentedView(context, colors, ringVisible, BlobSegmentedView.Style.ACCENT).apply {
+                    tag = "mode"
+                    heightDp = 38f; textSp = 13f; padXDp = 16f
+                    setOptions(listOf(BlobSegmentedView.Option(NORMAL, "Normal speed"), BlobSegmentedView.Option(QUIET, "Quiet")),
+                        if (quiet) QUIET else NORMAL)
+                    onPick = { id -> if ((id == QUIET) != quiet) save(BandwidthChange(mode = if (id == QUIET) "alternative" else "normal")) }
+                }, 10f)
+                hint("Quiet uses qBittorrent's alternative limits: slower downloads that leave room for everything else.")
+            }, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(12) })
         }
-        body.post { requestInitialFocus();host?.refreshHints() }
+
+        body.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            clipChildren = false
+            addView(limits("normal", "Normal speed", value.downloadBps, value.uploadBps, inUse = !quiet, value), LinearLayout.LayoutParams(0, WRAP, 1f))
+            addView(limits("alternative", "Quiet", value.alternativeDownloadBps, value.alternativeUploadBps, inUse = quiet, value),
+                LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = dp(12) })
+        })
+
+        val notes = listOfNotNull(
+            "qBittorrent's own schedule is on, so it may switch between these by itself.".takeIf { value.schedulerEnabled },
+            if (value.queueingEnabled) "Each transfer's actions can move it up or down the queue."
+            else "Queueing is off in qBittorrent, so transfers have no order to change.",
+            "This token can read these limits but not change them.".takeIf { !value.canControl },
+            "Switching between them here needs qBittorrent 5 or later.".takeIf { value.canControl && !value.modeSwitchSupported }
+        )
+        notes.forEach { note ->
+            body.addView(DashboardParts.text(context, note, 11.5f, colors.mutedText).apply { setPadding(dp(4), 0, dp(4), 0) },
+                LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(10) })
+        }
+        body.post {
+            if (focused?.let { body.findViewWithTag<View>(it) }?.requestFocus() != true) requestInitialFocus()
+            host?.refreshHints()
+        }
     }
-    private fun edit(mode:String,down:Long,up:Long) {
-        if(busy) return
-        panel.resetBody();panel.open("${mode.replaceFirstChar { it.uppercase() }} limits","Applies to all qBittorrent transfers. 0 means unlimited."){host?.refreshHints()}
-        fun field(title:String,initial:Long):EditText {
-            panel.body.addView(label("$title (KiB/s)",13f))
+
+    /** One set of limits: its name, "In use" when it is, the two caps, and Edit. */
+    private fun limits(mode: String, name: String, down: Long, up: Long, inUse: Boolean, value: BandwidthState): SettingsCard =
+        card(name, if (inUse) "In use" else "").apply {
+            if (inUse) trailing("In use", colors.accent)
+            body(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(cap("Download", down), LinearLayout.LayoutParams(0, WRAP, 1f))
+                addView(cap("Upload", up), LinearLayout.LayoutParams(0, WRAP, 1f))
+            }, 10f, fill = true)
+            if (value.canControl) {
+                val editButton = PillButton.create(context, colors, "Edit limits", heightDp = 34f).apply {
+                    tag = "edit:$mode"
+                    FocusDecorator.attach(this, ringVisible, scale = false)
+                    activateOnTap { if (!busy) edit(mode, name, down, up) }
+                }
+                body(editButton, 10f)
+                // The pill, not its ring, lines up with the words above.
+                editButton.layoutParams = (editButton.layoutParams as LinearLayout.LayoutParams).apply {
+                    marginStart = -dp(PillButton.RING_DP.toInt())
+                }
+            }
+        }
+
+    private fun cap(label: String, bps: Long): LinearLayout = LinearLayout(checkNotNull(host).viewContext).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(DashboardParts.text(context, label.uppercase(), 10.5f, colors.mutedText, 700).apply { letterSpacing = 0.1f })
+        addView(TextView(context).apply {
+            text = (if (label == "Download") "↓ " else "↑ ") + rate(bps)
+            typeRole(Type.Role.HEADING, 18f)
+            setTextColor(colors.primaryText)
+        }, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = dp(4) })
+    }
+
+    private fun edit(mode: String, name: String, down: Long, up: Long) {
+        if (busy) return
+        panel.resetBody()
+        panel.open(name, "In KiB/s, for every transfer. 0 means no limit.") { host?.refreshHints() }
+        fun field(title: String, initial: Long): EditText {
+            panel.section(title)
             return EditText(checkNotNull(host).viewContext).apply {
-                inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-                setText(String.format(Locale.US,"%.6f",initial/1024.0).trimEnd('0').trimEnd('.'))
-                setTextColor(colors.primaryText);textSize=16f;minHeight=dp(48);contentDescription="$title limit in KiB per second"
-                Styler.makeFocusable(this);panel.body.addView(this)
+                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                setText(String.format(Locale.US, "%.6f", initial / 1024.0).trimEnd('0').trimEnd('.'))
+                setTextColor(colors.primaryText)
+                textSize = 16f
+                minHeight = dp(48)
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), 0, dp(14), 0)
+                background = ThemeGradientDrawable.rounded(dp(12).toFloat(), colors.cardSurface)
+                contentDescription = "$title limit in KiB per second"
+                Styler.makeFocusable(this)
+                panel.body.addView(this, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(6) })
             }
         }
-        val download=field("Download",down);val upload=field("Upload",up)
-        val error=label("",12f);error.setTextColor(colors.dangerText);panel.body.addView(error)
-        panel.choice("Apply limits","Keeps the current normal/alternative mode") {
-            fun parse(field:EditText):Long?=field.text.toString().toDoubleOrNull()?.takeIf { it.isFinite()&&it>=0&&it<=1048576 }?.let {(it*1024).roundToLong()}
-            val d=parse(download);val u=parse(upload)
-            if(d==null||u==null) error.text="Enter a value from 0 to 1,048,576 KiB/s."
-            else {panel.dismiss();save(BandwidthChange(limitsFor=mode,downloadBps=d,uploadBps=u))}
+        val download = field("Download", down)
+        val upload = field("Upload", up)
+        val error = DashboardParts.text(checkNotNull(host).viewContext, "", 12f, colors.dangerText)
+        panel.body.addView(error)
+        panel.choice("Apply", "Keeps ${if (state?.mode == "alternative") "Quiet" else "Normal speed"} in use") {
+            fun parse(field: EditText): Long? = field.text.toString().toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it >= 0 && it <= 1_048_576 }?.let { (it * 1024).roundToLong() }
+            val d = parse(download)
+            val u = parse(upload)
+            if (d == null || u == null) error.text = "Enter a number from 0 to 1,048,576."
+            else { panel.dismiss(); save(BandwidthChange(limitsFor = mode, downloadBps = d, uploadBps = u)) }
         }
-        panel.focusBody(download);host?.refreshHints()
+        panel.focusBody(download)
+        host?.refreshHints()
     }
-    private fun save(change:BandwidthChange) {
-        if(busy) return
-        status.text="Applying and verifying settings…"
+
+    private fun save(change: BandwidthChange) {
+        if (busy) return
+        status.text = "Saving and checking with qBittorrent…"
+        status.setTextColor(colors.mutedText)
         work.launch(scope, onIdle = { host?.refreshHints() }) {
             host?.refreshHints()
-            val result=api.setBandwidth(change)
-            when(result) {
-                is HubResult.Ok -> {render(result.value);host?.notify("Bandwidth settings verified")}
-                is HubResult.Failed -> {status.text=result.message;host?.notify(result.message)}
+            when (val result = api.setBandwidth(change)) {
+                is HubResult.Ok -> { render(result.value); host?.notify("Speed limits saved") }
+                is HubResult.Failed -> { status.text = result.message; status.setTextColor(colors.dangerText); host?.notify(result.message) }
             }
-            host?.refreshHints()
         }
     }
-    private fun rate(value:Long)=if(value<=0) "Unlimited" else String.format(Locale.US,"%,.1f KiB/s",value/1024.0)
-    private fun label(value:String,size:Float)=TextView(checkNotNull(host).viewContext).apply {text=value;textSize=size;setTextColor(colors.primaryText);setPadding(dp(4),dp(5),dp(4),dp(5))}
-    private fun button(value:String,action:()->Unit)=label(value,14f).apply {
-        minHeight=dp(44);gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(dp(12),dp(8),dp(12),dp(8));background=Styler.chipBackground(context,colors)
-        layoutParams=LinearLayout.LayoutParams(-1,-2).apply {topMargin=dp(5)}
-        Styler.makeFocusable(this);FocusDecorator.attach(this,ringVisible,false);activateOnTap { if(!busy) action() }
+
+    private fun card(title: String, trailing: String): SettingsCard = SettingsCard(checkNotNull(host).viewContext, colors).apply {
+        title(title, trailing)
+        titleView?.typeRole(Type.Role.HEADING, 15f)
     }
-    private fun dp(n:Int)=Styler.dpInt(checkNotNull(host).viewContext,n.toFloat())
+
+    /** "Unlimited", "10 KiB/s", "1,536 KiB/s". */
+    private fun rate(value: Long) = if (value <= 0) "Unlimited"
+        else String.format(Locale.US, "%,.1f", value / 1024.0).removeSuffix(".0") + " KiB/s"
+
+    private fun dp(n: Int) = Styler.dpInt(checkNotNull(host).viewContext, n.toFloat())
+
+    private companion object {
+        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+        const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        const val NORMAL = "normal"
+        const val QUIET = "quiet"
+    }
 }

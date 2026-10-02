@@ -74,22 +74,24 @@ class ReadingAuthorScreen(
         column.addView(LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(24), 0, dp(24), dp(4))
+            // Round, as on the Authors grid: a person, not a cover.
             addView(FrameLayout(context).apply {
                 clipToOutline = true
-                background = Styler.cardBackground(context, colors)
+                background = com.pocketds.hub.ui.ThemeGradientDrawable.oval(colors.posterPlaceholder)
+                outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
                 portrait = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
                 addView(portrait, FrameLayout.LayoutParams(MATCH, MATCH))
                 bindPortrait()
-            }, LinearLayout.LayoutParams(dp(64), dp(64)))
+            }, LinearLayout.LayoutParams(dp(76), dp(76)))
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(16), 0, 0, 0)
+                setPadding(dp(18), 0, 0, 0)
                 addView(TextView(context).apply {
-                    text = author.name; textSize = 22f; setTypeface(typeface, Typeface.BOLD); setTextColor(colors.primaryText)
+                    text = author.name; com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HERO, 28f); setTextColor(colors.primaryText)
                 })
                 counts = TextView(context).apply {
                     text = AuthorLabels.shelf(author.seriesCount, author.bookCount, author.total)
-                    textSize = 12f; setTextColor(colors.mutedText)
+                    textSize = 12.5f; setTextColor(colors.mutedText); setPadding(0, dp(5), 0, 0)
                 }
                 addView(counts)
             })
@@ -173,7 +175,7 @@ class ReadingAuthorScreen(
         if (books.isNotEmpty()) {
             shelves.addView(TextView(context).apply {
                 text = if (series.isEmpty()) "Books" else "Other books"
-                textSize = 17f; setTextColor(colors.primaryText); setPadding(dp(24), dp(18), dp(24), 0)
+                com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING); setTextColor(colors.primaryText); setPadding(dp(24), dp(18), dp(24), 0)
             })
             shelves.addView(SeriesBookStrip.create(context, colors, ringVisible, api, books.map(SeriesBookStrip::itemOf)) { card, item -> bindBook(card, item) })
         }
@@ -189,10 +191,10 @@ class ReadingAuthorScreen(
     private fun seriesHeading(collection: ReadingWork): TextView = TextView(requireNotNull(host).viewContext).apply {
         val count = collection.bookCount.takeIf { it > 0 }?.let { if (it == 1) " · 1 book" else " · $it books" }.orEmpty()
         text = "${collection.title}$count  ›"
-        textSize = 16f; setTextColor(colors.primaryText)
+        com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING); setTextColor(colors.primaryText)
         minHeight = dp(40); gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(8), dp(4), dp(8), dp(4))
-        background = Styler.chipBackground(context, colors)
+        setPadding(dp(12), dp(4), dp(12), dp(4))
+        background = Styler.selectionBackground(context, colors, selected = false, cornerDp = 999f)
         contentDescription = "Open series ${collection.title}"
         Styler.makeFocusable(this)
         remember("series:${collection.id}", this, ring = true)

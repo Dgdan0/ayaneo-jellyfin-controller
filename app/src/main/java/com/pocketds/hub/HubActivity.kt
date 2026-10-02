@@ -322,10 +322,18 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         stage.addView(topBar, FrameLayout.LayoutParams(MATCH, Styler.dpInt(this, TopBarView.HEIGHT_DP), android.view.Gravity.TOP))
 
         pageTitle = android.widget.TextView(this).apply {
-            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.SUBHEADING, 15f)
+            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 19f)
             setTextColor(colors.primaryText)
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(Styler.dpInt(this@HubActivity, 22f), 0, Styler.dpInt(this@HubActivity, 22f), 0)
+            // A small round back mark before the title, like the player's, rather than "‹".
+            val mark = Styler.dpInt(this@HubActivity, 28f)
+            val inset = Styler.dpInt(this@HubActivity, 8f)
+            setCompoundDrawables(android.graphics.drawable.LayerDrawable(arrayOf(
+                com.pocketds.hub.ui.ThemeGradientDrawable.oval(androidx.core.graphics.ColorUtils.setAlphaComponent(colors.primaryText, 0x1F)),
+                android.graphics.drawable.InsetDrawable(com.pocketds.hub.ui.AppIconDrawable(com.pocketds.hub.ui.AppIcon.PREVIOUS, colors.primaryText), inset)
+            )).apply { setBounds(0, 0, mark, mark) }, null, null, null)
+            compoundDrawablePadding = Styler.dpInt(this@HubActivity, 10f)
             setBackgroundColor(colors.background)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -511,7 +519,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private fun layoutScreen(screen: Screen, view: View) {
         val titled = !screen.immersive && sections.depth > 1 && !screen.showsOwnTitle
         pageTitle.visibility = if (titled) View.VISIBLE else View.GONE
-        if (titled) pageTitle.text = "‹  ${screen.title}"
+        if (titled) { pageTitle.text = screen.title; pageTitle.contentDescription = "Back from ${screen.title}" }
         val top = when {
             screen.immersive || screen.drawsUnderTopBar -> 0f
             titled -> TopBarView.HEIGHT_DP + PAGE_TITLE_DP
@@ -1102,7 +1110,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val NOTIFICATIONS_SECTION = 5
         const val CONTENT_SECTION_COUNT = 5
-        const val PAGE_TITLE_DP = 30f
+        const val PAGE_TITLE_DP = 40f
         const val STATE_SECTION = "current_section"
     }
 }

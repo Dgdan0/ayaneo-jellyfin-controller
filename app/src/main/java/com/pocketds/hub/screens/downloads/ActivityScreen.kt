@@ -415,13 +415,7 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(6), dp(5), dp(6), dp(5))
-                addView(View(context).apply {
-                    background = ThemeGradientDrawable.oval(when (service.state) {
-                        "up" -> colors.badgeAvailable
-                        "misconfigured" -> colors.badgePending
-                        else -> colors.dangerText
-                    })
-                }, LinearLayout.LayoutParams(dp(7), dp(7)).apply { marginEnd = dp(8) })
+                addView(com.pocketds.hub.ui.DashboardParts.dot(context, com.pocketds.hub.ui.DashboardParts.stateColor(colors, service.state)))
                 addView(text(name, 12f, colors.primaryText, 600), LinearLayout.LayoutParams(0, WRAP, 1f))
                 addView(text(meta, 11f, if (service.state == "up") colors.mutedText else colors.dangerText))
                 addView(ImageView(context).apply { setImageDrawable(AppIconDrawable(AppIcon.OPEN, colors.mutedText)) },
@@ -456,17 +450,7 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
         diskRows.removeAllViews()
         storage.visibility = if (disks.isEmpty()) View.GONE else View.VISIBLE
         disks.forEach { disk ->
-            val low = ActivityDashboard.lowSpace(disk)
-            val used = (disk.totalBytes - disk.availableBytes).coerceAtLeast(0)
-            diskRows.addView(LinearLayout(checkNotNull(host).viewContext).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(0, dp(6), 0, dp(4))
-                addView(text(disk.name.trimEnd('\\', '/'), 11f, colors.primaryText, 600), LinearLayout.LayoutParams(0, WRAP, 1f))
-                addView(text("${Fmt.bytes(disk.availableBytes)} free of ${Fmt.bytes(disk.totalBytes)}", 11f, if (low) colors.dangerText else colors.mutedText))
-            })
-            diskRows.addView(ProgressLine.create(checkNotNull(host).viewContext, colors, if (low) colors.dangerText else colors.primaryText).apply {
-                showFraction(if (disk.totalBytes > 0) used.toDouble() / disk.totalBytes else 0.0)
-            }, LinearLayout.LayoutParams(MATCH, dp(7)))
+            diskRows.addView(com.pocketds.hub.ui.DashboardParts.disk(checkNotNull(host).viewContext, colors, disk), LinearLayout.LayoutParams(MATCH, WRAP))
         }
     }
 

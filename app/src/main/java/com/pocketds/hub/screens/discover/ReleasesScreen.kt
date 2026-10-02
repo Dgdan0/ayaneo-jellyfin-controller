@@ -22,6 +22,7 @@ import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
+import com.pocketds.hub.ui.textWeight
 import com.pocketds.hub.ui.Theme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -84,24 +85,24 @@ class ReleasesScreen(
         root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
 
         heading = TextView(context).apply {
-            textSize = 15f
+            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 18f)
             setTextColor(colors.primaryText)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             text = mediaTitle
             setPadding(
-                Styler.dpInt(context, 14f), Styler.dpInt(context, 10f),
-                Styler.dpInt(context, 14f), 0
+                Styler.dpInt(context, 24f), Styler.dpInt(context, 4f),
+                Styler.dpInt(context, 24f), 0
             )
         }
         content.addView(heading)
 
         status = TextView(context).apply {
-            textSize = 11f
+            textSize = 11.5f
             setTextColor(colors.mutedText)
             setPadding(
-                Styler.dpInt(context, 14f), Styler.dpInt(context, 2f),
-                Styler.dpInt(context, 14f), Styler.dpInt(context, 6f)
+                Styler.dpInt(context, 24f), Styler.dpInt(context, 3f),
+                Styler.dpInt(context, 24f), Styler.dpInt(context, 8f)
             )
             text = "Asking every indexer… this takes a few seconds."
         }
@@ -114,8 +115,8 @@ class ReleasesScreen(
             setItemViewCacheSize(12)
             clipToPadding = false
             setPadding(
-                Styler.dpInt(context, 8f), 0,
-                Styler.dpInt(context, 8f), Styler.dpInt(context, 90f)
+                Styler.dpInt(context, 20f), 0,
+                Styler.dpInt(context, 20f), Styler.dpInt(context, 90f)
             )
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
         }
@@ -338,43 +339,42 @@ class ReleasesScreen(
 }
 
 /** One candidate release. */
+/**
+ * One release, as a transfer row looks: a tile with its resolution (green
+ * when Sonarr or Radarr would take it, grey when rejected), the release name,
+ * one line of figures, and the rejection reasons in their own words.
+ */
 private class ReleaseRowView(
     context: android.content.Context,
     private val colors: PocketColors
 ) : LinearLayout(context) {
 
+    private val tile: TextView
     private val titleView: TextView
     private val statsView: TextView
     private val rejectionView: TextView
-    private val badge: TextView
 
     init {
-        orientation = VERTICAL
-        background = Styler.cardBackground(context, colors)
-        val h = Styler.dpInt(context, 12f)
-        val v = Styler.dpInt(context, 9f)
-        setPadding(h, v, h, v)
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = Styler.cardBackground(context, colors, cornerDp = 16f)
+        setPadding(dp(12), dp(10), dp(14), dp(10))
         Styler.makeFocusable(this)
 
-        val header = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        tile = TextView(context).apply {
+            gravity = Gravity.CENTER
+            textSize = 11.5f
+            textWeight(700)
+            maxLines = 1
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        addView(header, LayoutParams(MATCH, WRAP))
+        addView(tile, LayoutParams(dp(52), dp(44)).apply { marginEnd = dp(14) })
 
-        badge = TextView(context).apply {
-            textSize = 10f
-            setPadding(
-                Styler.dpInt(context, 7f), Styler.dpInt(context, 2f),
-                Styler.dpInt(context, 7f), Styler.dpInt(context, 2f)
-            )
-        }
-        header.addView(badge, LayoutParams(WRAP, WRAP).apply {
-            rightMargin = Styler.dpInt(context, 8f)
-        })
-
+        val words = LinearLayout(context).apply { orientation = VERTICAL }
+        addView(words, LayoutParams(0, WRAP, 1f))
         titleView = TextView(context).apply {
-            textSize = 14f
+            textSize = 13.5f
+            textWeight(600)
             setTextColor(colors.primaryText)
             maxLines = 1
             // MIDDLE, not END: the release group and codec live at the end of
@@ -382,51 +382,46 @@ private class ReleaseRowView(
             // identical-looking rows.
             ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
         }
-        header.addView(titleView, LayoutParams(0, WRAP, 1f))
+        words.addView(titleView, LayoutParams(MATCH, WRAP))
 
         statsView = TextView(context).apply {
-            textSize = 11f
+            textSize = 11.5f
             setTextColor(colors.mutedText)
-            setPadding(0, Styler.dpInt(context, 3f), 0, 0)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, dp(4), 0, 0)
         }
-        addView(statsView, LayoutParams(MATCH, WRAP))
+        words.addView(statsView, LayoutParams(MATCH, WRAP))
 
         rejectionView = TextView(context).apply {
-            textSize = 11f
+            textSize = 11.5f
             setTextColor(colors.dangerText)
             maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, dp(3), 0, 0)
             visibility = GONE
         }
-        addView(rejectionView, LayoutParams(MATCH, WRAP))
+        words.addView(rejectionView, LayoutParams(MATCH, WRAP))
     }
 
     fun bind(release: Release) {
         titleView.text = release.title
 
-        badge.text = release.quality.ifEmpty { "?" }
-        badge.setTextColor(colors.accentText)
-        // Qualified: GradientDrawable has a `colors` property of its own, and an
-        // unqualified reference inside apply{} resolves to that instead.
-        val badgeFill = if (release.rejected) {
-            this@ReleaseRowView.colors.mutedText
-        } else {
-            this@ReleaseRowView.colors.badgeAvailable
-        }
-        badge.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 9f)
-            setColor(badgeFill)
-        }
+        val tint = if (release.rejected) colors.mutedText else colors.badgeAvailable
+        tile.text = RESOLUTION.find(release.quality)?.value?.lowercase() ?: release.quality.substringAfterLast('-').ifEmpty { "?" }
+        tile.setTextColor(tint)
+        tile.background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(12).toFloat(),
+            androidx.core.graphics.ColorUtils.setAlphaComponent(tint, 0x2E))
 
-        statsView.text = buildString {
-            append(Fmt.bytes(release.sizeBytes))
-            append(" · ").append(release.seeders).append("s/").append(release.leechers).append("p")
-            if (release.ageDays > 0) append(" · ").append(release.ageDays).append("d old")
-            if (release.freeleech) append(" · freeleech")
-            if (release.languages.isNotEmpty()) {
-                append(" · ").append(release.languages.joinToString("/"))
-            }
-            append(" · ").append(release.indexer)
-        }
+        statsView.text = buildList {
+            if (release.quality.isNotEmpty()) add(release.quality)
+            add(Fmt.bytes(release.sizeBytes))
+            add("${release.seeders}s/${release.leechers}p")
+            if (release.ageDays > 0) add("${release.ageDays}d old")
+            if (release.freeleech) add("freeleech")
+            if (release.languages.isNotEmpty()) add(release.languages.joinToString("/"))
+            add(release.indexer)
+        }.filter(String::isNotBlank).joinToString(" · ")
 
         // Verbatim, and joined rather than truncated to the first: "not wanted
         // in profile" and "not enough seeders" are different problems with
@@ -434,10 +429,14 @@ private class ReleaseRowView(
         val reason = release.rejections.joinToString(" · ")
         rejectionView.text = reason
         rejectionView.visibility = if (reason.isEmpty()) GONE else VISIBLE
+        contentDescription = listOf(release.title, statsView.text, reason).filter { it.isNotEmpty() }.joinToString(", ")
     }
+
+    private fun dp(value: Int) = Styler.dpInt(context, value.toFloat())
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        val RESOLUTION = Regex("""(?i)\d{3,4}p""")
     }
 }

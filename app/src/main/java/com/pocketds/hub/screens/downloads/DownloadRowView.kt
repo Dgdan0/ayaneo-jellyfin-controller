@@ -1,7 +1,8 @@
 package com.pocketds.hub.screens.downloads
 
-import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.content.Context
+import android.content.res.ColorStateList
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -10,12 +11,16 @@ import android.widget.TextView
 import com.pocketds.hub.model.ActivityItem
 import com.pocketds.hub.model.Stages
 import com.pocketds.hub.state.Fmt
+import androidx.core.graphics.ColorUtils
 import com.pocketds.hub.ui.PocketColors
-import com.pocketds.hub.ui.SemanticColor
+import com.pocketds.hub.ui.ProgressLine
 import com.pocketds.hub.ui.Styler
+import com.pocketds.hub.ui.ThemeGradientDrawable
+import com.pocketds.hub.ui.textWeight
 
 /**
- * One transfer.
+ * One transfer, as the redesign's queue row: a tile saying what it is doing,
+ * the title in words, a slim bar, and one quiet line of figures.
  *
  * Full width rather than a card in a grid, because the useful information here
  * is all text and the interesting part -- why something is stuck -- is a
@@ -26,104 +31,89 @@ class DownloadRowView(
     private val colors: PocketColors
 ) : LinearLayout(context) {
 
-    private val stageChip: TextView
+    private val tile: TextView
     private val titleView: TextView
     private val trailing: TextView
-    private val subline: TextView
     private val bar: ProgressBar
     private val stats: TextView
+    private val release: TextView
     private val problem: TextView
 
     init {
-        orientation = VERTICAL
-        background = Styler.cardBackground(context, colors)
-        val h = Styler.dpInt(context, 12f)
-        val v = Styler.dpInt(context, 10f)
-        setPadding(h, v, h, v)
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = Styler.cardBackground(context, colors, cornerDp = 16f)
+        setPadding(dp(12), dp(10), dp(14), dp(10))
         Styler.makeFocusable(this)
 
-        val header = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        tile = TextView(context).apply {
+            gravity = Gravity.CENTER
+            textSize = 18f
+            textWeight(700)
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        addView(header, LayoutParams(MATCH, WRAP))
+        addView(tile, LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(14) })
 
-        stageChip = TextView(context).apply {
-            textSize = 11f
-            setPadding(
-                Styler.dpInt(context, 8f), Styler.dpInt(context, 2f),
-                Styler.dpInt(context, 8f), Styler.dpInt(context, 2f)
-            )
-        }
-        header.addView(stageChip, LayoutParams(WRAP, WRAP).apply {
-            rightMargin = Styler.dpInt(context, 8f)
-        })
-
+        val words = LinearLayout(context).apply { orientation = VERTICAL }
+        addView(words, LayoutParams(0, WRAP, 1f))
+        val header = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        words.addView(header, LayoutParams(MATCH, WRAP))
         titleView = TextView(context).apply {
             textSize = 14f
+            textWeight(600)
             setTextColor(colors.primaryText)
-            maxLines = 2
-            ellipsize = android.text.TextUtils.TruncateAt.END
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.END
         }
         header.addView(titleView, LayoutParams(0, WRAP, 1f))
-
         trailing = TextView(context).apply {
-            textSize = 14f
-            setTextColor(colors.primaryText)
-            gravity = Gravity.END
-        }
-        header.addView(trailing, LayoutParams(WRAP, WRAP).apply {
-            leftMargin = Styler.dpInt(context, 8f)
-        })
-
-        subline = TextView(context).apply {
             textSize = 12f
+            textWeight(600)
             setTextColor(colors.mutedText)
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            textDirection = TEXT_DIRECTION_LTR
         }
-        addView(subline, LayoutParams(MATCH, WRAP))
+        header.addView(trailing, LayoutParams(WRAP, WRAP).apply { marginStart = dp(10) })
 
-        bar = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 1000
-            isIndeterminate = false
-        }
-        addView(bar, LayoutParams(MATCH, Styler.dpInt(context, 3f)).apply {
-            topMargin = Styler.dpInt(context, 7f)
-            bottomMargin = Styler.dpInt(context, 5f)
-        })
+        bar = ProgressLine.create(context, colors)
+        words.addView(bar, LayoutParams(MATCH, dp(5)).apply { topMargin = dp(7) })
 
         stats = TextView(context).apply {
-            textSize = 12f
+            textSize = 11.5f
             setTextColor(colors.mutedText)
-            maxLines = 1
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.END
         }
-        addView(stats, LayoutParams(MATCH, WRAP))
+        words.addView(stats, LayoutParams(MATCH, WRAP).apply { topMargin = dp(5) })
+
+        // The release name under an *arr title: what qBittorrent calls it.
+        release = TextView(context).apply {
+            textSize = 10.5f
+            setTextColor(colors.mutedText)
+            alpha = .8f
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.MIDDLE
+        }
+        words.addView(release, LayoutParams(MATCH, WRAP).apply { topMargin = dp(2) })
 
         problem = TextView(context).apply {
             textSize = 12f
             setTextColor(colors.dangerText)
             maxLines = 2
-            ellipsize = android.text.TextUtils.TruncateAt.END
+            ellipsize = TextUtils.TruncateAt.END
             visibility = GONE
         }
-        addView(problem, LayoutParams(MATCH, WRAP).apply {
-            topMargin = Styler.dpInt(context, 4f)
-        })
+        words.addView(problem, LayoutParams(MATCH, WRAP).apply { topMargin = dp(4) })
     }
 
     fun bind(item: ActivityItem) {
         val stageColor = stageColor(item.stage)
-        stageChip.text = Stages.label(item.stage).uppercase()
-        stageChip.setTextColor(SemanticColor.foreground(stageColor))
-        stageChip.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 9f)
-            setColor(stageColor)
-        }
+        tile.text = glyph(item.stage)
+        tile.setTextColor(stageColor)
+        tile.background = ThemeGradientDrawable.rounded(dp(12).toFloat(), ColorUtils.setAlphaComponent(stageColor, 0x2E))
 
         titleView.text = item.headline
-        subline.text = item.subline
-        subline.visibility = if (item.subline.isEmpty()) GONE else VISIBLE
+        release.text = item.subline
+        release.visibility = if (item.subline.isEmpty()) GONE else VISIBLE
 
         // A seeding torrent sits at 100% forever; showing its ratio-free percent
         // is noise, so the trailing slot carries the upload rate instead.
@@ -133,13 +123,11 @@ class DownloadRowView(
             else -> ""
         }
 
-        bar.progress = (item.progress * 1000).toInt().coerceIn(0, 1000)
-        bar.progressTintList = android.content.res.ColorStateList.valueOf(stageColor)
-        bar.progressBackgroundTintList =
-            android.content.res.ColorStateList.valueOf(colors.posterPlaceholder)
+        bar.progress = (item.progress * ProgressLine.MAX).toInt().coerceIn(0, ProgressLine.MAX)
+        bar.progressTintList = ColorStateList.valueOf(stageColor)
         bar.visibility = if (item.stage == Stages.STUCK && item.progress <= 0.0) GONE else VISIBLE
 
-        stats.text = statsLine(item)
+        stats.text = listOf(Stages.label(item.stage), statsLine(item)).filter { it.isNotEmpty() && it != "—" }.joinToString(" · ")
 
         // The *arr's own words, verbatim. Paraphrasing "Found executable file
         // with extension: '.exe'" into "import failed" would have hidden the
@@ -152,10 +140,23 @@ class DownloadRowView(
                 append(warningLabel(warning))
             }
         }
-        contentDescription = listOf(item.headline, Stages.label(item.stage), stats.text, note).filter { it.isNotEmpty() }.joinToString(", ")
+        contentDescription = listOf(item.headline, stats.text, note).filter { it.isNotEmpty() }.joinToString(", ")
         problem.text = note
         problem.visibility = if (note.isEmpty()) GONE else VISIBLE
     }
+
+    /** What the tile says at a glance. */
+    private fun glyph(stage: String): String = when (stage) {
+        Stages.DOWNLOADING -> "↓"
+        Stages.SEEDING -> "↑"
+        Stages.IMPORTING -> "⇢"
+        Stages.STUCK -> "!"
+        Stages.DONE -> "✓"
+        Stages.STOPPED -> "‖"
+        else -> "…"
+    }
+
+    private fun dp(value: Int) = Styler.dpInt(context, value.toFloat())
 
     private fun statsLine(item: ActivityItem): String = buildString {
         if (item.queueItems > 1) {

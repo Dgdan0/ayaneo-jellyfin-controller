@@ -111,75 +111,43 @@ class DownloadsScreen(
         root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
 
         mode = if (targetTransferId.isNotBlank() || targetMediaKey.isNotBlank()) ContentMode.MEDIA else ContentModeSettings.get(context)
+        // Pills like every other page's actions; the filter lights up while it is on.
+        val ring = Styler.dpInt(context, com.pocketds.hub.ui.PillButton.RING_DP)
+        fun pill(label: String, onTap: () -> Unit): TextView =
+            com.pocketds.hub.ui.PillButton.create(context, colors, label, heightDp = 34f).apply {
+                FocusDecorator.attach(this, ringVisible, scale = false)
+                activateOnTap { onTap() }
+            }
         content.addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(Styler.dpInt(context, 12f), Styler.dpInt(context, 7f),
-                Styler.dpInt(context, 12f), 0)
-            attentionFilter = TextView(context).apply {
-                text = "Needs attention"
-                textSize = 12f
-                gravity = android.view.Gravity.CENTER
-                setTextColor(colors.primaryText)
-                minimumHeight = Styler.dpInt(context, 48f)
-                setPadding(Styler.dpInt(context, 12f), 0, Styler.dpInt(context, 12f), 0)
-                background = Styler.chipBackground(context, colors)
-                Styler.makeFocusable(this)
-                FocusDecorator.attach(this, ringVisible, scale = false)
-                visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
-                activateOnTap {
-                    attentionOnly = !attentionOnly
-                    latestActivity?.let(::render)
-                }
-            }
+            clipChildren = false
+            setPadding(Styler.dpInt(context, 24f) - ring, Styler.dpInt(context, 2f), Styler.dpInt(context, 24f) - ring, 0)
+            attentionFilter = pill("Needs attention") {
+                attentionOnly = !attentionOnly
+                latestActivity?.let(::render)
+            }.apply { visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE }
             addView(attentionFilter)
-            bandwidthButton = TextView(context).apply {
-                text = "Bandwidth"
-                textSize = 12f
-                setTextColor(colors.primaryText)
-                gravity = android.view.Gravity.CENTER
-                minimumHeight = Styler.dpInt(context, 48f)
-                setPadding(Styler.dpInt(context, 12f), 0, Styler.dpInt(context, 12f), 0)
-                background = Styler.chipBackground(context, colors)
-                Styler.makeFocusable(this)
-                FocusDecorator.attach(this, ringVisible, scale = false)
-                visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
-                activateOnTap { host.push(BandwidthScreen(api, ringVisible)) }
-            }
-            addView(bandwidthButton, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = Styler.dpInt(context, 8f) })
+            bandwidthButton = pill("Speed limits") { host.push(BandwidthScreen(api, ringVisible)) }
+                .apply { visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE }
+            addView(bandwidthButton, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = Styler.dpInt(context, 4f) })
             addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
-            deviceTransfers = TextView(context).apply {
-                text = "To this device"
-                textSize = 12f
-                gravity = android.view.Gravity.CENTER
-                setTextColor(colors.primaryText)
-                minimumHeight = Styler.dpInt(context, 48f)
-                setPadding(Styler.dpInt(context, 12f), 0, Styler.dpInt(context, 12f), 0)
-                background = Styler.chipBackground(context, colors)
-                Styler.makeFocusable(this)
-                FocusDecorator.attach(this, ringVisible, scale = false)
-                activateOnTap { host?.openOfflineManager() }
-            }
+            deviceTransfers = pill("On your Pocket") { host?.openOfflineManager() }
             addView(deviceTransfers)
         }, LinearLayout.LayoutParams(MATCH, WRAP))
 
         summaryLine = TextView(context).apply {
-            textSize = 13f
+            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 16f)
             setTextColor(colors.primaryText)
-            setPadding(
-                Styler.dpInt(context, 14f), Styler.dpInt(context, 10f),
-                Styler.dpInt(context, 14f), 0
-            )
+            textDirection = View.TEXT_DIRECTION_LTR
+            setPadding(Styler.dpInt(context, 24f), Styler.dpInt(context, 12f), Styler.dpInt(context, 24f), 0)
         }
         content.addView(summaryLine)
 
         statusLine = TextView(context).apply {
-            textSize = 11f
+            textSize = 11.5f
             setTextColor(colors.mutedText)
-            setPadding(
-                Styler.dpInt(context, 14f), Styler.dpInt(context, 2f),
-                Styler.dpInt(context, 14f), Styler.dpInt(context, 6f)
-            )
+            setPadding(Styler.dpInt(context, 24f), Styler.dpInt(context, 3f), Styler.dpInt(context, 24f), Styler.dpInt(context, 8f))
         }
         content.addView(statusLine)
 
@@ -193,8 +161,8 @@ class DownloadsScreen(
             setItemViewCacheSize(12)
             clipToPadding = false
             setPadding(
-                Styler.dpInt(context, 8f), 0,
-                Styler.dpInt(context, 8f), Styler.dpInt(context, 20f)
+                Styler.dpInt(context, 20f), 0,
+                Styler.dpInt(context, 20f), Styler.dpInt(context, 20f)
             )
             layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
         }
@@ -234,13 +202,13 @@ class DownloadsScreen(
             return listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
         }
         if (::deviceTransfers.isInitialized && deviceTransfers.hasFocus()) {
-            return listOf(ButtonHint.activate("Device downloads"), ButtonHint.back())
+            return listOf(ButtonHint.activate("On your Pocket"), ButtonHint.back())
         }
         if (::attentionFilter.isInitialized && attentionFilter.hasFocus()) {
             return listOf(ButtonHint.activate(if (attentionOnly) "All transfers" else "Needs attention"), ButtonHint.back())
         }
         if (::bandwidthButton.isInitialized && bandwidthButton.hasFocus()) {
-            return listOf(ButtonHint.activate("Bandwidth"), ButtonHint.back())
+            return listOf(ButtonHint.activate("Speed limits"), ButtonHint.back())
         }
         if (mode == ContentMode.BOOKS) {
             return listOfNotNull(
@@ -401,8 +369,9 @@ class DownloadsScreen(
             }
         }
         val attentionCount = related.count { it.isBroken }
-        attentionFilter.text = if (attentionOnly) "All transfers · $attentionCount need attention" else "Needs attention · $attentionCount"
+        attentionFilter.text = if (attentionOnly) "Showing $attentionCount that need attention" else "Needs attention · $attentionCount"
         attentionFilter.isSelected = attentionOnly
+        com.pocketds.hub.ui.PillButton.setPrimary(attentionFilter, colors, primary = attentionOnly)
 
         val s = body.summary
         summaryLine.setTextColor(colors.primaryText)

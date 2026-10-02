@@ -112,4 +112,13 @@ class FmtTest {
         assertEquals("2.5 Mbps", Fmt.mbps(2_500_000))
         assertEquals("", Fmt.mbps(0))
     }
+
+    @Test
+    fun `uptime counts days and hours in words, singular when one`() {
+        assertEquals("1 day", Fmt.uptime(86_400 + 120))
+        assertEquals("2 days 4 hours", Fmt.uptime(2 * 86_400 + 4 * 3_600))
+        assertEquals("1 hour 12 min", Fmt.uptime(3_600 + 12 * 60))
+        assertEquals("8 min", Fmt.uptime(8 * 60 + 5))
+        assertEquals("", Fmt.uptime(0))
+    }
 }

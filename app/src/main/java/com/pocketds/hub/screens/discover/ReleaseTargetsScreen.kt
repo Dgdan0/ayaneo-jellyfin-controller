@@ -65,22 +65,22 @@ class SeasonReleasePickerScreen(
             setBackgroundColor(colors.background)
             addView(TextView(context).apply {
                 text = "Choose a season"
-                textSize = 22f
+                com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.SCREEN)
                 setTextColor(colors.primaryText)
-                setPadding(dp(16), dp(13), dp(16), 0)
+                setPadding(dp(24), dp(6), dp(24), 0)
             })
             addView(TextView(context).apply {
                 text = "$mediaTitle · then choose the whole season or one aired episode"
                 textSize = 12f
                 setTextColor(colors.mutedText)
-                setPadding(dp(16), dp(3), dp(16), dp(7))
+                setPadding(dp(24), dp(4), dp(24), dp(4))
             })
             list = RecyclerView(context).apply {
                 layoutManager = LinearLayoutManager(context, RecyclerView.HORIZONTAL, false)
                 adapter = this@SeasonReleasePickerScreen.adapter
                 clipToPadding = false
                 clipChildren = false
-                setPadding(dp(16), dp(16), dp(16), dp(16))
+                setPadding(dp(16), dp(12), dp(16), dp(16))
                 layoutParams = LinearLayout.LayoutParams(MATCH, WRAP)
             }
             addView(list)
@@ -205,27 +205,27 @@ class ReleaseTargetsScreen(
             orientation = LinearLayout.VERTICAL
             addView(TextView(context).apply {
                 text = mediaTitle
-                textSize = 22f
+                com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.SCREEN)
                 maxLines = 1
                 setTextColor(colors.primaryText)
-                setPadding(dp(16), dp(12), dp(16), 0)
+                setPadding(dp(24), dp(6), dp(24), 0)
             })
             status = TextView(context).apply {
                 text = "Loading released episodes…"
                 textSize = 11f
                 setTextColor(colors.mutedText)
-                setPadding(dp(16), dp(3), dp(16), dp(7))
+                setPadding(dp(24), dp(4), dp(24), dp(10))
             }
             addView(status)
             seasonAction = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = Styler.cardBackground(context, colors)
+                background = Styler.cardBackground(context, colors, cornerDp = 16f)
                 Styler.makeFocusable(this)
                 descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                 setPadding(dp(7), dp(7), dp(14), dp(7))
                 layoutParams = LinearLayout.LayoutParams(dp(390), dp(130)).apply {
-                    marginStart = dp(16)
+                    marginStart = dp(24)
                     bottomMargin = dp(9)
                 }
                 seasonArt = ImageView(context).apply {

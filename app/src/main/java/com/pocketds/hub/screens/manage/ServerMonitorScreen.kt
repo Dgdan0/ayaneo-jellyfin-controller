@@ -1,100 +1,224 @@
 package com.pocketds.hub.screens.manage
 
-import com.pocketds.hub.ui.FocusScrollView
+import android.text.TextUtils
 import android.view.View
 import android.view.ViewGroup
-import android.widget.*
-import com.pocketds.hub.state.JobSlot
+import android.widget.LinearLayout
+import android.widget.TextView
 import com.pocketds.hub.input.PadAction
-import com.pocketds.hub.model.*
-import com.pocketds.hub.nav.*
-import com.pocketds.hub.net.*
-import com.pocketds.hub.ui.*
-import kotlinx.coroutines.*
-import java.util.Locale
+import com.pocketds.hub.model.HostContainer
+import com.pocketds.hub.model.ServerMonitor
+import com.pocketds.hub.nav.ButtonHint
+import com.pocketds.hub.nav.Screen
+import com.pocketds.hub.nav.ScreenHost
+import com.pocketds.hub.net.HubApi
+import com.pocketds.hub.net.HubResult
+import com.pocketds.hub.state.Fmt
+import com.pocketds.hub.state.JobSlot
+import com.pocketds.hub.ui.DashboardParts
+import com.pocketds.hub.ui.FocusScrollView
+import com.pocketds.hub.ui.PocketColors
+import com.pocketds.hub.ui.SettingsCard
+import com.pocketds.hub.ui.Styler
+import com.pocketds.hub.ui.Theme
+import com.pocketds.hub.ui.Type
+import com.pocketds.hub.ui.typeRole
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import com.pocketds.hub.state.Fmt
+import java.util.Locale
 
+/**
+ * The media PC at a glance: CPU, memory and uptime on cards across the top,
+ * then its disks and what is playing beside the Docker containers. Read-only;
+ * the pad moves through the rows so a long list scrolls, and Select refreshes
+ * (it also refreshes itself every 15 seconds while shown).
+ */
 class ServerMonitorScreen(private val api: HubApi, private val ringVisible: () -> Boolean) : Screen {
     override val title = "Server monitor"
-    private val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
-    private var host:ScreenHost?=null
-    private lateinit var colors:PocketColors
-    private lateinit var body:LinearLayout
-    private lateinit var status:TextView
-    private lateinit var refresh:TextView
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var host: ScreenHost? = null
+    private lateinit var colors: PocketColors
+    private lateinit var body: LinearLayout
+    private lateinit var status: TextView
     private val work = JobSlot()
-    private val busy: Boolean get() = work.isBusy
-    override fun onCreateView(host:ScreenHost,container:ViewGroup):View {
-        this.host=host;colors=Theme.colors(host.viewContext)
+    private var firstRender = true
+
+    override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
+        this.host = host
+        colors = Theme.colors(host.viewContext)
         return LinearLayout(host.viewContext).apply {
-            orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(8),dp(16),dp(8));setBackgroundColor(colors.background)
-            val header=LinearLayout(context).apply {orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL}
-            status=label("Loading host, disks and sessions…",12f);header.addView(status,LinearLayout.LayoutParams(0,-2,1f))
-            refresh=label("Refresh",14f).apply {minHeight=dp(44);gravity=android.view.Gravity.CENTER;setPadding(dp(14),0,dp(14),0);background=Styler.chipBackground(context,colors);Styler.makeFocusable(this);FocusDecorator.attach(this,ringVisible,false);activateOnTap{load()}}
-            header.addView(refresh);addView(header)
-            body=LinearLayout(context).apply {orientation=LinearLayout.VERTICAL}
-            addView(FocusScrollView(context).apply {addView(body)},LinearLayout.LayoutParams(-1,0,1f))
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(2), dp(24), 0)
+            setBackgroundColor(colors.background)
+            status = DashboardParts.text(context, "Asking the media PC…", 12f, colors.mutedText)
+            addView(status, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(10) })
+            body = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; clipChildren = false; setPadding(0, 0, 0, dp(16)) }
+            addView(FocusScrollView(context).apply { clipToPadding = false; addView(body) }, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }
     }
-    override fun onShow() {load();scope.launch {while(isActive){delay(15000);load()}}}
-    override fun onHide() {scope.coroutineContext.cancelChildren()}
-    override fun onDestroyView() {scope.cancel();host=null}
-    override fun requestInitialFocus()=refresh.requestFocus()
-    override fun hints()=listOf(ButtonHint.activate("Refresh"),ButtonHint.back(),ButtonHint("⟳","Refresh",PadAction.Refresh))
-    override fun onPad(action:PadAction):Boolean {if(action==PadAction.Refresh){load();return true};return false}
+
+    override fun onShow() {
+        load()
+        scope.launch { while (isActive) { delay(REFRESH_MILLIS); load() } }
+    }
+
+    override fun onHide() = scope.coroutineContext.cancelChildren()
+    override fun onDestroyView() { scope.cancel(); host = null }
+    override fun requestInitialFocus(): Boolean = body.getFocusables(View.FOCUS_FORWARD).firstOrNull()?.requestFocus() == true
+    override fun hints() = listOf(ButtonHint.back(), ButtonHint.refresh())
+    override fun onPad(action: PadAction): Boolean {
+        if (action != PadAction.Refresh) return false
+        load()
+        return true
+    }
+
     private fun load() {
-        if(busy)return
+        if (work.isBusy) return
         work.launch(scope) {
-            val result=api.serverMonitor()
-            when(result){is HubResult.Ok->render(result.value);is HubResult.Failed->{status.text="Refresh failed · ${result.message} · Previous values may be stale";status.setTextColor(colors.dangerText)}}
+            when (val result = api.serverMonitor()) {
+                is HubResult.Ok -> render(result.value)
+                is HubResult.Failed -> {
+                    status.text = "Could not refresh · ${result.message} · the figures below may be old"
+                    status.setTextColor(colors.dangerText)
+                }
+            }
         }
     }
-    private fun render(value:ServerMonitor) {
-        val selected=body.findFocus()?.tag as? String
-        body.removeAllViews();status.setTextColor(colors.mutedText)
-        val time=runCatching{DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault()).format(Instant.parse(value.checkedAt))}.getOrDefault("")
-        status.text="${value.host.os} host · Checked $time · Refreshes every 15 seconds"
-        val metrics=LinearLayout(checkNotNull(host).viewContext).apply {orientation=LinearLayout.HORIZONTAL}
-        val total=value.host.memoryTotalBytes;val used=(total-value.host.memoryAvailableBytes).coerceAtLeast(0)
+
+    private fun render(value: ServerMonitor) {
+        val context = checkNotNull(host).viewContext
+        val focused = body.findFocus()?.tag as? String
+        body.removeAllViews()
+        val time = runCatching {
+            DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault()).format(Instant.parse(value.checkedAt))
+        }.getOrDefault("")
+        status.setTextColor(colors.mutedText)
+        status.text = listOf("${value.host.os.ifEmpty { "Media PC" }} host", "checked $time".takeIf { time.isNotEmpty() },
+            "refreshes every 15 seconds").filterNotNull().joinToString(" · ")
+
+        val total = value.host.memoryTotalBytes
+        val used = (total - value.host.memoryAvailableBytes).coerceAtLeast(0)
+        val cpu = value.host.cpuPercent
+        val figures = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         listOf(
-            card("cpu","CPU",value.host.cpuPercent?.let{String.format(Locale.US,"%.1f%% · short sample",it)}?:"Unavailable",value.host.cpuPercent),
-            card("memory","Memory",if(total>0) "${Fmt.bytes(used)} / ${Fmt.bytes(total)}" else "Unavailable",if(total>0)100.0*used/total else null),
-            card("uptime","Host uptime",if(value.host.uptimeSeconds>0) "${value.host.uptimeSeconds/86400} days ${(value.host.uptimeSeconds%86400)/3600} hours" else "Unavailable")
-        ).forEach {metrics.addView(it,LinearLayout.LayoutParams(0,-2,1f).apply{marginEnd=dp(6)})}
-        body.addView(metrics)
-        value.host.warnings.forEach{body.addView(label(it,12f))}
-        val columns=LinearLayout(checkNotNull(host).viewContext).apply {orientation=LinearLayout.HORIZONTAL}
-        val disks=LinearLayout(checkNotNull(host).viewContext).apply{orientation=LinearLayout.VERTICAL}
-        disks.addView(label("Disk space available to Hub",16f))
-        if(value.host.disks.isEmpty())disks.addView(label("No fixed-disk statistics available.",13f))
-        value.host.disks.forEach {disk->
-            val free=if(disk.totalBytes>0)100.0*disk.availableBytes/disk.totalBytes else null
-            val low=com.pocketds.hub.screens.downloads.ActivityDashboard.lowSpace(disk)
-            disks.addView(card("disk:${disk.name}",disk.name,"${Fmt.bytes(disk.availableBytes)} free of ${Fmt.bytes(disk.totalBytes)}${if(low) " · Low space (<10%)" else ""}",free?.let{100-it},low))
+            DashboardParts.stat(context, colors, "CPU", cpu?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—",
+                "Over a short sample", cpu?.div(100.0), warning = (cpu ?: 0.0) >= 90.0),
+            DashboardParts.stat(context, colors, "Memory", if (total > 0) Fmt.bytes(used) else "—",
+                if (total > 0) "of ${Fmt.bytes(total)}" else "Unavailable", if (total > 0) used.toDouble() / total else null),
+            DashboardParts.stat(context, colors, "Up for", Fmt.uptime(value.host.uptimeSeconds).ifEmpty { "—" }, "Since the PC last started")
+        ).forEachIndexed { i, card -> figures.addView(card, LinearLayout.LayoutParams(0, MATCH, 1f).apply { if (i > 0) marginStart = dp(12) }) }
+        body.addView(figures)
+
+        val left = column(context)
+        val right = column(context)
+        left.addView(disks(value))
+        left.addView(playing(value), LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(12) })
+        right.addView(containers(value.containers, value.dockerWarning))
+        body.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            clipChildren = false
+            addView(left, LinearLayout.LayoutParams(0, WRAP, 1f))
+            addView(right, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = dp(12) })
+        }, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(12) })
+        // The first answer lands after the page has shown, with nothing to
+        // focus yet; focus had fallen to the tabs above.
+        body.post {
+            val back = focused?.let { body.findViewWithTag<View>(it) }
+            if (back?.requestFocus() != true && !body.hasFocus() && firstRender) requestInitialFocus()
+            firstRender = false
+            host?.refreshHints()
         }
-        disks.addView(label("Playing · selected Jellyfin profile",16f))
-        if(value.sessionWarning.isNotEmpty())disks.addView(label(value.sessionWarning,13f))
-        else if(value.sessions.isEmpty())disks.addView(label("Nothing playing for this profile.",13f))
-        value.sessions.forEachIndexed {i,item->disks.addView(card("session:$i",item.title,"${item.device} · ${item.client}\n${if(item.paused) "Paused" else "Playing"} · ${item.method.ifEmpty{"Method unavailable"}}"))}
-        columns.addView(disks,LinearLayout.LayoutParams(0,-2,1f).apply{marginEnd=dp(12)})
-        val containers=LinearLayout(checkNotNull(host).viewContext).apply{orientation=LinearLayout.VERTICAL}
-        containers.addView(label("Docker containers",16f))
-        if(value.dockerWarning.isNotEmpty())containers.addView(label(value.dockerWarning,13f))
-        else if(value.containers.isEmpty())containers.addView(label("No containers reported by Docker.",13f))
-        value.containers.forEach{containers.addView(card("container:${it.name}",it.name,"${it.state} · ${it.status}\n${it.image}",warning=it.state in setOf("dead","restarting")||it.status.contains("unhealthy")))}
-        columns.addView(containers,LinearLayout.LayoutParams(0,-2,1f));body.addView(columns)
-        if(selected!=null)body.post{body.findViewWithTag<View>(selected)?.requestFocus()?:refresh.requestFocus()}
     }
-    private fun card(id:String,title:String,detail:String,percentage:Double?=null,warning:Boolean=false)=LinearLayout(checkNotNull(host).viewContext).apply {
-        orientation=LinearLayout.VERTICAL;tag=id;setPadding(dp(10),dp(8),dp(10),dp(8));background=Styler.chipBackground(context,colors)
-        layoutParams=LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(6)}
-        addView(label(title,15f));addView(label(detail,12f).apply{if(warning)setTextColor(colors.dangerText)})
-        percentage?.let {p->addView(ProgressBar(context,null,android.R.attr.progressBarStyleHorizontal).apply{max=1000;progress=(p*10).toInt().coerceIn(0,1000);progressTintList=android.content.res.ColorStateList.valueOf(if(warning)colors.dangerText else colors.accent)},LinearLayout.LayoutParams(-1,dp(6)).apply{topMargin=dp(6)})}
-        Styler.makeFocusable(this);FocusDecorator.attach(this,ringVisible,false);contentDescription="$title, $detail"
+
+    private fun disks(value: ServerMonitor): SettingsCard = card("Disks", "${value.host.disks.size} with space the hub can see").apply {
+        val context = this.context
+        if (value.host.disks.isEmpty()) quiet(this, "No disk figures from this PC")
+        value.host.disks.forEach { disk ->
+            val view = DashboardParts.disk(context, colors, disk)
+            addView(DashboardParts.row(context, colors, ringVisible, "disk:${disk.name}", view.contentDescription.toString()).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(view, LinearLayout.LayoutParams(MATCH, WRAP))
+            })
+        }
+        // "G:\ space unavailable": a drive the hub can name but not measure.
+        value.host.warnings.forEach { quiet(this, it) }
     }
-    private fun label(value:String,size:Float)=TextView(checkNotNull(host).viewContext).apply{text=value;textSize=size;setTextColor(colors.primaryText);setPadding(0,dp(4),0,dp(4))}
-    private fun dp(n:Int)=Styler.dpInt(checkNotNull(host).viewContext,n.toFloat())
+
+    private fun playing(value: ServerMonitor): SettingsCard = card("Playing now", "for this profile").apply {
+        when {
+            value.sessionWarning.isNotEmpty() -> quiet(this, value.sessionWarning)
+            value.sessions.isEmpty() -> quiet(this, "Nothing is playing")
+        }
+        value.sessions.forEachIndexed { i, session ->
+            val line = listOf(session.device, session.client, if (session.paused) "Paused" else session.method.ifEmpty { "Playing" })
+                .filter(String::isNotBlank).joinToString(" · ")
+            addView(item("session:$i", session.title, line, if (session.paused) colors.mutedText else colors.accent))
+        }
+    }
+
+    private fun containers(values: List<HostContainer>, warning: String): SettingsCard {
+        val running = values.count { it.state == "running" }
+        return card("Docker containers", if (values.isEmpty()) "" else "$running of ${values.size} running").apply {
+            when {
+                warning.isNotEmpty() -> quiet(this, warning)
+                values.isEmpty() -> quiet(this, "Docker reports no containers")
+            }
+            values.sortedWith(compareBy({ it.state != "running" }, { it.name })).forEach { container ->
+                val unhealthy = container.status.contains("unhealthy", ignoreCase = true)
+                val state = if (unhealthy) "degraded" else container.state
+                addView(item("container:${container.name}", container.name,
+                    listOf(container.status, container.image).filter(String::isNotBlank).joinToString(" · "),
+                    DashboardParts.stateColor(colors, state)))
+            }
+        }
+    }
+
+    /** A name with its state dot and a quiet line under it. */
+    private fun item(id: String, name: String, line: String, dotColor: Int): LinearLayout {
+        val context = checkNotNull(host).viewContext
+        return DashboardParts.row(context, colors, ringVisible, id, "$name, $line").apply {
+            gravity = android.view.Gravity.TOP
+            addView(DashboardParts.dot(context, dotColor).apply {
+                (layoutParams as LinearLayout.LayoutParams).topMargin = dp(6)
+            })
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(DashboardParts.text(context, name, 12.5f, colors.primaryText, 600).apply { isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
+                if (line.isNotBlank()) addView(DashboardParts.text(context, line, 11f, colors.mutedText).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
+            }, LinearLayout.LayoutParams(0, WRAP, 1f))
+        }
+    }
+
+    private fun card(title: String, trailing: String): SettingsCard = SettingsCard(checkNotNull(host).viewContext, colors).apply {
+        title(title, trailing)
+        titleView?.typeRole(Type.Role.HEADING, 15f)
+        // Room under the heading before the first row.
+        addView(View(context), LinearLayout.LayoutParams(MATCH, dp(4)))
+    }
+
+    private fun quiet(card: SettingsCard, text: String) {
+        card.addView(DashboardParts.text(card.context, text, 11.5f, colors.mutedText).apply { setPadding(dp(6), dp(4), dp(6), dp(2)) })
+    }
+
+    private fun column(context: android.content.Context) = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        clipChildren = false
+    }
+
+    private fun dp(value: Int) = Styler.dpInt(checkNotNull(host).viewContext, value.toFloat())
+
+    private companion object {
+        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+        const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        const val REFRESH_MILLIS = 15_000L
+    }
 }

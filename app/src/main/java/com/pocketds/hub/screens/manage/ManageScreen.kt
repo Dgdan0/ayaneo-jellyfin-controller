@@ -13,7 +13,8 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.recyclerview.widget.LinearLayoutManager
+import android.text.TextUtils
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.pocketds.hub.R
 import com.pocketds.hub.input.Direction
@@ -27,7 +28,14 @@ import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.settings.HubSettings
+import com.pocketds.hub.state.Fmt
+import com.pocketds.hub.ui.AppIcon
+import com.pocketds.hub.ui.DashboardParts
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.PillButton
+import com.pocketds.hub.ui.Type
+import com.pocketds.hub.ui.textWeight
+import com.pocketds.hub.ui.typeRole
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
@@ -73,10 +81,9 @@ class ManageScreen(
 
             summary = TextView(context).apply {
                 text = "Services"
-                textSize = 22f
-                setTypeface(typeface, Typeface.BOLD)
+                typeRole(Type.Role.SCREEN)
                 setTextColor(colors.primaryText)
-                setPadding(dp(18), dp(16), dp(18), 0)
+                setPadding(dp(24), dp(14), dp(24), 0)
             }
             addView(summary)
 
@@ -84,16 +91,17 @@ class ManageScreen(
                 text = "Checking Ayaneo Hub…"
                 textSize = 12f
                 setTextColor(colors.mutedText)
-                setPadding(dp(18), dp(3), dp(18), dp(9))
+                setPadding(dp(24), dp(4), dp(24), dp(10))
             }
             addView(status)
 
             list = RecyclerView(context).apply {
-                layoutManager = LinearLayoutManager(context)
+                // Two across: thirteen full-width rows took four screens to pass.
+                layoutManager = GridLayoutManager(context, COLUMNS)
                 adapter = this@ManageScreen.adapter
                 itemAnimator = null
                 clipToPadding = false
-                setPadding(dp(10), 0, dp(10), dp(16))
+                setPadding(dp(18), 0, dp(18), dp(16))
                 addOnChildAttachStateChangeListener(
                     object : RecyclerView.OnChildAttachStateChangeListener {
                         override fun onChildViewAttachedToWindow(view: View) {
@@ -145,10 +153,16 @@ class ManageScreen(
     }
 
     override fun onPad(action: PadAction): Boolean = when (action) {
-        is PadAction.Step -> when (action.direction) {
-            Direction.UP -> { moveService(-1); true }
-            Direction.DOWN -> { moveService(1); true }
-            else -> false
+        is PadAction.Step -> {
+            val position = list.findContainingViewHolder(list.findFocus() ?: list)?.bindingAdapterPosition
+                ?.takeIf { it != RecyclerView.NO_POSITION } ?: adapter.indexOf(selectedService).coerceAtLeast(0)
+            when (action.direction) {
+                Direction.UP -> moveService(-COLUMNS)
+                Direction.DOWN -> moveService(COLUMNS)
+                Direction.LEFT -> if (position % COLUMNS > 0) moveService(-1)
+                Direction.RIGHT -> if (position % COLUMNS < COLUMNS - 1) moveService(1)
+            }
+            true
         }
         PadAction.Primary -> if (selectedService in scannableServices) {
             scanLibrary(selectedService)
@@ -167,8 +181,8 @@ class ManageScreen(
             ?.bindingAdapterPosition
             ?.takeIf { it != RecyclerView.NO_POSITION }
         val current = focusedPosition ?: adapter.indexOf(selectedService).coerceAtLeast(0)
-        val target = (current + delta).coerceIn(0, adapter.itemCount - 1)
-        if (target == current) return
+        val target = current + delta
+        if (target !in 0 until adapter.itemCount) return
         pendingFocus = target
         list.scrollToPosition(target)
         list.post {
@@ -243,10 +257,10 @@ class ManageScreen(
         adapter.submit(rows)
         val problemCount = rows.count { it.state == "down" || it.state == "misconfigured" }
         val running = rows.count { it.state == "up" }
-        summary.text = "Services · $running running"
+        summary.text = "Services"
         status.setTextColor(if (problemCount == 0) colors.mutedText else colors.badgePending)
         status.text = if (problemCount == 0) {
-            "Ayaneo Hub and all enabled services are responding"
+            "All $running running · A opens a service's own page"
         } else {
             "$problemCount service${if (problemCount == 1) " needs" else "s need"} attention"
         }
@@ -366,6 +380,7 @@ class ManageScreen(
     private inner class ServiceCardView(context: android.content.Context) : LinearLayout(context) {
         private val name: TextView
         private val state: TextView
+        private val dot: View
         private val detail: TextView
         private val icon: ImageView
         private val scan: TextView
@@ -373,9 +388,9 @@ class ManageScreen(
         init {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(64)
-            setPadding(dp(14), dp(8), dp(14), dp(8))
-            background = cardBackground()
+            minimumHeight = dp(72)
+            setPadding(dp(14), dp(10), dp(12), dp(10))
+            background = Styler.cardBackground(context, colors, cornerDp = 16f)
             Styler.makeFocusable(this)
             isClickable = true
 
@@ -383,71 +398,60 @@ class ManageScreen(
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            addView(icon, LayoutParams(dp(36), dp(36)).apply {
-                marginEnd = dp(14)
-            })
+            addView(icon, LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(12) })
 
             addView(LinearLayout(context).apply {
                 orientation = VERTICAL
-
-                addView(LinearLayout(context).apply {
-                orientation = HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
                 name = TextView(context).apply {
-                    textSize = 15f
-                    setTypeface(typeface, Typeface.BOLD)
+                    textSize = 14.5f
+                    textWeight(600)
                     setTextColor(colors.primaryText)
+                    isSingleLine = true
+                    ellipsize = TextUtils.TruncateAt.END
                 }
-                addView(name, LayoutParams(0, WRAP, 1f))
-                state = TextView(context).apply {
-                    textSize = 11f
-                    gravity = Gravity.CENTER
-                    setPadding(dp(11), dp(4), dp(11), dp(4))
-                }
-                addView(state)
-                }, LayoutParams(MATCH, WRAP))
-
+                addView(name, LayoutParams(MATCH, WRAP))
+                addView(LinearLayout(context).apply {
+                    orientation = HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(3), 0, 0)
+                    dot = DashboardParts.dot(context, colors.mutedText)
+                    addView(dot)
+                    state = TextView(context).apply { textSize = 11.5f; textWeight(600) }
+                    addView(state)
+                })
                 detail = TextView(context).apply {
-                    textSize = 12f
+                    textSize = 11f
                     setTextColor(colors.mutedText)
-                    setPadding(0, dp(4), 0, 0)
+                    setPadding(0, dp(2), 0, 0)
                     maxLines = 2
+                    ellipsize = TextUtils.TruncateAt.END
                 }
                 addView(detail, LayoutParams(MATCH, WRAP))
             }, LayoutParams(0, WRAP, 1f))
 
-            scan = TextView(context).apply {
-                text = "↻  Scan"
-                textSize = 13f
-                gravity = Gravity.CENTER
-                setTextColor(colors.primaryText)
-                background = Styler.chipBackground(context, colors)
-                minWidth = dp(78)
-                minHeight = dp(48)
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                isClickable = true
+            scan = PillButton.create(context, colors, "Scan", AppIcon.REFRESH, heightDp = 32f).apply {
                 isFocusable = false
+                isFocusableInTouchMode = false
                 contentDescription = "Scan Jellyfin libraries"
                 visibility = View.GONE
             }
-            addView(scan, LayoutParams(WRAP, WRAP).apply { marginStart = dp(12) })
+            addView(scan, LayoutParams(WRAP, WRAP).apply { marginStart = dp(6) })
         }
 
         fun bind(row: ServiceRow) {
             com.pocketds.hub.ui.ServiceLogo.bind(icon,serviceLogo(row.icon))
             icon.background = if (row.icon == "hub") ThemeGradientDrawable().apply {
-                cornerRadius = Styler.dp(context, 12f)
+                cornerRadius = Styler.dp(context, 10f)
                 setColor(0xFF0FADA0.toInt())
             } else null
             val inset = if (row.icon == "hub") dp(1) else dp(2)
             icon.setPadding(inset, inset, inset, inset)
             name.text = row.name
             state.text = stateLabel(row.state)
-            state.setTextColor(SemanticColor.foreground(stateColor(row.state)))
-            state.background = ThemeGradientDrawable().apply {
-                cornerRadius = Styler.dp(context, 12f)
-                setColor(stateColor(row.state))
-            }
+            val color = stateColor(row.state)
+            state.setTextColor(if (row.state == "overview" || row.state == "checking") colors.mutedText else color)
+            dot.background = ThemeGradientDrawable.oval(color)
+            dot.visibility = if (row.state == "overview") View.GONE else View.VISIBLE
             detail.text = row.detail.ifEmpty { "No additional information" }
             scan.visibility = if (row.id in scannableServices) View.VISIBLE else View.GONE
             scan.contentDescription = "Scan ${row.name} library"
@@ -464,61 +468,21 @@ class ManageScreen(
         }
     }
 
-    private fun serviceLogo(service: String): Int = when (service) {
-        "jellyfin" -> R.drawable.logo_jellyfin
-        "jellyseerr" -> R.drawable.logo_jellyseerr
-        "prowlarr" -> R.drawable.logo_prowlarr
-        "sonarr" -> R.drawable.logo_sonarr
-        "radarr" -> R.drawable.logo_radarr
-        "readarr" -> R.drawable.logo_readarr
-        "bazarr" -> R.drawable.logo_bazarr
-        "cleanuparr" -> R.drawable.logo_cleanuparr
-        "qbittorrent" -> R.drawable.logo_qbittorrent
-        else -> R.drawable.ic_launcher_foreground
-    }
-
-    private fun cardBackground(): StateListDrawable {
-        fun face(color: Int, stroke: Int = 0) = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(host.viewContext, 14f)
-            setColor(color)
-            if (stroke > 0) setStroke(stroke, this@ManageScreen.colors.focusRing)
-        }
-        return StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_pressed), face(colors.cardSurfacePressed))
-            addState(intArrayOf(android.R.attr.state_focused), face(colors.focusFill, dp(3)))
-            addState(intArrayOf(), face(colors.cardSurface))
-        }
-    }
+    private fun serviceLogo(service: String): Int = com.pocketds.hub.ui.ServiceLogo.resource(service)
 
     private fun stateColor(value: String): Int = when (value) {
-        "overview" -> colors.stripBackground
-        "up" -> colors.badgeAvailable
-        "checking" -> colors.stripBackground
-        "disabled" -> colors.posterPlaceholder
-        "misconfigured" -> colors.badgePending
-        else -> colors.badgeFailed
+        "overview", "checking" -> colors.mutedText
+        else -> DashboardParts.stateColor(colors, value)
     }
 
     private fun stateLabel(value: String): String = when (value) {
-        "overview" -> "View"
+        "overview" -> "Open"
         "up" -> "Running"
         "checking" -> "Checking"
         "disabled" -> "Disabled"
         "misconfigured" -> "Needs setup"
         "down" -> "Unavailable"
         else -> value.ifEmpty { "Unknown" }.replaceFirstChar { it.uppercase() }
-    }
-
-    private fun uptime(seconds: Long): String {
-        val safe = seconds.coerceAtLeast(0)
-        val days = safe / 86_400
-        val hours = (safe % 86_400) / 3_600
-        val minutes = (safe % 3_600) / 60
-        return when {
-            days > 0 -> "${days}d ${hours}h"
-            hours > 0 -> "${hours}h ${minutes}m"
-            else -> "${minutes}m"
-        }
     }
 
     private fun configuredHubRow(
@@ -533,7 +497,7 @@ class ManageScreen(
             add(HubSettings.baseUrl(host.viewContext).ifEmpty { "No address configured" })
             health?.let {
                 if (it.version.isNotEmpty()) add("v${it.version}")
-                add("Running for ${uptime(it.uptimeSeconds)}")
+                add("up ${Fmt.uptime(it.uptimeSeconds)}")
                 add("${it.tokenCount} access token${if (it.tokenCount == 1) "" else "s"}")
             }
         }.joinToString(" · ")
@@ -555,6 +519,7 @@ class ManageScreen(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        const val COLUMNS = 2
 
         val scannableServices = setOf("jellyfin", "kavita", "storyteller")
     }

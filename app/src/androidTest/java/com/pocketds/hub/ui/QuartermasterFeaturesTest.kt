@@ -195,11 +195,11 @@ class QuartermasterFeaturesTest {
             ins.runOnMainSync {root=screen.onCreateView(host,FrameLayout(activity));activity.setContentView(root);screen.onShow()}
             ins.waitForIdleSync()
             ins.runOnMainSync {
-                all(root).filterIsInstance<TextView>().first{it.text=="Edit alternative limits"}.performClick()
+                all(root).first{it.tag=="edit:alternative"}.performClick()
                 val fields=all(root).filterIsInstance<android.widget.EditText>()
                 assertEquals(2,fields.size);assertEquals("10",fields[0].text.toString())
                 fields[0].setText("32");fields[1].setText("16")
-                var target:View=all(root).filterIsInstance<TextView>().first{it.text=="Apply limits"}
+                var target:View=all(root).filterIsInstance<TextView>().first{it.text=="Apply"}
                 while(!target.isClickable)target=target.parent as View
                 target.performClick()
                 assertEquals("alternative",sent?.limitsFor);assertEquals("",sent?.mode)

@@ -49,6 +49,19 @@ object PillButton {
         Styler.makeFocusable(this)
     }
 
+    /**
+     * Switches a pill between the accent fill and the quiet one: a filter that
+     * is on. A new background resets the view's padding to the drawable's
+     * insets, which cut the text against the pill's edge, so it is put back.
+     */
+    fun setPrimary(view: TextView, colors: PocketColors, primary: Boolean) {
+        val left = view.paddingLeft; val top = view.paddingTop; val right = view.paddingRight; val bottom = view.paddingBottom
+        view.background = background(view.context, colors, primary)
+        view.setPadding(left, top, right, bottom)
+        view.setTextColor(if (primary) colors.accentText else colors.primaryText)
+        view.textWeight(if (primary) 700 else 600)
+    }
+
     fun background(context: Context, colors: PocketColors, primary: Boolean): StateListDrawable {
         val ring = Styler.dpInt(context, RING_DP)
         fun fill(pressed: Boolean) = ThemeGradientDrawable().apply {
