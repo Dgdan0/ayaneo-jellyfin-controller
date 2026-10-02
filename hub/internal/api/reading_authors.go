@@ -1,13 +1,16 @@
 package api
 
 import (
+	"ayaneohub/internal/adapters/openlibrary"
 	"ayaneohub/internal/adapters/storyteller"
 	"ayaneohub/internal/cache"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -86,6 +89,8 @@ func (s *Server) handleReadingAuthors(w http.ResponseWriter, r *http.Request) {
 	}
 	standalone, seriesGroups := s.storytellerShelfGroups(books, true)
 	groups := map[string]*ReadingAuthor{}
+	// One of each writer's own book titles, to find their portrait by.
+	bookTitles := map[string]string{}
 	add := func(name string, work ReadingWork, artworkBook *storyteller.Book) {
 		ref := readingAuthorRef(name)
 		name = ref.Name
@@ -93,6 +98,13 @@ func (s *Server) handleReadingAuthors(w http.ResponseWriter, r *http.Request) {
 		if group == nil {
 			group = &ReadingAuthor{ID: ref.ID, Name: name, Items: []ReadingWork{}}
 			groups[ref.ID] = group
+		}
+		if bookTitles[ref.ID] == "" {
+			if artworkBook != nil {
+				bookTitles[ref.ID] = artworkBook.Title
+			} else if work.EntityType != "collection" {
+				bookTitles[ref.ID] = work.Title
+			}
 		}
 		if group.Artwork == "" && artworkBook != nil {
 			group.Artwork = s.readingAuthorArtwork(*artworkBook, name)
@@ -173,7 +185,9 @@ func (s *Server) handleReadingAuthors(w http.ResponseWriter, r *http.Request) {
 				}
 				group.Page = page
 				group.Items = readingAuthorPage(group.Items, page)
-				out.Authors = []ReadingAuthor{group}
+				one := []ReadingAuthor{group}
+				s.fillAuthorPhotos(ctx, one, bookTitles)
+				out.Authors = one
 				out.Total = group.Total
 				out.TotalPages = group.TotalPages
 				writeJSON(w, 200, out)
@@ -185,12 +199,46 @@ func (s *Server) handleReadingAuthors(w http.ResponseWriter, r *http.Request) {
 	}
 	start := min((page-1)*12, len(authors))
 	end := min(start+12, len(authors))
+	s.fillAuthorPhotos(ctx, authors[start:end], bookTitles)
 	for _, group := range authors[start:end] {
 		group.Page = 1
 		group.Items = readingAuthorPage(group.Items, 1)
 		out.Authors = append(out.Authors, group)
 	}
 	writeJSON(w, 200, out)
+}
+
+// fillAuthorPhotos gives each writer without a portrait from a requested series
+// their Open Library photo, found through one of their own books in the
+// library. Looked up together and remembered for a day; a writer Open Library
+// does not know keeps the initials.
+func (s *Server) fillAuthorPhotos(ctx context.Context, authors []ReadingAuthor, bookTitles map[string]string) {
+	if s.openlibrary == nil {
+		return
+	}
+	var wait sync.WaitGroup
+	for i := range authors {
+		author := &authors[i]
+		title := bookTitles[author.ID]
+		if author.Artwork != "" || title == "" || author.Name == "" || author.Name == "Unknown author" {
+			continue
+		}
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			key := "reading:author-photo:" + strings.ToLower(author.Name) + "\x00" + strings.ToLower(title)
+			id, _, err := cache.Fetch(ctx, s.cache, key, cache.Metadata, func(ctx context.Context) (string, error) {
+				return s.openlibrary.AuthorIDForBook(ctx, author.Name, title)
+			})
+			if err != nil || id == "" {
+				return
+			}
+			if token := s.images.registerReadingCover(openlibrary.AuthorPhotoURL(id)); token != "" {
+				author.Artwork = "/v1/img/reading/" + token
+			}
+		}()
+	}
+	wait.Wait()
 }
 
 func (s *Server) readingAuthorArtwork(book storyteller.Book, name string) string {

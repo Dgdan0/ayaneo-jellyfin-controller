@@ -1,6 +1,7 @@
 package api
 
 import (
+	"ayaneohub/internal/adapters/openlibrary"
 	"ayaneohub/internal/adapters/storyteller"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -25,7 +27,20 @@ func TestAuthorShelvesUseWholeCatalogAndPageEachAuthor(t *testing.T) {
 		json.NewEncoder(w).Encode(books)
 	}))
 	defer upstream.Close()
-	handler := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})).Handler()
+	// Open Library knows Pierce Brown through one of his books here, and nobody else.
+	var lookups atomic.Int32
+	ol := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lookups.Add(1)
+		if r.URL.Path == "/search.json" && r.URL.Query().Get("author") == "Pierce Brown" {
+			fmt.Fprint(w, `{"docs":[{"author_key":["OL7621609A"],"author_name":["Pierce Brown"]}]}`)
+			return
+		}
+		fmt.Fprint(w, `{"docs":[]}`)
+	}))
+	defer ol.Close()
+	server := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"}))
+	server.openlibrary = openlibrary.New(ol.URL)
+	handler := server.Handler()
 	get := func(path string) ReadingAuthorsResponse {
 		t.Helper()
 		result := libraryRequest(handler, path)
@@ -42,6 +57,15 @@ func TestAuthorShelvesUseWholeCatalogAndPageEachAuthor(t *testing.T) {
 	out := get(root)
 	if len(out.Authors) != 3 || out.Authors[0].Name != "Brandon Sanderson" || out.Authors[2].Name != "Unknown author" {
 		t.Fatalf("groups: %+v", out.Authors)
+	}
+	// A writer without a requested series still gets a portrait, found through their own book.
+	if !strings.HasPrefix(out.Authors[1].Artwork, "/v1/img/reading/") || out.Authors[0].Artwork != "" || out.Authors[2].Artwork != "" {
+		t.Fatalf("portraits: %q %q %q", out.Authors[0].Artwork, out.Authors[1].Artwork, out.Authors[2].Artwork)
+	}
+	before := lookups.Load()
+	get(root)
+	if lookups.Load() != before {
+		t.Fatalf("portraits were looked up again: %d -> %d", before, lookups.Load())
 	}
 	// An author's shelf is their series, then their books outside a series.
 	group := out.Authors[1]
@@ -86,7 +110,20 @@ func TestReadingResolveUsesISBNAndDoesNotInventTitleMatches(t *testing.T) {
 		fmt.Fprint(w, `[{"id":1,"title":"Red Rising","identifiers":[{"type":"isbn","value":"978-0-345-53978-6"}],"authors":[{"name":"Pierce Brown"}],"ebook":{"uuid":"e"}}]`)
 	}))
 	defer upstream.Close()
-	handler := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})).Handler()
+	// Open Library knows Pierce Brown through one of his books here, and nobody else.
+	lookups := 0
+	ol := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lookups++
+		if r.URL.Path == "/search.json" && r.URL.Query().Get("author") == "Pierce Brown" {
+			fmt.Fprint(w, `{"docs":[{"author_key":["OL7621609A"],"author_name":["Pierce Brown"]}]}`)
+			return
+		}
+		fmt.Fprint(w, `{"docs":[]}`)
+	}))
+	defer ol.Close()
+	server := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"}))
+	server.openlibrary = openlibrary.New(ol.URL)
+	handler := server.Handler()
 	matched := libraryRequest(handler, "/v1/reading/resolve?source=openlibrary&sourceId=OL1W&isbn=9780345539786")
 	if matched.Code != 200 || !strings.Contains(matched.Body.String(), `"workId":"rw_`) {
 		t.Fatalf("resolve: %d %s", matched.Code, matched.Body.String())

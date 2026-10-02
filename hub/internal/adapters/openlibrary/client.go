@@ -400,6 +400,42 @@ func (c *Client) getJSON(ctx context.Context, path string, query url.Values, out
 	return nil
 }
 
+// AuthorIDForBook finds a writer's Open Library id through one of their own
+// books, so a name two people share resolves to the one who wrote this book.
+// Empty, with no error, when Open Library has no such book by that name.
+func (c *Client) AuthorIDForBook(ctx context.Context, name, title string) (string, error) {
+	name, title = strings.TrimSpace(name), strings.TrimSpace(title)
+	if name == "" || title == "" {
+		return "", nil
+	}
+	var out struct {
+		Docs []struct {
+			AuthorKey  []string `json:"author_key"`
+			AuthorName []string `json:"author_name"`
+		} `json:"docs"`
+	}
+	query := url.Values{"title": {title}, "author": {name}, "fields": {"author_key,author_name"}, "limit": {"5"}}
+	if err := c.getJSON(ctx, "/search.json", query, &out); err != nil {
+		return "", err
+	}
+	for _, doc := range out.Docs {
+		for i, key := range doc.AuthorKey {
+			if i < len(doc.AuthorName) && strings.EqualFold(strings.TrimSpace(doc.AuthorName[i]), name) {
+				if id := normalizeAuthorID(key); id != "" {
+					return id, nil
+				}
+			}
+		}
+	}
+	return "", nil
+}
+
+// AuthorPhotoURL is Open Library's portrait of an author. It answers 404 when
+// there is none, and the app then draws the initials.
+func AuthorPhotoURL(authorID string) string {
+	return "https://covers.openlibrary.org/a/olid/" + authorID + "-L.jpg?default=false"
+}
+
 func normalizeWorkID(value string) string {
 	value = strings.TrimSpace(strings.TrimSuffix(value, ".json"))
 	value = strings.TrimPrefix(value, "/works/")

@@ -156,3 +156,24 @@ func TestBooksByWorkIDsHydratesWikidataRosterFromOpenLibrary(t *testing.T) {
 		t.Fatalf("books = %+v", books)
 	}
 }
+
+func TestAuthorIDForBookPicksTheWriterOfThatBook(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search.json" || r.URL.Query().Get("title") != "Red Rising" || r.URL.Query().Get("author") != "Pierce Brown" {
+			t.Fatalf("request = %s", r.URL)
+		}
+		// A co-credited illustrator comes first; the writer is matched by name.
+		_, _ = w.Write([]byte(`{"docs":[{"author_key":["OL9363988A","OL7621609A"],"author_name":["Renee Joiner","Pierce Brown"]}]}`))
+	}))
+	defer server.Close()
+	id, err := New(server.URL).AuthorIDForBook(context.Background(), "Pierce Brown", "Red Rising")
+	if err != nil || id != "OL7621609A" {
+		t.Fatalf("id = %q, err = %v", id, err)
+	}
+	if got := AuthorPhotoURL(id); got != "https://covers.openlibrary.org/a/olid/OL7621609A-L.jpg?default=false" {
+		t.Fatalf("photo = %s", got)
+	}
+	if id, err := New(server.URL).AuthorIDForBook(context.Background(), "", "Red Rising"); id != "" || err != nil {
+		t.Fatal("a nameless writer is not looked up")
+	}
+}
