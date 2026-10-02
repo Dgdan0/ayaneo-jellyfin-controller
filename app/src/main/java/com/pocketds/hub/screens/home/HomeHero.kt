@@ -10,8 +10,8 @@ import java.util.Locale
  * What the big area at the top of Home says about the focused card.
  *
  * Built first from the card alone, so the hero changes the instant focus moves,
- * and again when the item's details arrive with the overview, runtime and
- * certification the Home rows do not carry.
+ * and again when the item's details arrive with the runtime and certification
+ * the Home rows do not carry.
  */
 data class HeroContent(
     val itemId: String,
@@ -19,7 +19,6 @@ data class HeroContent(
     val eyebrow: String,
     val title: String,
     val meta: List<String>,
-    val overview: String,
     val progress: Double,
     val progressLabel: String,
     val playLabel: String,
@@ -80,7 +79,6 @@ object HomeHero {
                 .filter(String::isNotBlank).joinToString(" · "),
             title = hit.media.title,
             meta = meta,
-            overview = detail?.overview?.takeIf(String::isNotBlank) ?: hit.overview,
             progress = if (watching) hit.progress else 0.0,
             progressLabel = left,
             playLabel = if (watching) "Resume" else "Play",

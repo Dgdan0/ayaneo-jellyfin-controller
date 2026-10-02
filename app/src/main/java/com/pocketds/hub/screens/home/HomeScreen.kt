@@ -29,6 +29,7 @@ import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.state.JobSlot
 import com.pocketds.hub.ui.LandscapeCardView
+import com.pocketds.hub.ui.pinFocusedRows
 import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
@@ -131,14 +132,12 @@ class HomeScreen(
         })
 
         rows = RecyclerView(host.viewContext).apply {
-            layoutManager = LinearLayoutManager(context)
             adapter = this@HomeScreen.adapter
-            // Rows that scroll up are clipped at the list's top edge rather than
-            // drawn over the hero's words.
-            clipToPadding = true
+            // The focused row always rests at the top, so the hero above it
+            // stays one size whichever row you are on.
+            pinFocusedRows(SHORTEST_ROW_DP)
             clipChildren = false
             setItemViewCacheSize(8)
-            setPadding(0, 0, 0, dp(12))
             addOnChildAttachStateChangeListener(
                 object : RecyclerView.OnChildAttachStateChangeListener {
                     override fun onChildViewAttachedToWindow(view: View) {
@@ -154,10 +153,13 @@ class HomeScreen(
                 }
             )
         }
-        mediaContent.addView(rows, FrameLayout.LayoutParams(MATCH, MATCH).apply { topMargin = dp(ROWS_TOP_DP) })
+        // Rows that scroll up are clipped at the list's top edge rather than
+        // drawn over the hero's words: this frame clips, the list does not.
+        val rowsFrame = FrameLayout(host.viewContext).apply { addView(rows, FrameLayout.LayoutParams(MATCH, MATCH)) }
+        mediaContent.addView(rowsFrame, FrameLayout.LayoutParams(MATCH, MATCH).apply { topMargin = dp(ROWS_TOP_DP) })
         // What scrolls up out of the rows fades instead of leaving a sliver of
-        // the row above. Only once scrolled: at rest it would draw a band
-        // across the hero.
+        // the row above. Only while a row is cut at the top edge: at rest the
+        // focused row starts exactly there, and the fade would dim its heading.
         val topFade = View(host.viewContext).apply {
             background = com.pocketds.hub.ui.ScrimDrawable(colors, com.pocketds.hub.ui.ScrimDrawable.Edge.TOP, listOf(0f to 1f, 1f to 0f))
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -166,7 +168,8 @@ class HomeScreen(
         mediaContent.addView(topFade, FrameLayout.LayoutParams(MATCH, dp(18), Gravity.TOP).apply { topMargin = dp(ROWS_TOP_DP) })
         rows.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
-                topFade.visibility = if (view.computeVerticalScrollOffset() > 0) View.VISIBLE else View.INVISIBLE
+                val cut = (0 until view.childCount).map(view::getChildAt).firstOrNull { it.bottom > 0 }?.let { it.top < 0 } == true
+                topFade.visibility = if (cut) View.VISIBLE else View.INVISIBLE
             }
         })
         // The next row's heading peeks in under a fade rather than being cut.
@@ -706,6 +709,8 @@ class HomeScreen(
         /** The hero's art; the rows start over its faded lower edge. */
         const val HERO_DP = 262
         const val ROWS_TOP_DP = 218
+        /** A landscape row: its heading, a 16:9 still and two lines under it. */
+        const val SHORTEST_ROW_DP = 160f
         const val POSTER_DP = 150f
         const val POSTER_CARD_DP = 100
         const val LANDSCAPE_CARD_DP = 176

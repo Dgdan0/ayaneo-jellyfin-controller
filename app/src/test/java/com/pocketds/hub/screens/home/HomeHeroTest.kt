@@ -34,12 +34,11 @@ class HomeHeroTest {
     }
 
     @Test
-    fun `details add the overview, certification, runtime left and the series backdrop`() {
+    fun `details add the certification, runtime left and the series backdrop`() {
         val detail = LibraryItem(id = episodeId, type = "episode", title = "Mindy's Back", seriesId = seriesId, year = 2005,
             overview = "Science fair.", runtimeSeconds = 1500, officialRating = "TV-Y7")
         val hero = HomeHero.from("continue", "Continue watching", episode, detail)
         assertEquals(listOf("Mindy's Back", "2005", "TV-Y7", "25 min", "★ 8.0"), hero.meta)
-        assertEquals("Science fair.", hero.overview)
         assertEquals("20 min left", hero.progressLabel)
         assertEquals("/v1/img/jf/$seriesId/Backdrop", hero.backdrop)
     }

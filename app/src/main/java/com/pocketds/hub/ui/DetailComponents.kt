@@ -74,18 +74,34 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         addView(progressBar, LinearLayout.LayoutParams(Styler.dpInt(context, 220f), Styler.dpInt(context, 6f)))
         addView(progressLabel, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = Styler.dpInt(context, 10f) })
     }
-    val metadataView = label(context, 12f, colors.mutedText).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END }
+    /**
+     * The facts line. Read left to right part by part, so "11 min" after a
+     * Hebrew episode title stays "11 min"; screens join it with [Bidi.join].
+     */
+    val metadataView = label(context, 12f, colors.mutedText).apply {
+        maxLines = 3; ellipsize = TextUtils.TruncateAt.END
+        textDirection = TEXT_DIRECTION_LTR; textAlignment = TEXT_ALIGNMENT_VIEW_START
+    }
     val formatStatus = ReadingFormatStatusView(context, colors).apply { visibility=GONE }
     val stateView = label(context, 11f, colors.accent).apply { visibility = GONE }
     val actions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; clipChildren = false }
     val overview = DetailOverviewView(context, colors, ringVisible)
     val continuation = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private val body = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-    private val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.TOP }
+    // Lets the action row reach a ring's width left of the words (below).
+    private val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.TOP; clipChildren = false }
     private val masks = FrameLayout(context)
+    /**
+     * The action row starts a ring's width left of the words, with that much
+     * padding, so its buttons still begin under the words. A screen whose first
+     * action is a [PillButton] pulls it back by [PillButton.RING_DP] so the pill
+     * itself lines up with the title; its focus ring then lands in this room.
+     * Without it the row clipped the ring and the left of Play.
+     */
     private val actionScroll = FocusHorizontalScrollView(context).apply {
         isHorizontalScrollBarEnabled = false
-        clipToPadding = false; setPadding(dp(3), dp(4), dp(3), dp(4))
+        clipToPadding = false; clipChildren = false
+        setPadding(dp(PillButton.RING_DP.toInt()), dp(4), dp(3), dp(4))
         addView(actions, ViewGroup.LayoutParams(WRAP, WRAP))
     }
     var compact = false
@@ -124,7 +140,7 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         body.addView(progressRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(8) })
         // The overview is read before acting on it, so it sits above the buttons.
         body.addView(overview, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6) })
-        body.addView(actionScroll, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6) })
+        body.addView(actionScroll, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6); marginStart = -dp(PillButton.RING_DP.toInt()) })
         body.addView(continuation, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(10) })
         row.addView(body, LinearLayout.LayoutParams(0, WRAP, 1f))
         addView(row, LayoutParams(MATCH, WRAP, Gravity.BOTTOM))

@@ -472,7 +472,7 @@ class LibraryDetailScreen(
             if (value.runtimeSeconds > 0) add(Fmt.runtime(value.runtimeSeconds.toLong()))
             if (value.rating > 0) add("★ %.1f".format(value.rating))
             addAll(value.genres.take(3))
-        }.filter(String::isNotBlank).joinToString("  ·  ")
+        }.filter(String::isNotBlank).let { com.pocketds.hub.ui.Bidi.join(it, "  ·  ") }
         progress.text = buildList {
             val watch = ResumeRules.watchLabel(value.played, value.progress)
             when {

@@ -587,7 +587,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Title and heading type | `ui/Type` (`typeRole(Type.Role.HERO …)`); body text is Figtree from the theme, never set per view |
 | An accent and the ink drawn on it | `AccentPreset.color(dark)` / `ink(dark)` via `Theme.colors`; Books default to gold (`AccentPreset.defaultFor`) |
 | A controller button drawn in the hint bar | `ui/KeyGlyphDrawable` |
-| A rounded action (Play, Details, Continue reading) | `ui/PillButton` (primary = accent fill; the ring keeps a gap) |
+| A rounded action (Play, Details, Continue reading) | `ui/PillButton` (primary = accent fill; the ring keeps a gap). As a detail page's first action it takes `marginStart = -RING_DP`; `DetailHeaderView`'s action row leaves that room, so the pill lines up with the title and its ring is not clipped |
 | A rounded or round drawable from palette colours | `ThemeGradientDrawable.rounded` / `.oval`: inside `ThemeGradientDrawable().apply {}` a bare `colors` is GradientDrawable's own array |
 | Fading the page colour into artwork | `ui/ScrimDrawable` |
 | A vertical list of places with the blob (Settings' sections) | `ui/SideNavView` |
@@ -601,6 +601,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Paging with L2/R2 | `HubActivity.page` (moves focus with the scroll) |
 | Loading the next page of a list or row | `state/PagedLoadState`; one per row via `state/RowPaging` |
 | A scrolling container | `ui/FocusScrollView` / `FocusHorizontalScrollView` (never a focus stop; `revealAbove` keeps a heading over the focused row visible) |
+| A list of rows whose focused row rests at the top, heading and all (Home) | `ui/PinnedRows` (`RecyclerView.pinFocusedRows`; leaves room under the last row; put the list in a clipping frame) |
 | Reacting to focus while keeping the ring | `FocusDecorator.listen(view, ringVisible) { view, focused -> … }` |
 | Player and playback-option wording | `playback/PlayerLabels` (Locale.US decimals) |
 | Subtitle decoding | `TolerantSubtitleDecoderFactory` in the text renderer (a broken ASS line is skipped, not fatal) |
@@ -912,8 +913,12 @@ which is still drawn. One animated scroll, label always visible, no override.
 
 Since the 2026-10 redesign, Home (media) is a hero for the focused card over rows of cards. The
 hero (`screens/home/HomeHeroView`, content from the pure `HomeHero`) changes the moment focus
-moves, from what the card already carries, and fills in the overview, certification and runtime
-from `/v1/library/items/{id}` once focus rests for 220ms (cached per item). An episode's hero
+moves, from what the card already carries, and fills in the certification and runtime from
+`/v1/library/items/{id}` once focus rests for 220ms (cached per item). It has no overview, and
+every line keeps its place: the 180dp progress line is held open (empty) for an unstarted title
+and the buttons have a fixed position, so nothing moves as focus runs along a row. A two-line
+overview plus a progress line used to push Play under the first row. The focused row always
+rests at the top of the rows (`pinFocusedRows`), so the hero is one size on every row. An episode's hero
 uses its series' backdrop (`/v1/img/jf/{seriesId}/Backdrop`, untagged) at `w=1280`. Play and
 Details sit in it: Up from the first row lands on Play, Down returns to the card you came from,
 and a series' Play resolves its resume/next/first episode through `seriesPlayTarget`. Cards carry
