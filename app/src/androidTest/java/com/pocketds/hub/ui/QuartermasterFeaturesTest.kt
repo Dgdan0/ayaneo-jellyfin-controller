@@ -309,20 +309,21 @@ class QuartermasterFeaturesTest {
             }
         } as HubApi
         val host=Proxy.newProxyInstance(ScreenHost::class.java.classLoader,arrayOf(ScreenHost::class.java)) { _,method,_ -> if(method.name=="getViewContext") activity else null } as ScreenHost
-        val screen=UpcomingScreen(api){true}
+        val screen=UpcomingScreen(api, ringVisible = { true })
         lateinit var root:View
         try {
             ins.runOnMainSync { root=screen.onCreateView(host,FrameLayout(activity));activity.setContentView(root);screen.onShow() }
             ins.waitForIdleSync()
             ins.runOnMainSync {
                 assertTrue(all(root).filterIsInstance<TextView>().any { it.text=="Season 1 · 2 episodes" })
-                assertEquals(6,all(root).filterIsInstance<TextView>().count { it.text=="No scheduled releases" })
+                // Each empty day is one quiet line under its heading.
+                assertEquals(6,all(root).filterIsInstance<TextView>().count { it.text=="·  Nothing scheduled" })
                 assertTrue(screen.onPad(PadAction.Page(Direction.RIGHT)))
             }
             ins.waitForIdleSync()
             ins.runOnMainSync {
                 assertEquals(requests[0].second,requests[1].first)
-                assertTrue(all(root).filterIsInstance<TextView>().any { it.text=="No scheduled releases this week" })
+                assertTrue(all(root).filterIsInstance<TextView>().any { it.text=="Nothing this week" })
                 screen.onPad(PadAction.Page(Direction.LEFT))
             }
             ins.waitForIdleSync()

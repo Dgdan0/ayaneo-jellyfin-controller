@@ -32,6 +32,9 @@ class DetailNavigationTest {
                 "libraryItem" -> HubResult.Ok(LibraryItemResponse(LibraryItem(id = "series", type = "series", title = "Fixture series", overview = "A synopsis.")))
                 "librarySeasons" -> HubResult.Ok(LibrarySeasonsResponse("series", seasons))
                 "seriesPlayTarget" -> HubResult.Ok(SeriesPlayTargetResponse(item = LibraryItem(id = "episode", type = "episode", title = "Next episode")))
+                "librarySimilar" -> HubResult.Ok(com.pocketds.hub.model.LibraryItemsResponse())
+                // The selected season's episodes load inline under the season blob.
+                "libraryEpisodes" -> HubResult.Ok(com.pocketds.hub.model.LibraryEpisodesResponse())
                 "imageUrl" -> args?.firstOrNull() as? String ?: ""
                 else -> error("Unexpected fixture request: ${method.name}")
             }
@@ -45,7 +48,10 @@ class DetailNavigationTest {
             yield(view)
             if (view is ViewGroup) for (index in 0 until view.childCount) yieldAll(descendants(view.getChildAt(index)))
         }
-        fun seasonThree() = descendants(root).first { it.contentDescription?.startsWith("Season 3,") == true }
+        // A season is an option of the season blob: "Season 3", or "Season 3, selected".
+        fun seasonThree() = descendants(root).first { view ->
+            view.contentDescription?.toString()?.let { it == "Season 3" || it.startsWith("Season 3,") } == true
+        }
         try {
             instrumentation.runOnMainSync {
                 root = screen.onCreateView(host, FrameLayout(activity))

@@ -40,7 +40,7 @@ class ReadingCompletionViewTest {
             all(root).first { it.contentDescription == "More actions for Book" }.performClick()
             all(root).first { it.contentDescription?.toString()?.startsWith(label) == true }.performClick()
         }
-        var screen = ReadingWorkScreen(api, work.id, work.title) { true }
+        var screen = ReadingWorkScreen(api, work.id, work.title, ringVisible = { true })
         lateinit var root: View
         try {
             instrumentation.runOnMainSync {
@@ -54,7 +54,7 @@ class ReadingCompletionViewTest {
                 assertEquals(.5, ReadingCompletionRepository.get(activity).project(work).progress!!.percentage, 0.0)
                 chooseReadAction(root, "Mark Book read")
                 screen.onHide(); screen.onDestroyView()
-                screen = ReadingWorkScreen(api, work.id, work.title) { true }
+                screen = ReadingWorkScreen(api, work.id, work.title, ringVisible = { true })
                 root = screen.onCreateView(host, FrameLayout(activity)); activity.setContentView(root); screen.onShow()
             }
             instrumentation.waitForIdleSync()

@@ -24,7 +24,7 @@ class ReadingCollectionTest {
         var opened:Any?=null;var searchRequests=0
         val api=Proxy.newProxyInstance(HubApi::class.java.classLoader,arrayOf(HubApi::class.java)){_,m,_-> when(m.name){"readingWork"->HubResult.Ok(work);"imageUrl"->"";"readingSearch"->{searchRequests++;HubResult.Ok(ReadingSearchResponse())};else->error("Unexpected request ${m.name}")}} as HubApi
         val host=Proxy.newProxyInstance(ScreenHost::class.java.classLoader,arrayOf(ScreenHost::class.java)){_,m,a->when(m.name){"getViewContext"->activity;"push"->{opened=a!![0];null};else->null}} as ScreenHost
-        val screen=ReadingWorkScreen(api,"collection","A collection"){true}
+        val screen=ReadingWorkScreen(api,"collection","A collection", ringVisible = { true })
         lateinit var root:View
         fun all(v:View):List<View> = listOf(v)+(v as? ViewGroup)?.let{g->(0 until g.childCount).flatMap{all(g.getChildAt(it))}}.orEmpty()
         try {

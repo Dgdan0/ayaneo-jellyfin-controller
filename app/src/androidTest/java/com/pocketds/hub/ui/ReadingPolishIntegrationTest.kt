@@ -19,7 +19,8 @@ import java.lang.reflect.Proxy
 @RunWith(AndroidJUnit4::class)
 class ReadingPolishIntegrationTest {
     private fun all(v:View):List<View> = listOf(v)+(v as? ViewGroup)?.let{g->(0 until g.childCount).flatMap{all(g.getChildAt(it))}}.orEmpty()
-    @Test fun booksHomeWithoutProfileOffersChooserWithoutRenamingTheGreeting() {
+    // Books Home has no greeting since the redesign (the tabs head the page); the chooser stays.
+    @Test fun booksHomeWithoutProfileOffersTheChooser() {
         val ins=InstrumentationRegistry.getInstrumentation()
         val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         val api=Proxy.newProxyInstance(HubApi::class.java.classLoader,arrayOf(HubApi::class.java)){_,method,_->when(method.name){
@@ -38,7 +39,6 @@ class ReadingPolishIntegrationTest {
                 root=screen.onCreateView(host,FrameLayout(activity));activity.setContentView(root);screen.onShow()
             };ins.waitForIdleSync()
             ins.runOnMainSync{
-                assertTrue(all(root).filterIsInstance<TextView>().any{it.isShown && it.text=="Hello"})
                 val choose=all(root).filterIsInstance<TextView>().first{it.isShown && it.text=="Choose profile"}
                 assertTrue(choose.isFocusable);choose.performClick()
                 assertTrue(all(root).filterIsInstance<TextView>().any{it.isShown && it.text=="Who is watching?"})

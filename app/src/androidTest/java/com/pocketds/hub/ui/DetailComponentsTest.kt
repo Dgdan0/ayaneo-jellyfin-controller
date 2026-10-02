@@ -132,14 +132,15 @@ class DetailComponentsTest {
         assertFalse(summary.expanded)
     }
 
-    @Test fun expandedRailAndLongHintsCannotConsumeTheDetailViewport() = onUi {
+    @Test fun longHintsCannotConsumeTheDetailViewport() = onUi {
         val context = instrumentation.targetContext
         val bar = HintBarView(context, Theme.colors(context))
         bar.setHints(listOf(ButtonHint.activate("Resume · 1:52:59"), ButtonHint.primary("Playback options"),
             ButtonHint.secondary("Start over"), ButtonHint.back(), ButtonHint("Refresh", "Refresh (Select)", PadAction.Refresh),
             ButtonHint("Start", "Collapse navigation menu", PadAction.Menu)))
         layout(bar, 663)
-        assertEquals(Styler.dpInt(context, 48f), bar.height)
+        // One slim line however many hints there are: the redesign's 36dp bar.
+        assertEquals(Styler.dpInt(context, HintBarView.HEIGHT_DP), bar.height)
         assertTrue("Overflow hints remain reachable by touch", bar.canScrollHorizontally(1))
     }
 

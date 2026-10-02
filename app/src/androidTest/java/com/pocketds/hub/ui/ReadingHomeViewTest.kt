@@ -43,7 +43,7 @@ class ReadingHomeViewTest {
         val host = Proxy.newProxyInstance(ScreenHost::class.java.classLoader, arrayOf(ScreenHost::class.java)) { _, method, _ ->
             when (method.name) { "getViewContext" -> activity; else -> null }
         } as ScreenHost
-        val screen = ReadingWorkScreen(api, work.id, work.title) { true }
+        val screen = ReadingWorkScreen(api, work.id, work.title, ringVisible = { true })
         lateinit var root: View
         fun all(view: View): List<View> = listOf(view) + (view as? ViewGroup)
             ?.let { group -> (0 until group.childCount).flatMap { all(group.getChildAt(it)) } }.orEmpty()
