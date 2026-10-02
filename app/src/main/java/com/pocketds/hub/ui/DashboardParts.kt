@@ -48,13 +48,15 @@ object DashboardParts {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, Styler.dpInt(context, 6f), 0, Styler.dpInt(context, 4f))
             addView(text(context, disk.name.trimEnd('\\', '/'), 12f, colors.primaryText, 600), LinearLayout.LayoutParams(0, WRAP, 1f))
-            addView(text(context, "${Fmt.bytes(disk.availableBytes)} free of ${Fmt.bytes(disk.totalBytes)}", 11f,
-                if (low) colors.dangerText else colors.mutedText))
+            // In words as well as red: colour alone says nothing to a screen reader.
+            addView(text(context, "${Fmt.bytes(disk.availableBytes)} free of ${Fmt.bytes(disk.totalBytes)}" +
+                if (low) " · nearly full" else "", 11f, if (low) colors.dangerText else colors.mutedText))
         })
         addView(ProgressLine.create(context, colors, if (low) colors.dangerText else colors.primaryText).apply {
             showFraction(if (disk.totalBytes > 0) used.toDouble() / disk.totalBytes else 0.0)
         }, LinearLayout.LayoutParams(MATCH, Styler.dpInt(context, 7f)))
-        contentDescription = "${disk.name}, ${Fmt.bytes(disk.availableBytes)} free of ${Fmt.bytes(disk.totalBytes)}"
+        contentDescription = "${disk.name}, ${Fmt.bytes(disk.availableBytes)} free of ${Fmt.bytes(disk.totalBytes)}" +
+            if (low) ", nearly full" else ""
     }
 
     /**

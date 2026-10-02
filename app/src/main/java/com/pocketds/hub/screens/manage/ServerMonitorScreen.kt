@@ -111,7 +111,7 @@ class ServerMonitorScreen(private val api: HubApi, private val ringVisible: () -
         val figures = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         listOf(
             DashboardParts.stat(context, colors, "CPU", cpu?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—",
-                "Over a short sample", cpu?.div(100.0), warning = (cpu ?: 0.0) >= 90.0),
+                if (cpu == null) "Unavailable" else "Over a short sample", cpu?.div(100.0), warning = (cpu ?: 0.0) >= 90.0),
             DashboardParts.stat(context, colors, "Memory", if (total > 0) Fmt.bytes(used) else "—",
                 if (total > 0) "of ${Fmt.bytes(total)}" else "Unavailable", if (total > 0) used.toDouble() / total else null),
             DashboardParts.stat(context, colors, "Up for", Fmt.uptime(value.host.uptimeSeconds).ifEmpty { "—" }, "Since the PC last started")

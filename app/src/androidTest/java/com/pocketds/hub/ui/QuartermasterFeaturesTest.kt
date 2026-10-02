@@ -130,7 +130,7 @@ class QuartermasterFeaturesTest {
             ins.runOnMainSync{root=screen.onCreateView(host,FrameLayout(activity));activity.setContentView(root);screen.onShow()};ins.waitForIdleSync()
             ins.runOnMainSync{
                 assertTrue(all(root).filterIsInstance<TextView>().any{it.text=="Unavailable"})
-                assertTrue(all(root).filterIsInstance<TextView>().any{it.text.contains("Low space (<10%)")})
+                assertTrue(all(root).filterIsInstance<TextView>().any{it.text.contains("nearly full")})
                 assertTrue(all(root).filterIsInstance<TextView>().any{it.text=="Jellyfin sessions unavailable"})
                 root.findViewWithTag<View>("disk:C:\\").requestFocus();screen.onPad(PadAction.Refresh)
             };ins.waitForIdleSync()
