@@ -41,4 +41,16 @@ class ReadingBookFactsTest {
         assertEquals("Finished", ReadingBookFacts.progress(book.copy(progress = com.pocketds.hub.model.ReadingProgress(completed = true))))
         assertNull(ReadingBookFacts.progress(book.copy(progress = null)))
     }
+
+    @Test
+    fun `a series page says which book and how many are finished`() {
+        fun book(n: Int, pct: Double?, done: Boolean = false) = com.pocketds.hub.model.ReadingSectionItem(
+            workId = "b$n", number = "$n", progress = pct?.let { com.pocketds.hub.model.ReadingProgress(percentage = it, completed = done) })
+        val series = ReadingWork(entityType = "collection", bookCount = 6, sections = listOf(com.pocketds.hub.model.ReadingSection(
+            items = listOf(book(1, 1.0, done = true), book(2, 0.3), book(3, null)))),
+            continueAt = com.pocketds.hub.model.ReadingContinue(number = "2"))
+        assertEquals("On #2 · 1 of 3 finished", ReadingBookFacts.seriesProgress(series))
+        assertNull(ReadingBookFacts.seriesProgress(series.copy(continueAt = null,
+            sections = listOf(com.pocketds.hub.model.ReadingSection(items = listOf(book(1, null)))))))
+    }
 }

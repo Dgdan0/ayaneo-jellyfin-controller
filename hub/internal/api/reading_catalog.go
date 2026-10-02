@@ -957,6 +957,10 @@ func (s *Server) storytellerCollection(
 	if !includeChildren {
 		return work, nil
 	}
+	// The series page links its writers to their pages, as a book's page does.
+	for _, name := range work.Authors {
+		work.AuthorRefs = append(work.AuthorRefs, readingAuthorRef(name))
+	}
 	section := ReadingSection{ID: "storyteller-series:" + group.sourceID, Title: "Books", Items: []ReadingSectionItem{}}
 	var continueBook *storyteller.Book
 	availableItems := make([]ReadingSectionItem, 0, len(books))

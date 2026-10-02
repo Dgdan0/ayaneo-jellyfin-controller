@@ -8,11 +8,11 @@ import org.junit.Test
 class BookShelfLabelsTest {
     @Test
     fun `a book in a series says its number, progress and unusual formats`() {
-        assertEquals("Book 2 · Audio", SeriesBookLabels.subtitle("2", true, null, listOf("audiobook")))
-        assertEquals("Book 1 · 40%", SeriesBookLabels.subtitle("1", true, ReadingProgress(percentage = 0.4), listOf("ebook")))
-        assertEquals("Book 3 · Completed · Ebook + audio",
+        assertEquals("#2 · Audio", SeriesBookLabels.subtitle("2", true, null, listOf("audiobook")))
+        assertEquals("#1 · 40%", SeriesBookLabels.subtitle("1", true, ReadingProgress(percentage = 0.4), listOf("ebook")))
+        assertEquals("#3 · Completed · Ebook + audio",
             SeriesBookLabels.subtitle("3", true, ReadingProgress(completed = true), listOf("ebook", "audiobook")))
-        assertEquals("Book 2 · Missing", SeriesBookLabels.subtitle("2", false, null, emptyList()))
+        assertEquals("#2 · Missing", SeriesBookLabels.subtitle("2", false, null, emptyList()))
         // A plain ebook is the usual case and says nothing about its format.
         assertNull(SeriesBookLabels.formats(listOf("ebook")))
         assertEquals("Read along", SeriesBookLabels.formats(listOf("ebook", "readaloud")))

@@ -1,5 +1,7 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.ui.CoverFanView
+
 import com.pocketds.hub.ui.typeRole
 
 import com.pocketds.hub.ui.ProgressLine.showFraction
@@ -56,7 +58,6 @@ import com.pocketds.hub.state.PagedLoadState
 import com.pocketds.hub.state.StableItemFocus
 import com.pocketds.hub.ui.DetailHeaderView
 import com.pocketds.hub.ui.DetailArtworkCardView
-import com.pocketds.hub.ui.ContinuationCardView
 import com.pocketds.hub.ui.DetailLayout
 import com.pocketds.hub.ui.DetailStyler
 import com.pocketds.hub.ui.AppIcon
@@ -670,14 +671,15 @@ class ReadingWorkScreen(
         content.addView(hero(work))
         val primaryRead = ReadingWorkPresentation.primaryRead(work)
         if (work.entityType == "collection") work.continueAt?.let { point ->
-            detailHeader.continuation.addView(continueCard(work, point))
+            continueButton(work, point)?.let { detailHeader.actions.addView(it, 0) }
         }
         if (work.editions.isNotEmpty() && primaryRead == null) {
             content.addView(sectionTitle("Editions"))
             work.editions.forEach { content.addView(editionCard(work, it)) }
         }
         work.sections.forEach { section ->
-            content.addView(sectionTitle(section.title))
+            // A series' one list of books is its reading order.
+            content.addView(sectionTitle(if (work.entityType == "collection" && work.sections.size == 1) "In reading order" else section.title))
             if (work.entityType == "collection" && section.items.isNotEmpty()) {
                 hasChildLinks = hasChildLinks || section.items.any(ReadingWorkPresentation::canOpen)
                 content.addView(bookRow(section))
@@ -722,22 +724,24 @@ class ReadingWorkScreen(
         subtitleView.visibility = View.GONE
         metadataView.text = if (work.entityType != "collection") ReadingBookFacts.line(work, null)
         else buildList {
-            if (work.authors.isNotEmpty()) add(work.authors.joinToString(", "))
-            if (work.entityType == "collection") {
-                add("${work.bookCount} available")
-                val missing = work.sections.sumOf { section -> section.items.count { !it.isAvailable } }
-                if (missing > 0) add("$missing missing")
-            } else if (work.year > 0) add(work.year.toString())
+            // Linked writers are chips under the title; how far through is the bar below.
+            if (work.authorRefs.isEmpty() && work.authors.isNotEmpty()) add(work.authors.joinToString(", "))
+            add("${work.bookCount} ${if (work.bookCount == 1) "book" else "books"}")
+            val missing = work.sections.sumOf { section -> section.items.count { !it.isAvailable } }
+            if (missing > 0) add("$missing missing")
             if (work.genres.isNotEmpty()) add(work.genres.joinToString(", "))
-            progressText(work.progress)?.let(::add)
         }.joinToString(" · ")
         overview.bind(work.overview)
-        if (work.entityType != "collection") {
-            val fraction = work.progress?.let { if (it.completed) 1.0 else it.percentage } ?: 0.0
-            progressBar.showFraction(fraction)
-            progressLabel.text = ReadingBookFacts.progress(work).orEmpty()
-            progressRow.visibility = if (fraction > 0) View.VISIBLE else View.GONE
-            bookLinks(work, links)
+        val fraction = work.progress?.let { if (it.completed) 1.0 else it.percentage } ?: 0.0
+        progressBar.showFraction(fraction)
+        progressLabel.text = (if (work.entityType == "collection") ReadingBookFacts.seriesProgress(work) else ReadingBookFacts.progress(work)).orEmpty()
+        progressRow.visibility = if (fraction > 0 || progressLabel.text.isNotEmpty()) View.VISIBLE else View.GONE
+        bookLinks(work, links)
+        if (work.entityType == "collection") {
+            val (width, height) = CoverFanView.sizeDp(FAN_COVER_DP)
+            replacePoster(CoverFanView(context, colors, FAN_COVER_DP).apply {
+                bind(com.pocketds.hub.screens.home.ReadingShelves.fanCovers(work), Artwork.loader(api, context), api::imageUrl)
+            }, width, height)
         }
         bindArtwork("book", null, work.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
             Artwork.loader(api, context))
@@ -958,22 +962,19 @@ class ReadingWorkScreen(
         host?.refreshHints()
     }
 
-    private fun continueCard(work: ReadingWork, point: ReadingContinue): View =
-        ContinuationCardView(requireNotNull(host).viewContext, colors, ringVisible, portrait = true).apply {
-            bind("Continue reading", buildList {
-                add(point.title)
-                if (point.number.isNotBlank()) add("Book ${point.number}")
-                if (point.percentage > 0) add("${(point.percentage * 100).roundToInt()}% read")
-            }.joinToString(" · "), point.percentage, point.percentage >= 1.0)
-            val url = ReadingWorkPresentation.continueArtwork(work).takeIf { it.isNotBlank() }?.let(api::imageUrl)
-            DetailStyler.image(image, url, Artwork.loader(api, context))
-            onFocused = { lastActionKey = point.sourceItemId; host?.refreshHints() }
-            if (canReadPublication(work.kind, point.sourceItemId)) {
-                hasChildLinks = true
-                activateOnTap { openPublication(work, point.sourceItemId, point.title, point.source) }
-                actionViews.putIfAbsent(point.sourceItemId, this)
-            } else { isFocusable = false; isClickable = false }
+    /** "Continue #6" on a series page: the book being read, opened where it was left. */
+    private fun continueButton(work: ReadingWork, point: ReadingContinue): View? {
+        if (!canReadPublication(work.kind, point.sourceItemId)) return null
+        return PillButton.create(requireNotNull(host).viewContext, colors,
+            if (point.number.isNotBlank()) "Continue #${point.number}" else "Continue reading", AppIcon.BOOK, primary = true).apply {
+            contentDescription = "Continue reading ${point.title}"
+            FocusDecorator.attach(this, ringVisible, scale = false)
+            FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) { lastActionKey = point.sourceItemId; host?.refreshHints() } }
+            hasChildLinks = true
+            activateOnTap { openPublication(work, point.sourceItemId, point.title, point.source) }
+            actionViews.putIfAbsent(point.sourceItemId, this)
         }
+    }
 
     private fun editionCard(work: ReadingWork, edition: ReadingEdition): View = infoCard(
         edition.kind.replaceFirstChar { it.uppercase() },
@@ -1185,11 +1186,12 @@ class ReadingWorkScreen(
         }
     }
 
-
     private fun dp(value: Int) = Styler.dpInt(requireNotNull(host).viewContext, value.toFloat())
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        /** A series page's fan of covers, a little larger than a book page's poster. */
+        const val FAN_COVER_DP = 88
     }
 }

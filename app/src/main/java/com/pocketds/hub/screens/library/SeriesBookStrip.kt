@@ -34,10 +34,10 @@ object SeriesBookLabels {
         }
     }
 
-    /** "Book 2 · 40% · Audio", "Book 3 · Missing", "Completed". */
+    /** "#2 · 40% · Audio", "#3 · Missing", "Completed". */
     fun subtitle(number: String, available: Boolean, progress: ReadingProgress?, formats: List<String>): String =
         buildList {
-            if (number.isNotBlank()) add("Book $number")
+            if (number.isNotBlank()) add("#$number")
             when {
                 !available -> add("Missing")
                 progress?.completed == true -> add("Completed")

@@ -570,12 +570,13 @@ Most of these exist because several screens had drifted copies of the same thing
 | On/off action icons (watched, favourite, downloaded) | `MediaActionIconDrawable.of` (`MediaActionIcon.isOn`): filled accent when on, outline when off; `DOWNLOADING` is a progress ring |
 | Reacting to offline downloads changing | `offline/OfflineChanges` (start in onShow, stop in onHide) |
 | Sorting a library | `ui/LibrarySortControls` (field button + one-press direction); wording from `SortPreference.directionLabel` |
-| A series' books as cards / their labels | `screens/library/SeriesBookStrip` + `SeriesBookLabels` ("Book 2 · 40% · Audio"); series page, author page and a book's own page |
+| A series' books as cards / their labels | `screens/library/SeriesBookStrip` + `SeriesBookLabels` ("#2 · 40% · Audio"); series page, author page and a book's own page |
 | A book's facts line | `ReadingBookFacts.line` ("Book 6 of Red Rising · 2023 · 735 pages"); how far through: `ReadingBookFacts.progress` ("49% · page 363 of 735") |
 | A book's place in its series on a card | `ReadingWork.cardSubtitle` ("Red Rising #6") and `seriesNumber` |
 | Books Library's view: Series, Authors, or every book on its own | `ReadingLibraryGridScreen` (`view`; Books asks the hub for `view=works`); each view's order in `DomainPreferences` (`sort`, `bookSort`, `readingView`) |
 | A person as a round portrait, the ring round it | `DetailArtworkCardView.portrait` |
 | Books Home's top: the book being read, the series being read | `screens/home/ContinueReadingView` (Resume reading opens `ReadingWorkScreen(openReader = true)`), `SeriesStackView` fed by `ReadingShelves.yourSeries` |
+| A series as a fan of covers (Books Home, the series page) | `ui/CoverFanView`; which covers from `ReadingShelves.fanCovers`, the book being read from `onNumber`; "On #6 · 1 of 6 finished" from `ReadingBookFacts.seriesProgress` |
 | Books Home rows | `ReadingShelves`: `onePerSeries`, `nextInSeries`, `BUILT_IN` (rows the app fills; list actions only on the person's own) |
 | Reading times from the hub | `ReadingShelves.timestamp` (Storyteller writes `2026-09-27 03:16:47`, UTC with no zone) |
 | Hub: an author page id | `readingAuthorRef` (Authors view and a book's author link) |

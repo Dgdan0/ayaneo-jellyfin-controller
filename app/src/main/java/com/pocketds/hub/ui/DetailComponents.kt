@@ -128,6 +128,16 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         addView(row, LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
     }
 
+    private var leading: View? = null
+
+    /** Something in the poster's place: a series page shows a fan of its covers. */
+    fun replacePoster(view: View, widthDp: Int, heightDp: Int) {
+        leading?.let(row::removeView)
+        leading = view
+        row.addView(view, 0, LinearLayout.LayoutParams(dp(widthDp), dp(heightDp)).apply { marginEnd = dp(20) })
+        requestLayout()
+    }
+
     fun setPresentation(type: String, hasLandscape: Boolean, hasPoster: Boolean) {
         this.type = type; this.hasLandscape = hasLandscape; this.hasPoster = hasPoster
         requestLayout()
@@ -149,12 +159,13 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val widthDp = (MeasureSpec.getSize(widthMeasureSpec) / resources.displayMetrics.density).toInt()
         val hero = DetailLayout.useHero(type, hasLandscape, widthDp, resources.configuration.fontScale)
-        val next = "$hero:$widthDp:$hasPoster:$compact"
+        val next = "$hero:$widthDp:$hasPoster:$compact:${leading != null}"
         if (layoutKey != next) {
             layoutKey = next
             landscape.visibility = if (hero) VISIBLE else GONE
             masks.visibility = landscape.visibility
-            poster.visibility = if (!hero && hasPoster) VISIBLE else GONE
+            poster.visibility = if (!hero && hasPoster && leading == null) VISIBLE else GONE
+            leading?.visibility = if (!hero) VISIBLE else GONE
             row.setPadding(dp(24), dp(topInsetDp + if (hero) 18 else if(compact) 8 else 16), dp(24), dp(if(compact)8 else 12))
             (metadataView.layoutParams as LinearLayout.LayoutParams).topMargin=dp(if(compact)4 else 7)
             (overview.layoutParams as LinearLayout.LayoutParams).topMargin=dp(if(compact)2 else 6)

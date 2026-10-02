@@ -557,6 +557,10 @@ func TestStorytellerCollectionIncludesMissingManifestBooksAndContinueArtwork(t *
 	if detail.Continue == nil || detail.Continue.WorkID != items[0].WorkID || detail.Continue.Artwork != items[0].Artwork {
 		t.Fatalf("continue = %+v, item = %+v", detail.Continue, items[0])
 	}
+	// The series page links its writer, with the same id the Authors view uses.
+	if len(detail.AuthorRefs) != 1 || detail.AuthorRefs[0] != readingAuthorRef("Pierce Brown") {
+		t.Fatalf("authorRefs = %+v", detail.AuthorRefs)
+	}
 }
 
 func TestStorytellerCollectionFallsBackToCleanFirstBookDescription(t *testing.T) {

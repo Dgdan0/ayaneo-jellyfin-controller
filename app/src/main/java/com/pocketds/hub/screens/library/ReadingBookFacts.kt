@@ -15,6 +15,18 @@ object ReadingBookFacts {
         return "Book ${work.seriesNumber} of ${work.series}"
     }
 
+    /** A series page's progress: "On #6 · 1 of 6 finished", or null before any book is started. */
+    fun seriesProgress(series: ReadingWork): String? {
+        val books = series.sections.flatMap { it.items }
+        val started = books.any { (it.progress?.percentage ?: 0.0) > 0 || it.progress?.completed == true } ||
+            (series.progress?.percentage ?: 0.0) > 0
+        if (!started) return null
+        val total = books.size.takeIf { it > 0 } ?: series.bookCount
+        val on = com.pocketds.hub.screens.home.ReadingShelves.onNumber(series)
+        return listOfNotNull(on.takeIf(String::isNotBlank)?.let { "On #$it" },
+            "${books.count { it.progress?.completed == true }} of $total finished").joinToString(" · ")
+    }
+
     /**
      * How far through: "49% · page 363 of 735" when the book's length is
      * known, "49% read" otherwise, "Finished" once done; null before starting.
