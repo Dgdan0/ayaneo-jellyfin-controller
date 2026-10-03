@@ -616,7 +616,9 @@ Most of these exist because several screens had drifted copies of the same thing
 | Controls drawn over a picture (the player, the comic reader) | `ui/OverlayButtons` (`round`, `pill`, `disc`, `ringed`: a soft disc or pill, the ring standing outside it) |
 | The comic reader's heading | `ReaderTitleFormatter.heading` / `issue` / `subtitle` ("Fantastic Four" over "Issue 51 · Page 2 of 24"; Kavita's "Chapter 51" is an issue for a comic) |
 | Reacting to focus while keeping the ring | `FocusDecorator.listen(view, ringVisible) { view, focused -> … }` |
-| Player and playback-option wording | `playback/PlayerLabels` (Locale.US decimals) |
+| Player and playback-option wording | `playback/PlayerLabels` (Locale.US decimals; `playMethod`: "Direct play", "Direct stream", "Converting") |
+| Hub: a reading-lab fixture (generated test files on the real reading servers) | `isReadingFixture` (Storyteller) / `readingdomain.IsFixtureSeries` (Kavita "Lab Comics", "Lab Manga"); kept off shelves and off library cards, whose cover prefers the series read most recently |
+| "1 transfer needs attention" | `ActivityDashboard.needAttention` |
 | Subtitle decoding | `TolerantSubtitleDecoderFactory` in the text renderer (a broken ASS line is skipped, not fatal) |
 | Hub: permission check | `requireScope(w, r, scope, action)` (403 `forbidden_scope`) |
 | Hub: a screen built from several cached reads | `cacheSummary` (keeps stale/degraded) |
