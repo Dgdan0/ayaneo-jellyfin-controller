@@ -77,7 +77,8 @@ public enum ServiceRows {
             logo: logos.contains(id) ? "logo_" + id : nil, dashboardURL: service.dashboardUrl)
     }
 
-    /// qBittorrent reports its version as "v5.0.4" already; the rest do not.
+    /// The hub strips qBittorrent's own "v5.0.4" to "5.0.4"; this keeps a "v"
+    /// that ever slips through from being doubled.
     static func version(_ value: String) -> String {
         value.lowercased().hasPrefix("v") ? value : "v" + value
     }

@@ -33,7 +33,7 @@ public struct DemoTransport: HubTransport {
       {"name":"jellyfin","state":"up","dashboardUrl":"https://ayaneo-media-pc.tail737e96.ts.net:8920","latencyMs":41,"version":"10.11.8"},
       {"name":"jellyseerr","state":"up","dashboardUrl":"https://ayaneo-media-pc.tail737e96.ts.net:5055","latencyMs":9,"version":"2.7.3"},
       {"name":"kavita","state":"up","latencyMs":22,"version":"0.8.7"},
-      {"name":"qbittorrent","state":"up","dashboardUrl":"https://ayaneo-media-pc.tail737e96.ts.net:8080","latencyMs":6,"version":"v5.0.4"},
+      {"name":"qbittorrent","state":"up","dashboardUrl":"https://ayaneo-media-pc.tail737e96.ts.net:8080","latencyMs":6,"version":"5.0.4"},
       {"name":"radarr","state":"up","dashboardUrl":"https://ayaneo-media-pc.tail737e96.ts.net:7878","latencyMs":14,"version":"6.3.0.10514"},
       {"name":"sonarr","state":"up","dashboardUrl":"https://ayaneo-media-pc.tail737e96.ts.net:8989","latencyMs":15,"version":"4.0.19.2979"},
       {"name":"storyteller","state":"misconfigured","lastError":"no API key configured"}
