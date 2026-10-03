@@ -43,7 +43,11 @@ data class PocketColors(
     var warningStrip: Int,
     var warningStripText: Int,
     var dangerText: Int,
-    /** Quiet inner tint for notification cards that have not been focused yet. */
+    /**
+     * Quiet inner tint for notifications not yet seen: a raised neutral. It was
+     * a dark red, and with ninety unread a whole column read as errors; red is
+     * for problems, which the dot and the count already carry.
+     */
     var unreadSurface: Int
 )
 
@@ -67,7 +71,7 @@ object Theme {
         warningStrip = 0xFFD7F1EE.toInt(),
         warningStripText = 0xFF134E4A.toInt(),
         dangerText = 0xFFC5372C.toInt(),
-        unreadSurface = 0xFFFFE5E2.toInt()
+        unreadSurface = 0xFFEAEFF5.toInt()
     )
 
     /**
@@ -93,7 +97,7 @@ object Theme {
         warningStrip = 0xFF123C38.toInt(),
         warningStripText = 0xFFA7F3E8.toInt(),
         dangerText = 0xFFFF7A7A.toInt(),
-        unreadSurface = 0xFF3A1D1D.toInt()
+        unreadSurface = 0xFF1C2431.toInt()
     )
 
     private val palettes = java.util.WeakHashMap<Context, PocketColors>()
