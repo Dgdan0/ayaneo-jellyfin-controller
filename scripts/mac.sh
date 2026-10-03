@@ -25,9 +25,12 @@ SHOTS="$ROOT/shots/apple"
 # The sizes the user owns: iPad Pro 12.9"/13", iPad mini, iPhone.
 SIMS=("iPad Pro 13-inch (M5)" "iPad mini (A17 Pro)" "iPhone 17 Pro")
 
-if [[ -f "$APPLE/dev.env" ]]; then
-  # shellcheck disable=SC1091
-  source "$APPLE/dev.env"
+# scripts/mac-remote.sh runs this from a build copy that has no dev.env of its
+# own and points HUB_DEV_ENV at the Mac checkout's, so the token is never copied.
+DEV_ENV="${HUB_DEV_ENV:-$APPLE/dev.env}"
+if [[ -f "$DEV_ENV" ]]; then
+  # shellcheck disable=SC1090
+  source "$DEV_ENV"
 fi
 
 project() {

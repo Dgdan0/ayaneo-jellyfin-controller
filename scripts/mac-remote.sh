@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Drives scripts/mac.sh on the MacBook from the Windows PC, over SSH (Git Bash).
+# The Mac is a build machine here, the way the Pocket DS is an adb target for
+# dev.sh: the code is edited in this checkout, and the Mac only builds and runs it.
+#
+#   scripts/mac-remote.sh sync              copy apple/ and scripts/mac.sh to the Mac
+#   scripts/mac-remote.sh <mac.sh command>  sync, run scripts/mac.sh there, then copy
+#                                           shots/apple/ back into this checkout
+#     e.g.  test | build | sims [-demo] | shot [-demo] | mac [-demo] | logs
+#
+# The Mac side is a build copy, ~/Builds/ayaneo-jellyfin-controller: a plain
+# directory, not a git checkout, so nothing there is ever committed or discarded,
+# and the Mac's own checkout is left alone. Files go over as git sees them here,
+# uncommitted edits included. A file deleted here is deleted there only if an
+# earlier sync from this checkout put it there.
+#
+# The hub address and token stay in the Mac checkout's apple/dev.env. HUB_DEV_ENV
+# points the build copy at that file, so the token never crosses the network.
+#
+# Needs Host "mac" in ~/.ssh/config with key login. On Windows the System32
+# OpenSSH client is used: it is the one that reaches the 1Password SSH agent.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HOST="${MAC_HOST:-mac}"
+REMOTE_DIR="${MAC_BUILD_DIR:-Builds/ayaneo-jellyfin-controller}"          # under the Mac home
+DEV_ENV="${MAC_DEV_ENV:-Projects/ayaneo-jellyfin-controller/apple/dev.env}" # under the Mac home
+MANIFEST="$ROOT/.tmp/mac-sync-manifest"
+SSH=ssh
+[[ -x /c/Windows/System32/OpenSSH/ssh.exe ]] && SSH=/c/Windows/System32/OpenSSH/ssh.exe
+
+remote() { "$SSH" -o BatchMode=yes -o ServerAliveInterval=30 "$HOST" "$@"; }
+
+sync() {
+  mkdir -p "$(dirname "$MANIFEST")"
+  local current="$MANIFEST.new"
+  # Index entries deleted in the working tree are still listed, so keep only
+  # files that exist.
+  (cd "$ROOT" && git ls-files -co --exclude-standard -- apple scripts/mac.sh |
+    while IFS= read -r f; do [[ -f "$f" ]] && printf '%s\n' "$f"; done | sort -u) > "$current"
+
+  (cd "$ROOT" && tar -cf - -T "$current") |
+    remote "mkdir -p ~/$REMOTE_DIR && tar -xf - -C ~/$REMOTE_DIR"
+
+  if [[ -f "$MANIFEST" ]]; then
+    local gone
+    gone="$(comm -23 "$MANIFEST" "$current")"
+    if [[ -n "$gone" ]]; then
+      printf '%s\n' "$gone" | remote "cd ~/$REMOTE_DIR && while IFS= read -r f; do rm -f -- \"\$f\"; done"
+      echo "removed $(printf '%s\n' "$gone" | wc -l | tr -d ' ') files deleted here"
+    fi
+  fi
+  mv "$current" "$MANIFEST"
+  echo "synced $(wc -l < "$MANIFEST" | tr -d ' ') files to $HOST:~/$REMOTE_DIR"
+}
+
+fetch_shots() {
+  if remote "test -d ~/$REMOTE_DIR/shots/apple"; then
+    mkdir -p "$ROOT/shots"
+    # Without these, macOS tar adds Finder metadata as ._ files beside each PNG.
+    remote "COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs -cf - -C ~/$REMOTE_DIR shots/apple" |
+      (cd "$ROOT" && tar -xf -)
+    echo "screenshots in $ROOT/shots/apple"
+  fi
+}
+
+run() {
+  sync
+  # A non-interactive SSH shell on the Mac does not read the login profile, so
+  # Homebrew's tools (xcodegen) are not on its PATH.
+  remote "export PATH=/opt/homebrew/bin:\$PATH; cd ~/$REMOTE_DIR && \
+    HUB_DEV_ENV=\$HOME/$DEV_ENV bash scripts/mac.sh $(printf '%q ' "$@")"
+  fetch_shots
+}
+
+case "${1:-}" in
+  ""|-h|--help) sed -n '2,22p' "$0" ;;
+  sync) sync ;;
+  *) run "$@" ;;
+esac
