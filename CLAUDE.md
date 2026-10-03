@@ -82,7 +82,8 @@ connection test.
 The preferred address is now **`https://ayaneo-media-pc.tail737e96.ts.net`**. Pocket DS and the
 media PC are members of the same tailnet, and Tailscale Serve proxies this private HTTPS origin to
 the loopback-only Hub on `127.0.0.1:8791`. Dashboard listeners on ports 8920, 5055, 7878, 8989,
-6767, and 8080 are also tailnet-only; `services.<name>.web_url` contains those HTTPS addresses.
+6767, 8080, Kavita 5000, Storyteller 8001, Prowlarr 9696, Readarr 8787 and BookKeeprr 3000 are also
+tailnet-only; `services.<name>.web_url` contains those HTTPS addresses (all eleven since 2026-10-03).
 The private live endpoint returns `200 ok`, and all dashboard listeners answer. ADB updated the
 Pocket DS app base while preserving its token; users, Home, Library, activity, health, and artwork
 return 200. The Jellyfin Manage card reaches its tailnet sign-in page without a certificate warning.
@@ -1219,9 +1220,10 @@ Design consequences:
   authenticated tailnet devices only.
 - **The Activity tab opens each service's `web_url` in the default browser.** A loopback address
   would look for the service on the Pocket, so `ActivityDashboard.reachableFromPocket` refuses it and
-  names the setting instead. Kavita and Storyteller are served by Tailscale at
-  `https://ayaneo-media-pc.tail737e96.ts.net:5000` and `:8001`, and their `web_url` holds those
-  addresses since 2026-10-03; BookKeeprr (3000) is not served on the tailnet at all.
+  names the setting instead. Every service, the reading ones included, is served by Tailscale on its
+  own port (`https://ayaneo-media-pc.tail737e96.ts.net:<port>`) and its `web_url` holds that address.
+  Sonarr, Radarr and Readarr reach Prowlarr and qBittorrent through `localhost`, so serving those
+  ports over HTTPS on the tailnet does not affect them.
 - **Jellyfin library refresh is a narrow Hub action.** `POST /v1/manage/jellyfin/scan` requires the
   existing `control` scope and invokes Jellyfin's asynchronous `/Library/Refresh`. The app exposes
   it as a visible action on the Jellyfin Manage row and as X. The Hub clears affected response
