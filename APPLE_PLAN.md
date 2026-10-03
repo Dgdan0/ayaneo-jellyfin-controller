@@ -1,9 +1,9 @@
 # Apple clients: iPad, iPhone and Mac
 
 Decided on 2026-10-03. This file holds the design. **Status lives in GitHub Issues** (label
-`apple`, see "Tickets" in `CLAUDE.md`), not here. This file hands the work to a Claude Code
-session running **on the MacBook**. The hub, the Android app and the Pocket DS stay with the sessions on
-the Windows media PC.
+`apple`, see "Tickets" in `CLAUDE.md`), not here. The Apple work is done **from the Windows
+media PC**, alongside the hub and Android. The MacBook is a build machine that the PC drives over
+SSH with `scripts/mac-remote.sh`, the way `scripts/dev.sh` drives the Pocket DS over adb.
 
 Read `CLAUDE.md` first. Its hub sections (architecture, upstream quirks, caching, badges,
 wording, the download join) apply unchanged. Its gamepad, focus and Pocket DS sections describe
@@ -26,8 +26,12 @@ the Android client and can be skimmed.
   review. **Every TestFlight build expires after 90 days**, so upload a fresh one at least that
   often. Family members (the Jellyfin profiles Adirimo, Hadas, Horim) can be added as internal
   testers on the App Store Connect team.
-- **Claude runs on the Mac.** Apple's toolchain (Xcode, signing, simulators, device tools) is
-  macOS-only. SSH from the Windows PC was considered and rejected in favour of a session here.
+- **One session, on the PC, does all three parts.** Apple's toolchain (Xcode, signing,
+  simulators, device tools) is macOS-only, so the Mac builds and runs what the PC edits. The
+  first Apple work (#2, #3) was done by a Claude session on the Mac. It was then moved to the PC
+  (#7), so that one session could see the hub, Android and Apple together. A session on the Mac
+  is still allowed, but never at the same time as the PC; the issue's "Starting" comment says
+  who has the work.
 
 ## Where things are
 
@@ -112,6 +116,20 @@ now lives in Kotlin (see `CLAUDE.md`, "Shared building blocks"): `ResumeRules`, 
 
 ## Working on the Mac
 
+### From the PC
+
+`scripts/mac-remote.sh <command>` (Git Bash on the PC) copies `apple/` and `scripts/mac.sh` to
+a plain build copy at `~/Builds/ayaneo-jellyfin-controller` on the Mac and runs
+`scripts/mac.sh <command>` there. After the run it brings `shots/apple/` back to the PC. The
+commands are `test`, `build`, `sims [-demo]`, `shot`, `mac` and `logs`. It reaches the Mac through
+the `mac` entry in `~/.ssh/config` (key login over the tailnet) and the System32 OpenSSH client,
+which uses the 1Password agent. The hub token stays in the Mac checkout's `apple/dev.env`; the
+build copy points at it through `HUB_DEV_ENV`. Measured on 2026-10-04: the tests take 16 s, and
+the three simulators run against the real hub in 39 s.
+
+The Mac must be awake. It never sleeps on the charger (`pmset -c sleep 0`), but on battery it
+sleeps after a minute.
+
 ### Tools that replace adb
 
 | Pocket DS (Windows) | Apple (on this Mac) |
@@ -128,17 +146,18 @@ Simulators cover every screen size the user owns: the iPad Pro 12.9"/13", the iP
 iPhone. Boot all three and screenshot each for layout work. Real devices are still needed for
 controller feel, playback performance and offline downloads.
 
-### Setup still to do
+### Setup
 
-- Xcode from the App Store, opened once. Homebrew, then `xcodegen` and `pymobiledevice3`.
-- **Keep the Xcode project as text.** Claude cannot click through Xcode, so generate the project
-  from `apple/project.yml` with XcodeGen and do not commit the generated `.xcodeproj`.
-- Apple Developer Program enrollment (the user, in the Apple Developer app). After approval, an
-  **App Store Connect API key** lets `xcodebuild` sign automatically
+- **Keep the Xcode project as text.** Nobody clicks through Xcode, so the project is generated
+  from `apple/project.yml` with XcodeGen and the generated `.xcodeproj` is not committed.
+- Done: Xcode 26.3, Homebrew, XcodeGen and `gh` on the Mac; `scripts/mac.sh` and
+  `scripts/mac-remote.sh`.
+- Still to do (#6): Apple Developer Program enrollment, done by the user in the Apple Developer
+  app. After approval, an **App Store Connect API key** lets `xcodebuild` sign automatically
   (`-allowProvisioningUpdates -authenticationKeyPath ...`) and upload builds without the Xcode
-  window. Keep the key outside the repo.
-- A `scripts/mac.sh` in the spirit of `scripts/dev.sh`: `build`, `test`, `sims` (boot the three
-  sizes, install, launch, screenshot), `device`, `logs`, `testflight`.
+  window. Keep the key outside the repo. **Signing over SSH needs a one-time keychain step on
+  the Mac**, because SSH sessions cannot open the login keychain (the same reason the Claude CLI
+  needed its own login there). Add `device` and `testflight` to `scripts/mac.sh` then.
 
 ## Design direction
 

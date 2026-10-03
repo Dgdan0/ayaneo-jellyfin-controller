@@ -9,8 +9,9 @@ Two components, built in parallel:
   a bearer token. Holds no service API keys.
 - **`hub/`** — a Go service on the Windows media PC. Holds every API key, fans out to all six
   services, and does the cross-service join.
-- **`apple/`** — the SwiftUI app for iPad, iPhone and Mac, built on the MacBook. Talks only to
-  the same hub. See `APPLE_PLAN.md`.
+- **`apple/`** — the SwiftUI app for iPad, iPhone and Mac. It is edited on the PC and built on
+  the MacBook over SSH (`scripts/mac-remote.sh`), and talks only to the same hub. See
+  `APPLE_PLAN.md`.
 
 The full plan lives at `~/.claude/plans/hey-claude-i-know-shiny-boole.md`.
 
@@ -21,8 +22,9 @@ The full plan lives at `~/.claude/plans/hey-claude-i-know-shiny-boole.md`.
 All work is tracked in **GitHub Issues** on `Dgdan0/ayaneo-jellyfin-controller`. That includes
 work by Claude on the PC or the Mac, by Codex, or by hand. Sessions on different machines share
 no conversation or memory, and the issues are what they all see. Use the `gh` CLI, signed in as
-`Dgdan0`. The PC session owns the hub and Android, the Mac session owns Apple, and either may
-change the hub. Hub deploys happen only on the media PC, by the user, and only from
+`Dgdan0`. The PC session owns the hub, Android and Apple; for Apple it drives the Mac as a build
+machine with `scripts/mac-remote.sh`. A Claude session on the Mac may also work on Apple, but
+never at the same time as the PC. Hub deploys happen only on the media PC, by the user, and only from
 `claude/consolidation`. When a hub change is made on another branch, push it, and the PC session
 brings it onto that branch.
 
@@ -84,7 +86,8 @@ The shared detail/focus redesign and remaining visual milestones are in `VISUAL_
 The durable reader checkpoint candidate and acceptance status are in `READING_CHECKPOINTS.md`.
 `IMPLEMENTATION_HANDOFF.md` breaks the remaining product features into tests-first tasks.
 Native Apple clients (iPad, iPhone, Mac; SwiftUI, TestFlight) are planned in `APPLE_PLAN.md`;
-that work runs on the MacBook on branch `apple/client` and talks to this same hub.
+that work happens on branch `apple/client`, edited here and built on the MacBook with
+`scripts/mac-remote.sh`, and it talks to this same hub.
 Native UI tests run only against the isolated `.uitest` application with `scripts/dev.sh test-ui`.
 Gradle uninstalls instrumentation targets after testing: never target the user's normal app,
 uninstall it, or clear its data as part of device verification. Use `adb install -r` for updates.
