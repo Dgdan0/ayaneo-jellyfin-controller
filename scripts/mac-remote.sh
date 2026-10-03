@@ -68,7 +68,13 @@ run() {
   sync
   # A non-interactive SSH shell on the Mac does not read the login profile, so
   # Homebrew's tools (xcodegen) are not on its PATH.
+  # HUB_SECTION (home, library, services, …) opens that section in Debug
+  # builds, for screenshots of a screen other than the last one open, and
+  # HUB_OPEN (continue, latest, …) opens that Home row's first title.
+  # SHOT_WAIT gives a screen with artwork longer to load before the shot.
   remote "export PATH=/opt/homebrew/bin:\$PATH; cd ~/$REMOTE_DIR && \
+    HUB_SECTION=$(printf '%q' "${HUB_SECTION:-}") HUB_OPEN=$(printf '%q' "${HUB_OPEN:-}") \
+    SHOT_WAIT=$(printf '%q' "${SHOT_WAIT:-3}") \
     HUB_DEV_ENV=\$HOME/$DEV_ENV bash scripts/mac.sh $(printf '%q ' "$@")"
   fetch_shots
 }

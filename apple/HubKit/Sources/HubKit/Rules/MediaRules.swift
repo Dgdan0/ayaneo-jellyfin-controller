@@ -67,7 +67,7 @@ public enum EpisodeLabel {
 }
 
 /// A library's sort: a field and a direction. Android's `SortPreference`.
-public struct SortPreference: Equatable, Sendable {
+public struct SortPreference: Hashable, Sendable {
     public var field: String
     public var ascending: Bool
 
@@ -94,6 +94,20 @@ public struct SortPreference: Equatable, Sendable {
     }
 
     public var order: String { ascending ? "asc" : "desc" }
+
+    /// "added:desc", as Android stores it.
+    public var encoded: String { field + ":" + order }
+
+    /// A stored sort, or `fallback`'s default direction when the value is
+    /// missing or malformed.
+    public static func decode(_ raw: String?, fallback: String) -> SortPreference {
+        let parts = (raw ?? "").split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 2, !parts[0].isEmpty,
+              parts[0].allSatisfy({ ("a"..."z").contains($0) || $0 == "_" }),
+              parts[1] == "asc" || parts[1] == "desc"
+        else { return forField(fallback) }
+        return SortPreference(field: parts[0], ascending: parts[1] == "asc")
+    }
 
     /// What the direction means for this field: "A to Z", "Newest first", "Highest first".
     public var directionLabel: String {
@@ -252,6 +266,51 @@ public enum DetailLines {
         if item.positionSeconds > 0 { parts.append("Continue at " + Fmt.clock(millis: Int64(item.positionSeconds) * 1_000)) }
         if item.favorite { parts.append("★ Favourite") }
         return parts.joined(separator: " · ")
+    }
+
+    /// The Details section, in Android's labels and order (`MediaFacts.facts`):
+    /// who made it, where, what kind, when, and its original title.
+    public static func details(_ item: LibraryItem) -> [(label: String, value: String)] {
+        func names(_ type: String) -> String {
+            item.people.filter { $0.type == type }.map(\.name).joined(separator: ", ")
+        }
+        var out: [(label: String, value: String)] = []
+        let directors = names("Director"), writers = names("Writer")
+        if !directors.isEmpty { out.append(("Directed by", directors)) }
+        if !writers.isEmpty { out.append(("Written by", writers)) }
+        if !item.studios.isEmpty { out.append((item.studios.count == 1 ? "Studio" : "Studios", item.studios.joined(separator: ", "))) }
+        if !item.genres.isEmpty { out.append(("Genres", item.genres.joined(separator: ", "))) }
+        let date = day(item.premiereDate)
+        if !date.isEmpty { out.append((item.type == "series" ? "First aired" : "Released", date)) }
+        if !item.originalTitle.isEmpty, item.originalTitle.caseInsensitiveCompare(item.title) != .orderedSame {
+            out.append(("Original title", item.originalTitle))
+        }
+        return out
+    }
+
+    /// The actors and guest stars, in billing order, at most 20.
+    public static func cast(_ item: LibraryItem) -> [LibraryPerson] {
+        Array(item.people.filter { $0.type == "Actor" || $0.type == "GuestStar" }.prefix(20))
+    }
+
+    /// "2008-12-09T00:00:00.0000000Z" as "9 Dec 2008"; empty when unreadable.
+    public static func day(_ iso: String) -> String {
+        let parts = iso.prefix(10).split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3, (1...12).contains(parts[1]), (1...31).contains(parts[2]), parts[0] > 1800 else { return "" }
+        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        return "\(parts[2]) \(months[parts[1] - 1]) \(parts[0])"
+    }
+
+    /// An episode in a season's list: "4. Pilot", or the title alone.
+    public static func episodeTitle(_ episode: LibraryItem) -> String {
+        episode.indexNumber > 0 ? "\(episode.indexNumber). \(episode.title)" : episode.title
+    }
+
+    /// Under an episode in a season's list: "47 min · 40% watched".
+    public static func episodeMeta(_ episode: LibraryItem) -> String {
+        [Fmt.runtime(seconds: Int64(episode.runtimeSeconds)),
+         ResumeRules.watchLabel(played: episode.played, progress: episode.progress) ?? ""]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     /// The Play button: "Resume · 12:34" with a saved position, else "Play".

@@ -82,6 +82,15 @@ struct SortAndClockTests {
         #expect(SortPreference.label(for: "parental") == "Parental rating")
     }
 
+    @Test func aStoredSortRoundTripsAndABadOneFallsBack() {
+        #expect(SortPreference(field: "added", ascending: false).encoded == "added:desc")
+        #expect(SortPreference.decode("added:desc", fallback: "name") == SortPreference(field: "added", ascending: false))
+        #expect(SortPreference.decode("last_read:asc", fallback: "name") == SortPreference(field: "last_read", ascending: true))
+        #expect(SortPreference.decode(nil, fallback: "name") == SortPreference(field: "name", ascending: true))
+        #expect(SortPreference.decode("Added:up", fallback: "added") == SortPreference(field: "added", ascending: false))
+        #expect(SortPreference.decode("a:b:c", fallback: "name") == SortPreference(field: "name", ascending: true))
+    }
+
     @Test func clockShowsMinutesAndSecondsUnderAnHour() {
         #expect(Fmt.clock(millis: 0) == "0:00")
         #expect(Fmt.clock(millis: 9_999) == "0:09")
@@ -190,5 +199,35 @@ struct DetailLinesTests {
         let series = LibraryItem(id: "s", type: "series", title: "Severance", unplayedCount: 9)
         #expect(DetailLines.state(series) == "9 unwatched")
         #expect(DetailLines.playLabel(series) == "Play")
+    }
+
+    @Test func theDetailsSectionNamesWhoMadeItAndWhen() {
+        let film = LibraryItem(
+            id: "m", type: "movie", title: "Amélie", originalTitle: "Le Fabuleux Destin d'Amélie Poulain",
+            premiereDate: "2001-04-25T00:00:00.0000000Z", genres: ["Comedy", "Romance"], studios: ["UGC"],
+            people: [LibraryPerson(name: "Jean-Pierre Jeunet", type: "Director"),
+                     LibraryPerson(name: "Guillaume Laurant", type: "Writer"),
+                     LibraryPerson(name: "Jean-Pierre Jeunet", type: "Writer"),
+                     LibraryPerson(name: "Audrey Tautou", role: "Amélie", type: "Actor")])
+        let facts = DetailLines.details(film)
+        #expect(facts.map(\.label) == ["Directed by", "Written by", "Studio", "Genres", "Released", "Original title"])
+        #expect(facts[1].value == "Guillaume Laurant, Jean-Pierre Jeunet")
+        #expect(facts[4].value == "25 Apr 2001")
+        #expect(DetailLines.cast(film).map(\.name) == ["Audrey Tautou"])
+
+        let series = LibraryItem(id: "s", type: "series", title: "Dark", originalTitle: "dark",
+                                 premiereDate: "2017-12-01", studios: ["Netflix", "Wiedemann & Berg"])
+        #expect(DetailLines.details(series).map(\.label) == ["Studios", "First aired"])
+        #expect(DetailLines.day("") == "" && DetailLines.day("0001-01-01T00:00:00Z") == "")
+    }
+
+    @Test func anEpisodeInASeasonListReadsNumberTitleAndProgress() {
+        let episode = LibraryItem(id: "e", type: "episode", title: "Pilot", indexNumber: 1, runtimeSeconds: 2820,
+                                  progress: 0.4)
+        #expect(DetailLines.episodeTitle(episode) == "1. Pilot")
+        #expect(DetailLines.episodeMeta(episode) == "47 min · 40% watched")
+        let special = LibraryItem(id: "x", type: "episode", title: "Making of", played: true)
+        #expect(DetailLines.episodeTitle(special) == "Making of")
+        #expect(DetailLines.episodeMeta(special) == "Watched")
     }
 }

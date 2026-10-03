@@ -9,22 +9,19 @@ enum AppSection: String, Hashable, CaseIterable {
 /// width the window actually has, not by the device: an iPad mini in portrait,
 /// or an iPad app in Split View, gets the tab bar like a phone.
 struct MainView: View {
-    // Services is the first screen built; Home becomes the default once it exists.
-    @SceneStorage("section") private var section: AppSection = .services
+    @SceneStorage("section") private var section: AppSection = .home
 
     var body: some View {
         TabView(selection: $section) {
             Tab("Home", systemImage: "house", value: .home) {
-                ComingNextView(title: "Home", systemImage: "house",
-                               detail: "Continue watching, Next up and Recently added for the chosen profile.")
+                NavigationStack { HomeView() }
             }
             Tab("Discover", systemImage: "sparkles", value: .discover) {
                 ComingNextView(title: "Discover", systemImage: "sparkles",
                                detail: "Trending and upcoming titles, search, and requests to Jellyseerr.")
             }
             Tab("Library", systemImage: "square.grid.2x2", value: .library) {
-                ComingNextView(title: "Library", systemImage: "square.grid.2x2",
-                               detail: "Every Jellyfin library, sorted on the hub, with watched and favourite actions.")
+                NavigationStack { LibraryView() }
             }
             Tab("Downloads", systemImage: "arrow.down.circle", value: .downloads) {
                 ComingNextView(title: "Downloads", systemImage: "arrow.down.circle",
@@ -49,6 +46,14 @@ struct MainView: View {
             }
         }
         .tabViewStyle(.sidebarAdaptable)
+        #if DEBUG
+        // scripts/mac.sh opens a chosen section for screenshots (HUB_SECTION=library).
+        .onAppear {
+            if let name = ProcessInfo.processInfo.environment["HUB_SECTION"], let chosen = AppSection(rawValue: name) {
+                section = chosen
+            }
+        }
+        #endif
     }
 }
 

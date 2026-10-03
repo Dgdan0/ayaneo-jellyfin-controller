@@ -84,6 +84,7 @@ launch_sim() {
   # SIMCTL_CHILD_ variables reach the app's environment without the token
   # ever being written into the simulator.
   SIMCTL_CHILD_HUB_URL="${HUB_URL:-}" SIMCTL_CHILD_HUB_TOKEN="${HUB_TOKEN:-}" \
+    SIMCTL_CHILD_HUB_SECTION="${HUB_SECTION:-}" SIMCTL_CHILD_HUB_OPEN="${HUB_OPEN:-}" \
     xcrun simctl launch "$udid" "$BUNDLE_ID" $(launch_args "$@") >/dev/null
 }
 
