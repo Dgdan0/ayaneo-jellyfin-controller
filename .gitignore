@@ -23,6 +23,18 @@ shots/
 # Hub URL + bearer token for scripts/dev.sh seed. Never committed.
 scripts/dev.env
 
+# ---- apple (SwiftUI clients, built on the Mac) ----
+# Hub URL + bearer token for development, like scripts/dev.env. Never committed.
+/apple/dev.env
+# Generated from apple/project.yml by XcodeGen.
+/apple/*.xcodeproj/
+xcuserdata/
+DerivedData/
+# App Store Connect API keys and signing material: this repository is public.
+*.p8
+*.mobileprovision
+*.p12
+
 # ---- hub (Go service) ----
 /hub/hub.exe
 /hub/hubctl.exe
