@@ -13,6 +13,13 @@ variants retrieved on 2026-09-09. Android selects the matching file from
 | `logo_jellyfin.png` | [selfh.st/icons](https://github.com/selfhst/icons) | CC BY 4.0 |
 | `logo_jellyseerr.png` | [selfh.st/icons](https://github.com/selfhst/icons) | CC BY 4.0 |
 | `logo_qbittorrent.png` | [selfh.st/icons](https://github.com/selfhst/icons) | CC BY 4.0 |
+| `logo_kavita.png` | The installed Kavita web app, `assets/icons/android-chrome-256x256.png` (256 px, retrieved 2026-10-04) | Kavita's own icon; mark retained by its owners |
+| `logo_storyteller.png` | The installed Storyteller web app, `Storyteller_Logo.png` (2048 px, scaled to 512 px, retrieved 2026-10-04) | Storyteller's own logo; mark retained by its owners |
+| `logo_bookkeeprr.png` | The installed BookKeeprr web app, `img/icon-512.png` (512 px, retrieved 2026-10-04) | BookKeeprr's own icon; mark retained by its owners |
+
+The three book services' logos read on both light and dark cards, so each has one file in
+`drawable-nodpi` and none in `drawable-night-nodpi`. The Apple app carries the same files as
+imagesets in `apple/Hub/Resources/Assets.xcassets/Logos`, with no dark appearance.
 
 Product names and trademarks remain the property of their respective owners.
 The Ayaneo Hub mark is this project's own launcher foreground.

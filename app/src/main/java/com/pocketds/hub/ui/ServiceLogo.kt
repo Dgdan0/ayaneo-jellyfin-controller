@@ -8,7 +8,7 @@ import com.pocketds.hub.R
 object ServiceLogo {
     private const val RESOURCE_TAG = -0x7fffffc2
 
-    /** A service's own logo; the app's mark for one without (the hub, the book services). */
+    /** A service's own logo; the app's mark for one without (the hub itself). */
     fun resource(service: String): Int = when (service.lowercase()) {
         "jellyfin" -> R.drawable.logo_jellyfin
         "jellyseerr" -> R.drawable.logo_jellyseerr
@@ -19,6 +19,9 @@ object ServiceLogo {
         "bazarr" -> R.drawable.logo_bazarr
         "cleanuparr" -> R.drawable.logo_cleanuparr
         "qbittorrent" -> R.drawable.logo_qbittorrent
+        "kavita" -> R.drawable.logo_kavita
+        "storyteller" -> R.drawable.logo_storyteller
+        "bookkeeprr" -> R.drawable.logo_bookkeeprr
         else -> R.drawable.ic_launcher_foreground
     }
 
