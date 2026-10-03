@@ -54,6 +54,12 @@ type PlaybackCapabilities struct {
 	VideoCodecs      []string `json:"videoCodecs"`
 	AudioCodecs      []string `json:"audioCodecs"`
 	HDRTypes         []string `json:"hdrTypes"`
+	// Containers the player opens as a plain file. Empty means the Media3 list,
+	// which includes MKV; AVPlayer names only mp4, m4v and mov.
+	Containers []string `json:"containers,omitempty"`
+	// HLSSegments is "ts" (the default) or "fmp4". AVPlayer plays HEVC in HLS only
+	// from fMP4 segments.
+	HLSSegments string `json:"hlsSegments,omitempty"`
 }
 
 type PlaybackPrepareResponse struct {
@@ -337,6 +343,11 @@ func validatePrepare(body *PlaybackPrepareBody) error {
 	if body.SubtitleStreamIndex != nil && *body.SubtitleStreamIndex < -1 {
 		return fmt.Errorf("subtitleStreamIndex is invalid")
 	}
+	switch strings.ToLower(body.Capabilities.HLSSegments) {
+	case "", "ts", "fmp4":
+	default:
+		return fmt.Errorf("hlsSegments must be ts or fmp4")
+	}
 	return nil
 }
 
@@ -432,6 +443,42 @@ func allowedCSV(values []string, allowed map[string]bool, fallback string) strin
 	return strings.Join(out, ",")
 }
 
+// The Media3 direct-play groups, used when a client names no containers.
+var media3Containers = []string{"mp4,m4v,mov", "mkv,webm", "ts,mpegts"}
+
+var allowedContainers = map[string]bool{
+	"mp4": true, "m4v": true, "mov": true, "mkv": true, "webm": true, "ts": true, "mpegts": true,
+}
+
+// What an fMP4 HLS stream may carry, in the order a re-encode should prefer.
+var (
+	fmp4VideoCodecs = []string{"h264", "hevc"}
+	fmp4AudioCodecs = []string{"aac", "ac3", "eac3", "alac", "flac"}
+)
+
+// preferredCSV keeps the values the client named that appear in preferred, in
+// preferred's order rather than the client's.
+func preferredCSV(values, preferred []string, fallback string) string {
+	allowed := make(map[string]bool, len(preferred))
+	for _, value := range preferred {
+		allowed[value] = true
+	}
+	named := map[string]bool{}
+	for _, value := range strings.Split(allowedCSV(values, allowed, ""), ",") {
+		named[value] = true
+	}
+	out := make([]string, 0, len(preferred))
+	for _, value := range preferred {
+		if named[value] {
+			out = append(out, value)
+		}
+	}
+	if len(out) == 0 {
+		return fallback
+	}
+	return strings.Join(out, ",")
+}
+
 func buildDeviceProfile(body PlaybackPrepareBody) jellyfin.DeviceProfile {
 	video := allowedCSV(body.Capabilities.VideoCodecs, allowedVideoCodecs, "h264")
 	audio := allowedCSV(body.Capabilities.AudioCodecs, allowedAudioCodecs, "aac,mp3")
@@ -443,19 +490,37 @@ func buildDeviceProfile(body PlaybackPrepareBody) jellyfin.DeviceProfile {
 	if channels <= 0 {
 		channels = 2
 	}
-	directPlay := []jellyfin.DirectPlayProfile{}
-	if !body.ForceTranscode {
-		directPlay = []jellyfin.DirectPlayProfile{
-			{Container: "mp4,m4v,mov", VideoCodec: video, AudioCodec: audio, Type: "Video"},
-			{Container: "mkv,webm", VideoCodec: video, AudioCodec: audio, Type: "Video"},
-			{Container: "ts,mpegts", VideoCodec: video, AudioCodec: audio, Type: "Video"},
+	name := "Pocket DS Media3"
+	containerGroups := media3Containers
+	if named := allowedCSV(body.Capabilities.Containers, allowedContainers, ""); named != "" {
+		containerGroups = []string{named}
+		name = body.Device.Name
+		if name == "" {
+			name = "Hub client"
 		}
 	}
+	directPlay := []jellyfin.DirectPlayProfile{}
+	if !body.ForceTranscode {
+		for _, containers := range containerGroups {
+			directPlay = append(directPlay, jellyfin.DirectPlayProfile{
+				Container: containers, VideoCodec: video, AudioCodec: audio, Type: "Video",
+			})
+		}
+	}
+	// Jellyfin writes fMP4 segments when an HLS profile's container is mp4. The
+	// codec lists name what may be copied into the stream; the first is what a
+	// re-encode produces, so H.264 and AAC stay first.
+	segment, hlsVideo, hlsAudio := "ts", "h264", "aac"
+	if strings.EqualFold(body.Capabilities.HLSSegments, "fmp4") {
+		segment = "mp4"
+		hlsVideo = preferredCSV(body.Capabilities.VideoCodecs, fmp4VideoCodecs, "h264")
+		hlsAudio = preferredCSV(body.Capabilities.AudioCodecs, fmp4AudioCodecs, "aac")
+	}
 	return jellyfin.DeviceProfile{
-		Name: "Pocket DS Media3", MaxStreamingBitrate: maxBitrate, MaxStaticBitrate: maxPlaybackBitrate,
+		Name: name, MaxStreamingBitrate: maxBitrate, MaxStaticBitrate: maxPlaybackBitrate,
 		DirectPlayProfiles: directPlay,
 		TranscodingProfiles: []jellyfin.TranscodingProfile{{
-			Container: "ts", Type: "Video", VideoCodec: "h264", AudioCodec: "aac",
+			Container: segment, Type: "Video", VideoCodec: hlsVideo, AudioCodec: hlsAudio,
 			Protocol: "hls", Context: "Streaming", MaxAudioChannels: strconv.Itoa(channels),
 			MinSegments: 1, SegmentLength: 6, BreakOnNonKeyFrames: true,
 			EnableSubtitlesInManifest: true,
