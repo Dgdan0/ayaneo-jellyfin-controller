@@ -27,7 +27,6 @@ import com.pocketds.hub.playback.SubtitleLook
 import com.pocketds.hub.playback.SubtitleLooks
 import com.pocketds.hub.playback.SubtitleSize
 import com.pocketds.hub.playback.SubtitleStyle
-import com.pocketds.hub.reader.ReaderLabScreen
 import com.pocketds.hub.screens.home.HomeRows
 import com.pocketds.hub.screens.system.PadTestScreen
 import com.pocketds.hub.settings.AccentPreset
@@ -437,7 +436,6 @@ class SettingsScreen(
         utility("controller", "Controller test", "Inspect buttons, sticks and triggers", AppIcon.SETTINGS, com.pocketds.hub.R.drawable.ic_nav_pad) {
             host.push(PadTestScreen())
         }
-        utility("reader", "Reader lab", "Test comic, manga, book and read-along controls", AppIcon.BOOK) { host.push(ReaderLabScreen(ringVisible)) }
         utility("dictionary", "Offline dictionary", "Open English WordNet 2025 · CC BY 4.0", AppIcon.BOOK) {
             overlay.show("Offline dictionary", "Available without an internet connection", listOf(
                 ChoiceOverlay.Choice("source", "Open English WordNet 2025", "https://en-word.net/downloads/"),
