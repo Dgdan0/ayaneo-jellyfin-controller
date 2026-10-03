@@ -1,0 +1,7 @@
+{
+  "images" : [
+    { "filename" : "logo_jellyfin.png", "idiom" : "universal" },
+    { "appearances" : [ { "appearance" : "luminosity", "value" : "dark" } ], "filename" : "logo_jellyfin_dark.png", "idiom" : "universal" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}

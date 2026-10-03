@@ -1,0 +1,7 @@
+{
+  "images" : [
+    { "filename" : "logo_jellyseerr.png", "idiom" : "universal" },
+    { "appearances" : [ { "appearance" : "luminosity", "value" : "dark" } ], "filename" : "logo_jellyseerr_dark.png", "idiom" : "universal" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}

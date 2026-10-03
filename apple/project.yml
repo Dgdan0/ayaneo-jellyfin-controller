@@ -1,0 +1,91 @@
+# The Apple client: one SwiftUI app for iPhone, iPad and Mac.
+# Generate the Xcode project with `scripts/mac.sh project` (XcodeGen); the
+# generated Hub.xcodeproj is gitignored, so this file is the project.
+name: Hub
+options:
+  bundleIdPrefix: com.pocketds
+  deploymentTarget:
+    # The MacBook runs macOS 15, and iPads not yet moved to 26 should still work.
+    iOS: "18.0"
+    macOS: "15.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Set when the Apple Developer Program enrolment is approved; until then
+    # simulator and local Mac builds are signed to run locally.
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+packages:
+  HubKit:
+    path: HubKit
+targets:
+  Hub:
+    type: application
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: Hub
+    dependencies:
+      - package: HubKit
+    entitlements:
+      path: Hub/Hub.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+    info:
+      path: Hub/Info.plist
+      properties:
+        CFBundleDisplayName: Hub
+        LSApplicationCategoryType: public.app-category.entertainment
+        ITSAppUsesNonExemptEncryption: false
+        UIAppFonts:
+          - Figtree-Regular.ttf
+          - Figtree-Medium.ttf
+          - Figtree-SemiBold.ttf
+          - Figtree-Bold.ttf
+          - Bricolage-SemiBold.ttf
+          - Bricolage-Bold.ttf
+          - Bricolage-ExtraBold.ttf
+        ATSApplicationFontsPath: .
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations~iphone:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        # The hub is HTTPS (Tailscale Serve, or the DuckDNS fallback). Local
+        # networking stays open for a hub on loopback during development.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        GCSupportsControllerUserInteraction: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pocketds.hub
+        PRODUCT_NAME: Hub
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+schemes:
+  Hub:
+    build:
+      targets:
+        Hub: all
+    run:
+      config: Debug
+    test:
+      config: Debug

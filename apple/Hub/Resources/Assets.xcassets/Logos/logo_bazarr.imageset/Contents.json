@@ -1,0 +1,7 @@
+{
+  "images" : [
+    { "filename" : "logo_bazarr.png", "idiom" : "universal" },
+    { "appearances" : [ { "appearance" : "luminosity", "value" : "dark" } ], "filename" : "logo_bazarr_dark.png", "idiom" : "universal" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}

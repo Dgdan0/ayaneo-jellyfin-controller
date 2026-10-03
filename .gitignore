@@ -46,3 +46,7 @@ DerivedData/
 
 # scripts/dev.sh keys off stashes the original accessibility list here
 /.dev-a11y-backup
+# Swift package build output and local Xcode builds of the Apple client
+/apple/HubKit/.build/
+/apple/HubKit/.swiftpm/
+/apple/build/
