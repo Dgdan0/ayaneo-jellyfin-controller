@@ -32,6 +32,7 @@ public enum ServiceRows {
     static let scannable: Set<String> = ["jellyfin", "kavita", "storyteller"]
     static let logos: Set<String> = [
         "jellyfin", "jellyseerr", "prowlarr", "sonarr", "radarr", "readarr", "bazarr", "cleanuparr", "qbittorrent",
+        "kavita", "storyteller", "bookkeeprr",
     ]
 
     public static func rows(health: HealthResponse?, address: String) -> [ServiceRow] {

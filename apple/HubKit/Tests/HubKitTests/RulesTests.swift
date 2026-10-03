@@ -293,7 +293,11 @@ struct ServiceRowsTests {
         let rows = ServiceRows.rows(health: health, address: "")
         #expect(rows.first { $0.id == "qbittorrent" }?.name == "qBittorrent")
         #expect(rows.first { $0.id == "qbittorrent" }?.logo == "logo_qbittorrent")
-        #expect(rows.first { $0.id == "kavita" }?.logo == nil)
+        #expect(rows.first { $0.id == "kavita" }?.logo == "logo_kavita")
+        #expect(ServiceRows.row(ServiceHealth(name: "storyteller", state: "up")).logo == "logo_storyteller")
+        #expect(ServiceRows.row(ServiceHealth(name: "bookkeeprr", state: "up")).logo == "logo_bookkeeprr")
+        // A service the app has no logo for falls back to the hub mark.
+        #expect(ServiceRows.row(ServiceHealth(name: "lidarr", state: "up")).logo == nil)
     }
 
     @Test func statesReadAsWordsInTheirColour() {
