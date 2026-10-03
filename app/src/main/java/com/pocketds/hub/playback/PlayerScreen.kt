@@ -520,7 +520,7 @@ class PlayerScreen(
         updateControlLabels(current)
         duration.text = PlayerLabels.remainingLine(controller?.currentPosition ?: 0L, current.durationMillis)
         status.setTextColor(Color.WHITE)
-        status.text = "Opening ${current.playMethod.lowercase().ifEmpty { "media" }}…"
+        status.text = "Opening · ${PlayerLabels.playMethod(current.playMethod).lowercase()}…"
         if (!serviceLoaded) {
             serviceLoaded = true
             PlaybackService.load(host.viewContext, current, subtitleOffsetMillis = subtitleOffsetMillis)
@@ -1379,7 +1379,7 @@ class PlayerScreen(
         if (selectedSubtitleSupportsOffset(current)) {
             choiceOverlay.setting("Subtitle timing", PlayerLabels.subtitleOffset(subtitleOffsetMillis)) { showSubtitleOffsetSheet() }
         }
-        choiceOverlay.setting("Stream", current.playMethod.ifEmpty { "Playback" }) { showStreamDetails() }
+        choiceOverlay.setting("Stream", PlayerLabels.playMethod(current.playMethod)) { showStreamDetails() }
         choiceOverlay.note("These change only this video. Skip distance, intros, up next and how subtitles look live in Settings › Playback and Subtitles.")
         choiceOverlay.focusBody()
         handler.removeCallbacks(hideControls)

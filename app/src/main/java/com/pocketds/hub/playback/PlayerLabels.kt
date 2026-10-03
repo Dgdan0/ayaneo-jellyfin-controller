@@ -67,9 +67,18 @@ object PlayerLabels {
         PlaybackAspect.ORIGINAL -> "Original aspect"
     }
 
+    /** Jellyfin's play method in words: "Direct play", "Direct stream", "Converting". */
+    fun playMethod(value: String): String = when (value.trim().lowercase(Locale.US)) {
+        "directplay" -> "Direct play"
+        "directstream" -> "Direct stream"
+        "transcode" -> "Converting"
+        "" -> "Playback"
+        else -> value
+    }
+
     /** What is playing and how, for the playback panel. */
     fun diagnostic(value: PlaybackPrepareResponse): String = buildList {
-        add(value.playMethod.ifEmpty { "Playback" })
+        add(playMethod(value.playMethod))
         if (value.width > 0) add("${value.width}×${value.height}")
         if (value.videoCodec.isNotEmpty()) add(value.videoCodec.uppercase(Locale.US))
         if (value.audioCodec.isNotEmpty()) add(value.audioCodec.uppercase(Locale.US))
@@ -123,7 +132,7 @@ object PlayerLabels {
 
     /** How the stream will be delivered: method, resolution, bitrate. */
     fun quality(value: PlaybackPrepareResponse): String = buildString {
-        append(value.playMethod.ifEmpty { "Original" })
+        append(if (value.playMethod.isEmpty()) "Original" else playMethod(value.playMethod))
         if (value.width > 0 && value.height > 0) append(" · ${value.width}×${value.height}")
         if (value.bitrate > 0) append(" · ${Fmt.mbps(value.bitrate.toLong())}")
     }

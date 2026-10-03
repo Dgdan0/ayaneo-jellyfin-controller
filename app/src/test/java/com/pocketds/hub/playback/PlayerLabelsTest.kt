@@ -27,7 +27,7 @@ class PlayerLabelsTest {
         assertEquals("No offset", PlayerLabels.subtitleOffset(0))
         val plan = PlaybackPrepareResponse(playMethod = "DirectPlay", width = 1920, height = 1080,
             videoCodec = "hevc", frameRate = 23.976)
-        assertEquals("DirectPlay · 1920×1080 · HEVC · 23.98 fps", PlayerLabels.diagnostic(plan))
+        assertEquals("Direct play · 1920×1080 · HEVC · 23.98 fps", PlayerLabels.diagnostic(plan))
     }
 
     @Test
@@ -78,5 +78,13 @@ class PlayerLabelsTest {
         assertEquals("26:56", PlayerLabels.chapterDetail(1_616_000, 0, null))
         assertEquals("Credits", PlayerLabels.segmentKind("Outro"))
         assertEquals(null, PlayerLabels.segmentKind("Unknown"))
+    }
+
+    @Test
+    fun theStreamRowSaysHowItPlaysInWords() {
+        assertEquals("Direct play", PlayerLabels.playMethod("DirectPlay"))
+        assertEquals("Direct stream", PlayerLabels.playMethod("DirectStream"))
+        assertEquals("Converting", PlayerLabels.playMethod("Transcode"))
+        assertEquals("Playback", PlayerLabels.playMethod(""))
     }
 }
