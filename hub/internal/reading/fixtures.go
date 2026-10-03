@@ -20,8 +20,9 @@ import (
 )
 
 // FixtureAuthor and FixtureIdentifierPrefix mark the generated reading-lab
-// books. They are real files on the reading server for device tests, and the
-// Hub keeps them out of library listings so they do not sit among real books.
+// books. They were real files on the reading servers for device tests (removed
+// on 2026-10-03); if they are generated there again, the Hub keeps them out of
+// library listings so they do not sit among real books.
 const (
 	FixtureAuthor           = "Lab Author"
 	FixtureIdentifierPrefix = "urn:pocketds:fixture:"

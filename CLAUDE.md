@@ -617,7 +617,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | The comic reader's heading | `ReaderTitleFormatter.heading` / `issue` / `subtitle` ("Fantastic Four" over "Issue 51 · Page 2 of 24"; Kavita's "Chapter 51" is an issue for a comic) |
 | Reacting to focus while keeping the ring | `FocusDecorator.listen(view, ringVisible) { view, focused -> … }` |
 | Player and playback-option wording | `playback/PlayerLabels` (Locale.US decimals; `playMethod`: "Direct play", "Direct stream", "Converting") |
-| Hub: a reading-lab fixture (generated test files on the real reading servers) | `isReadingFixture` (Storyteller) / `readingdomain.IsFixtureSeries` (Kavita "Lab Comics", "Lab Manga"); kept off shelves and off library cards, whose cover prefers the series read most recently |
+| Hub: a reading-lab fixture (generated test files; removed from the real reading servers on 2026-10-03, the guard stays in case they are generated again) | `isReadingFixture` (Storyteller) / `readingdomain.IsFixtureSeries` (Kavita "Lab Comics", "Lab Manga"); kept off shelves and off library cards, whose cover prefers the series read most recently |
 | "1 transfer needs attention" | `ActivityDashboard.needAttention` |
 | Subtitle decoding | `TolerantSubtitleDecoderFactory` in the text renderer (a broken ASS line is skipped, not fatal) |
 | Hub: permission check | `requireScope(w, r, scope, action)` (403 `forbidden_scope`) |
@@ -1217,9 +1217,9 @@ Design consequences:
   authenticated tailnet devices only.
 - **The Activity tab opens each service's `web_url` in the default browser.** A loopback address
   would look for the service on the Pocket, so `ActivityDashboard.reachableFromPocket` refuses it and
-  names the setting instead. On 2026-10-02 Kavita and Storyteller were already served by Tailscale
-  at `https://ayaneo-media-pc.tail737e96.ts.net:5000` and `:8001`, but their `web_url` was empty;
-  BookKeeprr (3000) is not served on the tailnet at all.
+  names the setting instead. Kavita and Storyteller are served by Tailscale at
+  `https://ayaneo-media-pc.tail737e96.ts.net:5000` and `:8001`, and their `web_url` holds those
+  addresses since 2026-10-03; BookKeeprr (3000) is not served on the tailnet at all.
 - **Jellyfin library refresh is a narrow Hub action.** `POST /v1/manage/jellyfin/scan` requires the
   existing `control` scope and invokes Jellyfin's asynchronous `/Library/Refresh`. The app exposes
   it as a visible action on the Jellyfin Manage row and as X. The Hub clears affected response
