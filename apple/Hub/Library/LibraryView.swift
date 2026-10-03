@@ -42,8 +42,12 @@ struct LibraryView: View {
                                 lastFolder = Self.favourites
                             }
                         }
+                        if case .folder(let id, _, let current) = source {
+                            sortControls(folderId: id, current: current)
+                                .padding(.leading, 12)
+                        }
                     }
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, 24)
                     .padding(.vertical, 10)
                 }
             } else if query.trimmingCharacters(in: .whitespaces).count < 2 {
@@ -53,7 +57,7 @@ struct LibraryView: View {
                     .padding(20)
             }
             StatusLine(message: status) { Task { await loadFolders() } }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 24)
             if let source {
                 LibraryGrid(source: source)
                     .id(source)
@@ -62,34 +66,47 @@ struct LibraryView: View {
             }
         }
         .background(Color.surface)
-        .navigationTitle("Library")
+        .underTheBar()
         .searchable(text: $query, prompt: "Search your Jellyfin library")
-        .toolbar {
-            if case .folder(let id, _, let current) = source {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Menu {
-                        Picker("Sort by", selection: Binding(
-                            get: { current.field },
-                            set: { setSort(SortPreference.forField($0), for: id) })) {
-                            ForEach(SortPreference.mediaFields, id: \.id) { field in
-                                Text(field.label).tag(field.id)
-                            }
-                        }
-                    } label: {
-                        Label(SortPreference.label(for: current.field), systemImage: "line.3.horizontal.decrease")
-                    }
-                    Button {
-                        setSort(SortPreference(field: current.field, ascending: !current.ascending), for: id)
-                    } label: {
-                        Label(current.directionLabel, systemImage: current.ascending ? "arrow.up" : "arrow.down")
-                            .labelStyle(.titleAndIcon)
-                    }
-                    .help("Sort direction")
-                }
-            }
-        }
         .navigationDestination(for: TitleRoute.self) { TitleView(route: $0) }
         .task(id: model.userId) { await loadFolders() }
+    }
+
+    /// Android's `LibrarySortControls`: the field as a menu pill ("Name ▾") and
+    /// the direction as a pill that flips on one press ("↑ A to Z").
+    private func sortControls(folderId: String, current: SortPreference) -> some View {
+        HStack(spacing: 8) {
+            Menu {
+                Picker("Sort by", selection: Binding(
+                    get: { current.field },
+                    set: { setSort(SortPreference.forField($0), for: folderId) })) {
+                    ForEach(SortPreference.mediaFields, id: \.id) { field in
+                        Text(field.label).tag(field.id)
+                    }
+                }
+            } label: {
+                Label(SortPreference.label(for: current.field) + "  ▾", systemImage: "line.3.horizontal.decrease")
+                    .font(HubType.body(15, weight: .medium, relativeTo: .subheadline))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(Color.ink)
+                    .background(Color.card, in: Capsule())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            Button {
+                setSort(SortPreference(field: current.field, ascending: !current.ascending), for: folderId)
+            } label: {
+                Label(current.directionLabel, systemImage: current.ascending ? "arrow.up" : "arrow.down")
+                    .font(HubType.body(15, weight: .medium, relativeTo: .subheadline))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(Color.ink)
+                    .background(Color.card, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Reverses the sort")
+        }
     }
 
     private func sort(for folderId: String) -> SortPreference {
@@ -183,7 +200,7 @@ struct LibraryGrid: View {
                     }
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 24)
             .padding(.vertical, 12)
         }
         .refreshable { await reload() }

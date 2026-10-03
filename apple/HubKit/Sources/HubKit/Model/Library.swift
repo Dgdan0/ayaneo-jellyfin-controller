@@ -358,6 +358,26 @@ public struct LibraryItemList: Decodable, Equatable, Sendable {
     }
 }
 
+/// `GET /v1/library/series/{id}/play-target`: the episode a series' Play
+/// button starts, and why.
+public struct SeriesPlayTarget: Decodable, Equatable, Sendable {
+    /// "resume" (an episode is part watched), "next" or "start".
+    public var kind: String
+    public var item: LibraryItem
+
+    public init(kind: String, item: LibraryItem) {
+        self.kind = kind
+        self.item = item
+    }
+
+    enum CodingKeys: String, CodingKey { case kind, item }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(kind: c.value(.kind, ""), item: c.value(.item, LibraryItem(id: "", type: "", title: "")))
+    }
+}
+
 /// `POST /v1/library/items/{itemId}/state`: exactly one of the two.
 public struct LibraryStateChange: Encodable, Equatable, Sendable {
     public var played: Bool?

@@ -313,6 +313,14 @@ public enum DetailLines {
             .filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
+    /// A series' Play button: "Resume S1E5" for a part-watched episode,
+    /// otherwise "Play S1E5" (Android's `seriesActionLabel`).
+    public static func seriesPlayLabel(_ target: SeriesPlayTarget) -> String {
+        let code = EpisodeLabel.code(season: target.item.seasonNumber, episode: target.item.indexNumber)
+        let suffix = code.isEmpty ? "" : " " + code
+        return (target.kind == "resume" ? "Resume" : "Play") + suffix
+    }
+
     /// The Play button: "Resume · 12:34" with a saved position, else "Play".
     public static func playLabel(_ item: LibraryItem) -> String {
         item.positionSeconds > 0 ? "Resume · " + Fmt.clock(millis: Int64(item.positionSeconds) * 1_000) : "Play"

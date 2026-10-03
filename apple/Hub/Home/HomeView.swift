@@ -29,23 +29,30 @@ struct HomeView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                if let hero {
-                    HeroView(content: hero)
-                }
-                StatusLine(message: status) { Task { await load() } }
-                    .padding(.horizontal, 20)
-                ForEach(rows) { row in
-                    HomeRowView(row: row) { hit in
-                        selection = HeroPick(rowId: row.id, rowTitle: row.title, hit: hit)
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    if let hero {
+                        HeroView(content: hero, topInset: proxy.safeAreaInsets.top) {
+                            status = StatusMessage("Playing on Apple devices comes next")
+                        }
+                    } else {
+                        Color.clear.frame(height: proxy.safeAreaInsets.top)
+                    }
+                    StatusLine(message: status) { Task { await load() } }
+                        .padding(.horizontal, 24)
+                    ForEach(rows) { row in
+                        HomeRowView(row: row) { hit in
+                            selection = HeroPick(rowId: row.id, rowTitle: row.title, hit: hit)
+                        }
                     }
                 }
+                .padding(.bottom, 24)
             }
-            .padding(.bottom, 24)
+            .ignoresSafeArea(edges: .top)
         }
         .background(Color.surface)
-        .navigationTitle(model.userName.isEmpty ? "Home" : model.userName)
+        .underTheBar()
         .refreshable { await load() }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -116,67 +123,59 @@ struct HeroPick: Equatable {
     let hit: MediaHit
 }
 
-/// The big area at the top of Home: the title's backdrop, its eyebrow,
-/// name, facts and progress, and Details.
+/// The top of Home (Android `HomeHeroView`): the title's backdrop fading into
+/// the page, an accent eyebrow, the name, its facts, how much is left, then
+/// Resume or Play and Details. Every line keeps its place, so nothing jumps
+/// when the hero changes title.
 struct HeroView: View {
     let content: HeroContent
+    let topInset: CGFloat
+    let play: () -> Void
     @Environment(\.horizontalSizeClass) private var sizeClass
 
-    private var height: CGFloat { sizeClass == .compact ? 300 : 420 }
-
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            ArtworkView(path: content.backdrop, width: 1920)
-                .frame(maxWidth: .infinity)
-                .frame(height: height)
-                .overlay {
-                    LinearGradient(colors: [.clear, .black.opacity(0.35), .black.opacity(0.85)],
-                                   startPoint: .top, endPoint: .bottom)
-                }
+        BackdropHeader(path: content.backdrop, topInset: topInset) {
             VStack(alignment: .leading, spacing: 8) {
-                if !content.eyebrow.isEmpty {
-                    Text(content.eyebrow)
-                        .font(HubType.body(13, weight: .bold, relativeTo: .caption))
-                        .tracking(1.2)
-                        .foregroundStyle(.white.opacity(0.85))
-                }
+                Text(content.eyebrow.isEmpty ? " " : content.eyebrow)
+                    .font(HubType.body(13, weight: .bold, relativeTo: .caption))
+                    .tracking(1.2)
+                    .foregroundStyle(Color.accentColor)
                 Text(content.title)
-                    .font(HubType.heading(sizeClass == .compact ? 30 : 40))
-                    .foregroundStyle(.white)
+                    .font(HubType.heading(sizeClass == .compact ? 32 : 44, weight: .heavy))
+                    .foregroundStyle(Color.ink)
                     .lineLimit(2)
-                if !content.meta.isEmpty {
-                    Text(content.meta.joined(separator: "  ·  "))
-                        .font(HubType.body(15, relativeTo: .subheadline))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(content.meta.isEmpty ? " " : content.meta.joined(separator: "  ·  "))
+                    .font(HubType.body(15, relativeTo: .subheadline))
+                    .foregroundStyle(Color.muted)
+                    .lineLimit(1)
+                // Held open for an unstarted title, so the buttons never move.
+                HStack(spacing: 12) {
+                    ProgressView(value: content.progress)
+                        .tint(Color.accentColor)
+                        .frame(width: 180)
+                    Text(content.progressLabel)
+                        .font(HubType.body(14, relativeTo: .caption))
+                        .foregroundStyle(Color.muted)
                 }
-                if content.progress > 0 {
-                    HStack(spacing: 10) {
-                        ProgressView(value: content.progress)
-                            .tint(.white)
-                            .frame(width: 180)
-                        if !content.progressLabel.isEmpty {
-                            Text(content.progressLabel)
-                                .font(HubType.body(13, relativeTo: .caption))
-                                .foregroundStyle(.white.opacity(0.85))
+                .opacity(content.progress > 0 ? 1 : 0)
+                HStack(spacing: 12) {
+                    if content.canPlay {
+                        Button(action: play) {
+                            Label(content.playLabel, systemImage: "play.fill")
                         }
+                        .buttonStyle(AccentPillStyle())
+                    }
+                    if !content.itemId.isEmpty {
+                        NavigationLink(value: TitleRoute(itemId: content.itemId, title: content.title)) {
+                            Label("Details", systemImage: "info.circle")
+                        }
+                        .buttonStyle(SoftPillStyle())
                     }
                 }
-                if !content.itemId.isEmpty {
-                    NavigationLink(value: TitleRoute(itemId: content.itemId, title: content.title)) {
-                        Label("Details", systemImage: "info.circle")
-                            .font(HubType.body(16, weight: .semibold))
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 10)
-                            .background(.white.opacity(0.92), in: Capsule())
-                            .foregroundStyle(.black)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 6)
-                }
+                .padding(.top, 6)
             }
-            .padding(24)
-            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: 620, alignment: .leading)
         }
         .animation(.easeInOut(duration: 0.2), value: content.itemId)
     }
@@ -194,7 +193,7 @@ struct HomeRowView: View {
             Text(row.title)
                 .font(HubType.heading(22, weight: .semibold, relativeTo: .title2))
                 .foregroundStyle(Color.ink)
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 24)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(row.items) { hit in
@@ -210,7 +209,7 @@ struct HomeRowView: View {
                         .onHover { inside in if inside { preview(hit) } }
                     }
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 24)
             }
         }
     }

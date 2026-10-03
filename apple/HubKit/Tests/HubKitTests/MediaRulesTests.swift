@@ -221,6 +221,18 @@ struct DetailLinesTests {
         #expect(DetailLines.day("") == "" && DetailLines.day("0001-01-01T00:00:00Z") == "")
     }
 
+    @Test func aSeriesPlayButtonNamesTheEpisodeItStarts() throws {
+        let target = try JSONDecoder().decode(SeriesPlayTarget.self, from: Data(#"""
+        {"seriesId":"s","kind":"resume","item":{"id":"e5","type":"episode","title":"Beat the Invisible Enemy!",
+                                               "seasonNumber":1,"indexNumber":5,"positionSeconds":915}}
+        """#.utf8))
+        #expect(DetailLines.seriesPlayLabel(target) == "Resume S1E5")
+        #expect(DetailLines.seriesPlayLabel(SeriesPlayTarget(kind: "next", item: target.item)) == "Play S1E5")
+        let unnumbered = LibraryItem(id: "x", type: "episode", title: "Special")
+        #expect(DetailLines.seriesPlayLabel(SeriesPlayTarget(kind: "start", item: unnumbered)) == "Play")
+        #expect(HubEndpoints.seriesPlayTarget(seriesId: "a b").path == "/v1/library/series/a%20b/play-target")
+    }
+
     @Test func anEpisodeInASeasonListReadsNumberTitleAndProgress() {
         let episode = LibraryItem(id: "e", type: "episode", title: "Pilot", indexNumber: 1, runtimeSeconds: 2820,
                                   progress: 0.4)

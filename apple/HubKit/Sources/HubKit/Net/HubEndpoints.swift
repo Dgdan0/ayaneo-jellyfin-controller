@@ -60,6 +60,10 @@ public enum HubEndpoints {
             + (page > 1 ? "&page=\(page)" : ""))
     }
 
+    public static func seriesPlayTarget(seriesId: String) -> HubRequest {
+        HubRequest("/v1/library/series/" + encode(seriesId) + "/play-target")
+    }
+
     public static func librarySearch(_ query: String, page: Int = 1) -> HubRequest {
         HubRequest("/v1/library/search?q=" + encode(query) + (page > 1 ? "&page=\(page)" : ""))
     }
