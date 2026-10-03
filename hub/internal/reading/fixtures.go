@@ -27,6 +27,22 @@ const (
 	FixtureIdentifierPrefix = "urn:pocketds:fixture:"
 )
 
+// fixtureSeries are the series Kavita makes of the generated comic and manga
+// archives ("Lab Comics (2026)", "Lab Manga"). Kavita's listings carry no
+// writer to tell them apart, so they are known by name.
+var fixtureSeries = []string{"lab comics", "lab manga"}
+
+// IsFixtureSeries reports a Kavita series made from the reading-lab files.
+func IsFixtureSeries(name string) bool {
+	value := strings.ToLower(strings.TrimSpace(name))
+	for _, fixture := range fixtureSeries {
+		if value == fixture || strings.HasPrefix(value, fixture+" ") {
+			return true
+		}
+	}
+	return false
+}
+
 type FixtureRole string
 
 const (

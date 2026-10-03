@@ -250,3 +250,17 @@ func TestGeneratedCanonicalAssetsPassLayoutValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestKavitaSeriesMadeFromLabFilesAreFixtures(t *testing.T) {
+	for name, want := range map[string]bool{
+		"Lab Manga":          true,
+		"Lab Comics (2026)":  true,
+		"lab comics":         true,
+		"Chainsaw Man":       false,
+		"Laboratory Stories": false,
+	} {
+		if got := IsFixtureSeries(name); got != want {
+			t.Errorf("IsFixtureSeries(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

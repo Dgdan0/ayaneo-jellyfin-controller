@@ -234,7 +234,9 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 func dailyStorytellerLibraryBook(books []storyteller.Book, day string) int64 {
 	available := make([]int64, 0, len(books))
 	for _, book := range books {
-		if book.ID > 0 {
+		// A reading-lab fixture's cover is a generated placeholder; it is off
+		// the shelf, so it is off the card too.
+		if book.ID > 0 && !isReadingFixture(book) {
 			available = append(available, book.ID)
 		}
 	}
@@ -251,19 +253,34 @@ func (s *Server) dailyKavitaLibrarySeries(ctx context.Context, libraryID int, da
 	}
 	key := fmt.Sprintf("reading:kavita:library-art:%d:%s", libraryID, day)
 	id, _, err := cache.Fetch(ctx, s.cache, key, cache.Metadata, func(ctx context.Context) (int, error) {
+		// What you are reading there is the most telling cover.
+		if recent, err := s.kavita.Series(ctx, libraryID, 1, 1, kavita.SortLastRead, kavita.Descending); err == nil &&
+			len(recent.Items) > 0 && recent.Items[0].PagesRead > 0 && !readingdomain.IsFixtureSeries(recent.Items[0].Name) {
+			return recent.Items[0].ID, nil
+		}
 		first, err := s.kavita.Series(ctx, libraryID, 1, 1, kavita.SortTitle, kavita.Ascending)
 		if err != nil || first.Total == 0 || len(first.Items) == 0 {
 			return 0, err
 		}
+		// Else the day's pick by title, stepping past a reading-lab fixture:
+		// "Lab Manga"'s cover is a generated checkerboard.
 		index := dailyLibraryArtworkIndex(day, "kavita:"+strconv.Itoa(libraryID), first.Total)
-		if index == 0 {
-			return first.Items[0].ID, nil
+		fallback := first.Items[0].ID
+		for step := 0; step < 3 && step < first.Total; step++ {
+			position := (index + step) % first.Total
+			selected := first
+			if position > 0 {
+				page, err := s.kavita.Series(ctx, libraryID, position+1, 1, kavita.SortTitle, kavita.Ascending)
+				if err != nil || len(page.Items) == 0 {
+					break
+				}
+				selected = page
+			}
+			if !readingdomain.IsFixtureSeries(selected.Items[0].Name) {
+				return selected.Items[0].ID, nil
+			}
 		}
-		selected, err := s.kavita.Series(ctx, libraryID, index+1, 1, kavita.SortTitle, kavita.Ascending)
-		if err != nil || len(selected.Items) == 0 {
-			return first.Items[0].ID, nil
-		}
-		return selected.Items[0].ID, nil
+		return fallback, nil
 	})
 	if err != nil {
 		return 0

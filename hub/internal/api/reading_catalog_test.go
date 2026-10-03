@@ -747,3 +747,15 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+func TestLibraryCardNeverShowsAReadingLabFixture(t *testing.T) {
+	books := []storyteller.Book{
+		{ID: 1, Title: "The Lab Book", Authors: []storyteller.Creator{{Name: "Lab Author"}}},
+		{ID: 2, Title: "Red Rising", Authors: []storyteller.Creator{{Name: "Pierce Brown"}}},
+	}
+	for _, day := range []string{"2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"} {
+		if got := dailyStorytellerLibraryBook(books, day); got != 2 {
+			t.Fatalf("%s: library card book = %d, want the real one", day, got)
+		}
+	}
+}
