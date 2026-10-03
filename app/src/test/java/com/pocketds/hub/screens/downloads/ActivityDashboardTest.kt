@@ -132,4 +132,10 @@ class ActivityDashboardTest {
         assertEquals("Today · Fri 2 Oct", ActivityDashboard.heading(today, today))
         assertEquals("Wed 7 Oct", ActivityDashboard.heading(today.plusDays(5), today))
     }
+
+    @Test
+    fun `one transfer needs attention, several need it`() {
+        assertEquals("1 transfer needs attention", ActivityDashboard.needAttention(1))
+        assertEquals("3 transfers need attention", ActivityDashboard.needAttention(3))
+    }
 }

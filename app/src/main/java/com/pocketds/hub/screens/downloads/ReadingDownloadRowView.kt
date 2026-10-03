@@ -1,93 +1,105 @@
 package com.pocketds.hub.screens.downloads
 
-import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.content.Context
+import android.content.res.ColorStateList
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.core.graphics.ColorUtils
 import com.pocketds.hub.model.ReadingDownloadItem
 import com.pocketds.hub.state.Fmt
 import com.pocketds.hub.ui.PocketColors
-import com.pocketds.hub.ui.SemanticColor
+import com.pocketds.hub.ui.ProgressLine
 import com.pocketds.hub.ui.Styler
+import com.pocketds.hub.ui.ThemeGradientDrawable
+import com.pocketds.hub.ui.textWeight
 
-/** A BookKeeprr transfer without exposing torrent or indexer identities. */
+/**
+ * A BookKeeprr transfer without exposing torrent or indexer identities, drawn
+ * like a media transfer (DownloadRowView): a tile for what it is doing, the
+ * book's title, a slim bar while it moves, and one line in words. It used to
+ * lead with a "READY IN LIBRARY" chip on every row.
+ */
 class ReadingDownloadRowView(
     context: Context,
     private val colors: PocketColors
 ) : LinearLayout(context) {
-    private val statusChip: TextView
     private val category: TextView
+    private val tile: TextView
     private val title: TextView
     private val trailing: TextView
-    private val release: TextView
     private val progress: ProgressBar
-    private val stats: TextView
+    private val line: TextView
+    private val release: TextView
 
     init {
         orientation = VERTICAL
-        background = Styler.cardBackground(context, colors)
-        val h = Styler.dpInt(context, 12f)
-        val v = Styler.dpInt(context, 10f)
-        setPadding(h, v, h, v)
+        background = Styler.cardBackground(context, colors, cornerDp = 16f)
+        setPadding(dp(12), dp(10), dp(14), dp(10))
         Styler.makeFocusable(this)
 
         category = TextView(context).apply {
-            textSize = 11f
+            textSize = 10.5f
+            textWeight(700)
+            letterSpacing = 0.1f
             setTextColor(colors.mutedText)
-            setPadding(0, 0, 0, Styler.dpInt(context, 7f))
+            setPadding(0, 0, 0, dp(8))
             visibility = GONE
         }
         addView(category)
 
-        val header = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        val row = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        addView(row, LayoutParams(MATCH, WRAP))
+        tile = TextView(context).apply {
+            gravity = Gravity.CENTER
+            textSize = 18f
+            textWeight(700)
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        addView(header, LayoutParams(MATCH, WRAP))
-        statusChip = TextView(context).apply {
-            textSize = 10f
-            setPadding(Styler.dpInt(context, 8f), Styler.dpInt(context, 2f), Styler.dpInt(context, 8f), Styler.dpInt(context, 2f))
-        }
-        header.addView(statusChip, LayoutParams(WRAP, WRAP).apply { rightMargin = Styler.dpInt(context, 8f) })
+        row.addView(tile, LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(14) })
+
+        val words = LinearLayout(context).apply { orientation = VERTICAL }
+        row.addView(words, LayoutParams(0, WRAP, 1f))
+        val header = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        words.addView(header, LayoutParams(MATCH, WRAP))
         title = TextView(context).apply {
             textSize = 14f
+            textWeight(600)
             setTextColor(colors.primaryText)
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.END
         }
         header.addView(title, LayoutParams(0, WRAP, 1f))
         trailing = TextView(context).apply {
-            textSize = 14f
-            setTextColor(colors.primaryText)
+            textSize = 12f
+            textWeight(600)
+            setTextColor(colors.mutedText)
         }
-        header.addView(trailing)
+        header.addView(trailing, LayoutParams(WRAP, WRAP).apply { marginStart = dp(10) })
+        progress = ProgressLine.create(context, colors)
+        words.addView(progress, LayoutParams(MATCH, dp(5)).apply { topMargin = dp(7) })
+        line = TextView(context).apply {
+            textSize = 11.5f
+            setTextColor(colors.mutedText)
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        words.addView(line, LayoutParams(MATCH, WRAP).apply { topMargin = dp(5) })
         release = TextView(context).apply {
-            textSize = 12f
+            textSize = 10.5f
             setTextColor(colors.mutedText)
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            alpha = .8f
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.MIDDLE
         }
-        addView(release, LayoutParams(MATCH, WRAP))
-        progress = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(colors.posterPlaceholder)
-        }
-        addView(progress, LayoutParams(MATCH, Styler.dpInt(context, 3f)).apply {
-            topMargin = Styler.dpInt(context, 7f)
-            bottomMargin = Styler.dpInt(context, 5f)
-        })
-        stats = TextView(context).apply {
-            textSize = 12f
-            setTextColor(colors.mutedText)
-        }
-        addView(stats)
+        words.addView(release, LayoutParams(MATCH, WRAP).apply { topMargin = dp(2) })
     }
 
     fun bind(item: ReadingDownloadItem, sectionStart: Boolean = false) {
-        category.text = ReadingTransferSummary.groupLabel(item.contentType)
+        category.text = ReadingTransferSummary.groupLabel(item.contentType).uppercase()
         category.visibility = if (sectionStart) VISIBLE else GONE
         val color = if (item.failed) colors.badgeFailed else when (item.status) {
             "downloading" -> colors.accent
@@ -95,33 +107,36 @@ class ReadingDownloadRowView(
             "completed", "imported" -> colors.badgeAvailable
             else -> colors.mutedText
         }
-        statusChip.text = ReadingTransferSummary.stageLabel(item.status, item.failed).uppercase()
-        statusChip.setTextColor(SemanticColor.foreground(color))
-        statusChip.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 9f)
-            setColor(color)
+        tile.text = when {
+            item.failed -> "!"
+            item.status == "downloading" -> "↓"
+            item.status == "importing" -> "⇢"
+            item.status == "completed" || item.status == "imported" -> "✓"
+            else -> "…"
         }
+        tile.setTextColor(color)
+        tile.background = ThemeGradientDrawable.rounded(dp(12).toFloat(), ColorUtils.setAlphaComponent(color, 0x2E))
+
         title.text = item.title
         release.text = item.releaseTitle
         release.visibility = if (item.releaseTitle.isBlank() || item.releaseTitle == item.title) GONE else VISIBLE
-        trailing.text = if (ReadingTransferSummary.showProgress(item.status, item.failed) && item.progressPercent > 0)
-            "${item.progressPercent}%" else ""
-        progress.progress = item.progressPercent.coerceIn(0, 100)
-        progress.progressTintList = android.content.res.ColorStateList.valueOf(color)
-        progress.visibility = if (ReadingTransferSummary.showProgress(item.status, item.failed)) VISIBLE else GONE
-        stats.text = buildString {
-            if (item.sizeBytes > 0) append(Fmt.bytes(item.sizeBytes))
-            if (item.downloadSpeedBytesPerSecond > 0) {
-                if (isNotEmpty()) append(" · ")
-                append(Fmt.speed(item.downloadSpeedBytesPerSecond))
-            }
-            if (item.etaSeconds > 0 && item.isActive) {
-                if (isNotEmpty()) append(" · ")
-                append(Fmt.eta(item.etaSeconds)).append(" left")
-            }
-            if (isEmpty()) append(ReadingTransferSummary.fallback(item.status, item.failed))
-        }
+        val moving = ReadingTransferSummary.showProgress(item.status, item.failed)
+        trailing.text = if (moving && item.progressPercent > 0) "${item.progressPercent}%" else ""
+        progress.progress = (item.progressPercent.coerceIn(0, 100) * ProgressLine.MAX) / 100
+        progress.progressTintList = ColorStateList.valueOf(color)
+        progress.visibility = if (moving) VISIBLE else GONE
+        val stage = ReadingTransferSummary.stageLabel(item.status, item.failed)
+        line.text = buildList {
+            add(stage)
+            if (item.sizeBytes > 0) add(Fmt.bytes(item.sizeBytes))
+            if (item.downloadSpeedBytesPerSecond > 0) add(Fmt.speed(item.downloadSpeedBytesPerSecond))
+            if (item.etaSeconds > 0 && item.isActive) add(Fmt.eta(item.etaSeconds) + " left")
+            ReadingTransferSummary.fallback(item.status, item.failed).takeIf { size == 1 && !it.equals(stage, ignoreCase = true) }?.let(::add)
+        }.joinToString(" · ")
+        contentDescription = listOf(item.title, line.text).joinToString(", ")
     }
+
+    private fun dp(value: Int) = Styler.dpInt(context, value.toFloat())
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT

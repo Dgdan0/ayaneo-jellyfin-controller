@@ -377,7 +377,8 @@ class DownloadsScreen(
         summaryLine.setTextColor(colors.primaryText)
         summaryLine.text = buildString {
             if (targetMediaKey.isNotBlank()) {
-                append(related.size).append(" transfers for this title · ").append(attentionCount).append(" need attention")
+                append(related.size).append(if (related.size == 1) " transfer for this title · " else " transfers for this title · ")
+                    .append(attentionCount).append(if (attentionCount == 1) " needs attention" else " need attention")
                 return@buildString
             }
             append(s.downloading).append(" downloading")
@@ -396,7 +397,7 @@ class DownloadsScreen(
         val summary = when {
             targetMediaKey.isNotBlank() && displayed.isEmpty() -> if (attentionOnly) "No transfers currently need attention for this title." else "No transfers found for this title."
             attentionOnly && displayed.isEmpty() -> "No transfers need attention."
-            attentionOnly -> "${displayed.size} transfers need attention"
+            attentionOnly -> ActivityDashboard.needAttention(displayed.size)
             body.items.isEmpty() && includeFinished -> "Nothing in the queues."
             body.items.isEmpty() -> "Nothing running. Ⓨ shows finished items."
             else -> "${displayed.size} items" + if (includeFinished) " · including finished" else ""
@@ -423,7 +424,7 @@ class DownloadsScreen(
         statusLine.setTextColor(if (failed > 0) colors.badgeFailed else colors.mutedText)
         statusLine.text = when {
             body.items.isEmpty() -> "No book transfers yet."
-            failed > 0 -> "$failed transfer${if (failed == 1) "" else "s"} need attention"
+            failed > 0 -> ActivityDashboard.needAttention(failed)
             else -> "${body.items.size} BookKeeprr transfer${if (body.items.size == 1) "" else "s"}"
         }
         host?.refreshHints()

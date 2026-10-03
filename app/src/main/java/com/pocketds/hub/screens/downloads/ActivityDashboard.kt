@@ -27,6 +27,10 @@ import java.util.Locale
  * one press away.
  */
 object ActivityDashboard {
+    /** "1 transfer needs attention", "3 transfers need attention". */
+    fun needAttention(count: Int): String =
+        if (count == 1) "1 transfer needs attention" else "$count transfers need attention"
+
 
     /** Under this share free, a disk is worth a warning. The server monitor uses it too. */
     const val LOW_SPACE_FRACTION = 0.10
