@@ -1,0 +1,372 @@
+import Foundation
+
+// The Home and Library responses, field for field with the hub's Go types
+// (`hub/internal/api/home.go`, `library.go`, `media.go`, `users.go`). Every
+// field is defaulted, as on Android, so a hub that adds or loosens a field
+// breaks neither client.
+
+/// Which title a card is: the hub's `MediaRef`.
+public struct MediaRef: Decodable, Equatable, Sendable {
+    /// "movie", "series" or, on Home's Continue and Next rows, "episode".
+    public var type: String
+    public var title: String
+    public var year: Int
+    public var key: String
+    public var tmdb: Int
+    /// Hub-relative artwork paths ("/v1/img/jf/…"), never a service address.
+    public var poster: String
+    public var backdrop: String
+
+    public init(type: String = "", title: String = "", year: Int = 0, key: String = "", tmdb: Int = 0,
+                poster: String = "", backdrop: String = "") {
+        self.type = type
+        self.title = title
+        self.year = year
+        self.key = key
+        self.tmdb = tmdb
+        self.poster = poster
+        self.backdrop = backdrop
+    }
+
+    enum CodingKeys: String, CodingKey { case type, title, year, key, ids, poster, backdrop }
+    enum IDKeys: String, CodingKey { case tmdb }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let ids = try? c.nestedContainer(keyedBy: IDKeys.self, forKey: .ids)
+        self.init(type: c.value(.type, ""), title: c.value(.title, ""), year: c.value(.year, 0),
+                  key: c.value(.key, ""), tmdb: ids?.value(.tmdb, 0) ?? 0,
+                  poster: c.value(.poster, ""), backdrop: c.value(.backdrop, ""))
+    }
+}
+
+/// One card in a Home row or a Library grid: the hub's `SearchHit`.
+public struct MediaHit: Decodable, Equatable, Sendable, Identifiable {
+    public var media: MediaRef
+    /// "S1E2 · The Stake Out" for an episode, the year for anything else.
+    public var subtitle: String
+    public var overview: String
+    public var availability: String
+    public var rating: Double
+    /// The Jellyfin item, when the title is in the library.
+    public var jellyfinItemId: String
+    public var played: Bool
+    public var favorite: Bool
+    public var unplayedCount: Int
+    /// 0…1. While a title is in the library this is watch progress.
+    public var progress: Double
+
+    public var id: String { jellyfinItemId.isEmpty ? media.key + media.title : jellyfinItemId }
+
+    public init(media: MediaRef, subtitle: String = "", overview: String = "", availability: String = "",
+                rating: Double = 0, jellyfinItemId: String = "", played: Bool = false, favorite: Bool = false,
+                unplayedCount: Int = 0, progress: Double = 0) {
+        self.media = media
+        self.subtitle = subtitle
+        self.overview = overview
+        self.availability = availability
+        self.rating = rating
+        self.jellyfinItemId = jellyfinItemId
+        self.played = played
+        self.favorite = favorite
+        self.unplayedCount = unplayedCount
+        self.progress = progress
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case media, subtitle, overview, availability, rating, jellyfinItemId, played, favorite, unplayedCount, progress
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(media: c.value(.media, MediaRef()), subtitle: c.value(.subtitle, ""),
+                  overview: c.value(.overview, ""), availability: c.value(.availability, ""),
+                  rating: c.value(.rating, 0), jellyfinItemId: c.value(.jellyfinItemId, ""),
+                  played: c.value(.played, false), favorite: c.value(.favorite, false),
+                  unplayedCount: c.value(.unplayedCount, 0), progress: c.value(.progress, 0))
+    }
+}
+
+/// A Home row: the hub's `DiscoverRow`. Ids are "favourites", "continue",
+/// "nextup" and "latest"; an empty row is never sent.
+public struct HomeRow: Decodable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var title: String
+    public var items: [MediaHit]
+
+    public init(id: String, title: String, items: [MediaHit]) {
+        self.id = id
+        self.title = title
+        self.items = items
+    }
+
+    enum CodingKeys: String, CodingKey { case id, title, items }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: c.value(.id, ""), title: c.value(.title, ""), items: c.value(.items, []))
+    }
+}
+
+/// `GET /v1/home`.
+public struct HomeResponse: Decodable, Equatable, Sendable {
+    public var rows: [HomeRow]
+    public var partial: [Partial]
+    public var cache: CacheInfo
+
+    public init(rows: [HomeRow], partial: [Partial] = [], cache: CacheInfo = CacheInfo()) {
+        self.rows = rows
+        self.partial = partial
+        self.cache = cache
+    }
+
+    enum CodingKeys: String, CodingKey { case rows, partial, cache }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(rows: c.value(.rows, []), partial: c.value(.partial, []), cache: c.value(.cache, CacheInfo()))
+    }
+}
+
+/// One of Jellyfin's top-level folders.
+public struct LibraryFolder: Decodable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    /// "movies" or "tvshows", from Jellyfin's CollectionType.
+    public var kind: String
+    /// The folder's own artwork, or one of its titles chosen for the day.
+    public var image: String
+    /// "banner" for real folder artwork, "poster" for a title standing in.
+    public var imageStyle: String
+
+    public init(id: String, name: String, kind: String = "", image: String = "", imageStyle: String = "") {
+        self.id = id
+        self.name = name
+        self.kind = kind
+        self.image = image
+        self.imageStyle = imageStyle
+    }
+
+    enum CodingKeys: String, CodingKey { case id, name, kind, image, imageStyle }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: c.value(.id, ""), name: c.value(.name, ""), kind: c.value(.kind, ""),
+                  image: c.value(.image, ""), imageStyle: c.value(.imageStyle, ""))
+    }
+}
+
+/// `GET /v1/library`.
+public struct LibraryResponse: Decodable, Equatable, Sendable {
+    public var views: [LibraryFolder]
+    public var partial: [Partial]
+
+    public init(views: [LibraryFolder], partial: [Partial] = []) {
+        self.views = views
+        self.partial = partial
+    }
+
+    enum CodingKeys: String, CodingKey { case views, partial }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(views: c.value(.views, []), partial: c.value(.partial, []))
+    }
+}
+
+/// One page of a folder, a library search or Favourites: `GET /v1/library/{viewId}/items`.
+public struct LibraryPage: Decodable, Equatable, Sendable {
+    public var title: String
+    public var page: Int
+    public var totalPages: Int
+    public var total: Int
+    public var items: [MediaHit]
+
+    public init(title: String = "", page: Int = 1, totalPages: Int = 1, total: Int = 0, items: [MediaHit] = []) {
+        self.title = title
+        self.page = page
+        self.totalPages = totalPages
+        self.total = total
+        self.items = items
+    }
+
+    enum CodingKeys: String, CodingKey { case title, page, totalPages, total, items }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(title: c.value(.title, ""), page: c.value(.page, 1), totalPages: c.value(.totalPages, 1),
+                  total: c.value(.total, 0), items: c.value(.items, []))
+    }
+}
+
+public struct LibraryPerson: Decodable, Equatable, Sendable, Identifiable {
+    public var personId: String
+    public var name: String
+    public var role: String
+    /// "Actor", "Director", "Writer", …
+    public var type: String
+    public var image: String
+
+    public var id: String { personId.isEmpty ? name + role : personId + role }
+
+    public init(personId: String = "", name: String, role: String = "", type: String = "", image: String = "") {
+        self.personId = personId
+        self.name = name
+        self.role = role
+        self.type = type
+        self.image = image
+    }
+
+    enum CodingKeys: String, CodingKey { case id, name, role, type, image }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(personId: c.value(.id, ""), name: c.value(.name, ""), role: c.value(.role, ""),
+                  type: c.value(.type, ""), image: c.value(.image, ""))
+    }
+}
+
+/// A movie, series, season or episode as Jellyfin knows it: `LibraryItem`.
+public struct LibraryItem: Decodable, Equatable, Sendable, Identifiable {
+    public var id: String
+    /// "movie", "series", "season" or "episode" (the hub lowercases Jellyfin's type).
+    public var type: String
+    public var title: String
+    /// "S1E4 · Title" for an episode, as on a Home card.
+    public var subtitle: String
+    public var seriesTitle: String
+    public var seriesId: String
+    public var seasonId: String
+    public var year: Int
+    /// The episode number (or the season's number, for a season).
+    public var indexNumber: Int
+    public var seasonNumber: Int
+    public var overview: String
+    public var originalTitle: String
+    public var premiereDate: String
+    public var runtimeSeconds: Int
+    public var rating: Double
+    public var criticRating: Double
+    public var officialRating: String
+    public var genres: [String]
+    public var studios: [String]
+    public var people: [LibraryPerson]
+    public var played: Bool
+    public var favorite: Bool
+    public var unplayedCount: Int
+    public var progress: Double
+    public var positionSeconds: Int
+    public var poster: String
+    public var thumb: String
+    public var backdrop: String
+
+    public init(id: String, type: String, title: String, subtitle: String = "", seriesTitle: String = "", seriesId: String = "",
+                seasonId: String = "", year: Int = 0, indexNumber: Int = 0, seasonNumber: Int = 0,
+                overview: String = "", originalTitle: String = "", premiereDate: String = "",
+                runtimeSeconds: Int = 0, rating: Double = 0, criticRating: Double = 0, officialRating: String = "",
+                genres: [String] = [], studios: [String] = [], people: [LibraryPerson] = [],
+                played: Bool = false, favorite: Bool = false, unplayedCount: Int = 0, progress: Double = 0,
+                positionSeconds: Int = 0, poster: String = "", thumb: String = "", backdrop: String = "") {
+        self.id = id
+        self.type = type
+        self.title = title
+        self.subtitle = subtitle
+        self.seriesTitle = seriesTitle
+        self.seriesId = seriesId
+        self.seasonId = seasonId
+        self.year = year
+        self.indexNumber = indexNumber
+        self.seasonNumber = seasonNumber
+        self.overview = overview
+        self.originalTitle = originalTitle
+        self.premiereDate = premiereDate
+        self.runtimeSeconds = runtimeSeconds
+        self.rating = rating
+        self.criticRating = criticRating
+        self.officialRating = officialRating
+        self.genres = genres
+        self.studios = studios
+        self.people = people
+        self.played = played
+        self.favorite = favorite
+        self.unplayedCount = unplayedCount
+        self.progress = progress
+        self.positionSeconds = positionSeconds
+        self.poster = poster
+        self.thumb = thumb
+        self.backdrop = backdrop
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, title, subtitle, seriesTitle, seriesId, seasonId, year, indexNumber, seasonNumber, overview,
+             originalTitle, premiereDate, runtimeSeconds, rating, criticRating, officialRating, genres, studios,
+             people, played, favorite, unplayedCount, progress, positionSeconds, poster, thumb, backdrop
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: c.value(.id, ""), type: c.value(.type, ""), title: c.value(.title, ""),
+            subtitle: c.value(.subtitle, ""), seriesTitle: c.value(.seriesTitle, ""), seriesId: c.value(.seriesId, ""),
+            seasonId: c.value(.seasonId, ""), year: c.value(.year, 0), indexNumber: c.value(.indexNumber, 0),
+            seasonNumber: c.value(.seasonNumber, 0), overview: c.value(.overview, ""),
+            originalTitle: c.value(.originalTitle, ""), premiereDate: c.value(.premiereDate, ""),
+            runtimeSeconds: c.value(.runtimeSeconds, 0), rating: c.value(.rating, 0),
+            criticRating: c.value(.criticRating, 0), officialRating: c.value(.officialRating, ""),
+            genres: c.value(.genres, []), studios: c.value(.studios, []), people: c.value(.people, []),
+            played: c.value(.played, false), favorite: c.value(.favorite, false),
+            unplayedCount: c.value(.unplayedCount, 0), progress: c.value(.progress, 0),
+            positionSeconds: c.value(.positionSeconds, 0), poster: c.value(.poster, ""),
+            thumb: c.value(.thumb, ""), backdrop: c.value(.backdrop, ""))
+    }
+}
+
+/// `GET /v1/library/items/{itemId}`.
+public struct LibraryItemResponse: Decodable, Equatable, Sendable {
+    public var item: LibraryItem
+
+    public init(item: LibraryItem) {
+        self.item = item
+    }
+
+    enum CodingKeys: String, CodingKey { case item }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(item: c.value(.item, LibraryItem(id: "", type: "", title: "")))
+    }
+}
+
+/// `GET /v1/library/series/{id}/seasons` and `/episodes`: the same shape, a
+/// list of items with paging (seasons always come in one page).
+public struct LibraryItemList: Decodable, Equatable, Sendable {
+    public var page: Int
+    public var totalPages: Int
+    public var items: [LibraryItem]
+
+    public init(page: Int = 1, totalPages: Int = 1, items: [LibraryItem]) {
+        self.page = page
+        self.totalPages = totalPages
+        self.items = items
+    }
+
+    enum CodingKeys: String, CodingKey { case page, totalPages, items }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(page: c.value(.page, 1), totalPages: c.value(.totalPages, 1), items: c.value(.items, []))
+    }
+}
+
+/// `POST /v1/library/items/{itemId}/state`: exactly one of the two.
+public struct LibraryStateChange: Encodable, Equatable, Sendable {
+    public var played: Bool?
+    public var favorite: Bool?
+
+    public static func played(_ value: Bool) -> LibraryStateChange { LibraryStateChange(played: value) }
+    public static func favorite(_ value: Bool) -> LibraryStateChange { LibraryStateChange(favorite: value) }
+
+    public func body() -> Data {
+        (try? JSONEncoder().encode(self)) ?? Data("{}".utf8)
+    }
+}

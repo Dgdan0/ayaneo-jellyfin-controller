@@ -28,6 +28,22 @@ public enum Fmt {
         bytesPerSecond <= 0 ? "—" : bytes(bytesPerSecond) + "/s"
     }
 
+    /// A playback position: "17:12", or "1:15:30" once there are hours.
+    public static func clock(millis: Int64) -> String {
+        let total = max(0, millis) / 1_000
+        let hours = total / 3_600, minutes = total % 3_600 / 60, seconds = total % 60
+        return hours > 0
+            ? String(format: "%lld:%02lld:%02lld", hours, minutes, seconds)
+            : String(format: "%lld:%02lld", minutes, seconds)
+    }
+
+    /// A title's length: "24 min", then "1h 5m". Zero is empty.
+    public static func runtime(seconds: Int64) -> String {
+        if seconds <= 0 { return "" }
+        let minutes = seconds / 60
+        return minutes < 60 ? "\(minutes) min" : "\(minutes / 60)h \(minutes % 60)m"
+    }
+
     /// Time left on a transfer; -1 (the hub could not estimate) is a dash.
     public static func eta(_ seconds: Int64) -> String {
         if seconds < 0 { return "—" }
