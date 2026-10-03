@@ -1,7 +1,8 @@
 # Apple clients: iPad, iPhone and Mac
 
-Decided on 2026-10-03. Nothing is built yet. This file hands the work to a Claude Code session
-running **on the MacBook**. The hub, the Android app and the Pocket DS stay with the sessions on
+Decided on 2026-10-03. This file holds the design. **Status lives in GitHub Issues** (label
+`apple`, see "Tickets" in `CLAUDE.md`), not here. This file hands the work to a Claude Code
+session running **on the MacBook**. The hub, the Android app and the Pocket DS stay with the sessions on
 the Windows media PC.
 
 Read `CLAUDE.md` first. Its hub sections (architecture, upstream quirks, caching, badges,
@@ -73,7 +74,7 @@ the hub happens on the Windows PC** (the user runs the installer in an administr
 PowerShell), so push them and say what needs deploying. Any deployed hub must also contain the
 `claude/consolidation` history; an older one silently stops saving watch positions.
 
-1. **A playback profile for AVPlayer.** `buildDeviceProfile` in `hub/internal/api/playback.go`
+1. **A playback profile for AVPlayer** (#2). `buildDeviceProfile` in `hub/internal/api/playback.go`
    is written for Media3: it offers **MKV and WebM direct play**, and names itself
    "Pocket DS Media3". AVPlayer cannot open MKV or WebM. Add a container list (or a client kind)
    to `PlaybackCapabilities`, defaulting to today's behaviour so the Android app is unaffected.
@@ -86,7 +87,7 @@ PowerShell), so push them and say what needs deploying. Any deployed hub must al
    (PGS, DVD). Android parses SRT/WebVTT once into a cue timeline and draws them itself, which is
    also what makes its live subtitle-delay control instant. Do the same on Apple. ASS can start
    as text with its styling dropped.
-3. **Offline.** Offline downloads are the original files, usually MKV, which AVPlayer cannot
+3. **Offline** (#5). Offline downloads are the original files, usually MKV, which AVPlayer cannot
    play. Choose when offline work starts:
    - a hub-side remux to MP4 (`ffmpeg -c copy`; the hub already runs the server's ffmpeg for
      trickplay previews),
@@ -106,6 +107,8 @@ now lives in Kotlin (see `CLAUDE.md`, "Shared building blocks"): `ResumeRules`, 
   a resolved resume decision), with a hub test.
 - When a rule must stay client-side, port it **with its tests**: translate the Kotlin JVM test
   cases into XCTest so both clients are held to the same cases.
+- Shared example responses in `contract/`, which the hub, Kotlin and Swift tests all read, catch a
+  renamed field before a device does (#4).
 
 ## Working on the Mac
 
@@ -152,8 +155,8 @@ controller feel, playback performance and offline downloads.
 
 ## Suggested order
 
-1. **Connect**: hub address and token (Keychain), the `CredentialGate` rules, then the Manage
-   health screen as the first proof that every service is reachable.
+1. **Connect** (#3): hub address and token (Keychain), the `CredentialGate` rules, then the
+   Manage health screen as the first proof that every service is reachable. TestFlight is #6.
 2. **Home, Library and detail**: the Jellyfin profile picker, artwork through `/v1/img/`, watched
    and favourite actions.
 3. **Playback**: hub change 1, then AVPlayer with resume / start over, tracks, versions, quality,
