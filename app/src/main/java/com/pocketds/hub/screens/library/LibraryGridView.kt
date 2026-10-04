@@ -250,7 +250,7 @@ class LibraryGridView(
         }
         loadJob = scope.launch {
             val request = when (library.kind) {
-                "search" -> api.librarySearch(library.id, page)
+                "search" -> api.librarySearch(library.id, page, searchIn)
                 "favorites" -> api.libraryFavorites(page)
                 else -> api.libraryItems(library.id, page, sortKey, if (sortAscending) "asc" else "desc")
             }
@@ -305,6 +305,9 @@ class LibraryGridView(
 
     /** Focus goes to the grid after a load unless the person is busy elsewhere on the screen. */
     var wantsFocus: () -> Boolean = { true }
+
+    /** A search's library (#14): its view id keeps the search inside it; blank searches everything. */
+    var searchIn: String = ""
 
     private fun applySort(value: SortPreference) {
         sortKey = value.field

@@ -37,8 +37,8 @@ import com.pocketds.hub.ui.glass.GlassSearchField
  * between them in place; search, Sort and its direction sit at the end of the
  * row; the posters fill seven columns below with their counts and ticks.
  *
- * Search looks through the whole Jellyfin library, as the root's does: the hub
- * has no search scoped to one library.
+ * Its search looks inside the library on show (#14); on Favourites it looks
+ * through everything, as the root's does.
  */
 class LibraryFolderScreen(
     private val api: HubApi,
@@ -152,6 +152,10 @@ class LibraryFolderScreen(
         host?.viewContext?.let { Prefs.of(it).edit().putString(LibraryScreen.KEY_LAST_LIBRARY, view.id).apply() }
         capsule.select(view.id)
         gridView.show(view)
+        // The search looks inside the library on show (#14), and says so.
+        val where = if (view.kind == FAVOURITES) "your Jellyfin library" else view.name
+        searchBox.hint = "Search $where"
+        searchButton.contentDescription = "Search $where"
         host?.refreshHints()
     }
 
@@ -178,7 +182,10 @@ class LibraryFolderScreen(
             return
         }
         closeSearchBox()
-        host?.push(LibraryGridScreen(api, LibraryView(id = query, name = "Search · $query", kind = "search"), ringVisible))
+        // Inside the library on show; Favourites is not a library, so its search is everything's.
+        val inside = gridView.library?.takeIf { it.kind != FAVOURITES }
+        host?.push(LibraryGridScreen(api, LibraryView(id = query, name = inside?.let { "Search ${it.name} · $query" } ?: "Search · $query",
+            kind = "search"), ringVisible, searchIn = inside?.id.orEmpty()))
     }
 
     override fun onShow() {

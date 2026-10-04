@@ -122,7 +122,8 @@ interface HubApi {
         seasonId: String,
         page: Int = 1
     ): HubResult<LibraryEpisodesResponse>
-    suspend fun librarySearch(query: String, page: Int = 1): HubResult<LibraryItemsResponse>
+    /** [viewId]: only that library's titles (#14); blank searches the whole of Jellyfin. */
+    suspend fun librarySearch(query: String, page: Int = 1, viewId: String = ""): HubResult<LibraryItemsResponse>
     suspend fun libraryFavorites(page: Int = 1): HubResult<LibraryItemsResponse>
     /** Jellyfin's "more like this". Absent on a hub from before 2026-10, which answers 404. */
     suspend fun librarySimilar(itemId: String): HubResult<LibraryItemsResponse> =
@@ -569,8 +570,8 @@ class HubClient(private val context: Context, private val connection: HubConnect
             json.decodeFromString<LibraryEpisodesResponse>(it)
         }
 
-    override suspend fun librarySearch(query: String, page: Int): HubResult<LibraryItemsResponse> =
-        get(HubEndpoints.librarySearch(base(), query, page), noCache = true) {
+    override suspend fun librarySearch(query: String, page: Int, viewId: String): HubResult<LibraryItemsResponse> =
+        get(HubEndpoints.librarySearch(base(), query, page, viewId), noCache = true) {
             json.decodeFromString<LibraryItemsResponse>(it)
         }
 

@@ -82,10 +82,12 @@ object HubEndpoints {
             "?seasonId=" + encode(seasonId) + if (page > 1) "&page=$page" else ""
     )
 
-    fun librarySearch(base: String, query: String, page: Int = 1): HubRequest =
+    /** [viewId], when set, keeps the search inside that library (#14); a hub before it ignores it and searches all. */
+    fun librarySearch(base: String, query: String, page: Int = 1, viewId: String = ""): HubRequest =
         HubRequest(
             join(base, "/v1/library/search") + "?q=" + encode(query) +
-                if (page > 1) "&page=$page" else ""
+                (if (page > 1) "&page=$page" else "") +
+                if (viewId.isNotBlank()) "&viewId=" + encode(viewId) else ""
         )
 
     fun libraryFavorites(base: String, page: Int = 1): HubRequest =

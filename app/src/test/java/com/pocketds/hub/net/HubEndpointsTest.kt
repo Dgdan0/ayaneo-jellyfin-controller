@@ -308,6 +308,16 @@ class HubEndpointsTest {
             "$base/v1/library/search?q=star%20wars&page=2",
             HubEndpoints.librarySearch(base, "star wars", 2).url
         )
+        // A library's own page searches only that library (#14); an older hub ignores viewId.
+        val view = "0123456789abcdef0123456789abcdef"
+        assertEquals(
+            "$base/v1/library/search?q=dark&viewId=$view",
+            HubEndpoints.librarySearch(base, "dark", viewId = view).url
+        )
+        assertEquals(
+            "$base/v1/library/search?q=dark&page=3&viewId=$view",
+            HubEndpoints.librarySearch(base, "dark", 3, view).url
+        )
         assertEquals("$base/v1/library/favorites", HubEndpoints.libraryFavorites(base).url)
         assertEquals("$base/v1/library/favorites?page=4", HubEndpoints.libraryFavorites(base, 4).url)
         val state = HubEndpoints.libraryState(base, item)

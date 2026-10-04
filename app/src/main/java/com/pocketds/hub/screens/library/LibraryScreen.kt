@@ -551,11 +551,15 @@ class LibraryScreen(
     }
 }
 
-/** A search's or a folder's posters on a page of their own. */
+/**
+ * A search's or a folder's posters on a page of their own. [searchIn] keeps a
+ * search inside one library (#14).
+ */
 class LibraryGridScreen(
     private val api: HubApi,
     private val library: LibraryView,
-    private val ringVisible: () -> Boolean
+    private val ringVisible: () -> Boolean,
+    private val searchIn: String = ""
 ) : Screen {
     override val contentDomain = ContentMode.MEDIA
     override val title = library.name
@@ -569,6 +573,7 @@ class LibraryGridScreen(
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
         gridView = LibraryGridView(host.viewContext, api, colors, ringVisible, host) { overlay }
+        gridView.searchIn = searchIn
         val content = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             val toolbar = LinearLayout(context).apply {
