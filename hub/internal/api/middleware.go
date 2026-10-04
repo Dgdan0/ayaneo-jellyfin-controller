@@ -246,6 +246,18 @@ func (s *Server) limiterFor(r *http.Request) *auth.Limiter {
 		return s.playbackLimiter
 	case strings.HasPrefix(path, "/v1/img/"):
 		return s.artworkLimiter
+	case strings.HasPrefix(path, "/v1/reading/works/") && strings.Contains(path, "/publications/"):
+		// A reader skims: each page turn is an image, and the scrubber and
+		// prefetch ask for several at once. On the screen budget a fast skim
+		// ran out like a Library grid did (#16). Pages and their thumbnails
+		// are images, as artwork is; a book's file or audio is transport.
+		if strings.Contains(path, "/pages/") {
+			return s.artworkLimiter
+		}
+		if strings.HasSuffix(path, "/file") || strings.Contains(path, "/audio") {
+			return s.playbackLimiter
+		}
+		return s.limiter
 	default:
 		return s.limiter
 	}

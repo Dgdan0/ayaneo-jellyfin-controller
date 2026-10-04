@@ -58,6 +58,36 @@ func TestArtworkForAWholeGridDoesNotRunOutOrConsumeTheScreenBudget(t *testing.T)
 	}
 }
 
+func TestReaderPagesAndFilesDoNotConsumeTheScreenBudget(t *testing.T) {
+	// Skimming a comic turns pages faster than any screen asks for data.
+	cfg := libraryAPIConfig("", "")
+	cfg.Auth.RateLimit = config.RateLimitConfig{RPM: 1, Burst: 1}
+	server := NewServer(cfg)
+	handler := server.withAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	if got := authenticatedMiddlewareRequest(handler, "/v1/reading/home").Code; got != http.StatusNoContent {
+		t.Fatalf("first screen request returned %d", got)
+	}
+	base := "/v1/reading/works/kavita:12/publications/kavita-chapter:34"
+	for i := 0; i < 40; i++ {
+		path := base + "/pages/" + string(rune('0'+i%10))
+		switch i % 4 {
+		case 1:
+			path += "/thumb"
+		case 2:
+			path = base + "/file"
+		}
+		if got := authenticatedMiddlewareRequest(handler, path).Code; got != http.StatusNoContent {
+			t.Fatalf("reader request %d (%s) returned %d", i+1, path, got)
+		}
+	}
+	// Progress and position are screen-sized writes and stay on the screen budget.
+	if got := authenticatedMiddlewareRequest(handler, base+"/progress").Code; got != http.StatusTooManyRequests {
+		t.Fatalf("progress was taken off the screen budget: %d", got)
+	}
+}
+
 func TestArtworkStillHasItsOwnLimit(t *testing.T) {
 	server := NewServer(libraryAPIConfig("", ""))
 	server.artworkLimiter = auth.NewLimiter(1, 1)
