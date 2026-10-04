@@ -163,9 +163,19 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     fun resetBody(keepScroll:Boolean=false) {body.removeAllViews();tabRow.removeAllViews();footer.removeAllViews();choiceRows.clear();if(!keepScroll)scroll.scrollTo(0,0)}
     /** A card for rows the caller builds and selects itself (the request form's); a [section] before it starts a new one. */
     fun group():LinearLayout=currentGroup()
-    /** Scrolls the body so [view], somewhere inside it, is on screen. */
+    /**
+     * Scrolls the body so [view], somewhere inside it, is on screen. Only the
+     * latest call scrolls, and only while [view] is still in the body: the
+     * request form rebuilds its rows on every press, and two quick presses
+     * left the first call measuring a row the second had already removed,
+     * which crashed the app (IllegalArgumentException, "parameter must be a
+     * descendant of this view").
+     */
     fun reveal(view:View) {
+        revealing=view
         scroll.post {
+            if(revealing!==view||!holds(body,view)) return@post
+            revealing=null
             val rect=android.graphics.Rect();view.getDrawingRect(rect);body.offsetDescendantRectToMyCoords(view,rect)
             val top=scroll.scrollY;val bottom=top+scroll.height-scroll.paddingBottom
             when {
@@ -173,6 +183,12 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
                 rect.bottom>bottom -> scroll.smoothScrollTo(0,rect.bottom-scroll.height+dp(10))
             }
         }
+    }
+    private var revealing:View?=null
+    private fun holds(group:ViewGroup,view:View):Boolean {
+        var parent:android.view.ViewParent?=view.parent
+        while(parent!=null){if(parent===group) return true;parent=parent.parent}
+        return false
     }
     /** Focuses [preferred], else the row last chosen in this menu, else the first row. */
     fun focusBody(preferred:View?=null) {
