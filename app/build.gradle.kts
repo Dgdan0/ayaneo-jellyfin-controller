@@ -14,9 +14,26 @@ android {
         targetSdk = 34
         // Must always increase: Android/Obtanium correctly rejects a release
         // whose version code is lower than the APK already on the Pocket DS.
-        versionCode = 27
-        versionName = "0.3.12"
+        versionCode = 28
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // The everyday app's own key. The debug key that signed 0.3.12 was lost on
+    // 2026-09-30, so that install could only be replaced, never updated. This key
+    // lives outside this public repository; its file and passwords come from the
+    // user-level ~/.gradle/gradle.properties. Without them a release build is
+    // unsigned and cannot be installed, which is the safe failure.
+    signingConfigs {
+        val store = providers.gradleProperty("POCKETDS_KEYSTORE_FILE").orNull
+        if (store != null) {
+            create("pocketds") {
+                storeFile = file(store)
+                storePassword = providers.gradleProperty("POCKETDS_KEYSTORE_PASSWORD").get()
+                keyAlias = providers.gradleProperty("POCKETDS_KEY_ALIAS").get()
+                keyPassword = providers.gradleProperty("POCKETDS_KEY_PASSWORD").get()
+            }
+        }
     }
 
     buildTypes {
@@ -27,6 +44,7 @@ android {
             matchingFallbacks += listOf("debug")
         }
         release {
+            signingConfigs.findByName("pocketds")?.let { signingConfig = it }
             // Left off deliberately, as in the sibling project. kotlinx.serialization
             // needs R8 keep rules to survive shrinking, and this is a personal build
             // where APK size has never been the constraint. Revisit only if it is.
