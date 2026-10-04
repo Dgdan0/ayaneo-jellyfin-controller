@@ -29,7 +29,9 @@ struct ServicesView: View {
             VStack(alignment: .leading, spacing: 0) {
                 header
                 // Two columns on an iPad, one on a phone (the prototype's `.svcs`).
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 380, maximum: 640), spacing: 12)], spacing: 12) {
+                // No maximum: an iPad mini in portrait fits one column, and
+                // held to 640 points it sat centred, indented from the heading.
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 380), spacing: 12)], spacing: 12) {
                     ForEach(rows) { row in
                         ServiceCard(row: row, scanning: scanning == row.id, open: { open(row) },
                                     scan: { Task { await scan(row) } })
