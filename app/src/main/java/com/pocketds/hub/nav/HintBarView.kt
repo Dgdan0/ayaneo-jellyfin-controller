@@ -15,6 +15,7 @@ import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Type
 import com.pocketds.hub.ui.glass.ArtworkPalette
 import com.pocketds.hub.ui.glass.GlassColors
+import com.pocketds.hub.ui.glass.GlassPage
 import com.pocketds.hub.ui.textWeight
 
 /**
@@ -75,6 +76,7 @@ class HintBarView(
             row.addView(gap, LinearLayout.LayoutParams(0, 1, 1f))
             row.addView(refresh)
             (refresh?.layoutParams as? LinearLayout.LayoutParams)?.rightMargin = 0
+            GlassPage.follow(this) { setPalette(it) }
         }
     }
 

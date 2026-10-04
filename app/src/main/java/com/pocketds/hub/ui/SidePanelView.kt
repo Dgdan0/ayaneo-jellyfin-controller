@@ -108,11 +108,29 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
             LayoutParams(dp(420),-1,Gravity.CENTER).apply {setMargins(dp(12),dp(12),dp(12),dp(12))})
         card.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> if(isOpen) onPanelGeometryChanged?.invoke() }
     }
+    /** The centred card's width, for a panel whose body is not rows (the profile picker's tiles). */
+    protected open val centredWidthDp:Int get()=420
+    /** The centred card takes its content's height, up to the screen's, instead of the rows' estimate. */
+    protected open val wrapsHeight:Boolean get()=false
     override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int) {
         val available=MeasureSpec.getSize(widthMeasureSpec)
-        card.layoutParams.width=if(side) dp(PanelGeometry.width((available/resources.displayMetrics.density).toInt())) else minOf(dp(420),(available-dp(24)).coerceAtLeast(1))
-        card.layoutParams.height=if(side) -1 else minOf(dp(minOf(360,100+choiceRows.size*54+(body.childCount-groups())*44)),(MeasureSpec.getSize(heightMeasureSpec)-dp(24)).coerceAtLeast(1))
+        card.layoutParams.width=if(side) dp(PanelGeometry.width((available/resources.displayMetrics.density).toInt())) else minOf(dp(centredWidthDp),(available-dp(24)).coerceAtLeast(1))
+        card.layoutParams.height=when {
+            side -> -1
+            wrapsHeight -> LayoutParams.WRAP_CONTENT
+            else -> minOf(dp(minOf(360,100+choiceRows.size*54+(body.childCount-groups())*44)),(MeasureSpec.getSize(heightMeasureSpec)-dp(24)).coerceAtLeast(1))
+        }
         super.onMeasure(widthMeasureSpec,heightMeasureSpec)
+    }
+    /**
+     * A question that is the whole heading ("Who is watching?"): centred, in
+     * the display face at [sizeSp], with no close button; B or a tap outside
+     * the card still cancels.
+     */
+    protected fun centreHeading(sizeSp:Float) {
+        titleView.typeRole(Type.Role.HERO,sizeSp)
+        titleView.gravity=Gravity.CENTER;titleView.textAlignment=TEXT_ALIGNMENT_CENTER
+        close.visibility=GONE
     }
     private fun groups()=(0 until body.childCount).count {body.getChildAt(it) is RowGroup}
     fun open(title:String,detail:String="",onDismiss:()->Unit={}) {

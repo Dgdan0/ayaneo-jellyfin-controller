@@ -1096,9 +1096,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         ambient.show(path, palette)
         if (palette == pagePalette) return
         pagePalette = palette
+        // The bars, the sheets and every glass control follow the page from here.
         GlassPage.set(this, palette)
-        topBar.setPalette(palette)
-        hintBar.setPalette(palette)
     }
 
     override fun refreshHints() {

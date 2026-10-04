@@ -27,6 +27,7 @@ import com.pocketds.hub.ui.ThemeGradientDrawable
 import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.glass.ArtworkPalette
 import com.pocketds.hub.ui.glass.GlassColors
+import com.pocketds.hub.ui.glass.GlassPage
 import com.pocketds.hub.ui.glass.GlassPanelDrawable
 import com.pocketds.hub.ui.textWeight
 
@@ -148,6 +149,7 @@ class TopBarView(
         })
         paintMark()
         paintIcons()
+        if (glass) GlassPage.follow(this) { setPalette(it) }
     }
 
     private fun modeIcon(mode: ContentMode) = if (mode == ContentMode.BOOKS) AppIcon.BOOK else AppIcon.MEDIA
