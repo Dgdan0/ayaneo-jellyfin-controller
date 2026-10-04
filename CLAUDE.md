@@ -689,7 +689,9 @@ Most of these exist because several screens had drifted copies of the same thing
 | An artwork's Glass colours on the Pocket | `ui/glass/ArtworkColors.shared(context, api)`: `prefetch` what a screen shows, `request` what is in focus, `peek`; when to ask again is `ArtworkColorBook` |
 | A Glass panel, bar and page | `ui/glass/GlassColors` (`panel`, `bar`, `sheet` for a side sheet or dialog over a screen's own words, `over`, `contrast`; the words on the page by loudness: `EYEBROW`, `FACTS`, `QUIET`, and `TRACK` under a bar), `GlassPanelDrawable` (`attach(view, radius)`: a view's background that follows the page; `retint`; `edge(color)` for an edge that says something, such as amber), `AmbientLayerView` (`show(path, palette)`) |
 | A Glass search field | `ui/glass/GlassSearchField.style`: a pill of the page's glass inside a taller target, ringed on focus (Discover, the Library) |
-| A library on the Glass Library root | `screens/library/LibraryTileView` (the picture, soft and dimmed, the hub's `fan` of posters, a glass label); where the posters sit, what the label and the root's line say: `LibraryTiles` (`slots`, `fan`, `summary`, `kindLabel`). The root is `LibraryRootView`; a tile pushes `LibraryFolderScreen` |
+| A library on the Glass Library root | `screens/library/LibraryTileView` (the picture, soft and dimmed, the hub's `fan` of posters, a glass label); where the posters sit, what the label and the root's line say: `LibraryTiles` (`slots`, `fan`, `summary`, `kindLabel`). The root is `LibraryRootView`, on both sides (Movies and TV adds search and Favourites); a tile pushes `LibraryFolderScreen` or the Books library's page |
+| The order libraries are shown in, and changing it (#15) | The hub's, never sorted here. `screens/library/LibraryOrder` (`move`, `step`, `slotAt`, `inOrder` for a list kept beside the tiles, such as the capsule on a library's page), `LibraryArrangeSession` (what is lifted, what the hub has), `LibraryOrderQueue` (one save out, the newest waiting) and `LibraryOrderChanges` (a screen that drew an older order reads it again); `LibraryOrderEditor` shows a move at once, saves it with `PUT /v1/library/order`, puts it back and says why when a save fails, and for A to Z sends `[]` and reads the hub's order again |
+| Library tiles that can be arranged | `screens/library/LibraryTileGrid` (three across; a new order slides every tile to its place; while arranging the tiles wiggle, the lifted one stands still and larger, a fixed one such as reading lists stays still; a hold, or a touch while arranging, drags one) in `LibraryRootView` (Arrange beside the heading, Done while arranging; Ⓐ picks up and drops, the D-pad moves, Ⓨ A to Z, Ⓑ or Back finishes); the same order as a list in Settings › Libraries (`LibraryOrderSection`: X and Y, or a row's arrows) |
 | Glass or Classic | `settings/LookSettings` (`Look.fromStored`: Glass unless Classic is stored; `Look.dark`: Glass is always dark) and `Theme.isGlass(context)`. A change rebuilds the Activity, as dark and light do. Classic goes once #11 is finished |
 | The Glass page: which artwork it shows | A screen's `pageArtwork` (the focused card, a title's backdrop, the cover in focus, what is playing), re-read on focus changes, `showCurrent` and `ScreenHost.pageArtworkChanged`; `nav/PageArtwork` (`next`: none keeps the last, `title`); `ScreenHost.prefetchArtwork` for the cards a row binds. `HubActivity.showArtwork` feeds `AmbientLayerView`, the bars' `setPalette` and `GlassPage` |
 | The Glass page's colours, for what is drawn over it | `ui/glass/GlassPage`: `palette(context)` for a panel opening now; `follow(view) { palette -> … }` for glass that stays on screen (the bars, a Details pill, a play disc, a day chip), held only while the view is attached. `Theme.onGlass(colors)` decides, so the player's video palette stays solid |
@@ -709,7 +711,7 @@ Cards measure at their natural height (`EpisodeCardView`, `DetailArtworkCardView
 
 `ConsolidationGuardTest` (part of `dev.sh test`) fails when a removed copy comes back -- a new
 `HubClient(context)`, a hand-built image loader or image request, a hand-written episode code or "Specials", a
-`"Selected"` detail line, an untinted progress bar, a bare `ScrollView(`, a `delay(POLL…)` loop, or words drawn in the page colour -- and names the owner
+`"Selected"` detail line, an untinted progress bar, a bare `ScrollView(`, a `delay(POLL…)` loop, words drawn in the page colour, or a list of libraries sorted on the device -- and names the owner
 to use instead. Extend its rules when you consolidate something new.
 
 ---
@@ -901,6 +903,19 @@ series. A banner library fans its contents too. Both apps read these rather than
 Libraries are listed A to Z by default, on both sides. A person can arrange them, and the order is kept
 on the hub per Jellyfin profile so every device shows it (#15). The apps show the hub's order and
 send a new one with `PUT /v1/library/order`; they never sort libraries themselves.
+
+On the Pocket both Glass roots arrange in place. Arrange beside "Your libraries" (or "Your reading
+libraries") starts it, and so does holding a tile; the tiles wiggle and Arrange reads Done. Ⓐ picks up
+the tile in focus, which stands still and grows, the D-pad moves it a place or a row with the others
+sliding out of its way, and Ⓐ puts it down; a pointer drags it. Each drop saves at once; a save that
+fails slides the tiles back and says "The new order could not be saved · …". Ⓨ goes back to A to Z,
+and Ⓑ, Back, Done or leaving the page finishes, a tile still lifted put down where it is. Reading
+lists stay last and still, since they are not a library. Settings › Libraries lists both sides in the
+same order, X and Y (or the arrows on a row) moving the library in focus, with Back to A–Z under a side
+that has its own order. A root that drew an older order reads the hub's again when it comes back
+(`LibraryOrderChanges`), and the capsule on a library's page follows the root. uiautomator cannot dump
+the screen while the tiles wiggle (it waits for the animations to settle), so a scripted check reads
+a screenshot there.
 
 Opening a folder uses `GET /v1/library/{viewId}/items?page=&sort=&order=` in 60-item pages. The
 poster grid derives its span count from the measured content width: seven columns with the compact

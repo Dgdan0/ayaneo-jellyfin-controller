@@ -72,7 +72,8 @@ import kotlinx.coroutines.launch
  *
  * Appearance picks the look (Glass, or Classic with its light and dark
  * themes) and a colour per media type, Home orders its
- * rows, Playback holds what used to be in the player (skip distance, the next
+ * rows, Libraries orders the libraries on both sides for every device (#15),
+ * Playback holds what used to be in the player (skip distance, the next
  * episode, intros), and Subtitles has a live preview drawn by the player's own
  * subtitle renderer, so what you choose is what you get.
  */
@@ -85,7 +86,11 @@ class SettingsScreen(
     override val showsOwnTitle = true
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /** Saves of a library order, which hiding Settings must not cancel half way. */
+    private val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var host: ScreenHost
+    /** Settings › Libraries; none without a hub to ask. */
+    private var libraryOrder: LibraryOrderSection? = null
     private lateinit var colors: PocketColors
     private lateinit var overlay: ChoiceOverlay
     private lateinit var nav: SideNavView
@@ -101,6 +106,7 @@ class SettingsScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
+        libraryOrder = api?.let { LibraryOrderSection(host, it, colors, ringVisible, scope, saveScope, ::render) }
         // Glass (#11): the prototype's Settings, a 150dp list of places with their icons beside glass cards.
         val glass = Theme.onGlass(colors)
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
@@ -122,7 +128,11 @@ class SettingsScreen(
             })
             nav = SideNavView(context, colors, ringVisible).apply {
                 setItems(SECTIONS.map { SideNavView.Item(it.first, it.second, if (glass) SECTION_ICONS[it.first] else null) }, section)
-                onPick = { id -> section = id; render() }
+                onPick = { id ->
+                    section = id
+                    if (id == SECTION_LIBRARIES) libraryOrder?.load()
+                    render()
+                }
             }
             addView(nav, LinearLayout.LayoutParams(MATCH, WRAP))
         }
@@ -142,6 +152,7 @@ class SettingsScreen(
     }
 
     override fun onShow() {
+        if (section == SECTION_LIBRARIES) libraryOrder?.load()
         render()
         if (libraries.isEmpty() && api != null) scope.launch {
             (api.library() as? HubResult.Ok)?.value?.views?.let { views ->
@@ -156,7 +167,10 @@ class SettingsScreen(
         scope.coroutineContext.cancelChildren()
     }
 
-    override fun onDestroyView() { scope.cancel() }
+    override fun onDestroyView() {
+        scope.cancel()
+        saveScope.cancel()
+    }
 
     override fun requestInitialFocus(): Boolean = nav.focus()
 
@@ -164,12 +178,14 @@ class SettingsScreen(
         ::overlay.isInitialized && overlay.isOpen -> listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
         focusedHomeRow != null && pane.hasFocus() -> listOf(ButtonHint.activate("Show or hide"),
             ButtonHint.primary("Move up"), ButtonHint.secondary("Move down"))
+        section == SECTION_LIBRARIES && pane.hasFocus() && libraryOrder?.hints() != null -> libraryOrder?.hints().orEmpty()
         ::nav.isInitialized && nav.hasFocus() -> listOf(ButtonHint("→", "Open", PadAction.Step(Direction.RIGHT)))
         else -> listOf(ButtonHint.activate("Choose"))
     }
 
     override fun onPad(action: PadAction): Boolean {
         if (overlay.onPad(action)) return true
+        if (section == SECTION_LIBRARIES && pane.hasFocus() && libraryOrder?.onPad(action) == true) return true
         val row = focusedHomeRow?.takeIf { pane.hasFocus() }
         return when {
             action == PadAction.Primary && row != null -> { moveHomeRow(row, -1); true }
@@ -197,18 +213,31 @@ class SettingsScreen(
     /** Rebuilds the chosen section's cards. Focus inside the pane comes back to the control with the same tag. */
     private fun render() {
         if (!::pane.isInitialized) return
-        val focusedTag = pane.findFocus()?.let { focused -> generateSequence(focused) { it.parent as? View }.firstNotNullOfOrNull { it.tag as? String } }
+        // The tags round the focused control, nearest first: the control itself
+        // when it comes back, else the card it was in (Back to A-Z goes once
+        // the order is A to Z again, and its card's first row takes focus).
+        val focusedTags = pane.findFocus()?.let { focused ->
+            generateSequence(focused) { it.parent as? View }.takeWhile { it !== pane }.mapNotNull { it.tag as? String }.toList()
+        }.orEmpty()
         focusedHomeRow = null
+        // Removing the focused card hands focus to the first focusable in the
+        // window, the first section in the list, which then opened: moving a
+        // Home row or a library jumped to Appearance. The chosen section holds
+        // focus meanwhile, and the control with the same tag takes it back.
+        if (focusedTags.isNotEmpty() && ::nav.isInitialized) nav.focus()
         pane.removeAllViews()
         when (section) {
             SECTION_APPEARANCE -> appearance()
             SECTION_HOME -> homeRows()
+            SECTION_LIBRARIES -> libraries()
             SECTION_PLAYBACK -> playback()
             SECTION_SUBTITLES -> subtitles()
             SECTION_DOWNLOADS -> downloads()
             else -> more()
         }
-        focusedTag?.let { tag -> pane.findViewWithTag<View>(tag)?.let { target -> pane.post { firstFocusable(target)?.requestFocus() } } }
+        focusedTags.firstNotNullOfOrNull { tag -> pane.findViewWithTag<View>(tag) }?.let { target ->
+            pane.post { firstFocusable(target)?.requestFocus() }
+        }
         host.refreshHints()
     }
 
@@ -346,6 +375,15 @@ class SettingsScreen(
         order.add(to, order.removeAt(from))
         HomeRowSettings.save(context, order, hidden)
         render()
+    }
+
+    // ----------------------------------------------------------- Libraries
+
+    private fun libraries() {
+        val section = libraryOrder ?: return run {
+            card().title("Libraries").hint("Connect to the hub to arrange your libraries.")
+        }
+        section.build { tag -> card(tag) }
     }
 
     // ------------------------------------------------------------ Playback
@@ -530,16 +568,18 @@ class SettingsScreen(
         const val PREVIEW_DP = 176
         const val SECTION_APPEARANCE = "appearance"
         const val SECTION_HOME = "home"
+        const val SECTION_LIBRARIES = "libraries"
         const val SECTION_PLAYBACK = "playback"
         const val SECTION_SUBTITLES = "subtitles"
         const val SECTION_DOWNLOADS = "downloads"
         val SECTIONS = listOf(
-            SECTION_APPEARANCE to "Appearance", SECTION_HOME to "Home", SECTION_PLAYBACK to "Playback",
+            SECTION_APPEARANCE to "Appearance", SECTION_HOME to "Home", SECTION_LIBRARIES to "Libraries", SECTION_PLAYBACK to "Playback",
             SECTION_SUBTITLES to "Subtitles", SECTION_DOWNLOADS to "Downloads", "more" to "More"
         )
         /** Glass: each place's icon, as the prototype's list has them. */
         val SECTION_ICONS = mapOf(
             SECTION_APPEARANCE to com.pocketds.hub.ui.AppIcon.APPEARANCE, SECTION_HOME to com.pocketds.hub.ui.AppIcon.HOME,
+            SECTION_LIBRARIES to com.pocketds.hub.ui.AppIcon.ARRANGE,
             SECTION_PLAYBACK to com.pocketds.hub.ui.AppIcon.PLAY, SECTION_SUBTITLES to com.pocketds.hub.ui.AppIcon.SUBTITLES,
             SECTION_DOWNLOADS to com.pocketds.hub.ui.AppIcon.DOWNLOAD, "more" to com.pocketds.hub.ui.AppIcon.MORE
         )

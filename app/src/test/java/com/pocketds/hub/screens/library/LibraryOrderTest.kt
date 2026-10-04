@@ -94,6 +94,47 @@ class LibraryOrderTest {
         assertEquals(0, session.lifted)
     }
 
+    @Test fun `a list kept beside the tiles follows their order, the rest after it`() {
+        val shown = listOf("films" to "Films", "shows" to "Shows", "anime" to "Anime", "favorites" to "Favourites")
+        assertEquals(listOf("anime", "films", "shows", "favorites"),
+            LibraryOrder.inOrder(shown, listOf("anime", "films", "shows")) { it.first }.map { it.first })
+        // An id the list does not have is skipped; one named twice counts once.
+        assertEquals(listOf("shows", "films", "anime", "favorites"),
+            LibraryOrder.inOrder(shown, listOf("shows", "gone", "shows", "films")) { it.first }.map { it.first })
+        assertEquals(shown, LibraryOrder.inOrder(shown, emptyList()) { it.first })
+    }
+
+    @Test fun `one save is out at a time and only the newest order waits`() {
+        val queue = LibraryOrderQueue()
+        assertEquals(listOf("b", "a"), queue.submit(listOf("b", "a")))
+        assertTrue(queue.isSending)
+        assertNull(queue.submit(listOf("a", "b")))
+        assertNull(queue.submit(listOf("c", "a")))
+        // The first answers: the newest waiting goes next, and nothing waits after it.
+        assertEquals(listOf("c", "a"), queue.answered(ok = true))
+        assertTrue(queue.isSending)
+        assertNull(queue.answered(ok = true))
+        assertFalse(queue.isSending)
+    }
+
+    @Test fun `a failed save drops the order waiting behind it`() {
+        val queue = LibraryOrderQueue()
+        queue.submit(listOf("b", "a"))
+        queue.submit(listOf("a", "b"))
+        assertNull(queue.answered(ok = false))
+        assertFalse(queue.isSending)
+        // The next one goes straight out.
+        assertEquals(emptyList<String>(), queue.submit(emptyList()))
+    }
+
+    @Test fun `each side counts its own saved orders`() {
+        val media = LibraryOrderChanges.revision(ContentMode.MEDIA)
+        val books = LibraryOrderChanges.revision(ContentMode.BOOKS)
+        assertEquals(books + 1, LibraryOrderChanges.changed(ContentMode.BOOKS))
+        assertEquals(media, LibraryOrderChanges.revision(ContentMode.MEDIA))
+        assertEquals(books + 1, LibraryOrderChanges.revision(ContentMode.BOOKS))
+    }
+
     @Test fun `the order the hub sends replaces the session's, lifted or not`() {
         val session = LibraryArrangeSession(listOf("a", "b"))
         session.pickUp(0)

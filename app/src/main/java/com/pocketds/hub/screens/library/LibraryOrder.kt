@@ -65,6 +65,63 @@ object LibraryOrder {
         val row = floor((y + gap / 2) / (height + gap)).toInt().coerceIn(0, rows - 1)
         return (row * columns + column).coerceIn(0, count - 1)
     }
+
+    /**
+     * [items] in the order of [ids], as a list kept beside the tiles follows a
+     * move (the capsule on a library's page): those named first, in that
+     * order, then the rest as they came (Favourites, a library new since).
+     */
+    fun <T> inOrder(items: List<T>, ids: List<String>, idOf: (T) -> String): List<T> {
+        val byId = items.associateBy(idOf)
+        val placed = ids.distinct().mapNotNull { byId[it] }
+        val named = placed.map(idOf).toSet()
+        return placed + items.filterNot { idOf(it) in named }
+    }
+}
+
+/**
+ * Saves of an order, one at a time (#15): while one is out, only the newest
+ * order waits, and a failure drops it, since the screen goes back to the
+ * order the hub has. Requests sent together could reach the hub in either
+ * order, and the older one would win. Pure.
+ */
+class LibraryOrderQueue {
+    private var sending = false
+    private var waiting: List<String>? = null
+
+    val isSending: Boolean get() = sending
+
+    /** The order to send now, or null when it waits for the save that is out. */
+    fun submit(ids: List<String>): List<String>? {
+        if (sending) {
+            waiting = ids
+            return null
+        }
+        sending = true
+        return ids
+    }
+
+    /** The save that was out has answered: the order to send next, or null. */
+    fun answered(ok: Boolean): List<String>? {
+        val next = waiting.takeIf { ok }
+        waiting = null
+        sending = next != null
+        return next
+    }
+}
+
+/**
+ * How many orders each side has saved in this process (#15), so a screen
+ * that drew an older one (the Library root after Settings › Libraries)
+ * reads the hub's again when it comes back.
+ */
+object LibraryOrderChanges {
+    private val counts = IntArray(ContentMode.entries.size)
+
+    fun revision(side: ContentMode): Int = counts[side.ordinal]
+
+    /** One more saved; the new revision. */
+    fun changed(side: ContentMode): Int = ++counts[side.ordinal]
 }
 
 /**

@@ -6,7 +6,7 @@ import android.graphics.drawable.Drawable
 import android.view.Gravity
 import android.widget.TextView
 
-enum class AppIcon { CLOSE, CONTENTS, APPEARANCE, PREVIOUS, NEXT, PREVIOUS_ITEM, NEXT_ITEM, THIRDS, FIT, DIRECTION, ZOOM_IN, ZOOM_OUT, SEARCH, OPEN, REFRESH, BOOK, HEADPHONES, READ_ALONG, BOOKMARK, BOOKMARK_FILLED, COMIC, MOVIE, TV, SETTINGS, CHECK, MEDIA, SORT, PANEL, PLAY, INFO, PERSON, SERIES, ADD, STAR, HOME, SUBTITLES, DOWNLOAD, MORE }
+enum class AppIcon { CLOSE, CONTENTS, APPEARANCE, PREVIOUS, NEXT, PREVIOUS_ITEM, NEXT_ITEM, THIRDS, FIT, DIRECTION, ZOOM_IN, ZOOM_OUT, SEARCH, OPEN, REFRESH, BOOK, HEADPHONES, READ_ALONG, BOOKMARK, BOOKMARK_FILLED, COMIC, MOVIE, TV, SETTINGS, CHECK, MEDIA, SORT, PANEL, PLAY, INFO, PERSON, SERIES, ADD, STAR, HOME, SUBTITLES, DOWNLOAD, MORE, ARRANGE, MOVE_UP, MOVE_DOWN }
 
 /** Original vector geometry; controls do not depend on the vendor's symbol font. */
 class AppIconDrawable(private val icon: AppIcon, color: Int) : Drawable() {
@@ -53,6 +53,9 @@ class AppIconDrawable(private val icon: AppIcon, color: Int) : Drawable() {
             AppIcon.SUBTITLES->{canvas.drawRoundRect(3f,5f,21f,19f,2.5f,2.5f,paint);path("M10.5 10.2a2.4 2.4 0 1 0 0 3.6m7-3.6a2.4 2.4 0 1 0 0 3.6")}
             AppIcon.DOWNLOAD->path("M12 4v11m-5-5 5 5 5-5M5 20h14")
             AppIcon.MORE->{paint.style=Paint.Style.FILL;for(x in listOf(6f,12f,18f))canvas.drawCircle(x,12f,1.6f,paint);paint.style=Paint.Style.STROKE}
+            // Four tiles, one of them lifted out of line: arranging a Library root (#15).
+            AppIcon.ARRANGE->{canvas.drawRoundRect(4f,4f,10.5f,10.5f,1.8f,1.8f,paint);canvas.drawRoundRect(4f,13.5f,10.5f,20f,1.8f,1.8f,paint);canvas.drawRoundRect(13.5f,13.5f,20f,20f,1.8f,1.8f,paint);canvas.save();canvas.rotate(12f,16.75f,7.25f);canvas.drawRoundRect(13.5f,3f,20f,9.5f,1.8f,1.8f,paint);canvas.restore()}
+            AppIcon.MOVE_UP,AppIcon.MOVE_DOWN->{val tip=if(icon==AppIcon.MOVE_UP) 9f else 15f;val foot=if(icon==AppIcon.MOVE_UP) 15f else 9f;line(6f,foot,12f,tip);line(12f,tip,18f,foot)}
         }
         canvas.restore()
     }

@@ -82,6 +82,8 @@ class ConsolidationGuardTest {
         Rule(Regex(""""/v1/img/jf/"""),
             "HubEndpoints.jellyfinImage(id, type): one string per picture, so one entry in the colour caches",
             setOf("net/HubEndpoints.kt")),
+        Rule(Regex("""\b(views|libraries|readingLibraries|libraryViews)\b[^\n]*\.(sorted|sortedBy|sortedWith|sortedByDescending|sortBy|sortWith|sortDescending)\b"""),
+            "the hub's order (#15): libraries come arranged, or A to Z; move one with LibraryOrder.move and save it with LibraryOrderEditor"),
     )
 
     @Test
