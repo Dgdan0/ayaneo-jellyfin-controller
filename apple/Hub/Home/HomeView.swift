@@ -37,7 +37,8 @@ struct HomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if let hero {
-                        HeroView(content: hero, topInset: proxy.safeAreaInsets.top) {
+                        HeroView(content: hero, topInset: proxy.safeAreaInsets.top,
+                                 visibleHeight: proxy.size.height + proxy.safeAreaInsets.top) {
                             // As Android's Home: the hub decides where it starts, and
                             // a series plays its part-watched, next or first episode.
                             play(PlayRequest(itemId: hero.itemId, series: hero.type == "series",
@@ -142,17 +143,25 @@ struct HeroPick: Equatable {
 struct HeroView: View {
     let content: HeroContent
     let topInset: CGFloat
+    /// From the top of the screen to the tab bar: what can be seen at once.
+    var visibleHeight: CGFloat = .infinity
     let play: () -> Void
     @Environment(\.glassMetrics) private var metrics
     @Environment(\.glassAccent) private var accent
 
     /// The prototype's 480 on an iPad and 560 on an iPhone, measured from the
-    /// top of the screen, and never so short that the words meet the bar.
-    private var height: CGFloat { max(metrics.compact ? 560 : 480, topInset + 330) }
+    /// top of the screen, and never so short that the words meet the bar. On
+    /// a short screen (a phone turned sideways) it fits what can be seen, the
+    /// next row's name showing under it, so Play is never below the fold.
+    private var height: CGFloat {
+        let tall = max(metrics.compact ? 560 : 480, topInset + 330)
+        guard metrics.short else { return tall }
+        return max(topInset + 230, min(tall, visibleHeight - 40))
+    }
 
     var body: some View {
-        ZStack(alignment: metrics.compact ? .bottom : .bottomLeading) {
-            FadedArtwork.hero(content.backdrop, centred: metrics.compact)
+        ZStack(alignment: metrics.centred ? .bottom : .bottomLeading) {
+            FadedArtwork.hero(content.backdrop, centred: metrics.centred)
             words
                 .padding(.horizontal, metrics.margin)
                 .padding(.bottom, 14)
@@ -163,7 +172,7 @@ struct HeroView: View {
     }
 
     private var words: some View {
-        VStack(alignment: metrics.compact ? .center : .leading, spacing: 10) {
+        VStack(alignment: metrics.centred ? .center : .leading, spacing: metrics.short ? 7 : 10) {
             Text(eyebrow)
                 .font(HubType.body(12.5, weight: .bold, relativeTo: .caption))
                 .tracking(1.75)
@@ -180,7 +189,7 @@ struct HeroView: View {
             // Held open for an unstarted title, so the buttons never move.
             HStack(spacing: 12) {
                 HeroProgress(progress: content.progress, accent: accent.tint)
-                    .frame(width: metrics.compact ? 110 : 180)
+                    .frame(width: metrics.small ? 110 : 180)
                 Text(content.progressLabel)
                     .font(HubType.body(13, relativeTo: .caption))
                     .foregroundStyle(.white.opacity(0.82))
@@ -204,8 +213,8 @@ struct HeroView: View {
             }
             .padding(.top, 4)
         }
-        .multilineTextAlignment(metrics.compact ? .center : .leading)
-        .frame(maxWidth: metrics.compact ? .infinity : 660, alignment: metrics.compact ? .center : .leading)
+        .multilineTextAlignment(metrics.centred ? .center : .leading)
+        .frame(maxWidth: metrics.centred ? .infinity : 660, alignment: metrics.centred ? .center : .leading)
         // Over the picture in a stack, a long title was offered one line's
         // height; its own height lets it take the second line it is allowed.
         .fixedSize(horizontal: false, vertical: true)

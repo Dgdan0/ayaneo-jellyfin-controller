@@ -14,6 +14,14 @@ public enum ShellLayout {
     /// The top capsule (iPad and Mac) rather than the bottom tab bar.
     public static func isWide(width: Double) -> Bool { width >= wideMinimum }
 
+    /// Below this a window has a phone's height: an iPhone turned sideways
+    /// (402 to 440 points). Its pages take phone sizes, its heroes fit the
+    /// height they have, and its tab bar is compact. The shortest iPad, a mini
+    /// turned sideways, is 744.
+    public static let shortMaximum = 500.0
+
+    public static func isShort(height: Double) -> Bool { height < shortMaximum }
+
     /// What the back pill says: the page under the one shown, or the
     /// section's own name when the first page is pushed.
     public static func backTitle(pages: [String], root: String) -> String {

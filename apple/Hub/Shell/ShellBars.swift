@@ -262,6 +262,9 @@ struct AvatarButton: View {
 /// icon and a word for each, the one shown lit.
 struct ShellTabBar: View {
     let section: AppSection
+    /// A phone turned sideways: a compact bar, each section's name beside its
+    /// icon, as the system's own tab bar is that way up.
+    var short = false
     let select: (AppSection) -> Void
 
     var body: some View {
@@ -271,18 +274,19 @@ struct ShellTabBar: View {
                 Button {
                     select(item)
                 } label: {
-                    VStack(spacing: 3) {
+                    let layout = short ? AnyLayout(HStackLayout(spacing: 6)) : AnyLayout(VStackLayout(spacing: 3))
+                    layout {
                         Image(systemName: item.systemImage)
-                            .font(.system(size: 19, weight: .semibold))
-                            .frame(height: 24)
+                            .font(.system(size: short ? 16 : 19, weight: .semibold))
+                            .frame(height: short ? 20 : 24)
                         Text(item.title)
-                            .font(HubType.chrome(10.5, weight: .semibold))
+                            .font(HubType.chrome(short ? 12 : 10.5, weight: .semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                     }
                     .foregroundStyle(on ? Color.white : .white.opacity(0.7))
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 4)
+                    .padding(.vertical, short ? 7 : 6)
+                    .padding(.horizontal, short ? 10 : 4)
                     .frame(minWidth: 62)
                     .background(on ? Color.white.opacity(0.14) : .clear,
                                 in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -294,8 +298,8 @@ struct ShellTabBar: View {
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 66)
+        .padding(.horizontal, short ? 6 : 8)
+        .frame(height: short ? 46 : 66)
         .glassPanel(Capsule())
     }
 }

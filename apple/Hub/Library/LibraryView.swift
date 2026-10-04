@@ -82,7 +82,10 @@ struct LibraryView: View {
                     }
                     .padding(.horizontal, metrics.margin)
                     .padding(.top, 18)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 18)], spacing: 18) {
+                    // Phone sizes three across a phone turned sideways, one
+                    // across one held upright.
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: metrics.small ? 230 : 300), spacing: metrics.gap)],
+                              spacing: metrics.gap) {
                         ForEach(folders) { folder in
                             NavigationLink(value: AppRoute.folder(FolderRoute(id: folder.id, name: folder.name))) {
                                 LibraryTile(folder: folder, posters: LibraryFan.posters(folder), background: art(of: folder))
@@ -151,7 +154,7 @@ struct LibraryTile: View {
 
     var body: some View {
         Color.clear
-            .aspectRatio(metrics.compact ? 2 : 1.6, contentMode: .fit)
+            .aspectRatio(metrics.small ? 2 : 1.6, contentMode: .fit)
             .overlay {
                 ArtworkView(path: background, width: 360, placeholder: .white.opacity(0.06))
                     .blur(radius: 18, opaque: true)
@@ -393,8 +396,8 @@ struct LibraryGrid: View {
             StatusLine(message: status) { Task { await loadNext() } }
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 10)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: metrics.compact ? 100 : 112, maximum: 180),
-                                         spacing: metrics.compact ? 12 : 18, alignment: .top)],
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: metrics.small ? 100 : 112, maximum: 180),
+                                         spacing: metrics.small ? 12 : 18, alignment: .top)],
                       alignment: .leading, spacing: 20) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, hit in
                     NavigationLink(value: AppRoute.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title))) {

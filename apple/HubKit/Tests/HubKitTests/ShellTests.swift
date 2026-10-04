@@ -5,16 +5,30 @@ import Testing
 /// The Glass shell's layout and back pill.
 struct ShellLayoutTests {
     @Test(arguments: [
-        (1032.0, true), // iPad Pro 13-inch, portrait
-        (1376.0, true), // and landscape
+        (1024.0, true), // iPad Pro 12.9-inch (4th generation), portrait: the user's
+        (1366.0, true), // and landscape
         (1133.0, true), // iPad mini, landscape
         (1280.0, true), // the Mac window as it opens
         (744.0, false), // iPad mini, portrait: a phone's tab bar
-        (402.0, false), // iPhone 17 Pro
-        (874.0, false), // and landscape
+        (440.0, false), // iPhone 17 Pro Max
+        (832.0, false), // and landscape, inside the notch's insets
+        (639.0, false), // the 12.9-inch's Split View, two thirds upright
+        (981.0, true),  // and two thirds sideways
     ])
     func theTopCapsuleNeedsTheWidthOfAnIPadOrAMacWindow(width: Double, wide: Bool) {
         #expect(ShellLayout.isWide(width: width) == wide)
+    }
+
+    @Test(arguments: [
+        (440.0, true),   // iPhone 17 Pro Max, landscape
+        (402.0, true),   // iPhone 17 Pro, landscape
+        (956.0, false),  // the Pro Max upright
+        (744.0, false),  // iPad mini, landscape
+        (1024.0, false), // iPad Pro 12.9-inch, landscape
+        (520.0, false),  // a small Mac window
+    ])
+    func aPhoneTurnedSidewaysIsShort(height: Double, short: Bool) {
+        #expect(ShellLayout.isShort(height: height) == short)
     }
 
     @Test func theBackPillNamesThePageUnderneath() {

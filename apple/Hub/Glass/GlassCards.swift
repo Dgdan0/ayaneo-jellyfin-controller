@@ -7,20 +7,31 @@ import SwiftUI
 
 /// Sizes a page lays itself out by: the prototype's `--px`, `--tile`,
 /// `--post`, `--ep`, `--gap` and `--r`, and its type sizes. The shell sets
-/// them for every page: phone-sized cards where the width class is compact,
-/// and the bar's own margin, so the page lines up with Media/Books.
+/// them for every page: phone-sized cards where the width class is compact or
+/// the window is short, and the bar's own margin, so the page lines up with
+/// Media/Books.
 struct GlassMetrics: Equatable {
+    /// Narrow: a phone held upright, an iPad in a narrow Split View.
     var compact = false
+    /// Short: a phone turned sideways, about 400 points tall (an iPhone Pro
+    /// Max is regular width that way, but has a phone's height). A hero fits
+    /// the height it has.
+    var short = false
     var margin: CGFloat = 44
 
-    var tile: CGFloat { compact ? 250 : 296 }
-    var poster: CGFloat { compact ? 104 : 126 }
-    var episode: CGFloat { compact ? 236 : 270 }
-    var gap: CGFloat { compact ? 14 : 18 }
-    var radius: CGFloat { compact ? 16 : 18 }
-    var heroTitle: CGFloat { compact ? 40 : 56 }
-    var pageTitle: CGFloat { compact ? 30 : 32 }
-    var rowTitle: CGFloat { compact ? 18 : 19 }
+    /// Phone sizes.
+    var small: Bool { compact || short }
+    /// A hero's words centred over the picture's foot: a phone held upright.
+    var centred: Bool { compact && !short }
+
+    var tile: CGFloat { small ? 250 : 296 }
+    var poster: CGFloat { small ? 104 : 126 }
+    var episode: CGFloat { small ? 236 : 270 }
+    var gap: CGFloat { small ? 14 : 18 }
+    var radius: CGFloat { small ? 16 : 18 }
+    var heroTitle: CGFloat { short ? 34 : (compact ? 40 : 56) }
+    var pageTitle: CGFloat { small ? 30 : 32 }
+    var rowTitle: CGFloat { small ? 18 : 19 }
 }
 
 extension EnvironmentValues {

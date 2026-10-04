@@ -124,7 +124,7 @@ The look is `GLASS_PLAN.md`. Its pieces in this app, so each screen uses one own
 | The page behind everything | `Glass/AmbientBackground` (the hub's `HubEndpoints.smallest` picture, decoded at 64 px); pages report their picture with `.ambientArtwork(path)`; which one shows is HubKit `AmbientStack` |
 | A panel, the white and glass pills, a round toggle | `.glassPanel(shape)`, `PrimaryPillStyle`, `GlassPillStyle`, `GlassRoundButton` in `Glass/GlassStyle` |
 | A card's ring and lift, its marks | `Glass/GlassCards`: put the card in a `GlassCardStyle` button and give its artwork `.litArtwork(corner:)` (`.litRing` for a row card); `ArtworkProgress`, `WatchBadge`, `UpNextTag`, `PlayDisc`, `CardCaption` |
-| Sizes: margins, tiles, posters, episodes, type | `GlassMetrics` (`\.glassMetrics`), set by the shell: phone sizes where the width class is compact |
+| Sizes: margins, tiles, posters, episodes, type | `GlassMetrics` (`\.glassMetrics`), set by the shell: phone sizes (`small`) where the width class is compact or the window is short (`ShellLayout.isShort`, a phone turned sideways, about 400 points tall: heroes fit the height, the tab bar is compact); a hero's words centred only on a phone held upright (`centred`) |
 | A filter or season pill, a capsule of places, a control, tabs, a page heading | `Glass/GlassControls`: `ChoicePill`, `GlassCapsulePicker`, `GlassControlStyle`, `UnderlineTabs`, `PageHeading`, `GlassLabel` |
 | Artwork fading into the page | `FadedArtwork.hero` / `.title` (`Media/Redesign`): a mask with the words' shade inside it, as Android's `FadedImageView` |
 | Panel, sheet and ink colours, accents | HubKit `GlassColors` (`panel`, `sheet`, `ink`, `badge`), `AccentPreset.defaultFor(side)` |

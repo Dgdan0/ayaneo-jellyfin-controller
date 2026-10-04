@@ -50,14 +50,19 @@ struct TitleView: View {
         GeometryReader { proxy in
             ScrollView {
                 ZStack(alignment: .top) {
-                    // The prototype's `.dart`: 590 tall on an iPad, 470 on an iPhone.
+                    // The prototype's `.dart`: 590 tall on an iPad, 470 on an
+                    // iPhone; on a phone turned sideways, what can be seen.
                     FadedArtwork.title(backdropPath)
-                        .frame(height: metrics.compact ? 470 : 590)
+                        .frame(height: metrics.short ? proxy.size.height + proxy.safeAreaInsets.top
+                               : (metrics.compact ? 470 : 590))
                         .frame(maxWidth: .infinity)
                         .clipped()
                     VStack(alignment: .leading, spacing: 0) {
+                        // On a short screen the words start under the bars,
+                        // so Play is never below the fold.
                         header
-                            .padding(.top, max(metrics.compact ? 290 : 236, proxy.safeAreaInsets.top + 120))
+                            .padding(.top, metrics.short ? proxy.safeAreaInsets.top + 10
+                                     : max(metrics.compact ? 290 : 236, proxy.safeAreaInsets.top + 120))
                             .padding(.horizontal, metrics.margin)
                         StatusLine(message: status) { Task { await load() } }
                             .padding(.horizontal, metrics.margin)
@@ -156,7 +161,7 @@ struct TitleView: View {
     /// The main pill, Start over beside it when there is a place to start
     /// over from, then watched and favourite as round glass buttons.
     private func actions(_ item: HubKit.LibraryItem) -> some View {
-        HStack(spacing: metrics.compact ? 8 : 10) {
+        HStack(spacing: metrics.small ? 8 : 10) {
             if item.type != "season" {
                 Button {
                     playMain(item)
@@ -168,7 +173,7 @@ struct TitleView: View {
                 if DetailLines.offersStartOver(item) {
                     // A glass pill on an iPad or a Mac (the prototype's `.bg`), a
                     // round button where a phone's row has no room for the words.
-                    if metrics.compact {
+                    if metrics.small {
                         GlassRoundButton(systemImage: "arrow.counterclockwise", label: "Start over", size: 42) {
                             play(request(for: item, mode: .restart))
                         }
@@ -183,14 +188,14 @@ struct TitleView: View {
                 }
                 GlassRoundButton(systemImage: item.played ? "eye.fill" : "eye",
                                  label: item.played ? "Mark unwatched" : "Mark watched", on: item.played,
-                                 size: metrics.compact ? 42 : 46) {
+                                 size: metrics.small ? 42 : 46) {
                     Task { await change(.played(!item.played)) }
                 }
                 .disabled(saving)
             }
             GlassRoundButton(systemImage: item.favorite ? "star.fill" : "star",
                              label: item.favorite ? "Remove from favourites" : "Favourite", on: item.favorite,
-                             size: metrics.compact ? 42 : 46) {
+                             size: metrics.small ? 42 : 46) {
                 Task { await change(.favorite(!item.favorite)) }
             }
             .disabled(saving)

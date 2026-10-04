@@ -123,6 +123,8 @@ final class ShellModel {
 struct ShellMetrics {
     let wide: Bool
     let safe: EdgeInsets
+    /// A phone turned sideways (`GlassMetrics.short`).
+    var short = false
 
     /// The round icons, the avatar and the back pill.
     var control: CGFloat { wide ? 44 : 40 }
@@ -132,7 +134,9 @@ struct ShellMetrics {
     var margin: CGFloat { wide ? 44 : 20 }
     /// Where pages start, under the bar; they scroll up beneath it.
     var topInset: CGFloat { barTop + control + (wide ? 12 : 10) }
-    var tabBarHeight: CGFloat { 66 }
+    /// A short window's bar is compact, as the system's is on a phone turned
+    /// sideways: the words beside the icons.
+    var tabBarHeight: CGFloat { short ? 46 : 66 }
     /// From the bottom of the screen: the prototype's 22 on an iPhone with a
     /// home indicator, never closer than 12.
     var tabBarBottom: CGFloat { max(safe.bottom - 12, 12) }
@@ -177,7 +181,9 @@ struct MainView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let metrics = ShellMetrics(wide: ShellLayout.isWide(width: proxy.size.width), safe: proxy.safeAreaInsets)
+            let metrics = ShellMetrics(wide: ShellLayout.isWide(width: proxy.size.width), safe: proxy.safeAreaInsets,
+                                       short: ShellLayout.isShort(height: proxy.size.height + proxy.safeAreaInsets.top
+                                                                  + proxy.safeAreaInsets.bottom))
             ZStack(alignment: .top) {
                 AmbientBackground(path: ambient.displayed, palette: model.colors.palette(for: ambient.displayed))
                     .ignoresSafeArea()
@@ -199,7 +205,7 @@ struct MainView: View {
                 topBar(metrics)
                     .accessibilityHidden(player.isOpen)
                 if !metrics.wide {
-                    ShellTabBar(section: section, select: select)
+                    ShellTabBar(section: section, short: metrics.short, select: select)
                         // An iPad mini in portrait is wider than a phone: the
                         // bar keeps a phone's proportions, centred.
                         .frame(maxWidth: 520)
@@ -294,7 +300,8 @@ struct MainView: View {
                 }
         }
         .environment(\.shellStack, stackKey.id)
-        .environment(\.glassMetrics, GlassMetrics(compact: sizeClass == .compact, margin: metrics.margin))
+        .environment(\.glassMetrics, GlassMetrics(compact: sizeClass == .compact, short: metrics.short,
+                                                  margin: metrics.margin))
         .environment(\.openRoute, OpenRouteAction(
             push: { route in paths[stackKey, default: []].append(route) },
             replace: { route in
