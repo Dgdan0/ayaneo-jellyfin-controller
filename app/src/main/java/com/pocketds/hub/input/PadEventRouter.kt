@@ -21,11 +21,16 @@ package com.pocketds.hub.input
  *    ways to move that the same person uses in the same sitting. Only the hat
  *    and the synthesised `KEYCODE_DPAD_*` compete, because those are two
  *    reports of one physical press.
+ *
+ * The right stick does not step: held, it pans ([AnalogPan]), one
+ * [PadAction.Pan] per frame. L3 and R3 report their press and their release
+ * ([PadAction.Click]), so a reader can do something only while one is held.
  */
 class PadEventRouter(
     private val gamepadMap: GamepadMap = GamepadMap(),
     private val stick: AnalogRepeater = AnalogRepeater(),
     private val hat: AnalogRepeater = AnalogRepeater.forHat(),
+    private val rightStick: AnalogPan = AnalogPan(),
     private val leftTrigger: TriggerLatch = TriggerLatch(),
     private val rightTrigger: TriggerLatch = TriggerLatch(),
     val inputMode: InputModeTracker = InputModeTracker(),
@@ -59,6 +64,8 @@ class PadEventRouter(
     private var lastY = 0f
     private var lastHatX = 0f
     private var lastHatY = 0f
+    private var lastRightX = 0f
+    private var lastRightY = 0f
 
     /** Which device the pumped axis values came from, for the hat latch. */
     private var motionDeviceId = DEVICE_UNKNOWN
@@ -73,6 +80,8 @@ class PadEventRouter(
         inputMode.onDirectional()
         // Holding B is one press, not an accidental second press that exits a reader.
         if (action == PadAction.Back && repeatCount > 0) return true
+        // A held stick click is one press until it is let go (onKeyUp).
+        if (action is PadAction.Click && repeatCount > 0) return true
 
         when (action) {
             is PadAction.Step ->
@@ -98,7 +107,12 @@ class PadEventRouter(
     }
 
     fun onKeyUp(keyCode: Int, deviceId: Int = DEVICE_UNKNOWN): Boolean {
-        val action = gamepadMap.actionFor(keyCode) as? PadAction.Page ?: return false
+        val mapped = gamepadMap.actionFor(keyCode)
+        if (mapped is PadAction.Click) {
+            emit(PadAction.Click(mapped.stick, down = false))
+            return true
+        }
+        val action = mapped as? PadAction.Page ?: return false
         val sources = if (action.direction == Direction.UP) leftTriggerSources else rightTriggerSources
         if (sources[deviceId]?.winner() == SourceLatch.SOURCE_KEYS) triggerHolds.up(deviceId, action.direction)
         return true
@@ -112,6 +126,8 @@ class PadEventRouter(
      * A generic motion event carrying joystick axes.
      *
      * @param y positive is down, matching Android's AXIS_Y.
+     * @param rightX the right stick (AXIS_Z on this handheld), positive right.
+     * @param rightY the right stick (AXIS_RZ), positive down.
      * @return true if these axes are ours to act on.
      */
     fun onMotion(
@@ -122,13 +138,17 @@ class PadEventRouter(
         leftTriggerValue: Float,
         rightTriggerValue: Float,
         nowMs: Long,
-        deviceId: Int = DEVICE_UNKNOWN
+        deviceId: Int = DEVICE_UNKNOWN,
+        rightX: Float = 0f,
+        rightY: Float = 0f
     ): Boolean {
         motionDeviceId = deviceId
         lastX = x
         lastY = y
         lastHatX = hatX
         lastHatY = hatY
+        lastRightX = rightX
+        lastRightY = rightY
 
         // Triggers are edge-detected here rather than on the tick: a pull is a
         // discrete event, and re-testing the same held value every frame is how
@@ -166,12 +186,13 @@ class PadEventRouter(
         inputMode.onPointer()
     }
 
-    /** No directional repeat or pending trigger hold needs another frame. */
-    fun idle(): Boolean = stick.idle() && hat.idle() && !triggerHolds.pending()
+    /** No directional repeat, pan or pending trigger hold needs another frame. */
+    fun idle(): Boolean = stick.idle() && hat.idle() && rightStick.idle() && !triggerHolds.pending()
 
     fun reset() {
         stick.reset()
         hat.reset()
+        rightStick.reset()
         leftTrigger.reset()
         rightTrigger.reset()
         triggerHolds.reset()
@@ -179,6 +200,8 @@ class PadEventRouter(
         lastY = 0f
         lastHatX = 0f
         lastHatY = 0f
+        lastRightX = 0f
+        lastRightY = 0f
     }
 
     private companion object {
@@ -197,6 +220,11 @@ class PadEventRouter(
                 inputMode.onDirectional()
                 emit(PadAction.Step(it))
             }
+        }
+        rightStick.update(lastRightX, lastRightY, nowMs)?.let {
+            triggerHolds.cancelPending()
+            inputMode.onDirectional()
+            emit(PadAction.Pan(it.dx, it.dy))
         }
         triggerHolds.tick(nowMs, triggerHoldContext()).forEach { emit(PadAction.Page(it)) }
     }

@@ -37,4 +37,22 @@ sealed interface PadAction {
 
     /** Select. */
     data object Refresh : PadAction
+
+    /**
+     * The right stick, held: how far it moves the view this frame, as its
+     * deflection past the dead zone (curved, so a nudge is fine) times the
+     * seconds since the last frame. A screen turns it into pixels at its own
+     * speed, so the feel does not depend on the frame rate. Readers pan and
+     * scroll with it; elsewhere it does nothing.
+     */
+    data class Pan(val dx: Float, val dy: Float) : PadAction
+
+    /**
+     * A stick pressed in, L3 or R3: [down] on the press and again, false, on
+     * the release, so a reader can act only while it is held (a magnifier).
+     */
+    data class Click(val stick: Stick, val down: Boolean = true) : PadAction
 }
+
+/** Which stick a [PadAction.Click] came from. */
+enum class Stick { LEFT, RIGHT }

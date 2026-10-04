@@ -37,6 +37,9 @@ class GamepadMap(
         PadNames.KEYCODE_BUTTON_START -> PadAction.Menu
         PadNames.KEYCODE_BUTTON_SELECT -> PadAction.Refresh
 
+        PadNames.KEYCODE_BUTTON_THUMBL -> PadAction.Click(Stick.LEFT)
+        PadNames.KEYCODE_BUTTON_THUMBR -> PadAction.Click(Stick.RIGHT)
+
         PadNames.KEYCODE_DPAD_UP -> PadAction.Step(Direction.UP)
         PadNames.KEYCODE_DPAD_DOWN -> PadAction.Step(Direction.DOWN)
         PadNames.KEYCODE_DPAD_LEFT -> PadAction.Step(Direction.LEFT)

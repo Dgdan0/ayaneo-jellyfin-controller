@@ -49,6 +49,12 @@ class GamepadMapTest {
     }
 
     @Test
+    fun `the stick clicks are their own presses`() {
+        assertEquals(PadAction.Click(Stick.LEFT), map.actionFor(PadNames.KEYCODE_BUTTON_THUMBL))
+        assertEquals(PadAction.Click(Stick.RIGHT), map.actionFor(PadNames.KEYCODE_BUTTON_THUMBR))
+    }
+
+    @Test
     fun `an unmapped key is ignored rather than guessed at`() {
         assertNull(map.actionFor(PadNames.KEYCODE_BUTTON_MODE))   // the AYA button
         assertNull(map.actionFor(24))                             // volume up

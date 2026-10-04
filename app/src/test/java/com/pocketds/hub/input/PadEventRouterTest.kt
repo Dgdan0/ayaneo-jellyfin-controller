@@ -211,6 +211,44 @@ class PadEventRouterTest {
         assertFalse(r.inputMode.showFocusRing)
     }
 
+    // --- the right stick and the stick clicks (#16) --------------------------
+
+    @Test
+    fun `the held right stick pans every frame and stops when let go`() {
+        val r = router()
+        r.onMotion(0f, 0f, 0f, 0f, 0f, 0f, nowMs = 0L, rightX = 1f)
+        assertFalse(r.idle())
+        assertTrue(emitted.isEmpty())   // the first frame only starts the clock
+        r.onTick(16L)
+        r.onTick(32L)
+        assertEquals(2, emitted.size)
+        val pan = emitted.first() as PadAction.Pan
+        assertEquals(0.016f, pan.dx, 0.0001f)
+        assertEquals(0f, pan.dy, 0.0001f)
+        // The left stick steps; the right one never does.
+        assertTrue(emitted.none { it is PadAction.Step })
+        r.onMotion(0f, 0f, 0f, 0f, 0f, 0f, nowMs = 40L, rightX = 0f)
+        assertTrue(r.idle())
+        emitted.clear()
+        r.onTick(60L)
+        assertTrue(emitted.isEmpty())
+    }
+
+    @Test
+    fun `L3 and R3 report the press and the release, once each`() {
+        val r = router()
+        assertTrue(r.onKeyDown(PadNames.KEYCODE_BUTTON_THUMBL))
+        // Held: the platform may repeat the key; it is still one press.
+        assertTrue(r.onKeyDown(PadNames.KEYCODE_BUTTON_THUMBL, repeatCount = 1))
+        assertTrue(r.onKeyUp(PadNames.KEYCODE_BUTTON_THUMBL))
+        r.onKeyDown(PadNames.KEYCODE_BUTTON_THUMBR)
+        r.onKeyUp(PadNames.KEYCODE_BUTTON_THUMBR)
+        assertEquals(listOf<PadAction>(
+            PadAction.Click(Stick.LEFT), PadAction.Click(Stick.LEFT, down = false),
+            PadAction.Click(Stick.RIGHT), PadAction.Click(Stick.RIGHT, down = false)
+        ), emitted)
+    }
+
     // --- reset -------------------------------------------------------------
 
     @Test

@@ -680,7 +680,10 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             leftTriggerValue = event.getAxisValue(PadNames.AXIS_BRAKE),
             rightTriggerValue = event.getAxisValue(PadNames.AXIS_GAS),
             nowMs = event.eventTime,
-            deviceId = event.deviceId
+            deviceId = event.deviceId,
+            // The right stick is ABS_Z/ABS_RZ on this handheld (measured), not RX/RY.
+            rightX = event.getAxisValue(PadNames.AXIS_Z),
+            rightY = event.getAxisValue(PadNames.AXIS_RZ)
         )
         ticker.ensureRunning()
         return true
@@ -742,6 +745,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             PadAction.Secondary -> notify("Y does nothing yet")
             PadAction.Menu -> Unit
             PadAction.Refresh -> notify("refresh")
+            // The right stick and the stick clicks belong to readers; elsewhere they do nothing.
+            is PadAction.Pan, is PadAction.Click -> Unit
         }
     }
 
