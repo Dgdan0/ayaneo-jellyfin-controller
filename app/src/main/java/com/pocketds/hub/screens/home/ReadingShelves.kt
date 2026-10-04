@@ -185,15 +185,21 @@ object ReadingShelves {
             ?: books.lastOrNull { (it.progress?.percentage ?: 0.0) > 0.0 && it.progress?.completed != true }?.number.orEmpty()
     }
 
-    /** A series' covers for a fan: the book being read in front, then its first books in order. */
+    /**
+     * A series' covers for a fan: the book being read in front, then its first
+     * books in order. Up to four, as Glass's fan holds; Classic's shows three.
+     */
     fun fanCovers(series: ReadingWork): List<String> {
         val books = series.sections.flatMap { it.items }
         val on = onNumber(series)
         val front = series.continueAt?.artwork?.takeIf(String::isNotBlank)
             ?: books.firstOrNull { it.number == on }?.artwork.orEmpty()
-        return (listOf(front) + books.map { it.artwork }).filter(String::isNotBlank).distinct().take(3)
+        return (listOf(front) + books.map { it.artwork }).filter(String::isNotBlank).distinct().take(FAN_COVERS)
             .ifEmpty { listOf(series.artwork).filter(String::isNotBlank) }
     }
+
+    /** The most covers a fan holds. */
+    const val FAN_COVERS = 4
 
     fun yourSeries(collections: List<ReadingWork>): List<SeriesShelfItem> = collections
         .filter { it.entityType == "collection" }

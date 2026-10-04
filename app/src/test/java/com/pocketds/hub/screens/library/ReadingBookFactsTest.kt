@@ -77,4 +77,51 @@ class ReadingBookFactsTest {
         assertEquals("Annual 1965", ReadingBookFacts.issueTitle(issue.copy(title = "Annual 1965"), "comic"))
         assertEquals("36 pages · Not started", ReadingBookFacts.issueLine(issue))
     }
+
+    @Test
+    fun `a page's eyebrow says what it is and where it belongs`() {
+        val lightBringer = ReadingWork(title = "Light Bringer", series = "Red Rising", seriesIndex = 6.0)
+        assertEquals("Book 6 · Red Rising", ReadingBookFacts.eyebrow(lightBringer))
+        assertEquals("Red Rising", ReadingBookFacts.eyebrow(lightBringer.copy(seriesIndex = 0.0)))
+        assertEquals("Series · Pierce Brown", ReadingBookFacts.eyebrow(ReadingWork(entityType = "collection", title = "Red Rising", authors = listOf("Pierce Brown"))))
+        assertEquals("Series", ReadingBookFacts.eyebrow(ReadingWork(entityType = "collection")))
+        assertEquals("Comic · My Marvelous Year", ReadingBookFacts.eyebrow(ReadingWork(kind = "comic"), "My Marvelous Year"))
+        assertEquals("Manga", ReadingBookFacts.eyebrow(ReadingWork(kind = "manga")))
+        assertEquals("Book", ReadingBookFacts.eyebrow(ReadingWork(title = "Dark Matter")))
+        assertEquals("Audiobook", ReadingBookFacts.eyebrow(ReadingWork(kind = "audiobook")))
+    }
+
+    @Test
+    fun `a book also being read says whose or which it is and how far in`() {
+        val darkMatter = ReadingWork(title = "Dark Matter", authors = listOf("Blake Crouch"),
+            progress = com.pocketds.hub.model.ReadingProgress(percentage = 0.0325))
+        assertEquals("Blake Crouch · 3%", ReadingBookFacts.miniLine(darkMatter))
+        // Opened is never 0%.
+        assertEquals("Mistborn #1 · 1%", ReadingBookFacts.miniLine(ReadingWork(series = "Mistborn", seriesIndex = 1.0,
+            progress = com.pocketds.hub.model.ReadingProgress(percentage = 0.004))))
+        assertEquals("Blake Crouch · Finished", ReadingBookFacts.miniLine(darkMatter.copy(
+            progress = com.pocketds.hub.model.ReadingProgress(percentage = 1.0, completed = true))))
+        assertEquals("Blake Crouch", ReadingBookFacts.miniLine(darkMatter.copy(progress = null)))
+    }
+
+    @Test
+    fun `a series' continue card says which book, how far and which page`() {
+        val point = com.pocketds.hub.model.ReadingContinue(title = "Light Bringer", number = "6", percentage = 0.4945)
+        assertEquals("Book 6 · 49% · page 363 of 735", ReadingBookFacts.continueLine(point, "book", 735))
+        assertEquals("Book 6 · 49%", ReadingBookFacts.continueLine(point, "book", 0))
+        assertEquals("Issue 51 · 1%", ReadingBookFacts.continueLine(point.copy(number = "51", percentage = 0.002), "comic", 0))
+        assertEquals("Book 1", ReadingBookFacts.continueLine(point.copy(number = "1", percentage = 0.0), "book", 300))
+    }
+
+    @Test
+    fun `formats come in one order whatever order the hub sends`() {
+        assertEquals(listOf("ebook", "audiobook", "readaloud"),
+            ReadingBookFacts.formats(ReadingWork(availability = listOf("readaloud", "ebook", "audiobook"))))
+        assertEquals(listOf("audiobook"), ReadingBookFacts.formats(ReadingWork(availability = listOf("audiobook"))))
+        // A book's own page carries editions rather than the list.
+        assertEquals(listOf("ebook", "audiobook"), ReadingBookFacts.formats(ReadingWork(editions = listOf(
+            ReadingEdition(kind = "book", availability = "available"),
+            ReadingEdition(kind = "audiobook", availability = "available"),
+            ReadingEdition(kind = "readaloud", availability = "missing")))))
+    }
 }

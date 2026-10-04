@@ -14,6 +14,21 @@ object ReadingTransferSummary {
         else -> status.replace('_', ' ').replaceFirstChar { it.uppercase() }.ifBlank { "Status unavailable" }
     }
 
+    /**
+     * Glass: the state in a word or two, for the chip beside a transfer's title
+     * ("Failed", "In library", "Importing"); the line under it says the rest.
+     */
+    fun chipLabel(status: String, failed: Boolean): String = when {
+        failed || status == "failed" -> "Failed"
+        status == "imported" -> "In library"
+        status == "completed" || status == "importing" -> "Importing"
+        status == "downloading" -> "Downloading"
+        status == "queued" -> "Queued"
+        status == "retry_pending" -> "Retry ready"
+        status == "retrying" -> "Retrying"
+        else -> status.replace('_', ' ').replaceFirstChar { it.uppercase() }.ifBlank { "Unknown" }
+    }
+
     fun showProgress(status: String, failed: Boolean): Boolean =
         !failed && status in setOf("downloading", "retrying")
 

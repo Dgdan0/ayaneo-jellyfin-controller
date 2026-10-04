@@ -242,7 +242,8 @@ class ReadingShelvesTest {
         val shelf = ReadingShelves.yourSeries(listOf(mistborn, unread, redRising, finished))
         assertEquals(listOf("Red Rising", "Mistborn"), shelf.map { it.title })
         assertEquals("6 books · on #6", shelf[0].line)
-        assertEquals(listOf("/art/6", "/art/1", "/art/2"), shelf[0].covers)
+        // Up to four: the book you are on, then the first books in order.
+        assertEquals(listOf("/art/6", "/art/1", "/art/2", "/art/3"), shelf[0].covers)
         assertEquals("3 books · on #1", shelf[1].line)
     }
 }

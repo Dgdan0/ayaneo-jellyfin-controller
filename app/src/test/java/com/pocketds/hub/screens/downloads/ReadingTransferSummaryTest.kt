@@ -28,6 +28,15 @@ class ReadingTransferSummaryTest {
         assertEquals("Adding to Library", ReadingTransferSummary.fallback("completed", false))
     }
 
+    @Test fun `a transfer's chip says its state in a word or two`() {
+        assertEquals("Failed", ReadingTransferSummary.chipLabel("downloading", true))
+        assertEquals("In library", ReadingTransferSummary.chipLabel("imported", false))
+        assertEquals("Importing", ReadingTransferSummary.chipLabel("completed", false))
+        assertEquals("Downloading", ReadingTransferSummary.chipLabel("downloading", false))
+        assertEquals("Retry ready", ReadingTransferSummary.chipLabel("retry_pending", false))
+        assertEquals("Awaiting choice", ReadingTransferSummary.chipLabel("awaiting_choice", false))
+    }
+
     @Test fun `failed and queued transfers have actionable summaries`() {
         assertEquals("Needs attention", ReadingTransferSummary.fallback("failed", true))
         assertEquals("Waiting for BookKeeprr", ReadingTransferSummary.fallback("queued", false))

@@ -110,5 +110,57 @@ object ReadingBookFacts {
         comicLine(item.progress)
     ).joinToString(" · ")
 
+    /**
+     * Glass: the line over a book page's title. "Book 6 · Red Rising" in a
+     * series, "Series · Pierce Brown" on a series' page, "Comic · My Marvelous
+     * Year" on a run (its [library], when known), else what it is: "Book",
+     * "Audiobook".
+     */
+    fun eyebrow(work: ReadingWork, library: String = ""): String {
+        kindTag(work.kind)?.let { kind -> return listOf(kind, library).filter(String::isNotBlank).joinToString(" · ") }
+        if (work.entityType == "collection") return listOf("Series", work.byline).filter(String::isNotBlank).joinToString(" · ")
+        if (work.series.isNotBlank()) return if (work.seriesNumber.isNotBlank()) "Book ${work.seriesNumber} · ${work.series}" else work.series
+        return if (work.kind == "audiobook") "Audiobook" else "Book"
+    }
+
+    /**
+     * Under a book you are also reading, on Glass's Books home: "Blake Crouch ·
+     * 3%", "Mistborn Original Trilogy #1 · 1%". Started is never 0%.
+     */
+    fun miniLine(work: ReadingWork): String = listOfNotNull(
+        work.cardSubtitle.takeIf(String::isNotBlank),
+        work.progress?.let { p ->
+            when {
+                p.completed -> "Finished"
+                p.percentage > 0 -> "${(p.percentage * 100).toInt().coerceAtLeast(1)}%"
+                else -> null
+            }
+        }
+    ).joinToString(" · ")
+
+    /**
+     * Glass: under "Continue reading · Light Bringer" on a series' page:
+     * "Book 6 · 49% · page 363 of 735", where [pages] is that book's length
+     * (0 when unknown); "Issue 51 · 1%" in a comic run.
+     */
+    fun continueLine(point: com.pocketds.hub.model.ReadingContinue, kind: String, pages: Int): String = listOfNotNull(
+        point.number.takeIf(String::isNotBlank)?.let { (when (kind) { "comic" -> "Issue "; "manga" -> "Chapter "; else -> "Book " }) + it },
+        point.percentage.takeIf { it > 0 }?.let { "${(it * 100).toInt().coerceAtLeast(1)}%" },
+        pages.takeIf { it > 0 && point.percentage > 0 }?.let { "page ${(point.percentage * it).toInt().coerceIn(1, it)} of $it" }
+    ).joinToString(" · ")
+
+    /**
+     * What a book can be opened as, always in this order: ebook, audiobook,
+     * read along. From the hub's list, else from the editions it has.
+     */
+    fun formats(work: ReadingWork): List<String> {
+        val known = work.availability.ifEmpty {
+            work.editions.filter { it.availability == "available" }.map { if (it.kind == "book") "ebook" else it.kind }
+        }
+        return FORMATS.filter { it in known }
+    }
+
+    private val FORMATS = listOf("ebook", "audiobook", "readaloud")
+
     private fun plural(n: Int, one: String) = if (n == 1) "1 $one" else "$n ${one}s"
 }

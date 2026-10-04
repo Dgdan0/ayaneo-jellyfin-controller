@@ -16,9 +16,15 @@ import kotlinx.coroutines.*
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.showStatus
 
-/** Missing volumes remain inspectable; acquisition still goes through the explicit request flow. */
+/**
+ * Missing volumes remain inspectable; acquisition still goes through the explicit request flow.
+ * On Glass it is a book page: the cover (dimmed, it is not here) beside the words.
+ */
 class MissingReadingItemScreen(private val api:HubApi,private val item:ReadingSectionItem,private val ring:()->Boolean):Screen {
     override val title=item.title
+    override val showsOwnTitle: Boolean get() = glass
+    override val pageArtwork: String? get() = item.artwork.takeIf(String::isNotBlank)
+    private var glass = false
     private lateinit var host:ScreenHost
     private lateinit var header:DetailHeaderView
     private lateinit var button:TextView
@@ -28,19 +34,30 @@ class MissingReadingItemScreen(private val api:HubApi,private val item:ReadingSe
     private var searchJob:Job?=null
     override fun onCreateView(host:ScreenHost,container:ViewGroup):View {
         this.host=host;val context=host.viewContext;val colors=Theme.colors(context)
+        glass=Theme.onGlass(colors)
         val root=FrameLayout(context).apply {setBackgroundColor(colors.background)}
-        header=DetailHeaderView(context,colors,ring).apply {
+        header=DetailHeaderView(context,colors,ring,glass).apply {
+            if (glass) {
+                book = true
+                squareCover = item.kind == ReadingType.AUDIOBOOK
+                eyebrowView.text = listOfNotNull(item.number.takeIf(String::isNotBlank)?.let { "Book $it" }, "Not in your library").joinToString(" · ")
+                poster.alpha = .42f
+            }
             titleView.text=item.title;subtitleView.text=item.authors.joinToString(", ");subtitleView.visibility=View.VISIBLE
             metadataView.text=listOfNotNull(item.number.takeIf(String::isNotBlank)?.let{"Book $it"},"Missing from library").joinToString(" · ")
             overview.bind("This volume is part of the collection but is not available to read. Search for an edition to see its details and available request options.")
             bindArtwork("book",null,item.artwork.takeIf(String::isNotBlank)?.let(api::imageUrl),Artwork.loader(api, context))
         }
-        button=TextView(context).apply {
-            text="Find this book";textSize=14f;DetailStyler.action(this,colors,true);FocusDecorator.attach(this,ring,scale=false)
-            setPadding(Styler.dpInt(context,16f),0,Styler.dpInt(context,16f),0);activateOnTap(::search)
-        }
-        header.actions.addView(button)
-        status=TextView(context).apply{textSize=13f;setTextColor(colors.mutedText)}
+        // Glass: the white pill, as a book page's main action.
+        button=(if (glass) PillButton.create(context,colors,"Find this book",AppIcon.SEARCH,primary=true,heightDp=31f,glass=true)
+        else TextView(context).apply {
+            text="Find this book";textSize=14f;DetailStyler.action(this,colors,true)
+            setPadding(Styler.dpInt(context,16f),0,Styler.dpInt(context,16f),0)
+        }).apply { FocusDecorator.attach(this,ring,scale=false);activateOnTap(::search) }
+        header.actions.addView(button, LinearLayout.LayoutParams(-2, -2).apply {
+            if (glass) marginStart = -Styler.dpInt(context, PillButton.RING_DP)
+        })
+        status=TextView(context).apply{textSize=13f;setTextColor(if (glass) com.pocketds.hub.ui.glass.GlassColors.QUIET else colors.mutedText)}
         header.continuation.addView(status)
         root.addView(FocusScrollView(context).apply{addView(header)},FrameLayout.LayoutParams(-1,-1))
         choices=ChoiceOverlay(context,colors,ring,sidePanel=true);root.addView(choices,FrameLayout.LayoutParams(-1,-1))

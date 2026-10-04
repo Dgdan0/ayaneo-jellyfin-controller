@@ -15,6 +15,8 @@ import com.pocketds.hub.ui.DetailStyler
 import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
+import com.pocketds.hub.ui.Theme
+import com.pocketds.hub.model.ReadingType
 import kotlin.math.roundToInt
 
 /** What a book in a series row says under its cover. Pure, so it is tested. */
@@ -50,10 +52,17 @@ object SeriesBookLabels {
 /**
  * One series' books in reading order, as cards. The series page and the author
  * page both show a series this way; the caller decides what a card does.
+ *
+ * On Glass they are the prototype's book cards: 82 x 123dp covers 12dp apart
+ * from the page's 22dp edge, an audiobook's square.
  */
 object SeriesBookStrip {
     private const val ARTWORK_DP = 120
     private const val CARD_DP = 88
+    private const val GLASS_ARTWORK_DP = 123
+    private const val GLASS_CARD_DP = 82
+    private const val GLASS_GAP_DP = 12
+    private const val GLASS_EDGE_DP = 22
 
     fun create(
         context: Context,
@@ -64,17 +73,22 @@ object SeriesBookStrip {
         bind: (card: DetailArtworkCardView, item: ReadingSectionItem) -> Unit
     ): View = FocusHorizontalScrollView(context).apply {
         isHorizontalScrollBarEnabled = false; clipToPadding = false; clipChildren = false
-        val clearance = DetailLayout.focusClearance(DetailLayout.posterCardHeight(ARTWORK_DP, resources.configuration.fontScale)).coerceAtLeast(10)
-        setPadding(dp(context, 24), dp(context, clearance), dp(context, 24), dp(context, clearance))
+        val glass = Theme.onGlass(colors)
+        val artwork = if (glass) GLASS_ARTWORK_DP else ARTWORK_DP
+        val clearance = DetailLayout.focusClearance(DetailLayout.posterCardHeight(artwork, resources.configuration.fontScale)).coerceAtLeast(10)
+        val edge = if (glass) GLASS_EDGE_DP else 24
+        setPadding(dp(context, edge), dp(context, clearance), dp(context, edge), dp(context, clearance))
         descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL; clipChildren = false
             items.forEach { item ->
                 addView(DetailArtworkCardView(context, colors, ringVisible).apply {
-                    artworkHeight(ARTWORK_DP)
-                    layoutParams = LinearLayout.LayoutParams(dp(context, CARD_DP), ViewGroup.LayoutParams.WRAP_CONTENT)
-                        .apply { marginEnd = dp(context, 14) }
-                    titleView.text = item.title; titleView.minLines = 2
+                    // Glass: an audiobook's cover is square.
+                    artworkHeight(if (glass && item.kind == ReadingType.AUDIOBOOK) GLASS_CARD_DP else artwork)
+                    layoutParams = LinearLayout.LayoutParams(dp(context, if (glass) GLASS_CARD_DP else CARD_DP), ViewGroup.LayoutParams.WRAP_CONTENT)
+                        .apply { marginEnd = dp(context, if (glass) GLASS_GAP_DP else 14) }
+                    titleView.text = item.title
+                    if (!glass) titleView.minLines = 2
                     subtitleView.text = SeriesBookLabels.subtitle(item.number, item.isAvailable, item.progress, item.formats)
                     available(item.isAvailable)
                     marks(item.progress?.percentage ?: 0.0, item.progress?.completed == true)

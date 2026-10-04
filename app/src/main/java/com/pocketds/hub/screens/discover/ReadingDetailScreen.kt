@@ -37,7 +37,14 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-/** Provider detail and the explicit BookKeeprr acquisition form. */
+/**
+ * Provider detail and the explicit BookKeeprr acquisition form.
+ *
+ * On Glass it is the prototype's book request page (`.pg-breq`): the cover at
+ * the left (square for an audiobook), "EBOOK · NOT IN YOUR LIBRARY" over the
+ * title, Find a download as the white pill, and the form as the glass side
+ * sheet.
+ */
 class ReadingDetailScreen(
     private val api: HubApi,
     private val item: ReadingItem,
@@ -46,6 +53,10 @@ class ReadingDetailScreen(
     override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val title: String = item.title
     override val focusOnShow: Boolean = false
+    /** Glass: the title beside the cover heads the page. */
+    override val showsOwnTitle: Boolean get() = glass
+    override val pageArtwork: String? get() = resolvedScreen?.pageArtwork ?: item.cover.takeIf(String::isNotBlank)
+    private var glass = false
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var host: ScreenHost? = null
@@ -75,8 +86,14 @@ class ReadingDetailScreen(
         if (releaseTargets.isEmpty() && requestSeriesId > 0) releaseTargets = listOf(ReadingRequestTarget(requestSeriesId, item.title))
         requested = requestSeriesId > 0
         colors = Theme.colors(context)
+        glass = Theme.onGlass(colors)
         val loader = Artwork.loader(api, context)
-        header = DetailHeaderView(context, colors, ringVisible).apply {
+        header = DetailHeaderView(context, colors, ringVisible, glass).apply {
+            if (glass) {
+                book = true
+                squareCover = item.contentType == ReadingType.AUDIOBOOK
+                eyebrowView.text = eyebrow()
+            }
             compact=true;titleView.text=item.title
             metadataView.text=buildList {
                 if(item.author.isNotBlank())add(item.author)
@@ -90,11 +107,15 @@ class ReadingDetailScreen(
             if(item.inLibrary) {stateView.text="Tracked in BookKeeprr";stateView.visibility=View.VISIBLE}
         }
         if(ReadingRequestActionPolicy.showAction(item.inLibrary, item.actions.contains("request"), releaseTargets.isNotEmpty())) {
-            requestButton=TextView(context).apply {
-                text=if (requested && releaseTargets.isNotEmpty()) "Choose release" else if (requested) "Open Transfers" else "Find a download"
-                contentDescription=if (requested && releaseTargets.isNotEmpty()) "Choose release for ${item.title}" else if (requested) "Open Transfers for ${item.title}" else "Choose how to download ${item.title}"
+            val label = if (requested && releaseTargets.isNotEmpty()) "Choose release" else if (requested) "Open Transfers" else "Find a download"
+            // Glass: the white pill, as a title page's Request.
+            requestButton=(if (glass) com.pocketds.hub.ui.PillButton.create(context, colors, label, com.pocketds.hub.ui.AppIcon.DOWNLOAD,
+                primary = true, heightDp = 31f, glass = true) else TextView(context).apply {
+                text=label
                 textSize=14f
                 DetailStyler.action(this,colors,primary=true);setPadding(dp(16),0,dp(16),0)
+            }).apply {
+                contentDescription=if (requested && releaseTargets.isNotEmpty()) "Choose release for ${item.title}" else if (requested) "Open Transfers for ${item.title}" else "Choose how to download ${item.title}"
                 FocusDecorator.attach(this,ringVisible,scale=false)
                 activateOnTap {
                     if (requested && latestAcquisition?.stage == ReadingAcquisitionState.Stage.IMPORTED) host.switchSection(1)
@@ -104,12 +125,16 @@ class ReadingDetailScreen(
                     else if (!flow.busy) flow.start(item)
                 }
             }
-            header.actions.addView(requestButton)
+            header.actions.addView(requestButton, android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                // Glass: the pill lines up with the words; its ring has the room left of it.
+                if (glass) marginStart = -dp(com.pocketds.hub.ui.PillButton.RING_DP.toInt())
+            })
         }
-        status=TextView(context).apply{textSize=12f;setTextColor(colors.mutedText)}
+        val quiet = if (glass) com.pocketds.hub.ui.glass.GlassColors.QUIET else colors.mutedText
+        status=TextView(context).apply{textSize=12f;setTextColor(quiet)}
         header.continuation.addView(status)
         val sourceText=listOfNotNull(item.source.takeIf(String::isNotBlank),item.isbn.takeIf(String::isNotBlank)?.let{"ISBN $it"}).joinToString(" · ")
-        if(sourceText.isNotBlank())header.continuation.addView(TextView(context).apply{text=sourceText;textSize=12f;setTextColor(colors.mutedText);setPadding(0,dp(12),0,0)})
+        if(sourceText.isNotBlank())header.continuation.addView(TextView(context).apply{text=sourceText;textSize=12f;setTextColor(quiet);setPadding(0,dp(12),0,0)})
 
         val frame = FrameLayout(context)
         rootFrame=frame
@@ -117,7 +142,8 @@ class ReadingDetailScreen(
             FocusScrollView(context).apply { addView(header) },
             FrameLayout.LayoutParams(MATCH, MATCH)
         )
-        form = FormOverlay(context, colors, ringVisible)
+        // Glass: the form is the shared side sheet, as a film's request is.
+        form = FormOverlay(context, colors, ringVisible, glass = glass)
         frame.addView(form, FrameLayout.LayoutParams(MATCH, MATCH))
         seriesForm = ReadingSeriesSelectionOverlay(
             context, colors, ringVisible, loader, api::imageUrl
@@ -129,7 +155,7 @@ class ReadingDetailScreen(
             overlay = { form },
             seriesOverlay = { seriesForm },
             onStatus = { message, failed ->
-                status.setTextColor(if (failed) colors.dangerText else colors.mutedText)
+                status.setTextColor(if (failed) colors.dangerText else quiet)
                 status.text = message
             },
             onNotify = host::notify,
@@ -265,7 +291,8 @@ class ReadingDetailScreen(
     private fun showAcquisitionState(state: ReadingAcquisitionState) {
         latestAcquisition = state
         status.text = state.message
-        status.setTextColor(if (state.stage == ReadingAcquisitionState.Stage.FAILED) colors.dangerText else colors.mutedText)
+        status.setTextColor(if (state.stage == ReadingAcquisitionState.Stage.FAILED) colors.dangerText
+            else if (glass) com.pocketds.hub.ui.glass.GlassColors.QUIET else colors.mutedText)
         requestButton?.apply {
             text = state.nextAction
             contentDescription = "${state.nextAction} for ${item.title}. ${state.message}"
@@ -277,6 +304,25 @@ class ReadingDetailScreen(
         resolvedScreen?.onDestroyView()
         scope.cancel()
         host = null
+    }
+
+    /**
+     * Glass: "EBOOK · NOT IN YOUR LIBRARY", the kind in the eyebrow's white and
+     * where it stands in the accent, as a film you can request says it.
+     */
+    private fun eyebrow(): CharSequence {
+        val kind = when (item.contentType) {
+            ReadingType.EBOOK -> "Ebook"
+            ReadingType.AUDIOBOOK -> "Audiobook"
+            ReadingType.LIGHT_NOVEL -> "Light novel"
+            else -> ReadingType.label(item.contentType)
+        }
+        val where = if (item.inLibrary) "In BookKeeprr" else "Not in your library"
+        return android.text.SpannableStringBuilder("$kind · ").apply {
+            val from = length
+            append(where)
+            setSpan(android.text.style.ForegroundColorSpan(colors.accent), from, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
     }
 
     private fun dp(value: Int) = Styler.dpInt(host?.viewContext ?: error("screen detached"), value.toFloat())

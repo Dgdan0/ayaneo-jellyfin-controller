@@ -636,12 +636,12 @@ Most of these exist because several screens had drifted copies of the same thing
 | Reacting to offline downloads changing | `offline/OfflineChanges` (start in onShow, stop in onHide) |
 | Sorting a library | `ui/LibrarySortControls` (field button + one-press direction; on Glass two control buttons); wording from `SortPreference.directionLabel` |
 | A series' books as cards / their labels | `screens/library/SeriesBookStrip` + `SeriesBookLabels` ("#2 · 40% · Audio"); series page, author page and a book's own page |
-| A book's facts line | `ReadingBookFacts.line` ("Book 6 of Red Rising · 2023 · 735 pages"); how far through: `ReadingBookFacts.progress` ("49% · page 363 of 735") |
+| A book's facts line | `ReadingBookFacts.line` ("Book 6 of Red Rising · 2023 · 735 pages"); how far through: `ReadingBookFacts.progress` ("49% · page 363 of 735"). Glass: `eyebrow` over a page's title ("Book 6 · Red Rising", "Series · Pierce Brown", "Comic · My Marvelous Year", the library from `ReadingLibraryNames`), `miniLine` under a book also being read ("Blake Crouch · 3%"), `formats` (ebook, audiobook, read along, always in that order), `continueLine` on a series' continue card ("Book 6 · 49% · page 363 of 735") |
 | A book's place in its series on a card | `ReadingWork.cardSubtitle` ("Red Rising #6") and `seriesNumber` |
 | Books Library's view: Series, Authors, or every book on its own | `ReadingLibraryGridScreen` (`view`; Books asks the hub for `view=works`); each view's order in `DomainPreferences` (`sort`, `bookSort`, `readingView`) |
 | A person as a round portrait, the ring round it | `DetailArtworkCardView.portrait` (an author, a title's cast row in `CastRowView`) |
-| Books Home's top: the book being read, the series being read | `screens/home/ContinueReadingView` (Resume reading opens `ReadingWorkScreen(openReader = true)`), `SeriesStackView` fed by `ReadingShelves.yourSeries` |
-| A series as a fan of covers (Books Home, the series page) | `ui/CoverFanView`; which covers from `ReadingShelves.fanCovers`, the book being read from `onNumber`; "On #6 · 1 of 6 finished" from `ReadingBookFacts.seriesProgress` |
+| Books Home's top: the book being read, the series being read | `screens/home/ContinueReadingView` (Resume reading opens `ReadingWorkScreen(openReader = true)`; on Glass no card, the cover at full size with the words beside its foot, Resume reading white), `SeriesStackView` fed by `ReadingShelves.yourSeries` |
+| A series as a fan of covers (Books Home, the series page) | `ui/CoverFanView`; which covers from `ReadingShelves.fanCovers` (up to four), the book being read from `onNumber`; "On #6 · 1 of 6 finished" from `ReadingBookFacts.seriesProgress`. `glass = true` is the prototype's fan: 64dp covers leaning about their feet, the book being read on top at the right, the outer two leaning further with focus (`spread`) |
 | Books Home rows | `ReadingShelves`: `onePerSeries`, `nextInSeries`, `BUILT_IN` (rows the app fills; list actions only on the person's own) |
 | Reading times from the hub | `ReadingShelves.timestamp` (Storyteller writes `2026-09-27 03:16:47`, UTC with no zone) |
 | Hub: an author page id | `readingAuthorRef` (Authors view and a book's author link) |
@@ -687,14 +687,16 @@ Most of these exist because several screens had drifted copies of the same thing
 | Hub: a service's own error sentence | `upstreamText` / `upstreamMessage` / `serviceOf` |
 | Hub: a title's request state changed | `invalidateTitle` (search, Discover, detail) |
 | An artwork's Glass colours on the Pocket | `ui/glass/ArtworkColors.shared(context, api)`: `prefetch` what a screen shows, `request` what is in focus, `peek`; when to ask again is `ArtworkColorBook` |
-| A Glass panel, bar and page | `ui/glass/GlassColors` (`panel`, `bar`, `sheet` for a side sheet or dialog over a screen's own words, `over`, `contrast`), `GlassPanelDrawable` (`attach(view, radius)`: a view's background that follows the page; `retint`; `edge(color)` for an edge that says something, such as amber), `AmbientLayerView` (`show(path, palette)`) |
+| A Glass panel, bar and page | `ui/glass/GlassColors` (`panel`, `bar`, `sheet` for a side sheet or dialog over a screen's own words, `over`, `contrast`; the words on the page by loudness: `EYEBROW`, `FACTS`, `QUIET`, and `TRACK` under a bar), `GlassPanelDrawable` (`attach(view, radius)`: a view's background that follows the page; `retint`; `edge(color)` for an edge that says something, such as amber), `AmbientLayerView` (`show(path, palette)`) |
 | A Glass search field | `ui/glass/GlassSearchField.style`: a pill of the page's glass inside a taller target, ringed on focus (Discover, the Library) |
 | A library on the Glass Library root | `screens/library/LibraryTileView` (the picture, soft and dimmed, the hub's `fan` of posters, a glass label); where the posters sit, what the label and the root's line say: `LibraryTiles` (`slots`, `fan`, `summary`, `kindLabel`). The root is `LibraryRootView`; a tile pushes `LibraryFolderScreen` |
 | Glass or Classic | `settings/LookSettings` (`Look.fromStored`: Glass unless Classic is stored; `Look.dark`: Glass is always dark) and `Theme.isGlass(context)`. A change rebuilds the Activity, as dark and light do. Classic goes once #11 is finished |
 | The Glass page: which artwork it shows | A screen's `pageArtwork` (the focused card, a title's backdrop, the cover in focus), re-read on focus changes, `showCurrent` and `ScreenHost.pageArtworkChanged`; `nav/PageArtwork` (`next`: none keeps the last, `title`); `ScreenHost.prefetchArtwork` for the cards a row binds. `HubActivity.showArtwork` feeds `AmbientLayerView`, the bars' `setPalette` and `GlassPage` |
 | The Glass page's colours, for what is drawn over it | `ui/glass/GlassPage`: `palette(context)` for a panel opening now; `follow(view) { palette -> … }` for glass that stays on screen (the bars, a Details pill, a play disc, a day chip), held only while the view is attached. `Theme.onGlass(colors)` decides, so the player's video palette stays solid |
 | Artwork fading into the Glass page | `ui/glass/FadedImageView`: `stops` (opacity down its height) and a `shade` for words over it, both inside its own layer, so neither ends in a line; `HERO` / `HERO_SHADE` for Home's hero, `TITLE` / `TITLE_SHADE` for a title page's backdrop (`DetailHeaderView(glass = true)`) |
-| A Glass tile or poster | `LandscapeCardView(glass = true)` and `EpisodeCardView(glass = true)` (11dp corners, 3dp ring and `ui/glass/GlassStillMarks`: the white progress bar inside the still, the accent tick, the glass play disc on focus; an episode's UP NEXT at its top left) and `PosterCardView(glass = true)` (a white count pill, an accent tick, where a title stands as a glass chip at the top left, `setDayChip`, and with captions the title on one bold line over the year); Discover's featured card is `DiscoverFeatureCardView(glass = true)`. Home, title pages and Discover opt in, other screens at their milestone |
+| A Glass tile or poster | `LandscapeCardView(glass = true)` and `EpisodeCardView(glass = true)` (11dp corners, 3dp ring and `ui/glass/GlassStillMarks`: the white progress bar inside the still, the accent tick, the glass play disc on focus; an episode's UP NEXT at its top left) and `PosterCardView(glass = true)` (a white count pill, an accent tick, where a title stands as a glass chip at the top left, `setDayChip`, and with captions the title on one bold line over the year; a book's cover keeps its words on the page, an audiobook's is square, a comic's kind sits on a dark pill); Discover's featured card is `DiscoverFeatureCardView(glass = true)`. Home, title pages and Discover opt in, other screens at their milestone |
+| How far in, drawn inside a picture (a still, a poster, a cover, a book also being read) | `ui/glass/GlassProgressBar`: a 4dp white bar on a faint track with round ends, hidden at nothing; the accent where a book is being read. `GlassStillMarks` and `PosterCardView(glass = true)` carry it |
+| A row's heading on Glass, with a quiet count after it ("Also reading 2", "Volume 1961 147 issues") | `ui/glass/GlassHeading` (`create`, `text`); the caller sets the padding that lines it up |
 | A title's pipeline as Glass chips | `screens/discover/PipelineChip` (`Tone.of(state)`: done in the accent, the stage under way amber with its dot pulsing, failed or stuck red, the rest waiting) |
 | The request form | `ui/FormOverlay` over `state/FormModel`; `glass = true` draws it into the shared side sheet, a heading where each part begins (`FormRow.section`), "‹ value ›" on a row that steps with left and right, Request white at the foot |
 | A Jellyfin profile's tile | `screens/home/ProfileAvatar` (`colors`: the profiles in alphabetical order take the palette, so four profiles get four colours; `initial`); Glass's "Who is watching?" is `ProfilePickerView`, a centred `SidePanelView` (`centredWidthDp`, `wrapsHeight`, `centreHeading`) |
@@ -936,6 +938,24 @@ season plus each episode that has aired; choosing an episode performs a Sonarr `
 The adapter shapes were checked against Jellyfin 10.11.8 on this machine. In particular,
 `/Shows/{id}/Episodes` accepts the season ID and needs `isMissing=false` so an API-key caller does
 not receive virtual missing episodes.
+
+### Books in Glass (#11)
+
+Books Home is the prototype's: the book being read at full cover size with the words beside its foot
+(`ContinueReadingView`), Resume reading white and Details glass; the other books being read under it
+as glass rows two to a line, with their formats as glass chips; Your series as fans (`CoverFanView`);
+then rows of glass covers with their captions, comics with their kind pill. The page takes the colours
+of the cover in focus. A book's page is `DetailHeaderView(glass = true)` with `book` set: no backdrop,
+the cover at the left (square for an audiobook, a series' fan in its place), the eyebrow
+(`ReadingBookFacts.eyebrow`) over the title, the formats as glass chips (missing ones dimmed), the bar
+in the accent, the main action white and the toggles glass. A series' page adds its continue card; a
+comic run of several volumes shows one volume's issues at a time, picked with glass chips. An author's
+page is a round portrait in a white ring over the series as glass pills. The Books Library page is the
+library's name, Series | Authors | Books as a glass capsule with Sort, and seven columns of covers
+(64dp portraits for Authors). Books Discover is the filters as a glass capsule beside the search over
+rows of captioned covers; its request page is a book page with "EBOOK · NOT IN YOUR LIBRARY" and the
+form as the glass side sheet. The Books Activity tab's transfers are glass rows with the state as a
+chip (`ReadingTransferSummary.chipLabel`).
 
 ### Discover, as built
 

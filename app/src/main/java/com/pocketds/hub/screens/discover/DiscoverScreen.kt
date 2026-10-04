@@ -113,6 +113,8 @@ class DiscoverScreen(
     private lateinit var searchStatus: View
     private var tab = TAB_DISCOVER
     private val readingFilterButtons = mutableMapOf<String, ReadingCategoryTabView>()
+    /** Glass: the book filters as a glass capsule beside the search, as the prototype's Books Discover. */
+    private var readingCapsule: com.pocketds.hub.ui.BlobSegmentedView? = null
     private lateinit var statusLine: TextView
     private lateinit var broaderSearchButton: TextView
     private lateinit var rowsList: RecyclerView
@@ -196,9 +198,10 @@ class DiscoverScreen(
         readingFilters = FocusHorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
-            addView(buildReadingFilters())
+            // Glass: the filters are a capsule in the row with the search, built there.
+            if (!glass) addView(buildReadingFilters())
         }
-        root.addView(readingFilters, LinearLayout.LayoutParams(MATCH, WRAP))
+        if (!glass) root.addView(readingFilters, LinearLayout.LayoutParams(MATCH, WRAP))
 
         tabs = com.pocketds.hub.ui.BlobSegmentedView(context, colors, ringVisible).apply {
             heightDp = if (glass) 34f else 38f
@@ -277,6 +280,26 @@ class DiscoverScreen(
                 marginStart = Styler.dpInt(context, 8f)
                 marginEnd = Styler.dpInt(context, 2f)
             })
+            if (glass) {
+                // Books: All, Ebooks, Audiobooks... as one glass capsule, in the
+                // filters' own scroller so a narrow screen can still reach them all.
+                readingCapsule = com.pocketds.hub.ui.BlobSegmentedView(context, colors, ringVisible).apply {
+                    heightDp = 34f
+                    textSp = 12f
+                    useGlassTrack()
+                    setOptions(ReadingType.filters.map { (wire, label) ->
+                        com.pocketds.hub.ui.BlobSegmentedView.Option(wire, label, "Show $label")
+                    }, readingType)
+                    onPick = ::selectReadingType
+                    onOptionFocused = { host.refreshHints() }
+                }
+                readingFilters.addView(readingCapsule)
+                readingFilters.clipToPadding = false
+                addView(readingFilters, LinearLayout.LayoutParams(WRAP, WRAP).apply {
+                    marginStart = Styler.dpInt(context, 8f)
+                    marginEnd = Styler.dpInt(context, 2f)
+                })
+            }
             addView(searchBox, LinearLayout.LayoutParams(0, WRAP, 1f))
         }, LinearLayout.LayoutParams(MATCH, WRAP))
 
@@ -295,11 +318,13 @@ class DiscoverScreen(
         }
         searchStatusRow.addView(statusLine, LinearLayout.LayoutParams(0, WRAP, 1f))
         broaderSearchButton = TextView(context).apply {
-            textSize = 11f
-            setTextColor(colors.primaryText)
-            setPadding(Styler.dpInt(context, 9f), Styler.dpInt(context, 5f),
-                Styler.dpInt(context, 9f), Styler.dpInt(context, 5f))
-            background = Styler.chipBackground(context, colors)
+            if (glass) com.pocketds.hub.ui.PillButton.control(this, colors) else {
+                textSize = 11f
+                setTextColor(colors.primaryText)
+                setPadding(Styler.dpInt(context, 9f), Styler.dpInt(context, 5f),
+                    Styler.dpInt(context, 9f), Styler.dpInt(context, 5f))
+                background = Styler.chipBackground(context, colors)
+            }
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
             activateOnTap { toggleBroaderReadingResults() }
@@ -442,6 +467,7 @@ class DiscoverScreen(
             val selected = wire == readingType
             button.select(selected)
         }
+        readingCapsule?.select(readingType)
     }
 
     private fun selectReadingType(type: String) {
@@ -1163,7 +1189,7 @@ class DiscoverScreen(
         context: android.content.Context,
         colors: PocketColors
     ) : LinearLayout(context), ShelfFocusRow, com.pocketds.hub.ui.PinnedRowsLayoutManager.Anchor {
-        private val feature = DiscoverFeatureCardView(context, colors, ringVisible)
+        private val feature = DiscoverFeatureCardView(context, colors, ringVisible, glass)
         private val label: TextView
         private val strip: RecyclerView
         override val featureFocusView: View get() = feature
@@ -1182,14 +1208,17 @@ class DiscoverScreen(
             clipChildren = false
             feature.visibility = View.GONE
             addView(feature, LayoutParams(MATCH, WRAP).apply {
-                setMargins(Styler.dpInt(context, 18f), Styler.dpInt(context, 5f),
+                if (glass) setMargins(Styler.dpInt(context, 22f), Styler.dpInt(context, 8f), Styler.dpInt(context, 22f), Styler.dpInt(context, 6f))
+                else setMargins(Styler.dpInt(context, 18f), Styler.dpInt(context, 5f),
                     Styler.dpInt(context, 18f), Styler.dpInt(context, 9f))
             })
             label = TextView(context).apply {
-                com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 15f)
+                // Glass: a row title as Home's are, bold Figtree.
+                if (glass) { textSize = 14f; textWeight(700) }
+                else com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 15f)
                 setTextColor(colors.primaryText)
                 setPadding(
-                    Styler.dpInt(context, 24f), Styler.dpInt(context, 8f),
+                    Styler.dpInt(context, if (glass) 22f else 24f), Styler.dpInt(context, 8f),
                     Styler.dpInt(context, 12f), Styler.dpInt(context, 2f)
                 )
             }
@@ -1201,7 +1230,9 @@ class DiscoverScreen(
                 clipToPadding = false
                 clipChildren = false
                 setItemViewCacheSize(8)
-                setPadding(Styler.dpInt(context, 16f), 0, Styler.dpInt(context, 16f), 0)
+                // Glass: the first cover lines up with the label, its 5dp margin inside the 22dp edge.
+                val edge = Styler.dpInt(context, if (glass) 17f else 16f)
+                setPadding(edge, 0, edge, 0)
                 addOnScrollListener(object : RecyclerView.OnScrollListener() {
                     override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
                         val manager = view.layoutManager as? LinearLayoutManager ?: return
@@ -1254,7 +1285,9 @@ class DiscoverScreen(
             }
 
             override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
-                CardHolder(newCard(parent, ROW_POSTER_DP, Styler.dpInt(parent.context, ROW_CARD_DP)))
+                // Glass: the prototype's book cards, 82dp covers with their captions under them.
+                CardHolder(if (glass) newCard(parent, GLASS_ROW_POSTER_DP, Styler.dpInt(parent.context, GLASS_ROW_CARD_DP), glassCard = true)
+                    else newCard(parent, ROW_POSTER_DP, Styler.dpInt(parent.context, ROW_CARD_DP)))
 
             override fun onBindViewHolder(holder: CardHolder, position: Int) {
                 bindReadingCard(holder.itemView as PosterCardView, items[position])
@@ -1274,7 +1307,7 @@ class DiscoverScreen(
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
-            CardHolder(newCard(parent, GRID_POSTER_DP, MATCH))
+            CardHolder(newCard(parent, GRID_POSTER_DP, MATCH, glassCard = glass))
 
         override fun onBindViewHolder(holder: CardHolder, position: Int) {
             bindReadingCard(holder.itemView as PosterCardView, items[position])
