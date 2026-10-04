@@ -42,10 +42,32 @@ func decodeArtwork(_ data: Data, maxPixels: Int) -> DecodedArtwork? {
     return DecodedArtwork(image)
 }
 
-/// Any hub image ("/v1/img/…"), loaded through `HubClient.image`, so the
-/// credential gate and the artwork cache apply to it (Android's
-/// `ui/Artwork.bindHub`). The placeholder colour shows until it arrives, and
-/// stays when the path is empty. It fills whatever frame it is given.
+/// The key a decoded image is kept under: the sized hub path and how large it
+/// was decoded, since the Glass page keeps a tiny copy of a picture a card
+/// shows full size.
+func artworkMemoryKey(_ path: String, width: Int, maxPixels: Int) -> String {
+    HubEndpoints.sized(path, width: width) + "#\(maxPixels)"
+}
+
+/// The one image loader: a hub image ("/v1/img/…") through `HubClient.image`,
+/// so the credential gate and the artwork cache apply to it (Android's
+/// `ui/Artwork.bindHub`), decoded to at most `maxPixels` off the main actor
+/// and kept in memory. Nil when it cannot be had.
+@MainActor
+func loadArtwork(_ hub: HubClient, path: String, width: Int, maxPixels: Int) async -> DecodedArtwork? {
+    guard !path.isEmpty else { return nil }
+    let key = artworkMemoryKey(path, width: width, maxPixels: maxPixels)
+    if let cached = ArtworkMemory.shared.get(key) { return cached }
+    guard let data = try? await hub.image(HubEndpoints.sized(path, width: width)), !Task.isCancelled else { return nil }
+    let decoded = await Task.detached(priority: .userInitiated) { decodeArtwork(data, maxPixels: maxPixels) }.value
+    guard let decoded, !Task.isCancelled else { return nil }
+    ArtworkMemory.shared.set(key, decoded)
+    return decoded
+}
+
+/// Any hub image ("/v1/img/…"), through `loadArtwork`. The placeholder colour
+/// shows until it arrives, and stays when the path is empty. It fills
+/// whatever frame it is given.
 struct ArtworkView: View {
     @Environment(AppModel.self) private var model
     let path: String
@@ -54,7 +76,9 @@ struct ArtworkView: View {
 
     @State private var image: DecodedArtwork?
 
-    private var key: String { path.isEmpty ? "" : HubEndpoints.sized(path, width: width) }
+    /// Twice the width covers a 2:3 poster's height.
+    private var maxPixels: Int { width * 2 }
+    private var key: String { path.isEmpty ? "" : artworkMemoryKey(path, width: width, maxPixels: maxPixels) }
 
     var body: some View {
         // The image is an overlay so a fill never changes the frame it was given.
@@ -72,22 +96,17 @@ struct ArtworkView: View {
     }
 
     private func load() async {
-        let request = key
-        guard !request.isEmpty else {
+        guard !key.isEmpty else {
             image = nil
             return
         }
-        if let cached = ArtworkMemory.shared.get(request) {
+        // A picture already decoded shows at once, with no fade.
+        if let cached = ArtworkMemory.shared.get(key) {
             image = cached
             return
         }
         image = nil
-        guard let data = try? await model.hub.image(request), !Task.isCancelled else { return }
-        // Twice the width covers a 2:3 poster's height.
-        let maxPixels = width * 2
-        let decoded = await Task.detached(priority: .userInitiated) { decodeArtwork(data, maxPixels: maxPixels) }.value
-        guard let decoded, !Task.isCancelled else { return }
-        ArtworkMemory.shared.set(request, decoded)
+        guard let decoded = await loadArtwork(model.hub, path: path, width: width, maxPixels: maxPixels) else { return }
         withAnimation(.easeOut(duration: 0.2)) { image = decoded }
     }
 }

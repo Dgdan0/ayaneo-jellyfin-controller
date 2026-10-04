@@ -21,5 +21,19 @@ The three book services' logos read on both light and dark cards, so each has on
 `drawable-nodpi` and none in `drawable-night-nodpi`. The Apple app carries the same files as
 imagesets in `apple/Hub/Resources/Assets.xcassets/Logos`, with no dark appearance.
 
+## Fonts
+
+Both apps bundle two typefaces under the SIL Open Font License 1.1, each with its licence text:
+Android in `app/src/main/assets/licenses`, the Apple app in `apple/Hub/Resources/Licenses`.
+
+| Font | Use | Files | Licence |
+|---|---|---|---|
+| [Bricolage Grotesque](https://github.com/ateliertriay/bricolage) | Titles, heroes and headings | `app/src/main/res/font/bricolage_{semibold,bold,extrabold}.ttf`; `apple/Hub/Resources/Fonts/Bricolage-{SemiBold,Bold,ExtraBold}.ttf` | SIL OFL 1.1, Copyright 2022 The Bricolage Grotesque Project Authors |
+| [Figtree](https://github.com/erikdkennedy/figtree) | Everything else | `app/src/main/res/font/figtree_*.ttf`; `apple/Hub/Resources/Fonts/Figtree-*.ttf` | SIL OFL 1.1, Copyright 2022 The Figtree Project Authors |
+
+The Apple fonts are the Android files with only their name tables changed. Each Android Bricolage
+weight names itself `BricolageGrotesque-96ptExtraBold` (and each Figtree weight `Figtree-Light`),
+and iOS and macOS register a font by that name, so only one weight of each would load.
+
 Product names and trademarks remain the property of their respective owners.
 The Ayaneo Hub mark is this project's own launcher foreground.

@@ -16,6 +16,8 @@ final class AppModel {
     let isDemo: Bool
 
     let hub: HubClient
+    /// Each artwork's Glass colours, asked of the hub and kept on the device.
+    let colors: ArtworkColors
     @ObservationIgnored private let defaults: UserDefaults
 
     var isConfigured: Bool { !address.isEmpty && hasToken }
@@ -35,6 +37,7 @@ final class AppModel {
             userName = ""
             hub = HubClient(credentials: HubCredentials(baseURL: DemoTransport.address, token: DemoTransport.token),
                             screens: DemoTransport())
+            colors = ArtworkColors(hub: hub, file: nil)
             return
         }
         #if DEBUG
@@ -57,6 +60,7 @@ final class AppModel {
             screens: URLSessionTransport.screens(),
             slow: URLSessionTransport.slow(),
             artwork: URLSessionTransport.artwork())
+        colors = ArtworkColors(hub: hub, file: ArtworkColors.file)
     }
 
     /// Saves first, then the caller tests: Android's "Save and test", so a
