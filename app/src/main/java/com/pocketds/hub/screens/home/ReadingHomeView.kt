@@ -82,6 +82,8 @@ class ReadingHomeView(
     private var selectedRow = ""
     private var selectedWork = ""
     private var focusedListHeader: String? = null
+    /** The front cover of the series in focus under Your series, where no single book is selected. */
+    private var focusedSeriesCover: String? = null
     private val cards = mutableMapOf<Pair<String, String>, View>()
     private val headerActions = mutableMapOf<String, View>()
     private var observed: Map<String, ReadingWork> = emptyMap()
@@ -335,6 +337,9 @@ class ReadingHomeView(
         val hadFocus = findFocus() != null
         rows = next
         renderedSeries = seriesShelf
+        // The page's colours for every cover shown, before focus reaches one.
+        host.prefetchArtwork((next.flatMap { row -> row.items.map { it.artwork } } +
+            seriesShelf.mapNotNull { it.covers.firstOrNull() }).filter(String::isNotBlank).distinct())
         cards.clear()
         headerActions.clear()
         selfActing.clear()
@@ -566,7 +571,11 @@ class ReadingHomeView(
                     bind(item, loader, api::imageUrl)
                     activateOnTap { host.push(ReadingWorkScreen(api, item.id, item.title, ringVisible)) }
                     // A series is not a book on a list: Y has nothing to act on here.
-                    onFocused = { focusedListHeader = null; selectedRow = ""; selectedWork = ""; host.refreshHints() }
+                    onFocused = {
+                        focusedListHeader = null; selectedRow = ""; selectedWork = ""
+                        focusedSeriesCover = item.covers.firstOrNull()
+                        host.refreshHints()
+                    }
                     selfActing += this
                 }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(22) })
             }
@@ -594,6 +603,10 @@ class ReadingHomeView(
 
     private fun focusedWork(): ReadingWork? = rows.firstOrNull { it.id == selectedRow }
         ?.items?.firstOrNull { it.id == selectedWork }
+
+    /** The cover in focus, for the Glass page (Screen.pageArtwork); a list's own buttons keep the last one. */
+    val pageArtwork: String?
+        get() = focusedWork()?.artwork?.takeIf(String::isNotBlank) ?: focusedSeriesCover
 
     private fun showListManagement(row: ReadingShelfRow) {
         overlay.show(row.title, "Manage this reading list", listOf(

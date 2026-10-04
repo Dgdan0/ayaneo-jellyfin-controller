@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.drawable.Drawable
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
@@ -32,7 +33,9 @@ class BlobSegmentedView(
     private val style: Style = Style.PILL
 ) : ViewGroup(context) {
 
-    data class Option(val id: String, val label: String, val description: String = label, val enabled: Boolean = true)
+    /** [icon] sits before the words in the label's colour: Media and Books in the Glass bar. */
+    data class Option(val id: String, val label: String, val description: String = label, val enabled: Boolean = true,
+                      val icon: AppIcon? = null)
 
     enum class Style {
         /** A quiet track with a light blob and dark text on it: top tabs, chips. */
@@ -57,6 +60,13 @@ class BlobSegmentedView(
     var inkOverride: Int? = null
     /** The track's own colour, for a control on a card rather than on the page. */
     var trackColor: Int? = null
+    /**
+     * A panel drawn as the track instead of the flat fill and hairline: the
+     * Glass capsule behind the top bar's tabs (a GlassPanelDrawable, re-tinted
+     * by its owner). Its bounds follow the track.
+     */
+    var trackDrawable: Drawable? = null
+        set(value) { field = value; invalidate() }
 
     var selected: String? = null
         private set
@@ -151,6 +161,11 @@ class BlobSegmentedView(
         contentDescription = option.description
         val pad = dp(padXDp)
         setPadding(pad, 0, pad, 0)
+        option.icon?.let { icon ->
+            val size = dp(ICON_DP)
+            setCompoundDrawables(AppIconDrawable(icon, offInk()).apply { setBounds(0, 0, size, size) }, null, null, null)
+            compoundDrawablePadding = dp(ICON_GAP_DP)
+        }
         alpha = if (option.enabled) 1f else 0.4f
         Styler.makeFocusable(this)
         setOnFocusChangeListener { _, focused ->
@@ -175,7 +190,7 @@ class BlobSegmentedView(
     }
 
     private fun onInk(): Int = when (style) {
-        Style.PILL -> colors.background
+        Style.PILL -> colors.inverseText
         Style.ACCENT -> inkOverride ?: colors.accentText
         Style.UNDERLINE -> colors.primaryText
     }
@@ -190,7 +205,9 @@ class BlobSegmentedView(
         val off = offInk()
         labels.forEachIndexed { index, view ->
             val weight = weightOf(index)
-            view.setTextColor(if (weight <= 0f) off else if (weight >= 1f) on else ColorUtils.blendARGB(off, on, weight))
+            val ink = if (weight <= 0f) off else if (weight >= 1f) on else ColorUtils.blendARGB(off, on, weight)
+            view.setTextColor(ink)
+            (view.compoundDrawables[0] as? AppIconDrawable)?.tint(ink)
             view.isSelected = index == to
             view.contentDescription = options[index].description + if (index == to) ", selected" else ""
         }
@@ -226,7 +243,11 @@ class BlobSegmentedView(
         val h = height.toFloat()
         val pad = dp(trackPadDp).toFloat()
         val trackRight = SegmentGeometry.total(spans, pad).coerceAtMost(width.toFloat())
-        if (style != Style.UNDERLINE) {
+        val track = trackDrawable
+        if (track != null && style != Style.UNDERLINE) {
+            track.setBounds(0, 0, trackRight.toInt(), h.toInt())
+            track.draw(canvas)
+        } else if (style != Style.UNDERLINE) {
             paint.style = Paint.Style.FILL
             paint.color = trackColor ?: ColorUtils.setAlphaComponent(colors.stripBackground, 0xE0)
             rect.set(0f, 0f, trackRight, h)
@@ -280,5 +301,8 @@ class BlobSegmentedView(
 
     private companion object {
         const val DURATION_MS = 380L
+        /** The prototype's 13px icon and 7px gap in the Media / Books pill. */
+        const val ICON_DP = 13f
+        const val ICON_GAP_DP = 7f
     }
 }

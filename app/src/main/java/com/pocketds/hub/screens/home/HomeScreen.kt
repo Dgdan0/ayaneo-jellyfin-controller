@@ -69,6 +69,12 @@ class HomeScreen(
     override val horizontalMode = HorizontalMode.CONFINED
     override val drawsUnderTopBar: Boolean get() = mode == ContentMode.MEDIA
     override val showsOwnTitle = true
+    /** The focused card's artwork, which the hero is already showing; on Books Home, the cover in focus. */
+    override val pageArtwork: String? get() = when {
+        mode == ContentMode.BOOKS -> if (::readingHome.isInitialized) readingHome.pageArtwork else null
+        ::hero.isInitialized -> hero.content?.backdrop
+        else -> null
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val adapter = RowsAdapter()
@@ -475,6 +481,7 @@ class HomeScreen(
         heroHit = hit
         val id = hit.jellyfinItemId
         hero.bind(HomeHero.from(row.id, row.title, hit, heroDetails[id]))
+        host?.pageArtworkChanged()
         if (id.isEmpty() || heroDetails.containsKey(id)) return
         heroJob?.cancel()
         heroJob = scope.launch {
@@ -483,7 +490,10 @@ class HomeScreen(
             val detail = (api.libraryItem(id) as? HubResult.Ok)?.value?.item ?: return@launch
             heroDetails[id] = detail
             val current = heroHit
-            if (current?.jellyfinItemId == id) hero.bind(HomeHero.from(row.id, row.title, current, detail))
+            if (current?.jellyfinItemId == id) {
+                hero.bind(HomeHero.from(row.id, row.title, current, detail))
+                host?.pageArtworkChanged()
+            }
         }
     }
 
@@ -681,6 +691,8 @@ class HomeScreen(
                     is LandscapeCardView -> card.bind(hit, loader, api::imageUrl)
                 }
                 card.setTag(TAG_HIT, hit)
+                // The page's colours for this card, asked for before focus gets here.
+                host?.prefetchArtwork(listOf(HomeHero.backdrop(hit, heroDetails[hit.jellyfinItemId])).filter(String::isNotBlank))
                 card.activateOnTap { open(hit) }
                 FocusDecorator.listen(card, ringVisible) { _, focused ->
                     if (focused) {

@@ -12,6 +12,9 @@ import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
+import com.pocketds.hub.ui.glass.GlassColors
+import com.pocketds.hub.ui.glass.GlassPage
+import com.pocketds.hub.ui.glass.GlassPanelDrawable
 
 /**
  * Modal in the existing window: stable content underneath, bounded body and real accessible focus.
@@ -21,14 +24,25 @@ import com.pocketds.hub.input.PadAction
  * [choice] and [setting] rows share one card, and a [section] heading, a
  * [note] or anything added to [body] by hand starts the next. Short questions
  * use the centred form of the same panel.
+ *
+ * In Glass the sheet and its cards are glass panels tinted by the artwork the
+ * page shows when the panel opens ([GlassPage]), instead of the page colour
+ * and solid cards: the same layout, in the look of the page under it.
  */
 open class SidePanelView(context:Context, protected val colors:PocketColors, private val ringVisible:()->Boolean,
     private val side:Boolean=true) : FrameLayout(context) {
     val body=LinearLayout(context).apply {orientation=LinearLayout.VERTICAL;setPadding(0,dp(2),0,dp(12))}
     val footer=LinearLayout(context).apply {orientation=LinearLayout.HORIZONTAL}
+    private val glass=Theme.onGlass(colors)
+    /** Glass: the page's tint, taken again each time the panel opens: nearly solid for the sheet, a panel for its cards. */
+    private var glassFill=GlassColors.panel(GlassPage.palette(context))
+    private val glassCard=if(glass) GlassPanelDrawable(GlassColors.sheet(GlassPage.palette(context)),if(side) 0f else Styler.dp(context,16f)) else null
     private val card=LinearLayout(context).apply {
         orientation=LinearLayout.VERTICAL;isClickable=true
-        if(side) {
+        if(glassCard!=null) {
+            setPadding(dp(18),dp(14),dp(18),dp(6))
+            background=glassCard
+        } else if(side) {
             setPadding(dp(18),dp(14),dp(18),dp(6))
             // Flush with the edge; a hairline where it meets the page or the video.
             background=ThemeGradientDrawable.rounded(0f,ColorUtils.setAlphaComponent(this@SidePanelView.colors.background,0xF7),
@@ -108,6 +122,11 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
                 val sibling=parent.getChildAt(i)
                 if(sibling!=this){hiddenAccessibility[sibling]=sibling.importantForAccessibility;sibling.importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS}
             }}
+        }
+        if(glassCard!=null) {
+            val page=GlassPage.palette(context);glassFill=GlassColors.panel(page);glassCard.retint(GlassColors.sheet(page))
+            // Cards a menu built before opening take the same tint.
+            (0 until body.childCount).forEach {(body.getChildAt(it).background as? GlassPanelDrawable)?.retint(glassFill)}
         }
         dismissed=onDismiss;titleView.text=title;menuKey=title;subtitle.text=detail;subtitle.visibility=if(detail.isBlank()) GONE else VISIBLE
         visibility=VISIBLE;bringToFront();ViewCompat.setAccessibilityPaneTitle(this,title)
@@ -199,7 +218,7 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     /** The card the next row joins: the last thing in [body] if it is one, else a new one. */
     private fun currentGroup():RowGroup =
         (body.getChildAt(body.childCount-1) as? RowGroup) ?: RowGroup(context).also {
-            it.background=ThemeGradientDrawable.rounded(dp(14).toFloat(),colors.cardSurface)
+            it.background=if(glass) GlassPanelDrawable(glassFill,dp(14).toFloat()) else ThemeGradientDrawable.rounded(dp(14).toFloat(),colors.cardSurface)
             body.addView(it,LinearLayout.LayoutParams(-1,-2).apply {bottomMargin=dp(10)})
         }
     private class RowGroup(context:Context) : LinearLayout(context) {

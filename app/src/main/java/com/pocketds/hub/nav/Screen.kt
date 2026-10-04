@@ -91,6 +91,18 @@ interface Screen : StackScreen {
     /** Full-screen media owns the whole display and hides the normal app chrome. */
     val immersive: Boolean get() = false
 
+    /**
+     * The hub image path of the artwork this screen is about right now -- the
+     * focused card on Home, a title page's backdrop, the cover in focus on
+     * Books Home -- or null to leave the page as it is (see [PageArtwork]).
+     * Glass tints the whole page from it; Classic ignores it.
+     *
+     * The host reads it when the screen comes to the front and after every
+     * focus change. When it changes without focus moving (a page's details
+     * arrive), say so with [ScreenHost.pageArtworkChanged].
+     */
+    val pageArtwork: String? get() = null
+
     /** Delay trigger actions until a deliberate hold; changing screens/panels cancels it. */
     val requiresTriggerHold: Boolean get() = false
 
@@ -150,6 +162,14 @@ interface ScreenHost {
      * false once it has scrolled away and the tabs need their solid ground.
      */
     fun setTopBarOverArtwork(over: Boolean) = Unit
+    /** Re-read [Screen.pageArtwork], after it changed without focus moving. */
+    fun pageArtworkChanged() = Unit
+    /**
+     * Artwork a screen is about to show, such as the cards a row binds, so its
+     * colours are known before focus reaches it and the page re-tints at once.
+     * Nothing in Classic.
+     */
+    fun prefetchArtwork(paths: Collection<String>) = Unit
 
     /**
      * Play a trailer in a floating window that survives navigation.

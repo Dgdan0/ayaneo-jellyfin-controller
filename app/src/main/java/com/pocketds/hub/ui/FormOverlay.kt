@@ -13,6 +13,9 @@ import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.state.FormModel
 import com.pocketds.hub.state.FormRow
+import com.pocketds.hub.ui.glass.GlassColors
+import com.pocketds.hub.ui.glass.GlassPage
+import com.pocketds.hub.ui.glass.GlassPanelDrawable
 
 /**
  * The request dialog: quality profile, root folder, seasons.
@@ -38,6 +41,10 @@ class FormOverlay(
     private val scroller: ScrollView
     private val list: LinearLayout
 
+    /** Glass: the card is a tint of the page's artwork, taken again each time it opens. */
+    private val glassPanel = if (Theme.onGlass(colors)) GlassPanelDrawable(
+        GlassColors.sheet(GlassPage.palette(context)), Styler.dp(context, 16f)) else null
+
     private var model: FormModel? = null
     private var onSubmit: ((String, FormModel) -> Unit)? = null
     private var onCancel: (() -> Unit)? = null
@@ -55,7 +62,8 @@ class FormOverlay(
         card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             // The centred panel's look: the page colour, a hairline, rows on a raised card.
-            background = ThemeGradientDrawable.rounded(Styler.dp(context, 16f), colors.background,
+            // Glass has no page colour; the card is a glass panel instead.
+            background = glassPanel ?: ThemeGradientDrawable.rounded(Styler.dp(context, 16f), colors.background,
                 Styler.dpInt(context, 1f), androidx.core.graphics.ColorUtils.setAlphaComponent(colors.primaryText, 0x1A))
             val p = Styler.dpInt(context, 18f)
             setPadding(p, Styler.dpInt(context, 16f), p, Styler.dpInt(context, 14f))
@@ -112,6 +120,7 @@ class FormOverlay(
         titleView.text = title
         subtitleView.text = subtitle
         subtitleView.visibility = if (subtitle.isEmpty()) View.GONE else View.VISIBLE
+        glassPanel?.retint(GlassColors.sheet(GlassPage.palette(context)))
         card.layoutParams = card.layoutParams.also {
             it.height = ViewGroup.LayoutParams.WRAP_CONTENT
         }

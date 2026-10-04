@@ -105,4 +105,14 @@ object Fmt {
     /** A stream or file bitrate. Empty when the server did not report one. */
     fun mbps(bitsPerSecond: Long): String =
         if (bitsPerSecond <= 0) "" else String.format(Locale.US, "%.1f Mbps", bitsPerSecond / 1_000_000.0)
+
+    /**
+     * A count on a small badge: empty for none, and "99+" past ninety-nine, so
+     * a long unread list cannot widen the badge past the button it sits on.
+     */
+    fun badge(count: Int): String = when {
+        count <= 0 -> ""
+        count > 99 -> "99+"
+        else -> count.toString()
+    }
 }

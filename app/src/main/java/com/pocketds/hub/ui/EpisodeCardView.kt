@@ -79,7 +79,7 @@ class EpisodeCardView(
     }
     /** The play mark a focused episode shows, where A would start it. */
     private val playMark = android.widget.ImageView(context).apply {
-        setImageDrawable(AppIconDrawable(AppIcon.PLAY, colors.background).apply { })
+        setImageDrawable(AppIconDrawable(AppIcon.PLAY, colors.inverseText))
         val pad = dp(10)
         setPadding(pad + dp(1), pad, pad - dp(1), pad)
         background = ThemeGradientDrawable().apply {

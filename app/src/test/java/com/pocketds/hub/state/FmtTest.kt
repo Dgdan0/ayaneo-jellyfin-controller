@@ -121,4 +121,14 @@ class FmtTest {
         assertEquals("8 min", Fmt.uptime(8 * 60 + 5))
         assertEquals("", Fmt.uptime(0))
     }
+
+    @Test
+    fun `a badge counts to ninety-nine and says nothing for none`() {
+        assertEquals("", Fmt.badge(0))
+        assertEquals("", Fmt.badge(-3))
+        assertEquals("1", Fmt.badge(1))
+        assertEquals("17", Fmt.badge(17))
+        assertEquals("99", Fmt.badge(99))
+        assertEquals("99+", Fmt.badge(100))
+    }
 }

@@ -672,7 +672,11 @@ Most of these exist because several screens had drifted copies of the same thing
 | Hub: a service's own error sentence | `upstreamText` / `upstreamMessage` / `serviceOf` |
 | Hub: a title's request state changed | `invalidateTitle` (search, Discover, detail) |
 | An artwork's Glass colours on the Pocket | `ui/glass/ArtworkColors.shared(context, api)`: `prefetch` what a screen shows, `request` what is in focus, `peek`; when to ask again is `ArtworkColorBook` |
-| A Glass panel, bar and page | `ui/glass/GlassColors` (`panel`, `bar`, `over`, `contrast`), `GlassPanelDrawable` (`retint`), `AmbientLayerView` (`show(path, palette)`) |
+| A Glass panel, bar and page | `ui/glass/GlassColors` (`panel`, `bar`, `sheet` for a side sheet or dialog over a screen's own words, `over`, `contrast`), `GlassPanelDrawable` (`retint`), `AmbientLayerView` (`show(path, palette)`) |
+| Glass or Classic | `settings/LookSettings` (`Look.fromStored`: Glass unless Classic is stored; `Look.dark`: Glass is always dark) and `Theme.isGlass(context)`. A change rebuilds the Activity, as dark and light do. Classic goes once #11 is finished |
+| The Glass page: which artwork it shows | A screen's `pageArtwork` (the focused card, a title's backdrop, the cover in focus), re-read on focus changes, `showCurrent` and `ScreenHost.pageArtworkChanged`; `nav/PageArtwork` (`next`: none keeps the last, `title`); `ScreenHost.prefetchArtwork` for the cards a row binds. `HubActivity.showArtwork` feeds `AmbientLayerView`, the bars' `setPalette` and `GlassPage` |
+| A panel opening over the Glass page | `ui/glass/GlassPage.palette(context)` (the page's colours now); `Theme.onGlass(colors)` decides, so the player's video palette stays solid |
+| Words and icons on a white pill (the selected tab, the status pill, a play mark) | `PocketColors.inverseText`, never `background`: Glass's page colour paints nothing |
 | Hub: an artwork's Glass colours | `internal/artcolor` (`Analyze` → `Palette`) behind `GET /v1/img/colors`; `artworkColorStore` keys a picture without its width and keeps `artwork-colors.json` |
 | Hub: the artwork routes | `imageRoutes`, registered on the API and on `artworkMux`, which the hub reads its own artwork through |
 
@@ -681,7 +685,7 @@ Cards measure at their natural height (`EpisodeCardView`, `DetailArtworkCardView
 
 `ConsolidationGuardTest` (part of `dev.sh test`) fails when a removed copy comes back -- a new
 `HubClient(context)`, a hand-built image loader or image request, a hand-written episode code or "Specials", a
-`"Selected"` detail line, an untinted progress bar, a bare `ScrollView(`, or a `delay(POLL…)` loop -- and names the owner
+`"Selected"` detail line, an untinted progress bar, a bare `ScrollView(`, a `delay(POLL…)` loop, or words drawn in the page colour -- and names the owner
 to use instead. Extend its rules when you consolidate something new.
 
 ---

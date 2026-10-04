@@ -54,6 +54,17 @@ class HomeHeroTest {
     }
 
     @Test
+    fun `a row asks for the page colours of the very artwork its hero will show`() {
+        val movie = SearchHit(media = MediaRef(type = "movie", title = "Iron Man 3", poster = "/p"), jellyfinItemId = "m")
+        val detail = LibraryItem(id = episodeId, type = "episode", seriesId = seriesId)
+        for ((hit, item) in listOf(episode to null, episode to detail, movie to null, movie.copy(media = movie.media.copy(backdrop = "/b")) to null)) {
+            assertEquals(HomeHero.from("latest", "Recently added", hit, item).backdrop, HomeHero.backdrop(hit, item))
+        }
+        // Nothing but a poster: the poster.
+        assertEquals("/p", HomeHero.backdrop(movie))
+    }
+
+    @Test
     fun `an episode whose poster is its own still has no series to borrow from`() {
         val own = episode.copy(media = episode.media.copy(poster = "/v1/img/jf/$episodeId/Primary?tag=still"))
         assertEquals(null, HomeHero.seriesIdFromPoster(own.media.poster, episodeId))
