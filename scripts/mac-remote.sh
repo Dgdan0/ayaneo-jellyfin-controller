@@ -79,7 +79,9 @@ run() {
   # SHOT_SIMS names the simulators to use, comma-separated (all three by
   # default), SHOT_STATE names the screenshots and SHOT_TIMES takes several,
   # that many seconds after launch. `turn landscape` turns the simulators, and
-  # HUB_WIDTH lays the app out as narrow as an iPad's Split View.
+  # HUB_WIDTH lays the app out as narrow as an iPad's Split View. testflight
+  # takes BUILD_NUMBER (the minute in UTC otherwise), TESTFLIGHT_PLATFORMS
+  # ("iOS macOS") and TESTFLIGHT_WAIT_MINUTES.
   remote "export PATH=/opt/homebrew/bin:\$PATH; cd ~/$REMOTE_DIR && \
     HUB_SECTION=$(printf '%q' "${HUB_SECTION:-}") HUB_OPEN=$(printf '%q' "${HUB_OPEN:-}") \
     HUB_SIDE=$(printf '%q' "${HUB_SIDE:-}") HUB_SHEET=$(printf '%q' "${HUB_SHEET:-}") \
@@ -89,6 +91,9 @@ run() {
     HUB_WIDTH=$(printf '%q' "${HUB_WIDTH:-}") \
     SHOT_SIMS=$(printf '%q' "${SHOT_SIMS:-}") SHOT_WAIT=$(printf '%q' "${SHOT_WAIT:-3}") \
     SHOT_STATE=$(printf '%q' "${SHOT_STATE:-}") SHOT_TIMES=$(printf '%q' "${SHOT_TIMES:-}") \
+    ${BUILD_NUMBER:+BUILD_NUMBER=$(printf '%q' "$BUILD_NUMBER")} \
+    ${TESTFLIGHT_WAIT_MINUTES:+TESTFLIGHT_WAIT_MINUTES=$(printf '%q' "$TESTFLIGHT_WAIT_MINUTES")} \
+    ${TESTFLIGHT_PLATFORMS:+TESTFLIGHT_PLATFORMS=$(printf '%q' "$TESTFLIGHT_PLATFORMS")} \
     HUB_DEV_ENV=\$HOME/$DEV_ENV bash scripts/mac.sh $(printf '%q ' "$@")"
   fetch_shots
 }

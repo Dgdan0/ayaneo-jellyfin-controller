@@ -278,19 +278,39 @@ The app is **JellyHub** (`com.dgdan.jellyhub`, one universal App Store Connect r
 macOS; the UI tests are `com.dgdan.jellyhub.uitests`). `scripts/mac-remote.sh testflight` is the
 one step:
 
-1. it archives for iOS (iPhone and iPad) and for macOS, numbering the build with the upload's
-   minute in UTC (`yyMMddHHmm`, always increasing, within Apple's 32-bit limit) and taking the
-   version from `MARKETING_VERSION` in `apple/project.yml`;
-2. it exports each with `method app-store-connect` and `destination upload`, signed by Xcode
-   through the App Store Connect API key (`-allowProvisioningUpdates` and the key's three
-   flags), which uploads it;
-3. `apple/Tools/asc.swift` follows the builds through App Store Connect's processing until both
+1. it checks that the signing keychain (below) holds both distribution identities and that App
+   Store Connect has a current App Store profile for each platform, and installs the profiles;
+2. it archives for iOS (iPhone and iPad) and for macOS, numbering the build with the minute of
+   the upload in UTC (`yyMMddHHmm`, always increasing; `BUILD_NUMBER` overrides it) and taking
+   the version from `MARKETING_VERSION` in `apple/project.yml`;
+3. it exports each with `method app-store-connect`, `destination upload` and manual signing,
+   which signs it and uploads it with the App Store Connect API key;
+4. `apple/Tools/asc.swift` follows the builds through App Store Connect's processing until both
    are `VALID`, and lists the TestFlight group's builds.
+
+When the Mac upload fails after the iOS one, `BUILD_NUMBER=<that build> TESTFLIGHT_PLATFORMS=macOS`
+sends the Mac build alone, under the same number. `asc.swift builds`, `certificates` and
+`profiles` show what App Store Connect holds.
 
 The key, its ids, the team and the app id stay on the Mac in `~/.appstoreconnect/jellyhub.env`
 (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_PATH`, `APPLE_TEAM_ID`, `ASC_APP_ID`, `TESTFLIGHT_GROUP`),
-never in the repo. Nothing touches the login keychain, which an SSH session cannot open anyway:
-the iOS archive is unsigned and the Mac one signed ad hoc so it carries its sandbox, and the export
+never in the repo.
+
+**Signing.** The key's role, App Manager, may not use Apple's cloud-managed distribution
+certificates, so the Mac keeps its own in `~/.appstoreconnect/jellyhub-signing.keychain-db`, whose
+random password is in `jellyhub-signing.pass` (600) beside it. The first run (2026-10-04) made the
+key pairs there and asked App Store Connect (`asc.swift cert`) for an **Apple Distribution**
+certificate, which signs both apps, and a **Mac Installer Distribution** one ("3rd Party Mac
+Developer Installer"), which signs the Mac package; both expire on 2027-10-04. `asc.swift profile`
+keeps one App Store profile per platform for that certificate, **JellyHub iOS App Store** and
+**JellyHub Mac App Store**: it is made once and then reused, and a profile of that name made for
+another certificate is replaced. For the run only, the keychain is unlocked and put first in the
+search list; when the run ends, however it ends, the list is put back and the keychain locked. The
+login keychain is never opened, which an SSH session could not do anyway. To start over (a
+certificate revoked or expired), delete the keychain and its password file, and the next run asks
+for new certificates.
+
+The iOS archive is unsigned and the Mac one signed ad hoc so it carries its sandbox; the export
 signs both. The macOS sandbox entitlements apply to the Mac only (an iOS build signed with them is
 refused, ITMS-90046), `ITSAppUsesNonExemptEncryption` is false, `PrivacyInfo.xcprivacy` declares
 the app's one required-reason API (UserDefaults, CA92.1), and the icon set has the iOS 1024 and

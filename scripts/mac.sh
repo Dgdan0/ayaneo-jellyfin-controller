@@ -316,16 +316,134 @@ mac_shot() {
   if cp "$container/hub-window.png" "$file" 2>/dev/null; then echo "$file"; else echo "no picture from the Mac app"; fi
 }
 
-# TestFlight: JellyHub archived for iOS (iPhone and iPad) and macOS, signed by
-# Xcode's cloud-managed distribution certificate through the App Store
-# Connect API key, uploaded, then followed until App Store Connect has
-# processed both and given them to the TestFlight group. The key and its ids
-# stay on this Mac, in ~/.appstoreconnect (ASC_ENV): ASC_KEY_ID, ASC_ISSUER_ID,
-# ASC_KEY_PATH, APPLE_TEAM_ID, ASC_APP_ID and TESTFLIGHT_GROUP. Nothing here
-# touches the login keychain: the iOS archive is unsigned and the Mac one
-# signed ad hoc (to carry its sandbox), and the export signs both.
+# TestFlight: JellyHub archived for iOS (iPhone and iPad) and macOS, signed
+# for the App Store, uploaded with the App Store Connect API key, then
+# followed until App Store Connect has processed both and handed them to the
+# TestFlight group. The key and its ids stay on this Mac, in ~/.appstoreconnect
+# (ASC_ENV): ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH, APPLE_TEAM_ID, ASC_APP_ID
+# and TESTFLIGHT_GROUP.
+#
+# The key's role (App Manager) may not use Apple's cloud-managed signing, so
+# the two distribution identities live in a keychain of their own beside the
+# key, with its own random password in a 600 file; the login keychain is never
+# opened (an SSH session could not anyway). The first run makes a key pair
+# here and asks App Store Connect for an Apple Distribution and a Mac
+# Installer Distribution certificate, and for App Store profiles; later runs
+# reuse them. The keychain is on the search list for the run only.
+TF_DIR="$HOME/.appstoreconnect"
+TF_KEYCHAIN="$TF_DIR/jellyhub-signing.keychain-db"
+TF_PASSWORD_FILE="$TF_DIR/jellyhub-signing.pass"
+XCODE_CERTS="/Applications/Xcode.app/Contents/SharedFrameworks/DVTFoundation.framework/Versions/A/Resources"
+# macOS's own LibreSSL: its PKCS#12 files are ones `security import` reads.
+OPENSSL=/usr/bin/openssl
+# The Mac Installer Distribution certificate's name, as issued and as it may become.
+TF_INSTALLER=("3rd Party Mac Developer Installer" "Mac Installer Distribution")
+
+tf_keychain() {
+  # The search list as it was, without this keychain (create-keychain adds it).
+  TF_SEARCH_LIST="$(security list-keychains -d user | tr -d '"' | { grep -v "$TF_KEYCHAIN" || true; } | xargs)"
+  # shellcheck disable=SC2064
+  trap "security list-keychains -d user -s $TF_SEARCH_LIST; security lock-keychain '$TF_KEYCHAIN' 2>/dev/null || true" EXIT
+  [[ -f "$TF_PASSWORD_FILE" ]] || (umask 077; "$OPENSSL" rand -hex 24 > "$TF_PASSWORD_FILE")
+  TF_PASSWORD="$(cat "$TF_PASSWORD_FILE")"
+  [[ -f "$TF_KEYCHAIN" ]] || security create-keychain -p "$TF_PASSWORD" "$TF_KEYCHAIN"
+  security unlock-keychain -p "$TF_PASSWORD" "$TF_KEYCHAIN"
+  # Locked again two hours on, and whenever the Mac sleeps.
+  security set-keychain-settings -lut 7200 "$TF_KEYCHAIN"
+  # Apple's intermediates as Xcode carries them (WWDR G3 and G6): the Mac's
+  # System keychain has only the one that expired in 2023.
+  local cer
+  for cer in AppleWWDRCA-2030.cer AppleWWDRCAG6.cer; do
+    security import "$XCODE_CERTS/$cer" -k "$TF_KEYCHAIN" >/dev/null 2>&1 || true
+  done
+  # shellcheck disable=SC2086
+  security list-keychains -d user -s "$TF_KEYCHAIN" $TF_SEARCH_LIST
+}
+
+# Whether the keychain has a certificate whose name starts with one of these.
+tf_has() {
+  local name
+  for name in "$@"; do
+    security find-certificate -c "$name" "$TF_KEYCHAIN" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
+# An identity of `type` (an App Store Connect certificate type), made here
+# once: a key pair, its request, and the certificate App Store Connect issues.
+tf_identity() {
+  local type="$1" work
+  shift
+  tf_has "$@" && return
+  work="$(umask 077; mktemp -d)"
+  "$OPENSSL" req -new -newkey rsa:2048 -nodes -keyout "$work/key.pem" -out "$work/csr.pem" \
+    -subj "/CN=JellyHub $type/C=US" >/dev/null 2>&1
+  swift "$APPLE/Tools/asc.swift" cert "$type" "$work/csr.pem" "$work/cert.cer"
+  "$OPENSSL" x509 -inform DER -in "$work/cert.cer" -out "$work/cert.pem"
+  "$OPENSSL" pkcs12 -export -inkey "$work/key.pem" -in "$work/cert.pem" -out "$work/identity.p12" \
+    -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -passout "pass:$TF_PASSWORD"
+  security import "$work/identity.p12" -k "$TF_KEYCHAIN" -P "$TF_PASSWORD" \
+    -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/xcodebuild >/dev/null
+  rm -rf "$work"
+  # Never ask for another: a certificate named otherwise would be made again on every run.
+  tf_has "$@" || { echo "the new $type certificate is not named $*; it is in $TF_KEYCHAIN"; exit 1; }
+}
+
+# The SHA-1 of the first certificate whose name starts with one of these.
+tf_sha1() {
+  local name
+  for name in "$@"; do
+    security find-certificate -c "$name" -Z "$TF_KEYCHAIN" 2>/dev/null |
+      awk '/^SHA-1 hash:/ && !seen {print $3; seen = 1}' | grep . && return 0
+  done
+  return 1
+}
+
+# An App Store profile for the Apple Distribution certificate, installed where
+# Xcode looks for profiles. Never in a $(...), where set -e does not hold.
+tf_profile() {
+  local type="$1" name="$2" extension="$3" work serial uuid
+  local installed="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+  work="$(mktemp -d)"
+  serial="$(security find-certificate -c "Apple Distribution" -p "$TF_KEYCHAIN" |
+    "$OPENSSL" x509 -noout -serial | cut -d= -f2)"
+  swift "$APPLE/Tools/asc.swift" profile "$type" "$BUNDLE_ID" "$serial" "$name" "$work/profile" >&2
+  security cms -D -i "$work/profile" > "$work/profile.plist"
+  uuid="$(plutil -extract UUID raw "$work/profile.plist")"
+  mkdir -p "$installed"
+  cp "$work/profile" "$installed/$uuid.$extension"
+  rm -rf "$work"
+}
+
+# The export's options; a Mac package also names its installer certificate.
+tf_export_options() {
+  local file="$1" profile="$2" installer="${3:-}"
+  {
+    cat <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key><string>app-store-connect</string>
+  <key>destination</key><string>upload</string>
+  <key>signingStyle</key><string>manual</string>
+  <key>teamID</key><string>$APPLE_TEAM_ID</string>
+  <key>signingCertificate</key><string>Apple Distribution</string>
+  <key>provisioningProfiles</key><dict><key>$BUNDLE_ID</key><string>$profile</string></dict>
+  <key>uploadSymbols</key><true/>
+  <key>manageAppVersionAndBuildNumber</key><false/>
+PLIST
+    # By its SHA-1: Xcode 27 matched no certificate to the selector "Mac Installer Distribution".
+    if [[ -n "$installer" ]]; then
+      echo "  <key>installerSigningCertificate</key><string>$installer</string>"
+    fi
+    echo "</dict>"
+    echo "</plist>"
+  } > "$file"
+}
+
 testflight() {
-  local env="${ASC_ENV:-$HOME/.appstoreconnect/jellyhub.env}"
+  local env="${ASC_ENV:-$TF_DIR/jellyhub.env}"
   if [[ ! -f "$env" ]]; then
     echo "no $env: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH, APPLE_TEAM_ID, ASC_APP_ID, TESTFLIGHT_GROUP"
     exit 2
@@ -335,30 +453,32 @@ testflight() {
   source "$env"
   set +a
   project
-  local build version out auth platform
-  # Always increasing: the upload's minute in UTC, which fits Apple's 32-bit build numbers.
+  local build version out auth platform installer
+  # Always increasing: the minute of the upload in UTC, yyMMddHHmm.
   build="${BUILD_NUMBER:-$(date -u +%y%m%d%H%M)}"
   version="$(awk -F'"' '/MARKETING_VERSION:/ {print $2; exit}' "$APPLE/project.yml")"
   out="$APPLE/build/testflight/$build"
   mkdir -p "$out"
   auth=(-allowProvisioningUpdates -authenticationKeyPath "$ASC_KEY_PATH"
         -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
-  cat > "$out/export.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>method</key><string>app-store-connect</string>
-  <key>destination</key><string>upload</string>
-  <key>signingStyle</key><string>automatic</string>
-  <key>teamID</key><string>$APPLE_TEAM_ID</string>
-  <key>uploadSymbols</key><true/>
-  <key>manageAppVersionAndBuildNumber</key><false/>
-</dict>
-</plist>
-PLIST
+
+  echo "signing identities and profiles"
+  tf_keychain
+  tf_identity DISTRIBUTION "Apple Distribution"
+  tf_identity MAC_INSTALLER_DISTRIBUTION "${TF_INSTALLER[@]}"
+  # codesign and productbuild may use the keys without asking anyone.
+  security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$TF_PASSWORD" "$TF_KEYCHAIN" >/dev/null
+  security find-identity -v "$TF_KEYCHAIN" | sed -n 's/.*"\(.*\)".*/  \1/p'
+  tf_profile IOS_APP_STORE "JellyHub iOS App Store" mobileprovision
+  tf_profile MAC_APP_STORE "JellyHub Mac App Store" provisionprofile
+  installer="$(tf_sha1 "${TF_INSTALLER[@]}")"
+  tf_export_options "$out/export-iOS.plist" "JellyHub iOS App Store"
+  tf_export_options "$out/export-macOS.plist" "JellyHub Mac App Store" "$installer"
+
   echo "JellyHub $version ($build)"
-  for platform in iOS macOS; do
+  # TESTFLIGHT_PLATFORMS=macOS with the BUILD_NUMBER of an iOS upload sends the
+  # Mac build that failed after it; the wait below wants both under one number.
+  for platform in ${TESTFLIGHT_PLATFORMS:-iOS macOS}; do
     local signing=(CODE_SIGNING_ALLOWED=NO)
     # The Mac app keeps its sandbox only if the archive carries it: an ad hoc
     # signature holds the entitlements for the export to sign again.
@@ -370,11 +490,11 @@ PLIST
       "${signing[@]}" -quiet archive
     echo "uploading $platform"
     xcodebuild -exportArchive -archivePath "$out/JellyHub-$platform.xcarchive" \
-      -exportOptionsPlist "$out/export.plist" -exportPath "$out/$platform" "${auth[@]}"
+      -exportOptionsPlist "$out/export-$platform.plist" -exportPath "$out/$platform" "${auth[@]}"
   done
   echo "waiting for App Store Connect to process $build"
   swift "$APPLE/Tools/asc.swift" wait "$build" "${TESTFLIGHT_WAIT_MINUTES:-60}"
-  swift "$APPLE/Tools/asc.swift" group "${TESTFLIGHT_GROUP:-me}"
+  swift "$APPLE/Tools/asc.swift" group "${TESTFLIGHT_GROUP:-me}" "$build"
 }
 
 case "${1:-build}" in
