@@ -377,12 +377,8 @@ class LibraryScreen(
             else -> booksRoot.takeIf { it.arranging }
         }
 
-    /** Back while arranging finishes it, rather than leaving the app. */
-    override fun onSystemBack(): Boolean {
-        val arranged = arranging ?: return false
-        arranged.finishArranging()
-        return true
-    }
+    /** Back while arranging puts a lifted tile back, or finishes, rather than leaving the app. */
+    override fun onSystemBack(): Boolean = arranging?.back() == true
 
     override fun requestInitialFocus(): Boolean {
         if (mode == ContentMode.MEDIA) {

@@ -179,6 +179,15 @@ class LibraryArrangeSession(ids: List<String>) {
         saved = order
     }
 
+    /** Ⓑ: the lifted library goes back where it was picked up, and there is nothing to save. */
+    fun putBack(): List<String> {
+        if (isLifted) {
+            ids = liftedFrom
+            lifted = -1
+        }
+        return ids
+    }
+
     /** A save failed: back to the order the hub has. */
     fun rollback(): List<String> {
         lifted = -1

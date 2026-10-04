@@ -164,8 +164,13 @@ class SettingsScreen(
 
     override fun onHide() {
         if (::overlay.isInitialized) overlay.dismiss()
+        // A library row still lifted is put down where it is, and saves.
+        libraryOrder?.finish()
         scope.coroutineContext.cancelChildren()
     }
+
+    /** The system's Back puts a lifted library row back where it was, before it leaves Settings. */
+    override fun onSystemBack(): Boolean = libraryOrder?.putBackIfLifted() == true
 
     override fun onDestroyView() {
         scope.cancel()

@@ -85,6 +85,26 @@ class LibraryOrderTest {
         assertEquals(listOf("b", "a", "c"), session.rollback())
     }
 
+    @Test fun `putting a lifted library back undoes its moves and saves nothing`() {
+        val session = LibraryArrangeSession(listOf("a", "b", "c"))
+        session.pickUp(0)
+        session.step(Direction.RIGHT, 1)
+        session.step(Direction.DOWN, 1)
+        assertEquals(listOf("b", "c", "a"), session.ids)
+        assertEquals(listOf("a", "b", "c"), session.putBack())
+        assertFalse(session.isLifted)
+        assertNull(session.drop())
+        // Nothing lifted: nothing changes.
+        assertEquals(listOf("a", "b", "c"), session.putBack())
+    }
+
+    @Test fun `in a list one across, up and down move one place`() {
+        assertEquals(1, LibraryOrder.step(2, 3, 1, Direction.UP))
+        assertEquals(2, LibraryOrder.step(1, 3, 1, Direction.DOWN))
+        assertEquals(2, LibraryOrder.step(2, 3, 1, Direction.DOWN))
+        assertEquals(0, LibraryOrder.step(0, 3, 1, Direction.UP))
+    }
+
     @Test fun `a drag moves the lifted library to the place it is over`() {
         val session = LibraryArrangeSession(listOf("a", "b", "c", "d"))
         session.pickUp(3)

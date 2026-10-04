@@ -691,7 +691,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | A Glass search field | `ui/glass/GlassSearchField.style`: a pill of the page's glass inside a taller target, ringed on focus (Discover, the Library) |
 | A library on the Glass Library root | `screens/library/LibraryTileView` (the picture, soft and dimmed, the hub's `fan` of posters, a glass label); where the posters sit, what the label and the root's line say: `LibraryTiles` (`slots`, `fan`, `summary`, `kindLabel`). The root is `LibraryRootView`, on both sides (Movies and TV adds search and Favourites); a tile pushes `LibraryFolderScreen` or the Books library's page |
 | The order libraries are shown in, and changing it (#15) | The hub's, never sorted here. `screens/library/LibraryOrder` (`move`, `step`, `slotAt`, `inOrder` for a list kept beside the tiles, such as the capsule on a library's page), `LibraryArrangeSession` (what is lifted, what the hub has), `LibraryOrderQueue` (one save out, the newest waiting) and `LibraryOrderChanges` (a screen that drew an older order reads it again); `LibraryOrderEditor` shows a move at once, saves it with `PUT /v1/library/order`, puts it back and says why when a save fails, and for A to Z sends `[]` and reads the hub's order again |
-| Library tiles that can be arranged | `screens/library/LibraryTileGrid` (three across; a new order slides every tile to its place; while arranging the tiles wiggle, the lifted one stands still and larger, a fixed one such as reading lists stays still; a hold, or a touch while arranging, drags one) in `LibraryRootView` (Arrange beside the heading, Done while arranging; Ⓐ picks up and drops, the D-pad moves, Ⓨ A to Z, Ⓑ or Back finishes); the same order as a list in Settings › Libraries (`LibraryOrderSection`: X and Y, or a row's arrows) |
+| Libraries that can be put in order: tiles or rows, and the grip that says so | `screens/library/LibraryArrangeGrid` (`Style.TILES` three across, `Style.ROWS` one under another; a new order slides each to its place; the grip, two columns of dots, always at a row's end and in a tile's corner while arranging, lit on the lifted one; tiles wiggle while arranging and a fixed one such as reading lists stays still without a grip; a pointer drags a row by its grip, a tile after a hold or at once while arranging) in `LibraryRootView` (Arrange beside the heading, Done while arranging; Ⓐ picks up and drops, the D-pad moves, Ⓑ puts a lifted tile back and otherwise finishes, Ⓨ A to Z) and Settings › Libraries (`LibraryOrderSection`: Ⓐ picks up and drops, the D-pad moves, Ⓑ puts back). No arrow buttons |
 | Glass or Classic | `settings/LookSettings` (`Look.fromStored`: Glass unless Classic is stored; `Look.dark`: Glass is always dark) and `Theme.isGlass(context)`. A change rebuilds the Activity, as dark and light do. Classic goes once #11 is finished |
 | The Glass page: which artwork it shows | A screen's `pageArtwork` (the focused card, a title's backdrop, the cover in focus, what is playing), re-read on focus changes, `showCurrent` and `ScreenHost.pageArtworkChanged`; `nav/PageArtwork` (`next`: none keeps the last, `title`); `ScreenHost.prefetchArtwork` for the cards a row binds. `HubActivity.showArtwork` feeds `AmbientLayerView`, the bars' `setPalette` and `GlassPage` |
 | The Glass page's colours, for what is drawn over it | `ui/glass/GlassPage`: `palette(context)` for a panel opening now; `follow(view) { palette -> … }` for glass that stays on screen (the bars, a Details pill, a play disc, a day chip), held only while the view is attached. `Theme.onGlass(colors)` decides, so the player's video palette stays solid |
@@ -905,17 +905,19 @@ on the hub per Jellyfin profile so every device shows it (#15). The apps show th
 send a new one with `PUT /v1/library/order`; they never sort libraries themselves.
 
 On the Pocket both Glass roots arrange in place. Arrange beside "Your libraries" (or "Your reading
-libraries") starts it, and so does holding a tile; the tiles wiggle and Arrange reads Done. Ⓐ picks up
-the tile in focus, which stands still and grows, the D-pad moves it a place or a row with the others
-sliding out of its way, and Ⓐ puts it down; a pointer drags it. Each drop saves at once; a save that
-fails slides the tiles back and says "The new order could not be saved · …". Ⓨ goes back to A to Z,
-and Ⓑ, Back, Done or leaving the page finishes, a tile still lifted put down where it is. Reading
-lists stay last and still, since they are not a library. Settings › Libraries lists both sides in the
-same order, X and Y (or the arrows on a row) moving the library in focus, with Back to A–Z under a side
-that has its own order. A root that drew an older order reads the hub's again when it comes back
-(`LibraryOrderChanges`), and the capsule on a library's page follows the root. uiautomator cannot dump
-the screen while the tiles wiggle (it waits for the animations to settle), so a scripted check reads
-a screenshot there.
+libraries") starts it, and so does holding a tile; the tiles wiggle, each shows the grip in its top
+corner, and Arrange reads Done. Ⓐ picks up the tile in focus, which stands still and grows with its
+grip lit, the D-pad moves it a place or a row with the others sliding out of its way, Ⓐ puts it down
+and Ⓑ puts it back where it was; a pointer drags it. Each drop saves at once; a save that fails slides
+the tiles back and says "The new order could not be saved · …". Ⓨ goes back to A to Z, and Ⓑ (with
+nothing lifted), Back, Done or leaving the page finishes, a tile still lifted put down where it is.
+Reading lists stay last and still, since they are not a library. Settings › Libraries lists both sides
+in the same order, each row with the same grip at its end: a pointer drags a row by it, and on the pad
+Ⓐ picks the row up, the D-pad moves it, Ⓐ drops it and Ⓑ puts it back (the user asked for the grip on
+2026-10-04, in place of up and down arrows). Back to A–Z sits under a side that has its own order. A
+root that drew an older order reads the hub's again when it comes back (`LibraryOrderChanges`), and the
+capsule on a library's page follows the root. uiautomator cannot dump the screen while the tiles
+wiggle (it waits for the animations to settle), so a scripted check reads a screenshot there.
 
 Opening a folder uses `GET /v1/library/{viewId}/items?page=&sort=&order=` in 60-item pages. The
 poster grid derives its span count from the measured content width: seven columns with the compact

@@ -1,7 +1,6 @@
 package com.pocketds.hub.screens.library
 
 import android.content.Context
-import android.graphics.Rect
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -31,15 +30,16 @@ import com.pocketds.hub.ui.showSummary
  * A Glass Library root (the prototype's Libraries page), Movies and TV or
  * Books: for Movies and TV a search field and Favourites first, then the
  * heading with how much the libraries hold, and a glass tile per library,
- * three across ([LibraryTileView] in a [LibraryTileGrid]). A tile opens its
+ * three across ([LibraryTileView] in a [LibraryArrangeGrid]). A tile opens its
  * library; the screen pushes the page.
  *
  * The tiles come in the hub's order and can be arranged (#15). The Arrange
  * control beside the heading (Done while arranging) or a hold on a tile starts
- * it: the tiles wiggle, Ⓐ picks up the tile in focus and puts it down, the
- * D-pad moves it, Ⓨ goes back to A to Z and Ⓑ finishes; a pointer drags. Each
- * drop saves through [order], which puts the tiles back and says why if the
- * save fails.
+ * it: the tiles wiggle and show their grips, Ⓐ picks up the tile in focus and
+ * puts it down, the D-pad moves it, Ⓑ puts a lifted tile back where it was and
+ * otherwise finishes, and Ⓨ goes back to A to Z; a pointer drags. Each drop
+ * saves through [order], which puts the tiles back and says why if the save
+ * fails. Settings › Libraries moves rows by the same grip.
  */
 class LibraryRootView(
     context: Context,
@@ -55,7 +55,7 @@ class LibraryRootView(
     private val onFavourites: () -> Unit = {},
     private val onSearch: (String) -> Unit = {},
     private val onFocusChanged: () -> Unit
-) : FrameLayout(context), LibraryTileGrid.Listener {
+) : FrameLayout(context), LibraryArrangeGrid.Listener {
     /**
      * A tile: [id] is what the hub orders. A [fixed] one is not arranged and
      * stays after the rest (reading lists). [artwork] tints the page while it
@@ -108,7 +108,7 @@ class LibraryRootView(
         setTextColor(colors.mutedText)
     }
     /** Not clipped: a focused tile's ring stands outside it, and a lifted one grows. */
-    private val grid = LibraryTileGrid(context).apply { listener = this@LibraryRootView }
+    private val grid = LibraryArrangeGrid(context, colors, LibraryArrangeGrid.Style.TILES).apply { listener = this@LibraryRootView }
     private val scroll = FocusScrollView(context)
     private var tiles: List<Tile> = emptyList()
     private val tileViews = LinkedHashMap<String, LibraryTileView>()
@@ -260,11 +260,28 @@ class LibraryRootView(
 
     private fun moveLifted(direction: Direction) {
         val before = order.session.lifted
-        val after = order.session.step(direction, LibraryTileGrid.COLUMNS)
+        val after = order.session.step(direction, grid.columns)
         if (after == before) return
         grid.order(order.session.ids)
         // The tile keeps focus as it moves; a row the page had scrolled away comes back.
-        grid.tile(after)?.let { tile -> tile.post { tile.requestRectangleOnScreen(Rect(0, 0, tile.width, tile.height), false) } }
+        grid.reveal(after)
+    }
+
+    /** Ⓑ on a lifted tile: back where it was picked up, nothing saved. */
+    private fun putBack() {
+        grid.order(order.session.putBack())
+        grid.lift(-1)
+        onFocusChanged()
+    }
+
+    /**
+     * Back, from the pad or the system: a lifted tile goes back where it was,
+     * else arranging finishes. False when there is nothing to undo here.
+     */
+    fun back(): Boolean = when {
+        order.session.isLifted -> { putBack(); true }
+        arranging -> { finishArranging(); true }
+        else -> false
     }
 
     /** The order changed under the tiles: a move, a failed save put back, or a save landing. */
@@ -305,7 +322,7 @@ class LibraryRootView(
                 action == PadAction.Activate && place in 0 until grid.movableCount -> pickUp(place)
                 // A fixed tile (reading lists) is not opened while arranging.
                 action == PadAction.Activate -> Unit
-                action == PadAction.Back -> finishArranging()
+                action == PadAction.Back -> back()
                 action == PadAction.Secondary -> if (order.isCustom) {
                     grid.lift(-1)
                     order.aToZ()
@@ -325,8 +342,8 @@ class LibraryRootView(
     private fun route(direction: Direction): Boolean = when (direction) {
         Direction.UP -> when {
             inFirstRow() -> {
-                val column = grid.focusedPlace() % LibraryTileGrid.COLUMNS
-                val target = if (arrange.isShown && (!withSearch || arranging || column == LibraryTileGrid.COLUMNS - 1)) arrange
+                val column = grid.focusedPlace() % grid.columns
+                val target = if (arrange.isShown && (!withSearch || arranging || column == grid.columns - 1)) arrange
                     else if (withSearch) search else null
                 target?.requestFocus() ?: false
             }
@@ -345,7 +362,7 @@ class LibraryRootView(
 
     /** What A, Y and B do while arranging, or on Arrange; null when the screen's own hints apply. */
     fun hints(): List<ButtonHint>? = when {
-        arranging && order.session.isLifted -> listOf(ButtonHint.activate("Drop"), ButtonHint.back("Done"))
+        arranging && order.session.isLifted -> listOf(ButtonHint.activate("Drop"), ButtonHint.back("Put back"))
         arranging -> buildList {
             val place = grid.focusedPlace()
             if (arrange.hasFocus()) add(ButtonHint.activate("Done"))
@@ -380,7 +397,7 @@ class LibraryRootView(
     }
 
     fun tileHasFocus(): Boolean = grid.focusedPlace() >= 0
-    fun inFirstRow(): Boolean = grid.focusedPlace() in 0 until LibraryTileGrid.COLUMNS
+    fun inFirstRow(): Boolean = grid.focusedPlace() in 0 until grid.columns
 
     /** The search field takes focus, and the keyboard comes up for it. */
     fun focusSearch() {
