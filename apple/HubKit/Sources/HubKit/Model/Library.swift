@@ -138,21 +138,30 @@ public struct LibraryFolder: Decodable, Equatable, Sendable, Identifiable {
     public var image: String
     /// "banner" for real folder artwork, "poster" for a title standing in.
     public var imageStyle: String
+    /// Up to three of its posters, the day's pick first (#13); empty from an
+    /// older hub.
+    public var fan: [String]
+    /// How many films and series it holds; nil when the hub does not know.
+    public var total: Int?
 
-    public init(id: String, name: String, kind: String = "", image: String = "", imageStyle: String = "") {
+    public init(id: String, name: String, kind: String = "", image: String = "", imageStyle: String = "",
+                fan: [String] = [], total: Int? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
         self.image = image
         self.imageStyle = imageStyle
+        self.fan = fan
+        self.total = total
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, kind, image, imageStyle }
+    enum CodingKeys: String, CodingKey { case id, name, kind, image, imageStyle, fan, total }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(id: c.value(.id, ""), name: c.value(.name, ""), kind: c.value(.kind, ""),
-                  image: c.value(.image, ""), imageStyle: c.value(.imageStyle, ""))
+                  image: c.value(.image, ""), imageStyle: c.value(.imageStyle, ""), fan: c.value(.fan, []),
+                  total: c.optional(.total))
     }
 }
 

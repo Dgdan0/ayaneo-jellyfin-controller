@@ -270,14 +270,27 @@ struct DetailLinesTests {
     }
 }
 
-/// The posters fanned on a library's tile.
+/// The posters fanned on a library's tile (#13).
 struct LibraryFanTests {
-    @Test func theFirstThreeTitlesWithAPosterInTheLibrarysOwnOrder() {
-        let titles = ["", "/v1/img/jf/a/Primary", "/v1/img/jf/b/Primary", "", "/v1/img/jf/c/Primary", "/v1/img/jf/d/Primary"]
-        let page = LibraryPage(items: titles.enumerated().map { index, poster in
-            MediaHit(media: MediaRef(type: "series", title: "T\(index)", poster: poster), jellyfinItemId: "id\(index)")
-        })
-        #expect(LibraryFan.posters(page) == ["/v1/img/jf/a/Primary", "/v1/img/jf/b/Primary", "/v1/img/jf/c/Primary"])
-        #expect(LibraryFan.posters(LibraryPage()) == [])
+    @Test func theHubsFanComesAsItIsUpToThree() throws {
+        let response = try JSONDecoder().decode(LibraryResponse.self, from: Data(#"""
+        {"views":[{"id":"m","name":"Marvel Movies","kind":"movies","image":"/v1/img/jf/m/Primary?tag=b",
+                   "imageStyle":"banner","fan":["/v1/img/jf/a/Primary","/v1/img/jf/b/Primary","/v1/img/jf/c/Primary"],
+                   "total":39},
+                  {"id":"t","name":"Marvel TV","kind":"tvshows","image":"/v1/img/jf/l/Primary","imageStyle":"poster",
+                   "fan":["/v1/img/jf/l/Primary"],"total":1}]}
+        """#.utf8))
+        let movies = try #require(response.views.first)
+        #expect(LibraryFan.posters(movies) == ["/v1/img/jf/a/Primary", "/v1/img/jf/b/Primary", "/v1/img/jf/c/Primary"])
+        #expect(movies.total == 39)
+        #expect(LibraryFan.posters(response.views[1]) == ["/v1/img/jf/l/Primary"])
+    }
+
+    @Test func anOlderHubFansTheOnePosterAndABannerNone() {
+        #expect(LibraryFan.posters(LibraryFolder(id: "a", name: "Anime", image: "/v1/img/jf/x/Primary", imageStyle: "poster"))
+                == ["/v1/img/jf/x/Primary"])
+        #expect(LibraryFan.posters(LibraryFolder(id: "m", name: "Marvel Movies", image: "/v1/img/jf/m/Primary",
+                                                 imageStyle: "banner")) == [])
+        #expect(LibraryFolder(id: "a", name: "Anime").total == nil)
     }
 }

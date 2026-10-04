@@ -24,7 +24,7 @@ enum LibrarySorts {
 
 /// The Jellyfin library's first page (the prototype's `pgLibrary`): search
 /// and Favourites, then a glass tile for each library, its own artwork behind
-/// a fan of three of its posters. Typing two letters turns the page into
+/// a fan of three of its posters, which the hub chooses (#13). Typing two letters turns the page into
 /// search results. Android's `screens/library/LibraryScreen`.
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
@@ -34,10 +34,6 @@ struct LibraryView: View {
     @State private var folders: [LibraryFolder] = []
     /// Debug builds: HUB_OPEN=Anime (a library's name) opens that library, once.
     @State private var debugOpened = false
-    /// Three posters a library shows on its tile, and how many titles it has:
-    /// the top of its first page, in its own order.
-    @State private var fans: [String: [String]] = [:]
-    @State private var totals: [String: Int] = [:]
     @State private var status = StatusMessage("")
     @State private var query = ""
     /// The tile a pointer rests on or focus is on, whose picture the page takes.
@@ -48,7 +44,8 @@ struct LibraryView: View {
     private var summary: String {
         guard !folders.isEmpty else { return "" }
         let count = "\(folders.count) librar" + (folders.count == 1 ? "y" : "ies")
-        let titles = totals.values.reduce(0, +)
+        // The hub counts each library's films and series (#13); an older hub does not.
+        let titles = folders.compactMap(\.total).reduce(0, +)
         return titles > 0 ? count + " · \(titles) titles" : count
     }
 
@@ -88,7 +85,7 @@ struct LibraryView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 18)], spacing: 18) {
                         ForEach(folders) { folder in
                             NavigationLink(value: AppRoute.folder(FolderRoute(id: folder.id, name: folder.name))) {
-                                LibraryTile(folder: folder, posters: fans[folder.id] ?? [], background: art(of: folder))
+                                LibraryTile(folder: folder, posters: LibraryFan.posters(folder), background: art(of: folder))
                             }
                             .buttonStyle(GlassCardStyle())
                             .previewsWhenFocused { lit = art(of: folder) }
@@ -109,7 +106,7 @@ struct LibraryView: View {
     /// for the day), else the middle poster of its fan.
     private func art(of folder: LibraryFolder) -> String {
         if !folder.image.isEmpty { return folder.image }
-        let fan = fans[folder.id] ?? []
+        let fan = LibraryFan.posters(folder)
         return fan.count > 1 ? fan[1] : (fan.first ?? "")
     }
 
@@ -129,31 +126,6 @@ struct LibraryView: View {
         } catch {
             if error.kind == .cancelled { return }
             status = StatusText.failed(error.message, kind: error.kind, hasData: !folders.isEmpty)
-            return
-        }
-        await loadFans()
-    }
-
-    /// The first page of every library at once, each in its own order: the
-    /// hub keeps them for a minute, so opening one is answered from its cache.
-    private func loadFans() async {
-        let hub = model.hub
-        let requests = folders.map { folder -> (String, HubRequest) in
-            let sort = LibrarySorts.sort(for: folder.id)
-            return (folder.id, HubEndpoints.libraryItems(viewId: folder.id, sort: sort.field, order: sort.order))
-        }
-        await withTaskGroup(of: (String, [String], Int)?.self) { group in
-            for (id, request) in requests {
-                group.addTask {
-                    guard let page = try? await hub.fetch(request, as: LibraryPage.self) else { return nil }
-                    return (id, LibraryFan.posters(page), page.total)
-                }
-            }
-            for await result in group {
-                guard let result else { continue }
-                fans[result.0] = result.1
-                totals[result.0] = result.2
-            }
         }
     }
 }

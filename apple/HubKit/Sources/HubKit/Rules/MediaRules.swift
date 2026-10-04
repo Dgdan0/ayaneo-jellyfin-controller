@@ -357,15 +357,17 @@ public enum DetailLines {
     }
 }
 
-/// The three posters fanned on a library's tile on the Library page. The one
-/// place they are chosen, so the choice can move to the hub (one field for
-/// both apps) without touching the page.
+/// The posters fanned on a library's tile on the Library page: the hub's
+/// choice (#13), so both apps show the same three and change them on the same
+/// day without asking for a page of every library.
 public enum LibraryFan {
     public static let count = 3
 
-    /// The first three titles with a poster, in the order the library's page
-    /// came in (its saved sort).
-    public static func posters(_ page: LibraryPage) -> [String] {
-        Array(page.items.map(\.media.poster).filter { !$0.isEmpty }.prefix(count))
+    /// The hub's fan; from an older hub, the library's one poster-shaped
+    /// picture, and nothing for a banner, which the tile shows behind instead.
+    public static func posters(_ folder: LibraryFolder) -> [String] {
+        let fan = folder.fan.filter { !$0.isEmpty }
+        if !fan.isEmpty { return Array(fan.prefix(count)) }
+        return folder.imageStyle != "banner" && !folder.image.isEmpty ? [folder.image] : []
     }
 }
