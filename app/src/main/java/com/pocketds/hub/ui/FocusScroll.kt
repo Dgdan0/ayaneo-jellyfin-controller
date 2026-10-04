@@ -1,6 +1,7 @@
 package com.pocketds.hub.ui
 
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Rect
 import android.widget.HorizontalScrollView
 import android.widget.ScrollView
@@ -17,9 +18,25 @@ import android.widget.ScrollView
  * scroller brings it on screen, for a list whose rows sit under a heading (a day
  * in Upcoming). Without it the heading is scrolled half under whatever is above
  * the list, because ScrollView reveals exactly the focused row and nothing more.
+ *
+ * On Glass a scrolled page fades out at its top edge rather than running under
+ * the top bar ([com.pocketds.hub.ui.glass.TopFade]), so every scrolling page
+ * gets it from here.
  */
 open class FocusScrollView(context: Context, private val revealAbove: Int = 0) : ScrollView(context) {
     init { isFocusable = false; isFocusableInTouchMode = false }
+
+    private val topFade = if (Theme.isGlass(context)) com.pocketds.hub.ui.glass.TopFade(this) else null
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        topFade?.measure()
+    }
+
+    override fun draw(canvas: Canvas) {
+        val fade = topFade ?: return super.draw(canvas)
+        fade.draw(canvas, scrollY) { super.draw(it) }
+    }
 
     override fun computeScrollDeltaToGetChildRectOnScreen(rect: Rect): Int {
         if (revealAbove <= 0) return super.computeScrollDeltaToGetChildRectOnScreen(rect)
