@@ -240,6 +240,12 @@ type LibraryView struct {
 	Image string `json:"image,omitempty"`
 	// banner is intentional folder artwork; poster is a daily contained title.
 	ImageStyle string `json:"imageStyle,omitempty"`
+	// Up to three posters from the library for the Glass tile's fan: the
+	// day's pick first, then the titles after it. A banner library gets one
+	// too, from its contents.
+	Fan []string `json:"fan,omitempty"`
+	// How many films and series the library holds; absent when unknown.
+	Total int `json:"total,omitempty"`
 }
 
 type LibraryResponse struct {
@@ -301,7 +307,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(i int, view jellyfin.Item) {
 			defer wg.Done()
-			out.Views[i].Image, out.Views[i].ImageStyle, errs[i] = s.libraryViewArtwork(ctx, jellyfinClient, view, day)
+			errs[i] = s.libraryViewArtwork(ctx, jellyfinClient, view, day, &out.Views[i])
 		}(i, view)
 	}
 	wg.Wait()
@@ -309,18 +315,25 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			continue
 		}
+		// A banner library keeps its picture without its contents; only the
+		// fan and the count are missing then.
+		affects := "views." + out.Views[i].ID + ".image"
+		if out.Views[i].Image != "" {
+			affects = "views." + out.Views[i].ID + ".fan"
+		}
 		out.Partial = append(out.Partial, Partial{
 			Service: "jellyfin", Reason: "artwork_unavailable",
-			Affects: []string{"views." + out.Views[i].ID + ".image"},
+			Affects: []string{affects},
 			Message: out.Views[i].Name + " artwork could not be loaded",
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
+// libraryViewArtwork fills a view's picture, fan and count.
 func (s *Server) libraryViewArtwork(
-	ctx context.Context, client *jellyfin.Client, view jellyfin.Item, day string,
-) (string, string, error) {
+	ctx context.Context, client *jellyfin.Client, view jellyfin.Item, day string, out *LibraryView,
+) error {
 	if tag := view.PosterTag(); tag != "" {
 		images, _, err := cache.Fetch(ctx, s.cache, "library:view-images:"+view.ID, cache.Metadata,
 			func(ctx context.Context) ([]jellyfin.ImageInfo, error) {
@@ -329,61 +342,97 @@ func (s *Server) libraryViewArtwork(
 		// If Jellyfin cannot describe the source, retaining its current art is
 		// safer than throwing away a possible user choice.
 		if err != nil || hasExplicitLibraryArtwork(images) {
-			return jellyfinImage(view.ID, "Primary", tag), "banner", nil
+			out.Image, out.ImageStyle = jellyfinImage(view.ID, "Primary", tag), "banner"
 		}
 	}
 
-	artKey := "library:art:" + client.UserID() + ":" + day + ":" + view.ID
-	item, _, err := cache.Fetch(ctx, s.cache, artKey, cache.Metadata,
-		func(ctx context.Context) (*jellyfin.Item, error) {
-			first, err := client.Items(ctx, jellyfin.ItemsQuery{
+	picks, err := s.libraryDailyPicks(ctx, client, view, day)
+	if err != nil {
+		return err
+	}
+	out.Total = picks.Total
+	for _, item := range picks.Posters {
+		out.Fan = append(out.Fan, posterImage(item))
+	}
+	if out.Image == "" && len(out.Fan) > 0 {
+		out.Image, out.ImageStyle = out.Fan[0], "poster"
+	}
+	return nil
+}
+
+// libraryFanSize is how many posters a Glass library tile fans out.
+const libraryFanSize = 3
+
+// libraryPicks is what a library tile shows from its contents on one day.
+type libraryPicks struct {
+	Total   int
+	Posters []jellyfin.Item
+}
+
+// libraryDailyPicks counts a library's films and series and picks its fan:
+// the title at the day's index, then the ones after it in name order. It is
+// read once per library a day, so the tiles do not reshuffle while someone
+// goes back and forth, and change tomorrow.
+func (s *Server) libraryDailyPicks(
+	ctx context.Context, client *jellyfin.Client, view jellyfin.Item, day string,
+) (*libraryPicks, error) {
+	key := "library:picks:" + client.UserID() + ":" + day + ":" + view.ID
+	picks, _, err := cache.Fetch(ctx, s.cache, key, cache.Metadata,
+		func(ctx context.Context) (*libraryPicks, error) {
+			query := jellyfin.ItemsQuery{
 				ParentID: view.ID, Recursive: true, Types: "Movie,Series",
 				SortBy: "SortName", SortOrder: "Ascending", Limit: 1,
-			})
-			if err != nil || first.TotalRecordCount == 0 || len(first.Items) == 0 {
-				return nil, err
 			}
-			start := dailyLibraryArtworkIndex(day, view.ID, first.TotalRecordCount)
-			if start == 0 && first.Items[0].PosterTag() != "" {
-				return &first.Items[0], nil
-			}
-			page, err := client.Items(ctx, jellyfin.ItemsQuery{
-				ParentID: view.ID, Recursive: true, Types: "Movie,Series",
-				SortBy: "SortName", SortOrder: "Ascending", Limit: 12, StartIndex: start,
-			})
+			first, err := client.Items(ctx, query)
 			if err != nil {
 				return nil, err
 			}
-			for i := range page.Items {
-				if page.Items[i].PosterTag() != "" {
-					return &page.Items[i], nil
-				}
+			picks := &libraryPicks{Total: first.TotalRecordCount}
+			if first.TotalRecordCount == 0 || len(first.Items) == 0 {
+				return picks, nil
 			}
-			// A run of items without artwork near the end should not leave the
-			// folder blank when the beginning has usable posters.
-			if start > 0 {
-				page, err = client.Items(ctx, jellyfin.ItemsQuery{
-					ParentID: view.ID, Recursive: true, Types: "Movie,Series",
-					SortBy: "SortName", SortOrder: "Ascending", Limit: 12,
-				})
+			// A dozen titles from the day's index leaves room to skip a run
+			// without posters.
+			start := dailyLibraryArtworkIndex(day, view.ID, first.TotalRecordCount)
+			query.Limit, query.StartIndex = 12, start
+			page, err := client.Items(ctx, query)
+			if err != nil {
+				return nil, err
+			}
+			picks.Posters = fanFrom(libraryFanSize, page.Items)
+			// Near the end of the library the fan wraps round to its start,
+			// so the last titles do not leave a tile thin or blank.
+			if len(picks.Posters) < libraryFanSize && start > 0 {
+				query.StartIndex = 0
+				head, err := client.Items(ctx, query)
 				if err != nil {
 					return nil, err
 				}
-				for i := range page.Items {
-					if page.Items[i].PosterTag() != "" {
-						return &page.Items[i], nil
-					}
-				}
+				picks.Posters = fanFrom(libraryFanSize, page.Items, head.Items)
 			}
-			return &first.Items[0], nil
+			return picks, nil
 		})
-	if err != nil || item == nil {
-		return "", "", err
+	return picks, err
+}
+
+// fanFrom takes up to n titles that have a poster from the lists in order,
+// each title once.
+func fanFrom(n int, lists ...[]jellyfin.Item) []jellyfin.Item {
+	var out []jellyfin.Item
+	seen := map[string]bool{}
+	for _, list := range lists {
+		for _, item := range list {
+			if len(out) == n {
+				return out
+			}
+			if item.PosterTag() == "" || seen[item.ID] {
+				continue
+			}
+			seen[item.ID] = true
+			out = append(out, item)
+		}
 	}
-	if poster := posterImage(*item); poster != "" {
-		return poster, "poster", nil
-	}
-	return "", "", nil
+	return out
 }
 
 func hasExplicitLibraryArtwork(images []jellyfin.ImageInfo) bool {

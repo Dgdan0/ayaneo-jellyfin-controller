@@ -681,6 +681,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Hub: permission check | `requireScope(w, r, scope, action)` (403 `forbidden_scope`) |
 | Hub: a screen built from several cached reads | `cacheSummary` (keeps stale/degraded) |
 | Hub: a Jellyfin image path | `jellyfinImage` / `posterImage` / `backdropImage` |
+| Hub: a library tile's picture, fan and count | `libraryViewArtwork` (the folder's own art wins) and `libraryDailyPicks` + `fanFrom` (the day's pick first, from `dailyLibraryArtworkIndex`), behind `GET /v1/library`'s `image`, `fan` and `total` |
 | Hub: a service's own error sentence | `upstreamText` / `upstreamMessage` / `serviceOf` |
 | Hub: a title's request state changed | `invalidateTitle` (search, Discover, detail) |
 | An artwork's Glass colours on the Pocket | `ui/glass/ArtworkColors.shared(context, api)`: `prefetch` what a screen shows, `request` what is in focus, `peek`; when to ask again is `ArtworkColorBook` |
@@ -878,7 +879,10 @@ An explicit collection image wins; otherwise each card uses a title
 poster selected deterministically from that folder for the media PC's current local day. On this Jellyfin
 10.11.8 install, generated view collages live under `metadata/library`, while the explicit Marvel
 images are `folder.jpg` / `folder.webp` under the configured library root; `/Items/{id}/Images`
-provides that distinction.
+provides that distinction. For the Glass tiles each view also carries `fan` and `total` (#13). `fan`
+holds up to three posters: the day's pick first, then the titles after it in name order, skipping
+any without a poster and wrapping round to the start. `total` counts the library's films and
+series. A banner library fans its contents too. Both apps read these rather than choosing their own.
 
 Opening a folder uses `GET /v1/library/{viewId}/items?page=&sort=&order=` in 60-item pages. The
 poster grid derives its span count from the measured content width: seven columns with the compact

@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"ayaneohub/internal/adapters/jellyfin"
 	"ayaneohub/internal/config"
@@ -91,11 +93,52 @@ func TestLibraryNeedsJellyfinAndAConfiguredUser(t *testing.T) {
 	}
 }
 
+// fakeLibraryContents answers Jellyfin's /Items for each folder from a fixed
+// list, honouring startIndex and limit, and counts the reads per folder.
+func fakeLibraryContents(t *testing.T, contents map[string][]string, calls map[string]int) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		parent := q.Get("parentId")
+		items, ok := contents[parent]
+		if !ok {
+			t.Errorf("unexpected items query %v", q)
+			http.NotFound(w, r)
+			return
+		}
+		calls[parent]++
+		start, _ := strconv.Atoi(q.Get("startIndex"))
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		end := len(items)
+		if limit > 0 && start+limit < end {
+			end = start + limit
+		}
+		page := []string{}
+		if start < len(items) {
+			page = items[start:end]
+		}
+		_, _ = w.Write([]byte(`{"Items":[` + strings.Join(page, ",") + `],"TotalRecordCount":` + strconv.Itoa(len(items)) + `}`))
+	}
+}
+
+// libraryTitle is one title as Jellyfin lists it; an empty tag means no poster.
+func libraryTitle(id, tag string) string {
+	if tag == "" {
+		return `{"Id":"` + id + `","Name":"` + id + `","Type":"Movie"}`
+	}
+	return `{"Id":"` + id + `","Name":"` + id + `","Type":"Movie","ImageTags":{"Primary":"` + tag + `"}}`
+}
+
 func TestLibraryArtworkPrefersViewImageAndFallsBackToContainedTitle(t *testing.T) {
 	const explicitID = "11111111111111111111111111111111"
 	const fallbackID = "22222222222222222222222222222222"
 	const movieID = "33333333333333333333333333333333"
-	itemCalls := 0
+	const marvelA = "44444444444444444444444444444444"
+	const marvelB = "55555555555555555555555555555555"
+	calls := map[string]int{}
+	contents := fakeLibraryContents(t, map[string][]string{
+		explicitID: {libraryTitle(marvelA, "a"), libraryTitle(marvelB, "b")},
+		fallbackID: {`{"Id":"` + movieID + `","Name":"Poster source","Type":"Series","ImageTags":{"Primary":"picked"}}`},
+	}, calls)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/UserViews":
@@ -108,19 +151,15 @@ func TestLibraryArtworkPrefersViewImageAndFallsBackToContainedTitle(t *testing.T
 		case "/Items/" + fallbackID + "/Images":
 			_, _ = w.Write([]byte(`[{"ImageType":"Primary","Path":"C:\\ProgramData\\Jellyfin\\Server\\metadata\\library\\22\\poster.png"}]`))
 		case "/Items":
-			itemCalls++
-			if r.URL.Query().Get("parentId") != fallbackID || r.URL.Query().Get("limit") != "1" {
-				t.Errorf("fallback artwork query = %v", r.URL.Query())
-			}
-			_, _ = w.Write([]byte(`{"Items":[{"Id":"` + movieID +
-				`","Name":"Poster source","Type":"Series","ImageTags":{"Primary":"picked"}}],"TotalRecordCount":1}`))
+			contents(w, r)
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer upstream.Close()
 
-	got := libraryRequest(NewServer(libraryAPIConfig(upstream.URL, "user-1")).Handler(), "/v1/library")
+	handler := NewServer(libraryAPIConfig(upstream.URL, "user-1")).Handler()
+	got := libraryRequest(handler, "/v1/library")
 	if got.Code != http.StatusOK {
 		t.Fatalf("library returned %d: %s", got.Code, got.Body.String())
 	}
@@ -128,23 +167,93 @@ func TestLibraryArtworkPrefersViewImageAndFallsBackToContainedTitle(t *testing.T
 	if err := json.NewDecoder(got.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Views) != 2 {
-		t.Fatalf("views = %+v", body.Views)
+	if len(body.Views) != 2 || len(body.Partial) != 0 {
+		t.Fatalf("views = %+v, partial = %+v", body.Views, body.Partial)
 	}
-	if body.Views[0].Image != "/v1/img/jf/"+explicitID+"/Primary?tag=custom" {
-		t.Fatalf("explicit artwork = %q", body.Views[0].Image)
+	marvel, shows := body.Views[0], body.Views[1]
+	if marvel.Image != "/v1/img/jf/"+explicitID+"/Primary?tag=custom" || marvel.ImageStyle != "banner" {
+		t.Fatalf("explicit artwork = %q (%s)", marvel.Image, marvel.ImageStyle)
 	}
-	if body.Views[0].ImageStyle != "banner" {
-		t.Fatalf("explicit artwork style = %q", body.Views[0].ImageStyle)
+	// The folder's own picture wins, and its tile still fans its contents.
+	if marvel.Total != 2 || len(marvel.Fan) != 2 {
+		t.Fatalf("banner library fan = %v, total %d", marvel.Fan, marvel.Total)
 	}
-	if body.Views[1].Image != "/v1/img/jf/"+movieID+"/Primary?tag=picked" {
-		t.Fatalf("fallback artwork = %q", body.Views[1].Image)
+	if shows.Image != "/v1/img/jf/"+movieID+"/Primary?tag=picked" || shows.ImageStyle != "poster" {
+		t.Fatalf("fallback artwork = %q (%s)", shows.Image, shows.ImageStyle)
 	}
-	if body.Views[1].ImageStyle != "poster" {
-		t.Fatalf("fallback artwork style = %q", body.Views[1].ImageStyle)
+	if shows.Total != 1 || len(shows.Fan) != 1 || shows.Fan[0] != shows.Image {
+		t.Fatalf("fallback fan = %v, total %d", shows.Fan, shows.Total)
 	}
-	if itemCalls != 1 {
-		t.Fatalf("fallback queried %d times", itemCalls)
+
+	// The day's picks are read once; opening the library again asks Jellyfin nothing.
+	before := calls[fallbackID]
+	if libraryRequest(handler, "/v1/library").Code != http.StatusOK || calls[fallbackID] != before {
+		t.Fatalf("fallback library read %d times, then %d", before, calls[fallbackID])
+	}
+}
+
+func TestLibraryFanStartsAtTheDaysPickAndTakesThreePosters(t *testing.T) {
+	const viewID = "66666666666666666666666666666666"
+	ids := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
+	titles := make([]string, len(ids))
+	for i, id := range ids {
+		titles[i] = libraryTitle(strings.Repeat(id, 32), "tag-"+id)
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/UserViews":
+			_, _ = w.Write([]byte(`{"Items":[{"Id":"` + viewID + `","Name":"Movies","CollectionType":"movies"}]}`))
+		case "/Items":
+			fakeLibraryContents(t, map[string][]string{viewID: titles}, map[string]int{})(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	got := libraryRequest(NewServer(libraryAPIConfig(upstream.URL, "user-1")).Handler(), "/v1/library")
+	var body LibraryResponse
+	if err := json.NewDecoder(got.Body).Decode(&body); err != nil || len(body.Views) != 1 {
+		t.Fatalf("library = %d %+v (%v)", got.Code, body, err)
+	}
+	view := body.Views[0]
+	start := dailyLibraryArtworkIndex(time.Now().Format("2006-01-02"), viewID, len(ids))
+	var want []string
+	for i := 0; i < libraryFanSize; i++ {
+		id := ids[(start+i)%len(ids)]
+		want = append(want, "/v1/img/jf/"+strings.Repeat(id, 32)+"/Primary?tag=tag-"+id)
+	}
+	if strings.Join(view.Fan, " ") != strings.Join(want, " ") {
+		t.Fatalf("fan = %v, want %v (day's index %d)", view.Fan, want, start)
+	}
+	if view.Image != want[0] || view.Total != len(ids) {
+		t.Fatalf("image = %q, total = %d", view.Image, view.Total)
+	}
+}
+
+func TestFanFromSkipsTitlesWithoutPostersAndRepeatsNone(t *testing.T) {
+	item := func(id, tag string) jellyfin.Item {
+		it := jellyfin.Item{ID: id}
+		if tag != "" {
+			it.ImageTags = map[string]string{"Primary": tag}
+		}
+		return it
+	}
+	page := []jellyfin.Item{item("a", "1"), item("b", ""), item("c", "3")}
+	head := []jellyfin.Item{item("a", "1"), item("x", "9"), item("y", "8")}
+
+	var got []string
+	for _, it := range fanFrom(3, page, head) {
+		got = append(got, it.ID)
+	}
+	if strings.Join(got, ",") != "a,c,x" {
+		t.Fatalf("fan = %v, want a,c,x: blanks skipped, the wrap adds no repeat", got)
+	}
+	if fan := fanFrom(3, []jellyfin.Item{item("a", "1"), item("c", "3"), item("d", "4"), item("e", "5")}); len(fan) != 3 {
+		t.Fatalf("a full page gave %d", len(fan))
+	}
+	if fan := fanFrom(3, []jellyfin.Item{item("b", "")}); len(fan) != 0 {
+		t.Fatalf("no posters gave %v", fan)
 	}
 }
 
