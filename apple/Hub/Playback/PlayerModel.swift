@@ -136,6 +136,9 @@ final class PlayerModel {
     @ObservationIgnored private var baseURL = ""
     /// The profile that opened the session; every later call is for it.
     @ObservationIgnored private var user = ""
+    /// A real hub's sessions are written down until closed (`OpenSessions`);
+    /// the demo hub's need no closing.
+    @ObservationIgnored private var recordsSessions = false
     @ObservationIgnored private var reporter = PlaybackReporter()
     /// What this profile last chose for the title's series or film.
     @ObservationIgnored private var selection = PlaybackSelection()
@@ -214,6 +217,7 @@ final class PlayerModel {
         hub = app.hub
         baseURL = app.address
         user = app.userId
+        recordsSessions = !app.isDemo
         outbox = outbox ?? PlaybackOutbox(hub: app.hub)
         backdrop = request.backdrop
         opens += 1
@@ -354,6 +358,9 @@ final class PlayerModel {
                                            capabilities: PlaybackDeviceInfo.capabilities())
             var plan = try await hub.fetch(HubEndpoints.preparePlayback(itemId: itemId, body: body, user: user),
                                            as: PlaybackPrepareResponse.self)
+            // Open on the hub from now on: written down, so a crash or a
+            // forced quit cannot leave it for the hub's 30-minute cleanup.
+            if recordsSessions { PlaybackMemory.sessionOpened(plan.sessionId, user: user) }
             selection = PlaybackMemory.selection(user: user, scope: PlaybackChoices.scope(plan.item))
             subtitleOffsetMillis = selection.subtitleOffsetMillis
             // This profile's last audio and subtitles for the series or film,
@@ -520,12 +527,15 @@ final class PlayerModel {
             if play { player.play() }
             return
         }
-        positionMillis = startAt
-        seekTarget = startAt
-        player.seek(to: CMTime(value: startAt, timescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        // A constant for the closure: Xcode 27's Swift will not send a `var`
+        // the main actor's task could still see changing.
+        let target = startAt
+        positionMillis = target
+        seekTarget = target
+        player.seek(to: CMTime(value: target, timescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             Task { @MainActor in
                 // Where playback starts is not a seek the person made.
-                if self?.seekTarget == startAt { self?.seekTarget = nil }
+                if self?.seekTarget == target { self?.seekTarget = nil }
                 if play { self?.player.play() }
             }
         }
@@ -1042,29 +1052,38 @@ final class PlaybackOutbox {
         enqueue(HubEndpoints.playbackEvent(sessionId: session, body: body, user: user), attempts: 3)
     }
 
+    /// Once the hub has closed it (or no longer has it), it is crossed off
+    /// the sessions left open (`PlaybackMemory`), from this task: quitting
+    /// waits on the main thread for it.
     func close(session: String, user: String) {
-        enqueue(HubEndpoints.closePlayback(sessionId: session, user: user), attempts: 1)
+        enqueue(HubEndpoints.closePlayback(sessionId: session, user: user), attempts: 1) { closed in
+            if closed { PlaybackMemory.sessionClosed(session) }
+        }
     }
 
-    private func enqueue(_ request: HubRequest, attempts: Int) {
+    private func enqueue(_ request: HubRequest, attempts: Int, done: (@Sendable (Bool) -> Void)? = nil) {
         let previous = tail
         let hub = hub
         tail = Task.detached {
             await previous?.value
-            await Self.send(request, hub: hub, attempts: attempts)
+            let sent = await Self.send(request, hub: hub, attempts: attempts)
+            done?(sent)
         }
     }
 
-    private nonisolated static func send(_ request: HubRequest, hub: HubClient, attempts: Int) async {
+    /// Whether the hub took it, or answered that it no longer has the session.
+    private nonisolated static func send(_ request: HubRequest, hub: HubClient, attempts: Int) async -> Bool {
         let pauses: [Int] = [1_000, 3_000]
         for attempt in 0..<attempts {
-            do {
+            do throws(HubFailure) {
                 try await hub.send(request)
-                return
+                return true
             } catch {
-                guard attempt < attempts - 1 else { return }
+                if error.kind == .notFound { return true }
+                guard attempt < attempts - 1 else { return false }
                 try? await Task.sleep(for: .milliseconds(pauses[min(attempt, pauses.count - 1)]))
             }
         }
+        return false
     }
 }

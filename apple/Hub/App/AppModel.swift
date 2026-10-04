@@ -40,15 +40,22 @@ final class AppModel {
             colors = ArtworkColors(hub: hub, file: nil)
             return
         }
+        var seeded: String?
         #if DEBUG
         // scripts/mac.sh seeds a simulator or the Mac app from apple/dev.env, the
         // way dev.sh seed does on the Pocket DS. Debug builds only.
         if let url = environment["HUB_URL"], let token = environment["HUB_TOKEN"], !url.isEmpty, !token.isEmpty {
             defaults.set(HubEndpoints.normaliseBase(url), forKey: Self.addressKey)
-            Keychain.token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            seeded = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            #if os(iOS)
+            // A simulator's own Keychain. The Mac app's is the user's login
+            // keychain, which a launch over SSH leaves alone: there the seed
+            // is used for this run only.
+            Keychain.token = seeded
+            #endif
         }
         #endif
-        let token = Keychain.token ?? ""
+        let token = seeded ?? Keychain.token ?? ""
         let storedAddress = defaults.string(forKey: Self.addressKey) ?? ""
         let storedUser = defaults.string(forKey: Self.userIdKey) ?? ""
         address = storedAddress
@@ -61,6 +68,11 @@ final class AppModel {
             slow: URLSessionTransport.slow(),
             artwork: URLSessionTransport.artwork())
         colors = ArtworkColors(hub: hub, file: ArtworkColors.file)
+        // Sessions an earlier launch left open are closed before anything plays.
+        if isConfigured {
+            let hub = hub
+            Task { await PlaybackMemory.closeLeftovers(hub: hub) }
+        }
     }
 
     /// Saves first, then the caller tests: Android's "Save and test", so a
