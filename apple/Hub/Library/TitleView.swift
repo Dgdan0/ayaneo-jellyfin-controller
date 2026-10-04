@@ -10,6 +10,9 @@ struct TitleView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.glassMetrics) private var metrics
     @Environment(\.glassAccent) private var accent
+    @Environment(\.openRoute) private var openRoute
+    @Environment(\.play) private var play
+    @Environment(\.playbackClosed) private var playbackClosed
     let route: TitleRoute
 
     @State private var item: HubKit.LibraryItem?
@@ -74,6 +77,7 @@ struct TitleView: View {
         .ambientArtwork(backdropPath)
         .refreshable { await load() }
         .task(id: model.userId) { await load() }
+        .onChange(of: playbackClosed) { _, _ in Task { await refreshAfterPlayback() } }
         .onChange(of: tabs.map(\.id)) { _, ids in
             if !ids.contains(tab), let first = ids.first { tab = first }
         }
@@ -149,17 +153,34 @@ struct TitleView: View {
         }
     }
 
-    /// The main pill, then watched and favourite as round glass buttons.
+    /// The main pill, Start over beside it when there is a place to start
+    /// over from, then watched and favourite as round glass buttons.
     private func actions(_ item: HubKit.LibraryItem) -> some View {
         HStack(spacing: metrics.compact ? 8 : 10) {
             if item.type != "season" {
                 Button {
-                    status = StatusMessage("Playing on Apple devices comes next")
+                    playMain(item)
                 } label: {
                     Label(playLabel(item), systemImage: "play.fill")
                 }
                 .buttonStyle(PrimaryPillStyle())
                 .disabled(item.type == "series" && target == nil)
+                if DetailLines.offersStartOver(item) {
+                    // A glass pill on an iPad or a Mac (the prototype's `.bg`), a
+                    // round button where a phone's row has no room for the words.
+                    if metrics.compact {
+                        GlassRoundButton(systemImage: "arrow.counterclockwise", label: "Start over", size: 42) {
+                            play(request(for: item, mode: .restart))
+                        }
+                    } else {
+                        Button {
+                            play(request(for: item, mode: .restart))
+                        } label: {
+                            Label("Start over", systemImage: "arrow.counterclockwise")
+                        }
+                        .buttonStyle(GlassPillStyle())
+                    }
+                }
                 GlassRoundButton(systemImage: item.played ? "eye.fill" : "eye",
                                  label: item.played ? "Mark unwatched" : "Mark watched", on: item.played,
                                  size: metrics.compact ? 42 : 46) {
@@ -174,6 +195,25 @@ struct TitleView: View {
             }
             .disabled(saving)
         }
+    }
+
+    /// Play: a movie or an episode where it was left, or from the start
+    /// without a saved position; a series its part-watched, next or first episode.
+    private func playMain(_ item: HubKit.LibraryItem) {
+        if item.type == "series" {
+            guard let target else { return }
+            play(PlayRequest(itemId: target.item.id, mode: DetailLines.startMode(target), title: item.title,
+                             backdrop: backdropPath))
+        } else {
+            play(request(for: item, mode: DetailLines.startMode(item)))
+        }
+    }
+
+    /// The player opens under the series' name for an episode, as it will show it.
+    private func request(for item: HubKit.LibraryItem, mode: PlaybackStartMode) -> PlayRequest {
+        let backdrop = item.id == route.itemId ? backdropPath : (item.thumb.isEmpty ? backdropPath : item.thumb)
+        return PlayRequest(itemId: item.id, mode: mode, title: item.seriesTitle.isEmpty ? item.title : item.seriesTitle,
+                           backdrop: backdrop)
     }
 
     private func playLabel(_ item: HubKit.LibraryItem) -> String {
@@ -223,11 +263,17 @@ struct TitleView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: metrics.gap) {
                         ForEach(Array(episodes.enumerated()), id: \.element.id) { index, episode in
-                            NavigationLink(value: AppRoute.title(TitleRoute(itemId: episode.id, title: episode.title))) {
+                            // An episode plays, as the prototype's and Android's
+                            // do; its own page is in the menu.
+                            Button {
+                                play(request(for: episode, mode: DetailLines.startMode(episode)))
+                            } label: {
                                 EpisodeCard(episode: episode, upNext: episode.id == target?.item.id)
                                     .frame(width: metrics.episode)
                             }
                             .buttonStyle(GlassCardStyle())
+                            .accessibilityHint(episode.positionSeconds > 0 ? "Resumes the episode" : "Plays the episode")
+                            .contextMenu { episodeMenu(episode) }
                             .onAppear {
                                 if index >= episodes.count - 3 { Task { await loadEpisodes(reset: false) } }
                             }
@@ -245,6 +291,26 @@ struct TitleView: View {
                     reader.scrollTo(id, anchor: .leading)
                 }
             }
+        }
+    }
+
+    @ViewBuilder private func episodeMenu(_ episode: HubKit.LibraryItem) -> some View {
+        Button {
+            play(request(for: episode, mode: DetailLines.startMode(episode)))
+        } label: {
+            Label(episode.positionSeconds > 0 ? "Resume" : "Play", systemImage: "play.fill")
+        }
+        if DetailLines.offersStartOver(episode) {
+            Button {
+                play(request(for: episode, mode: .restart))
+            } label: {
+                Label("Start over", systemImage: "arrow.counterclockwise")
+            }
+        }
+        Button {
+            openRoute(.title(TitleRoute(itemId: episode.id, title: episode.title)))
+        } label: {
+            Label("Episode details", systemImage: "info.circle")
         }
     }
 
@@ -322,6 +388,29 @@ struct TitleView: View {
             if error.kind == .cancelled { return }
             status = StatusText.failed(error.message, kind: error.kind, hasData: item != nil)
         }
+    }
+
+    /// Back from the player: the title, a series' next episode and the
+    /// episodes already loaded read again and swapped in whole, so the strip
+    /// and the page keep their places.
+    private func refreshAfterPlayback() async {
+        guard let response = try? await model.hub.fetch(HubEndpoints.libraryItem(route.itemId), as: LibraryItemResponse.self)
+        else { return }
+        item = response.item
+        guard response.item.type == "series" else { return }
+        await loadTarget()
+        let season = seasonId
+        let pages = episodePage
+        guard !season.isEmpty, pages > 0 else { return }
+        var fresh: [HubKit.LibraryItem] = []
+        for page in 1...pages {
+            guard let list = try? await model.hub.fetch(
+                HubEndpoints.libraryEpisodes(seriesId: route.itemId, seasonId: season, page: page), as: LibraryItemList.self)
+            else { return }
+            fresh += list.items
+        }
+        guard season == seasonId, !loadingEpisodes else { return }
+        episodes = fresh
     }
 
     private func loadSimilar() async {

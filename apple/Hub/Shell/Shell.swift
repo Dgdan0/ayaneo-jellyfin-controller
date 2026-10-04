@@ -160,6 +160,8 @@ struct MainView: View {
     @State private var opened: [StackKey] = []
     @State private var ambient = AmbientModel()
     @State private var shell = ShellModel()
+    /// The player, over the whole window while something plays.
+    @State private var player = PlayerModel()
     @State private var profilesOpen = false
     @State private var sheetPlaces = false
     /// The Mac's window buttons sit over the page under its hidden title bar:
@@ -167,6 +169,8 @@ struct MainView: View {
     @State private var windowButtons = CGSize.zero
     /// Debug builds: HUB_SHEET=profiles opens the avatar's sheet at launch.
     @State private var debugSheet = false
+    /// Debug builds: HUB_PLAY=<item id> opens the player at launch.
+    @State private var debugPlay = ""
 
     private var key: StackKey { StackKey(side: side, section: section) }
     private var pages: [AppRoute] { paths[key] ?? [] }
@@ -189,10 +193,11 @@ struct MainView: View {
                         .allowsHitTesting(shown)
                         // A section out of sight keeps its pages but not its
                         // keyboard shortcuts.
-                        .disabled(!shown)
-                        .accessibilityHidden(!shown)
+                        .disabled(!shown || player.isOpen)
+                        .accessibilityHidden(!shown || player.isOpen)
                 }
                 topBar(metrics)
+                    .accessibilityHidden(player.isOpen)
                 if !metrics.wide {
                     ShellTabBar(section: section, select: select)
                         // An iPad mini in portrait is wider than a phone: the
@@ -202,8 +207,16 @@ struct MainView: View {
                         .padding(.bottom, metrics.tabBarBottom)
                         .frame(maxHeight: .infinity, alignment: .bottom)
                         .ignoresSafeArea(edges: .bottom)
+                        .accessibilityHidden(player.isOpen)
+                }
+                // Over the bars too; the pages under it keep their places.
+                if player.isOpen {
+                    PlayerView(player: player)
+                        .transition(.opacity)
+                        .zIndex(1)
                 }
             }
+            .animation(.easeOut(duration: 0.25), value: player.isOpen)
             #if DEBUG && os(macOS)
             .onChange(of: windowButtons) { _, _ in
                 let line = "safe area top \(metrics.safe.top), bar from \(metrics.safe.top + metrics.barTop), "
@@ -212,6 +225,16 @@ struct MainView: View {
             }
             #endif
             #if DEBUG
+            .task(id: debugPlay) {
+                let itemId = debugPlay
+                guard !itemId.isEmpty else { return }
+                // Once Home has had a moment to settle under it. Layout can
+                // start this twice; only the first still finds the id.
+                try? await Task.sleep(for: .milliseconds(800))
+                guard !Task.isCancelled, debugPlay == itemId else { return }
+                debugPlay = ""
+                player.open(PlayRequest(itemId: itemId), app: model)
+            }
             .task(id: debugSheet) {
                 guard debugSheet else { return }
                 // After the first layout settles, so the sheet is the one for
@@ -225,6 +248,8 @@ struct MainView: View {
         // The keyboard rises over the tab bar, as it does over the system's.
         .ignoresSafeArea(.keyboard)
         .environment(ambient)
+        .environment(\.play, PlayAction { request in player.open(request, app: model) })
+        .environment(\.playbackClosed, player.closedCount)
         .environment(\.glassPalette, model.colors.palette(for: ambient.displayed))
         .environment(\.glassAccent, AccentPreset.defaultFor(side))
         .onChange(of: key, initial: true) { _, latest in open(latest) }
@@ -385,12 +410,13 @@ struct MainView: View {
 
     #if DEBUG
     /// scripts/mac.sh opens a chosen place for screenshots: HUB_SECTION=library,
-    /// HUB_SIDE=books, HUB_SHEET=profiles. (HUB_OPEN is Home's.)
+    /// HUB_SIDE=books, HUB_SHEET=profiles, HUB_PLAY=<item id>. (HUB_OPEN is Home's.)
     private func applyDebugLaunch() {
         let environment = ProcessInfo.processInfo.environment
         if let name = environment["HUB_SECTION"], let chosen = AppSection(rawValue: name) { section = chosen }
         if let name = environment["HUB_SIDE"], let chosen = AppSide(rawValue: name) { side = chosen }
         if environment["HUB_SHEET"] == "profiles" { debugSheet = true }
+        if let itemId = environment["HUB_PLAY"], !itemId.isEmpty { debugPlay = itemId }
     }
     #endif
 }

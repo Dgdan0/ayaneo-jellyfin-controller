@@ -9,6 +9,8 @@ struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openRoute) private var openRoute
     @Environment(\.glassMetrics) private var metrics
+    @Environment(\.play) private var play
+    @Environment(\.playbackClosed) private var playbackClosed
 
     @State private var rows: [HomeRow] = []
     @State private var status = StatusMessage("")
@@ -36,7 +38,10 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if let hero {
                         HeroView(content: hero, topInset: proxy.safeAreaInsets.top) {
-                            status = StatusMessage("Playing on Apple devices comes next")
+                            // As Android's Home: the hub decides where it starts, and
+                            // a series plays its part-watched, next or first episode.
+                            play(PlayRequest(itemId: hero.itemId, series: hero.type == "series",
+                                             title: hero.title, backdrop: hero.backdrop))
                         }
                     } else {
                         Color.clear.frame(height: proxy.safeAreaInsets.top)
@@ -63,6 +68,20 @@ struct HomeView: View {
             await load()
         }
         .task(id: hero?.itemId) { await loadHeroDetail() }
+        // Back from the player: the rows read again in place, the hero on the
+        // same card with its new progress.
+        .onChange(of: playbackClosed) { _, _ in
+            Task {
+                await load()
+                if let pick = selection {
+                    selection = rows.first { $0.id == pick.rowId }
+                        .flatMap { row in
+                            row.items.first { $0.id == pick.hit.id }
+                                .map { HeroPick(rowId: row.id, rowTitle: row.title, hit: $0) }
+                        }
+                }
+            }
+        }
     }
 
     private func load() async {
@@ -236,6 +255,7 @@ struct HomeRowView: View {
     let row: HomeRow
     let preview: (MediaHit) -> Void
     @Environment(\.glassMetrics) private var metrics
+    @Environment(\.play) private var play
 
     private var landscape: Bool { HomeHero.isLandscape(rowId: row.id) }
 
@@ -258,6 +278,7 @@ struct HomeRowView: View {
                         .buttonStyle(GlassCardStyle())
                         .disabled(hit.jellyfinItemId.isEmpty)
                         .previewsWhenFocused { preview(hit) }
+                        .contextMenu { playMenu(hit) }
                     }
                 }
                 .padding(.horizontal, metrics.margin)
@@ -266,6 +287,28 @@ struct HomeRowView: View {
             }
         }
         .padding(.top, 8)
+    }
+
+    /// A long press or a secondary click on a card: play it, or start a
+    /// part-watched one over (the title page has both as buttons).
+    @ViewBuilder private func playMenu(_ hit: MediaHit) -> some View {
+        if !hit.jellyfinItemId.isEmpty {
+            let series = hit.media.type == "series"
+            let backdrop = HomeHero.from(rowId: row.id, rowTitle: row.title, hit: hit).backdrop
+            let watching = hit.progress > 0 && !ResumeRules.showsWatched(played: hit.played, progress: hit.progress)
+            Button {
+                play(PlayRequest(itemId: hit.jellyfinItemId, series: series, title: hit.media.title, backdrop: backdrop))
+            } label: {
+                Label(watching ? "Resume" : "Play", systemImage: "play.fill")
+            }
+            if watching && !series {
+                Button {
+                    play(PlayRequest(itemId: hit.jellyfinItemId, mode: .restart, title: hit.media.title, backdrop: backdrop))
+                } label: {
+                    Label("Start over", systemImage: "arrow.counterclockwise")
+                }
+            }
+        }
     }
 }
 

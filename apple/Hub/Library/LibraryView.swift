@@ -146,7 +146,7 @@ struct LibraryView: View {
             for (id, request) in requests {
                 group.addTask {
                     guard let page = try? await hub.fetch(request, as: LibraryPage.self) else { return nil }
-                    return (id, Array(page.items.map(\.media.poster).filter { !$0.isEmpty }.prefix(3)), page.total)
+                    return (id, LibraryFan.posters(page), page.total)
                 }
             }
             for await result in group {
