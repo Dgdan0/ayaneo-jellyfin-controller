@@ -5,7 +5,6 @@ import android.animation.PropertyValuesHolder
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
-import android.graphics.drawable.LayerDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -16,8 +15,6 @@ import com.pocketds.hub.model.Stage
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.ThemeGradientDrawable
-import com.pocketds.hub.ui.glass.GlassColors
-import com.pocketds.hub.ui.glass.GlassPage
 import com.pocketds.hub.ui.glass.GlassPanelDrawable
 import com.pocketds.hub.ui.textWeight
 import java.util.Locale
@@ -55,15 +52,12 @@ class PipelineChip(context: Context, colors: PocketColors, stage: Stage) : Linea
         clipToPadding = false
         val tone = Tone.of(stage.state)
         setPadding(dp(10), dp(6), dp(11), dp(6))
-        val panel = GlassPanelDrawable(GlassColors.panel(GlassPage.palette(context)), dp(999).toFloat())
-        val edge = when (tone) {
-            Tone.ACTIVE -> ACTIVE
-            Tone.FAILED -> FAILED
-            else -> 0
+        val panel = GlassPanelDrawable.attach(this, dp(999).toFloat())
+        when (tone) {
+            Tone.ACTIVE -> panel.edge(ACTIVE, dp(1).toFloat())
+            Tone.FAILED -> panel.edge(FAILED, dp(1).toFloat())
+            else -> Unit
         }
-        background = if (edge == 0) panel else LayerDrawable(arrayOf(panel,
-            ThemeGradientDrawable.rounded(dp(999).toFloat(), Color.TRANSPARENT, dp(1), edge)))
-        GlassPage.follow(this) { page -> panel.retint(GlassColors.panel(page)) }
 
         val dotColour = when (tone) {
             Tone.DONE -> colors.accent

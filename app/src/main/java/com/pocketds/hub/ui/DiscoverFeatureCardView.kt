@@ -45,10 +45,7 @@ class DiscoverFeatureCardView(
         minimumHeight = Styler.dpInt(context, 128f)
         if (glass) {
             val corner = Styler.dp(context, GLASS_CORNER_DP)
-            val panel = com.pocketds.hub.ui.glass.GlassPanelDrawable(
-                com.pocketds.hub.ui.glass.GlassColors.panel(com.pocketds.hub.ui.glass.GlassPage.palette(context)), corner)
-            background = panel
-            com.pocketds.hub.ui.glass.GlassPage.follow(this) { page -> panel.retint(com.pocketds.hub.ui.glass.GlassColors.panel(page)) }
+            com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, corner)
             // The picture is cut to the card's corners by an outline the panel does not give.
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: android.view.View, outline: android.graphics.Outline) =

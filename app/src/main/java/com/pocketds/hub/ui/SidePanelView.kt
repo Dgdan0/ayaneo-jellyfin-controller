@@ -88,7 +88,7 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     private val choiceRows=mutableListOf<View>()
     /** The choice and setting rows, in order: what a test or a screen means by "the first row". */
     val rows:List<View> get()=choiceRows
-    val isOpen get()=visibility==VISIBLE
+    open val isOpen get()=visibility==VISIBLE
     /** Optional reader preview hook; called for both cancel and successful selection. */
     var onPanelGeometryChanged: (() -> Unit)? = null
     val panelStartX: Int get() = if (card.isLaidOut) card.left else

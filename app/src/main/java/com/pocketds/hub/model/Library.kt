@@ -8,7 +8,11 @@ data class LibraryView(
     val name: String = "",
     val kind: String = "",
     val image: String = "",
-    val imageStyle: String = ""
+    val imageStyle: String = "",
+    /** Up to three of its posters, the day's pick first, for the Glass tile's fan; empty from hubs before #13. */
+    val fan: List<String> = emptyList(),
+    /** How many titles it holds; 0 when the hub does not say. */
+    val total: Int = 0
 )
 
 @Serializable

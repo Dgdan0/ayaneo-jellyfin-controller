@@ -39,6 +39,7 @@ import com.pocketds.hub.ui.PosterCardView
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
+import com.pocketds.hub.ui.textWeight
 import com.pocketds.hub.state.Fmt
 import kotlinx.coroutines.launch
 
@@ -46,6 +47,10 @@ import kotlinx.coroutines.launch
  * Downloads: what is on this handheld, grouped by the Jellyfin library each
  * title came from, and the queue of what is still coming. A bar shows the
  * space used against what is left.
+ *
+ * Glass (#11): the prototype's page, the heading and its line, a glass
+ * capsule, library headings in small capitals, glass posters and glass queue
+ * rows with the white bar; the actions open as the side sheet.
  */
 class OfflineScreen(
     private val api: HubApi,
@@ -78,45 +83,50 @@ class OfflineScreen(
     private val queueRows = mutableMapOf<String, QueueRowBinding>()
     private val queueHeaders = mutableMapOf<String, QueueHeaderBinding>()
     private val offlineChanges = OfflineChanges { scheduleRender() }
+    private var glass = false
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
+        glass = Theme.onGlass(colors)
         repository = OfflineRepository.get(host.viewContext)
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
         val page = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(10), dp(20), 0)
+            if (glass) setPadding(dp(22), dp(8), dp(22), 0) else setPadding(dp(24), dp(10), dp(20), 0)
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
                     addView(TextView(context).apply {
                         text = "On your Pocket"
-                        com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.SCREEN, 24f)
+                        if (glass) { textSize = 21f; typeface = com.pocketds.hub.ui.Type.display(context, 800); includeFontPadding = false }
+                        else com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.SCREEN, 24f)
                         setTextColor(colors.primaryText)
                     })
                     summary = TextView(context).apply {
-                        textSize = 12f; setTextColor(colors.mutedText); setPadding(0, dp(4), 0, 0)
+                        textSize = 12f; setTextColor(if (glass) com.pocketds.hub.ui.SettingsCard.GLASS_QUIET else colors.mutedText)
+                        setPadding(0, dp(if (glass) 6 else 4), 0, 0)
                     }
                     addView(summary)
                 }, LinearLayout.LayoutParams(0, WRAP, 1f))
                 // Space used on the chosen storage against what is left.
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
-                    storageLabel = TextView(context).apply { textSize = 11f; setTextColor(colors.mutedText) }
+                    storageLabel = TextView(context).apply { textSize = 11f; setTextColor(if (glass) com.pocketds.hub.ui.SettingsCard.GLASS_QUIET else colors.mutedText) }
                     addView(storageLabel)
                     storageFill = View(context).apply {
                         background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(4).toFloat(), colors.accent)
                     }
                     addView(FrameLayout(context).apply {
-                        background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(4).toFloat(), colors.posterPlaceholder)
+                        background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(4).toFloat(),
+                            if (glass) com.pocketds.hub.ui.ProgressLine.GLASS_TRACK else colors.posterPlaceholder)
                         clipToOutline = true
                         addView(storageFill, FrameLayout.LayoutParams(0, MATCH))
                     }, LinearLayout.LayoutParams(dp(200), dp(8)).apply { topMargin = dp(5) })
                 }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(16); bottomMargin = dp(6) })
                 tabs = com.pocketds.hub.ui.BlobSegmentedView(context, colors, ringVisible).apply {
-                    trackColor = colors.cardSurface
+                    if (glass) useGlassTrack() else trackColor = colors.cardSurface
                     setOptions(listOf(com.pocketds.hub.ui.BlobSegmentedView.Option("library", "Downloaded"),
                         com.pocketds.hub.ui.BlobSegmentedView.Option("queue", "Queue")), "library")
                     onPick = { id -> switchTo(if (id == "queue") MODE_QUEUE else MODE_LIBRARY) }
@@ -132,7 +142,8 @@ class OfflineScreen(
             addView(scroll, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }
         root.addView(page, FrameLayout.LayoutParams(MATCH, MATCH))
-        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
+        // Glass: the actions as the side sheet; removing still asks on the centred card.
+        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = Theme.onGlass(colors))
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         val target = if (!targetOpened && targetItemId.isNotBlank()) repository.forItem(targetItemId) else null
         if (target != null) { mode=MODE_QUEUE; selectedId=target.id }
@@ -427,7 +438,7 @@ class OfflineScreen(
             } else Fmt.bytes(size),
             jellyfinItemId = value.key
         )
-        val card = PosterCardView(host.viewContext, colors, 158f).apply {
+        val card = PosterCardView(host.viewContext, colors, 158f, glass = glass).apply {
             tag = TaggedCatalog(value)
             contentDescription = if (value.isSeries) {
                 "${value.title}, ${value.rows.size} downloaded episodes"
@@ -493,14 +504,14 @@ class OfflineScreen(
         val view = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = Styler.cardBackground(context, colors, cornerDp = 11f)
+            glassRow(this, 11f) ?: run { background = Styler.cardBackground(context, colors, cornerDp = 11f) }
             setPadding(dp(12), dp(8), dp(12), dp(8))
             tag = TaggedBatch(batch)
             Styler.makeFocusable(this)
             descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
             addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(context).apply { text = batch.title; textSize = 15f; setTextColor(colors.primaryText) })
+            addView(TextView(context).apply { text = batch.title; textSize = if (glass) 13f else 15f; if (glass) textWeight(700); setTextColor(colors.primaryText) })
             detail = TextView(context).apply {
                 val active = batch.jobs.firstOrNull { it.state == OfflineState.DOWNLOADING }
                 val transfer = active?.speedBytesPerSecond?.takeIf { it > 0 }?.let { speed ->
@@ -538,7 +549,7 @@ class OfflineScreen(
         val view = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(7), dp(6), dp(10), dp(6)); tag = TaggedDownload(row)
-            background = Styler.cardBackground(context, colors, cornerDp = 10f)
+            glassRow(this, 13f) ?: run { background = Styler.cardBackground(context, colors, cornerDp = 10f) }
             Styler.makeFocusable(this); descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
             image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
             addView(image, LinearLayout.LayoutParams(dp(112), dp(63)))
@@ -549,8 +560,9 @@ class OfflineScreen(
                 })
                 state = TextView(context).apply { textSize = 12f; maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END }
                 addView(state)
-                progress = ProgressLine.create(context, colors)
-                addView(progress, LinearLayout.LayoutParams(MATCH, dp(3)).apply { topMargin = dp(4) })
+                // Glass: the white bar, 5dp, as the prototype's queue rows have it.
+                progress = if (glass) ProgressLine.create(context, colors, android.graphics.Color.WHITE) else ProgressLine.create(context, colors)
+                addView(progress, LinearLayout.LayoutParams(MATCH, dp(if (glass) 5 else 3)).apply { topMargin = dp(4) })
             }, LinearLayout.LayoutParams(0, WRAP, 1f))
             percent = TextView(context).apply { textSize = 13f; gravity = Gravity.CENTER; setTextColor(colors.accent) }
             addView(percent, LinearLayout.LayoutParams(dp(58), MATCH))
@@ -572,9 +584,14 @@ class OfflineScreen(
     private fun sectionLabel(title: String, detail: String) = LinearLayout(host.viewContext).apply {
         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM
         addView(TextView(context).apply {
-            text = title
-            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 15f)
-            setTextColor(colors.primaryText)
+            // Glass: the prototype's group heading, small capitals at 55%.
+            if (glass) {
+                text = title.uppercase(); textSize = 12f; textWeight(800); letterSpacing = 0.12f; setTextColor(GROUP_INK)
+            } else {
+                text = title
+                com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 15f)
+                setTextColor(colors.primaryText)
+            }
         })
         addView(TextView(context).apply { text = detail; textSize = 11f; setTextColor(colors.mutedText); setPadding(dp(10), 0, 0, dp(1)) })
         setPadding(0, dp(12), dp(2), dp(2))
@@ -585,6 +602,14 @@ class OfflineScreen(
             text = message; textSize = 14f; gravity = Gravity.CENTER; setTextColor(colors.mutedText)
             setPadding(dp(40), dp(70), dp(40), dp(40))
         })
+    }
+
+    /** Glass: a queue row's or batch's panel of the page's glass, with the white ring on focus; null in Classic. */
+    private fun glassRow(view: View, cornerDp: Float): Unit? {
+        if (!glass) return null
+        com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(view, Styler.dp(view.context, cornerDp))
+        view.foreground = Styler.focusOutline(view.context, colors, cornerDp, 3f)
+        return Unit
     }
 
     private fun decorate(view: View) {
@@ -640,7 +665,7 @@ class OfflineScreen(
     }
 
     private fun confirmRemoveBatch(batch: OfflineBatch) {
-        overlay.show("Cancel ${batch.title}?", "Choose whether completed episodes remain in Downloaded.",
+        overlay.ask("Cancel ${batch.title}?", "Choose whether completed episodes remain in Downloaded.",
             listOf(
                 ChoiceOverlay.Choice("keep", "Keep batch"),
                 ChoiceOverlay.Choice("cancel", "Cancel pending · keep completed"),
@@ -747,6 +772,8 @@ class OfflineScreen(
     private data class TaggedBatch(val value: OfflineBatch)
     private data class TaggedCatalog(val value: OfflineCatalogEntry)
     private companion object {
+        /** Glass: a library's heading over its titles, white at 55%. */
+        const val GROUP_INK = 0x8CFFFFFF.toInt()
         const val UPDATE_COALESCE_MS = 180L
         const val MODE_QUEUE = 0
         const val MODE_LIBRARY = 1

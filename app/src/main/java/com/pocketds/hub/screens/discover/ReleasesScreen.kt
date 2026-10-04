@@ -361,11 +361,8 @@ private class ReleaseRowView(
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         if (glass) {
-            val panel = com.pocketds.hub.ui.glass.GlassPanelDrawable(
-                com.pocketds.hub.ui.glass.GlassColors.panel(com.pocketds.hub.ui.glass.GlassPage.palette(context)), dp(14).toFloat())
-            background = panel
+            com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, dp(14).toFloat())
             foreground = Styler.focusOutline(context, colors, 14f)
-            com.pocketds.hub.ui.glass.GlassPage.follow(this) { page -> panel.retint(com.pocketds.hub.ui.glass.GlassColors.panel(page)) }
         } else background = Styler.cardBackground(context, colors, cornerDp = 16f)
         setPadding(dp(12), dp(10), dp(14), dp(10))
         Styler.makeFocusable(this)
@@ -421,9 +418,9 @@ private class ReleaseRowView(
         if (glass) {
             // The prototype's status chips: green with white for one Sonarr or
             // Radarr would take, a faint white for a refused one.
-            tile.setTextColor(if (release.rejected) GLASS_REFUSED_TEXT else android.graphics.Color.WHITE)
-            tile.background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(11).toFloat(),
-                if (release.rejected) GLASS_REFUSED else GLASS_ACCEPTED)
+            val tone = if (release.rejected) com.pocketds.hub.ui.DashboardParts.Tone.QUIET else com.pocketds.hub.ui.DashboardParts.Tone.GOOD
+            tile.setTextColor(com.pocketds.hub.ui.DashboardParts.glassInk(tone))
+            tile.background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(11).toFloat(), com.pocketds.hub.ui.DashboardParts.glassFill(tone))
         } else {
             tile.setTextColor(tint)
             tile.background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(12).toFloat(),
@@ -455,10 +452,7 @@ private class ReleaseRowView(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         val RESOLUTION = Regex("""(?i)\d{3,4}p""")
-        /** Glass: the figures white at 62%; an accepted release's chip green, a refused one's white at 12%. */
+        /** Glass: the figures white at 62%; an accepted release's tile is a good chip's green, a refused one's quiet. */
         const val GLASS_STATS = 0x9EFFFFFF.toInt()
-        const val GLASS_ACCEPTED = 0xE61C965C.toInt()
-        const val GLASS_REFUSED = 0x1FFFFFFF
-        const val GLASS_REFUSED_TEXT = 0xCCFFFFFF.toInt()
     }
 }

@@ -134,6 +134,20 @@ class ActivityDashboardTest {
     }
 
     @Test
+    fun `the heading's line says what is moving, what needs a look and how the services are`() {
+        val idle = ActivityResponse(items = listOf(ActivityItem(id = "a", stage = Stages.SEEDING)))
+        val health = HealthResponse(services = List(11) { ServiceHealth(name = "s$it", state = "up") } +
+            ServiceHealth(name = "off", state = "disabled"))
+        assertEquals("Nothing downloading · 1 thing needs attention · all 11 services up", ActivityDashboard.headline(idle, 1, health))
+        val busy = ActivityResponse(items = listOf(ActivityItem(id = "a", stage = Stages.DOWNLOADING), ActivityItem(id = "b", stage = Stages.DOWNLOADING)))
+        val down = HealthResponse(services = listOf(ServiceHealth(name = "a", state = "up"), ServiceHealth(name = "b", state = "down")))
+        assertEquals("2 downloading · 1 service not responding", ActivityDashboard.headline(busy, 0, down))
+        // Before anything has loaded there is nothing to say.
+        assertEquals("", ActivityDashboard.headline(null, 0, null))
+        assertEquals("3 things need attention", ActivityDashboard.headline(null, 3, null))
+    }
+
+    @Test
     fun `one transfer needs attention, several need it`() {
         assertEquals("1 transfer needs attention", ActivityDashboard.needAttention(1))
         assertEquals("3 transfers need attention", ActivityDashboard.needAttention(3))

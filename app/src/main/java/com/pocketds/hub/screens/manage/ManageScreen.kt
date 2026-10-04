@@ -49,7 +49,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
-import com.pocketds.hub.ui.showStatus
+import com.pocketds.hub.state.StatusTone
+import com.pocketds.hub.ui.showSummary
 import com.pocketds.hub.model.ServiceNames
 
 /** Service dashboard with authenticated, service-specific maintenance actions. */
@@ -72,26 +73,35 @@ class ManageScreen(
     private var selectedService = "hub"
     private var pendingFocus = RecyclerView.NO_POSITION
 
+    /** Glass (#11): the prototype's Services, glass cards two across under a heading and its line. */
+    private var glass = false
+
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
+        glass = Theme.onGlass(colors)
         return LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(colors.background)
 
             summary = TextView(context).apply {
                 text = "Services"
-                typeRole(Type.Role.SCREEN)
                 setTextColor(colors.primaryText)
-                setPadding(dp(24), dp(14), dp(24), 0)
+                if (glass) {
+                    textSize = 21f; typeface = Type.display(context, 800); includeFontPadding = false
+                    setPadding(dp(22), dp(10), dp(22), 0)
+                } else {
+                    typeRole(Type.Role.SCREEN)
+                    setPadding(dp(24), dp(14), dp(24), 0)
+                }
             }
             addView(summary)
 
             status = TextView(context).apply {
                 text = "Checking Ayaneo Hub…"
                 textSize = 12f
-                setTextColor(colors.mutedText)
-                setPadding(dp(24), dp(4), dp(24), dp(10))
+                setTextColor(if (glass) com.pocketds.hub.ui.SettingsCard.GLASS_QUIET else colors.mutedText)
+                if (glass) setPadding(dp(22), dp(6), dp(22), dp(8)) else setPadding(dp(24), dp(4), dp(24), dp(10))
             }
             addView(status)
 
@@ -101,6 +111,7 @@ class ManageScreen(
                 adapter = this@ManageScreen.adapter
                 itemAnimator = null
                 clipToPadding = false
+                // Glass: the cards' 4dp margins make the prototype's 8dp gaps and 22dp sides.
                 setPadding(dp(18), 0, dp(18), dp(16))
                 addOnChildAttachStateChangeListener(
                     object : RecyclerView.OnChildAttachStateChangeListener {
@@ -157,12 +168,12 @@ class ManageScreen(
             val position = list.findContainingViewHolder(list.findFocus() ?: list)?.bindingAdapterPosition
                 ?.takeIf { it != RecyclerView.NO_POSITION } ?: adapter.indexOf(selectedService).coerceAtLeast(0)
             when (action.direction) {
-                Direction.UP -> moveService(-COLUMNS)
-                Direction.DOWN -> moveService(COLUMNS)
-                Direction.LEFT -> if (position % COLUMNS > 0) moveService(-1)
-                Direction.RIGHT -> if (position % COLUMNS < COLUMNS - 1) moveService(1)
+                // Up from the top row is the app's: it goes to the tabs. Taking it here left the cards with no way up.
+                Direction.UP -> position >= COLUMNS && moveService(-COLUMNS).let { true }
+                Direction.DOWN -> { moveService(COLUMNS); true }
+                Direction.LEFT -> { if (position % COLUMNS > 0) moveService(-1); true }
+                Direction.RIGHT -> { if (position % COLUMNS < COLUMNS - 1) moveService(1); true }
             }
-            true
         }
         PadAction.Primary -> if (selectedService in scannableServices) {
             scanLibrary(selectedService)
@@ -225,7 +236,8 @@ class ManageScreen(
 
     private fun refresh() {
         if (loadJob?.isActive == true) return
-        status.showStatus(
+        // The page's own line (showSummary): on Glass a status line that only speaks with news hid it for good.
+        status.showSummary(
             StatusMessage(if (adapter.itemCount == 0) "Checking Ayaneo Hub…" else "Refreshing services…"), colors
         )
         loadJob = scope.launch {
@@ -239,7 +251,7 @@ class ManageScreen(
                     if (!hasServices) adapter.showHub(configuredHubRow(state = "down"))
                     val message = if (hasServices) result.message
                         else "${result.message} · open Ayaneo Hub to edit the connection"
-                    status.showStatus(StatusText.failed(message, result.kind, hasData = hasServices), colors)
+                    status.showSummary(StatusText.failed(message, result.kind, hasData = hasServices), colors)
                 }
             }
             loadJob = null
@@ -250,7 +262,9 @@ class ManageScreen(
         val rows = buildList {
             add(configuredHubRow(value.hub))
             add(monitorRow())
-            value.services.sortedBy { ServiceNames.rank(it.name) }.forEach {
+            // In Books the reading services come first.
+            val books = com.pocketds.hub.settings.ContentModeSettings.get(host.viewContext) == com.pocketds.hub.state.ContentMode.BOOKS
+            value.services.sortedBy { ServiceNames.rank(it.name, books) }.forEach {
                 add(it.toRow())
             }
         }
@@ -258,12 +272,8 @@ class ManageScreen(
         val problemCount = rows.count { it.state == "down" || it.state == "misconfigured" }
         val running = rows.count { it.state == "up" }
         summary.text = "Services"
-        status.setTextColor(if (problemCount == 0) colors.mutedText else colors.badgePending)
-        status.text = if (problemCount == 0) {
-            "All $running running · A opens a service's own page"
-        } else {
-            "$problemCount service${if (problemCount == 1) " needs" else "s need"} attention"
-        }
+        status.showSummary(if (problemCount == 0) StatusMessage("All $running running · A opens a service's own page")
+            else StatusMessage("$problemCount service${if (problemCount == 1) " needs" else "s need"} attention", StatusTone.WARNING), colors)
         restoreFocus()
     }
 
@@ -356,7 +366,7 @@ class ManageScreen(
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ServiceHolder {
             val card = ServiceCardView(parent.context).apply {
                 layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
-                    setMargins(dp(7), dp(5), dp(7), dp(5))
+                    if (glass) setMargins(dp(4), dp(4), dp(4), dp(4)) else setMargins(dp(7), dp(5), dp(7), dp(5))
                 }
                 FocusDecorator.attach(this, ringVisible, scale = false)
             }
@@ -385,12 +395,21 @@ class ManageScreen(
         private val icon: ImageView
         private val scan: TextView
 
+        /** Glass: the card's panel, edged in amber while its service is down or needs setting up. */
+        private val panel = if (glass) com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, GLASS_CORNER_DP)) else null
+
         init {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(72)
-            setPadding(dp(14), dp(10), dp(12), dp(10))
-            background = Styler.cardBackground(context, colors, cornerDp = 16f)
+            if (glass) {
+                minimumHeight = dp(62)
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                foreground = Styler.focusOutline(context, colors, GLASS_CORNER_DP, 3f)
+            } else {
+                minimumHeight = dp(72)
+                setPadding(dp(14), dp(10), dp(12), dp(10))
+                background = Styler.cardBackground(context, colors, cornerDp = 16f)
+            }
             Styler.makeFocusable(this)
             isClickable = true
 
@@ -398,13 +417,13 @@ class ManageScreen(
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            addView(icon, LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(12) })
+            addView(icon, LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(if (glass) 10 else 12) })
 
             addView(LinearLayout(context).apply {
                 orientation = VERTICAL
                 name = TextView(context).apply {
-                    textSize = 14.5f
-                    textWeight(600)
+                    textSize = if (glass) 13f else 14.5f
+                    textWeight(if (glass) 700 else 600)
                     setTextColor(colors.primaryText)
                     isSingleLine = true
                     ellipsize = TextUtils.TruncateAt.END
@@ -416,12 +435,12 @@ class ManageScreen(
                     setPadding(0, dp(3), 0, 0)
                     dot = DashboardParts.dot(context, colors.mutedText)
                     addView(dot)
-                    state = TextView(context).apply { textSize = 11.5f; textWeight(600) }
+                    state = TextView(context).apply { textSize = if (glass) 10.5f else 11.5f; textWeight(if (glass) 700 else 600) }
                     addView(state)
                 })
                 detail = TextView(context).apply {
-                    textSize = 11f
-                    setTextColor(colors.mutedText)
+                    textSize = if (glass) 10.5f else 11f
+                    setTextColor(if (glass) com.pocketds.hub.ui.SettingsCard.GLASS_QUIET else colors.mutedText)
                     setPadding(0, dp(2), 0, 0)
                     maxLines = 2
                     ellipsize = TextUtils.TruncateAt.END
@@ -429,7 +448,7 @@ class ManageScreen(
                 addView(detail, LayoutParams(MATCH, WRAP))
             }, LayoutParams(0, WRAP, 1f))
 
-            scan = PillButton.create(context, colors, "Scan", AppIcon.REFRESH, heightDp = 32f).apply {
+            scan = PillButton.create(context, colors, "Scan", AppIcon.REFRESH, heightDp = 32f, glass = glass).apply {
                 isFocusable = false
                 isFocusableInTouchMode = false
                 contentDescription = "Scan Jellyfin libraries"
@@ -452,6 +471,8 @@ class ManageScreen(
             state.setTextColor(if (row.state == "overview" || row.state == "checking") colors.mutedText else color)
             dot.background = ThemeGradientDrawable.oval(color)
             dot.visibility = if (row.state == "overview") View.GONE else View.VISIBLE
+            panel?.edge(if (row.state == "down" || row.state == "misconfigured") com.pocketds.hub.ui.SettingsCard.ATTENTION_EDGE else null,
+                Styler.dp(context, 1.5f))
             detail.text = row.detail.ifEmpty { "No additional information" }
             scan.visibility = if (row.id in scannableServices) View.VISIBLE else View.GONE
             scan.contentDescription = "Scan ${row.name} library"
@@ -520,6 +541,8 @@ class ManageScreen(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val COLUMNS = 2
+        /** The prototype's Pocket service card corner. */
+        const val GLASS_CORNER_DP = 14f
 
         val scannableServices = setOf("jellyfin", "kavita", "storyteller")
     }

@@ -31,13 +31,11 @@ class GlassStillMarks(context: Context, colors: PocketColors, frame: FrameLayout
         addView(progress, FrameLayout.LayoutParams(-1, -1))
     }
     private val disc = FrameLayout(context).apply {
-        val panel = GlassPanelDrawable(GlassColors.panel(GlassPage.palette(context)), dp(context, 23).toFloat())
-        background = panel
+        GlassPanelDrawable.attach(this, dp(context, 23).toFloat())
         alpha = 0f
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         addView(ImageView(context).apply { setImageDrawable(AppIconDrawable(AppIcon.PLAY, Color.WHITE)) },
             FrameLayout.LayoutParams(dp(context, 18), dp(context, 18), Gravity.CENTER).apply { leftMargin = dp(context, 2) })
-        GlassPage.follow(this) { page -> panel.retint(GlassColors.panel(page)) }
     }
     private val tick = TextView(context).apply {
         text = "✓"

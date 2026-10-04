@@ -46,12 +46,14 @@ class ArtworkProgressView(context: Context, color: Int) : View(context) {
  */
 object ProgressLine {
     const val MAX = 1_000
+    const val GLASS_TRACK = 0x29FFFFFF
 
     fun create(context: Context, colors: PocketColors, color: Int = colors.accent): ProgressBar =
         ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = MAX
             progressTintList = ColorStateList.valueOf(color)
-            progressBackgroundTintList = ColorStateList.valueOf(colors.cardSurfacePressed)
+            // Glass: the prototype's track, white at 16%, under any bar.
+            progressBackgroundTintList = ColorStateList.valueOf(if (Theme.onGlass(colors)) GLASS_TRACK else colors.cardSurfacePressed)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
 

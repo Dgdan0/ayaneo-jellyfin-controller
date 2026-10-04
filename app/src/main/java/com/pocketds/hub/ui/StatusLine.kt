@@ -41,6 +41,25 @@ fun TextView.showStatus(message: StatusMessage, colors: PocketColors) {
 }
 
 /**
+ * A page's own line under its heading ("12 unread notifications", "All 13
+ * running"): always shown, in plain words rather than the Glass chip, because
+ * it says what the page holds rather than how fresh it is. A warning or a
+ * failure still takes its colour. Lines that should speak only with news use
+ * [showStatus].
+ */
+fun TextView.showSummary(message: StatusMessage, colors: PocketColors) {
+    text = message.text
+    setTextColor(
+        when (message.tone) {
+            StatusTone.NORMAL -> if (Theme.onGlass(colors)) SettingsCard.GLASS_QUIET else colors.mutedText
+            StatusTone.WARNING -> colors.badgePending
+            StatusTone.ERROR -> colors.dangerText
+        }
+    )
+    visibility = if (message.text.isEmpty()) View.GONE else View.VISIBLE
+}
+
+/**
  * The Glass status chip: drawn round the words wherever the line puts them
  * (start, end, one line or two), so every screen's status line becomes a chip
  * without changing its layout. Its tint follows the page.

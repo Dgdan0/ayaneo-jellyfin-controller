@@ -25,6 +25,10 @@ import com.pocketds.hub.ui.textWeight
  * Full width rather than a card in a grid, because the useful information here
  * is all text and the interesting part -- why something is stuck -- is a
  * sentence, not a number.
+ *
+ * On the Glass page it is the prototype's row (`.trow`): glass with 13dp
+ * corners and the white ring on focus, the stage as a state chip by the title
+ * ([DashboardParts.chip]) and the bar in white.
  */
 class DownloadRowView(
     context: Context,
@@ -38,12 +42,21 @@ class DownloadRowView(
     private val stats: TextView
     private val release: TextView
     private val problem: TextView
+    private val glass = com.pocketds.hub.ui.Theme.onGlass(colors)
+    /** Glass: the stage, as a chip beside the title. */
+    private val chipSlot = android.widget.FrameLayout(context)
 
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        background = Styler.cardBackground(context, colors, cornerDp = 16f)
-        setPadding(dp(12), dp(10), dp(14), dp(10))
+        if (glass) {
+            com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, GLASS_CORNER_DP))
+            foreground = Styler.focusOutline(context, colors, GLASS_CORNER_DP, 3f)
+            setPadding(dp(10), dp(8), dp(12), dp(8))
+        } else {
+            background = Styler.cardBackground(context, colors, cornerDp = 16f)
+            setPadding(dp(12), dp(10), dp(14), dp(10))
+        }
         Styler.makeFocusable(this)
 
         tile = TextView(context).apply {
@@ -52,20 +65,21 @@ class DownloadRowView(
             textWeight(700)
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        addView(tile, LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(14) })
+        addView(tile, if (glass) LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(10) } else LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(14) })
 
         val words = LinearLayout(context).apply { orientation = VERTICAL }
         addView(words, LayoutParams(0, WRAP, 1f))
         val header = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         words.addView(header, LayoutParams(MATCH, WRAP))
         titleView = TextView(context).apply {
-            textSize = 14f
-            textWeight(600)
+            textSize = if (glass) 12.5f else 14f
+            textWeight(if (glass) 700 else 600)
             setTextColor(colors.primaryText)
             isSingleLine = true
             ellipsize = TextUtils.TruncateAt.END
         }
         header.addView(titleView, LayoutParams(0, WRAP, 1f))
+        if (glass) header.addView(chipSlot, LayoutParams(WRAP, WRAP).apply { marginStart = dp(8) })
         trailing = TextView(context).apply {
             textSize = 12f
             textWeight(600)
@@ -75,11 +89,11 @@ class DownloadRowView(
         header.addView(trailing, LayoutParams(WRAP, WRAP).apply { marginStart = dp(10) })
 
         bar = ProgressLine.create(context, colors)
-        words.addView(bar, LayoutParams(MATCH, dp(5)).apply { topMargin = dp(7) })
+        words.addView(bar, LayoutParams(MATCH, dp(5)).apply { topMargin = dp(if (glass) 5 else 7) })
 
         stats = TextView(context).apply {
-            textSize = 11.5f
-            setTextColor(colors.mutedText)
+            textSize = if (glass) 11f else 11.5f
+            setTextColor(if (glass) com.pocketds.hub.ui.SettingsCard.GLASS_QUIET else colors.mutedText)
             isSingleLine = true
             ellipsize = TextUtils.TruncateAt.END
         }
@@ -109,7 +123,11 @@ class DownloadRowView(
         val stageColor = stageColor(item.stage)
         tile.text = glyph(item.stage)
         tile.setTextColor(stageColor)
-        tile.background = ThemeGradientDrawable.rounded(dp(12).toFloat(), ColorUtils.setAlphaComponent(stageColor, 0x2E))
+        tile.background = ThemeGradientDrawable.rounded(dp(if (glass) 9 else 12).toFloat(), ColorUtils.setAlphaComponent(stageColor, 0x2E))
+        if (glass) {
+            chipSlot.removeAllViews()
+            chipSlot.addView(com.pocketds.hub.ui.DashboardParts.chip(context, colors, Stages.label(item.stage), stageTone(item.stage)))
+        }
 
         titleView.text = item.headline
         release.text = item.subline
@@ -124,10 +142,11 @@ class DownloadRowView(
         }
 
         bar.progress = (item.progress * ProgressLine.MAX).toInt().coerceIn(0, ProgressLine.MAX)
-        bar.progressTintList = ColorStateList.valueOf(stageColor)
+        // Glass: the bar is white, as every progress bar on the glass page; its stage is the chip.
+        bar.progressTintList = ColorStateList.valueOf(if (glass) android.graphics.Color.WHITE else stageColor)
         bar.visibility = if (item.stage == Stages.STUCK && item.progress <= 0.0) GONE else VISIBLE
 
-        stats.text = listOf(Stages.label(item.stage), statsLine(item)).filter { it.isNotEmpty() && it != "—" }.joinToString(" · ")
+        stats.text = listOf(if (glass) "" else Stages.label(item.stage), statsLine(item)).filter { it.isNotEmpty() && it != "—" }.joinToString(" · ")
 
         // The *arr's own words, verbatim. Paraphrasing "Found executable file
         // with extension: '.exe'" into "import failed" would have hidden the
@@ -203,6 +222,14 @@ class DownloadRowView(
         else -> warning
     }
 
+    /** The stage's [DashboardParts.chip] tone: moving or waiting quiet, importing amber, done green, stuck red. */
+    private fun stageTone(stage: String): com.pocketds.hub.ui.DashboardParts.Tone = when (stage) {
+        Stages.IMPORTING -> com.pocketds.hub.ui.DashboardParts.Tone.WAITING
+        Stages.SEEDING, Stages.DONE -> com.pocketds.hub.ui.DashboardParts.Tone.GOOD
+        Stages.STUCK -> com.pocketds.hub.ui.DashboardParts.Tone.BAD
+        else -> com.pocketds.hub.ui.DashboardParts.Tone.QUIET
+    }
+
     private fun stageColor(stage: String): Int = when (stage) {
         Stages.DOWNLOADING -> colors.accent
         Stages.IMPORTING -> colors.badgePending
@@ -214,5 +241,7 @@ class DownloadRowView(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        /** The prototype's Pocket transfer row corner. */
+        const val GLASS_CORNER_DP = 13f
     }
 }

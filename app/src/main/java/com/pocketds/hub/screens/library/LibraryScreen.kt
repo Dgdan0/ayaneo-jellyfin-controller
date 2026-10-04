@@ -63,6 +63,10 @@ import com.pocketds.hub.ui.showStatus
  * More libraries than fit scroll sideways under a darkened right edge with a
  * › that says so. Books: the reading libraries as cards, each opening its own
  * page.
+ *
+ * Glass (#11): Movies and TV open on the prototype's root instead, a fanned
+ * tile per library with search and Favourites ([LibraryRootView]); a tile
+ * pushes that library's page ([LibraryFolderScreen]).
  */
 class LibraryScreen(
     private val api: HubApi,
@@ -71,6 +75,9 @@ class LibraryScreen(
     override val title = "Library"
     override val horizontalMode = HorizontalMode.GRID
     override val showsOwnTitle = true
+    /** Glass: the tile in focus tints the page. */
+    override val pageArtwork: String?
+        get() = if (glass && mode == ContentMode.MEDIA && ::root.isInitialized) root.artwork else null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val readingAdapter = ReadingViewAdapter()
@@ -86,6 +93,9 @@ class LibraryScreen(
     private lateinit var searchButton: View
     private lateinit var searchBox: EditText
     private lateinit var gridView: LibraryGridView
+    /** Glass: the root of tiles, in place of the chips and grid. */
+    private lateinit var root: LibraryRootView
+    private var glass = false
     private lateinit var overlay: ChoiceOverlay
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
@@ -99,15 +109,16 @@ class LibraryScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
+        glass = Theme.onGlass(colors)
         mode = ContentModeSettings.get(host.viewContext)
-        val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
+        val page = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
         mediaContent = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
         }
-        buildMedia(host)
-        root.addView(mediaContent, FrameLayout.LayoutParams(MATCH, MATCH))
+        if (glass) buildGlassMedia(host) else buildMedia(host)
+        page.addView(mediaContent, FrameLayout.LayoutParams(MATCH, MATCH))
         booksContent = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
@@ -140,9 +151,26 @@ class LibraryScreen(
             }
             addView(list)
         }
-        root.addView(booksContent, FrameLayout.LayoutParams(MATCH, MATCH))
-        root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
-        return root
+        page.addView(booksContent, FrameLayout.LayoutParams(MATCH, MATCH))
+        page.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
+        return page
+    }
+
+    private fun buildGlassMedia(host: ScreenHost) {
+        root = LibraryRootView(
+            host.viewContext, api, colors, ringVisible,
+            onOpen = ::openFolder,
+            onFavourites = { views.firstOrNull { it.kind == FAVOURITES }?.let(::openFolder) },
+            onSearch = ::openSearch,
+            onFocusChanged = { host.refreshHints() }
+        )
+        mediaContent.addView(root, LinearLayout.LayoutParams(MATCH, 0, 1f))
+    }
+
+    /** Glass: a library's page, its capsule holding every library and Favourites. */
+    private fun openFolder(view: LibraryView) {
+        if (views.isEmpty()) return
+        host?.push(LibraryFolderScreen(api, views, view.id, ringVisible))
     }
 
     private fun buildMedia(host: ScreenHost) {
@@ -265,7 +293,7 @@ class LibraryScreen(
             if (views.isEmpty() || LibraryArtworkRefresh.needed(mediaArtworkDay, LocalDate.now().toString())) {
                 if (loadJob?.isActive != true) load(force = views.isNotEmpty())
             } else {
-                gridView.onShow()
+                if (!glass) gridView.onShow()
                 restoreFocus()
             }
             return
@@ -278,6 +306,7 @@ class LibraryScreen(
 
     override fun onHide() {
         rememberSelection()
+        if (::root.isInitialized) root.onHide()
         if (::gridView.isInitialized) gridView.onHide()
         if (::overlay.isInitialized && overlay.isOpen) overlay.dismiss()
         scope.coroutineContext.cancelChildren()
@@ -293,6 +322,7 @@ class LibraryScreen(
     override fun requestInitialFocus(): Boolean {
         if (mode == ContentMode.MEDIA) {
             if (::overlay.isInitialized && overlay.isOpen) return true
+            if (glass) return root.requestInitialFocus() || views.isEmpty() || root.search.requestFocus()
             // While the first posters load, focus waits for them rather than
             // settling on the chips, where a late page could no longer claim it.
             if (gridView.requestInitialFocus()) return true
@@ -310,6 +340,8 @@ class LibraryScreen(
     override fun hints(): List<ButtonHint> = when {
         ::overlay.isInitialized && overlay.isOpen -> listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
         mode == ContentMode.BOOKS -> listOf(ButtonHint.activate("Open"), ButtonHint.refresh())
+        glass && root.search.hasFocus() -> listOf(ButtonHint.activate("Search"), ButtonHint.refresh())
+        glass -> listOf(ButtonHint.activate("Open"), ButtonHint.secondary("Search"), ButtonHint.refresh())
         chips.hasFocus() -> listOf(ButtonHint.activate("Show library"), ButtonHint.refresh())
         searchBox.hasFocus() -> listOf(ButtonHint.activate("Search"), ButtonHint.back("Close search"))
         searchButton.hasFocus() -> listOf(ButtonHint.activate("Search"))
@@ -322,6 +354,21 @@ class LibraryScreen(
         if (mode == ContentMode.BOOKS) return when (action) {
             PadAction.Activate -> readingAdapter.at(focusedPosition())?.let { open(it) } != null
             PadAction.Refresh -> { load(force = true); true }
+            else -> false
+        }
+        if (glass) return when {
+            // A on the search field types or searches; on an EditText a click does nothing visible.
+            action == PadAction.Activate && root.search.hasFocus() -> {
+                if (root.search.text.isNullOrBlank()) root.focusSearch() else openSearch(root.search.text.toString())
+                true
+            }
+            action == PadAction.Secondary -> { root.focusSearch(); host?.refreshHints(); true }
+            action is PadAction.Step && action.direction == Direction.DOWN &&
+                (root.search.hasFocus() || root.favourites.hasFocus()) -> root.requestInitialFocus()
+            // Up from the first tiles goes to the search field, scrolled away above them;
+            // the window's own search skipped it for the tabs.
+            action is PadAction.Step && action.direction == Direction.UP && root.inFirstRow() -> root.search.requestFocus()
+            action == PadAction.Refresh -> { load(force = true); true }
             else -> false
         }
         return when {
@@ -340,13 +387,13 @@ class LibraryScreen(
         val generation = ++loadGeneration
         val requestedMode = mode
         if (mode == ContentMode.BOOKS) status.showStatus(StatusText.loading("reading libraries", refreshing = force), colors)
-        else gridView.status.showStatus(StatusText.loading("libraries", refreshing = force), colors)
+        else mediaStatus.showStatus(StatusText.loading("libraries", refreshing = force), colors)
         loadJob = scope.launch {
             if (requestedMode == ContentMode.MEDIA) {
                 when (val result = api.library()) {
                     is HubResult.Ok -> if (generation == loadGeneration && requestedMode == mode) renderMedia(result.value)
                     is HubResult.Failed -> if (generation == loadGeneration && requestedMode == mode) {
-                        gridView.status.showStatus(StatusText.failed(result.message, result.kind, hasData = views.isNotEmpty()), colors)
+                        mediaStatus.showStatus(StatusText.failed(result.message, result.kind, hasData = views.isNotEmpty()), colors)
                     }
                 }
             } else {
@@ -361,11 +408,25 @@ class LibraryScreen(
         }
     }
 
+    /** Where the media side says it is loading or failed: the root's line in Glass, the grid's in Classic. */
+    private val mediaStatus: TextView get() = if (glass) root.status else gridView.status
+
     private fun renderMedia(body: LibraryResponse) {
         mediaArtworkDay = LocalDate.now().toString()
         views = body.views + LibraryView(id = FAVOURITES, name = "Favourites", kind = "favorites")
         if (body.views.isEmpty()) {
-            gridView.status.showStatus(StatusText.notice("No movie or TV libraries were found."), colors)
+            mediaStatus.showStatus(StatusText.notice("No movie or TV libraries were found."), colors)
+            return
+        }
+        if (glass) {
+            // The counts and how old they are go in the root's own line; the chip is for failures.
+            mediaStatus.showStatus(com.pocketds.hub.state.StatusMessage(""), colors)
+            val first = !root.hasLibraries
+            root.show(body.views)
+            root.summarize(StatusText.loaded(LibraryTiles.summary(body.views), body.cache, body.partial.map { it.service }))
+            host?.prefetchArtwork(body.views.mapNotNull { LibraryTiles.fan(it).firstOrNull() ?: it.image.ifBlank { null } })
+            if (first) restoreFocus()
+            host?.refreshHints()
             return
         }
         val remembered = host?.viewContext?.let { Prefs.of(it).getString(KEY_LAST_LIBRARY, null) }
@@ -409,7 +470,7 @@ class LibraryScreen(
     private fun switchMode(next: ContentMode, persist: Boolean) {
         if (next == mode) return
         rememberSelection()
-        if (mode == ContentMode.MEDIA) gridView.onHide()
+        if (mode == ContentMode.MEDIA && ::gridView.isInitialized) gridView.onHide()
         scope.coroutineContext.cancelChildren()
         loadJob = null
         loadGeneration++
@@ -435,7 +496,7 @@ class LibraryScreen(
             host?.notify("Type at least two characters")
             return
         }
-        closeSearchBox()
+        if (!glass) closeSearchBox()
         host?.push(LibraryGridScreen(api, LibraryView(id = query, name = "Search · $query", kind = "search"), ringVisible))
     }
 
@@ -479,13 +540,14 @@ class LibraryScreen(
     private class ViewHolder(view: View) : RecyclerView.ViewHolder(view)
     private fun dp(value: Int) = Styler.dpInt(requireNotNull(host).viewContext, value.toFloat())
 
-    private companion object {
-        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
-        const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-        const val LIBRARY_COLUMNS = 3
-        const val TAG_READING_VIEW = -0x7fffffe0
-        const val FAVOURITES = "favorites"
-        const val KEY_LAST_LIBRARY = "library_last_view"
+    companion object {
+        private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+        private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        private const val LIBRARY_COLUMNS = 3
+        private const val TAG_READING_VIEW = -0x7fffffe0
+        private const val FAVOURITES = "favorites"
+        /** The library the Classic page opens on; the Glass library page keeps it too. */
+        internal const val KEY_LAST_LIBRARY = "library_last_view"
     }
 }
 

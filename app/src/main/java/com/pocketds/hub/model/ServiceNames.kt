@@ -25,6 +25,18 @@ object ServiceNames {
 
     fun display(id: String): String = names[id.lowercase()] ?: id.replaceFirstChar { it.uppercase() }
 
-    /** Where a service sits in a list: playback first, then requests, the *arrs, the client, books. Unknown ones last. */
-    fun rank(id: String): Int = names.keys.indexOf(id.lowercase()).takeIf { it >= 0 } ?: Int.MAX_VALUE
+    /**
+     * Where a service sits in a list: playback first, then requests, the *arrs,
+     * the client, books. Unknown ones last. In [books] the reading services
+     * come first (Readarr, BookKeeprr, Kavita, Storyteller), then the rest in
+     * the same order.
+     */
+    fun rank(id: String, books: Boolean = false): Int {
+        val key = id.lowercase()
+        val place = names.keys.indexOf(key).takeIf { it >= 0 } ?: return Int.MAX_VALUE
+        return if (books && key in READING) place - names.size else place
+    }
+
+    /** The services that serve Books. */
+    val READING = setOf("readarr", "bookkeeprr", "kavita", "storyteller")
 }

@@ -8,7 +8,6 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.graphics.ColorUtils
 import coil.dispose
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
@@ -350,17 +349,14 @@ class UpcomingScreen(
                 else com.pocketds.hub.ui.glass.GlassColors.panel(com.pocketds.hub.ui.glass.GlassPage.palette(context)))
         }
         val corner = Styler.dp(context, 15f)
-        val panel = com.pocketds.hub.ui.glass.GlassPanelDrawable(
-            com.pocketds.hub.ui.glass.GlassColors.panel(com.pocketds.hub.ui.glass.GlassPage.palette(context)), corner)
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            background = panel
+            com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, corner)
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) =
                     outline.setRoundRect(0, 0, view.width, view.height, corner)
             }
             clipToOutline = true
-            com.pocketds.hub.ui.glass.GlassPage.follow(this) { page -> panel.retint(com.pocketds.hub.ui.glass.GlassColors.panel(page)) }
         }
         card.addView(com.pocketds.hub.ui.ArtworkFrame(context, 16f / 9f, 0f).apply {
             addView(ImageView(context).apply {
@@ -399,27 +395,8 @@ class UpcomingScreen(
         else host?.notify("No metadata ID is available for this title")
     }
 
-    private fun badge(state: UpcomingPresentation.ReleaseState): TextView = if (glass) glassBadge(state) else label(state.label, 9.5f, toneOf(state)).apply {
-        textWeight(700)
-        setPadding(dp(8), dp(2), dp(8), dp(2))
-        background = ThemeGradientDrawable.rounded(Styler.dp(context, 99f), ColorUtils.setAlphaComponent(toneOf(state), 40))
-    }
-
-    /** Glass: the prototype's state chip (`.st`): white on green, amber or red; Soon a faint white. */
-    private fun glassBadge(state: UpcomingPresentation.ReleaseState): TextView {
-        val fill = when (state) {
-            UpcomingPresentation.ReleaseState.IN_LIBRARY -> 0xE61C965C.toInt()
-            UpcomingPresentation.ReleaseState.AIRED -> 0xF2CD8414.toInt()
-            UpcomingPresentation.ReleaseState.MISSING -> 0xFFD8434A.toInt()
-            UpcomingPresentation.ReleaseState.SOON -> 0x1FFFFFFF
-        }
-        return label(state.label, 10.5f, if (state == UpcomingPresentation.ReleaseState.SOON) 0xCCFFFFFF.toInt() else android.graphics.Color.WHITE).apply {
-            textWeight(800)
-            includeFontPadding = false
-            setPadding(dp(8), dp(4), dp(8), dp(4))
-            background = ThemeGradientDrawable.rounded(Styler.dp(context, 99f), fill)
-        }
-    }
+    private fun badge(state: UpcomingPresentation.ReleaseState): TextView =
+        com.pocketds.hub.ui.DashboardParts.releaseChip(checkNotNull(host).viewContext, colors, state)
 
     private fun toneOf(state: UpcomingPresentation.ReleaseState) = when (state) {
         UpcomingPresentation.ReleaseState.MISSING -> colors.dangerText

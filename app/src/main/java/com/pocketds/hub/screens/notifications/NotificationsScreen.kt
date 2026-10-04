@@ -52,7 +52,7 @@ import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.state.PollCadence
 import com.pocketds.hub.state.PollOutcome
 import com.pocketds.hub.state.Poller
-import com.pocketds.hub.ui.showStatus
+import com.pocketds.hub.ui.showSummary
 
 /** Recent automation activity and current health, kept separate by service. */
 class NotificationsScreen(
@@ -80,9 +80,13 @@ class NotificationsScreen(
     private var unreadIds: Set<String> = emptySet()
     private var latestResponse: NotificationsResponse? = null
 
+    /** Glass (#11): the prototype's columns of glass, each service's notes on darker glass inside. */
+    private var glass = false
+
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
+        glass = Theme.onGlass(colors)
         mode = ContentModeSettings.get(host.viewContext)
         readStore = NotificationReadStore(host.viewContext)
         return LinearLayout(host.viewContext).apply {
@@ -94,23 +98,25 @@ class NotificationsScreen(
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 clipChildren = false
-                setPadding(dp(24), dp(10), dp(24) - dp(PillButton.RING_DP.toInt()), dp(10))
+                if (glass) setPadding(dp(22), dp(8), dp(22) - dp(PillButton.RING_DP.toInt()), dp(8))
+                else setPadding(dp(24), dp(10), dp(24) - dp(PillButton.RING_DP.toInt()), dp(10))
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
                     addView(TextView(context).apply {
                         text = "Notifications"
-                        typeRole(Type.Role.SCREEN)
+                        if (glass) { textSize = 21f; typeface = Type.display(context, 800); includeFontPadding = false } else typeRole(Type.Role.SCREEN)
                         setTextColor(colors.primaryText)
                     })
                     status = TextView(context).apply {
                         text = "Loading activity…"
                         textSize = 12f
-                        setTextColor(colors.mutedText)
-                        setPadding(0, dp(4), 0, 0)
+                        setTextColor(if (glass) com.pocketds.hub.ui.SettingsCard.GLASS_QUIET else colors.mutedText)
+                        setPadding(0, dp(if (glass) 6 else 4), 0, 0)
                     }
                     addView(status)
                 }, LinearLayout.LayoutParams(0, WRAP, 1f))
-                deviceAlerts = PillButton.create(context, colors, "On this Pocket", heightDp = 36f).apply {
+                deviceAlerts = (if (glass) TextView(context).apply { text = "On this Pocket"; PillButton.control(this, colors); Styler.makeFocusable(this) }
+                    else PillButton.create(context, colors, "On this Pocket", heightDp = 36f)).apply {
                     FocusDecorator.attach(this, ringVisible, false)
                     activateOnTap { host.push(LocalAlertsScreen(api, ringVisible)) }
                 }
@@ -120,7 +126,7 @@ class NotificationsScreen(
             mediaColumns = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
-                setPadding(dp(18), 0, dp(18), dp(14))
+                if (glass) setPadding(dp(17), 0, dp(17), dp(12)) else setPadding(dp(18), 0, dp(18), dp(14))
                 MEDIA_SERVICES.forEach { service ->
                     val column = ServiceColumnView(service)
                     columns[service] = column
@@ -131,7 +137,7 @@ class NotificationsScreen(
             }
             bookColumns = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
-                setPadding(dp(18), 0, dp(18), dp(14))
+                if (glass) setPadding(dp(17), 0, dp(17), dp(12)) else setPadding(dp(18), 0, dp(18), dp(14))
                 BOOK_SERVICES.forEach { service ->
                     val column = ServiceColumnView(service)
                     columns[service] = column
@@ -202,9 +208,9 @@ class NotificationsScreen(
 
     private fun startPolling(showLoading: Boolean) {
         if (showLoading) {
-            status.showStatus(StatusText.loading("activity", refreshing = false), colors)
+            status.showSummary(StatusText.loading("activity", refreshing = false), colors)
         } else if (hasContent) {
-            status.showStatus(StatusText.loading("activity", refreshing = true), colors)
+            status.showSummary(StatusText.loading("activity", refreshing = true), colors)
         }
         poller.start(scope, { visible }) { fetchOnce() }
     }
@@ -216,7 +222,7 @@ class NotificationsScreen(
                 PollOutcome(ok = true)
             }
             is HubResult.Failed -> {
-                status.showStatus(StatusText.failed(result.message, result.kind, hasData = hasContent), colors)
+                status.showSummary(StatusText.failed(result.message, result.kind, hasData = hasContent), colors)
                 PollOutcome(ok = false)
             }
         }
@@ -277,7 +283,8 @@ class NotificationsScreen(
             response.partial.isNotEmpty() || response.cache.stale -> "Recent activity"
             else -> "Recent activity · all services responding"
         }
-        status.showStatus(StatusText.loaded(summary, response.cache, response.partial.map { it.service }), colors)
+        // The page's own line: how many are unread is what it holds, not news about freshness.
+        status.showSummary(StatusText.loaded(summary, response.cache, response.partial.map { it.service }), colors)
     }
 
     private fun selectedNotice(): ServiceNotice? =
@@ -307,8 +314,13 @@ class NotificationsScreen(
 
         init {
             orientation = VERTICAL
-            background = ThemeGradientDrawable.rounded(Styler.dp(context, 16f), this@NotificationsScreen.colors.cardSurface)
-            setPadding(dp(8), dp(10), dp(8), dp(6))
+            if (glass) {
+                com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, 16f))
+                setPadding(dp(8), dp(9), dp(8), dp(4))
+            } else {
+                background = ThemeGradientDrawable.rounded(Styler.dp(context, 16f), this@NotificationsScreen.colors.cardSurface)
+                setPadding(dp(8), dp(10), dp(8), dp(6))
+            }
 
             addView(LinearLayout(context).apply {
                 orientation = HORIZONTAL
@@ -407,7 +419,8 @@ class NotificationsScreen(
         fun updateUnreadCount() {
             val unread = adapter.unreadCount()
             count.text = unread.toString()
-            count.background = pill(colors.badgeFailed)
+            count.background = pill(if (glass) com.pocketds.hub.ui.glass.GlassColors.BADGE else colors.badgeFailed)
+            if (glass) { count.setTextColor(android.graphics.Color.WHITE); count.textWeight(800) }
             count.setTextColor(SemanticColor.foreground(colors.badgeFailed))
             count.visibility = if (unread > 0) View.VISIBLE else View.GONE
             count.contentDescription = "$unread unread ${displayName(service)} notifications"
@@ -492,23 +505,23 @@ class NotificationsScreen(
             addView(LinearLayout(context).apply {
                 orientation = VERTICAL
                 headline = TextView(context).apply {
-                    textSize = 13f
-                    textWeight(600)
+                    textSize = if (glass) 12f else 13f
+                    textWeight(if (glass) 700 else 600)
                     setTextColor(colors.primaryText)
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 }
                 addView(headline)
                 detail = TextView(context).apply {
-                    textSize = 11.5f
-                    setTextColor(colors.mutedText)
+                    textSize = if (glass) 11f else 11.5f
+                    setTextColor(if (glass) com.pocketds.hub.ui.SettingsCard.GLASS_QUIET else colors.mutedText)
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 }
                 addView(detail)
                 meta = TextView(context).apply {
                     textSize = 11f
-                    setTextColor(colors.mutedText)
+                    setTextColor(if (glass) NOTE_TIME else colors.mutedText)
                     maxLines = 1
                     setPadding(0, dp(3), 0, 0)
                 }
@@ -532,11 +545,26 @@ class NotificationsScreen(
         }
 
         fun setUnread(unread: Boolean) {
+            if (glass) return setGlassFace(unread)
             background = Styler.selectionBackground(
                 context, colors, selected = false,
                 baseFill = if (unread) colors.unreadSurface else android.graphics.Color.TRANSPARENT,
                 cornerDp = 10f
             )
+        }
+
+        /**
+         * The prototype's note: darker glass inside its column with a faint
+         * edge, a brighter one while unread, and the white ring on focus.
+         */
+        private fun setGlassFace(unread: Boolean) {
+            val corner = Styler.dp(context, NOTE_CORNER_DP)
+            val fill = if (unread) NOTE_UNREAD else NOTE_READ
+            background = android.graphics.drawable.StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_focused),
+                    ThemeGradientDrawable.rounded(corner, fill, dp(2), colors.focusRing))
+                addState(intArrayOf(), ThemeGradientDrawable.rounded(corner, fill, 1, NOTE_EDGE))
+            }
         }
     }
 
@@ -588,6 +616,12 @@ class NotificationsScreen(
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val TAG_NOTICE = -0x7ffffc01
         val MEDIA_SERVICES = listOf("sonarr", "radarr", "bazarr")
+        /** Glass notes: black at 20% or, unread, white at 9%, with a white edge at 6%; their time white at 50%. */
+        const val NOTE_READ = 0x33000000
+        const val NOTE_UNREAD = 0x17FFFFFF
+        const val NOTE_EDGE = 0x0FFFFFFF
+        const val NOTE_TIME = 0x80FFFFFF.toInt()
+        const val NOTE_CORNER_DP = 12f
         val BOOK_SERVICES = listOf("bookkeeprr", "kavita", "storyteller")
         val HEALTH_WORD_BOUNDARY = Regex("(?<=[a-z0-9])(?=[A-Z])")
     }

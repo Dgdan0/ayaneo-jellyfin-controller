@@ -17,7 +17,6 @@ import com.pocketds.hub.model.SearchHit
 import com.pocketds.hub.model.ReadingItem
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.ui.glass.GlassColors
-import com.pocketds.hub.ui.glass.GlassPage
 import com.pocketds.hub.ui.glass.GlassPanelDrawable
 
 /**
@@ -150,10 +149,7 @@ class PosterCardView(
             setPadding(Styler.dpInt(context, 7f), Styler.dpInt(context, 5f), Styler.dpInt(context, 7f), Styler.dpInt(context, 5f))
             // Nearly solid, as a sheet is: it sits on the poster's own lettering,
             // and a see-through strip let "SLOW HORSES" run through "Wed".
-            val strip = GlassPanelDrawable(
-                GlassColors.sheet(GlassPage.palette(context)), Styler.dp(context, 9f))
-            background = strip
-            GlassPage.follow(this) { page -> strip.retint(GlassColors.sheet(page)) }
+            GlassPanelDrawable.attach(this, Styler.dp(context, 9f), GlassColors::sheet)
             visibility = GONE
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }.also { chip ->
@@ -185,7 +181,20 @@ class PosterCardView(
             visibility = if (compact) GONE else VISIBLE
         }
         addView(subtitle)
-        compactCard = compact || !captions
+        if (glass && captions) {
+            // The prototype's captions: the title on one bold line, the year under it.
+            title.textSize = 12f
+            title.textWeight(700)
+            title.minLines = 1
+            title.maxLines = 1
+            title.setPadding(0, Styler.dpInt(context, 7f), 0, 0)
+            subtitle.textSize = 11f
+            subtitle.setTextColor(GLASS_CAPTION)
+            subtitle.ellipsize = android.text.TextUtils.TruncateAt.END
+            subtitle.setPadding(0, Styler.dpInt(context, 1f), 0, 0)
+            subtitle.visibility = VISIBLE
+        }
+        compactCard = (compact && !glass) || !captions
     }
 
     fun bind(hit: SearchHit, imageLoader: ImageLoader, imageUrl: (String) -> String) =
@@ -430,6 +439,8 @@ class PosterCardView(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        /** A Glass poster's second caption line: white at 64%. */
+        const val GLASS_CAPTION = 0xA3FFFFFF.toInt()
         /** A Glass poster's count pill: white at 90%. */
         const val GLASS_COUNT = 0xE6FFFFFF.toInt()
     }

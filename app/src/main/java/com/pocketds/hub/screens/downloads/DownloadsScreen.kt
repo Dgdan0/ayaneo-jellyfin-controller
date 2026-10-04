@@ -114,7 +114,7 @@ class DownloadsScreen(
         // Pills like every other page's actions; the filter lights up while it is on.
         val ring = Styler.dpInt(context, com.pocketds.hub.ui.PillButton.RING_DP)
         fun pill(label: String, onTap: () -> Unit): TextView =
-            com.pocketds.hub.ui.PillButton.create(context, colors, label, heightDp = 34f).apply {
+            com.pocketds.hub.ui.PillButton.create(context, colors, label, heightDp = 34f, glass = Theme.onGlass(colors)).apply {
                 FocusDecorator.attach(this, ringVisible, scale = false)
                 activateOnTap { onTap() }
             }
@@ -564,7 +564,7 @@ class DownloadsScreen(
     }
 
     private fun confirmReading(item: ReadingDownloadItem, choice: ChoiceOverlay.Choice) {
-        overlay.show(
+        overlay.ask(
             title = choice.label + "?",
             subtitle = item.title + "\n" + choice.detail,
             choices = listOf(

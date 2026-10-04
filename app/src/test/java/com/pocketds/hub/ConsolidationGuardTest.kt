@@ -64,6 +64,15 @@ class ConsolidationGuardTest {
             "PocketColors.inverseText for words and icons on a white pill: Glass's page colour paints nothing"),
         Rule(Regex("""StatusMessage\("(No |Nothing |This \w+ is empty)"""),
             "StatusText.notice(…): why a list is empty must still show on Glass, where a line shows only with news"),
+        Rule(Regex("""GlassPage\.follow\([^)]*\)\s*\{\s*page\s*->\s*\w+\.retint\("""),
+            "GlassPanelDrawable.attach(view, radius): the panel as the background, following the page",
+            // The owner itself, a button's two faces, a capsule that draws its own glass,
+            // a search field's focused and quiet faces, and the status chip drawn round words.
+            setOf("ui/glass/GlassPanelDrawable.kt", "ui/glass/GlassButtonBackground.kt", "ui/BlobSegmentedView.kt",
+                "ui/glass/GlassSearchField.kt", "ui/StatusLine.kt")),
+        Rule(Regex("""0xE61C965C|0xF2CD8414"""),
+            "DashboardParts.chip / releaseChip: one state chip for Upcoming, Activity and the transfers",
+            setOf("ui/DashboardParts.kt")),
     )
 
     @Test

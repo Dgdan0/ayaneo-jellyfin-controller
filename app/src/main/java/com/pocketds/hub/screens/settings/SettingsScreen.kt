@@ -101,24 +101,32 @@ class SettingsScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
+        // Glass (#11): the prototype's Settings, a 150dp list of places with their icons beside glass cards.
+        val glass = Theme.onGlass(colors)
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
         val columns = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(24), dp(10), dp(24), 0)
+            if (glass) setPadding(dp(22), dp(8), dp(22), 0) else setPadding(dp(24), dp(10), dp(24), 0)
         }
         val left = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(context).apply {
-                text = "Settings"; typeRole(Type.Role.SCREEN); setTextColor(colors.primaryText)
-                setPadding(dp(4), dp(2), 0, dp(12))
+                text = "Settings"; setTextColor(colors.primaryText)
+                if (glass) {
+                    textSize = 18f; typeface = Type.display(context, 800); includeFontPadding = false
+                    setPadding(dp(6), dp(4), 0, dp(10))
+                } else {
+                    typeRole(Type.Role.SCREEN)
+                    setPadding(dp(4), dp(2), 0, dp(12))
+                }
             })
             nav = SideNavView(context, colors, ringVisible).apply {
-                setItems(SECTIONS.map { SideNavView.Item(it.first, it.second) }, section)
+                setItems(SECTIONS.map { SideNavView.Item(it.first, it.second, if (glass) SECTION_ICONS[it.first] else null) }, section)
                 onPick = { id -> section = id; render() }
             }
             addView(nav, LinearLayout.LayoutParams(MATCH, WRAP))
         }
-        columns.addView(left, LinearLayout.LayoutParams(dp(178), MATCH).apply { marginEnd = dp(18) })
+        columns.addView(left, LinearLayout.LayoutParams(dp(if (glass) 150 else 178), MATCH).apply { marginEnd = dp(if (glass) 12 else 18) })
         pane = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = false
@@ -206,14 +214,14 @@ class SettingsScreen(
 
     private fun card(tag: String? = null) = SettingsCard(host.viewContext, colors).also { card ->
         tag?.let { card.tag = it }
-        pane.addView(card, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(12) })
+        pane.addView(card, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(if (Theme.onGlass(colors)) 10 else 12) })
     }
 
     private fun blob(options: List<Pair<String, String>>, selected: String, tag: String, accent: Boolean = false,
                      onPick: (String) -> Unit) = BlobSegmentedView(host.viewContext, colors, ringVisible,
         if (accent) BlobSegmentedView.Style.ACCENT else BlobSegmentedView.Style.PILL).apply {
         this.tag = tag
-        trackColor = colors.background
+        if (Theme.onGlass(colors)) useGlassTrack() else trackColor = colors.background
         setOptions(options.map { BlobSegmentedView.Option(it.first, it.second) }, selected)
         this.onPick = { id -> onPick(id); host.refreshHints() }
         onOptionFocused = { host.refreshHints() }
@@ -528,6 +536,12 @@ class SettingsScreen(
         val SECTIONS = listOf(
             SECTION_APPEARANCE to "Appearance", SECTION_HOME to "Home", SECTION_PLAYBACK to "Playback",
             SECTION_SUBTITLES to "Subtitles", SECTION_DOWNLOADS to "Downloads", "more" to "More"
+        )
+        /** Glass: each place's icon, as the prototype's list has them. */
+        val SECTION_ICONS = mapOf(
+            SECTION_APPEARANCE to com.pocketds.hub.ui.AppIcon.APPEARANCE, SECTION_HOME to com.pocketds.hub.ui.AppIcon.HOME,
+            SECTION_PLAYBACK to com.pocketds.hub.ui.AppIcon.PLAY, SECTION_SUBTITLES to com.pocketds.hub.ui.AppIcon.SUBTITLES,
+            SECTION_DOWNLOADS to com.pocketds.hub.ui.AppIcon.DOWNLOAD, "more" to com.pocketds.hub.ui.AppIcon.MORE
         )
     }
 }

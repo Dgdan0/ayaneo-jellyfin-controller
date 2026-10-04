@@ -215,30 +215,27 @@ class DiscoverScreen(
 
         searchBox = EditText(context).apply {
             hint = if (mode == ContentMode.BOOKS) "Search books, comics and audio" else "Search films and series"
-            textSize = if (glass) 12.5f else 14f
-            setTextColor(colors.primaryText)
-            setHintTextColor(if (glass) GLASS_HINT else colors.mutedText)
-            background = if (glass) {
-                // The prototype's search: a pill of the page's glass, 34dp of the 48dp target.
-                val panel = com.pocketds.hub.ui.glass.GlassPanelDrawable(
-                    com.pocketds.hub.ui.glass.GlassColors.panel(com.pocketds.hub.ui.glass.GlassPage.palette(context)), Styler.dp(context, 999f))
-                com.pocketds.hub.ui.glass.GlassPage.follow(this) { page -> panel.retint(com.pocketds.hub.ui.glass.GlassColors.panel(page)) }
-                InsetDrawable(panel, 0, Styler.dpInt(context, 7f), 0, Styler.dpInt(context, 7f))
-            } else InsetDrawable(ThemeGradientDrawable().apply {
-                cornerRadius = Styler.dp(context, 12f)
-                setColor(this@DiscoverScreen.colors.cardSurface)
-                setStroke(Styler.dpInt(context, 1f), this@DiscoverScreen.colors.stripBackground)
-            }, 0, Styler.dpInt(context, 4f), 0, Styler.dpInt(context, 4f))
-            setCompoundDrawablesRelative(AppIconDrawable(AppIcon.SEARCH, if (glass) GLASS_ICON else colors.mutedText).apply {
-                val size = Styler.dpInt(context, if (glass) 15f else 18f)
-                setBounds(0, 0, size, size)
-            }, null, null, null)
-            compoundDrawablePadding = Styler.dpInt(context, 9f)
-            setSingleLine()
+            // Glass: the prototype's search, a pill of the page's glass 34dp of the 48dp target.
+            if (glass) com.pocketds.hub.ui.glass.GlassSearchField.style(this, colors, pillDp = 34f, targetDp = 48f) else {
+                textSize = 14f
+                setTextColor(colors.primaryText)
+                setHintTextColor(colors.mutedText)
+                background = InsetDrawable(ThemeGradientDrawable().apply {
+                    cornerRadius = Styler.dp(context, 12f)
+                    setColor(this@DiscoverScreen.colors.cardSurface)
+                    setStroke(Styler.dpInt(context, 1f), this@DiscoverScreen.colors.stripBackground)
+                }, 0, Styler.dpInt(context, 4f), 0, Styler.dpInt(context, 4f))
+                setCompoundDrawablesRelative(AppIconDrawable(AppIcon.SEARCH, colors.mutedText).apply {
+                    val size = Styler.dpInt(context, 18f)
+                    setBounds(0, 0, size, size)
+                }, null, null, null)
+                compoundDrawablePadding = Styler.dpInt(context, 9f)
+                setSingleLine()
+                val h = Styler.dpInt(context, 12f)
+                val v = Styler.dpInt(context, 6f)
+                setPadding(h, v, h, v)
+            }
             imeOptions = EditorInfo.IME_ACTION_SEARCH
-            val h = Styler.dpInt(context, 12f)
-            val v = Styler.dpInt(context, 6f)
-            setPadding(h, v, h, v)
             // Focusing this opens the IME, which on this device is the sibling
             // keyboard project's panel on the bottom screen.
             Styler.makeFocusable(this)
@@ -1546,9 +1543,6 @@ class DiscoverScreen(
         const val GLASS_ROW_POSTER_DP = 123f
         const val GLASS_ROW_CARD_DP = 82f
         const val GLASS_SHORTEST_ROW_DP = 160f
-        /** Glass: the search box's hint and icon, white at 60% and 80%. */
-        const val GLASS_HINT = 0x99FFFFFF.toInt()
-        const val GLASS_ICON = 0xCCFFFFFF.toInt()
         /** How many cards of each row to ask the page colours for when the rows arrive. */
         const val PREFETCH_COLOURS = 12
 

@@ -549,10 +549,7 @@ class MediaDetailScreen(
         val h = Styler.dpInt(context, 11f)
         val v = Styler.dpInt(context, 7f)
         setPadding(h, v, h, v)
-        val pill = com.pocketds.hub.ui.glass.GlassPanelDrawable(
-            com.pocketds.hub.ui.glass.GlassColors.panel(com.pocketds.hub.ui.glass.GlassPage.palette(context)), Styler.dp(context, 999f))
-        background = pill
-        com.pocketds.hub.ui.glass.GlassPage.follow(this) { page -> pill.retint(com.pocketds.hub.ui.glass.GlassColors.panel(page)) }
+        com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, 999f))
     }
 
     /** Ⓨ: pick a release by hand. */

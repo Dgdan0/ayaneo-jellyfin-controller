@@ -15,13 +15,16 @@ import androidx.core.graphics.ColorUtils
  * A short vertical list of places, such as Settings' sections, with the same
  * sliding blob as [BlobSegmentedView], standing up: the chosen row has a raised
  * pill and a coloured dot, and moving focus along the list picks as it goes.
+ *
+ * On Glass it is the prototype's `.snav`: each place with its icon, the chosen
+ * one lit white at 14% with no dot, the rows the Pocket's smaller ones.
  */
 class SideNavView(
     context: Context,
     private val colors: PocketColors,
     private val ringVisible: () -> Boolean
 ) : LinearLayout(context) {
-    data class Item(val id: String, val label: String)
+    data class Item(val id: String, val label: String, val icon: AppIcon? = null)
 
     var onPick: ((String) -> Unit)? = null
     var selected: String? = null
@@ -32,6 +35,9 @@ class SideNavView(
     private val rect = RectF()
     private var blobTop = -1f
     private var animator: ValueAnimator? = null
+    private val glass = Theme.onGlass(colors)
+    private val rowDp = if (glass) GLASS_ROW_DP else ROW_DP
+    private val cornerDp = if (glass) 10 else 12
 
     init {
         orientation = VERTICAL
@@ -45,10 +51,16 @@ class SideNavView(
         next.forEach { item ->
             val row = TextView(context).apply {
                 text = item.label
-                textSize = 13.5f
+                textSize = if (glass) 12f else 13.5f
                 textWeight(600)
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(30), 0, dp(12), 0)
+                if (glass) {
+                    setPadding(dp(10), 0, dp(10), 0)
+                    item.icon?.let { icon ->
+                        compoundDrawablePadding = dp(10)
+                        setCompoundDrawables(AppIconDrawable(icon, GLASS_ICON).apply { setBounds(0, 0, dp(15), dp(15)) }, null, null, null)
+                    }
+                } else setPadding(dp(30), 0, dp(12), 0)
                 contentDescription = item.label
                 Styler.makeFocusable(this)
                 setOnFocusChangeListener { _, focused ->
@@ -58,7 +70,7 @@ class SideNavView(
                 activateOnTap { pick(item.id) }
             }
             rows += row
-            addView(row, LayoutParams(MATCH, dp(ROW_DP)).apply { bottomMargin = dp(GAP_DP) })
+            addView(row, LayoutParams(MATCH, dp(rowDp)).apply { bottomMargin = dp(GAP_DP) })
         }
         select(chosen, animate = false)
     }
@@ -68,8 +80,15 @@ class SideNavView(
     fun select(id: String, animate: Boolean = true) {
         val index = items.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: return
         selected = id
-        rows.forEachIndexed { i, row -> row.setTextColor(if (i == index) colors.primaryText else colors.mutedText); row.isSelected = i == index }
-        val target = index * (dp(ROW_DP) + dp(GAP_DP)).toFloat()
+        rows.forEachIndexed { i, row ->
+            row.setTextColor(when {
+                i == index -> colors.primaryText
+                glass -> GLASS_QUIET
+                else -> colors.mutedText
+            })
+            row.isSelected = i == index
+        }
+        val target = index * (dp(rowDp) + dp(GAP_DP)).toFloat()
         animator?.cancel()
         if (!animate || blobTop < 0 || !ValueAnimator.areAnimatorsEnabled()) {
             blobTop = target
@@ -91,13 +110,15 @@ class SideNavView(
 
     override fun dispatchDraw(canvas: Canvas) {
         if (blobTop >= 0 && rows.isNotEmpty()) {
-            val h = dp(ROW_DP).toFloat()
+            val h = dp(rowDp).toFloat()
             paint.style = Paint.Style.FILL
-            paint.color = ColorUtils.blendARGB(colors.cardSurface, colors.primaryText, 0.06f)
+            paint.color = if (glass) GLASS_LIT else ColorUtils.blendARGB(colors.cardSurface, colors.primaryText, 0.06f)
             rect.set(0f, blobTop, width.toFloat(), blobTop + h)
-            canvas.drawRoundRect(rect, dp(12).toFloat(), dp(12).toFloat(), paint)
-            paint.color = colors.accent
-            canvas.drawCircle(dp(15).toFloat(), blobTop + h / 2, dp(4).toFloat(), paint)
+            canvas.drawRoundRect(rect, dp(cornerDp).toFloat(), dp(cornerDp).toFloat(), paint)
+            if (!glass) {
+                paint.color = colors.accent
+                canvas.drawCircle(dp(15).toFloat(), blobTop + h / 2, dp(4).toFloat(), paint)
+            }
         }
         super.dispatchDraw(canvas)
         rows.firstOrNull { it.isFocused && ringVisible() }?.let { row ->
@@ -105,7 +126,7 @@ class SideNavView(
             paint.strokeWidth = dp(2).toFloat()
             paint.color = colors.focusRing
             rect.set(row.left + 1f, row.top + 1f, row.right - 1f, row.bottom - 1f)
-            canvas.drawRoundRect(rect, dp(12).toFloat(), dp(12).toFloat(), paint)
+            canvas.drawRoundRect(rect, dp(cornerDp).toFloat(), dp(cornerDp).toFloat(), paint)
         }
     }
 
@@ -115,5 +136,11 @@ class SideNavView(
         const val MATCH = LayoutParams.MATCH_PARENT
         const val ROW_DP = 40
         const val GAP_DP = 4
+        /** Glass: the prototype's Pocket rows, 12sp in 7dp of padding. */
+        const val GLASS_ROW_DP = 32
+        /** Glass: the chosen place white at 14%, the others' words at 74% and icons at 85%. */
+        const val GLASS_LIT = 0x24FFFFFF
+        const val GLASS_QUIET = 0xBDFFFFFF.toInt()
+        const val GLASS_ICON = 0xD9FFFFFF.toInt()
     }
 }

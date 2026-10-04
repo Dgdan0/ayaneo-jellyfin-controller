@@ -32,6 +32,27 @@ object ActivityDashboard {
         if (count == 1) "1 transfer needs attention" else "$count transfers need attention"
 
 
+    /**
+     * The line under Activity's heading on Glass: "Nothing downloading · 1
+     * thing needs attention · all 11 services up". A part not yet loaded says
+     * nothing rather than a guess.
+     */
+    fun headline(activity: ActivityResponse?, attention: Int, health: HealthResponse?): String = listOfNotNull(
+        activity?.let { body ->
+            val moving = body.items.count { it.stage == Stages.DOWNLOADING && !it.isBroken }
+            if (moving == 0) "Nothing downloading" else "$moving downloading"
+        },
+        attention.takeIf { it > 0 }?.let { if (it == 1) "1 thing needs attention" else "$it things need attention" },
+        health?.let { value ->
+            val shown = value.services.filter { it.state != "disabled" }
+            when (val notUp = shown.count { it.state != "up" }) {
+                0 -> "all ${shown.size} services up"
+                1 -> "1 service not responding"
+                else -> "$notUp services not responding"
+            }
+        }
+    ).joinToString(" · ")
+
     /** Under this share free, a disk is worth a warning. The server monitor uses it too. */
     const val LOW_SPACE_FRACTION = 0.10
 

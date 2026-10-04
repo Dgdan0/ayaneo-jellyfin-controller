@@ -72,6 +72,41 @@ object PillButton {
     }
 
     /**
+     * Glass: the prototype's control button (`.cbtn`), a [CONTROL_DP]-tall
+     * round-ended pill of the page's glass in a row of controls -- Favourites,
+     * Sort and its direction, Mark all seen -- its icon before the words.
+     * [round] is a circle round the icon alone, such as search. The ring
+     * stands outside it with a gap, as on every pill, so the view is
+     * [RING_DP] larger on each side. Applied to [view] so a screen's own
+     * button class (a [CenteredIconTextView]) keeps its behaviour.
+     */
+    fun control(view: TextView, colors: PocketColors, icon: AppIcon? = null, round: Boolean = false) {
+        val context = view.context
+        val ring = Styler.dpInt(context, RING_DP)
+        GlassButtonBackground.attach(view, colors, Styler.dp(context, 999f), ring, lit = false)
+        view.textSize = 12f
+        view.textWeight(700)
+        view.isSingleLine = true
+        view.includeFontPadding = false
+        view.gravity = Gravity.CENTER
+        view.setTextColor(Color.WHITE)
+        val iconSize = Styler.dpInt(context, 14f)
+        val side = if (round) (Styler.dpInt(context, CONTROL_DP) - iconSize) / 2 else Styler.dpInt(context, 11f)
+        view.setPadding(ring + side, ring, ring + side, ring)
+        val outer = Styler.dpInt(context, CONTROL_DP + 2 * RING_DP)
+        view.minimumHeight = outer
+        view.minHeight = outer
+        if (round) { view.minimumWidth = outer; view.minWidth = outer }
+        icon?.let {
+            view.compoundDrawablePadding = if (round) 0 else Styler.dpInt(context, 7f)
+            view.setCompoundDrawables(AppIconDrawable(it, Color.WHITE).apply { setBounds(0, 0, iconSize, iconSize) }, null, null, null)
+        }
+    }
+
+    /** A [control] button's height, without its ring: the prototype's Pocket `.cbtn`. */
+    const val CONTROL_DP = 32f
+
+    /**
      * Switches a pill between the accent fill and the quiet one: a filter that
      * is on. A new background resets the view's padding to the drawable's
      * insets, which cut the text against the pill's edge, so it is put back.
