@@ -1,10 +1,11 @@
 import HubKit
 import SwiftUI
 
-/// The avatar's sheet. On the iPhone (`places`) it is the account sheet: who
-/// is watching, the profiles to switch to, and rows for Notifications,
-/// Services and Settings, which have no icons of their own there. On the iPad
-/// and the Mac it is "Who is watching?" with the profiles large.
+/// The avatar's sheet. Where the sections are a tab bar (`places`: an iPhone,
+/// an iPad mini in portrait) it is the account sheet: who is watching, the
+/// profiles to switch to, and rows for Notifications, Services and Settings,
+/// which have no icons of their own there. With the top capsule (iPad, Mac)
+/// it is "Who is watching?" with the profiles large.
 struct AccountSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -21,31 +22,38 @@ struct AccountSheet: View {
     private var avatarSize: CGFloat { places ? 56 : 104 }
 
     var body: some View {
-        // Scrolls only when it must (large text in a phone's half-height sheet),
-        // so on an iPad the sheet can be as tall as what it holds.
-        ViewThatFits(in: .vertical) {
-            content
+        sheet
+            .presentationBackground {
+                if reduceTransparency {
+                    // Over the page's own words, a sheet is nearly solid.
+                    Color(argb: GlassColors.sheet(palette))
+                } else {
+                    // The prototype's sheet: its glass with a dark blue-grey at 72%.
+                    Rectangle().fill(.ultraThinMaterial)
+                        .overlay(Color(argb: 0xB81A_1C26))
+                }
+            }
+            .presentationCornerRadius(places ? 32 : 28)
+            #if os(iOS)
+            .presentationDetents(places ? [.medium, .large] : [.large])
+            #else
+            .frame(minWidth: 560)
+            #endif
+            .task { await reload() }
+    }
+
+    /// The account sheet scrolls: a phone's half-height sheet with large text
+    /// can be shorter than it. "Who is watching?" is sized to what it holds
+    /// instead, which a scroll view would hide from the sizing (on an iPad
+    /// mini that left a sliver with the rows cut off).
+    @ViewBuilder private var sheet: some View {
+        if places {
             ScrollView { content }
                 .scrollBounceBehavior(.basedOnSize)
+        } else {
+            content
+                .presentationSizing(.form.fitted(horizontal: false, vertical: true))
         }
-        .presentationBackground {
-            if reduceTransparency {
-                // Over the page's own words, a sheet is nearly solid.
-                Color(argb: GlassColors.sheet(palette))
-            } else {
-                // The prototype's sheet: its glass with a dark blue-grey at 72%.
-                Rectangle().fill(.ultraThinMaterial)
-                    .overlay(Color(argb: 0xB81A_1C26))
-            }
-        }
-        .presentationCornerRadius(places ? 32 : 28)
-        .presentationSizing(.form.fitted(horizontal: false, vertical: true))
-        #if os(iOS)
-        .presentationDetents(places ? [.medium, .large] : [.large])
-        #else
-        .frame(minWidth: 560)
-        #endif
-        .task { await reload() }
     }
 
     private var content: some View {
