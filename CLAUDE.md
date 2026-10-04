@@ -83,6 +83,8 @@ The 2026-09-08 Findroid 1.1.0 hardware audit, screenshot index, side-by-side fea
 and recommended next milestones are in `FINDROID_COMPARISON.md`.
 
 The shared detail/focus redesign and remaining visual milestones are in `VISUAL_POLISH.md`.
+The Glass look chosen on 2026-10-04 for the Pocket DS and the Apple apps, screen by screen, is in
+`GLASS_PLAN.md` (issues #10, #11 and #12).
 The durable reader checkpoint candidate and acceptance status are in `READING_CHECKPOINTS.md`.
 `IMPLEMENTATION_HANDOFF.md` breaks the remaining product features into tests-first tasks.
 Native Apple clients (iPad, iPhone, Mac; SwiftUI, TestFlight) are planned in `APPLE_PLAN.md`;
@@ -669,6 +671,8 @@ Most of these exist because several screens had drifted copies of the same thing
 | Hub: a Jellyfin image path | `jellyfinImage` / `posterImage` / `backdropImage` |
 | Hub: a service's own error sentence | `upstreamText` / `upstreamMessage` / `serviceOf` |
 | Hub: a title's request state changed | `invalidateTitle` (search, Discover, detail) |
+| Hub: an artwork's Glass colours | `internal/artcolor` (`Analyze` → `Palette`) behind `GET /v1/img/colors`; `artworkColorStore` keys a picture without its width and keeps `artwork-colors.json` |
+| Hub: the artwork routes | `imageRoutes`, registered on the API and on `artworkMux`, which the hub reads its own artwork through |
 
 Cards measure at their natural height (`EpisodeCardView`, `DetailArtworkCardView`); give a row
 `WRAP` height rather than leftover space.

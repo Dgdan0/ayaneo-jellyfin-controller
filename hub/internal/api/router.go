@@ -59,8 +59,13 @@ type Server struct {
 	// takes 362ms here. See internal/index.
 	index *index.Index
 
-	cache                 *cache.Store
-	images                *imageProxy
+	cache  *cache.Store
+	images *imageProxy
+	// Each artwork's Glass colours (GLASS_PLAN.md), worked out once and kept.
+	colors                *artworkColorStore
+	colorRequestBudget    time.Duration
+	artworkMuxOnce        sync.Once
+	artworkMuxHandler     http.Handler
 	offline               *offlineStore
 	readingCatalog        *readingdomain.CatalogStore
 	readingCandidates     *readingCandidateStore
@@ -101,6 +106,7 @@ func NewServer(cfg *config.Config) *Server {
 		cache:                 cache.New(),
 		index:                 index.New(),
 		images:                newImageProxy(),
+		colors:                newArtworkColorStore(artworkColorsPath(cfg.Server.OfflineRegistry)),
 		offline:               newOfflineStore(cfg.Server.OfflineRegistry),
 		readingCatalog:        readingdomain.NewCatalogStore(cfg.Server.ReadingCatalog),
 		readingCandidates:     newReadingCandidateStore(2000),
@@ -265,10 +271,8 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/offline/grants/{grantId}/subtitles/{trackId}", s.handleOfflineSubtitle)
 	authed.HandleFunc("POST /v1/offline/grants/{grantId}/renew", s.handleOfflineRenew)
 	authed.HandleFunc("POST /v1/offline/progress/sync", s.handleOfflineProgressSync)
-	authed.HandleFunc("GET /v1/img/jf/{itemId}/{imageType}", s.handleJellyfinImage)
 	authed.HandleFunc("GET /v1/discover", s.handleDiscover)
 	authed.HandleFunc("GET /v1/calendar", s.handleCalendar)
-	authed.HandleFunc("GET /v1/img/arr/{service}/{id}", s.handleArrPoster)
 	authed.HandleFunc("GET /v1/discover/{row}", s.handleDiscoverRow)
 	authed.HandleFunc("GET /v1/reading/discover", s.handleReadingDiscover)
 	authed.HandleFunc("GET /v1/reading/discover/{row}", s.handleReadingDiscoverRow)
@@ -295,11 +299,6 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/downloads", s.handleReadingDownloads)
 	authed.HandleFunc("POST /v1/reading/downloads/{transferId}/retry", s.handleReadingDownloadRetry)
 	authed.HandleFunc("DELETE /v1/reading/downloads/{transferId}", s.handleReadingDownloadCancel)
-	authed.HandleFunc("GET /v1/img/reading/kavita/{seriesId}", s.handleKavitaReadingImage)
-	authed.HandleFunc("GET /v1/img/reading/kavita-library/{libraryId}", s.handleKavitaLibraryImage)
-	authed.HandleFunc("GET /v1/img/reading/kavita-chapter/{chapterId}", s.handleKavitaChapterImage)
-	authed.HandleFunc("GET /v1/img/reading/storyteller/{bookId}", s.handleStorytellerReadingImage)
-	authed.HandleFunc("GET /v1/img/reading/{token}", s.handleReadingImage)
 	authed.HandleFunc("GET /v1/media/{key}", s.handleMediaDetail)
 	authed.HandleFunc("GET /v1/requests/options", s.handleRequestOptions)
 	authed.HandleFunc("POST /v1/requests", s.handleCreateRequest)
@@ -322,7 +321,12 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("POST /v1/downloads/{id}/start", s.handleDownloadStart)
 	authed.HandleFunc("DELETE /v1/downloads/{id}", s.handleDownloadDelete)
 	authed.HandleFunc("POST /v1/queue/{service}/{queueId}/remove", s.handleQueueRemove)
-	authed.HandleFunc("GET /v1/img/tmdb/{size}/{file}", s.handleTmdbImage)
+
+	// Artwork, from the one list artworkMux also serves for the hub's own use.
+	for pattern, handler := range s.imageRoutes() {
+		authed.HandleFunc(pattern, handler)
+	}
+	authed.HandleFunc("GET /v1/img/colors", s.handleArtworkColors)
 
 	mux.Handle("/v1/", s.withAuth(authed))
 
