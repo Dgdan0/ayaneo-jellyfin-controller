@@ -35,8 +35,10 @@ type ReadingLibrary struct {
 
 type ReadingLibrariesResponse struct {
 	Libraries []ReadingLibrary `json:"libraries"`
-	Partial   []Partial        `json:"partial"`
-	Cache     CacheInfo        `json:"cache"`
+	// "custom" when the profile's saved order shaped the list, else "name" (A to Z).
+	Order   string    `json:"order"`
+	Partial []Partial `json:"partial"`
+	Cache   CacheInfo `json:"cache"`
 }
 
 type ReadingProgress struct {
@@ -227,6 +229,19 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, http.StatusServiceUnavailable, Error{Code: CodeUpstreamDown, Service: "reading", Message: "Reading libraries are unavailable", Retryable: true})
 		return
 	}
+	// The profile's own order, else A to Z (#15): Kavita's libraries used to
+	// come first and Storyteller's last, whatever their names.
+	profile, ok := s.libraryOrderProfile(r)
+	if !ok {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "bad Jellyfin user id"})
+		return
+	}
+	var custom bool
+	out.Libraries, custom = arrangeLibraries(out.Libraries,
+		func(l ReadingLibrary) string { return l.ID }, func(l ReadingLibrary) string { return l.Title },
+		s.libraryOrder.get(profile, librarySideBooks))
+	out.Order = orderLabel(custom)
+	w.Header().Add("Vary", jellyfinUserHeader)
 	out.Cache = freshness.result()
 	writeJSON(w, http.StatusOK, out)
 }

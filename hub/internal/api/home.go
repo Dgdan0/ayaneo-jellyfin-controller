@@ -249,9 +249,11 @@ type LibraryView struct {
 }
 
 type LibraryResponse struct {
-	Views   []LibraryView `json:"views"`
-	Partial []Partial     `json:"partial"`
-	Cache   CacheInfo     `json:"cache"`
+	Views []LibraryView `json:"views"`
+	// "custom" when the profile's saved order shaped the list, else "name" (A to Z).
+	Order   string    `json:"order"`
+	Partial []Partial `json:"partial"`
+	Cache   CacheInfo `json:"cache"`
 }
 
 // handleLibrary lists the library's top level.
@@ -327,6 +329,14 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 			Message: out.Views[i].Name + " artwork could not be loaded",
 		})
 	}
+	// The profile's own order, else A to Z (#15). The request's profile was
+	// already checked by jellyfinForRequest.
+	profile, _ := s.libraryOrderProfile(r)
+	var custom bool
+	out.Views, custom = arrangeLibraries(out.Views,
+		func(v LibraryView) string { return v.ID }, func(v LibraryView) string { return v.Name },
+		s.libraryOrder.get(profile, librarySideMedia))
+	out.Order = orderLabel(custom)
 	writeJSON(w, http.StatusOK, out)
 }
 

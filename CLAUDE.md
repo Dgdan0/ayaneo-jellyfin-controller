@@ -682,7 +682,8 @@ Most of these exist because several screens had drifted copies of the same thing
 | Hub: permission check | `requireScope(w, r, scope, action)` (403 `forbidden_scope`) |
 | Hub: a screen built from several cached reads | `cacheSummary` (keeps stale/degraded) |
 | Hub: a Jellyfin image path | `jellyfinImage` / `posterImage` / `backdropImage` |
-| Hub: a library tile's picture, fan and count | `libraryViewArtwork` (the folder's own art wins) and `libraryDailyPicks` + `fanFrom` (the day's pick first, from `dailyLibraryArtworkIndex`), behind `GET /v1/library`'s `image`, `fan` and `total` |
+| Hub: a library tile's picture, fan and count | `libraryViewArtwork` (the folder's own art wins) and `libraryDailyPicks` + `fanFrom` (places spread through the library from `fanIndices`, the day's pick first), behind `GET /v1/library`'s `image`, `fan` and `total` |
+| Hub: the order libraries are listed in | `arrangeLibraries` (saved first, then A to Z) with `libraryOrderStore` (`library-order.json`, per Jellyfin profile and side), written by `PUT /v1/library/order`; `GET /v1/library` and `/v1/reading/libraries` come back in it with `order` |
 | Hub: a service's own error sentence | `upstreamText` / `upstreamMessage` / `serviceOf` |
 | Hub: a title's request state changed | `invalidateTitle` (search, Discover, detail) |
 | An artwork's Glass colours on the Pocket | `ui/glass/ArtworkColors.shared(context, api)`: `prefetch` what a screen shows, `request` what is in focus, `peek`; when to ask again is `ArtworkColorBook` |
@@ -892,9 +893,12 @@ poster selected deterministically from that folder for the media PC's current lo
 10.11.8 install, generated view collages live under `metadata/library`, while the explicit Marvel
 images are `folder.jpg` / `folder.webp` under the configured library root; `/Items/{id}/Images`
 provides that distinction. For the Glass tiles each view also carries `fan` and `total` (#13). `fan`
-holds up to three posters: the day's pick first, then the titles after it in name order, skipping
-any without a poster and wrapping round to the start. `total` counts the library's films and
+holds up to three posters from places spread through the library (the day's pick first, the others
+kept apart so one franchise cannot fill a fan), skipping any without a poster. `total` counts the library's films and
 series. A banner library fans its contents too. Both apps read these rather than choosing their own.
+Libraries are listed A to Z by default, on both sides. A person can arrange them, and the order is kept
+on the hub per Jellyfin profile so every device shows it (#15). The apps show the hub's order and
+send a new one with `PUT /v1/library/order`; they never sort libraries themselves.
 
 Opening a folder uses `GET /v1/library/{viewId}/items?page=&sort=&order=` in 60-item pages. The
 poster grid derives its span count from the measured content width: seven columns with the compact

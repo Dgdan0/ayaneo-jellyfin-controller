@@ -101,16 +101,18 @@ func TestReadingLibrariesCombineKavitaAndStoryteller(t *testing.T) {
 	if err := json.Unmarshal(got.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Libraries) != 2 || body.Libraries[0].ID != "kavita:2" || body.Libraries[0].Kind != "comic" || body.Libraries[1].ID != "storyteller:books" {
-		t.Fatalf("libraries = %+v", body.Libraries)
+	// A to Z by name with nothing saved (#15): Books & Audiobooks before Comics.
+	if len(body.Libraries) != 2 || body.Libraries[0].ID != "storyteller:books" || body.Libraries[1].ID != "kavita:2" || body.Libraries[1].Kind != "comic" || body.Order != "name" {
+		t.Fatalf("libraries = %+v (order %q)", body.Libraries, body.Order)
 	}
-	if body.Libraries[0].Artwork != "/v1/img/reading/kavita/9" || body.Libraries[0].ArtworkStyle != "poster" {
-		t.Fatalf("Kavita library artwork = %+v", body.Libraries[0])
+	if body.Libraries[1].Artwork != "/v1/img/reading/kavita/9" || body.Libraries[1].ArtworkStyle != "poster" {
+		t.Fatalf("Kavita library artwork = %+v", body.Libraries[1])
 	}
-	if body.Libraries[1].Artwork != "/v1/img/reading/storyteller/12" || body.Libraries[1].ArtworkStyle != "poster" {
-		t.Fatalf("Storyteller library artwork = %+v", body.Libraries[1])
+	if body.Libraries[0].Artwork != "/v1/img/reading/storyteller/12" || body.Libraries[0].ArtworkStyle != "poster" {
+		t.Fatalf("Storyteller library artwork = %+v", body.Libraries[0])
 	}
-	if containsString(body.Libraries[0].Capabilities, "sort:author") || !containsString(body.Libraries[0].Capabilities, "sort:last_read") || !containsString(body.Libraries[1].Capabilities, "sort:author") {
+	// Kavita's comics have no author sort; Storyteller's books do.
+	if containsString(body.Libraries[1].Capabilities, "sort:author") || !containsString(body.Libraries[1].Capabilities, "sort:last_read") || !containsString(body.Libraries[0].Capabilities, "sort:author") {
 		t.Fatalf("sort capabilities = %+v / %+v", body.Libraries[0].Capabilities, body.Libraries[1].Capabilities)
 	}
 	if len(body.Partial) != 0 {
@@ -267,7 +269,7 @@ func TestReadingLibrariesPreferStorytellerBooksAndKeepKavitaFallback(t *testing.
 	if err := json.Unmarshal(response.Body.Bytes(), &preferred); err != nil {
 		t.Fatal(err)
 	}
-	if got := readingLibraryIDs(preferred.Libraries); strings.Join(got, ",") != "kavita:2,storyteller:books" {
+	if got := readingLibraryIDs(preferred.Libraries); strings.Join(got, ",") != "storyteller:books,kavita:2" {
 		t.Fatalf("preferred library ids = %v", got)
 	}
 

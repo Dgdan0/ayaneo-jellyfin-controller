@@ -63,6 +63,7 @@ type Server struct {
 	images *imageProxy
 	// Each artwork's Glass colours (GLASS_PLAN.md), worked out once and kept.
 	colors                *artworkColorStore
+	libraryOrder          *libraryOrderStore
 	colorRequestBudget    time.Duration
 	artworkMuxOnce        sync.Once
 	artworkMuxHandler     http.Handler
@@ -107,6 +108,7 @@ func NewServer(cfg *config.Config) *Server {
 		index:                 index.New(),
 		images:                newImageProxy(),
 		colors:                newArtworkColorStore(artworkColorsPath(cfg.Server.OfflineRegistry)),
+		libraryOrder:          newLibraryOrderStore(libraryOrderPath(cfg.Server.OfflineRegistry)),
 		offline:               newOfflineStore(cfg.Server.OfflineRegistry),
 		readingCatalog:        readingdomain.NewCatalogStore(cfg.Server.ReadingCatalog),
 		readingCandidates:     newReadingCandidateStore(2000),
@@ -245,6 +247,7 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/search", s.handleSearch)
 	authed.HandleFunc("GET /v1/home", s.handleHome)
 	authed.HandleFunc("GET /v1/library", s.handleLibrary)
+	authed.HandleFunc("PUT /v1/library/order", s.handleLibraryOrder)
 	// One dispatcher because /{viewId}/items and /items/{itemId} are
 	// intentionally symmetric and net/http correctly rejects them as ambiguous
 	// wildcard patterns when registered separately.
