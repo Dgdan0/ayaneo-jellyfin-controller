@@ -608,6 +608,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Titles requested this session | `state/RequestedTitles` (applied at card bind) |
 | Patching cards already on screen | `state/HitRefresh` |
 | Loading any hub image | `ui/Artwork.loader` / `bind` / `bindHub` (always cancels a recycled view's old request) |
+| The size of a hub picture to ask for | `HubEndpoints.sized(path, width)` for artwork shown large; `smallest(path)` for artwork drawn tiny or blurred (TMDB w92, Jellyfin w=180, a reading cover as it is) |
 | Watch progress | `ui/ArtworkProgressView` on artwork, `ui/ProgressLine` under titles |
 | An episode | `ui/EpisodeCardView`; names via `EpisodeLabel.of` / `code` / `season` ("S1E4 · Title", "Specials") |
 | A season or poster-shaped detail card | `ui/DetailArtworkCardView` |

@@ -16,6 +16,20 @@ class HubEndpointsTest {
         assertEquals("", HubEndpoints.sized("", 1280))
     }
 
+    @Test fun `the smallest picture is w92 from TMDB, w=180 from Jellyfin, and anything else as it is`() {
+        assertEquals("/v1/img/tmdb/w92/abc.jpg", HubEndpoints.smallest("/v1/img/tmdb/w780/abc.jpg"))
+        assertEquals("/v1/img/tmdb/w92/abc.jpg", HubEndpoints.smallest("/v1/img/tmdb/original/abc.jpg"))
+        assertEquals("/v1/img/jf/a/Backdrop?w=180", HubEndpoints.smallest("/v1/img/jf/a/Backdrop"))
+        assertEquals("/v1/img/jf/a/Backdrop?tag=t&w=180", HubEndpoints.smallest("/v1/img/jf/a/Backdrop?tag=t"))
+        // A width already asked for is replaced, not doubled.
+        assertEquals("/v1/img/jf/a/Backdrop?tag=t&w=180", HubEndpoints.smallest("/v1/img/jf/a/Backdrop?tag=t&w=1280"))
+        assertEquals("/v1/img/jf/a/Primary?tag=t&w=180", HubEndpoints.smallest("/v1/img/jf/a/Primary?w=1920&tag=t"))
+        // A reading cover has one size; a malformed path and a blank one are left alone.
+        assertEquals("/v1/img/reading/kavita/12", HubEndpoints.smallest("/v1/img/reading/kavita/12"))
+        assertEquals("/v1/img/tmdb/abc.jpg", HubEndpoints.smallest("/v1/img/tmdb/abc.jpg"))
+        assertEquals("", HubEndpoints.smallest(""))
+    }
+
     @Test fun `artwork colours send each image path whole and encoded`() {
         assertEquals(
             "$base/v1/img/colors?src=%2Fv1%2Fimg%2Fjf%2Fabc%2FBackdrop%3Ftag%3Dt%26w%3D1280&src=%2Fv1%2Fimg%2Ftmdb%2Fw342%2Fa.jpg",

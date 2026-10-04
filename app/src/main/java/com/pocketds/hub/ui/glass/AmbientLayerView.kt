@@ -87,7 +87,7 @@ class AmbientLayerView(context: Context, private val api: HubApi) : FrameLayout(
             return
         }
         // The smallest size the hub serves; decoding tiny is the whole trick.
-        Artwork.bindHub(next, api, HubEndpoints.sized(hubPath, 180), opaque = true) {
+        Artwork.bindHub(next, api, HubEndpoints.smallest(hubPath), opaque = true) {
             size(DECODE_PX, DECODE_PX)
             crossfade(false)
             listener(onSuccess = { _, _ ->
