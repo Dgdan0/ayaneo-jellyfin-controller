@@ -51,6 +51,13 @@ struct ConnectionTests {
     func aTypedAddressIsNormalised(input: String, expected: String) {
         #expect(HubEndpoints.normaliseBase(input) == expected)
     }
+
+    /// A new device's Address field starts with the media PC's tailnet
+    /// address, which needs no change before Save and test.
+    @Test func theSuggestedAddressIsAlreadyNormalised() {
+        #expect(HubEndpoints.normaliseBase(HubEndpoints.suggestedAddress) == HubEndpoints.suggestedAddress)
+        #expect(HubConnectionValidation.error(normalizedAddress: HubEndpoints.suggestedAddress, token: token) == nil)
+    }
 }
 
 struct EndpointTests {

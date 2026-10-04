@@ -15,7 +15,14 @@
 #                                   turn the simulators themselves (SHOT_SIMS, or all
 #                                   three); shot then names its pictures -landscape
 #   scripts/mac.sh mac [-demo]      build and run the Mac app
+#   scripts/mac.sh mac-shot <WxH> [-demo]
+#                                   the built Mac app with its window that size: it draws
+#                                   the window into shots/apple/[<state>-]mac-<WxH>.png
+#                                   after SHOT_WAIT seconds and quits itself
 #   scripts/mac.sh logs             stream the app's log from the booted simulators
+#   scripts/mac.sh testflight       archive JellyHub for iOS (iPhone and iPad) and macOS,
+#                                   upload both to App Store Connect and wait until they
+#                                   are VALID and in the TestFlight group
 #
 # A hub address and token in apple/dev.env (gitignored) are passed to Debug
 # builds on launch, the way dev.sh seed does on the Pocket DS:
@@ -28,7 +35,8 @@
 # run against the real hub never leaves a session open), HUB_PLAY_CHROME=pinned,
 # HUB_PLAY_TOUR=1 (its panels open in turn), HUB_PLAY_SUBTITLE=<language> and,
 # with -demo, HUB_PLAY_FROM_END=<seconds>. SHOT_SIMS="iPad Pro (12.9-inch) (4th generation),iPhone 17 Pro Max"
-# limits sims and shot to those simulators; SHOT_STATE names the screenshots
+# limits sims and shot to those simulators, and HUB_WIDTH=375 lays the app out
+# in a window that wide, as an iPad's Split View would; SHOT_STATE names the screenshots
 # <state>-<device>[-landscape].png, and SHOT_TIMES="5 9 13" takes them that many
 # seconds after launch instead of once after SHOT_WAIT (adding -t<seconds>).
 set -euo pipefail
@@ -36,7 +44,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APPLE="$ROOT/apple"
 DERIVED="$APPLE/build"
-BUNDLE_ID="com.pocketds.hub"
+BUNDLE_ID="com.dgdan.jellyhub"
 SHOTS="$ROOT/shots/apple"
 # The devices the user owns (APPLE_PLAN.md): an iPad Pro 12.9" (4th
 # generation, 2020, A12Z; 1024 x 1366 pt), an iPad mini (A17 Pro) and an
@@ -119,8 +127,8 @@ build_mac() {
     -destination 'platform=macOS' -derivedDataPath "$DERIVED" -quiet "${signing[@]}" build
 }
 
-app_ios() { echo "$DERIVED/Build/Products/Debug-iphonesimulator/Hub.app"; }
-app_mac() { echo "$DERIVED/Build/Products/Debug/Hub.app"; }
+app_ios() { echo "$DERIVED/Build/Products/Debug-iphonesimulator/JellyHub.app"; }
+app_mac() { echo "$DERIVED/Build/Products/Debug/JellyHub.app"; }
 
 launch_args() {
   local args=()
@@ -141,6 +149,7 @@ launch_sim() {
     SIMCTL_CHILD_HUB_PLAY="${HUB_PLAY:-}" SIMCTL_CHILD_HUB_PLAY_EXIT="${HUB_PLAY_EXIT:-}" \
     SIMCTL_CHILD_HUB_PLAY_CHROME="${HUB_PLAY_CHROME:-}" SIMCTL_CHILD_HUB_PLAY_FROM_END="${HUB_PLAY_FROM_END:-}" \
     SIMCTL_CHILD_HUB_PLAY_TOUR="${HUB_PLAY_TOUR:-}" SIMCTL_CHILD_HUB_PLAY_SUBTITLE="${HUB_PLAY_SUBTITLE:-}" \
+    SIMCTL_CHILD_HUB_WIDTH="${HUB_WIDTH:-}" \
     xcrun simctl launch "$udid" "$BUNDLE_ID" $(launch_args "$@") >/dev/null
 }
 
@@ -162,9 +171,15 @@ shoot_all() {
     udid="$(udid_of "$name")"
     file="$(shot_file "$name" "$udid" "${1:-}")"
     xcrun simctl io "$udid" screenshot "$file" >/dev/null 2>&1 || continue
-    # A turned simulator is captured as its screen stands, upright with the
-    # picture on its side: it is turned back, its top up.
-    if turned "$udid"; then sips -r 270 "$file" >/dev/null 2>&1; fi
+    # Xcode 26's simctl captured a turned simulator as its screen stands,
+    # upright with the picture on its side; Xcode 27's captures it the way it
+    # is turned. A turned one that comes back upright is turned to stand.
+    if turned "$udid"; then
+      local width height
+      width="$(sips -g pixelWidth "$file" | awk '/pixelWidth/ {print $2}')"
+      height="$(sips -g pixelHeight "$file" | awk '/pixelHeight/ {print $2}')"
+      if (( height > width )); then sips -r 270 "$file" >/dev/null 2>&1; fi
+    fi
     echo "$file"
   done < <(selected_sims)
 }
@@ -262,12 +277,104 @@ transparency() {
 mac() {
   build_mac
   # Only this build of the Mac app: the simulators run apps named Hub too.
-  pkill -f "$(app_mac)/Contents/MacOS/Hub" >/dev/null 2>&1 || true
+  pkill -f "$(app_mac)/Contents/MacOS/JellyHub" >/dev/null 2>&1 || true
   # Detached, with its output in a file: an SSH session that starts it
   # (scripts/mac-remote.sh) otherwise stays open as long as the app runs.
-  HUB_URL="${HUB_URL:-}" HUB_TOKEN="${HUB_TOKEN:-}" nohup "$(app_mac)/Contents/MacOS/Hub" $(launch_args "$@") \
+  HUB_URL="${HUB_URL:-}" HUB_TOKEN="${HUB_TOKEN:-}" nohup "$(app_mac)/Contents/MacOS/JellyHub" $(launch_args "$@") \
     > "$DERIVED/mac-app.log" 2>&1 < /dev/null &
   echo "started $(app_mac); its output goes to $DERIVED/mac-app.log"
+}
+
+# The Mac app with its window at one size, for the orientation and size pass:
+# it draws its own window into its container (a screenshot over SSH needs
+# Screen Recording, which stays off) and quits itself through its own path.
+mac_shot() {
+  local size="${1:-1280x820}" app container file pid
+  shift || true
+  app="$(app_mac)/Contents/MacOS/JellyHub"
+  container="$HOME/Library/Containers/$BUNDLE_ID/Data"
+  pkill -f "$app" >/dev/null 2>&1 || true
+  rm -f "$container/hub-window.png"
+  # The window's last frame is kept in the app's own defaults and wins over
+  # the size asked for, so it is forgotten first. A window resized after it
+  # opened drew its scrolled pages where they had been.
+  local prefs="$container/Library/Preferences/$BUNDLE_ID"
+  defaults read "$prefs" 2>/dev/null | sed -n 's/^ *"\(NSWindow Frame [^"]*\)" = .*/\1/p' |
+    while IFS= read -r key; do defaults delete "$prefs" "$key"; done
+  HUB_URL="${HUB_URL:-}" HUB_TOKEN="${HUB_TOKEN:-}" HUB_SECTION="${HUB_SECTION:-}" HUB_SIDE="${HUB_SIDE:-}" \
+    HUB_OPEN="${HUB_OPEN:-}" HUB_SHEET="${HUB_SHEET:-}" HUB_WINDOW="$size" HUB_SNAPSHOT="${SHOT_WAIT:-8}" \
+    nohup "$app" $(launch_args "$@") -ApplePersistenceIgnoreState YES > "$DERIVED/mac-app.log" 2>&1 < /dev/null &
+  pid=$!
+  for _ in $(seq 1 90); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  # Never left running.
+  kill "$pid" 2>/dev/null || true
+  mkdir -p "$SHOTS"
+  file="$SHOTS/${SHOT_STATE:+$SHOT_STATE-}mac-$size.png"
+  if cp "$container/hub-window.png" "$file" 2>/dev/null; then echo "$file"; else echo "no picture from the Mac app"; fi
+}
+
+# TestFlight: JellyHub archived for iOS (iPhone and iPad) and macOS, signed by
+# Xcode's cloud-managed distribution certificate through the App Store
+# Connect API key, uploaded, then followed until App Store Connect has
+# processed both and given them to the TestFlight group. The key and its ids
+# stay on this Mac, in ~/.appstoreconnect (ASC_ENV): ASC_KEY_ID, ASC_ISSUER_ID,
+# ASC_KEY_PATH, APPLE_TEAM_ID, ASC_APP_ID and TESTFLIGHT_GROUP. Nothing here
+# touches the login keychain: the iOS archive is unsigned and the Mac one
+# signed ad hoc (to carry its sandbox), and the export signs both.
+testflight() {
+  local env="${ASC_ENV:-$HOME/.appstoreconnect/jellyhub.env}"
+  if [[ ! -f "$env" ]]; then
+    echo "no $env: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH, APPLE_TEAM_ID, ASC_APP_ID, TESTFLIGHT_GROUP"
+    exit 2
+  fi
+  set -a
+  # shellcheck disable=SC1090
+  source "$env"
+  set +a
+  project
+  local build version out auth platform
+  # Always increasing: the upload's minute in UTC, which fits Apple's 32-bit build numbers.
+  build="${BUILD_NUMBER:-$(date -u +%y%m%d%H%M)}"
+  version="$(awk -F'"' '/MARKETING_VERSION:/ {print $2; exit}' "$APPLE/project.yml")"
+  out="$APPLE/build/testflight/$build"
+  mkdir -p "$out"
+  auth=(-allowProvisioningUpdates -authenticationKeyPath "$ASC_KEY_PATH"
+        -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+  cat > "$out/export.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key><string>app-store-connect</string>
+  <key>destination</key><string>upload</string>
+  <key>signingStyle</key><string>automatic</string>
+  <key>teamID</key><string>$APPLE_TEAM_ID</string>
+  <key>uploadSymbols</key><true/>
+  <key>manageAppVersionAndBuildNumber</key><false/>
+</dict>
+</plist>
+PLIST
+  echo "JellyHub $version ($build)"
+  for platform in iOS macOS; do
+    local signing=(CODE_SIGNING_ALLOWED=NO)
+    # The Mac app keeps its sandbox only if the archive carries it: an ad hoc
+    # signature holds the entitlements for the export to sign again.
+    [[ "$platform" == "macOS" ]] && signing=(CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=-)
+    echo "archiving for $platform"
+    xcodebuild -project "$APPLE/Hub.xcodeproj" -scheme Hub -configuration Release \
+      -destination "generic/platform=$platform" -archivePath "$out/JellyHub-$platform.xcarchive" \
+      -derivedDataPath "$DERIVED" CURRENT_PROJECT_VERSION="$build" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+      "${signing[@]}" -quiet archive
+    echo "uploading $platform"
+    xcodebuild -exportArchive -archivePath "$out/JellyHub-$platform.xcarchive" \
+      -exportOptionsPlist "$out/export.plist" -exportPath "$out/$platform" "${auth[@]}"
+  done
+  echo "waiting for App Store Connect to process $build"
+  swift "$APPLE/Tools/asc.swift" wait "$build" "${TESTFLIGHT_WAIT_MINUTES:-60}"
+  swift "$APPLE/Tools/asc.swift" group "${TESTFLIGHT_GROUP:-me}"
 }
 
 case "${1:-build}" in
@@ -281,6 +388,8 @@ case "${1:-build}" in
   uitest) uitest ;;
   turn) shift; turn "$@" ;;
   mac) shift; mac "$@" ;;
+  mac-shot) shift; mac_shot "$@" ;;
+  testflight) testflight ;;
   logs) xcrun simctl spawn booted log stream --level debug --predicate "subsystem == '$BUNDLE_ID' OR process == 'Hub'" ;;
-  *) sed -n '2,34p' "$0"; exit 2 ;;
+  *) sed -n '2,42p' "$0"; exit 2 ;;
 esac

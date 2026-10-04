@@ -146,6 +146,11 @@ themselves (an iPad app that shares the screen cannot turn itself), `shot` then 
 pictures `<state>-<device>-landscape.png`, and `turn portrait` turns them back. Look for words
 cut off behind the bars or the notch, anything squeezed to "…", scrolling that stops, a turn
 that loses your place, and heights that suit a phone held sideways (about 400 points tall).
+An iPad's Split View widths are checked with `HUB_WIDTH=375` (a third), `639` (two thirds
+upright), `678` (half sideways) and `981` (two thirds sideways): debug builds lay the app out in a
+window that wide, compact below 660 as Apple's table has it. The Mac's windows are checked with
+`scripts/mac.sh mac-shot 760x560` and `1440x860`: the app opens a fresh window of that size, draws
+it into its container (a screenshot over SSH needs Screen Recording, which stays off) and quits.
 
 ## Playback on Apple (#2)
 
@@ -183,6 +188,13 @@ relaunching. Against the real hub, play only a title that is unwatched and at 0:
 30 seconds, and leave through `HUB_PLAY_EXIT`: under Jellyfin's 5% nothing is kept, though the
 stop still sets the item's `lastPlayedAt`. Then `POST /v1/library/items/{id}/state
 {"played": false}` clears it; read the title before and after, and report both reads.
+
+A session left open by a crash, a forced quit or a relaunch is closed at the next launch: each
+session is written down when the hub opens it and crossed off when its `DELETE` succeeds
+(HubKit `OpenSessions`, kept by `Playback/PlaybackMemory`), and once a launch, before anything
+plays, `PlaybackLeftovers` closes what an earlier launch left, each for its own profile. Checked
+against the real hub with a made-up leftover: the launch sent its `DELETE`, the hub answered 404,
+and the entry was gone.
 
 The player follows the device. Turned, the picture fills the screen; held upright it is a band
 across the middle, the title takes its own line under the buttons, drawn subtitles sit under the
@@ -258,12 +270,34 @@ still needed for controller feel, playback performance and offline downloads.
   from `apple/project.yml` with XcodeGen and the generated `.xcodeproj` is not committed.
 - Done: Xcode 26.3, Homebrew, XcodeGen and `gh` on the Mac; `scripts/mac.sh` and
   `scripts/mac-remote.sh`.
-- Still to do (#6): Apple Developer Program enrollment, done by the user in the Apple Developer
-  app. After approval, an **App Store Connect API key** lets `xcodebuild` sign automatically
-  (`-allowProvisioningUpdates -authenticationKeyPath ...`) and upload builds without the Xcode
-  window. Keep the key outside the repo. **Signing over SSH needs a one-time keychain step on
-  the Mac**, because SSH sessions cannot open the login keychain (the same reason the Claude CLI
-  needed its own login there). Add `device` and `testflight` to `scripts/mac.sh` then.
+- TestFlight (#6) is described below under Shipping.
+
+## Shipping through TestFlight (#6)
+
+The app is **JellyHub** (`com.dgdan.jellyhub`, one universal App Store Connect record for iOS and
+macOS; the UI tests are `com.dgdan.jellyhub.uitests`). `scripts/mac-remote.sh testflight` is the
+one step:
+
+1. it archives for iOS (iPhone and iPad) and for macOS, numbering the build with the upload's
+   minute in UTC (`yyMMddHHmm`, always increasing, within Apple's 32-bit limit) and taking the
+   version from `MARKETING_VERSION` in `apple/project.yml`;
+2. it exports each with `method app-store-connect` and `destination upload`, signed by Xcode
+   through the App Store Connect API key (`-allowProvisioningUpdates` and the key's three
+   flags), which uploads it;
+3. `apple/Tools/asc.swift` follows the builds through App Store Connect's processing until both
+   are `VALID`, and lists the TestFlight group's builds.
+
+The key, its ids, the team and the app id stay on the Mac in `~/.appstoreconnect/jellyhub.env`
+(`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_PATH`, `APPLE_TEAM_ID`, `ASC_APP_ID`, `TESTFLIGHT_GROUP`),
+never in the repo. Nothing touches the login keychain, which an SSH session cannot open anyway:
+the iOS archive is unsigned and the Mac one signed ad hoc so it carries its sandbox, and the export
+signs both. The macOS sandbox entitlements apply to the Mac only (an iOS build signed with them is
+refused, ITMS-90046), `ITSAppUsesNonExemptEncryption` is false, `PrivacyInfo.xcprivacy` declares
+the app's one required-reason API (UserDefaults, CA92.1), and the icon set has the iOS 1024 and
+every Mac size.
+
+A new device starts with the hub's tailnet address in its Address field; it only pastes its own
+token (`hubctl.exe token new --label ipad-pro`, `ipad-mini`, `iphone`).
 
 ## Design direction
 

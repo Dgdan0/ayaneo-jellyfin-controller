@@ -3,7 +3,7 @@
 # generated Hub.xcodeproj is gitignored, so this file is the project.
 name: Hub
 options:
-  bundleIdPrefix: com.pocketds
+  bundleIdPrefix: com.dgdan
   deploymentTarget:
     # The MacBook runs macOS 15, and iPads not yet moved to 26 should still work.
     iOS: "18.0"
@@ -13,7 +13,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.1.0"
+    # The first TestFlight build; scripts/mac.sh testflight numbers each upload.
+    MARKETING_VERSION: "0.2.0"
     CURRENT_PROJECT_VERSION: "1"
     # Set when the Apple Developer Program enrolment is approved; until then
     # simulator and local Mac builds are signed to run locally.
@@ -32,6 +33,8 @@ targets:
       - path: Hub
     dependencies:
       - package: HubKit
+    # The Mac's sandbox and outgoing network. macOS only: App Store Connect
+    # refuses an iOS build signed with macOS entitlements (ITMS-90046).
     entitlements:
       path: Hub/Hub.entitlements
       properties:
@@ -40,7 +43,10 @@ targets:
     info:
       path: Hub/Info.plist
       properties:
-        CFBundleDisplayName: Hub
+        CFBundleDisplayName: JellyHub
+        # From the build settings, so scripts/mac.sh testflight can number a build.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.entertainment
         ITSAppUsesNonExemptEncryption: false
         UIAppFonts:
@@ -76,8 +82,10 @@ targets:
         GCSupportsControllerUserInteraction: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.pocketds.hub
-        PRODUCT_NAME: Hub
+        PRODUCT_BUNDLE_IDENTIFIER: com.dgdan.jellyhub
+        PRODUCT_NAME: JellyHub
+        CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: ""
+        CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: ""
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -95,7 +103,7 @@ targets:
       - target: Hub
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.pocketds.hub.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: com.dgdan.jellyhub.uitests
         TEST_TARGET_NAME: Hub
         GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1,2"

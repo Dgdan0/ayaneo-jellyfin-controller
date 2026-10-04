@@ -185,6 +185,11 @@ public enum HubEndpoints {
         return hubPath
     }
 
+    /// What a new device's Address field starts with: the media PC on the
+    /// tailnet, through Tailscale Serve. Still editable; a device only pastes
+    /// its own token.
+    public static let suggestedAddress = "https://ayaneo-media-pc.tail737e96.ts.net"
+
     /// Trims a trailing slash from the base and guarantees exactly one between
     /// the two halves.
     public static func join(_ base: String, _ path: String) -> String {

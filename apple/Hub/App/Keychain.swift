@@ -4,7 +4,9 @@ import Security
 /// The hub token lives in the Keychain, never in UserDefaults: the same token
 /// can delete media and control downloads on the user's real stack.
 enum Keychain {
-    private static let service = "com.pocketds.hub"
+    /// The app's own id: renamed (JellyHub, com.dgdan.jellyhub), it starts with
+    /// no token, and a debug launch seeds it again from apple/dev.env.
+    private static let service = Bundle.main.bundleIdentifier ?? "com.dgdan.jellyhub"
     private static let account = "hub-token"
 
     private static var query: [String: Any] {

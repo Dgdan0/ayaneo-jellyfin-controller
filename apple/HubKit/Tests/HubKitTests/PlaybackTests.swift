@@ -274,7 +274,7 @@ struct PlaybackModelTests {
         #expect(sent["startMode"] as? String == "resume")
         // The hub's own defaults stay out of the body.
         #expect(sent["positionMillis"] == nil && sent["maxBitrate"] == nil && sent["forceTranscode"] == nil)
-        #expect((sent["device"] as? [String: Any])?["name"] as? String == "Hub for iPad")
+        #expect((sent["device"] as? [String: Any])?["name"] as? String == "JellyHub for iPad")
         let capabilities = try #require(sent["capabilities"] as? [String: Any])
         #expect(capabilities["containers"] as? [String] == ["mp4", "m4v", "mov"])
         #expect(capabilities["hlsSegments"] as? String == "fmp4")

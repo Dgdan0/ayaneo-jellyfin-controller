@@ -6,7 +6,7 @@
 #   scripts/mac-remote.sh sync              copy apple/ and scripts/mac.sh to the Mac
 #   scripts/mac-remote.sh <mac.sh command>  sync, run scripts/mac.sh there, then copy
 #                                           shots/apple/ back into this checkout
-#     e.g.  test | build | sims [-demo] | shot [-demo] | mac [-demo] | logs
+#     e.g.  test | build | sims [-demo] | shot [-demo] | mac [-demo] | logs | testflight
 #
 # The Mac side is a build copy, ~/Builds/ayaneo-jellyfin-controller: a plain
 # directory, not a git checkout, so nothing there is ever committed or discarded,
@@ -78,13 +78,15 @@ run() {
   # opens its panels in turn, HUB_PLAY_SUBTITLE=eng turns those subtitles on).
   # SHOT_SIMS names the simulators to use, comma-separated (all three by
   # default), SHOT_STATE names the screenshots and SHOT_TIMES takes several,
-  # that many seconds after launch. `turn landscape` turns the simulators.
+  # that many seconds after launch. `turn landscape` turns the simulators, and
+  # HUB_WIDTH lays the app out as narrow as an iPad's Split View.
   remote "export PATH=/opt/homebrew/bin:\$PATH; cd ~/$REMOTE_DIR && \
     HUB_SECTION=$(printf '%q' "${HUB_SECTION:-}") HUB_OPEN=$(printf '%q' "${HUB_OPEN:-}") \
     HUB_SIDE=$(printf '%q' "${HUB_SIDE:-}") HUB_SHEET=$(printf '%q' "${HUB_SHEET:-}") \
     HUB_PLAY=$(printf '%q' "${HUB_PLAY:-}") HUB_PLAY_EXIT=$(printf '%q' "${HUB_PLAY_EXIT:-}") \
     HUB_PLAY_CHROME=$(printf '%q' "${HUB_PLAY_CHROME:-}") HUB_PLAY_FROM_END=$(printf '%q' "${HUB_PLAY_FROM_END:-}") \
     HUB_PLAY_TOUR=$(printf '%q' "${HUB_PLAY_TOUR:-}") HUB_PLAY_SUBTITLE=$(printf '%q' "${HUB_PLAY_SUBTITLE:-}") \
+    HUB_WIDTH=$(printf '%q' "${HUB_WIDTH:-}") \
     SHOT_SIMS=$(printf '%q' "${SHOT_SIMS:-}") SHOT_WAIT=$(printf '%q' "${SHOT_WAIT:-3}") \
     SHOT_STATE=$(printf '%q' "${SHOT_STATE:-}") SHOT_TIMES=$(printf '%q' "${SHOT_TIMES:-}") \
     HUB_DEV_ENV=\$HOME/$DEV_ENV bash scripts/mac.sh $(printf '%q ' "$@")"

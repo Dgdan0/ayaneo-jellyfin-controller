@@ -89,7 +89,9 @@ struct HubConnectionView: View {
             }
         }
         .onAppear {
-            address = model.address
+            // A new device starts with the media PC's address; it only pastes
+            // its own token.
+            address = model.address.isEmpty ? HubEndpoints.suggestedAddress : model.address
             focus = model.hasToken ? .address : .token
         }
     }

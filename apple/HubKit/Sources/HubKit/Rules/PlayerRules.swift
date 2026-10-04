@@ -342,6 +342,6 @@ public enum PlaybackProfile {
                              hlsSegments: hlsSegments)
     }
 
-    /// "Hub for iPad", the name Jellyfin's dashboard shows.
-    public static func deviceName(_ kind: String) -> String { "Hub for " + kind }
+    /// "JellyHub for iPad", the name Jellyfin's dashboard shows.
+    public static func deviceName(_ kind: String) -> String { "JellyHub for " + kind }
 }
