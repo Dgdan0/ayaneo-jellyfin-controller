@@ -357,6 +357,10 @@ object HubEndpoints {
      */
     fun image(base: String, hubPath: String): String = join(base, hubPath)
 
+    /** The Glass colours of up to 60 hub image paths, each sent exactly as a screen shows it (#10). */
+    fun artworkColors(base: String, sources: List<String>): HubRequest =
+        HubRequest(join(base, "/v1/img/colors") + "?" + sources.joinToString("&") { "src=" + encode(it) })
+
     /**
      * A hub image path asking for [width] pixels, which the hub snaps to its
      * nearest size. Unsized, a Jellyfin image comes back 360 wide: right for a

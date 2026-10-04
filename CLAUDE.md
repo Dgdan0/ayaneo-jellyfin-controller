@@ -671,6 +671,8 @@ Most of these exist because several screens had drifted copies of the same thing
 | Hub: a Jellyfin image path | `jellyfinImage` / `posterImage` / `backdropImage` |
 | Hub: a service's own error sentence | `upstreamText` / `upstreamMessage` / `serviceOf` |
 | Hub: a title's request state changed | `invalidateTitle` (search, Discover, detail) |
+| An artwork's Glass colours on the Pocket | `ui/glass/ArtworkColors.shared(context, api)`: `prefetch` what a screen shows, `request` what is in focus, `peek`; when to ask again is `ArtworkColorBook` |
+| A Glass panel, bar and page | `ui/glass/GlassColors` (`panel`, `bar`, `over`, `contrast`), `GlassPanelDrawable` (`retint`), `AmbientLayerView` (`show(path, palette)`) |
 | Hub: an artwork's Glass colours | `internal/artcolor` (`Analyze` → `Palette`) behind `GET /v1/img/colors`; `artworkColorStore` keys a picture without its width and keeps `artwork-colors.json` |
 | Hub: the artwork routes | `imageRoutes`, registered on the API and on `artworkMux`, which the hub reads its own artwork through |
 

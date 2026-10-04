@@ -16,6 +16,13 @@ class HubEndpointsTest {
         assertEquals("", HubEndpoints.sized("", 1280))
     }
 
+    @Test fun `artwork colours send each image path whole and encoded`() {
+        assertEquals(
+            "$base/v1/img/colors?src=%2Fv1%2Fimg%2Fjf%2Fabc%2FBackdrop%3Ftag%3Dt%26w%3D1280&src=%2Fv1%2Fimg%2Ftmdb%2Fw342%2Fa.jpg",
+            HubEndpoints.artworkColors("$base/", listOf("/v1/img/jf/abc/Backdrop?tag=t&w=1280", "/v1/img/tmdb/w342/a.jpg")).url
+        )
+    }
+
     @Test fun `books always come as series whatever the sort`() {
         assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"series","asc").url.endsWith("&view=collections"))
         assertTrue(HubEndpoints.readingLibraryItems(base,"storyteller:books",1,"title","desc").url.endsWith("&view=collections"))
