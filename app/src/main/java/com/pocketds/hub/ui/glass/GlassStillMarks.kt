@@ -9,7 +9,6 @@ import android.widget.ImageView
 import android.widget.TextView
 import com.pocketds.hub.ui.AppIcon
 import com.pocketds.hub.ui.AppIconDrawable
-import com.pocketds.hub.ui.ArtworkProgressView
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.ThemeGradientDrawable
@@ -22,14 +21,7 @@ import com.pocketds.hub.ui.ThemeGradientDrawable
  * cannot drift apart.
  */
 class GlassStillMarks(context: Context, colors: PocketColors, frame: FrameLayout) {
-    private val progress = ArtworkProgressView(context, Color.WHITE)
-    private val track = FrameLayout(context).apply {
-        background = ThemeGradientDrawable.rounded(dp(context, 2).toFloat(), TRACK)
-        clipToOutline = true
-        visibility = View.GONE
-        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        addView(progress, FrameLayout.LayoutParams(-1, -1))
-    }
+    private val track = GlassProgressBar(context)
     private val disc = FrameLayout(context).apply {
         GlassPanelDrawable.attach(this, dp(context, 23).toFloat())
         alpha = 0f
@@ -50,7 +42,7 @@ class GlassStillMarks(context: Context, colors: PocketColors, frame: FrameLayout
     init {
         // The prototype's 6% inset from the edges of a 186dp tile.
         val inset = dp(context, INSET_DP)
-        frame.addView(track, FrameLayout.LayoutParams(-1, dp(context, 4), Gravity.BOTTOM).apply { setMargins(inset, 0, inset, inset) })
+        frame.addView(track, FrameLayout.LayoutParams(-1, dp(context, GlassProgressBar.HEIGHT_DP.toInt()), Gravity.BOTTOM).apply { setMargins(inset, 0, inset, inset) })
         frame.addView(disc, FrameLayout.LayoutParams(dp(context, 46), dp(context, 46), Gravity.CENTER))
         frame.addView(tick, FrameLayout.LayoutParams(dp(context, 22), dp(context, 22), Gravity.TOP or Gravity.END).apply {
             setMargins(dp(context, 6), dp(context, 6), dp(context, 6), dp(context, 6))
@@ -59,8 +51,7 @@ class GlassStillMarks(context: Context, colors: PocketColors, frame: FrameLayout
 
     /** How far in (nothing for none or finished) and whether it is watched. */
     fun bind(fraction: Double, watched: Boolean) {
-        progress.fraction = fraction
-        track.visibility = if (progress.fraction > 0.0) View.VISIBLE else View.GONE
+        track.fraction = fraction
         tick.visibility = if (watched) View.VISIBLE else View.GONE
     }
 
@@ -70,8 +61,6 @@ class GlassStillMarks(context: Context, colors: PocketColors, frame: FrameLayout
     }
 
     private companion object {
-        /** The track under the progress: white at 28%. */
-        const val TRACK = 0x47FFFFFF
         const val INSET_DP = 11
 
         fun dp(context: Context, value: Int) = Styler.dpInt(context, value.toFloat())

@@ -270,7 +270,7 @@ class LibraryTileView(context: Context, private val colors: PocketColors, privat
             /** How small the picture behind a fan is decoded, and how far it is blurred: only its colours stay. */
             const val SOFT_DECODE_PX = 64
             const val BLUR_SIGMA_DP = 14f
-            const val KIND_INK = 0xB8FFFFFF.toInt()
+            const val KIND_INK = com.pocketds.hub.ui.glass.GlassColors.EYEBROW
             const val POSTER_GROUND = 0xFF222730.toInt()
             /** The prototype's `saturate(1.2) brightness(.8)` on the picture behind a fan. */
             val SOFT = ColorMatrixColorFilter(ColorMatrix().apply {

@@ -106,7 +106,7 @@ class SettingsCard(context: Context, private val colors: PocketColors) : LinearL
         /** The prototype's Pocket card corner. */
         const val GLASS_CORNER_DP = 15f
         /** Quiet words on a Glass card: white at 64%. */
-        const val GLASS_QUIET = 0xA3FFFFFF.toInt()
+        const val GLASS_QUIET = com.pocketds.hub.ui.glass.GlassColors.QUIET
         /** The attention card's edge, amber at 55%, and its heading. */
         const val ATTENTION_EDGE = 0x8CF2B544.toInt()
         const val ATTENTION_INK = 0xFFF5C75A.toInt()

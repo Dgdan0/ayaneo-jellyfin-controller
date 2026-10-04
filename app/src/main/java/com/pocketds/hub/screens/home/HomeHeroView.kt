@@ -258,9 +258,9 @@ class HomeHeroView(
         const val GLASS_BUTTON_DP = 31f
         const val GLASS_BUTTON_GAP_DP = 10
         /** The prototype's eyebrow (white at 72%), facts (82%) and progress track (25%). */
-        private const val GLASS_EYEBROW = 0xB8FFFFFF.toInt()
-        private const val GLASS_WORDS = 0xD1FFFFFF.toInt()
-        private const val GLASS_TRACK = 0x40FFFFFF
+        private const val GLASS_EYEBROW = com.pocketds.hub.ui.glass.GlassColors.EYEBROW
+        private const val GLASS_WORDS = com.pocketds.hub.ui.glass.GlassColors.FACTS
+        private const val GLASS_TRACK = com.pocketds.hub.ui.glass.GlassColors.TRACK
         private const val MATCH = LayoutParams.MATCH_PARENT
         private const val WRAP = LayoutParams.WRAP_CONTENT
     }

@@ -73,6 +73,12 @@ class ConsolidationGuardTest {
         Rule(Regex("""0xE61C965C|0xF2CD8414"""),
             "DashboardParts.chip / releaseChip: one state chip for Upcoming, Activity and the transfers",
             setOf("ui/DashboardParts.kt")),
+        Rule(Regex("""0x(B8|D1|A3)FFFFFF"""),
+            "GlassColors.EYEBROW / FACTS / QUIET: the prototype's words on the page, by how loud they are",
+            setOf("ui/glass/GlassColors.kt")),
+        Rule(Regex("""0x47FFFFFF"""),
+            "GlassProgressBar: how far in, a white bar on its track inside a picture",
+            setOf("ui/glass/GlassProgressBar.kt")),
     )
 
     @Test

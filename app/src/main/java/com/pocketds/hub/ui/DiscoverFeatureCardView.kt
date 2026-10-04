@@ -118,8 +118,8 @@ class DiscoverFeatureCardView(
         const val GLASS_CORNER_DP = 16f
         const val GLASS_HEIGHT_DP = 176f
         /** Glass: the eyebrow white at 72%, the facts at 82%, the overview at 78%. */
-        const val GLASS_KICKER = 0xB8FFFFFF.toInt()
-        const val GLASS_META = 0xD1FFFFFF.toInt()
+        const val GLASS_KICKER = com.pocketds.hub.ui.glass.GlassColors.EYEBROW
+        const val GLASS_META = com.pocketds.hub.ui.glass.GlassColors.FACTS
         const val GLASS_OVERVIEW = 0xC7FFFFFF.toInt()
     }
 }

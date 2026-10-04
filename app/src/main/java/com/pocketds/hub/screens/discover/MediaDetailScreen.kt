@@ -580,6 +580,6 @@ class MediaDetailScreen(
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val ART_WIDTH_PX = 1920
         /** Glass: "NOT IN YOUR LIBRARY" in white at 72%. */
-        const val GLASS_EYEBROW = 0xB8FFFFFF.toInt()
+        const val GLASS_EYEBROW = com.pocketds.hub.ui.glass.GlassColors.EYEBROW
     }
 }

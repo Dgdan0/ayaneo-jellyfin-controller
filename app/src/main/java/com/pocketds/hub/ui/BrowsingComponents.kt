@@ -19,7 +19,10 @@ import com.pocketds.hub.state.LibraryGridSizing
 import com.pocketds.hub.ui.glass.GlassStillMarks
 
 /** The image determines neither layout size nor crop ratio when its request completes. */
-class ArtworkFrame(context: Context, private val ratio: Float, cornerDp: Float = CORNER_DP) : FrameLayout(context) {
+class ArtworkFrame(context: Context, ratio: Float, cornerDp: Float = CORNER_DP) : FrameLayout(context) {
+    /** Width over height: 2:3 for a poster, 1 for an audiobook's square cover. */
+    var ratio: Float = ratio
+        set(value) { if (field != value) { field = value; requestLayout() } }
     companion object {
         /** Every poster, still and cover, and the focus ring drawn around one. */
         const val CORNER_DP = 10f
@@ -102,7 +105,7 @@ class LandscapeCardView(context: Context, private val colors: PocketColors, priv
 
     private companion object {
         /** The prototype's second caption line: white at 64%. */
-        const val GLASS_SUBTITLE = 0xA3FFFFFF.toInt()
+        const val GLASS_SUBTITLE = com.pocketds.hub.ui.glass.GlassColors.QUIET
     }
 }
 

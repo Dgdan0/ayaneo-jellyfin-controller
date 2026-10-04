@@ -64,6 +64,16 @@ object GlassColors {
     /** A notification count on its button. */
     const val BADGE: Int = 0xFFFF5A5F.toInt()
 
+    /**
+     * The prototype's words on the page, by how loud they are: an eyebrow over
+     * a title (white at 72%), the facts under it (82%), a quiet second line
+     * such as a card's caption (64%), and the track under a progress bar (25%).
+     */
+    const val EYEBROW: Int = 0xB8FFFFFF.toInt()
+    const val FACTS: Int = 0xD1FFFFFF.toInt()
+    const val QUIET: Int = 0xA3FFFFFF.toInt()
+    const val TRACK: Int = 0x40FFFFFF
+
     fun parse(hex: String): Int? {
         if (hex.length != 7 || hex[0] != '#') return null
         val rgb = hex.substring(1).toIntOrNull(16) ?: return null

@@ -191,7 +191,7 @@ class EpisodeCardView(
         /** Glass: the prototype's Pocket episode, 176dp wide. */
         const val GLASS_STRIP_WIDTH_DP = 176
         /** Glass: an episode's second line, white at 64%. */
-        private const val GLASS_META = 0xA3FFFFFF.toInt()
+        private const val GLASS_META = com.pocketds.hub.ui.glass.GlassColors.QUIET
         private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
     }

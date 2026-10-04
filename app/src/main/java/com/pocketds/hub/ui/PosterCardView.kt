@@ -27,9 +27,11 @@ import com.pocketds.hub.ui.glass.GlassPanelDrawable
  * broken; a flat fill lets the grid appear instantly as a grid and fill in.
  *
  * [glass] is the Glass poster (GLASS_PLAN.md): 11dp corners and a 3dp ring, a
- * count as a white pill and a tick in the accent, and the day of a coming-up
- * title on a strip of the page's glass ([setDayChip]). Screens opt in as their
- * Glass milestone lands.
+ * count as a white pill and a tick in the accent, how far in as a white bar
+ * inside the picture ([GlassProgressBar]), and the day of a coming-up title on
+ * a strip of the page's glass ([setDayChip]). A book's cover keeps its words on
+ * the page; an audiobook's is square, and a comic's kind sits on a dark pill.
+ * Screens opt in as their Glass milestone lands.
  */
 class PosterCardView(
     context: Context,
@@ -49,6 +51,7 @@ class PosterCardView(
     private val glass: Boolean = false
 ) : LinearLayout(context) {
 
+    private val posterWrap: ArtworkFrame
     private val poster: ImageView
     private val missingArt: TextView
     /** Which bind a late load failure belongs to, so it cannot label a recycled card. */
@@ -59,6 +62,8 @@ class PosterCardView(
     private val title: TextView
     private val subtitle: TextView
     private val progressBar: ArtworkProgressView
+    /** Glass: the progress inside the picture, in place of [progressBar] along its foot. */
+    private var glassBar: com.pocketds.hub.ui.glass.GlassProgressBar? = null
     private val compactCard: Boolean
     /** Glass: "Tomorrow" on a coming-up title, along the poster's foot. */
     private var dayChip: TextView? = null
@@ -77,7 +82,7 @@ class PosterCardView(
         setPadding(0, 0, 0, if (captions) Styler.dpInt(context, 6f) else 0)
 
         val corner = if (glass) ArtworkFrame.GLASS_CORNER_DP else ArtworkFrame.CORNER_DP
-        val posterWrap = ArtworkFrame(context, 2f / 3f, corner).apply {
+        posterWrap = ArtworkFrame(context, 2f / 3f, corner).apply {
             isDuplicateParentStateEnabled = true
             foreground = Styler.focusOutline(context, colors, corner, if (glass) 3f else 2f)
         }
@@ -134,11 +139,25 @@ class PosterCardView(
             }
         }
         posterWrap.addView(kindTag)
+        if (glass) kindTag.apply {
+            // The prototype's `.kind`: dark, heavy little capitals on 7dp corners.
+            textSize = 10f
+            textWeight(800)
+            letterSpacing = .04f
+            includeFontPadding = false
+            setPadding(Styler.dpInt(context, 7f), Styler.dpInt(context, 4f), Styler.dpInt(context, 7f), Styler.dpInt(context, 4f))
+            background = ThemeGradientDrawable.rounded(Styler.dp(context, 7f), GLASS_KIND)
+            (layoutParams as FrameLayout.LayoutParams).bottomMargin = Styler.dpInt(context, KIND_EDGE_DP)
+        }
 
         // A thin bar along the bottom of the poster while something is actually
         // downloading -- readable at a glance without reading any text.
         progressBar = ArtworkProgressView(context, colors.accent)
-        posterWrap.addView(progressBar, FrameLayout.LayoutParams(MATCH, Styler.dpInt(context, 4f), Gravity.BOTTOM))
+        if (glass) glassBar = com.pocketds.hub.ui.glass.GlassProgressBar(context).also { bar ->
+            val inset = Styler.dpInt(context, com.pocketds.hub.ui.glass.GlassProgressBar.POSTER_INSET_DP)
+            posterWrap.addView(bar, FrameLayout.LayoutParams(MATCH, Styler.dpInt(context, com.pocketds.hub.ui.glass.GlassProgressBar.HEIGHT_DP), Gravity.BOTTOM)
+                .apply { setMargins(inset, 0, inset, inset) })
+        } else posterWrap.addView(progressBar, FrameLayout.LayoutParams(MATCH, Styler.dpInt(context, 4f), Gravity.BOTTOM))
         if (glass) dayChip = TextView(context).apply {
             textSize = 11f
             textWeight(700)
@@ -207,6 +226,7 @@ class PosterCardView(
         showAvailability: Boolean
     ) {
         kindTag.visibility = GONE
+        if (glass) posterWrap.ratio = POSTER_RATIO
         // A recycled card keeps no day from the row it came from.
         dayChip?.visibility = GONE
         title.text = hit.media.title
@@ -234,7 +254,7 @@ class PosterCardView(
             badge.visibility = GONE
         }
 
-        progressBar.fraction = hit.progress
+        showProgress(hit.progress)
 
         loadPoster(hit.media.poster, imageLoader, imageUrl)
     }
@@ -245,8 +265,12 @@ class PosterCardView(
         contentDescription = listOf(item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(", ")
         subtitle.text = item.subtitle
         subtitle.visibility = if (compactCard) GONE else VISIBLE
-        progressBar.fraction = 0.0
-        if (item.inLibrary) {
+        showProgress(0.0)
+        if (glass) {
+            // An audiobook's cover is square, as the prototype's Discover draws it.
+            posterWrap.ratio = if (item.contentType == com.pocketds.hub.model.ReadingType.AUDIOBOOK) 1f else POSTER_RATIO
+            if (item.inLibrary) glassAvailability(Availability.AVAILABLE) else badge.visibility = GONE
+        } else if (item.inLibrary) {
             badge.visibility = VISIBLE
             badge.text = "Tracked"
             badge.setBackgroundColor(colors.badgeAvailable)
@@ -265,12 +289,18 @@ class PosterCardView(
         kindTag.visibility = if (kind != null && showKind) VISIBLE else GONE
         subtitle.text = if (kind != null) com.pocketds.hub.screens.library.ReadingBookFacts.comicLine(work.progress) else work.cardSubtitle
         subtitle.visibility = VISIBLE
-        title.setBackgroundColor(colors.cardSurface)
-        subtitle.setBackgroundColor(colors.cardSurface)
-        title.setPadding(Styler.dpInt(context,8f),Styler.dpInt(context,8f),Styler.dpInt(context,8f),0)
-        subtitle.setPadding(Styler.dpInt(context,8f),Styler.dpInt(context,3f),Styler.dpInt(context,8f),Styler.dpInt(context,8f))
+        if (glass) {
+            // The words stay on the page under the cover, as every Glass poster's;
+            // an audiobook's cover is square.
+            posterWrap.ratio = if (work.kind == com.pocketds.hub.model.ReadingType.AUDIOBOOK) 1f else POSTER_RATIO
+        } else {
+            title.setBackgroundColor(colors.cardSurface)
+            subtitle.setBackgroundColor(colors.cardSurface)
+            title.setPadding(Styler.dpInt(context,8f),Styler.dpInt(context,8f),Styler.dpInt(context,8f),0)
+            subtitle.setPadding(Styler.dpInt(context,8f),Styler.dpInt(context,3f),Styler.dpInt(context,8f),Styler.dpInt(context,8f))
+        }
         subtitle.ellipsize=android.text.TextUtils.TruncateAt.END
-        progressBar.fraction = if (work.progress?.completed == true) 0.0 else work.progress?.percentage ?: 0.0
+        showProgress(if (work.progress?.completed == true) 0.0 else work.progress?.percentage ?: 0.0)
         if (work.progress?.completed == true) {
             roundBadge("✓", colors.badgeAvailable)
         } else if (work.entityType == "collection" && work.bookCount > 0) {
@@ -309,7 +339,7 @@ class PosterCardView(
         poster.imageAlpha = 105
         title.alpha = 1f
         subtitle.alpha = 1f
-        progressBar.fraction = 0.0
+        showProgress(0.0)
         badge.visibility = VISIBLE
         badge.text = "Missing"
         badge.background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
@@ -320,6 +350,21 @@ class PosterCardView(
         isClickable = false
         isFocusable = false
         isFocusableInTouchMode = false
+    }
+
+    /**
+     * How far in: the accent bar along the poster's foot, or Glass's white bar
+     * inside it, with a comic's kind pill lifted clear of it.
+     */
+    private fun showProgress(fraction: Double) {
+        progressBar.fraction = fraction
+        val bar = glassBar ?: return
+        bar.fraction = fraction
+        (kindTag.layoutParams as? FrameLayout.LayoutParams)?.let {
+            val lift = if (bar.visibility == VISIBLE) com.pocketds.hub.ui.glass.GlassProgressBar.HEIGHT_DP + KIND_EDGE_DP else 0f
+            val bottom = Styler.dpInt(context, KIND_EDGE_DP + lift)
+            if (it.bottomMargin != bottom) { it.bottomMargin = bottom; kindTag.layoutParams = it }
+        }
     }
 
     private fun loadPoster(path: String, imageLoader: ImageLoader, imageUrl: (String) -> String) {
@@ -440,8 +485,12 @@ class PosterCardView(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         /** A Glass poster's second caption line: white at 64%. */
-        const val GLASS_CAPTION = 0xA3FFFFFF.toInt()
+        const val GLASS_CAPTION = GlassColors.QUIET
         /** A Glass poster's count pill: white at 90%. */
         const val GLASS_COUNT = 0xE6FFFFFF.toInt()
+        /** A comic's kind pill on Glass (the prototype's `.kind`): black at 62%, 6dp in from the corner. */
+        const val GLASS_KIND = 0x9E000000.toInt()
+        const val KIND_EDGE_DP = 6f
+        const val POSTER_RATIO = 2f / 3f
     }
 }
