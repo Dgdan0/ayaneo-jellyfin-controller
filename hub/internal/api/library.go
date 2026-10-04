@@ -202,6 +202,10 @@ func (s *Server) invalidateLibraryUser(userID string) {
 	s.cache.InvalidatePrefix("library:search:" + userID + ":")
 }
 
+// handleLibrarySearch serves GET /v1/library/search?q=&viewId=, the selected
+// user's films and series whose names match. viewId keeps the search inside
+// one library, for the search on a library's own page; without it the whole
+// of Jellyfin is searched.
 func (s *Server) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	if len([]rune(query)) < 2 || len([]rune(query)) > 100 {
@@ -210,15 +214,22 @@ func (s *Server) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	s.handleLibraryCollection(w, r, "search", "Search results", query, "")
+	viewID := r.URL.Query().Get("viewId")
+	// Straight into an upstream query parameter, so it is checked rather than
+	// trusted, as the library's own items route does.
+	if viewID != "" && !isHex32(viewID) {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "bad view id"})
+		return
+	}
+	s.handleLibraryCollection(w, r, "search", "Search results", query, "", viewID)
 }
 
 func (s *Server) handleLibraryFavorites(w http.ResponseWriter, r *http.Request) {
-	s.handleLibraryCollection(w, r, "favorites", "Favourites", "", "IsFavorite")
+	s.handleLibraryCollection(w, r, "favorites", "Favourites", "", "IsFavorite", "")
 }
 
 func (s *Server) handleLibraryCollection(
-	w http.ResponseWriter, r *http.Request, id, title, searchTerm, filters string,
+	w http.ResponseWriter, r *http.Request, id, title, searchTerm, filters, parentID string,
 ) {
 	client, ok := s.jellyfinForRequest(w, r)
 	if !ok {
@@ -234,11 +245,12 @@ func (s *Server) handleLibraryCollection(
 	}
 	ctx, cancel := timeoutFor(r, s.cfg.Server.RequestTimeout.OrDefault(20*time.Second))
 	defer cancel()
-	key := "library:" + id + ":" + client.UserID() + ":" + strings.ToLower(searchTerm) + ":" + strconv.Itoa(pageNumber)
+	key := "library:" + id + ":" + client.UserID() + ":" + parentID + ":" +
+		strings.ToLower(searchTerm) + ":" + strconv.Itoa(pageNumber)
 	result, meta, err := cache.Fetch(ctx, s.cache, key, cache.UserData,
 		func(ctx context.Context) (*jellyfin.ItemsPage, error) {
 			return client.Items(ctx, jellyfin.ItemsQuery{
-				Recursive: true, Types: "Movie,Series", Filters: filters, SearchTerm: searchTerm,
+				ParentID: parentID, Recursive: true, Types: "Movie,Series", Filters: filters, SearchTerm: searchTerm,
 				Fields: "ProviderIds", SortBy: "SortName", SortOrder: "Ascending",
 				Limit: libraryPageSize, StartIndex: (pageNumber - 1) * libraryPageSize,
 			})

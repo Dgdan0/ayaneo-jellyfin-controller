@@ -514,6 +514,37 @@ func TestLibrarySearchAndFavoritesUseJellyfinFilters(t *testing.T) {
 	}
 }
 
+func TestLibrarySearchStaysInsideOneLibraryWhenAsked(t *testing.T) {
+	const userID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const viewID = "0123456789abcdef0123456789abcdef"
+	var parents []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parents = append(parents, r.URL.Query().Get("parentId"))
+		_, _ = w.Write([]byte(`{"Items":[],"TotalRecordCount":0}`))
+	}))
+	defer upstream.Close()
+	handler := NewServer(libraryAPIConfig(upstream.URL, userID)).Handler()
+
+	if got := libraryRequest(handler, "/v1/library/search?q=dark&viewId="+viewID); got.Code != http.StatusOK {
+		t.Fatalf("scoped search returned %d: %s", got.Code, got.Body.String())
+	}
+	// The same words across all of Jellyfin are a different answer, not a cache hit.
+	if got := libraryRequest(handler, "/v1/library/search?q=dark"); got.Code != http.StatusOK {
+		t.Fatalf("search returned %d: %s", got.Code, got.Body.String())
+	}
+	if strings.Join(parents, ",") != viewID+"," {
+		t.Fatalf("Jellyfin was asked with parentId %q", parents)
+	}
+	for _, bad := range []string{"nope", "../" + viewID, viewID + "0"} {
+		if got := libraryRequest(handler, "/v1/library/search?q=dark&viewId="+bad).Code; got != http.StatusBadRequest {
+			t.Errorf("viewId %q returned %d, want 400", bad, got)
+		}
+	}
+	if len(parents) != 2 {
+		t.Fatalf("bad view ids reached Jellyfin: %q", parents)
+	}
+}
+
 func TestLibraryStateBodyValidationStopsBeforeJellyfin(t *testing.T) {
 	const itemID = "0123456789abcdef0123456789abcdef"
 	calls := 0
