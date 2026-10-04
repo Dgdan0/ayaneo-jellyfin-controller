@@ -129,6 +129,11 @@ public actor HubClient {
         _ = try await perform(request, transport: request.slow ? slow : screens)
     }
 
+    /// The answer's bytes as they are: a session's subtitle file.
+    public func data(_ request: HubRequest) async throws(HubFailure) -> Data {
+        try await perform(request, transport: request.slow ? slow : screens)
+    }
+
     /// The bytes of a hub image path ("/v1/img/jf/..."), through the artwork
     /// transport and its cache.
     public func image(_ hubPath: String) async throws(HubFailure) -> Data {

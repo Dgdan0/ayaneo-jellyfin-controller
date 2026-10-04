@@ -112,6 +112,17 @@ public enum HubEndpoints {
         HubRequest(session(sessionId), method: .delete, user: user)
     }
 
+    /// A file the session serves, such as a subtitle track's `externalUrl`.
+    public static func playbackFile(_ hubPath: String, user: String) -> HubRequest {
+        HubRequest(hubPath, user: user)
+    }
+
+    /// A frame of the session's video near `positionMillis`, extracted by the
+    /// hub on a five-second grid: a chapter's picture.
+    public static func playbackPreview(_ previewUrl: String, positionMillis: Int64) -> String {
+        previewUrl + (previewUrl.contains("?") ? "&" : "?") + "positionMillis=\(max(0, positionMillis))"
+    }
+
     private static func session(_ id: String) -> String { "/v1/playback/sessions/" + encode(id) }
 
     /// A request body: keys sorted, so a body is the same bytes every time.

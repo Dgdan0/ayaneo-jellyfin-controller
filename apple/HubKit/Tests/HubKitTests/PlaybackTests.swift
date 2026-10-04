@@ -382,10 +382,49 @@ struct DemoPlaybackTests {
         #expect(plan.previousItem?.episodeNumber == 4 && plan.nextItem?.episodeNumber == 6)
         #expect(plan.sessionId.count == 32)
         let grant = try await hub.fetch(HubEndpoints.playbackGrant(sessionId: plan.sessionId, user: ""), as: PlaybackGrant.self)
-        #expect(grant.address(base: DemoTransport.address) == DemoTransport.demoStream)
+        #expect(grant.address(base: DemoTransport.address) == DemoPlayback.stream)
         try await hub.send(HubEndpoints.playbackEvent(sessionId: plan.sessionId,
                                                       body: PlaybackEventBody(type: "started", sequence: 1, positionMillis: 0),
                                                       user: ""))
         try await hub.send(HubEndpoints.closePlayback(sessionId: plan.sessionId, user: ""))
+    }
+
+    @Test func aDemoSessionKeepsEachChangeAsTheHubDoes() async throws {
+        let hub = HubClient(credentials: HubCredentials(baseURL: DemoTransport.address, token: DemoTransport.token),
+                            screens: DemoTransport(), sleep: { _ in })
+        let body = PlaybackPrepareBody(startMode: .resume, device: PlaybackDevice(id: "d", name: "n", version: "v"),
+                                       capabilities: PlaybackProfile.capabilities(width: 1, height: 1, hevc: false))
+        let plan = try await hub.fetch(HubEndpoints.preparePlayback(itemId: "demo-e4", body: body, user: ""),
+                                       as: PlaybackPrepareResponse.self)
+        #expect(plan.selectedSubtitleIndex == nil && plan.selectedAudioIndex == 1)
+        let subtitles = try await hub.fetch(HubEndpoints.selectPlayback(
+            sessionId: plan.sessionId, body: PlaybackSelectBody(positionMillis: 5_000, subtitleStreamIndex: 4), user: ""),
+            as: PlaybackPrepareResponse.self)
+        #expect(subtitles.item.episodeNumber == 4 && subtitles.selectedSubtitleIndex == 4)
+        #expect(PlaybackChoices.sameStream(plan, subtitles))
+        let audio = try await hub.fetch(HubEndpoints.selectPlayback(
+            sessionId: plan.sessionId, body: PlaybackSelectBody(positionMillis: 5_000, audioStreamIndex: 2), user: ""),
+            as: PlaybackPrepareResponse.self)
+        #expect(audio.selectedAudioIndex == 2 && audio.selectedSubtitleIndex == 4)
+        // A lower quality is a conversion at an address of its own.
+        let lower = try await hub.fetch(HubEndpoints.selectPlayback(
+            sessionId: plan.sessionId, body: PlaybackSelectBody(positionMillis: 5_000, maxBitrate: 5_000_000), user: ""),
+            as: PlaybackPrepareResponse.self)
+        #expect(lower.playMethod == "Transcode" && !PlaybackChoices.sameStream(audio, lower))
+        // Its subtitle files read as subtitles, and a chapter's frame is a picture.
+        let track = try #require(PlaybackChoices.drawnSubtitle(audio))
+        let file = try await hub.data(HubEndpoints.playbackFile(track.externalUrl, user: ""))
+        #expect(SubtitleParser.parse(String(decoding: file, as: UTF8.self), codec: track.codec).count == 150)
+        let frame = try await hub.image(HubEndpoints.playbackPreview(plan.previewUrl, positionMillis: 90_000))
+        #expect(frame.starts(with: [0xFF, 0xD8]))
+        try await hub.send(HubEndpoints.closePlayback(sessionId: plan.sessionId, user: ""))
+    }
+
+    @Test func theDemoSubtitlesReadInEveryFormat() {
+        #expect(SubtitleParser.parse(DemoPlayback.subtitles(track: 3), codec: "srt").first?.values == ["Demo subtitle 1"])
+        #expect(SubtitleParser.parse(DemoPlayback.subtitles(track: 4), codec: "webvtt").count == 150)
+        let signs = SubtitleParser.parse(DemoPlayback.subtitles(track: 5), codec: "ass")
+        #expect(signs.count == 30)
+        #expect(signs.first?.values == ["Sign 1, on the wall"])
     }
 }
