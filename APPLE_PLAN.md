@@ -131,12 +131,43 @@ The look is `GLASS_PLAN.md`. Its pieces in this app, so each screen uses one own
 | The bars, the sections and Media/Books | `Shell/` (`MainView`, `WideBar`, `PhoneBar`, `ShellTabBar`); top capsule or bottom tab bar by width, `ShellLayout.isWide` |
 | Pushing a page, or swapping the top one | `NavigationLink(value: AppRoute…)` or `@Environment(\.openRoute)` (`push`, `replace`); the shell owns every stack and its back pill |
 | A profile's avatar and colour | HubKit `Profiles` (Android's `ProfileAvatar`, held to its test cases) |
+| A library tile's three fanned posters | HubKit `LibraryFan.posters` (one function, so the choice can move into a hub field) |
 
 Debug builds also take `HUB_SIDE=books` and `HUB_SHEET=profiles` (the avatar's sheet) for
 screenshots, beside `HUB_SECTION` and `HUB_OPEN` (a Home row's first title, or with
 `HUB_SECTION=library` a library by name, `HUB_OPEN=Anime`). `scripts/mac.sh uitest` runs the UI
 tests on the iPhone simulator against `-demo`, and `scripts/mac.sh transparency reduce|normal`
 turns the simulators' Reduce transparency on and off.
+
+## Playback on Apple (#2)
+
+| Behaviour | Owner |
+|---|---|
+| Playing something from a page | `@Environment(\.play)` with a `PlayRequest` (item, resume or restart, or a series whose episode the hub picks) |
+| The player, its AVPlayer and its hub session | `Playback/PlayerModel`, one per window, shown by the shell over everything (`Playback/PlayerView`) |
+| What the hub is told, and when | HubKit `PlaybackReporter` (Android `PlaybackService`'s rules); sent in order by `PlaybackOutbox` |
+| What AVPlayer can open | HubKit `PlaybackProfile` (mp4/m4v/mov files, fMP4 HLS), filled in for this device by `Playback/PlaybackDeviceInfo` |
+| Resume or start over | `DetailLines.startMode` / `offersStartOver` (Android's `canResume`); the hub judges the position |
+| Player wording, the up-next card, seeking and the end | HubKit `PlayerLabels`, `UpNext`, `PlaybackRules` (Android's, with their tests); the card is `UpNextCardView` |
+| Pages reading their progress again after playback | `@Environment(\.playbackClosed)`, which changes once the stop and the close have reached the hub |
+
+A session is prepared, then streamed, reported (started, paused and unpaused, seeks, progress
+every ten seconds of play, stopped) and deleted. Leaving is the only way out, and Back, the next
+episode, the app going to the background and quitting all take it. AVPlayer is given the
+session's grant addresses (`POST /v1/playback/sessions/{id}/cast-grant`, the ones a TV gets)
+rather than the session's own: it fetches its media and every HLS segment itself, it has no
+supported way to add the bearer token, and a request without one counts towards the hub's ban
+on the device's address. The grant needs no token, the session's `DELETE` revokes it, and
+AirPlay will need it too.
+
+`HUB_PLAY=<item id>` opens the player at launch (with `-demo`, `demo-e5` plays Apple's public
+HLS test stream as Bleach S1E5), `HUB_PLAY_EXIT=<seconds>` leaves it through Back's own path,
+`HUB_PLAY_CHROME=pinned` holds the controls up for a screenshot, and with `-demo`
+`HUB_PLAY_FROM_END=<seconds>` starts near the end for the up-next card. `SHOT_SIMS` limits
+`sims` and `shot` to some simulators, and `scripts/mac.sh capture` takes screenshots without
+relaunching. Against the real hub, play only a title that is unwatched and at 0:00, for under
+30 seconds, and leave through `HUB_PLAY_EXIT`: under Jellyfin's 5% nothing is kept, though the
+stop still sets the item's `lastPlayedAt`.
 
 ## Working on the Mac
 

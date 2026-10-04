@@ -7,6 +7,7 @@
 #   scripts/mac.sh sims [-demo]     boot iPad Pro 13", iPad mini and iPhone; install,
 #                                   launch and screenshot each into shots/apple/
 #   scripts/mac.sh shot [-demo]     relaunch on the booted simulators and screenshot again
+#   scripts/mac.sh capture          screenshot the booted simulators as they are, no relaunch
 #   scripts/mac.sh transparency reduce|normal
 #                                   turn the simulators' Reduce transparency on or off
 #   scripts/mac.sh uitest           the UI tests on the iPhone simulator, against -demo
@@ -18,6 +19,12 @@
 #   HUB_URL=https://ayaneo-media-pc.tail737e96.ts.net
 #   HUB_TOKEN=...
 # -demo runs against built-in fixtures instead, for layout work without a hub.
+#
+# Debug launches also take HUB_PLAY=<item id> (the player opens on it; "demo-e5"
+# with -demo), HUB_PLAY_EXIT=<seconds> (it leaves through Back's own path, so a
+# run against the real hub never leaves a session open), HUB_PLAY_CHROME=pinned
+# and, with -demo, HUB_PLAY_FROM_END=<seconds>. SHOT_SIMS="iPad Pro 13-inch (M5),
+# iPhone 17 Pro" limits sims and shot to those simulators.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -38,6 +45,15 @@ fi
 
 project() {
   (cd "$APPLE" && xcodegen generate --spec project.yml --quiet)
+}
+
+# The simulators to use: SHOT_SIMS, comma-separated, or all three.
+selected_sims() {
+  if [[ -z "${SHOT_SIMS:-}" ]]; then
+    printf '%s\n' "${SIMS[@]}"
+  else
+    tr ',' '\n' <<< "$SHOT_SIMS"
+  fi
 }
 
 udid_of() {
@@ -89,6 +105,8 @@ launch_sim() {
   SIMCTL_CHILD_HUB_URL="${HUB_URL:-}" SIMCTL_CHILD_HUB_TOKEN="${HUB_TOKEN:-}" \
     SIMCTL_CHILD_HUB_SECTION="${HUB_SECTION:-}" SIMCTL_CHILD_HUB_OPEN="${HUB_OPEN:-}" \
     SIMCTL_CHILD_HUB_SIDE="${HUB_SIDE:-}" SIMCTL_CHILD_HUB_SHEET="${HUB_SHEET:-}" \
+    SIMCTL_CHILD_HUB_PLAY="${HUB_PLAY:-}" SIMCTL_CHILD_HUB_PLAY_EXIT="${HUB_PLAY_EXIT:-}" \
+    SIMCTL_CHILD_HUB_PLAY_CHROME="${HUB_PLAY_CHROME:-}" SIMCTL_CHILD_HUB_PLAY_FROM_END="${HUB_PLAY_FROM_END:-}" \
     xcrun simctl launch "$udid" "$BUNDLE_ID" $(launch_args "$@") >/dev/null
 }
 
@@ -96,31 +114,31 @@ shoot() {
   mkdir -p "$SHOTS"
   local wait="${SHOT_WAIT:-3}"
   sleep "$wait"
-  for name in "${SIMS[@]}"; do
+  while IFS= read -r name; do
     local udid file
     udid="$(udid_of "$name")"
     file="$SHOTS/$(echo "$name" | tr -cd '[:alnum:]-').png"
     xcrun simctl io "$udid" screenshot "$file" >/dev/null 2>&1 && echo "$file"
-  done
+  done < <(selected_sims)
 }
 
 sims() {
   build_ios
-  for name in "${SIMS[@]}"; do
+  while IFS= read -r name; do
     local udid
     udid="$(udid_of "$name")"
     xcrun simctl boot "$udid" >/dev/null 2>&1 || true
     xcrun simctl bootstatus "$udid" -b >/dev/null
     xcrun simctl install "$udid" "$(app_ios)"
     launch_sim "$udid" "$@"
-  done
+  done < <(selected_sims)
   shoot
 }
 
 shot() {
-  for name in "${SIMS[@]}"; do
+  while IFS= read -r name; do
     launch_sim "$(udid_of "$name")" "$@"
-  done
+  done < <(selected_sims)
   shoot
 }
 
@@ -171,9 +189,10 @@ case "${1:-build}" in
   build) build_ios && build_mac ;;
   sims) shift; sims "$@" ;;
   shot) shift; shot "$@" ;;
+  capture) SHOT_WAIT=0 shoot ;;
   transparency) shift; transparency "$@" ;;
   uitest) uitest ;;
   mac) shift; mac "$@" ;;
   logs) xcrun simctl spawn booted log stream --level debug --predicate "subsystem == '$BUNDLE_ID' OR process == 'Hub'" ;;
-  *) sed -n '2,17p' "$0"; exit 2 ;;
+  *) sed -n '2,27p' "$0"; exit 2 ;;
 esac

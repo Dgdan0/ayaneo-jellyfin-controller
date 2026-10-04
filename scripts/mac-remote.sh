@@ -73,10 +73,15 @@ run() {
   # HUB_OPEN (continue, latest, …) opens that Home row's first title.
   # HUB_SIDE=books shows the Books side, and HUB_SHEET=profiles opens the
   # avatar's sheet. SHOT_WAIT gives a screen with artwork longer to load.
+  # HUB_PLAY opens the player on an item (HUB_PLAY_EXIT leaves it after that
+  # many seconds, HUB_PLAY_CHROME=pinned keeps its controls up); SHOT_SIMS
+  # names the simulators to use, comma-separated (all three by default).
   remote "export PATH=/opt/homebrew/bin:\$PATH; cd ~/$REMOTE_DIR && \
     HUB_SECTION=$(printf '%q' "${HUB_SECTION:-}") HUB_OPEN=$(printf '%q' "${HUB_OPEN:-}") \
     HUB_SIDE=$(printf '%q' "${HUB_SIDE:-}") HUB_SHEET=$(printf '%q' "${HUB_SHEET:-}") \
-    SHOT_WAIT=$(printf '%q' "${SHOT_WAIT:-3}") \
+    HUB_PLAY=$(printf '%q' "${HUB_PLAY:-}") HUB_PLAY_EXIT=$(printf '%q' "${HUB_PLAY_EXIT:-}") \
+    HUB_PLAY_CHROME=$(printf '%q' "${HUB_PLAY_CHROME:-}") HUB_PLAY_FROM_END=$(printf '%q' "${HUB_PLAY_FROM_END:-}") \
+    SHOT_SIMS=$(printf '%q' "${SHOT_SIMS:-}") SHOT_WAIT=$(printf '%q' "${SHOT_WAIT:-3}") \
     HUB_DEV_ENV=\$HOME/$DEV_ENV bash scripts/mac.sh $(printf '%q ' "$@")"
   fetch_shots
 }
