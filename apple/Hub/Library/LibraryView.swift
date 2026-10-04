@@ -1,79 +1,338 @@
 import HubKit
 import SwiftUI
 
-/// The Jellyfin library: a pill per folder plus Favourites, a poster grid
-/// sorted on the hub, and search. Android's `screens/library/LibraryScreen`.
-struct LibraryView: View {
-    @Environment(AppModel.self) private var model
-    /// The folder last open, kept between launches (Android's `KEY_LAST_LIBRARY`).
-    @AppStorage("library.last") private var lastFolder = ""
+/// A library opened from the Library page, or Favourites.
+struct FolderRoute: Hashable {
+    let id: String
+    let name: String
 
-    @State private var folders: [LibraryFolder] = []
-    @State private var status = StatusMessage("")
-    @State private var query = ""
-    @State private var sorts: [String: SortPreference] = [:]
+    static let favourites = FolderRoute(id: "favourites", name: "Favourites")
+}
 
-    private static let favourites = "favourites"
-
-    private var selectedId: String {
-        if lastFolder == Self.favourites || folders.contains(where: { $0.id == lastFolder }) { return lastFolder }
-        return folders.first?.id ?? ""
+/// Each library's order, kept between launches (Android keeps one per folder).
+enum LibrarySorts {
+    static func sort(for folderId: String) -> SortPreference {
+        SortPreference.decode(UserDefaults.standard.string(forKey: key(folderId)), fallback: "name")
     }
 
-    /// What the grid shows: a search while one is typed, else the chosen place.
-    private var source: GridSource? {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count >= 2 { return .search(trimmed) }
-        if selectedId == Self.favourites { return .favourites }
-        guard let folder = folders.first(where: { $0.id == selectedId }) else { return nil }
-        return .folder(id: folder.id, name: folder.name, sort: sort(for: folder.id))
+    static func set(_ value: SortPreference, for folderId: String) {
+        UserDefaults.standard.set(value.encoded, forKey: key(folderId))
+    }
+
+    private static func key(_ folderId: String) -> String { "library.sort." + folderId }
+}
+
+/// The Jellyfin library's first page (the prototype's `pgLibrary`): search
+/// and Favourites, then a glass tile for each library, its own artwork behind
+/// a fan of three of its posters. Typing two letters turns the page into
+/// search results. Android's `screens/library/LibraryScreen`.
+struct LibraryView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.glassMetrics) private var metrics
+    @Environment(\.openRoute) private var openRoute
+
+    @State private var folders: [LibraryFolder] = []
+    /// Debug builds: HUB_OPEN=Anime (a library's name) opens that library, once.
+    @State private var debugOpened = false
+    /// Three posters a library shows on its tile, and how many titles it has:
+    /// the top of its first page, in its own order.
+    @State private var fans: [String: [String]] = [:]
+    @State private var totals: [String: Int] = [:]
+    @State private var status = StatusMessage("")
+    @State private var query = ""
+    /// The tile a pointer rests on or focus is on, whose picture the page takes.
+    @State private var lit: String?
+
+    private var searchText: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private var summary: String {
+        guard !folders.isEmpty else { return "" }
+        let count = "\(folders.count) librar" + (folders.count == 1 ? "y" : "ies")
+        let titles = totals.values.reduce(0, +)
+        return titles > 0 ? count + " · \(titles) titles" : count
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            searchField
-                .padding(.horizontal, 24)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    LibrarySearchField(query: $query)
+                    NavigationLink(value: AppRoute.folder(.favourites)) {
+                        Label("Favourites", systemImage: "star")
+                    }
+                    .buttonStyle(GlassControlStyle())
+                }
+                .padding(.horizontal, metrics.margin)
                 .padding(.top, 4)
-            if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(folders) { folder in
-                            ChoicePill(title: folder.name, selected: folder.id == selectedId) { lastFolder = folder.id }
-                        }
-                        if !folders.isEmpty {
-                            ChoicePill(title: "★ Favourites", selected: selectedId == Self.favourites) {
-                                lastFolder = Self.favourites
-                            }
-                        }
-                        if case .folder(let id, _, let current) = source {
-                            sortControls(folderId: id, current: current)
-                                .padding(.leading, 12)
+                if searchText.count >= 2 {
+                    LibraryGrid(source: .search(searchText))
+                        .id(searchText)
+                } else if !searchText.isEmpty {
+                    Text("Type at least two characters")
+                        .font(HubType.body(15, relativeTo: .subheadline))
+                        .foregroundStyle(.white.opacity(0.66))
+                        .padding(.horizontal, metrics.margin)
+                        .padding(.top, 20)
+                } else {
+                    PageHeading(title: "Your libraries") {
+                        if status.text.isEmpty {
+                            Text(summary)
+                                .font(HubType.body(14, relativeTo: .subheadline))
+                                .foregroundStyle(.white.opacity(0.66))
+                        } else {
+                            StatusLine(message: status) { Task { await loadFolders() } }
                         }
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, metrics.margin)
+                    .padding(.top, 18)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 18)], spacing: 18) {
+                        ForEach(folders) { folder in
+                            NavigationLink(value: AppRoute.folder(FolderRoute(id: folder.id, name: folder.name))) {
+                                LibraryTile(folder: folder, posters: fans[folder.id] ?? [], background: art(of: folder))
+                            }
+                            .buttonStyle(GlassCardStyle())
+                            .previewsWhenFocused { lit = art(of: folder) }
+                        }
+                    }
+                    .padding(.horizontal, metrics.margin)
+                    .padding(.top, 14)
+                    .padding(.bottom, 30)
                 }
-            } else if query.trimmingCharacters(in: .whitespaces).count < 2 {
-                Text("Type at least two characters")
-                    .font(HubType.body(15, relativeTo: .subheadline))
-                    .foregroundStyle(Color.muted)
-                    .padding(20)
-            }
-            StatusLine(message: status) { Task { await loadFolders() } }
-                .padding(.horizontal, 24)
-            if let source {
-                LibraryGrid(source: source)
-                    .id(source)
-            } else {
-                Spacer()
             }
         }
+        .ambientArtwork(searchText.count >= 2 ? "" : (lit ?? folders.first.map(art(of:)) ?? ""))
+        .refreshable { await loadFolders() }
         .task(id: model.userId) { await loadFolders() }
     }
 
-    /// The shell hides the system bar that `.searchable` lives in, so the
-    /// search is a glass field of its own (the prototype's `.search`).
-    private var searchField: some View {
+    /// A tile's picture: the library's own (its folder art, or a title chosen
+    /// for the day), else the middle poster of its fan.
+    private func art(of folder: LibraryFolder) -> String {
+        if !folder.image.isEmpty { return folder.image }
+        let fan = fans[folder.id] ?? []
+        return fan.count > 1 ? fan[1] : (fan.first ?? "")
+    }
+
+    private func loadFolders() async {
+        if folders.isEmpty { status = StatusText.loading("libraries", refreshing: false) }
+        do {
+            let response = try await model.hub.fetch(HubEndpoints.library, as: LibraryResponse.self)
+            folders = response.views
+            status = folders.isEmpty ? StatusMessage("No Jellyfin libraries were found") : StatusMessage("")
+            #if DEBUG
+            if let name = ProcessInfo.processInfo.environment["HUB_OPEN"], !debugOpened,
+               let folder = folders.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+                debugOpened = true
+                openRoute(.folder(FolderRoute(id: folder.id, name: folder.name)))
+            }
+            #endif
+        } catch {
+            if error.kind == .cancelled { return }
+            status = StatusText.failed(error.message, kind: error.kind, hasData: !folders.isEmpty)
+            return
+        }
+        await loadFans()
+    }
+
+    /// The first page of every library at once, each in its own order: the
+    /// hub keeps them for a minute, so opening one is answered from its cache.
+    private func loadFans() async {
+        let hub = model.hub
+        let requests = folders.map { folder -> (String, HubRequest) in
+            let sort = LibrarySorts.sort(for: folder.id)
+            return (folder.id, HubEndpoints.libraryItems(viewId: folder.id, sort: sort.field, order: sort.order))
+        }
+        await withTaskGroup(of: (String, [String], Int)?.self) { group in
+            for (id, request) in requests {
+                group.addTask {
+                    guard let page = try? await hub.fetch(request, as: LibraryPage.self) else { return nil }
+                    return (id, Array(page.items.map(\.media.poster).filter { !$0.isEmpty }.prefix(3)), page.total)
+                }
+            }
+            for await result in group {
+                guard let result else { continue }
+                fans[result.0] = result.1
+                totals[result.0] = result.2
+            }
+        }
+    }
+}
+
+/// A library on the Library page (`.lib`): its picture blurred into colour,
+/// three of its posters fanned on the right, and a glass label with what kind
+/// of library it is and its name.
+struct LibraryTile: View {
+    let folder: LibraryFolder
+    let posters: [String]
+    let background: String
+    @Environment(\.glassMetrics) private var metrics
+
+    private static let corner: CGFloat = 24
+
+    private var kind: String {
+        switch folder.kind {
+        case "movies": "Movie library"
+        case "tvshows": "TV library"
+        default: "Library"
+        }
+    }
+
+    var body: some View {
+        Color.clear
+            .aspectRatio(metrics.compact ? 2 : 1.6, contentMode: .fit)
+            .overlay {
+                ArtworkView(path: background, width: 360, placeholder: .white.opacity(0.06))
+                    .blur(radius: 18, opaque: true)
+                    .saturation(1.2)
+                    .colorMultiply(Color(white: 0.8))
+            }
+            .overlay { GeometryReader { fan(in: $0.size) } }
+            .overlay(alignment: .bottom) { label }
+            .clipShape(RoundedRectangle(cornerRadius: Self.corner, style: .continuous))
+            .litArtwork(corner: Self.corner)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(folder.name), \(kind)")
+    }
+
+    /// The prototype's `.stack`: 66% of the tile's height, 9% from its top and
+    /// 5% from its right, the three turned 7°, −1° and −8°, the last on top.
+    private func fan(in size: CGSize) -> some View {
+        let height = size.height * 0.66
+        let width = height * 1.3
+        let poster = height * 2 / 3
+        let right = size.width * 0.05
+        let top = size.height * 0.09
+        let steps: [CGFloat] = [0, 0.26, 0.52]
+        let turns: [Double] = [7, -1, -8]
+        return ZStack(alignment: .topLeading) {
+            ForEach(Array(posters.prefix(3).enumerated()), id: \.offset) { index, path in
+                ArtworkView(path: path, width: 240)
+                    .frame(width: poster, height: height)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .shadow(color: .black.opacity(0.45), radius: 10, x: -8, y: 10)
+                    .rotationEffect(.degrees(turns[index]))
+                    .position(x: size.width - right - steps[index] * width - poster / 2, y: top + height / 2)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private var label: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(kind.uppercased())
+                .font(HubType.body(11, weight: .bold, relativeTo: .caption2))
+                .tracking(1.3)
+                .foregroundStyle(.white.opacity(0.72))
+            Text(folder.name)
+                .font(HubType.heading(23, weight: .heavy, relativeTo: .title2))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .glassPanel(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(12)
+    }
+}
+
+/// One library's titles (the prototype's `pgFolder`): the libraries in a glass
+/// capsule with Favourites, Sort and its direction, then the poster grid with
+/// unwatched counts or a tick. Another library from the capsule takes this
+/// page's place, so Back still returns to the Library page.
+struct FolderView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openRoute) private var navigation
+    @Environment(\.glassMetrics) private var metrics
+    let route: FolderRoute
+
+    @State private var folders: [LibraryFolder] = []
+    @State private var sort = SortPreference.forField("name")
+    @State private var refreshes = 0
+
+    private var source: GridSource {
+        route == .favourites ? .favourites : .folder(id: route.id, name: route.name, sort: sort)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                controls
+                    .padding(.horizontal, metrics.margin)
+                    .padding(.top, 4)
+                LibraryGrid(source: source)
+                    .id("\(refreshes)·\(String(describing: source))")
+            }
+        }
+        .refreshable { refreshes += 1 }
+        .onAppear { sort = LibrarySorts.sort(for: route.id) }
+        .task(id: model.userId) { await loadFolders() }
+    }
+
+    @ViewBuilder private var controls: some View {
+        let capsule = GlassCapsulePicker(
+            items: folders.map { GlassCapsulePicker<String>.Item(id: $0.id, title: $0.name) }
+                + [GlassCapsulePicker<String>.Item(id: FolderRoute.favourites.id, title: "Favourites", systemImage: "star.fill")],
+            selection: route.id) { id in
+                let name = folders.first(where: { $0.id == id })?.name ?? FolderRoute.favourites.name
+                navigation.replace(.folder(FolderRoute(id: id, name: name)))
+            }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                capsule
+                Spacer(minLength: 0)
+                if route != .favourites { sortControls }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                ScrollView(.horizontal, showsIndicators: false) { capsule }
+                if route != .favourites { sortControls }
+            }
+        }
+    }
+
+    /// Android's `LibrarySortControls`: the field as a menu ("Name ▾") and the
+    /// direction as a control that flips on one press ("↑ A to Z").
+    private var sortControls: some View {
+        HStack(spacing: 10) {
+            Menu {
+                Picker("Sort by", selection: Binding(get: { sort.field }, set: { setSort(SortPreference.forField($0)) })) {
+                    ForEach(SortPreference.mediaFields, id: \.id) { field in
+                        Text(field.label).tag(field.id)
+                    }
+                }
+            } label: {
+                Label(SortPreference.label(for: sort.field) + " ▾", systemImage: "line.3.horizontal.decrease")
+            }
+            .menuStyle(.button)
+            .buttonStyle(GlassControlStyle())
+            Button {
+                setSort(SortPreference(field: sort.field, ascending: !sort.ascending))
+            } label: {
+                Label(sort.directionLabel, systemImage: sort.ascending ? "arrow.up" : "arrow.down")
+            }
+            .buttonStyle(GlassControlStyle())
+            .accessibilityHint("Reverses the sort")
+        }
+        .fixedSize()
+    }
+
+    private func setSort(_ value: SortPreference) {
+        sort = value
+        LibrarySorts.set(value, for: route.id)
+    }
+
+    private func loadFolders() async {
+        guard let response = try? await model.hub.fetch(HubEndpoints.library, as: LibraryResponse.self) else { return }
+        folders = response.views
+    }
+}
+
+/// The glass search field (the prototype's `.search`): the shell hides the
+/// system bar that `.searchable` lives in.
+struct LibrarySearchField: View {
+    @Binding var query: String
+
+    var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 16, weight: .semibold))
@@ -101,65 +360,6 @@ struct LibraryView: View {
         .frame(height: 44)
         .frame(maxWidth: 460)
         .glassPanel(Capsule())
-    }
-
-    /// Android's `LibrarySortControls`: the field as a menu pill ("Name ▾") and
-    /// the direction as a pill that flips on one press ("↑ A to Z").
-    private func sortControls(folderId: String, current: SortPreference) -> some View {
-        HStack(spacing: 8) {
-            Menu {
-                Picker("Sort by", selection: Binding(
-                    get: { current.field },
-                    set: { setSort(SortPreference.forField($0), for: folderId) })) {
-                    ForEach(SortPreference.mediaFields, id: \.id) { field in
-                        Text(field.label).tag(field.id)
-                    }
-                }
-            } label: {
-                Label(SortPreference.label(for: current.field) + "  ▾", systemImage: "line.3.horizontal.decrease")
-                    .font(HubType.body(15, weight: .medium, relativeTo: .subheadline))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .foregroundStyle(Color.ink)
-                    .background(Color.card, in: Capsule())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            Button {
-                setSort(SortPreference(field: current.field, ascending: !current.ascending), for: folderId)
-            } label: {
-                Label(current.directionLabel, systemImage: current.ascending ? "arrow.up" : "arrow.down")
-                    .font(HubType.body(15, weight: .medium, relativeTo: .subheadline))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .foregroundStyle(Color.ink)
-                    .background(Color.card, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Reverses the sort")
-        }
-    }
-
-    private func sort(for folderId: String) -> SortPreference {
-        sorts[folderId] ?? SortPreference.decode(UserDefaults.standard.string(forKey: "library.sort." + folderId),
-                                                 fallback: "name")
-    }
-
-    private func setSort(_ value: SortPreference, for folderId: String) {
-        sorts[folderId] = value
-        UserDefaults.standard.set(value.encoded, forKey: "library.sort." + folderId)
-    }
-
-    private func loadFolders() async {
-        if folders.isEmpty { status = StatusText.loading("libraries", refreshing: false) }
-        do {
-            let response = try await model.hub.fetch(HubEndpoints.library, as: LibraryResponse.self)
-            folders = response.views
-            status = folders.isEmpty ? StatusMessage("No Jellyfin libraries were found") : StatusMessage("")
-        } catch {
-            if error.kind == .cancelled { return }
-            status = StatusText.failed(error.message, kind: error.kind, hasData: !folders.isEmpty)
-        }
     }
 }
 
@@ -200,9 +400,12 @@ enum GridSource: Hashable {
     }
 }
 
-/// A poster grid that loads the next page of 60 as its end comes into view.
+/// A poster grid (`.grid`) that loads the next page of 60 as its end comes
+/// into view, with its count line over it. It sits in its page's own scroll
+/// view, under the page's controls, and the poster in focus tints the page.
 struct LibraryGrid: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.glassMetrics) private var metrics
     let source: GridSource
 
     @State private var items: [MediaHit] = []
@@ -211,30 +414,34 @@ struct LibraryGrid: View {
     @State private var total = 0
     @State private var loading = false
     @State private var status = StatusMessage("")
+    @State private var lit: String?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                StatusLine(message: status) { Task { await loadNext() } }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 170), spacing: 14, alignment: .top)],
-                          alignment: .leading, spacing: 20) {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, hit in
-                        NavigationLink(value: AppRoute.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title))) {
-                            PosterCard(hit: hit)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(hit.jellyfinItemId.isEmpty)
-                        .onAppear {
-                            // Six cards before the end, as on Android.
-                            if index >= items.count - 6 { Task { await loadNext() } }
-                        }
+        VStack(alignment: .leading, spacing: 0) {
+            StatusLine(message: status) { Task { await loadNext() } }
+                .padding(.horizontal, metrics.margin)
+                .padding(.top, 10)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: metrics.compact ? 100 : 112, maximum: 180),
+                                         spacing: metrics.compact ? 12 : 18, alignment: .top)],
+                      alignment: .leading, spacing: 20) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, hit in
+                    NavigationLink(value: AppRoute.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title))) {
+                        PosterCard(hit: hit)
+                    }
+                    .buttonStyle(GlassCardStyle())
+                    .disabled(hit.jellyfinItemId.isEmpty)
+                    .previewsWhenFocused { lit = hit.media.poster }
+                    .onAppear {
+                        // Six cards before the end, as on Android.
+                        if index >= items.count - 6 { Task { await loadNext() } }
                     }
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
+            .padding(.horizontal, metrics.margin)
+            .padding(.top, 14)
+            .padding(.bottom, 26)
         }
-        .refreshable { await reload() }
+        .ambientArtwork(lit ?? items.first?.media.poster ?? "")
         .task(id: model.userId) { await reload() }
     }
 
@@ -243,6 +450,7 @@ struct LibraryGrid: View {
         page = 0
         totalPages = 1
         total = 0
+        lit = nil
         await loadNext()
     }
 

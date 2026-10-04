@@ -1,14 +1,15 @@
 import HubKit
 import SwiftUI
 
-/// A movie, series, season or episode from the library, in the 2026-10
-/// redesign's shape (Android `screens/library/LibraryDetailScreen` with
-/// `DetailHeaderView`): the backdrop fading in behind the name, facts and
-/// progress, Resume or Play with round watched and favourite buttons, then
-/// Episodes, More like this, Cast and Details as tabs.
+/// A movie, series, season or episode from the library, in the Glass shape
+/// (the prototype's `pgTitle`; Android `screens/library/LibraryDetailScreen`):
+/// the backdrop filling the top under the bars and fading into the page, the
+/// name, facts and progress over it, Resume or Play with round watched and
+/// favourite buttons, then Episodes, More like this, Cast and Details as tabs.
 struct TitleView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.glassMetrics) private var metrics
+    @Environment(\.glassAccent) private var accent
     let route: TitleRoute
 
     @State private var item: HubKit.LibraryItem?
@@ -30,8 +31,6 @@ struct TitleView: View {
 
     enum TitleTab: Hashable { case episodes, similar, cast, details }
 
-    private var compact: Bool { sizeClass == .compact }
-
     /// Episodes for a series; More like this when there is any; Cast when
     /// there is a cast; Details always.
     private var tabs: [(id: TitleTab, title: String)] {
@@ -47,16 +46,26 @@ struct TitleView: View {
     var body: some View {
         GeometryReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    header(topInset: proxy.safeAreaInsets.top)
-                    VStack(alignment: .leading, spacing: 16) {
+                ZStack(alignment: .top) {
+                    // The prototype's `.dart`: 590 tall on an iPad, 470 on an iPhone.
+                    FadedArtwork.title(backdropPath)
+                        .frame(height: metrics.compact ? 470 : 590)
+                        .frame(maxWidth: .infinity)
+                        .clipped()
+                    VStack(alignment: .leading, spacing: 0) {
+                        header
+                            .padding(.top, max(metrics.compact ? 290 : 236, proxy.safeAreaInsets.top + 120))
+                            .padding(.horizontal, metrics.margin)
                         StatusLine(message: status) { Task { await load() } }
+                            .padding(.horizontal, metrics.margin)
+                            .padding(.top, 8)
                         if item != nil, !tabs.isEmpty {
                             UnderlineTabs(tabs: tabs, selection: $tab)
+                                .padding(.horizontal, metrics.margin)
+                                .padding(.top, 14)
                             tabContent
                         }
                     }
-                    .padding(.horizontal, 24)
                 }
                 .padding(.bottom, 28)
             }
@@ -78,67 +87,71 @@ struct TitleView: View {
         return item.type == "episode" ? item.thumb : item.poster
     }
 
-    private func header(topInset: CGFloat) -> some View {
-        BackdropHeader(path: backdropPath, topInset: topInset) {
-            VStack(alignment: .leading, spacing: 8) {
-                if let item, item.type == "episode", !item.seriesTitle.isEmpty {
-                    NavigationLink(value: AppRoute.title(TitleRoute(itemId: item.seriesId, title: item.seriesTitle))) {
-                        Text(item.seriesTitle.uppercased())
-                            .font(HubType.body(13, weight: .bold, relativeTo: .caption))
-                            .tracking(1.2)
-                            .foregroundStyle(Color.accentColor)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(item.seriesId.isEmpty)
+    /// The prototype's `.dhead`: lines 10 apart, at most 860 wide.
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let item, item.type == "episode", !item.seriesTitle.isEmpty {
+                NavigationLink(value: AppRoute.title(TitleRoute(itemId: item.seriesId, title: item.seriesTitle))) {
+                    Text(item.seriesTitle.uppercased())
+                        .font(HubType.body(12.5, weight: .bold, relativeTo: .caption))
+                        .tracking(1.75)
+                        .foregroundStyle(accent.tint)
                 }
-                Text(item?.title ?? route.title)
-                    .font(HubType.heading(compact ? 32 : 44, weight: .heavy))
-                    .foregroundStyle(Color.ink)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
-                if let item {
-                    if !item.originalTitle.isEmpty,
-                       item.originalTitle.caseInsensitiveCompare(item.title) != .orderedSame {
-                        Text(item.originalTitle)
-                            .font(HubType.body(15, relativeTo: .subheadline))
-                            .foregroundStyle(Color.muted)
-                    }
-                    let facts = DetailLines.facts(item)
-                    if !facts.isEmpty {
-                        Text(facts)
-                            .font(HubType.body(15, relativeTo: .subheadline))
-                            .foregroundStyle(Color.muted)
-                    }
-                    let state = DetailLines.state(item)
-                    if !state.isEmpty {
-                        Text(state)
-                            .font(HubType.body(15, weight: .medium, relativeTo: .subheadline))
-                            .foregroundStyle(Color.accentColor)
-                    }
-                    if !item.overview.isEmpty { overview(item.overview) }
-                    actions(item).padding(.top, 6)
-                }
+                .buttonStyle(.plain)
+                .disabled(item.seriesId.isEmpty)
             }
-            .frame(maxWidth: 640, alignment: .leading)
+            Text(item?.title ?? route.title)
+                .font(HubType.heading(metrics.heroTitle, weight: .heavy))
+                .tracking(-0.02 * metrics.heroTitle)
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .minimumScaleFactor(0.6)
+            if let item {
+                if !item.originalTitle.isEmpty,
+                   item.originalTitle.caseInsensitiveCompare(item.title) != .orderedSame {
+                    Text(item.originalTitle)
+                        .font(HubType.body(15, relativeTo: .subheadline))
+                        .foregroundStyle(.white.opacity(0.66))
+                }
+                let facts = DetailLines.facts(item)
+                if !facts.isEmpty {
+                    // Wraps rather than truncates, as the prototype's `.facts` does.
+                    Text(factsLine(facts.components(separatedBy: "  ·  ")))
+                        .font(HubType.body(15, relativeTo: .subheadline))
+                }
+                let state = DetailLines.state(item)
+                if !state.isEmpty {
+                    Text(state)
+                        .font(HubType.body(14, weight: .bold, relativeTo: .subheadline))
+                        .foregroundStyle(accent.tint)
+                }
+                if !item.overview.isEmpty { overview(item.overview) }
+                actions(item).padding(.top, 4)
+            }
         }
+        .frame(maxWidth: 860, alignment: .leading)
+        // Laid over the backdrop in a stack, the lines were offered one line's
+        // height each and truncated; their own height lets them wrap.
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func overview(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(text)
                 .font(HubType.body(15, relativeTo: .body))
-                .foregroundStyle(Color.ink.opacity(0.85))
+                .foregroundStyle(.white.opacity(0.86))
                 .lineLimit(expanded ? nil : 2)
+                .frame(maxWidth: 620, alignment: .leading)
             Button(expanded ? "Collapse description" : "Read more") { expanded.toggle() }
-                .font(HubType.body(14, weight: .semibold, relativeTo: .subheadline))
-                .foregroundStyle(Color.muted)
+                .font(HubType.body(13, weight: .bold, relativeTo: .footnote))
+                .foregroundStyle(.white.opacity(0.7))
                 .buttonStyle(.plain)
         }
     }
 
-    /// The main pill, then watched and favourite as round buttons.
+    /// The main pill, then watched and favourite as round glass buttons.
     private func actions(_ item: HubKit.LibraryItem) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: metrics.compact ? 8 : 10) {
             if item.type != "season" {
                 Button {
                     status = StatusMessage("Playing on Apple devices comes next")
@@ -148,13 +161,15 @@ struct TitleView: View {
                 .buttonStyle(PrimaryPillStyle())
                 .disabled(item.type == "series" && target == nil)
                 GlassRoundButton(systemImage: item.played ? "eye.fill" : "eye",
-                                 label: item.played ? "Mark unwatched" : "Mark watched", on: item.played) {
+                                 label: item.played ? "Mark unwatched" : "Mark watched", on: item.played,
+                                 size: metrics.compact ? 42 : 46) {
                     Task { await change(.played(!item.played)) }
                 }
                 .disabled(saving)
             }
             GlassRoundButton(systemImage: item.favorite ? "star.fill" : "star",
-                             label: item.favorite ? "Remove from favourites" : "Favourite", on: item.favorite) {
+                             label: item.favorite ? "Remove from favourites" : "Favourite", on: item.favorite,
+                             size: metrics.compact ? 42 : 46) {
                 Task { await change(.favorite(!item.favorite)) }
             }
             .disabled(saving)
@@ -181,7 +196,8 @@ struct TitleView: View {
     }
 
     @ViewBuilder private var episodesTab: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
+            // The prototype's `.pills`: one glass pill per season.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(seasons) { season in
@@ -192,26 +208,34 @@ struct TitleView: View {
                         }
                     }
                 }
+                .padding(.horizontal, metrics.margin)
+                .padding(.top, 14)
+                .padding(.bottom, 2)
             }
             if episodes.isEmpty && !loadingEpisodes && !seasons.isEmpty {
                 Text("No episodes in this season yet.")
                     .font(HubType.body(15, relativeTo: .subheadline))
-                    .foregroundStyle(Color.muted)
+                    .foregroundStyle(.white.opacity(0.66))
+                    .padding(.horizontal, metrics.margin)
+                    .padding(.top, 14)
             }
             ScrollViewReader { reader in
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: 16) {
+                    LazyHStack(alignment: .top, spacing: metrics.gap) {
                         ForEach(Array(episodes.enumerated()), id: \.element.id) { index, episode in
                             NavigationLink(value: AppRoute.title(TitleRoute(itemId: episode.id, title: episode.title))) {
                                 EpisodeCard(episode: episode, upNext: episode.id == target?.item.id)
-                                    .frame(width: compact ? 220 : 260)
+                                    .frame(width: metrics.episode)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(GlassCardStyle())
                             .onAppear {
                                 if index >= episodes.count - 3 { Task { await loadEpisodes(reset: false) } }
                             }
                         }
                     }
+                    .padding(.horizontal, metrics.margin)
+                    .padding(.top, 12)
+                    .padding(.bottom, 16)
                 }
                 // The strip opens at the episode Play starts, as Android's does,
                 // rather than at episode 1 of a half-watched season.
@@ -226,58 +250,52 @@ struct TitleView: View {
 
     private var similarTab: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(alignment: .top, spacing: 14) {
+            LazyHStack(alignment: .top, spacing: metrics.gap) {
                 ForEach(similar) { hit in
                     NavigationLink(value: AppRoute.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title))) {
-                        PosterCard(hit: hit, caption: false).frame(width: compact ? 104 : 128)
+                        PosterCard(hit: hit).frame(width: metrics.poster)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(GlassCardStyle())
                     .disabled(hit.jellyfinItemId.isEmpty)
                 }
             }
+            .padding(.horizontal, metrics.margin)
+            .padding(.top, 12)
+            .padding(.bottom, 16)
         }
     }
 
+    /// The prototype's `.people`: a round portrait for each, name and part under it.
     private func castTab(_ item: HubKit.LibraryItem) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(alignment: .top, spacing: 16) {
+            LazyHStack(alignment: .top, spacing: 18) {
                 ForEach(DetailLines.cast(item)) { person in
-                    VStack(spacing: 6) {
-                        Color.clear
-                            .frame(width: 84, height: 84)
-                            .overlay { ArtworkView(path: person.image, width: 240) }
-                            .clipShape(Circle())
-                        Text(person.name)
-                            .font(HubType.body(13, weight: .medium, relativeTo: .caption))
-                            .foregroundStyle(Color.ink)
-                        if !person.role.isEmpty {
-                            Text(person.role)
-                                .font(HubType.body(12, relativeTo: .caption2))
-                                .foregroundStyle(Color.muted)
-                        }
-                    }
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .frame(width: 100)
-                    .accessibilityElement(children: .combine)
+                    PersonCard(person: person)
                 }
             }
+            .padding(.horizontal, metrics.margin)
+            .padding(.top, 16)
+            .padding(.bottom, 18)
         }
     }
 
+    /// The prototype's `.dl`: small capitals over each value, in columns.
     private func detailsTab(_ item: HubKit.LibraryItem) -> some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 8) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 30, alignment: .topLeading)],
+                  alignment: .leading, spacing: 16) {
             ForEach(DetailLines.details(item), id: \.label) { fact in
-                GridRow {
-                    Text(fact.label)
-                        .font(HubType.body(15, relativeTo: .subheadline))
-                        .foregroundStyle(Color.muted)
+                VStack(alignment: .leading, spacing: 4) {
+                    GlassLabel(text: fact.label)
                     Text(fact.value)
                         .font(HubType.body(15, relativeTo: .subheadline))
-                        .foregroundStyle(Color.ink)
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .accessibilityElement(children: .combine)
             }
         }
+        .padding(.horizontal, metrics.margin)
+        .padding(.top, 18)
     }
 
     /// "Season 2 · 10 episodes" on the chosen pill, as on Android.
@@ -379,47 +397,78 @@ struct TitleView: View {
     }
 }
 
-/// One episode in a season's strip (Android `ui/EpisodeCardView`): its 16:9
-/// still with progress, UP NEXT on the one Play starts, "5. Title" and
-/// "22 min · 69% watched" under it.
+/// One episode in a season's strip (`.card.ep`; Android `ui/EpisodeCardView`):
+/// its 16:9 still with the progress inside, UP NEXT on the one Play starts, a
+/// tick on a watched one, "5. Title" and "22 min · 69% watched" under it.
 struct EpisodeCard: View {
     let episode: HubKit.LibraryItem
     let upNext: Bool
+    @Environment(\.glassMetrics) private var metrics
 
     private var watched: Bool { ResumeRules.showsWatched(played: episode.played, progress: episode.progress) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Color.clear
                 .aspectRatio(16 / 9, contentMode: .fit)
                 .overlay { ArtworkView(path: episode.thumb.isEmpty ? episode.poster : episode.thumb, width: 480) }
-                .overlay(alignment: .bottom) { ProgressStrip(progress: watched ? 0 : episode.progress) }
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay { ArtworkProgress(progress: watched ? 0 : episode.progress) }
+                .overlay { PlayDisc() }
+                .clipShape(RoundedRectangle(cornerRadius: metrics.radius, style: .continuous))
+                .overlay(alignment: .topLeading) {
+                    if upNext && !watched { UpNextTag().padding(8) }
+                }
                 .overlay(alignment: .topTrailing) {
-                    if upNext && !watched {
-                        Text("UP NEXT")
-                            .font(HubType.body(11, weight: .bold, relativeTo: .caption2))
-                            .tracking(0.8)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .foregroundStyle(Color.accentInk)
-                            .background(Color.accentColor, in: Capsule())
-                            .padding(6)
-                    } else {
+                    if watched {
                         WatchBadge(played: episode.played, progress: episode.progress, unplayedCount: 0, favorite: false)
                             .padding(6)
                     }
                 }
-            Text(DetailLines.episodeTitle(episode))
-                .font(HubType.body(15, weight: .semibold, relativeTo: .subheadline))
-                .foregroundStyle(Color.ink)
-                .lineLimit(1)
-            let meta = DetailLines.episodeMeta(episode)
-            Text(meta.isEmpty ? " " : meta)
-                .font(HubType.body(13, relativeTo: .caption))
-                .foregroundStyle(Color.muted)
+                .litArtwork(corner: metrics.radius)
+            CardCaption(title: DetailLines.episodeTitle(episode), detail: DetailLines.episodeMeta(episode))
         }
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// One of the cast (`.person`): a round portrait with its shadow, or their
+/// initials when there is no picture, then the name and the part.
+struct PersonCard: View {
+    let person: LibraryPerson
+
+    private var initials: String {
+        person.name.split(separator: " ").prefix(2).compactMap(\.first).map { String($0).uppercased() }.joined()
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Group {
+                if person.image.isEmpty {
+                    Text(initials)
+                        .font(HubType.heading(28, weight: .heavy, relativeTo: .title2))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.white.opacity(0.12))
+                } else {
+                    ArtworkView(path: person.image, width: 240)
+                }
+            }
+            .frame(width: 92, height: 92)
+            .clipShape(Circle())
+            .shadow(color: .black.opacity(0.35), radius: 11, y: 10)
+            Text(person.name)
+                .font(HubType.body(14, weight: .bold, relativeTo: .subheadline))
+                .foregroundStyle(.white)
+            if !person.role.isEmpty {
+                Text(person.role)
+                    .font(HubType.body(12, relativeTo: .caption))
+                    .foregroundStyle(.white.opacity(0.62))
+            }
+        }
+        .lineLimit(2)
+        .multilineTextAlignment(.center)
+        .frame(width: 112)
         .accessibilityElement(children: .combine)
     }
 }

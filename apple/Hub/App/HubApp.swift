@@ -17,6 +17,9 @@ struct HubApp: App {
         }
         #if os(macOS)
         .defaultSize(width: 1280, height: 820)
+        // The Glass page runs to the top of the window, the window buttons over
+        // it, as the bars float over it on an iPad (the shell keeps clear of them).
+        .windowStyle(.hiddenTitleBar)
         #endif
     }
 }

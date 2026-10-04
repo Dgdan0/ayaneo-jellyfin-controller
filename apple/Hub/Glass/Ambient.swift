@@ -59,8 +59,8 @@ extension View {
 ///
 /// The prototype's `blur(72px) saturate(1.5) brightness(.62)`. SwiftUI's
 /// `brightness` adds to each channel where CSS scales it, so the scaling is a
-/// multiply by 62% grey. The picture is decoded at under a hundred pixels: a
-/// blur this wide leaves no detail a larger one would keep. A new picture
+/// multiply by 62% grey. The picture is the hub's smallest, decoded at 64
+/// pixels. A new picture
 /// cross-fades in once it has loaded, so a slow one never leaves the page
 /// blank, and the dark colour fades with it.
 struct AmbientBackground: View {
@@ -126,8 +126,10 @@ struct AmbientBackground: View {
             withAnimation(Self.fade) { shown = nil }
             return
         }
+        // The smallest picture the hub serves, decoded at 64 pixels as
+        // Android's page is: a blur this wide leaves nothing more to see.
         guard shown?.path != path,
-              let image = await loadArtwork(model.hub, path: path, width: 180, maxPixels: 96),
+              let image = await loadArtwork(model.hub, request: HubEndpoints.smallest(path), maxPixels: 64),
               !Task.isCancelled else { return }
         withAnimation(Self.fade) { shown = Shown(path: path, image: image) }
     }

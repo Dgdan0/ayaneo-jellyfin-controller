@@ -3,11 +3,13 @@ import SwiftUI
 
 /// The hub, the server monitor and every service with its live state: the
 /// first proof that the whole stack is reachable from this device. Android's
-/// Manage screen (`screens/manage/ManageScreen`).
+/// Manage screen (`screens/manage/ManageScreen`), as the prototype's
+/// `pgServices` draws it.
 struct ServicesView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.glassMetrics) private var metrics
 
     @State private var health: HealthResponse?
     @State private var status = StatusMessage("")
@@ -24,17 +26,20 @@ struct ServicesView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 0) {
                 header
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 320, maximum: 640), spacing: 14)], spacing: 14) {
+                // Two columns on an iPad, one on a phone (the prototype's `.svcs`).
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 380, maximum: 640), spacing: 12)], spacing: 12) {
                     ForEach(rows) { row in
                         ServiceCard(row: row, scanning: scanning == row.id, open: { open(row) },
                                     scan: { Task { await scan(row) } })
                     }
                 }
+                .padding(.top, 12)
+                .padding(.bottom, 26)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .padding(.horizontal, metrics.margin)
+            .padding(.top, 4)
         }
         .refreshable { await load() }
         .task { await load() }
@@ -53,10 +58,7 @@ struct ServicesView: View {
     /// name, then how everything is ("All 13 running"), and Refresh.
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Services")
-                    .font(HubType.heading(32, weight: .heavy, relativeTo: .largeTitle))
-                    .foregroundStyle(Color.ink)
+            PageHeading(title: "Services") {
                 StatusLine(message: status) { Task { await load() } }
             }
             Spacer(minLength: 0)
@@ -66,7 +68,6 @@ struct ServicesView: View {
             .keyboardShortcut("r", modifiers: .command)
             .disabled(loading)
         }
-        .padding(.horizontal, 4)
     }
 
     private func load() async {
@@ -116,12 +117,17 @@ struct ServicesView: View {
     }
 }
 
-/// One service: its logo, name, state and what the hub knows about it.
+/// One service (the prototype's `.scard`): a glass card with its logo, name,
+/// state and what the hub knows about it, ringed while a pointer rests on it.
+/// A service that is down or misconfigured has an amber edge, as the Activity
+/// dashboard's attention card has.
 struct ServiceCard: View {
     let row: ServiceRow
     let scanning: Bool
     let open: () -> Void
     let scan: () -> Void
+
+    private var needsAttention: Bool { row.state == "down" || row.state == "misconfigured" }
 
     var body: some View {
         Group {
@@ -131,7 +137,7 @@ struct ServiceCard: View {
                 Button(action: open) { content }
             }
         }
-        .buttonStyle(CardButtonStyle())
+        .buttonStyle(GlassCardStyle())
         .contextMenu {
             if !row.dashboardURL.isEmpty {
                 Button("Open \(row.name)", systemImage: "safari", action: open)
@@ -148,67 +154,84 @@ struct ServiceCard: View {
     private var content: some View {
         HStack(alignment: .center, spacing: 14) {
             logo
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(row.name)
-                    .font(HubType.body(17, weight: .semibold, relativeTo: .headline))
-                    .foregroundStyle(Color.ink)
+                    .font(HubType.body(16, weight: .bold, relativeTo: .headline))
+                    .foregroundStyle(.white)
                 HStack(spacing: 6) {
                     if row.showsDot {
                         Circle().fill(Color.tone(row.tone)).frame(width: 8, height: 8)
                     }
                     Text(row.stateWord)
-                        .font(HubType.body(14, weight: .medium, relativeTo: .subheadline))
-                        .foregroundStyle(row.showsDot ? Color.tone(row.tone) : Color.muted)
+                        .font(HubType.body(12.5, weight: .bold, relativeTo: .caption))
+                        .foregroundStyle(row.showsDot ? Color.tone(row.tone) : .white.opacity(0.64))
                 }
                 Text(row.detail)
-                    .font(HubType.body(14, relativeTo: .subheadline))
-                    .foregroundStyle(Color.muted)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
+                    .font(HubType.body(12.5, relativeTo: .caption))
+                    .foregroundStyle(.white.opacity(0.64))
+                    .lineLimit(1)
             }
             Spacer(minLength: 8)
             if row.canScan {
                 Button(action: scan) {
-                    if scanning {
-                        ProgressView().controlSize(.small)
-                    } else {
+                    HStack(spacing: 6) {
+                        if scanning {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .bold))
+                        }
                         Text("Scan")
                     }
+                    .font(HubType.body(13, weight: .bold, relativeTo: .footnote))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(.white)
+                    .glassPanel(Capsule())
                 }
-                .font(HubType.body(14, weight: .semibold, relativeTo: .subheadline))
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
+                .buttonStyle(.plain)
                 .disabled(scanning)
             } else if row.kind != .service || !row.dashboardURL.isEmpty {
                 Image(systemName: row.kind == .service ? "arrow.up.forward" : "chevron.forward")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color.muted)
+                    .foregroundStyle(.white.opacity(0.5))
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 13)
+        .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
+        .glassPanel(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            if needsAttention {
+                // The prototype's amber edge at 55%.
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color(argb: 0x8CF2_B544), lineWidth: 1.5)
+            }
+        }
+        .litRing(corner: 20)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityHint(hint)
     }
 
-    @ViewBuilder private var logo: some View {
-        if let logo = row.logo {
-            Image(logo)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 40, height: 40)
-                .accessibilityHidden(true)
-        } else if row.kind == .monitor {
-            Image(systemName: "cpu")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 40, height: 40)
-                .background(Color.hubMark, in: RoundedRectangle(cornerRadius: 10.4, style: .continuous))
-                .accessibilityHidden(true)
-        } else {
-            HubMark(size: 40)
+    private var logo: some View {
+        Group {
+            if let logo = row.logo {
+                Image(logo)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 40, height: 40)
+            } else if row.kind == .monitor {
+                Image(systemName: "cpu")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .background(Color.hubMark, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else {
+                HubMark(size: 46)
+            }
         }
+        .frame(width: 46, height: 46)
+        .accessibilityHidden(true)
     }
 
     private var hint: String {
@@ -217,18 +240,5 @@ struct ServiceCard: View {
         case .monitor: "Opens the server monitor"
         case .service: row.dashboardURL.isEmpty ? "" : "Opens \(row.name) in the browser"
         }
-    }
-}
-
-/// A raised card that darkens while pressed, like the Android cards.
-struct CardButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(configuration.isPressed ? Color.cardPressed : Color.card,
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-            #if os(iOS)
-            .hoverEffect(.highlight)
-            #endif
     }
 }

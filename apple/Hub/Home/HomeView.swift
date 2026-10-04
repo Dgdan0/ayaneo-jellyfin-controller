@@ -8,6 +8,7 @@ import SwiftUI
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openRoute) private var openRoute
+    @Environment(\.glassMetrics) private var metrics
 
     @State private var rows: [HomeRow] = []
     @State private var status = StatusMessage("")
@@ -32,7 +33,7 @@ struct HomeView: View {
     var body: some View {
         GeometryReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 0) {
                     if let hero {
                         HeroView(content: hero, topInset: proxy.safeAreaInsets.top) {
                             status = StatusMessage("Playing on Apple devices comes next")
@@ -41,7 +42,8 @@ struct HomeView: View {
                         Color.clear.frame(height: proxy.safeAreaInsets.top)
                     }
                     StatusLine(message: status) { Task { await load() } }
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, metrics.margin)
+                        .padding(.top, 8)
                     ForEach(rows) { row in
                         HomeRowView(row: row) { hit in
                             selection = HeroPick(rowId: row.id, rowTitle: row.title, hit: hit)
@@ -112,95 +114,158 @@ struct HeroPick: Equatable {
     let hit: MediaHit
 }
 
-/// The top of Home (Android `HomeHeroView`): the title's backdrop fading into
-/// the page, an accent eyebrow, the name, its facts, how much is left, then
-/// Resume or Play and Details. Every line keeps its place, so nothing jumps
-/// when the hero changes title.
+/// The top of Home (Android `HomeHeroView`, the prototype's `.hero`): the
+/// title's backdrop across the whole width, under the bars, fading into the
+/// page; an eyebrow with its code in the accent, the name, its facts, how much
+/// is left, then Resume or Play and Details. Every line keeps its place, so
+/// nothing jumps when the hero changes title. On a phone the words are centred
+/// over the picture's foot.
 struct HeroView: View {
     let content: HeroContent
     let topInset: CGFloat
     let play: () -> Void
-    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.glassMetrics) private var metrics
+    @Environment(\.glassAccent) private var accent
+
+    /// The prototype's 480 on an iPad and 560 on an iPhone, measured from the
+    /// top of the screen, and never so short that the words meet the bar.
+    private var height: CGFloat { max(metrics.compact ? 560 : 480, topInset + 330) }
 
     var body: some View {
-        BackdropHeader(path: content.backdrop, topInset: topInset) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(content.eyebrow.isEmpty ? " " : content.eyebrow)
-                    .font(HubType.body(13, weight: .bold, relativeTo: .caption))
-                    .tracking(1.2)
-                    .foregroundStyle(Color.accentColor)
-                Text(content.title)
-                    .font(HubType.heading(sizeClass == .compact ? 32 : 44, weight: .heavy))
-                    .foregroundStyle(Color.ink)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
-                Text(content.meta.isEmpty ? " " : content.meta.joined(separator: "  ·  "))
-                    .font(HubType.body(15, relativeTo: .subheadline))
-                    .foregroundStyle(Color.muted)
-                    .lineLimit(1)
-                // Held open for an unstarted title, so the buttons never move.
-                HStack(spacing: 12) {
-                    ProgressView(value: content.progress)
-                        .tint(Color.accentColor)
-                        .frame(width: 180)
-                    Text(content.progressLabel)
-                        .font(HubType.body(14, relativeTo: .caption))
-                        .foregroundStyle(Color.muted)
-                }
-                .opacity(content.progress > 0 ? 1 : 0)
-                HStack(spacing: 12) {
-                    if content.canPlay {
-                        Button(action: play) {
-                            Label(content.playLabel, systemImage: "play.fill")
-                        }
-                        .buttonStyle(PrimaryPillStyle())
-                    }
-                    if !content.itemId.isEmpty {
-                        NavigationLink(value: AppRoute.title(TitleRoute(itemId: content.itemId, title: content.title))) {
-                            Label("Details", systemImage: "info.circle")
-                        }
-                        .buttonStyle(GlassPillStyle())
-                    }
-                }
-                .padding(.top, 6)
-            }
-            .frame(maxWidth: 620, alignment: .leading)
+        ZStack(alignment: metrics.compact ? .bottom : .bottomLeading) {
+            FadedArtwork.hero(content.backdrop, centred: metrics.compact)
+            words
+                .padding(.horizontal, metrics.margin)
+                .padding(.bottom, 14)
         }
+        .frame(maxWidth: .infinity)
+        .frame(height: height)
+        .clipped()
+    }
+
+    private var words: some View {
+        VStack(alignment: metrics.compact ? .center : .leading, spacing: 10) {
+            Text(eyebrow)
+                .font(HubType.body(12.5, weight: .bold, relativeTo: .caption))
+                .tracking(1.75)
+                .lineLimit(1)
+            Text(content.title)
+                .font(HubType.heading(metrics.heroTitle, weight: .heavy))
+                .tracking(-0.02 * metrics.heroTitle)
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .minimumScaleFactor(0.6)
+            Text(content.meta.isEmpty ? AttributedString(" ") : factsLine(content.meta))
+                .font(HubType.body(15, relativeTo: .subheadline))
+                .lineLimit(1)
+            // Held open for an unstarted title, so the buttons never move.
+            HStack(spacing: 12) {
+                HeroProgress(progress: content.progress, accent: accent.tint)
+                    .frame(width: metrics.compact ? 110 : 180)
+                Text(content.progressLabel)
+                    .font(HubType.body(13, relativeTo: .caption))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .monospacedDigit()
+            }
+            .frame(height: 18)
+            .opacity(content.progress > 0 ? 1 : 0)
+            HStack(spacing: 10) {
+                if content.canPlay {
+                    Button(action: play) {
+                        Label(content.playAction.isEmpty ? content.playLabel : content.playAction, systemImage: "play.fill")
+                    }
+                    .buttonStyle(PrimaryPillStyle())
+                }
+                if !content.itemId.isEmpty {
+                    NavigationLink(value: AppRoute.title(TitleRoute(itemId: content.itemId, title: content.title))) {
+                        Label("Details", systemImage: "info.circle")
+                    }
+                    .buttonStyle(GlassPillStyle())
+                }
+            }
+            .padding(.top, 4)
+        }
+        .multilineTextAlignment(metrics.compact ? .center : .leading)
+        .frame(maxWidth: metrics.compact ? .infinity : 660, alignment: metrics.compact ? .center : .leading)
+        // Over the picture in a stack, a long title was offered one line's
+        // height; its own height lets it take the second line it is allowed.
+        .fixedSize(horizontal: false, vertical: true)
         .animation(.easeInOut(duration: 0.2), value: content.itemId)
+    }
+
+    /// "CONTINUE WATCHING · S3E4": the lead in soft white, the episode's code
+    /// (or Coming up's day) in the accent.
+    private var eyebrow: AttributedString {
+        let mark = content.eyebrowMark
+        var lead = content.eyebrow
+        if !mark.isEmpty, lead.hasSuffix(mark) {
+            lead = String(lead.dropLast(mark.count))
+            if lead.hasSuffix(" · ") { lead = String(lead.dropLast(3)) }
+        }
+        var line = AttributedString(lead.isEmpty && mark.isEmpty ? " " : lead)
+        line.foregroundColor = Color.white.opacity(0.72)
+        if !mark.isEmpty {
+            var code = AttributedString((lead.isEmpty ? "" : " · ") + mark)
+            code.foregroundColor = accent.tint
+            line += code
+        }
+        return line
     }
 }
 
-/// One Home row: its title, then the cards side by side.
+/// How far in, on the hero: the accent on a faint track (`.prog .b`).
+struct HeroProgress: View {
+    let progress: Double
+    let accent: Color
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.25))
+                Capsule().fill(accent).frame(width: geometry.size.width * min(1, max(0, progress)))
+            }
+        }
+        .frame(height: 4)
+        .accessibilityLabel("\(Int(progress * 100))% watched")
+    }
+}
+
+/// One Home row (`.row`): its title, then the cards side by side, with room
+/// above and below for a lit card's lift and ring.
 struct HomeRowView: View {
     let row: HomeRow
     let preview: (MediaHit) -> Void
+    @Environment(\.glassMetrics) private var metrics
 
     private var landscape: Bool { HomeHero.isLandscape(rowId: row.id) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             Text(row.title)
-                .font(HubType.heading(22, weight: .semibold, relativeTo: .title2))
-                .foregroundStyle(Color.ink)
-                .padding(.horizontal, 24)
+                .font(HubType.body(metrics.rowTitle, weight: .bold, relativeTo: .title3))
+                .foregroundStyle(.white)
+                .padding(.horizontal, metrics.margin)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
+                LazyHStack(alignment: .top, spacing: metrics.gap) {
                     ForEach(row.items) { hit in
                         NavigationLink(value: AppRoute.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title))) {
                             if landscape {
-                                LandscapeCard(hit: hit).frame(width: 260)
+                                LandscapeCard(hit: hit).frame(width: metrics.tile)
                             } else {
-                                PosterCard(hit: hit, caption: false).frame(width: 120)
+                                PosterCard(hit: hit, caption: false).frame(width: metrics.poster)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(GlassCardStyle())
                         .disabled(hit.jellyfinItemId.isEmpty)
                         .previewsWhenFocused { preview(hit) }
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, metrics.margin)
+                .padding(.top, 12)
+                .padding(.bottom, 16)
             }
         }
+        .padding(.top, 8)
     }
 }
 

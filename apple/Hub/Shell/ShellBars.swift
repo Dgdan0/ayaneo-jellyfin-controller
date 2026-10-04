@@ -15,6 +15,9 @@ struct WideBar: View {
     let backTitle: String?
     let attention: Int
     let avatar: AvatarLook
+    /// Extra room before Media/Books: the Mac's window buttons, which sit over
+    /// the page under its hidden title bar. The capsule stays centred.
+    var leadingInset: CGFloat = 0
     let select: (AppSection) -> Void
     let back: () -> Void
     let openProfiles: () -> Void
@@ -22,11 +25,14 @@ struct WideBar: View {
     var body: some View {
         ZStack(alignment: .top) {
             HStack(spacing: 10) {
-                if let backTitle {
-                    BackPill(title: backTitle, action: back)
-                } else {
-                    SidePicker(side: $side)
+                Group {
+                    if let backTitle {
+                        BackPill(title: backTitle, action: back)
+                    } else {
+                        SidePicker(side: $side)
+                    }
                 }
+                .padding(.leading, leadingInset)
                 Spacer(minLength: 0)
                 GlassRoundButton(systemImage: "bell", label: "Notifications", on: section == .notifications,
                                  size: 44, count: attention) { select(.notifications) }

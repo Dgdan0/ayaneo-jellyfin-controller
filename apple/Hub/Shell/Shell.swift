@@ -3,6 +3,8 @@ import Observation
 import SwiftUI
 #if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
 #endif
 
 /// The app's places, in the Android app's order (`HubActivity.sectionTitles`).
@@ -36,12 +38,14 @@ enum AppSection: String, Hashable, CaseIterable {
 /// A page pushed onto a section's stack.
 enum AppRoute: Hashable {
     case title(TitleRoute)
+    case folder(FolderRoute)
     case monitor
 
     /// What the back pill calls this page from the one above it.
     var name: String {
         switch self {
         case .title(let route): route.title
+        case .folder(let route): route.name
         case .monitor: "Server monitor"
         }
     }
@@ -62,9 +66,13 @@ struct StackKey: Hashable {
     var id: String { side.map { "\($0.rawValue):\(section.rawValue)" } ?? section.rawValue }
 }
 
-/// Pushes a page onto the stack the asking page is in.
+/// Pushes a page onto the stack the asking page is in, or puts another in
+/// its place.
 struct OpenRouteAction {
     var push: @MainActor (AppRoute) -> Void = { _ in }
+    /// Swaps the page on top for `route` without a push, so Back still goes
+    /// where it went: another library chosen from a library's own capsule.
+    var replace: @MainActor (AppRoute) -> Void = { _ in }
 
     @MainActor func callAsFunction(_ route: AppRoute) { push(route) }
 }
@@ -118,14 +126,9 @@ struct ShellMetrics {
 
     /// The round icons, the avatar and the back pill.
     var control: CGFloat { wide ? 44 : 40 }
-    /// From the top of the safe area to the bar.
-    var barTop: CGFloat {
-        #if os(macOS)
-        14
-        #else
-        wide ? 8 : 2
-        #endif
-    }
+    /// From the top of the safe area to the bar: below the status bar, and on
+    /// the Mac below the band its hidden title bar leaves for the window buttons.
+    var barTop: CGFloat { wide ? 8 : 2 }
     var margin: CGFloat { wide ? 44 : 20 }
     /// Where pages start, under the bar; they scroll up beneath it.
     var topInset: CGFloat { barTop + control + (wide ? 12 : 10) }
@@ -151,12 +154,17 @@ struct MainView: View {
     @SceneStorage("section") private var section: AppSection = .home
     @SceneStorage("side") private var side: AppSide = .media
 
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
     @State private var paths: [StackKey: [AppRoute]] = [:]
     @State private var opened: [StackKey] = []
     @State private var ambient = AmbientModel()
     @State private var shell = ShellModel()
     @State private var profilesOpen = false
     @State private var sheetPlaces = false
+    /// The Mac's window buttons sit over the page under its hidden title bar:
+    /// how far across and down they reach, so Media/Books keeps clear of them.
+    @State private var windowButtons = CGSize.zero
     /// Debug builds: HUB_SHEET=profiles opens the avatar's sheet at launch.
     @State private var debugSheet = false
 
@@ -172,7 +180,12 @@ struct MainView: View {
                 ForEach(opened, id: \.self) { stackKey in
                     let shown = stackKey == key
                     stack(stackKey, metrics: metrics)
+                        // The section shown fades in and settles, the prototype's
+                        // `fadein`; the one left goes at once, so two pages never
+                        // show through each other.
                         .opacity(shown ? 1 : 0)
+                        .offset(y: shown ? 0 : 10)
+                        .animation(shown ? .easeOut(duration: 0.28) : nil, value: shown)
                         .allowsHitTesting(shown)
                         // A section out of sight keeps its pages but not its
                         // keyboard shortcuts.
@@ -191,6 +204,13 @@ struct MainView: View {
                         .ignoresSafeArea(edges: .bottom)
                 }
             }
+            #if DEBUG && os(macOS)
+            .onChange(of: windowButtons) { _, _ in
+                let line = "safe area top \(metrics.safe.top), bar from \(metrics.safe.top + metrics.barTop), "
+                    + "media/books moved right by \(windowButtonsInset(metrics))\n"
+                FileHandle.standardError.write(Data(line.utf8))
+            }
+            #endif
             #if DEBUG
             .task(id: debugSheet) {
                 guard debugSheet else { return }
@@ -246,7 +266,16 @@ struct MainView: View {
                 }
         }
         .environment(\.shellStack, stackKey.id)
-        .environment(\.openRoute, OpenRouteAction { route in paths[stackKey, default: []].append(route) })
+        .environment(\.glassMetrics, GlassMetrics(compact: sizeClass == .compact, margin: metrics.margin))
+        .environment(\.openRoute, OpenRouteAction(
+            push: { route in paths[stackKey, default: []].append(route) },
+            replace: { route in
+                guard var path = paths[stackKey], !path.isEmpty else { return }
+                path[path.count - 1] = route
+                var swap = Transaction()
+                swap.disablesAnimations = true
+                withTransaction(swap) { paths[stackKey] = path }
+            }))
     }
 
     @ViewBuilder private func root(_ stackKey: StackKey) -> some View {
@@ -261,6 +290,7 @@ struct MainView: View {
     @ViewBuilder private func destination(_ route: AppRoute) -> some View {
         switch route {
         case .title(let title): TitleView(route: title)
+        case .folder(let folder): FolderView(route: folder)
         case .monitor: ComingNextView(title: "Server monitor", systemImage: "cpu",
                                       detail: "CPU, memory, disk space, containers and current playback.")
         }
@@ -274,7 +304,8 @@ struct MainView: View {
             Group {
                 if metrics.wide {
                     WideBar(side: $side, section: section, backTitle: back, attention: shell.attention,
-                            avatar: avatar, select: select, back: goBack, openProfiles: { openProfiles(wide: true) })
+                            avatar: avatar, leadingInset: windowButtonsInset(metrics),
+                            select: select, back: goBack, openProfiles: { openProfiles(wide: true) })
                 } else {
                     PhoneBar(side: $side, section: section, backTitle: back, attention: shell.attention,
                              avatar: avatar, select: select, back: goBack, openProfiles: { openProfiles(wide: false) })
@@ -285,25 +316,49 @@ struct MainView: View {
             Spacer(minLength: 0)
         }
         .background(alignment: .top) {
-            // Keeps the bar readable over whatever scrolls beneath it.
-            LinearGradient(colors: [.black.opacity(0.42), .clear], startPoint: .top, endPoint: .bottom)
-                .frame(height: metrics.barTop + metrics.control + 24)
-                .ignoresSafeArea(edges: .top)
-                .allowsHitTesting(false)
+            ZStack(alignment: .top) {
+                // Keeps the bar readable over whatever scrolls beneath it.
+                LinearGradient(colors: [.black.opacity(0.42), .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: metrics.safe.top + metrics.barTop + metrics.control + 24)
+                    .allowsHitTesting(false)
+                #if os(macOS)
+                // With the title bar hidden, the band behind the bar is where the
+                // window is dragged from, and the window buttons are measured.
+                Color.clear
+                    .frame(height: metrics.safe.top + metrics.topInset)
+                    .contentShape(Rectangle())
+                    .gesture(WindowDragGesture())
+                    .allowsWindowActivationEvents(true)
+                    .background { WindowButtonsReader(corner: $windowButtons) }
+                #endif
+            }
+            .ignoresSafeArea(edges: .top)
         }
+    }
+
+    /// Room before Media/Books on the Mac: only when the bar reaches up beside
+    /// the window buttons. Below them it needs none.
+    private func windowButtonsInset(_ metrics: ShellMetrics) -> CGFloat {
+        guard metrics.safe.top + metrics.barTop < windowButtons.height + 6 else { return 0 }
+        return max(0, windowButtons.width + 14 - metrics.margin)
     }
 
     private var avatar: AvatarLook {
         let current = Profiles.current(shell.users, chosen: model.userId)
         let name = current?.name ?? model.userName
         let color = current.flatMap { Profiles.color(of: $0.id, in: shell.users) }
-        return AvatarLook(name: name, initial: Profiles.initial(name), color: color.map(Color.init(argb:)))
+        // No name yet: the glass circle keeps its person glyph rather than "?".
+        return AvatarLook(name: name, initial: name.isEmpty ? "" : Profiles.initial(name),
+                          color: color.map(Color.init(argb:)))
     }
 
     // MARK: Moving about
 
     private func open(_ stackKey: StackKey) {
-        if !opened.contains(stackKey) { opened.append(stackKey) }
+        if !opened.contains(stackKey) {
+            // A section's first visit fades in as a revisit does.
+            withAnimation(.easeOut(duration: 0.28)) { opened.append(stackKey) }
+        }
         ambient.select(stackKey.id)
     }
 
@@ -388,6 +443,48 @@ struct SwipeBack: UIViewControllerRepresentable {
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             (navigationController?.viewControllers.count ?? 0) > 1
+        }
+    }
+}
+#endif
+
+#if os(macOS)
+/// Where the Mac window's close, minimise and zoom buttons are, measured from
+/// the window's top left: how far across they end and how far down. With the
+/// title bar hidden they sit over the page, and Media/Books keeps clear of
+/// them. Debug builds print what they found, since the Mac's screen cannot be
+/// captured from the PC that builds it.
+struct WindowButtonsReader: NSViewRepresentable {
+    @Binding var corner: CGSize
+
+    func makeNSView(context: Context) -> Probe { Probe { corner = $0 } }
+    func updateNSView(_ view: Probe, context: Context) {}
+
+    final class Probe: NSView {
+        let report: (CGSize) -> Void
+
+        init(report: @escaping (CGSize) -> Void) {
+            self.report = report
+            super.init(frame: .zero)
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window, let zoom = window.standardWindowButton(.zoomButton) else { return }
+            let frame = zoom.convert(zoom.bounds, to: nil)
+            let height = window.contentView?.bounds.height ?? 0
+            let corner = CGSize(width: frame.maxX, height: height - frame.minY)
+            #if DEBUG
+            // Standard error, which is not buffered: scripts/mac.sh keeps it in a file.
+            let layout = window.contentLayoutRect
+            let line = "window buttons end at x \(frame.maxX), from \(height - frame.maxY) to \(corner.height) "
+                + "below the top; content below the title bar starts \(height - layout.maxY) down\n"
+            FileHandle.standardError.write(Data(line.utf8))
+            #endif
+            let report = report
+            DispatchQueue.main.async { report(corner) }
         }
     }
 }
