@@ -65,6 +65,10 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
+        # Picture in picture keeps playing with the app in the background
+        # (#2); without it, leaving the app ends playback (PlayerModel).
+        UIBackgroundModes:
+          - audio
         # The hub is HTTPS (Tailscale Serve, or the DuckDNS fallback). Local
         # networking stays open for a hub on loopback during development.
         NSAppTransportSecurity:

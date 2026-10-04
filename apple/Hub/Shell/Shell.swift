@@ -254,6 +254,9 @@ struct MainView: View {
         .environment(\.glassAccent, AccentPreset.defaultFor(side))
         .onChange(of: key, initial: true) { _, latest in open(latest) }
         .onChange(of: ambient.displayed, initial: true) { _, path in model.colors.want([path]) }
+        // Closing the window (the Mac's, or an iPad's in the app switcher)
+        // ends what plays in it, as Back would; minimising it does not.
+        .onDisappear { player.close() }
         .task(id: model.userId) { await shell.loadUsers(model.hub) }
         .task(id: scenePhase == .active) {
             guard scenePhase == .active else { return }

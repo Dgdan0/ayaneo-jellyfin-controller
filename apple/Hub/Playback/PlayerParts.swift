@@ -98,13 +98,15 @@ struct PlayerPlayDisc: View {
 }
 
 /// The timeline (`.pl-line`): what has loaded in faint white, what has played
-/// in white, and a thumb with a soft ring. Dragging moves only the thumb and
-/// the time under it; letting go seeks there, so a stream is not asked for
-/// every position on the way.
+/// in white, a notch where each chapter starts, and a thumb with a soft ring.
+/// Dragging moves only the thumb and the time under it; letting go seeks
+/// there, so a stream is not asked for every position on the way.
 struct PlayerTimeline: View {
     let positionMillis: Int64
     let durationMillis: Int64
     let bufferedMillis: Int64
+    /// Where chapters start after the first, as shares of the length.
+    var marks: [Double] = []
     @Binding var scrub: Double?
     let seek: (Int64) -> Void
     /// VoiceOver's swipe up and down: ten seconds either way.
@@ -119,6 +121,7 @@ struct PlayerTimeline: View {
                 Capsule().fill(.white.opacity(0.22)).frame(height: 6)
                 Capsule().fill(.white.opacity(0.3)).frame(width: width * loaded, height: 6)
                 Capsule().fill(.white).frame(width: width * played, height: 6)
+                ChapterNotches(marks: marks).fill(.black.opacity(0.55)).frame(height: 6)
                 Circle()
                     .fill(.white)
                     .frame(width: 16, height: 16)
@@ -157,9 +160,9 @@ struct PlayerTimeline: View {
     }
 }
 
-/// Near the end of an episode (Android `UpNextCardView`): its still, "UP NEXT ·
-/// S1E6", its name and series, a bar that fills until it starts by itself, and
-/// Play now or Watch credits.
+/// Near the end of an episode (Android `UpNextCardView`, in Glass): its
+/// still, "UP NEXT · S1E6", its name and series, a bar that fills until it
+/// starts by itself, and Play now or Watch credits.
 struct UpNextCardView: View {
     let card: UpNextCard
     var compact = false
@@ -203,31 +206,144 @@ struct UpNextCardView: View {
             .frame(height: 4)
             .padding(.top, 12)
             .accessibilityHidden(true)
-            Text("Starts automatically when the bar fills")
-                .font(HubType.body(11.5, relativeTo: .caption))
-                .foregroundStyle(.white.opacity(0.67))
-                .padding(.top, 5)
+            // A phone's card leaves it out: the bar says as much, and the
+            // card must fit beside the middle row on a phone turned sideways.
+            if !compact {
+                Text("Starts automatically when the bar fills")
+                    .font(HubType.body(11.5, relativeTo: .caption))
+                    .foregroundStyle(.white.opacity(0.67))
+                    .padding(.top, 5)
+            }
             HStack(spacing: 8) {
                 Button(action: playNow) {
                     Label("Play now", systemImage: "play.fill").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(PrimaryPillStyle())
+                .buttonStyle(GlassPillStyle())
                 Button(action: watchCredits) {
                     Text("Watch credits").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassPillStyle())
             }
             .lineLimit(1)
+            // A phone's card is 300 points wide: the words shrink a little
+            // rather than lose their end to "…".
+            .minimumScaleFactor(0.8)
             .padding(.top, 10)
         }
-        .padding(12)
-        // Over a moving picture the card is nearly solid, as on the Pocket.
-        .background(Color(argb: 0xF00E_1219), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.1), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.45), radius: 18, y: 10)
+        .padding(14)
+        // Glass, as the timeline's bar under it is (the prototype's panels;
+        // the Pocket's card is a dark solid one).
+        .glassPanel(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Up next: \(card.item.displayTitle)")
+        .accessibilityHint("Starts automatically when the bar fills")
+    }
+}
+
+/// Subtitles the app draws (`PlaybackChoices.drawnSubtitle`), in the look
+/// Settings chose: white words with a black edge, the way mpv draws them, or
+/// white on a dark box (Android's `SubtitleLooks`).
+///
+/// No ForEach: the words change while the chrome fades, and SwiftUI lays out
+/// some animation frames on its own thread, where a ForEach's main-actor
+/// closure traps under Swift 6 (`PlayerSheet`).
+///
+/// Their size is a share of the screen's short side, which is its height in
+/// landscape as on Android, so a phone turned upright keeps the same size of
+/// words. Turned landscape they sit a share of the height up from the bottom,
+/// lifted above the timeline while it shows if the look asks for that; held
+/// upright, where the picture is a band across the middle, just under it.
+struct SubtitleOverlay: View {
+    let lines: [String]
+    let look: SubtitleLook
+    let size: CGSize
+    /// Where the picture is drawn.
+    let picture: CGRect
+    /// How much of the bottom the controls cover, 0 while they are hidden.
+    let covered: CGFloat
+
+    var body: some View {
+        let fontSize = max(12, min(size.width, size.height) * look.size.textFraction)
+        // One text for the cue, its lines broken where the file breaks them.
+        let words = lines.flatMap { $0.components(separatedBy: "\n") }.filter { !$0.isEmpty }.joined(separator: "\n")
+        let text = SubtitleLine(text: words, style: look.style, fontSize: fontSize)
+            .frame(maxWidth: size.width * 0.9)
+        let below = size.height - picture.maxY
+        Group {
+            if size.height > size.width, below > fontSize * 4 {
+                text
+                    .padding(.top, picture.maxY + fontSize * 0.6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else {
+                let share = PlaybackEnhancements.subtitlePlacement(look, covered: Double(covered), height: Double(size.height))
+                text
+                    .padding(.bottom, size.height * share)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+        }
+        .allowsHitTesting(false)
+        // They change several times a minute; VoiceOver would chase them.
+        .accessibilityHidden(true)
+    }
+}
+
+/// One line of drawn subtitles.
+struct SubtitleLine: View {
+    let text: String
+    let style: SubtitleStyle
+    let fontSize: CGFloat
+
+    var body: some View {
+        // A medium weight: a regular one thins out under the black edge.
+        let words = Text(text)
+            .font(.system(size: fontSize, weight: .medium))
+            .multilineTextAlignment(.center)
+        switch style {
+        case .outline:
+            // Eight black copies round the white one: written out rather than
+            // a ForEach (see `SubtitleOverlay`).
+            let edge = max(1.2, fontSize * 0.055)
+            let corner = edge * 0.71
+            ZStack {
+                words.foregroundStyle(.black).offset(x: edge, y: 0)
+                words.foregroundStyle(.black).offset(x: -edge, y: 0)
+                words.foregroundStyle(.black).offset(x: 0, y: edge)
+                words.foregroundStyle(.black).offset(x: 0, y: -edge)
+                words.foregroundStyle(.black).offset(x: corner, y: corner)
+                words.foregroundStyle(.black).offset(x: -corner, y: corner)
+                words.foregroundStyle(.black).offset(x: corner, y: -corner)
+                words.foregroundStyle(.black).offset(x: -corner, y: -corner)
+                words.foregroundStyle(.white)
+            }
+        case .box:
+            words.foregroundStyle(.white)
+                .padding(.horizontal, fontSize * 0.28)
+                .padding(.vertical, fontSize * 0.08)
+                .background(Color.black.opacity(185.0 / 255))
+        }
+    }
+}
+
+/// Where the picture is drawn in a frame of `size`: fitted, letterboxed.
+func letterboxed(_ picture: CGSize, in size: CGSize) -> CGRect {
+    guard picture.width > 0, picture.height > 0, size.width > 0, size.height > 0 else {
+        return CGRect(origin: .zero, size: size)
+    }
+    let scale = min(size.width / picture.width, size.height / picture.height)
+    let width = picture.width * scale, height = picture.height * scale
+    return CGRect(x: (size.width - width) / 2, y: (size.height - height) / 2, width: width, height: height)
+}
+
+/// The notches where chapters start, as a shape: a shape is drawn off the
+/// main thread safely, where a ForEach of rectangles would not be.
+struct ChapterNotches: Shape {
+    let marks: [Double]
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        for mark in marks where mark > 0 && mark < 1 {
+            path.addRect(CGRect(x: rect.minX + rect.width * mark - 1, y: rect.minY, width: 2, height: rect.height))
+        }
+        return path
     }
 }

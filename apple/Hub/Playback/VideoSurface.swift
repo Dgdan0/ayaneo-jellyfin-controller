@@ -1,13 +1,16 @@
 import AVFoundation
+import AVKit
 import SwiftUI
 
 /// The picture: AVPlayer drawn into an `AVPlayerLayer`, letterboxed, with
 /// nothing of its own on top (the chrome is SwiftUI). `ready` is told when the
-/// first frame is on screen, so the title's picture standing in can go.
+/// first frame is on screen, so the title's picture standing in can go, and
+/// `layer` is handed the layer, which picture in picture is built on.
 #if os(iOS)
 struct VideoSurface: UIViewRepresentable {
     let player: AVPlayer
     let ready: (Bool) -> Void
+    let layer: (AVPlayerLayer) -> Void
 
     func makeUIView(context: Context) -> Surface {
         let view = Surface()
@@ -19,6 +22,7 @@ struct VideoSurface: UIViewRepresentable {
     func updateUIView(_ view: Surface, context: Context) {
         view.onReady = ready
         if view.playerLayer.player !== player { view.playerLayer.player = player }
+        layer(view.playerLayer)
     }
 
     final class Surface: UIView {
@@ -45,6 +49,7 @@ struct VideoSurface: UIViewRepresentable {
 struct VideoSurface: NSViewRepresentable {
     let player: AVPlayer
     let ready: (Bool) -> Void
+    let layer: (AVPlayerLayer) -> Void
 
     func makeNSView(context: Context) -> Surface {
         let view = Surface()
@@ -56,6 +61,7 @@ struct VideoSurface: NSViewRepresentable {
     func updateNSView(_ view: Surface, context: Context) {
         view.onReady = ready
         if view.playerLayer.player !== player { view.playerLayer.player = player }
+        layer(view.playerLayer)
     }
 
     final class Surface: NSView {
@@ -85,6 +91,45 @@ struct VideoSurface: NSViewRepresentable {
 
         /// Taps belong to the chrome above.
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+#endif
+
+#if os(iOS)
+/// The system's AirPlay picker for the round Cast button, its own glyph
+/// clear: the button draws an icon the size of its neighbours' under it, and
+/// the picker takes the taps. AVPlayer hands a receiver the grant's address,
+/// which needs no token (`PlaybackGrant`).
+struct RoutePicker: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.tintColor = .clear
+        view.activeTintColor = .clear
+        view.prioritizesVideoDevices = true
+        view.backgroundColor = .clear
+        return view
+    }
+
+    func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+}
+#else
+struct RoutePicker: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.player = player
+        view.isRoutePickerButtonBordered = false
+        for state in [AVRoutePickerView.ButtonState.normal, .normalHighlighted, .active, .activeHighlighted] {
+            view.setRoutePickerButtonColor(.clear, for: state)
+        }
+        return view
+    }
+
+    func updateNSView(_ view: AVRoutePickerView, context: Context) {
+        if view.player !== player { view.player = player }
     }
 }
 #endif

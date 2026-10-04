@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import HubKit
 import Observation
 import SwiftUI
@@ -47,9 +48,10 @@ struct UpNextCard: Equatable {
 /// A session's life is Android's (`PlaybackService`): prepare with what
 /// AVPlayer can open, then stream it, report started, paused, unpaused, seeks
 /// and progress every ten seconds, and leave with stopped where it was, then
-/// `DELETE` the session. Leaving is the only way out, and it is taken on Back,
-/// on the next episode, when the app goes to the background and before it
-/// quits, so a session is never left for the hub's 30-minute cleanup to save.
+/// `DELETE` the session. Leaving is the only way out: Back, the next episode,
+/// quitting, closing the Mac's window, and on iPhone and iPad going to the
+/// background without picture in picture. So a session is never left for the
+/// hub's 30-minute cleanup to save.
 @MainActor
 @Observable
 final class PlayerModel {
@@ -75,6 +77,37 @@ final class PlayerModel {
     /// The picture behind the player while it opens.
     private(set) var backdrop = ""
     private(set) var closedCount = 0
+    /// What the subtitles the app draws say now (`PlaybackChoices.drawnSubtitle`).
+    private(set) var subtitleLines: [String] = []
+    /// The live delay of those subtitles, kept per profile and series or film.
+    private(set) var subtitleOffsetMillis: Int64 = 0
+    /// How subtitles look, in every video.
+    private(set) var subtitleLook = PlaybackMemory.look()
+    private(set) var speed: Float = PlaybackEnhancements.defaultSpeed
+    /// The bitrate cap This video chose; 0 is the original.
+    private(set) var maxBitrate = 0
+    /// The segment a Skip button is for now.
+    private(set) var skipSegment: PlaybackSegment?
+    /// A track, quality or version change on its way to the hub.
+    private(set) var applying = false
+    /// A short word about something that did not work, shown for a moment.
+    private(set) var notice: String?
+    private(set) var pipPossible = false
+    private(set) var pipActive = false
+    /// Whether this device has picture in picture at all (the iPhone
+    /// simulator has not); where it has not, the button is not offered.
+    let pipSupported = AVPictureInPictureController.isPictureInPictureSupported()
+    /// The video plays on an AirPlay receiver, not in this window.
+    private(set) var externalActive = false
+    /// The picture's own size, for where drawn subtitles go when it is
+    /// letterboxed (a phone held upright).
+    private(set) var presentationSize = CGSize.zero
+    /// Which kind the Audio & subtitles panel starts on: the one changed last.
+    private(set) var menu = PlayerMenuState()
+    /// The panel the debug tour has open (`HUB_PLAY_TOUR`), for PlayerView to
+    /// show. Outside `#if DEBUG`: @Observable does not track a property inside
+    /// one. Nothing sets it in a release build.
+    private(set) var debugPanel: String?
     /// The length AVPlayer found, for a plan that names none.
     private var itemDuration: Int64 = 0
 
@@ -84,6 +117,15 @@ final class PlayerModel {
         if let plan, plan.durationMillis > 0 { return plan.durationMillis }
         return itemDuration
     }
+
+    /// In order, inside the video, each with a name.
+    var chapters: [PlaybackChapter] {
+        PlaybackEnhancements.chapters(plan?.chapters ?? [], durationMillis: durationMillis)
+    }
+
+    /// The selected subtitles are a text file the app draws, so they can be
+    /// moved in time; a picture track is burned in by the hub.
+    var drawsSubtitles: Bool { plan.flatMap(PlaybackChoices.drawnSubtitle) != nil }
 
     /// Settings › Playback has no Apple page yet: Android's default.
     let nextTiming = NextEpisodeTiming.credits
@@ -95,6 +137,8 @@ final class PlayerModel {
     /// The profile that opened the session; every later call is for it.
     @ObservationIgnored private var user = ""
     @ObservationIgnored private var reporter = PlaybackReporter()
+    /// What this profile last chose for the title's series or film.
+    @ObservationIgnored private var selection = PlaybackSelection()
     /// Bumped by every open, close and change of episode, so an answer for a
     /// session the person has already left is closed instead of played.
     @ObservationIgnored private var generation = 0
@@ -107,17 +151,34 @@ final class PlayerModel {
     @ObservationIgnored private var reportedPlaying = false
     @ObservationIgnored private var upNextDismissed = false
     @ObservationIgnored private var seekTarget: Int64?
+    /// Where the next item starts instead of its plan's position: a track or
+    /// quality change goes on from where it was, which the hub would turn into
+    /// 0:00 in a title's first 30 seconds.
+    @ObservationIgnored private var startOverride: Int64?
+    @ObservationIgnored private var playAfterLoad = true
+    @ObservationIgnored private var subtitleTimeline: SubtitleTimeline<String>?
+    @ObservationIgnored private var subtitleKey = ""
+    @ObservationIgnored private var subtitleTask: Task<Void, Never>?
+    @ObservationIgnored private var noticeTask: Task<Void, Never>?
+    @ObservationIgnored private var subtitleClock: Any?
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var quitObserver: NSObjectProtocol?
+    @ObservationIgnored private var pip: AVPictureInPictureController?
+    @ObservationIgnored private var pipObserver: PictureInPictureObserver?
+    @ObservationIgnored private var inBackground = false
     @ObservationIgnored private let origin = ContinuousClock.now
     #if os(iOS)
     @ObservationIgnored private var backgroundWork: UIBackgroundTaskIdentifier = .invalid
     #endif
     #if DEBUG
     @ObservationIgnored private var debugFromEndUsed = false
+    @ObservationIgnored private var debugTourStarted = false
     #endif
 
     init() {
+        // AirPlay sends the video itself to the receiver: the grant's
+        // addresses need no token, so the receiver can fetch them.
+        player.allowsExternalPlayback = true
         #if os(iOS)
         let quitting = UIApplication.willTerminateNotification
         #else
@@ -131,6 +192,12 @@ final class PlayerModel {
         ) { [weak self] note in
             let item = (note.object as AnyObject?).map(ObjectIdentifier.init)
             MainActor.assumeIsolated { self?.reachedEnd(of: item) }
+        }
+        // Ten times a second on the video's own clock: drawn subtitles follow
+        // the picture, and stand still with it.
+        subtitleClock = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in
+            let millis = time.isNumeric ? Int64((CMTimeGetSeconds(time) * 1_000).rounded()) : 0
+            MainActor.assumeIsolated { self?.showSubtitles(at: millis) }
         }
     }
 
@@ -150,6 +217,8 @@ final class PlayerModel {
         outbox = outbox ?? PlaybackOutbox(hub: app.hub)
         backdrop = request.backdrop
         opens += 1
+        speed = PlaybackEnhancements.defaultSpeed
+        player.defaultRate = speed
         startSession()
         activateAudio()
         poll = Task { [weak self] in
@@ -175,6 +244,11 @@ final class PlayerModel {
         #endif
         poll?.cancel()
         poll = nil
+        if let pip, pip.isPictureInPictureActive { pip.stopPictureInPicture() }
+        pip = nil
+        pipObserver = nil
+        pipActive = false
+        pipPossible = false
         endSession()
         player.replaceCurrentItem(with: nil)
         request = nil
@@ -236,6 +310,15 @@ final class PlayerModel {
         fallbackTried = false
         reportedPlaying = false
         seekTarget = nil
+        startOverride = nil
+        playAfterLoad = true
+        maxBitrate = 0
+        skipSegment = nil
+        applying = false
+        subtitleKey = ""
+        subtitleTask?.cancel()
+        subtitleTimeline = nil
+        subtitleLines = []
     }
 
     /// Reports the stop (when it started and the end has not already said
@@ -269,8 +352,20 @@ final class PlayerModel {
             }
             let body = PlaybackPrepareBody(startMode: mode, device: PlaybackDeviceInfo.device(),
                                            capabilities: PlaybackDeviceInfo.capabilities())
-            let plan = try await hub.fetch(HubEndpoints.preparePlayback(itemId: itemId, body: body, user: user),
+            var plan = try await hub.fetch(HubEndpoints.preparePlayback(itemId: itemId, body: body, user: user),
                                            as: PlaybackPrepareResponse.self)
+            selection = PlaybackMemory.selection(user: user, scope: PlaybackChoices.scope(plan.item))
+            subtitleOffsetMillis = selection.subtitleOffsetMillis
+            // This profile's last audio and subtitles for the series or film,
+            // asked for before the first frame, as Android does.
+            if let wanted = wantedTracks(plan) {
+                let choose = PlaybackSelectBody(positionMillis: plan.positionMillis, audioStreamIndex: wanted.audio,
+                                                subtitleStreamIndex: wanted.subtitle)
+                if let chosen = try? await hub.fetch(HubEndpoints.selectPlayback(sessionId: plan.sessionId, body: choose, user: user),
+                                                     as: PlaybackPrepareResponse.self) {
+                    plan = chosen
+                }
+            }
             try await load(plan, generation: generation)
         } catch {
             #if DEBUG
@@ -308,6 +403,7 @@ final class PlayerModel {
         failedItem = nil
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
+        prepareSubtitles(plan)
     }
 
     // MARK: Playing
@@ -330,9 +426,23 @@ final class PlayerModel {
         let clamped = PlaybackRules.clampSeek(target, durationMillis: durationMillis)
         positionMillis = clamped
         seekTarget = clamped
+        showSubtitles(at: clamped)
         player.seek(to: CMTime(value: clamped, timescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
             Task { @MainActor in self?.seekFinished(at: clamped, finished: finished) }
         }
+    }
+
+    /// Past the intro (or recap, preview, ad) the Skip button is for.
+    func skip() {
+        guard let segment = skipSegment else { return }
+        skipSegment = nil
+        seek(to: segment.endMillis)
+    }
+
+    func setSpeed(_ value: Float) {
+        speed = value
+        player.defaultRate = value
+        if isPlaying { player.rate = value }
     }
 
     private func seekFinished(at target: Int64, finished: Bool) {
@@ -350,7 +460,18 @@ final class PlayerModel {
     /// Four times a second while the player is open: what AVPlayer is doing,
     /// what the chrome shows, what the hub is told.
     private func step() {
+        let possible = pip?.isPictureInPicturePossible ?? false
+        if possible != pipPossible {
+            pipPossible = possible
+            #if DEBUG
+            NSLog("playback: picture in picture %@", possible ? "possible" : "not possible")
+            #endif
+        }
+        if player.isExternalPlaybackActive != externalActive { externalActive = player.isExternalPlaybackActive }
         guard let item = player.currentItem else { return }
+        if item.presentationSize != presentationSize, item.presentationSize.width > 0 {
+            presentationSize = item.presentationSize
+        }
         let id = ObjectIdentifier(item)
         switch item.status {
         case .readyToPlay where startedItem != id:
@@ -362,15 +483,19 @@ final class PlayerModel {
         default:
             break
         }
-        if item.duration.isNumeric { itemDuration = millis(item.duration) }
-        if let range = item.loadedTimeRanges.last?.timeRangeValue {
+        // Each only when it changed: an @Observable property tells its readers
+        // on every assignment, equal or not, and this runs four times a second.
+        if item.duration.isNumeric, millis(item.duration) != itemDuration { itemDuration = millis(item.duration) }
+        if let range = item.loadedTimeRanges.last?.timeRangeValue, millis(CMTimeRangeGetEnd(range)) != bufferedMillis {
             bufferedMillis = millis(CMTimeRangeGetEnd(range))
         }
         let status = player.timeControlStatus
-        isBuffering = status == .waitingToPlayAtSpecifiedRate
-        isPlaying = status == .playing
+        if (status == .waitingToPlayAtSpecifiedRate) != isBuffering { isBuffering = status == .waitingToPlayAtSpecifiedRate }
+        if (status == .playing) != isPlaying { isPlaying = status == .playing }
         let time = player.currentTime()
-        if seekTarget == nil, time.isNumeric { positionMillis = max(0, millis(time)) }
+        if seekTarget == nil, time.isNumeric, max(0, millis(time)) != positionMillis { positionMillis = max(0, millis(time)) }
+        let prompt = plan.flatMap { PlaybackEnhancements.skipPrompt($0.segments, positionMillis: positionMillis) }
+        if prompt != skipSegment { skipSegment = prompt }
         report(status)
         updateUpNext()
     }
@@ -378,16 +503,21 @@ final class PlayerModel {
     /// The item is ready: to its start position, then playing.
     private func start(_ item: AVPlayerItem) {
         phase = .playing
-        var startAt = plan?.positionMillis ?? 0
+        var startAt = startOverride ?? plan?.positionMillis ?? 0
+        startOverride = nil
         #if DEBUG
         // The first title only: the next episode starts at its beginning.
         if let fromEnd = Self.debugSeconds("HUB_PLAY_FROM_END"), item.duration.isNumeric, !debugFromEndUsed {
             debugFromEndUsed = true
             startAt = max(0, millis(item.duration) - Int64(fromEnd * 1_000))
         }
+        startDebugTour()
         #endif
+        applyAudioChoice(to: item)
+        let play = playAfterLoad
+        playAfterLoad = true
         guard startAt > 0 else {
-            player.play()
+            if play { player.play() }
             return
         }
         positionMillis = startAt
@@ -396,7 +526,7 @@ final class PlayerModel {
             Task { @MainActor in
                 // Where playback starts is not a seek the person made.
                 if self?.seekTarget == startAt { self?.seekTarget = nil }
-                self?.player.play()
+                if play { self?.player.play() }
             }
         }
     }
@@ -412,12 +542,14 @@ final class PlayerModel {
         }
         fallbackTried = true
         phase = .opening
-        let body = PlaybackSelectBody(positionMillis: max(positionMillis, plan.positionMillis), forceTranscode: true)
+        let at = max(positionMillis, plan.positionMillis)
+        let body = PlaybackSelectBody(positionMillis: at, forceTranscode: true)
         let request = HubEndpoints.selectPlayback(sessionId: plan.sessionId, body: body, user: user)
         let generation = generation
         Task {
             do {
                 let converted = try await hub.fetch(request, as: PlaybackPrepareResponse.self)
+                startOverride = at
                 try await load(converted, generation: generation)
             } catch {
                 if generation == self.generation { phase = .failed(reason) }
@@ -464,6 +596,154 @@ final class PlayerModel {
             if upNext == nil { upNext = UpNextCard(item: next, fraction: 0) }
             startCountdown()
         }
+    }
+
+    // MARK: Tracks, quality and version (This video, Audio & subtitles)
+
+    func chooseAudio(_ track: PlaybackTrack) {
+        menu.selectTrackTab("audio")
+        guard track.index != plan?.selectedAudioIndex else { return }
+        change(PlaybackSelectBody(positionMillis: 0, audioStreamIndex: track.index))
+    }
+
+    /// -1 turns subtitles off.
+    func chooseSubtitle(_ index: Int) {
+        menu.selectTrackTab("subtitles")
+        guard index != (plan?.selectedSubtitleIndex ?? -1) else { return }
+        change(PlaybackSelectBody(positionMillis: 0, subtitleStreamIndex: index))
+    }
+
+    func chooseQuality(_ bitrate: Int) {
+        guard bitrate != maxBitrate else { return }
+        let before = maxBitrate
+        maxBitrate = bitrate
+        change(PlaybackSelectBody(positionMillis: 0, maxBitrate: bitrate)) { [weak self] in self?.maxBitrate = before }
+    }
+
+    func chooseSource(_ id: String) {
+        guard id != plan?.selectedMediaSourceId else { return }
+        change(PlaybackSelectBody(positionMillis: 0, mediaSourceId: id))
+    }
+
+    /// Asks the hub for the same session with another track, quality or
+    /// version, from where it is now. A new stream starts there; the same
+    /// stream (the file played as it is, or only the drawn subtitles changed)
+    /// plays on untouched.
+    private func change(_ body: PlaybackSelectBody, failed: @escaping @MainActor () -> Void = {}) {
+        guard let plan, let hub, !applying else { return }
+        applying = true
+        var body = body
+        let at = positionMillis
+        body.positionMillis = at
+        let wasPlaying = isPlaying
+        let generation = generation
+        let request = HubEndpoints.selectPlayback(sessionId: plan.sessionId, body: body, user: user)
+        Task {
+            defer { if generation == self.generation { applying = false } }
+            do throws(HubFailure) {
+                let next = try await hub.fetch(request, as: PlaybackPrepareResponse.self)
+                guard generation == self.generation else { return }
+                remember(next)
+                if PlaybackChoices.sameStream(plan, next), let item = player.currentItem {
+                    self.plan = next
+                    prepareSubtitles(next)
+                    applyAudioChoice(to: item)
+                } else {
+                    player.pause()
+                    // The hub would start a title's first 30 seconds again at 0:00.
+                    startOverride = at
+                    playAfterLoad = wasPlaying
+                    try await load(next, generation: generation)
+                }
+            } catch {
+                guard generation == self.generation else { return }
+                failed()
+                if error.kind != .cancelled { show(notice: error.message) }
+            }
+        }
+    }
+
+    /// A file played as it is, with several audio tracks, plays the one chosen
+    /// by its language; a converted stream carries only the one chosen.
+    private func applyAudioChoice(to item: AVPlayerItem) {
+        guard let plan, plan.audioTracks.count > 1,
+              let chosen = plan.audioTracks.first(where: { $0.index == plan.selectedAudioIndex }) else { return }
+        let position = plan.audioTracks.firstIndex(of: chosen) ?? 0
+        let asset = item.asset
+        Task {
+            guard let group = try? await asset.loadMediaSelectionGroup(for: .audible) else { return }
+            let options = group.options
+            // Jellyfin writes ISO 639-2 ("jpn"), AVFoundation BCP 47 ("ja").
+            func code(_ tag: String) -> String? { Locale.Language(identifier: tag).languageCode?.identifier(.alpha2) }
+            let wanted = code(chosen.language)
+            let byLanguage = options.first { option in
+                guard let wanted, let tag = option.extendedLanguageTag ?? option.locale?.identifier else { return false }
+                return code(tag) == wanted
+            }
+            let pick = byLanguage ?? (position < options.count ? options[position] : nil)
+            if let pick, self.player.currentItem === item { item.select(pick, in: group) }
+        }
+    }
+
+    private func remember(_ plan: PlaybackPrepareResponse) {
+        selection = PlaybackChoices.remembering(plan, in: selection)
+        PlaybackMemory.save(selection, user: user, scope: PlaybackChoices.scope(plan.item))
+    }
+
+    // MARK: Subtitles the app draws
+
+    /// Reads the selected text track once into a timeline, so a new delay
+    /// redraws at once without touching the stream.
+    private func prepareSubtitles(_ plan: PlaybackPrepareResponse) {
+        let track = PlaybackChoices.drawnSubtitle(plan)
+        let key = track.map { "\(plan.sessionId):\($0.index):\($0.externalUrl)" } ?? ""
+        guard key != subtitleKey else { return }
+        subtitleKey = key
+        subtitleTask?.cancel()
+        subtitleTimeline = nil
+        subtitleLines = []
+        guard let track, let hub else { return }
+        let request = HubEndpoints.playbackFile(track.externalUrl, user: user)
+        let codec = track.codec
+        subtitleTask = Task {
+            guard let bytes = try? await hub.data(request), !Task.isCancelled, subtitleKey == key else { return }
+            let windows = await Task.detached(priority: .userInitiated) {
+                SubtitleParser.parse(String(decoding: bytes, as: UTF8.self), codec: codec)
+            }.value
+            guard subtitleKey == key else { return }
+            subtitleTimeline = SubtitleTimeline(windows)
+            showSubtitles(at: positionMillis)
+            #if DEBUG
+            NSLog("playback: %d subtitle lines read (%@)", windows.count, codec)
+            #endif
+        }
+    }
+
+    private func showSubtitles(at millis: Int64) {
+        guard let subtitleTimeline else {
+            if !subtitleLines.isEmpty { subtitleLines = [] }
+            return
+        }
+        let lines = subtitleTimeline.values(at: millis, offsetMillis: subtitleOffsetMillis)
+        if lines != subtitleLines { subtitleLines = lines }
+    }
+
+    /// The slider moves this; it redraws at once.
+    func setSubtitleOffset(_ value: Int64) {
+        subtitleOffsetMillis = SubtitleTimingPolicy.clamp(value, wide: true)
+        showSubtitles(at: positionMillis)
+    }
+
+    /// Kept for this profile and the series or film, when the slider lets go.
+    func commitSubtitleOffset() {
+        guard let plan else { return }
+        selection.subtitleOffsetMillis = subtitleOffsetMillis
+        PlaybackMemory.save(selection, user: user, scope: PlaybackChoices.scope(plan.item))
+    }
+
+    func setSubtitleLook(_ look: SubtitleLook) {
+        subtitleLook = look
+        PlaybackMemory.save(look)
     }
 
     // MARK: Up next
@@ -529,7 +809,65 @@ final class PlayerModel {
         if readyForDisplay != ready { readyForDisplay = ready }
     }
 
+    // MARK: Picture in picture
+
+    /// The video's layer, from the surface: picture in picture needs it.
+    func attach(_ layer: AVPlayerLayer) {
+        // The surface hands its layer over on every update; a new surface
+        // (the player opened again) brings a new one.
+        guard pipSupported, request != nil, pip?.playerLayer !== layer,
+              let controller = AVPictureInPictureController(playerLayer: layer) else { return }
+        let observer = PictureInPictureObserver(model: self)
+        controller.delegate = observer
+        #if os(iOS)
+        // Leaving the app while it plays carries on in a small window.
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
+        #endif
+        pip = controller
+        pipObserver = observer
+    }
+
+    func togglePictureInPicture() {
+        guard let pip else { return }
+        if pip.isPictureInPictureActive { pip.stopPictureInPicture() } else { pip.startPictureInPicture() }
+    }
+
+    fileprivate func pictureInPicture(active: Bool) {
+        pipActive = active
+        guard !active, inBackground, request != nil else { return }
+        // The small window closed while the app is away: playback is over.
+        // Its own button back to the app also stops it, as the app returns,
+        // so that case is given a moment to say so first.
+        beginBackgroundWork()
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard let self else { return }
+            if self.inBackground && !self.pipActive && self.request != nil { self.close() } else { self.endBackgroundWork() }
+        }
+    }
+
+    /// The small window's button back to the app.
+    fileprivate func pictureInPictureRestoring() {
+        inBackground = false
+    }
+
     // MARK: The app around it
+
+    /// iPhone and iPad: leaving the app ends playback unless picture in
+    /// picture carries it on. It may still be starting as the app leaves, so
+    /// the decision waits a moment for it. The Mac never calls this: a
+    /// minimised window or a hidden app plays on.
+    func sceneChanged(background: Bool) {
+        inBackground = background
+        guard background, request != nil else { return }
+        if pipActive { return }
+        beginBackgroundWork()
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self else { return }
+            if self.inBackground && !self.pipActive { self.close() } else { self.endBackgroundWork() }
+        }
+    }
 
     /// Quitting: the stop and the close are sent, and the quit waits for them
     /// for at most two and a half seconds.
@@ -543,6 +881,16 @@ final class PlayerModel {
             done.signal()
         }
         _ = done.wait(timeout: .now() + 2.5)
+    }
+
+    private func show(notice text: String) {
+        notice = text
+        noticeTask?.cancel()
+        noticeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.notice = nil
+        }
     }
 
     private func activateAudio() {
@@ -587,10 +935,12 @@ final class PlayerModel {
         return elapsed.components.seconds * 1_000 + elapsed.components.attoseconds / 1_000_000_000_000_000
     }
 
+    // MARK: Debug launches (scripts/mac.sh)
+
     #if DEBUG
-    /// scripts/mac.sh: HUB_PLAY_EXIT=25 leaves the player that many seconds
-    /// after it opened, through Back's own path, so a screenshot run against
-    /// the real hub never leaves a session open.
+    /// HUB_PLAY_EXIT=25 leaves the player that many seconds after it opened,
+    /// through Back's own path, so a screenshot run against the real hub never
+    /// leaves a session open.
     private func exitAfterDebugDelay() {
         guard let seconds = Self.debugSeconds("HUB_PLAY_EXIT") else { return }
         let opened = opens
@@ -601,10 +951,75 @@ final class PlayerModel {
         }
     }
 
+    /// HUB_PLAY_SUBTITLE=eng turns on that language's subtitles when the title
+    /// opens without them, as choosing them in the panel would.
+    private func debugSubtitle(_ plan: PlaybackPrepareResponse) -> (audio: Int?, subtitle: Int?)? {
+        guard let language = ProcessInfo.processInfo.environment["HUB_PLAY_SUBTITLE"], !language.isEmpty,
+              plan.selectedSubtitleIndex == nil || plan.selectedSubtitleIndex == -1,
+              let track = plan.subtitleTracks.first(where: { $0.language.caseInsensitiveCompare(language) == .orderedSame })
+        else { return nil }
+        return (plan.selectedAudioIndex, track.index)
+    }
+
+    /// HUB_PLAY_TOUR=1 opens each panel in turn once the video plays, 4 s
+    /// apart, then closes them, for screenshots: Audio & subtitles, its
+    /// subtitle timing, This video and Chapters. The first title only.
+    private func startDebugTour() {
+        guard ProcessInfo.processInfo.environment["HUB_PLAY_TOUR"] == "1", !debugTourStarted else { return }
+        debugTourStarted = true
+        let opened = opens
+        Task { [weak self] in
+            for (index, panel) in ["tracks", "timing", "video", "chapters", "none"].enumerated() {
+                try? await Task.sleep(for: .seconds(index == 0 ? 2.5 : 4))
+                guard let self, self.opens == opened, self.request != nil else { return }
+                self.debugPanel = panel
+            }
+        }
+    }
+
+    /// Which tracks to ask for before the first frame: HUB_PLAY_SUBTITLE's,
+    /// else what this profile chose last.
+    private func wantedTracks(_ plan: PlaybackPrepareResponse) -> (audio: Int?, subtitle: Int?)? {
+        debugSubtitle(plan) ?? PlaybackChoices.wanted(plan, selection)
+    }
+
     static func debugSeconds(_ name: String) -> Double? {
         ProcessInfo.processInfo.environment[name].flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil }
     }
+    #else
+    private func wantedTracks(_ plan: PlaybackPrepareResponse) -> (audio: Int?, subtitle: Int?)? {
+        PlaybackChoices.wanted(plan, selection)
+    }
     #endif
+}
+
+/// Picture in picture's news, carried to the model on the main actor.
+private final class PictureInPictureObserver: NSObject, AVPictureInPictureControllerDelegate, @unchecked Sendable {
+    private weak var model: PlayerModel?
+
+    init(model: PlayerModel) {
+        self.model = model
+    }
+
+    func pictureInPictureControllerWillStartPictureInPicture(_ controller: AVPictureInPictureController) {
+        Task { @MainActor [weak self] in self?.model?.pictureInPicture(active: true) }
+    }
+
+    func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
+        Task { @MainActor [weak self] in self?.model?.pictureInPicture(active: false) }
+    }
+
+    func pictureInPictureController(_ controller: AVPictureInPictureController,
+                                    failedToStartPictureInPictureWithError error: any Error) {
+        Task { @MainActor [weak self] in self?.model?.pictureInPicture(active: false) }
+    }
+
+    /// Back from the small window: the player is still there underneath.
+    func pictureInPictureController(_ controller: AVPictureInPictureController,
+                                    restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+        Task { @MainActor [weak self] in self?.model?.pictureInPictureRestoring() }
+        completionHandler(true)
+    }
 }
 
 /// A session's events and its close, sent one after another in the order

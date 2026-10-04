@@ -10,8 +10,6 @@ struct AccountSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.glassAccent) private var accent
-    @Environment(\.glassPalette) private var palette
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     let shell: ShellModel
     let places: Bool
     let open: (AppSection) -> Void
@@ -23,16 +21,7 @@ struct AccountSheet: View {
 
     var body: some View {
         sheet
-            .presentationBackground {
-                if reduceTransparency {
-                    // Over the page's own words, a sheet is nearly solid.
-                    Color(argb: GlassColors.sheet(palette))
-                } else {
-                    // The prototype's sheet: its glass with a dark blue-grey at 72%.
-                    Rectangle().fill(.ultraThinMaterial)
-                        .overlay(Color(argb: 0xB81A_1C26))
-                }
-            }
+            .presentationBackground { GlassSheetFill() }
             .presentationCornerRadius(places ? 32 : 28)
             #if os(iOS)
             .presentationDetents(places ? [.medium, .large] : [.large])

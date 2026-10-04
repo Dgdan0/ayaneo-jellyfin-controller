@@ -23,6 +23,8 @@ extension EnvironmentValues {
     @Entry var glassPalette: ArtworkPalette = .neutral
     /// Teal on the Media side, gold on Books.
     @Entry var glassAccent: AccentPreset = .teal
+    /// Glass over a playing video (the player sets it): dark whatever the frame.
+    @Entry var glassOverVideo = false
 }
 
 extension AccentPreset {
@@ -52,12 +54,20 @@ struct GlassPanel<S: InsettableShape>: ViewModifier {
     let shape: S
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.glassPalette) private var palette
+    @Environment(\.glassOverVideo) private var overVideo
 
     func body(content: Content) -> some View {
         content
             .background {
                 if reduceTransparency {
                     shape.fill(Color(argb: GlassColors.panel(palette)))
+                } else if overVideo {
+                    // Over video the glass stays dark whatever the frame: over a
+                    // bright one the material alone turned light grey under
+                    // white words. So the title's panel colour lies on it at 70%
+                    // (the user's rule: nothing white over video but Play).
+                    shape.fill(.ultraThinMaterial)
+                        .overlay { shape.fill(Color(argb: GlassColors.panel(palette)).opacity(0.7)) }
                 } else {
                     // Dark material already lifts a dark page about as much as
                     // the prototype's white 11% does, and dims a bright one;
@@ -82,6 +92,24 @@ struct GlassPanel<S: InsettableShape>: ViewModifier {
 extension View {
     func glassPanel<S: InsettableShape>(_ shape: S) -> some View {
         modifier(GlassPanel(shape: shape))
+    }
+}
+
+/// A side sheet's or a dialog's fill (the prototype's `.sheet`): glass with a
+/// dark blue-grey at 72%. Under Reduce transparency it is the page's panel
+/// colour at 95% (`GlassColors.sheet`), nearly solid, because a sheet sits
+/// over the screen's own words: the account sheet, the player's panels.
+struct GlassSheetFill: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.glassPalette) private var palette
+
+    var body: some View {
+        if reduceTransparency {
+            Color(argb: GlassColors.sheet(palette))
+        } else {
+            Rectangle().fill(.ultraThinMaterial)
+                .overlay(Color(argb: 0xB81A_1C26))
+        }
     }
 }
 
