@@ -11,6 +11,9 @@ struct HubApp: App {
                 .environment(model)
                 .font(HubType.body())
                 .tint(.accentColor)
+                // Glass is always dark: the page is the artwork's own dark
+                // colour under its blurred picture (GLASS_PLAN.md).
+                .preferredColorScheme(.dark)
         }
         #if os(macOS)
         .defaultSize(width: 1280, height: 820)

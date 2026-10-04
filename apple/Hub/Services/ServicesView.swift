@@ -25,8 +25,7 @@ struct ServicesView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                StatusLine(message: status) { Task { await load() } }
-                    .padding(.horizontal, 4)
+                header
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 320, maximum: 640), spacing: 14)], spacing: 14) {
                     ForEach(rows) { row in
                         ServiceCard(row: row, scanning: scanning == row.id, open: { open(row) },
@@ -37,20 +36,7 @@ struct ServicesView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
         }
-        .background(Color.surface)
-        .navigationTitle("Services")
         .refreshable { await load() }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task { await load() }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .keyboardShortcut("r", modifiers: .command)
-                .disabled(loading)
-            }
-        }
         .task { await load() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await load() } }
@@ -61,12 +47,26 @@ struct ServicesView: View {
                 .frame(minWidth: 520, minHeight: 460)
                 #endif
         }
-        .navigationDestination(for: String.self) { destination in
-            if destination == "monitor" {
-                ComingNextView(title: "Server monitor", systemImage: "cpu",
-                               detail: "CPU, memory, disk space, containers and current playback.")
+    }
+
+    /// The page's own heading, now that the shell's bar carries no title: the
+    /// name, then how everything is ("All 13 running"), and Refresh.
+    private var header: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Services")
+                    .font(HubType.heading(32, weight: .heavy, relativeTo: .largeTitle))
+                    .foregroundStyle(Color.ink)
+                StatusLine(message: status) { Task { await load() } }
             }
+            Spacer(minLength: 0)
+            GlassRoundButton(systemImage: "arrow.clockwise", label: "Refresh", size: 44) {
+                Task { await load() }
+            }
+            .keyboardShortcut("r", modifiers: .command)
+            .disabled(loading)
         }
+        .padding(.horizontal, 4)
     }
 
     private func load() async {
@@ -126,7 +126,7 @@ struct ServiceCard: View {
     var body: some View {
         Group {
             if row.kind == .monitor {
-                NavigationLink(value: "monitor") { content }
+                NavigationLink(value: AppRoute.monitor) { content }
             } else {
                 Button(action: open) { content }
             }

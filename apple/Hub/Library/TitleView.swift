@@ -62,8 +62,7 @@ struct TitleView: View {
             }
             .ignoresSafeArea(edges: .top)
         }
-        .background(Color.surface)
-        .underTheBar()
+        .ambientArtwork(backdropPath)
         .refreshable { await load() }
         .task(id: model.userId) { await load() }
         .onChange(of: tabs.map(\.id)) { _, ids in
@@ -83,7 +82,7 @@ struct TitleView: View {
         BackdropHeader(path: backdropPath, topInset: topInset) {
             VStack(alignment: .leading, spacing: 8) {
                 if let item, item.type == "episode", !item.seriesTitle.isEmpty {
-                    NavigationLink(value: TitleRoute(itemId: item.seriesId, title: item.seriesTitle)) {
+                    NavigationLink(value: AppRoute.title(TitleRoute(itemId: item.seriesId, title: item.seriesTitle))) {
                         Text(item.seriesTitle.uppercased())
                             .font(HubType.body(13, weight: .bold, relativeTo: .caption))
                             .tracking(1.2)
@@ -146,16 +145,16 @@ struct TitleView: View {
                 } label: {
                     Label(playLabel(item), systemImage: "play.fill")
                 }
-                .buttonStyle(AccentPillStyle())
+                .buttonStyle(PrimaryPillStyle())
                 .disabled(item.type == "series" && target == nil)
-                RoundIconButton(systemImage: item.played ? "eye.fill" : "eye",
-                                label: item.played ? "Mark unwatched" : "Mark watched", on: item.played) {
+                GlassRoundButton(systemImage: item.played ? "eye.fill" : "eye",
+                                 label: item.played ? "Mark unwatched" : "Mark watched", on: item.played) {
                     Task { await change(.played(!item.played)) }
                 }
                 .disabled(saving)
             }
-            RoundIconButton(systemImage: item.favorite ? "star.fill" : "star",
-                            label: item.favorite ? "Remove from favourites" : "Favourite", on: item.favorite) {
+            GlassRoundButton(systemImage: item.favorite ? "star.fill" : "star",
+                             label: item.favorite ? "Remove from favourites" : "Favourite", on: item.favorite) {
                 Task { await change(.favorite(!item.favorite)) }
             }
             .disabled(saving)
@@ -203,7 +202,7 @@ struct TitleView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: 16) {
                         ForEach(Array(episodes.enumerated()), id: \.element.id) { index, episode in
-                            NavigationLink(value: TitleRoute(itemId: episode.id, title: episode.title)) {
+                            NavigationLink(value: AppRoute.title(TitleRoute(itemId: episode.id, title: episode.title))) {
                                 EpisodeCard(episode: episode, upNext: episode.id == target?.item.id)
                                     .frame(width: compact ? 220 : 260)
                             }
@@ -229,7 +228,7 @@ struct TitleView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: 14) {
                 ForEach(similar) { hit in
-                    NavigationLink(value: TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title)) {
+                    NavigationLink(value: AppRoute.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title))) {
                         PosterCard(hit: hit, caption: false).frame(width: compact ? 104 : 128)
                     }
                     .buttonStyle(.plain)

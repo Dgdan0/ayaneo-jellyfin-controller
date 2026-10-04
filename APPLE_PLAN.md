@@ -114,6 +114,23 @@ now lives in Kotlin (see `CLAUDE.md`, "Shared building blocks"): `ResumeRules`, 
 - Shared example responses in `contract/`, which the hub, Kotlin and Swift tests all read, catch a
   renamed field before a device does (#4).
 
+## Glass on Apple (#12)
+
+The look is `GLASS_PLAN.md`. Its pieces in this app, so each screen uses one owner:
+
+| Behaviour | Owner |
+|---|---|
+| An artwork's colours: batched asks, the 3/10/30 s retries, the file | HubKit `ArtworkColorStore` (rules in `ArtworkColorBook`); the app's copy is `Glass/ArtworkColors` (`palette(for:)`, `want`) |
+| The page behind everything | `Glass/AmbientBackground`; pages report their picture with `.ambientArtwork(path)`; which one shows is HubKit `AmbientStack` |
+| A panel, the white and glass pills, a round toggle | `.glassPanel(shape)`, `PrimaryPillStyle`, `GlassPillStyle`, `GlassRoundButton` in `Glass/GlassStyle` |
+| Panel, sheet and ink colours, accents | HubKit `GlassColors` (`panel`, `sheet`, `ink`, `badge`), `AccentPreset.defaultFor(side)` |
+| The bars, the sections and Media/Books | `Shell/` (`MainView`, `WideBar`, `PhoneBar`, `ShellTabBar`); top capsule or bottom tab bar by width, `ShellLayout.isWide` |
+| Pushing a page | `NavigationLink(value: AppRoute…)` or `@Environment(\.openRoute)`; the shell owns every stack and its back pill |
+| A profile's avatar and colour | HubKit `Profiles` |
+
+Debug builds also take `HUB_SIDE=books` and `HUB_SHEET=profiles` (the avatar's sheet) for
+screenshots, beside `HUB_SECTION` and `HUB_OPEN`.
+
 ## Working on the Mac
 
 ### From the PC

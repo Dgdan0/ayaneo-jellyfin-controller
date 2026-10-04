@@ -3,9 +3,11 @@ import SwiftUI
 
 /// Home: a hero for one title over rows of cards, for the chosen Jellyfin
 /// profile. Android's `screens/home/HomeScreen` with `HomeHero`; touch-first,
-/// so a tap opens a title and a pointer resting on a card shows it in the hero.
+/// so a tap opens a title and a pointer resting on a card (or focus on it)
+/// shows it in the hero, and its artwork becomes the Glass page.
 struct HomeView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openRoute) private var openRoute
 
     @State private var rows: [HomeRow] = []
     @State private var status = StatusMessage("")
@@ -13,10 +15,9 @@ struct HomeView: View {
     @State private var selection: HeroPick?
     /// Item details by id: the runtime and certification a Home card lacks.
     @State private var details: [String: HubKit.LibraryItem] = [:]
-    @State private var choosingProfile = false
     /// Debug builds: scripts/mac.sh opens a row's first title for screenshots
-    /// (HUB_OPEN=latest).
-    @State private var debugOpen: TitleRoute?
+    /// (HUB_OPEN=latest), once.
+    @State private var debugOpened = false
 
     private var hero: HeroContent? {
         guard let pick = selection ?? firstPick else { return nil }
@@ -51,26 +52,8 @@ struct HomeView: View {
             }
             .ignoresSafeArea(edges: .top)
         }
-        .background(Color.surface)
-        .underTheBar()
+        .ambientArtwork(hero?.backdrop ?? "")
         .refreshable { await load() }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    choosingProfile = true
-                } label: {
-                    Label("Profiles", systemImage: "person.crop.circle")
-                }
-            }
-        }
-        .navigationDestination(for: TitleRoute.self) { TitleView(route: $0) }
-        .navigationDestination(item: $debugOpen) { TitleView(route: $0) }
-        .sheet(isPresented: $choosingProfile) {
-            NavigationStack { ProfilePicker() }
-                #if os(macOS)
-                .frame(minWidth: 420, minHeight: 360)
-                #endif
-        }
         // A new profile is a new Home: everything reloads under its name.
         .task(id: model.userId) {
             details = [:]
@@ -88,10 +71,16 @@ struct HomeView: View {
         do {
             let home = try await model.hub.fetch(HubEndpoints.home, as: HomeResponse.self)
             rows = HomeHero.ordered(home.rows)
+            // Any card can become the hero, so ask for every hero's colours
+            // now: the page re-tints the moment a card is chosen.
+            model.colors.want(rows.flatMap { row in
+                row.items.map { HomeHero.from(rowId: row.id, rowTitle: row.title, hit: $0).backdrop }
+            })
             #if DEBUG
-            if let rowId = ProcessInfo.processInfo.environment["HUB_OPEN"], debugOpen == nil,
+            if let rowId = ProcessInfo.processInfo.environment["HUB_OPEN"], !debugOpened,
                let hit = rows.first(where: { $0.id == rowId })?.items.first {
-                debugOpen = TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title)
+                debugOpened = true
+                openRoute(.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title)))
             }
             #endif
             let unavailable = home.partial.map(\.service)
@@ -164,13 +153,13 @@ struct HeroView: View {
                         Button(action: play) {
                             Label(content.playLabel, systemImage: "play.fill")
                         }
-                        .buttonStyle(AccentPillStyle())
+                        .buttonStyle(PrimaryPillStyle())
                     }
                     if !content.itemId.isEmpty {
-                        NavigationLink(value: TitleRoute(itemId: content.itemId, title: content.title)) {
+                        NavigationLink(value: AppRoute.title(TitleRoute(itemId: content.itemId, title: content.title))) {
                             Label("Details", systemImage: "info.circle")
                         }
-                        .buttonStyle(SoftPillStyle())
+                        .buttonStyle(GlassPillStyle())
                     }
                 }
                 .padding(.top, 6)
@@ -197,7 +186,7 @@ struct HomeRowView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(row.items) { hit in
-                        NavigationLink(value: TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title)) {
+                        NavigationLink(value: AppRoute.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title))) {
                             if landscape {
                                 LandscapeCard(hit: hit).frame(width: 260)
                             } else {
@@ -206,7 +195,7 @@ struct HomeRowView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(hit.jellyfinItemId.isEmpty)
-                        .onHover { inside in if inside { preview(hit) } }
+                        .previewsWhenFocused { preview(hit) }
                     }
                 }
                 .padding(.horizontal, 24)
@@ -215,65 +204,23 @@ struct HomeRowView: View {
     }
 }
 
-/// "Who is watching?": the Jellyfin profiles this device can watch as.
-struct ProfilePicker: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @State private var users: [HubUser] = []
-    @State private var status = StatusMessage("Loading Jellyfin users…")
+/// A pointer resting on a card, or keyboard or controller focus on it, shows
+/// it: in the hero, and through it on the Glass page (GLASS_PLAN.md, "On the
+/// iPad a resting pointer counts as focus").
+struct PreviewsWhenFocused: ViewModifier {
+    let preview: () -> Void
+    @FocusState private var focused: Bool
 
-    var body: some View {
-        List {
-            Section {
-                ForEach(users) { user in
-                    Button {
-                        Task {
-                            await model.selectUser(id: user.id, name: user.name)
-                            dismiss()
-                        }
-                    } label: {
-                        HStack {
-                            Text(user.name)
-                                .font(HubType.body(17, weight: .medium))
-                                .foregroundStyle(Color.ink)
-                            Spacer()
-                            if isCurrent(user) {
-                                Text("Current profile")
-                                    .font(HubType.body(14, relativeTo: .subheadline))
-                                    .foregroundStyle(Color.muted)
-                                Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
-                            }
-                        }
-                    }
-                }
-            } header: {
-                Text("Continue Watching, Next Up and progress use this profile.")
-                    .textCase(nil)
-            } footer: {
-                StatusLine(message: status) { Task { await load() } }
-            }
-        }
-        .navigationTitle("Who is watching?")
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Close") { dismiss() }
-            }
-        }
-        .task { await load() }
+    func body(content: Content) -> some View {
+        content
+            .focused($focused)
+            .onHover { inside in if inside { preview() } }
+            .onChange(of: focused) { _, now in if now { preview() } }
     }
+}
 
-    /// The device's own choice wins; without one, the hub's default is current.
-    private func isCurrent(_ user: HubUser) -> Bool {
-        model.userId.isEmpty ? user.selected : user.id == model.userId
-    }
-
-    private func load() async {
-        do {
-            users = try await model.hub.fetch(HubEndpoints.users, as: UsersResponse.self).users
-            status = users.isEmpty ? StatusMessage("No enabled Jellyfin users were found") : StatusMessage("")
-        } catch {
-            if error.kind == .cancelled { return }
-            status = StatusText.failed(error.message, kind: error.kind, hasData: !users.isEmpty)
-        }
+extension View {
+    func previewsWhenFocused(_ preview: @escaping () -> Void) -> some View {
+        modifier(PreviewsWhenFocused(preview: preview))
     }
 }

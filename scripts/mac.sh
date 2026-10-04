@@ -85,6 +85,7 @@ launch_sim() {
   # ever being written into the simulator.
   SIMCTL_CHILD_HUB_URL="${HUB_URL:-}" SIMCTL_CHILD_HUB_TOKEN="${HUB_TOKEN:-}" \
     SIMCTL_CHILD_HUB_SECTION="${HUB_SECTION:-}" SIMCTL_CHILD_HUB_OPEN="${HUB_OPEN:-}" \
+    SIMCTL_CHILD_HUB_SIDE="${HUB_SIDE:-}" SIMCTL_CHILD_HUB_SHEET="${HUB_SHEET:-}" \
     xcrun simctl launch "$udid" "$BUNDLE_ID" $(launch_args "$@") >/dev/null
 }
 
@@ -123,8 +124,11 @@ shot() {
 mac() {
   build_mac
   pkill -x Hub >/dev/null 2>&1 || true
-  HUB_URL="${HUB_URL:-}" HUB_TOKEN="${HUB_TOKEN:-}" "$(app_mac)/Contents/MacOS/Hub" $(launch_args "$@") &
-  echo "started $(app_mac)"
+  # Detached, with its output in a file: an SSH session that starts it
+  # (scripts/mac-remote.sh) otherwise stays open as long as the app runs.
+  HUB_URL="${HUB_URL:-}" HUB_TOKEN="${HUB_TOKEN:-}" nohup "$(app_mac)/Contents/MacOS/Hub" $(launch_args "$@") \
+    > "$DERIVED/mac-app.log" 2>&1 < /dev/null &
+  echo "started $(app_mac); its output goes to $DERIVED/mac-app.log"
 }
 
 case "${1:-build}" in

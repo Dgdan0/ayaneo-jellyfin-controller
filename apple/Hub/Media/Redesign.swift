@@ -1,18 +1,20 @@
 import HubKit
 import SwiftUI
 
-// The pieces of the Android app's 2026-10 redesign that Home and a title's page
-// share: the artwork that fades into the page behind the words, the accent
-// pill for the main action, round icon buttons, and underlined tabs.
+// The pieces Home and a title's page share: the artwork behind the words and
+// the underlined tabs. Their buttons are the Glass ones (`Glass/GlassStyle`).
 
 /// The top of Home and of a title's page (Android `HomeHeroView` and
 /// `DetailHeaderView`'s hero). The artwork sits on the trailing side and fades
-/// into the page colour towards the words and the bottom; on a narrow screen
-/// it spans the width and fades only downwards. It reaches up under the tabs,
-/// so the page has no title bar of its own.
+/// out towards the words and the bottom; on a narrow screen it spans the width
+/// and fades only downwards. It reaches up under the bar, so the page has no
+/// title bar of its own.
+///
+/// It fades through transparency, not into a colour, so the Glass page shows
+/// through where it ends (GLASS_PLAN.md, "Title pages").
 struct BackdropHeader<Content: View>: View {
     let path: String
-    /// Room above the words for the status bar, the tabs and the back button.
+    /// Room above the words for the status bar and the shell's bar.
     let topInset: CGFloat
     @ViewBuilder let content: Content
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -29,75 +31,23 @@ struct BackdropHeader<Content: View>: View {
                     let width = compact ? geometry.size.width : geometry.size.width * 0.68
                     ArtworkView(path: path, width: 1920)
                         .frame(width: width, height: geometry.size.height)
-                        .overlay {
-                            if !compact {
-                                LinearGradient(stops: [.init(color: .surface, location: 0),
-                                                       .init(color: .surface.opacity(0), location: 0.5)],
+                        .mask {
+                            LinearGradient(stops: [.init(color: .black, location: compact ? 0.3 : 0.4),
+                                                   .init(color: .clear, location: 0.97)],
+                                           startPoint: .top, endPoint: .bottom)
+                        }
+                        .mask {
+                            if compact {
+                                Color.black
+                            } else {
+                                LinearGradient(stops: [.init(color: .clear, location: 0),
+                                                       .init(color: .black, location: 0.5)],
                                                startPoint: .leading, endPoint: .trailing)
                             }
-                        }
-                        .overlay {
-                            LinearGradient(stops: [.init(color: .surface.opacity(0), location: compact ? 0.25 : 0.55),
-                                                   .init(color: .surface, location: 1)],
-                                           startPoint: .top, endPoint: .bottom)
                         }
                         .frame(width: geometry.size.width, alignment: .trailing)
                 }
             }
-    }
-}
-
-/// The page's main action: a filled accent pill ("▶ Resume · 15:00").
-struct AccentPillStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(HubType.body(16, weight: .semibold))
-            .padding(.horizontal, 22)
-            .padding(.vertical, 12)
-            .foregroundStyle(Color.accentInk)
-            .background(Color.accentColor.opacity(configuration.isPressed ? 0.8 : 1), in: Capsule())
-            #if os(iOS)
-            .hoverEffect(.lift)
-            #endif
-    }
-}
-
-/// A secondary pill ("ⓘ Details"): the same shape, quiet.
-struct SoftPillStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(HubType.body(16, weight: .semibold))
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .foregroundStyle(Color.ink)
-            .background(Color.muted.opacity(configuration.isPressed ? 0.28 : 0.16), in: Capsule())
-            #if os(iOS)
-            .hoverEffect(.highlight)
-            #endif
-    }
-}
-
-/// A round action next to the main pill: watched, favourite. Filled accent
-/// when on, an outline when off (Android's `MediaActionIconDrawable`).
-struct RoundIconButton: View {
-    let systemImage: String
-    let label: String
-    var on = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(on ? Color.accentColor : Color.ink)
-                .frame(width: 48, height: 48)
-                .background(Color.muted.opacity(0.16), in: Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-        #if os(iOS)
-        .hoverEffect(.highlight)
-        #endif
     }
 }
 
@@ -132,21 +82,4 @@ struct UnderlineTabs<Tab: Hashable>: View {
             Divider()
         }
     }
-}
-
-/// A screen whose artwork reaches under the tabs: the bar keeps its back
-/// button and actions but draws no background and no title.
-struct UnderTheBar: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .navigationTitle("")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            #endif
-    }
-}
-
-extension View {
-    func underTheBar() -> some View { modifier(UnderTheBar()) }
 }

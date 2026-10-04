@@ -31,6 +31,9 @@ struct LibraryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            searchField
+                .padding(.horizontal, 24)
+                .padding(.top, 4)
             if query.trimmingCharacters(in: .whitespaces).isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -65,11 +68,39 @@ struct LibraryView: View {
                 Spacer()
             }
         }
-        .background(Color.surface)
-        .underTheBar()
-        .searchable(text: $query, prompt: "Search your Jellyfin library")
-        .navigationDestination(for: TitleRoute.self) { TitleView(route: $0) }
         .task(id: model.userId) { await loadFolders() }
+    }
+
+    /// The shell hides the system bar that `.searchable` lives in, so the
+    /// search is a glass field of its own (the prototype's `.search`).
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.8))
+            TextField("Search your Jellyfin library", text: $query)
+                .textFieldStyle(.plain)
+                .font(HubType.body(15))
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                .submitLabel(.search)
+                #endif
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear the search")
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 44)
+        .frame(maxWidth: 460)
+        .glassPanel(Capsule())
     }
 
     /// Android's `LibrarySortControls`: the field as a menu pill ("Name ▾") and
@@ -188,7 +219,7 @@ struct LibraryGrid: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 170), spacing: 14, alignment: .top)],
                           alignment: .leading, spacing: 20) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, hit in
-                        NavigationLink(value: TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title)) {
+                        NavigationLink(value: AppRoute.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title))) {
                             PosterCard(hit: hit)
                         }
                         .buttonStyle(.plain)
