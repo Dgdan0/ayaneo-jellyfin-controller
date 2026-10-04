@@ -85,6 +85,12 @@ public enum HubEndpoints {
     /// A hub image path asking for `width` pixels, which the hub snaps to its
     /// nearest size. Unsized, a Jellyfin image comes back 360 wide: right for a
     /// poster, soft across a whole screen.
+    /// The Glass colours of up to 60 hub image paths, each sent exactly as a
+    /// screen shows it (issue #10). Mirrors Android's `HubEndpoints.artworkColors`.
+    public static func artworkColors(_ sources: [String]) -> HubRequest {
+        HubRequest("/v1/img/colors?" + sources.map { "src=" + encode($0) }.joined(separator: "&"))
+    }
+
     public static func sized(_ hubPath: String, width: Int) -> String {
         // A TMDB image names its size in the path; w1280 is the largest worth
         // fetching (original runs to 4K and several megabytes).
