@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -217,17 +218,78 @@ func TestLibraryFanStartsAtTheDaysPickAndTakesThreePosters(t *testing.T) {
 		t.Fatalf("library = %d %+v (%v)", got.Code, body, err)
 	}
 	view := body.Views[0]
-	start := dailyLibraryArtworkIndex(time.Now().Format("2006-01-02"), viewID, len(ids))
+	places := fanIndices(time.Now().Format("2006-01-02"), viewID, len(ids), libraryFanSize)
 	var want []string
-	for i := 0; i < libraryFanSize; i++ {
-		id := ids[(start+i)%len(ids)]
+	for _, place := range places {
+		id := ids[place]
 		want = append(want, "/v1/img/jf/"+strings.Repeat(id, 32)+"/Primary?tag=tag-"+id)
 	}
-	if strings.Join(view.Fan, " ") != strings.Join(want, " ") {
-		t.Fatalf("fan = %v, want %v (day's index %d)", view.Fan, want, start)
+	if len(want) != libraryFanSize || strings.Join(view.Fan, " ") != strings.Join(want, " ") {
+		t.Fatalf("fan = %v, want %v (places %v)", view.Fan, want, places)
 	}
 	if view.Image != want[0] || view.Total != len(ids) {
 		t.Fatalf("image = %q, total = %d", view.Image, view.Total)
+	}
+}
+
+func TestFanIndicesStartAtTheDaysPickAndKeepApart(t *testing.T) {
+	const view = "77777777777777777777777777777777"
+	for _, total := range []int{1, 2, 3, 8, 39, 137, 1000} {
+		for _, day := range []string{"2026-10-04", "2026-10-05", "2026-12-31"} {
+			got := fanIndices(day, view, total, 3)
+			want := 3
+			if total < 3 {
+				want = total
+			}
+			if len(got) != want || got[0] != dailyLibraryArtworkIndex(day, view, total) {
+				t.Fatalf("total %d on %s: places %v", total, day, got)
+			}
+			if again := fanIndices(day, view, total, 3); !slices.Equal(again, got) {
+				t.Fatalf("total %d on %s changed between calls: %v then %v", total, day, got, again)
+			}
+			for i := range got {
+				for j := i + 1; j < len(got); j++ {
+					d := got[i] - got[j]
+					if d < 0 {
+						d = -d
+					}
+					if total-d < d {
+						d = total - d
+					}
+					// Neighbours by name are often one franchise: a big
+					// library keeps its picks a sixth of it apart.
+					if d == 0 || (total >= 18 && d < total/6) {
+						t.Fatalf("total %d on %s: places %v are too close", total, day, got)
+					}
+				}
+			}
+		}
+	}
+	if got := fanIndices("2026-10-04", view, 0, 3); len(got) != 0 {
+		t.Fatalf("empty library gave %v", got)
+	}
+}
+
+func TestFanFromEachTakesOnePosterPerPlace(t *testing.T) {
+	item := func(id, tag string) jellyfin.Item {
+		it := jellyfin.Item{ID: id}
+		if tag != "" {
+			it.ImageTags = map[string]string{"Primary": tag}
+		}
+		return it
+	}
+	windows := [][]jellyfin.Item{
+		{item("a", ""), item("b", "2"), item("c", "3")}, // steps past a title without a poster
+		{item("b", "2"), item("d", "4")},                // b is already in the fan
+		{item("x", "")},                                 // nothing usable here
+		{item("e", "5"), item("f", "6")},
+	}
+	var got []string
+	for _, it := range fanFromEach(3, windows) {
+		got = append(got, it.ID)
+	}
+	if strings.Join(got, ",") != "b,d,e" {
+		t.Fatalf("fan = %v, want b,d,e: one per place, no repeats, blanks skipped", got)
 	}
 }
 

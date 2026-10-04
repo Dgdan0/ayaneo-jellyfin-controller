@@ -370,9 +370,11 @@ type libraryPicks struct {
 }
 
 // libraryDailyPicks counts a library's films and series and picks its fan:
-// the title at the day's index, then the ones after it in name order. It is
-// read once per library a day, so the tiles do not reshuffle while someone
-// goes back and forth, and change tomorrow.
+// titles at a few places spread through the library, the day's pick first.
+// Neighbours in name order are often one franchise (three Deadpools side by
+// side in Marvel Movies), so each poster comes from its own place. It is read
+// once per library a day, so the tiles do not reshuffle while someone goes
+// back and forth, and change tomorrow.
 func (s *Server) libraryDailyPicks(
 	ctx context.Context, client *jellyfin.Client, view jellyfin.Item, day string,
 ) (*libraryPicks, error) {
@@ -391,28 +393,98 @@ func (s *Server) libraryDailyPicks(
 			if first.TotalRecordCount == 0 || len(first.Items) == 0 {
 				return picks, nil
 			}
-			// A dozen titles from the day's index leaves room to skip a run
-			// without posters.
-			start := dailyLibraryArtworkIndex(day, view.ID, first.TotalRecordCount)
-			query.Limit, query.StartIndex = 12, start
-			page, err := client.Items(ctx, query)
-			if err != nil {
-				return nil, err
+			// A few titles from each place leave room to step past one without
+			// a poster; only the first usable one is taken from each.
+			var windows [][]jellyfin.Item
+			for _, start := range fanIndices(day, view.ID, first.TotalRecordCount, libraryFanSize) {
+				query.Limit, query.StartIndex = 4, start
+				page, err := client.Items(ctx, query)
+				if err != nil {
+					return nil, err
+				}
+				windows = append(windows, page.Items)
 			}
-			picks.Posters = fanFrom(libraryFanSize, page.Items)
-			// Near the end of the library the fan wraps round to its start,
-			// so the last titles do not leave a tile thin or blank.
-			if len(picks.Posters) < libraryFanSize && start > 0 {
-				query.StartIndex = 0
+			picks.Posters = fanFromEach(libraryFanSize, windows)
+			// A library whose picks all lack posters falls back to its first
+			// titles that have one, so a tile is never blank while art exists.
+			if len(picks.Posters) == 0 {
+				query.Limit, query.StartIndex = 12, 0
 				head, err := client.Items(ctx, query)
 				if err != nil {
 					return nil, err
 				}
-				picks.Posters = fanFrom(libraryFanSize, page.Items, head.Items)
+				picks.Posters = fanFrom(libraryFanSize, head.Items)
 			}
 			return picks, nil
 		})
 	return picks, err
+}
+
+// fanIndices is up to n places in a library of total titles, stable for the
+// day: the day's pick first, then further places hashed from the day. In a
+// library large enough, the places keep apart, a sixth of the library between
+// any two, so a franchise's run of titles gives the fan one poster at most.
+func fanIndices(day, viewID string, total, n int) []int {
+	if total <= 0 || n <= 0 {
+		return nil
+	}
+	out := []int{dailyLibraryArtworkIndex(day, viewID, total)}
+	gap := 0
+	if total >= 2*n*3 {
+		gap = total / (2 * n)
+	}
+	for k := 1; len(out) < n && len(out) < total && k <= 64; k++ {
+		index := dailyLibraryArtworkIndex(day, viewID+":"+strconv.Itoa(k), total)
+		if farFromAll(index, out, gap, total) {
+			out = append(out, index)
+		}
+	}
+	return out
+}
+
+// farFromAll reports whether index is a new place at least gap away, round the
+// library's ends, from every place already taken.
+func farFromAll(index int, taken []int, gap, total int) bool {
+	for _, other := range taken {
+		d := index - other
+		if d < 0 {
+			d = -d
+		}
+		if total-d < d {
+			d = total - d
+		}
+		if d == 0 || d < gap {
+			return false
+		}
+	}
+	return true
+}
+
+// fanFromEach takes the first title with a poster from each window in turn,
+// each title once, up to n.
+func fanFromEach(n int, windows [][]jellyfin.Item) []jellyfin.Item {
+	var out []jellyfin.Item
+	for _, window := range windows {
+		if len(out) == n {
+			break
+		}
+		for _, item := range window {
+			if item.PosterTag() != "" && !containsItem(out, item.ID) {
+				out = append(out, item)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func containsItem(items []jellyfin.Item, id string) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // fanFrom takes up to n titles that have a poster from the lists in order,
