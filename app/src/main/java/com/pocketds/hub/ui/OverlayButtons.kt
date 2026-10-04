@@ -39,6 +39,20 @@ object OverlayButtons {
     /** A soft pill: a tool named in words. Classic only; [dressPill] picks by look. */
     fun pillFace(context: Context, ring: Int): StateListDrawable = ringed(context, ring, GradientDrawable.RECTANGLE, SOFT)
 
+    /**
+     * Glass: makes [view]'s background a panel of the same dark glass, with
+     * [cornerDp] corners (the timeline's bar, the seek preview, the up-next
+     * card, the subtitle timing strip), following what is playing. False on
+     * Classic, where the caller keeps its own.
+     */
+    fun panel(view: View, cornerDp: Float): Boolean {
+        if (!Theme.isGlass(view.context)) return false
+        com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(view, Styler.dp(view.context, cornerDp)) { page ->
+            GlassColors.overPicture(page, VIDEO_BASE)
+        }
+        return true
+    }
+
     /** Gives [view] a round control's face: the soft disc, or on Glass a disc of dark glass. */
     fun dressDisc(view: View, ring: Int) = dress(view, ring, round = true)
 

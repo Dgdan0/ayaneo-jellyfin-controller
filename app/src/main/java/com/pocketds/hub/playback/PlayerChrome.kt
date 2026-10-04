@@ -202,9 +202,7 @@ internal class PlayerChrome(
             )
             val bar = if (glass) LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, GLASS_BAR_CORNER_DP)) { page ->
-                    com.pocketds.hub.ui.glass.GlassColors.overPicture(page, this@PlayerChrome.colors.background)
-                }
+                com.pocketds.hub.ui.OverlayButtons.panel(this, GLASS_BAR_CORNER_DP)
                 setPadding(dp(4), dp(4), dp(4), dp(6))
             }.also { addView(it, LinearLayout.LayoutParams(MATCH, WRAP)) } else this
             seekBar = ChapterSeekBar(context).apply {
@@ -265,7 +263,7 @@ internal class PlayerChrome(
         gravity = Gravity.CENTER_HORIZONTAL
         visibility = View.GONE
         isClickable = false
-        if (glass) glassFace(this, 12f) else background = ThemeGradientDrawable().apply {
+        if (!com.pocketds.hub.ui.OverlayButtons.panel(this, 12f)) background = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 12f)
             setColor(Color.argb(235, 22, 24, 29))
             setStroke(dp(1), Color.argb(120, 255, 255, 255))
@@ -301,19 +299,13 @@ internal class PlayerChrome(
         setTextColor(Color.WHITE)
         setTypeface(typeface, Typeface.BOLD)
         setPadding(dp(18), dp(12), dp(18), dp(12))
-        if (glass) glassFace(this, 18f) else background = ThemeGradientDrawable().apply {
+        if (!com.pocketds.hub.ui.OverlayButtons.panel(this, 18f)) background = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 18f)
             setColor(Color.argb(225, 22, 24, 29))
             setStroke(dp(1), Color.argb(110, 255, 255, 255))
         }
     }
 
-    /** Glass: a panel of the controls' dark glass, as the seek preview and the gesture readout. */
-    private fun glassFace(view: View, cornerDp: Float) {
-        com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(view, Styler.dp(context, cornerDp)) { page ->
-            com.pocketds.hub.ui.glass.GlassColors.overPicture(page, colors.background)
-        }
-    }
 
     /** A round button on a soft disc (dark glass on Glass): back, cast, lock, picture in picture, previous and next. */
     private fun round(icon: PlayerControlIcon, description: String, action: () -> Unit) =

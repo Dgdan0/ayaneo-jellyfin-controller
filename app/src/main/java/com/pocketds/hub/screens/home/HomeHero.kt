@@ -103,7 +103,7 @@ object HomeHero {
         val seriesId = if (hit.media.type == "episode") detail?.seriesId?.takeIf(String::isNotBlank)
             ?: seriesIdFromPoster(hit.media.poster, hit.jellyfinItemId) else null
         return when {
-            seriesId != null -> "/v1/img/jf/$seriesId/Backdrop"
+            seriesId != null -> com.pocketds.hub.net.HubEndpoints.jellyfinImage(seriesId, "Backdrop")
             else -> detail?.backdrop?.takeIf(String::isNotBlank) ?: hit.media.backdrop.ifBlank { hit.media.poster }
         }
     }

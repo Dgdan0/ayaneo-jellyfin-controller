@@ -21,7 +21,8 @@ internal class PlayerLevelView(context: Context) : View(context) {
     init {
         visibility = GONE
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
-        background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
+        // Glass: the controls' dark glass, following what is playing.
+        if (!com.pocketds.hub.ui.OverlayButtons.panel(this, 17f)) background = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 17f)
             setColor(Color.argb(220, 16, 18, 23))
             setStroke(Styler.dpInt(context, 1f), Color.argb(115, 255, 255, 255))

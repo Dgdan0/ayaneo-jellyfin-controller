@@ -39,6 +39,9 @@ import com.pocketds.hub.ui.typeRole
  * One continuous fill rather than a number counting down a second at a time,
  * which read as jumpy. The fill stops while the video is paused, so the next
  * episode never starts behind a pause.
+ *
+ * On Glass the card is the controls' dark glass, Play now the white pill and
+ * Watch credits a glass one.
  */
 class UpNextCardView(
     context: Context,
@@ -58,15 +61,16 @@ class UpNextCardView(
     }
     private val meta = TextView(context).apply { textSize = 11f; setTextColor(Color.argb(200, 220, 226, 234)); maxLines = 1 }
     private val bar = FillBar(context)
-    val playNow: TextView = PillButton.create(context, colors, "Play now", AppIcon.PLAY, primary = true, heightDp = 36f)
-    val watchCredits: TextView = PillButton.create(context, colors, "Watch credits", heightDp = 36f)
+    private val glass = com.pocketds.hub.ui.Theme.isGlass(context)
+    val playNow: TextView = PillButton.create(context, colors, "Play now", AppIcon.PLAY, primary = true, heightDp = 36f, glass = glass)
+    val watchCredits: TextView = PillButton.create(context, colors, "Watch credits", heightDp = 36f, glass = glass)
     private var animator: ValueAnimator? = null
 
     init {
         orientation = VERTICAL
         val pad = dp(12)
         setPadding(pad, pad, pad, dp(8))
-        background = ThemeGradientDrawable().apply {
+        if (!com.pocketds.hub.ui.OverlayButtons.panel(this, 18f)) background = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 18f)
             setColor(Color.argb(240, 14, 18, 25))
             setStroke(dp(1), Color.argb(26, 255, 255, 255))
@@ -112,7 +116,8 @@ class UpNextCardView(
         meta.visibility = if (next.seriesTitle.isBlank()) GONE else VISIBLE
         // A fixed size: bound while the card is hidden, a size taken from the view would
         // wait for its first layout and only start loading once the card showed.
-        Artwork.bindHub(still, api, "/v1/img/jf/${next.id}/Primary?w=360", opaque = true) { size(dp(128), dp(72)) }
+        Artwork.bindHub(still, api, com.pocketds.hub.net.HubEndpoints.sized(
+            com.pocketds.hub.net.HubEndpoints.jellyfinImage(next.id, "Primary"), 360), opaque = true) { size(dp(128), dp(72)) }
         contentDescription = "Up next: ${next.displayTitle()}"
     }
 

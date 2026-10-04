@@ -1079,14 +1079,16 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private fun showArtwork() {
         val ambient = ambient ?: return
         val top = sections.stack().peek() as? Screen ?: return
-        if (top.immersive) return
         val path = PageArtwork.next(shownArtwork, top.pageArtwork) ?: return
         val colours = ArtworkColors.shared(this, api)
         paletteWait?.let { colours.cancel(shownArtwork, it) }
         paletteWait = null
         shownArtwork = path
         val known = colours.peek(path)
-        tintPage(ambient, path, known ?: ArtworkPalette.NEUTRAL)
+        // Over video the page itself is hidden and only the controls carry its
+        // colours: they keep the ones they have until the playing title's
+        // arrive, rather than going grey between.
+        if (known != null || !top.immersive) tintPage(ambient, path, known ?: ArtworkPalette.NEUTRAL)
         if (known != null) return
         val wait: (ArtworkPalette) -> Unit = { palette -> if (shownArtwork == path) tintPage(ambient, path, palette) }
         paletteWait = wait

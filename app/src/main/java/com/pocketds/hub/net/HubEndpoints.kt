@@ -401,6 +401,14 @@ object HubEndpoints {
         else -> hubPath
     }
 
+    /**
+     * The hub path of a Jellyfin item's picture of [type] ("Primary",
+     * "Backdrop"), untagged: the hub fills in the current one. Built here only,
+     * so the same picture is always the same string, and so one entry in the
+     * hub's and the Pocket's colour caches.
+     */
+    fun jellyfinImage(itemId: String, type: String): String = "$JELLYFIN_IMAGES$itemId/$type"
+
     private const val TMDB_IMAGES = "/v1/img/tmdb/"
     private const val JELLYFIN_IMAGES = "/v1/img/jf/"
     /** The hub's smallest width bucket for a Jellyfin image. */

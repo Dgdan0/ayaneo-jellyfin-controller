@@ -77,6 +77,13 @@ class PlayerScreen(
     override val title = initialPlan?.item?.title ?: "Player"
     override val immersive = true
     override val focusOnShow = false
+    /**
+     * Glass: the page, and so the controls' glass, takes the colours of what
+     * is playing (GLASS_PLAN.md): an episode its series' backdrop, as Home's
+     * hero shows it, a film its own.
+     */
+    override val pageArtwork: String?
+        get() = plan?.item?.let { com.pocketds.hub.net.HubEndpoints.jellyfinImage(it.seriesId.ifEmpty { it.id }, "Backdrop") }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val handler = Handler(Looper.getMainLooper())
@@ -1798,6 +1805,8 @@ class PlayerScreen(
         seekBar.marks = if (value.durationMillis > 0) PlaybackEnhancements.chapters(value.chapters, value.durationMillis)
             .map { it.positionMillis.toFloat() / value.durationMillis } else emptyList()
         showTitle(value.item, value.offline)
+        // Another title (the next episode, a different film) may bring other colours.
+        host.pageArtworkChanged()
         chaptersButton.visibility = if (value.chapters.isEmpty()) View.GONE else View.VISIBLE
         val audio = value.audioTracks.firstOrNull { it.index == value.selectedAudioIndex }
         val subtitle = value.subtitleTracks.firstOrNull { it.index == value.selectedSubtitleIndex }

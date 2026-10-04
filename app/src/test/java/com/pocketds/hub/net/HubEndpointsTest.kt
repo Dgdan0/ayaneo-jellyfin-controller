@@ -9,6 +9,12 @@ class HubEndpointsTest {
     private val base = "http://127.0.0.1:8791"
 
     @Test
+    fun `a Jellyfin picture's path is built in one way`() {
+        assertEquals("/v1/img/jf/abc/Backdrop", HubEndpoints.jellyfinImage("abc", "Backdrop"))
+        assertEquals("/v1/img/jf/abc/Primary?w=360", HubEndpoints.sized(HubEndpoints.jellyfinImage("abc", "Primary"), 360))
+    }
+
+    @Test
     fun `a sized image asks for a width once and leaves blank paths alone`() {
         assertEquals("/v1/img/jf/a/Backdrop?tag=t&w=1280", HubEndpoints.sized("/v1/img/jf/a/Backdrop?tag=t", 1280))
         assertEquals("/v1/img/jf/a/Backdrop?w=1280", HubEndpoints.sized("/v1/img/jf/a/Backdrop", 1280))

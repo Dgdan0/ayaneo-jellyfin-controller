@@ -618,7 +618,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Titles requested this session | `state/RequestedTitles` (applied at card bind) |
 | Patching cards already on screen | `state/HitRefresh` |
 | Loading any hub image | `ui/Artwork.loader` / `bind` / `bindHub` (always cancels a recycled view's old request) |
-| The size of a hub picture to ask for | `HubEndpoints.sized(path, width)` for artwork shown large; `smallest(path)` for artwork drawn tiny or blurred (TMDB w92, Jellyfin w=180, a reading cover as it is) |
+| The size of a hub picture to ask for | `HubEndpoints.sized(path, width)` for artwork shown large; `smallest(path)` for artwork drawn tiny or blurred (TMDB w92, Jellyfin w=180, a reading cover as it is). A Jellyfin item's picture by id: `HubEndpoints.jellyfinImage(id, type)`, so one picture is one string in the colour caches |
 | Watch progress | `ui/ArtworkProgressView` on artwork, `ui/ProgressLine` under titles |
 | An episode | `ui/EpisodeCardView`; names via `EpisodeLabel.of` / `code` / `season` ("S1E4 · Title", "Specials") |
 | A season or poster-shaped detail card | `ui/DetailArtworkCardView` |
@@ -672,7 +672,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Up/Down through a scrolling page of rows (past an empty row, to rows scrolled away) | `ui/RowStep.move(rows, focused, up)` (Books home) |
 | A comic or manga among books: the pill on its cover and its line | `ReadingBookFacts.kindTag` / `comicLine`; `PosterCardView.bindReadingWork(showKind = true)` on Books home only |
 | A comic run's issues on its page; their names and counts | `screens/library/IssueStrip` (a lazy strip per volume, opening at the issue you are on); `ReadingBookFacts.issueTitle` / `issueLine`, "162 issues" in `length`, "On issue 51 · 1% read" in `progress`; the hub's `/v1/img/reading/kavita-chapter/{id}` cover per issue |
-| Controls drawn over a picture (the player, the comic reader) | `ui/OverlayButtons` (`round`, `pill`, `dressDisc`, `dressPill`, `ringed`: a soft disc or pill, the ring standing outside it; `light` for a pill that is on). On Glass no white discs: dark glass tinted by what is open, nearly solid on the video palette's dark (`GlassButtonBackground.overPicture`, `GlassColors.overPicture`), so it reads over the brightest frame; Play stays the white disc |
+| Controls drawn over a picture (the player, the comic reader) | `ui/OverlayButtons` (`round`, `pill`, `dressDisc`, `dressPill`, `ringed`: a soft disc or pill, the ring standing outside it; `light` for a pill that is on). On Glass no white discs: dark glass tinted by what is open, nearly solid on the video palette's dark (`GlassButtonBackground.overPicture`, `GlassColors.overPicture`), so it reads over the brightest frame; Play stays the white disc. `panel(view, corner)` for a panel of the same glass (the timeline's bar, the seek preview, the up-next card, subtitle timing) |
 | The comic reader's heading | `ReaderTitleFormatter.heading` / `issue` / `subtitle` ("Fantastic Four" over "Issue 51 · Page 2 of 24"; Kavita's "Chapter 51" is an issue for a comic) |
 | Reacting to focus while keeping the ring | `FocusDecorator.listen(view, ringVisible) { view, focused -> … }` |
 | Player and playback-option wording | `playback/PlayerLabels` (Locale.US decimals; `playMethod`: "Direct play", "Direct stream", "Converting") |
@@ -691,7 +691,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | A Glass search field | `ui/glass/GlassSearchField.style`: a pill of the page's glass inside a taller target, ringed on focus (Discover, the Library) |
 | A library on the Glass Library root | `screens/library/LibraryTileView` (the picture, soft and dimmed, the hub's `fan` of posters, a glass label); where the posters sit, what the label and the root's line say: `LibraryTiles` (`slots`, `fan`, `summary`, `kindLabel`). The root is `LibraryRootView`; a tile pushes `LibraryFolderScreen` |
 | Glass or Classic | `settings/LookSettings` (`Look.fromStored`: Glass unless Classic is stored; `Look.dark`: Glass is always dark) and `Theme.isGlass(context)`. A change rebuilds the Activity, as dark and light do. Classic goes once #11 is finished |
-| The Glass page: which artwork it shows | A screen's `pageArtwork` (the focused card, a title's backdrop, the cover in focus), re-read on focus changes, `showCurrent` and `ScreenHost.pageArtworkChanged`; `nav/PageArtwork` (`next`: none keeps the last, `title`); `ScreenHost.prefetchArtwork` for the cards a row binds. `HubActivity.showArtwork` feeds `AmbientLayerView`, the bars' `setPalette` and `GlassPage` |
+| The Glass page: which artwork it shows | A screen's `pageArtwork` (the focused card, a title's backdrop, the cover in focus, what is playing), re-read on focus changes, `showCurrent` and `ScreenHost.pageArtworkChanged`; `nav/PageArtwork` (`next`: none keeps the last, `title`); `ScreenHost.prefetchArtwork` for the cards a row binds. `HubActivity.showArtwork` feeds `AmbientLayerView`, the bars' `setPalette` and `GlassPage` |
 | The Glass page's colours, for what is drawn over it | `ui/glass/GlassPage`: `palette(context)` for a panel opening now; `follow(view) { palette -> … }` for glass that stays on screen (the bars, a Details pill, a play disc, a day chip), held only while the view is attached. `Theme.onGlass(colors)` decides, so the player's video palette stays solid |
 | Artwork fading into the Glass page | `ui/glass/FadedImageView`: `stops` (opacity down its height) and a `shade` for words over it, both inside its own layer, so neither ends in a line; `HERO` / `HERO_SHADE` for Home's hero, `TITLE` / `TITLE_SHADE` for a title page's backdrop (`DetailHeaderView(glass = true)`) |
 | A Glass tile or poster | `LandscapeCardView(glass = true)` and `EpisodeCardView(glass = true)` (11dp corners, 3dp ring and `ui/glass/GlassStillMarks`: the white progress bar inside the still, the accent tick, the glass play disc on focus; an episode's UP NEXT at its top left) and `PosterCardView(glass = true)` (a white count pill, an accent tick, where a title stands as a glass chip at the top left, `setDayChip`, and with captions the title on one bold line over the year; a book's cover keeps its words on the page, an audiobook's is square, a comic's kind sits on a dark pill); Discover's featured card is `DiscoverFeatureCardView(glass = true)`. Home, title pages and Discover opt in, other screens at their milestone |
@@ -1153,7 +1153,9 @@ media version, audio, subtitles and Original/40/20/10/5/2 Mbps quality. The hub 
 streaming, HLS manifest rewriting, external subtitle extraction, ordered Jellyfin events,
 session ownership and 30-minute abandoned-session cleanup.
 
-In Glass (#11, GLASS_PLAN.md › Player) every control but Play is that dark glass, Audio & subtitles and
+In Glass (#11, GLASS_PLAN.md › Player) the player reports what is playing as the page's artwork (an
+episode its series' backdrop), so its glass takes that title's colours; over video the page keeps the
+colours it has until the new ones arrive. Every control but Play is that dark glass, Audio & subtitles and
 Chapters carry their icons, the timeline and its times sit in a frosted bar 14dp in from the edges
 (a 6dp white line on a faint track, the buffered part lighter, a white thumb that rings with focus),
 and the panels are the glass side sheet. What the controls do and where focus goes are unchanged.

@@ -45,7 +45,8 @@ internal class SubtitleOffsetOverlay(
 
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            background = Styler.cardBackground(context, colors, cornerDp = 13f)
+            // Glass: the controls' dark glass, following what is playing.
+            if (!com.pocketds.hub.ui.OverlayButtons.panel(this, 13f)) background = Styler.cardBackground(context, colors, cornerDp = 13f)
             setPadding(dp(12), dp(8), dp(12), dp(8))
             isClickable = true
             setOnClickListener { /* Keep card taps away from outside-to-close. */ }

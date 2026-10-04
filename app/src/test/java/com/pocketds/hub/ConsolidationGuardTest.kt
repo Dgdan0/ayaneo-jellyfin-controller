@@ -79,6 +79,9 @@ class ConsolidationGuardTest {
         Rule(Regex("""0x47FFFFFF"""),
             "GlassProgressBar: how far in, a white bar on its track inside a picture",
             setOf("ui/glass/GlassProgressBar.kt")),
+        Rule(Regex(""""/v1/img/jf/"""),
+            "HubEndpoints.jellyfinImage(id, type): one string per picture, so one entry in the colour caches",
+            setOf("net/HubEndpoints.kt")),
     )
 
     @Test
