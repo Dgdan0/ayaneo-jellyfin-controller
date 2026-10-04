@@ -18,8 +18,24 @@ data class LibraryView(
 @Serializable
 data class LibraryResponse(
     val views: List<LibraryView> = emptyList(),
+    /** "name" (A to Z) or "custom" (the profile arranged them, #15); hubs before #15 send neither. */
+    val order: String = "name",
     val partial: List<PartialFailure> = emptyList(),
     val cache: CacheInfo = CacheInfo()
+)
+
+/** `PUT /v1/library/order` (#15): a side's libraries in the order to show them; empty goes back to A to Z. */
+@Serializable
+data class LibraryOrderRequest(
+    val side: String,
+    val ids: List<String>
+)
+
+@Serializable
+data class LibraryOrderResponse(
+    val side: String = "",
+    val ids: List<String> = emptyList(),
+    val order: String = "name"
 )
 
 @Serializable

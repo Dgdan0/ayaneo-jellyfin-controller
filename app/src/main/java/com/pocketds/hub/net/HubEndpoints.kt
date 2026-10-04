@@ -48,6 +48,9 @@ object HubEndpoints {
 
     fun library(base: String): HubRequest = HubRequest(join(base, "/v1/library"))
 
+    /** Saves one side's library order for the profile (#15); the body is a [com.pocketds.hub.model.LibraryOrderRequest]. */
+    fun libraryOrder(base: String): HubRequest = HubRequest(join(base, "/v1/library/order"), method = "PUT")
+
     fun libraryItems(
         base: String,
         viewId: String,

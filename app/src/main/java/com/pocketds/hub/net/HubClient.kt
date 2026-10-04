@@ -109,6 +109,8 @@ interface HubApi {
     suspend fun users(): HubResult<UsersResponse>
     suspend fun home(): HubResult<HomeResponse>
     suspend fun library(): HubResult<LibraryResponse>
+    /** One side's libraries in the order to show them, for the profile (#15); empty goes back to A to Z. */
+    suspend fun saveLibraryOrder(side: String, ids: List<String>): HubResult<com.pocketds.hub.model.LibraryOrderResponse>
     suspend fun libraryItems(
         viewId: String,
         page: Int = 1,
@@ -538,8 +540,14 @@ class HubClient(private val context: Context, private val connection: HubConnect
     override suspend fun home(): HubResult<HomeResponse> =
         get(HubEndpoints.home(base()), noCache = true) { json.decodeFromString<HomeResponse>(it) }
 
+    // Never from the device's cache: the order is the person's to change (#15),
+    // from this device or another, and a cached list put it back.
     override suspend fun library(): HubResult<LibraryResponse> =
-        get(HubEndpoints.library(base())) { json.decodeFromString<LibraryResponse>(it) }
+        get(HubEndpoints.library(base()), noCache = true) { json.decodeFromString<LibraryResponse>(it) }
+
+    override suspend fun saveLibraryOrder(side: String, ids: List<String>): HubResult<com.pocketds.hub.model.LibraryOrderResponse> =
+        postOnce(HubEndpoints.libraryOrder(base()), json.encodeToString(com.pocketds.hub.model.LibraryOrderRequest.serializer(),
+            com.pocketds.hub.model.LibraryOrderRequest(side, ids))) { json.decodeFromString<com.pocketds.hub.model.LibraryOrderResponse>(it) }
 
     override suspend fun libraryItems(
         viewId: String,
@@ -836,7 +844,7 @@ class HubClient(private val context: Context, private val connection: HubConnect
         }
 
     override suspend fun readingLibraries(): HubResult<ReadingLibrariesResponse> =
-        get(HubEndpoints.readingLibraries(base())) {
+        get(HubEndpoints.readingLibraries(base()), noCache = true) {
             json.decodeFromString<ReadingLibrariesResponse>(it)
         }
 
@@ -1121,7 +1129,8 @@ class HubClient(private val context: Context, private val connection: HubConnect
                         .url(request.url)
                         .cacheControl(noStore)
                         .apply { if (userId.isNotEmpty()) header(JELLYFIN_USER_HEADER, userId) }
-                        .post(payload.toRequestBody(jsonMedia))
+                        // A PUT when the request says so (a library order); a POST otherwise.
+                        .method(if (request.method == "PUT") "PUT" else "POST", payload.toRequestBody(jsonMedia))
                         .build()
                 )
                 call.await().use { response ->

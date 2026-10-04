@@ -255,6 +255,8 @@ data class ReadingLibrary(
 @Serializable
 data class ReadingLibrariesResponse(
     val libraries: List<ReadingLibrary> = emptyList(),
+    /** "name" (A to Z) or "custom" (the profile arranged them, #15). */
+    val order: String = "name",
     val partial: List<PartialFailure> = emptyList(),
     val cache: CacheInfo = CacheInfo()
 )

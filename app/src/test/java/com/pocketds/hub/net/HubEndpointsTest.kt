@@ -9,6 +9,13 @@ class HubEndpointsTest {
     private val base = "http://127.0.0.1:8791"
 
     @Test
+    fun `a library order is put to its own address`() {
+        val request = HubEndpoints.libraryOrder(base)
+        assertEquals("http://127.0.0.1:8791/v1/library/order", request.url)
+        assertEquals("PUT", request.method)
+    }
+
+    @Test
     fun `a Jellyfin picture's path is built in one way`() {
         assertEquals("/v1/img/jf/abc/Backdrop", HubEndpoints.jellyfinImage("abc", "Backdrop"))
         assertEquals("/v1/img/jf/abc/Primary?w=360", HubEndpoints.sized(HubEndpoints.jellyfinImage("abc", "Primary"), 360))
