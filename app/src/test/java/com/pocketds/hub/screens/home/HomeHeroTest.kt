@@ -4,6 +4,7 @@ import com.pocketds.hub.model.LibraryItem
 import com.pocketds.hub.model.MediaRef
 import com.pocketds.hub.model.SearchHit
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeHeroTest {
@@ -51,6 +52,42 @@ class HomeHeroTest {
         assertEquals("Play", hero.playLabel)
         assertEquals(0.0, hero.progress, 0.0)
         assertEquals("/b", hero.backdrop)
+    }
+
+    @Test
+    fun `a row asks for the page colours of the very artwork its hero will show`() {
+        val movie = SearchHit(media = MediaRef(type = "movie", title = "Iron Man 3", poster = "/p"), jellyfinItemId = "m")
+        val detail = LibraryItem(id = episodeId, type = "episode", seriesId = seriesId)
+        for ((hit, item) in listOf(episode to null, episode to detail, movie to null, movie.copy(media = movie.media.copy(backdrop = "/b")) to null)) {
+            assertEquals(HomeHero.from("latest", "Recently added", hit, item).backdrop, HomeHero.backdrop(hit, item))
+        }
+        // Nothing but a poster: the poster.
+        assertEquals("/p", HomeHero.backdrop(movie))
+    }
+
+    @Test
+    fun `the eyebrow's mark is the episode code, or the day on Coming up`() {
+        assertEquals("S3E4", HomeHero.from("continue", "Continue watching", episode).eyebrowMark)
+        val movie = SearchHit(media = MediaRef(type = "movie", title = "Iron Man 3", backdrop = "/b"), jellyfinItemId = "m")
+        assertEquals("", HomeHero.from("latest", "Recently added", movie).eyebrowMark)
+        assertEquals("RECENTLY ADDED", HomeHero.from("latest", "Recently added", movie).eyebrow)
+        val coming = SearchHit(media = MediaRef(type = "series", title = "Lanterns"), subtitle = "Fri · S1E8")
+        val hero = HomeHero.from(HomeRows.UPCOMING, "Coming up", coming)
+        assertEquals("FRI · S1E8", hero.eyebrowMark)
+        assertEquals("COMING UP · FRI · S1E8", hero.eyebrow)
+        assertTrue(hero.eyebrow.endsWith(hero.eyebrowMark))
+    }
+
+    @Test
+    fun `next up plays its episode by name while classic keeps the short label`() {
+        val next = episode.copy(progress = 0.0, subtitle = "S2E1 · Pilot")
+        val hero = HomeHero.from("nextup", "Next up", next)
+        assertEquals("Play S2E1", hero.playAction)
+        assertEquals("Play", hero.playLabel)
+        // A part-watched one resumes, on any row; a film just plays.
+        assertEquals("Resume", HomeHero.from("continue", "Continue watching", episode).playAction)
+        val movie = SearchHit(media = MediaRef(type = "movie", title = "Iron Man 3", backdrop = "/b"), jellyfinItemId = "m")
+        assertEquals("Play", HomeHero.from("latest", "Recently added", movie).playAction)
     }
 
     @Test

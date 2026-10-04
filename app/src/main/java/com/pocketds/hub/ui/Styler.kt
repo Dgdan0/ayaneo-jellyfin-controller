@@ -39,10 +39,13 @@ object Styler {
         }
     }
 
-    /** Above edge-to-edge artwork so the image cannot cover the focus outline. */
-    fun focusOutline(context: Context, colors: PocketColors) = StateListDrawable().apply {
+    /**
+     * Above edge-to-edge artwork so the image cannot cover the focus outline.
+     * Glass cards draw it at the prototype's 3dp round their 11dp corners.
+     */
+    fun focusOutline(context: Context, colors: PocketColors, cornerDp: Float = ArtworkFrame.CORNER_DP, strokeDp: Float = 2f) = StateListDrawable().apply {
         addState(intArrayOf(android.R.attr.state_focused), ThemeGradientDrawable().apply {
-            cornerRadius=dp(context,ArtworkFrame.CORNER_DP);setColor(android.graphics.Color.TRANSPARENT);setStroke(dpInt(context,2f),colors.focusRing)
+            cornerRadius=dp(context,cornerDp);setColor(android.graphics.Color.TRANSPARENT);setStroke(dpInt(context,strokeDp),colors.focusRing)
         })
         addState(intArrayOf(), android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
     }

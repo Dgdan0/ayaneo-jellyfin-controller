@@ -65,9 +65,16 @@ import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.settings.HapticSettings
 import com.pocketds.hub.settings.NotificationReadStore
 import com.pocketds.hub.settings.NotificationSettings
+import com.pocketds.hub.settings.Look
+import com.pocketds.hub.settings.LookSettings
 import com.pocketds.hub.settings.ThemeSettings
+import com.pocketds.hub.nav.PageArtwork
 import com.pocketds.hub.ui.KeyHaptics
 import com.pocketds.hub.ui.Theme
+import com.pocketds.hub.ui.glass.AmbientLayerView
+import com.pocketds.hub.ui.glass.ArtworkColors
+import com.pocketds.hub.ui.glass.ArtworkPalette
+import com.pocketds.hub.ui.glass.GlassPage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -119,6 +126,15 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     /** "‹ Title" under the tabs, for a pushed page that does not draw its own heading. */
     private lateinit var pageTitle: android.widget.TextView
     private lateinit var content: FrameLayout
+    /**
+     * Glass: the page behind everything (GLASS_PLAN.md) -- the artwork the
+     * screen in front reports, blurred, over its dark colour. Null in Classic.
+     */
+    private var ambient: AmbientLayerView? = null
+    /** The artwork the page shows, the colours it is tinted with, and the colour request still out. */
+    private var shownArtwork: String? = null
+    private var pagePalette = ArtworkPalette.NEUTRAL
+    private var paletteWait: ((ArtworkPalette) -> Unit)? = null
     private var lastContentSection = 0
     private var utilityReturnFocus: View? = null
 
@@ -152,13 +168,17 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         // restores state; this Activity intentionally rebuilds its own screen
         // stack after process death.
         supportFragmentManager.fragmentFactory = EpubNavigatorFragment.createDummyFactory()
+        // Glass is always dark, so its night resources (the services' logos)
+        // apply whatever the Theme setting says; that setting is Classic's.
+        val look = LookSettings.get(this)
         AppCompatDelegate.setDefaultNightMode(
-            when (ThemeSettings.getMode(this)) {
+            if (look == Look.GLASS) AppCompatDelegate.MODE_NIGHT_YES else when (ThemeSettings.getMode(this)) {
                 ThemeSettings.Mode.SYSTEM -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
                 ThemeSettings.Mode.LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
                 ThemeSettings.Mode.DARK -> AppCompatDelegate.MODE_NIGHT_YES
             }
         )
+        builtLook = look
         builtDark = Theme.isDark(this)
         super.onCreate(savedInstanceState)
 
@@ -181,8 +201,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         // menu returning from a submenu kept the bell's hints). Following every
         // focus change here covers them all; one refresh per frame at most.
         window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, _ ->
-            window.decorView.removeCallbacks(hintRefresh)
-            window.decorView.post(hintRefresh)
+            window.decorView.removeCallbacks(focusSettled)
+            window.decorView.post(focusSettled)
         }
         if (savedInstanceState != null) {
             supportFragmentManager.fragments
@@ -289,6 +309,17 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         // The chrome sits inside a frame so the floating trailer window can be
         // laid over all of it, hint bar included.
         overlay = FrameLayout(this)
+        if (Theme.isGlass(this)) {
+            // The page itself, under the content, the tabs and the hint bar.
+            // Nothing above it paints a page colour (Theme's Glass palette has
+            // none); the frame's own dark is only what shows while an
+            // immersive screen has the page hidden.
+            overlay.setBackgroundColor(ArtworkPalette.NEUTRAL.dark)
+            ambient = AmbientLayerView(this, api).also {
+                overlay.addView(it, FrameLayout.LayoutParams(MATCH, MATCH))
+            }
+        }
+        val glass = ambient != null
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(colors.background)
@@ -301,7 +332,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         content = FrameLayout(this).apply { clipChildren = false }
         stage.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        topBar = TopBarView(this, colors, ::ringVisible, sectionTitles.take(CONTENT_SECTION_COUNT)).apply {
+        topBar = TopBarView(this, colors, ::ringVisible, sectionTitles.take(CONTENT_SECTION_COUNT), glass).apply {
             onModeSelected = { mode ->
                 ContentModeSettings.set(this@HubActivity, mode)
                 refreshAppearance()
@@ -348,7 +379,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         })
         root.addView(stage, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
-        hintBar = HintBarView(this, colors).apply {
+        hintBar = HintBarView(this, colors, glass).apply {
             // A pointer user reaches every contextual action through the same
             // widget that labels it for a pad user.
             onAction = { action ->
@@ -489,15 +520,18 @@ class HubActivity : AppCompatActivity(), ScreenHost {
      * back from the saved state, so Settings reopens where it was.
      */
     override fun refreshAppearance() {
-        if (builtDark != null && builtDark != Theme.isDark(this)) {
+        if ((builtDark != null && builtDark != Theme.isDark(this)) ||
+            (builtLook != null && builtLook != LookSettings.get(this))
+        ) {
             recreate()
             return
         }
         if (::overlay.isInitialized) Theme.refresh(this, overlay, (sections.stack().peek() as? Screen)?.contentDomain ?: ContentModeSettings.get(this))
     }
 
-    /** Whether the views were built dark; null until onCreate has run. */
+    /** Whether the views were built dark, and in which look; null until onCreate has run. */
     private var builtDark: Boolean? = null
+    private var builtLook: Look? = null
 
     private fun showCurrent() {
         refreshAppearance()
@@ -519,6 +553,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         topBar.setMode(if (top is ContentModeScreen) ContentModeSettings.get(this) else null)
         topBar.setOverArtwork(top.drawsUnderTopBar)
         hintBar.setHints(top.hints())
+        showArtwork()
         view?.post {
             if (top.focusOnShow && view.findFocus() == null) {
                 if (!top.requestInitialFocus()) focusFirst(view)
@@ -549,6 +584,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     }
 
     private fun applyImmersive(active: Boolean) {
+        // Full-screen media draws over video or a page: never the blurred page.
+        ambient?.visibility = if (active) View.GONE else View.VISIBLE
         topBar.visibility = if (active) View.GONE else View.VISIBLE
         if (active) pageTitle.visibility = View.GONE
         statusStrip.setChromeVisible(!active)
@@ -1020,7 +1057,48 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             .also { if (!it) enteringPictureInPicture = false }
     }
 
-    private val hintRefresh = Runnable { refreshHints() }
+    /** After focus lands: the hints and the page's artwork both follow the selection. */
+    private val focusSettled = Runnable {
+        refreshHints()
+        showArtwork()
+    }
+
+    override fun pageArtworkChanged() = showArtwork()
+
+    override fun prefetchArtwork(paths: Collection<String>) {
+        if (ambient != null && paths.isNotEmpty()) ArtworkColors.shared(this, api).prefetch(paths)
+    }
+
+    /**
+     * Glass: the page shows the artwork the screen in front reports, tinted
+     * with its colours, and keeps the last artwork when the screen reports
+     * none ([PageArtwork]). Until the hub has the colours the page uses the
+     * neutral tint, as GLASS_PLAN.md asks, with the picture already showing.
+     */
+    private fun showArtwork() {
+        val ambient = ambient ?: return
+        val top = sections.stack().peek() as? Screen ?: return
+        if (top.immersive) return
+        val path = PageArtwork.next(shownArtwork, top.pageArtwork) ?: return
+        val colours = ArtworkColors.shared(this, api)
+        paletteWait?.let { colours.cancel(shownArtwork, it) }
+        paletteWait = null
+        shownArtwork = path
+        val known = colours.peek(path)
+        tintPage(ambient, path, known ?: ArtworkPalette.NEUTRAL)
+        if (known != null) return
+        val wait: (ArtworkPalette) -> Unit = { palette -> if (shownArtwork == path) tintPage(ambient, path, palette) }
+        paletteWait = wait
+        colours.request(path, wait)
+    }
+
+    private fun tintPage(ambient: AmbientLayerView, path: String, palette: ArtworkPalette) {
+        ambient.show(path, palette)
+        if (palette == pagePalette) return
+        pagePalette = palette
+        // The bars, the sheets and every glass control follow the page from here.
+        GlassPage.set(this, palette)
+    }
 
     override fun refreshHints() {
         if (!::player.isInitialized) return
@@ -1081,6 +1159,10 @@ class HubActivity : AppCompatActivity(), ScreenHost {
 
     override fun onDestroy() {
         notificationBadge.stop()
+        // The colours client outlives this Activity (a look change rebuilds it);
+        // an ask still out must not keep the old window and its page alive.
+        paletteWait?.let { ArtworkColors.shared(this, api).cancel(shownArtwork, it) }
+        paletteWait = null
         chromeScope.cancel()
         super.onDestroy()
     }

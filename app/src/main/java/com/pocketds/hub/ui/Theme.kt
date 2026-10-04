@@ -2,7 +2,11 @@ package com.pocketds.hub.ui
 
 import android.content.Context
 import android.content.res.Configuration
+import com.pocketds.hub.settings.Look
+import com.pocketds.hub.settings.LookSettings
 import com.pocketds.hub.settings.ThemeSettings
+import com.pocketds.hub.ui.glass.ArtworkPalette
+import com.pocketds.hub.ui.glass.GlassColors
 
 /**
  * The palette. Teal stays the default accent so this and the sibling keyboard
@@ -18,6 +22,12 @@ data class PocketColors(
     var mutedText: Int,
     var accent: Int,
     var accentText: Int,
+    /**
+     * Words and icons drawn on a [primaryText] fill: a selected tab's white
+     * pill, the status pill. Classic drew them in the page colour; Glass has no
+     * page colour (see Theme), so they have their own token.
+     */
+    var inverseText: Int,
     var stripBackground: Int,
     /** The focus ring: the text colour, so it reads on any poster and any accent. */
     var focusRing: Int,
@@ -60,6 +70,7 @@ object Theme {
         mutedText = 0xFF5F6873.toInt(),
         accent = 0xFF087D73.toInt(),
         accentText = 0xFFFFFFFF.toInt(),
+        inverseText = 0xFFF4F5F7.toInt(),
         stripBackground = 0xFFE6E9EE.toInt(),
         focusRing = 0xFF12161C.toInt(),
         focusFill = 0xFFE2F6F4.toInt(),
@@ -86,6 +97,7 @@ object Theme {
         mutedText = 0xFFA3ADBB.toInt(),
         accent = 0xFF3DDBC6.toInt(),
         accentText = 0xFF0C2C28.toInt(),
+        inverseText = 0xFF0A0D12.toInt(),
         stripBackground = 0xFF141922.toInt(),
         focusRing = 0xFFF3F5F8.toInt(),
         focusFill = 0xFF15302E.toInt(),
@@ -100,6 +112,21 @@ object Theme {
         unreadSurface = 0xFF1C2431.toInt()
     )
 
+    /**
+     * Glass (GLASS_PLAN.md): always dark, with the ambient layer behind every
+     * screen as the page. So the page colour paints nothing: its alpha is zero,
+     * which turns off every screen's own fill, the page-title strip and the
+     * bars' solid ground in one place. Its RGB stays the Glass base, because a
+     * fade into the page (ScrimDrawable) still fades into that darkness. Cards
+     * and chips are glass tints rather than solid surfaces.
+     */
+    private val GLASS = DARK.copy(
+        background = GlassColors.withAlpha(ArtworkPalette.NEUTRAL.dark, 0),
+        inverseText = GlassColors.INK,
+        cardSurface = GlassColors.panel(ArtworkPalette.NEUTRAL),
+        stripBackground = GlassColors.bar(ArtworkPalette.NEUTRAL)
+    )
+
     private val palettes = java.util.WeakHashMap<Context, PocketColors>()
 
     /** A stable palette object lets retained screen callbacks use the new accent. */
@@ -107,18 +134,27 @@ object Theme {
         preview(context, com.pocketds.hub.settings.ContentModeSettings.get(context))
     }
 
-    fun preview(context: Context, domain: com.pocketds.hub.state.ContentMode): PocketColors =
-        palette(context, domain, isDark(context))
+    fun preview(context: Context, domain: com.pocketds.hub.state.ContentMode): PocketColors {
+        val dark = isDark(context)
+        return palette(context, domain, base(LookSettings.get(context), dark), dark)
+    }
 
     /**
      * For anything drawn over video -- the player's controls and panels: the
      * dark palette whatever the app's theme, since the picture behind is dark,
-     * with the person's media accent.
+     * with the person's media accent. Never the Glass page: nothing is tinted
+     * or see-through over video.
      */
-    fun onVideo(context: Context): PocketColors = palette(context, com.pocketds.hub.state.ContentMode.MEDIA, dark = true)
+    fun onVideo(context: Context): PocketColors = palette(context, com.pocketds.hub.state.ContentMode.MEDIA, DARK, dark = true)
 
-    private fun palette(context: Context, domain: com.pocketds.hub.state.ContentMode, dark: Boolean): PocketColors {
-        val base = if (dark) DARK else LIGHT
+    /** The palette a look and a theme start from, before the accents. */
+    fun base(look: Look, dark: Boolean): PocketColors = when {
+        look == Look.GLASS -> GLASS
+        dark -> DARK
+        else -> LIGHT
+    }
+
+    private fun palette(context: Context, domain: com.pocketds.hub.state.ContentMode, base: PocketColors, dark: Boolean): PocketColors {
         val preset = com.pocketds.hub.settings.DomainPreferences.accent(context, domain)
         val accent = preset.color(dark)
         // The focus ring is the text colour, not the accent: white on the dark
@@ -133,16 +169,27 @@ object Theme {
         val old = colors(context).copy()
         val next = preview(context, domain)
         if (old == next) return
-        listOf(colors(context)).forEach { it.background=next.background; it.cardSurface=next.cardSurface; it.cardSurfacePressed=next.cardSurfacePressed; it.primaryText=next.primaryText; it.mutedText=next.mutedText; it.accent=next.accent; it.accentText=next.accentText; it.stripBackground=next.stripBackground; it.focusRing=next.focusRing; it.focusFill=next.focusFill; it.posterPlaceholder=next.posterPlaceholder; it.badgeAvailable=next.badgeAvailable; it.badgePartial=next.badgePartial; it.badgePending=next.badgePending; it.badgeFailed=next.badgeFailed; it.warningStrip=next.warningStrip; it.warningStripText=next.warningStripText; it.dangerText=next.dangerText; it.unreadSurface=next.unreadSurface }
+        listOf(colors(context)).forEach { it.background=next.background; it.cardSurface=next.cardSurface; it.cardSurfacePressed=next.cardSurfacePressed; it.primaryText=next.primaryText; it.mutedText=next.mutedText; it.accent=next.accent; it.accentText=next.accentText; it.inverseText=next.inverseText; it.stripBackground=next.stripBackground; it.focusRing=next.focusRing; it.focusFill=next.focusFill; it.posterPlaceholder=next.posterPlaceholder; it.badgeAvailable=next.badgeAvailable; it.badgePartial=next.badgePartial; it.badgePending=next.badgePending; it.badgeFailed=next.badgeFailed; it.warningStrip=next.warningStrip; it.warningStripText=next.warningStripText; it.dangerText=next.dangerText; it.unreadSurface=next.unreadSurface }
         AccentRebinder.apply(root,old,next)
     }
 
-    fun isDark(context: Context): Boolean = when (ThemeSettings.getMode(context)) {
-        ThemeSettings.Mode.LIGHT -> false
-        ThemeSettings.Mode.DARK -> true
-        ThemeSettings.Mode.SYSTEM -> {
-            val uiMode = context.applicationContext.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-            uiMode == Configuration.UI_MODE_NIGHT_YES
-        }
+    /**
+     * Glass rather than Classic (#11). Read when views are built; changing it
+     * rebuilds the Activity, as switching between dark and light does.
+     */
+    fun isGlass(context: Context): Boolean = LookSettings.get(context) == Look.GLASS
+
+    /**
+     * Whether something drawn with [colors] sits on the Glass page, and so
+     * takes its panels from the page's artwork. Only the Glass palette has a
+     * page colour that paints nothing; the video palette ([onVideo]) is solid
+     * whatever the look, because nothing is tinted over a moving picture.
+     */
+    fun onGlass(colors: PocketColors): Boolean = GlassColors.alpha(colors.background) == 0
+
+    /** Glass is always dark; Classic follows the Theme setting. */
+    fun isDark(context: Context): Boolean {
+        val uiMode = context.applicationContext.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        return LookSettings.get(context).dark(ThemeSettings.getMode(context), systemNight = uiMode == Configuration.UI_MODE_NIGHT_YES)
     }
 }

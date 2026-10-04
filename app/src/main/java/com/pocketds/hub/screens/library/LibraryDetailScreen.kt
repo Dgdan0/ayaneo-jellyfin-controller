@@ -21,6 +21,7 @@ import com.pocketds.hub.model.LibraryStateRequest
 import com.pocketds.hub.model.SeriesPlayTargetResponse
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
+import com.pocketds.hub.nav.PageArtwork
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.nav.TopBarView
 import com.pocketds.hub.net.HubApi
@@ -83,6 +84,9 @@ class LibraryDetailScreen(
     override val focusOnShow = true
     override val drawsUnderTopBar = true
     override val showsOwnTitle = true
+    /** The picture across the top of the page: the backdrop, an episode's still, else the poster. */
+    override val pageArtwork: String?
+        get() = item?.let { PageArtwork.title(it.backdrop, it.poster.ifBlank { it.thumb }, if (it.type == "episode") it.thumb else "") }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var colors: PocketColors
@@ -491,6 +495,7 @@ class LibraryDetailScreen(
         val landscapePath = value.backdrop.ifBlank { if (value.type == "episode") value.thumb else "" }
         header.bindArtwork(value.type, landscapePath.takeIf { it.isNotBlank() }?.let { api.imageUrl(HubEndpoints.sized(it, ART_WIDTH_PX)) },
             value.poster.ifBlank { value.thumb }.takeIf { it.isNotBlank() }?.let(api::imageUrl), imageLoader())
+        host?.pageArtworkChanged()
         renderActions(value)
         renderTabs(value)
         if (value.type == "series" && seasonList.isEmpty() && seasonsJob?.isActive != true) loadSeasons()

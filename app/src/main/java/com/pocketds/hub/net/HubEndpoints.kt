@@ -378,7 +378,31 @@ object HubEndpoints {
         return if (hubPath.isBlank() || "w=" in hubPath) hubPath else hubPath + (if ('?' in hubPath) "&" else "?") + "w=$width"
     }
 
+    /**
+     * The smallest picture the hub serves of [hubPath], for artwork drawn tiny
+     * or blurred: the Glass page behind every screen decodes 64 pixels. A TMDB
+     * image at w92 rather than the w780 [sized] would ask for, a Jellyfin one
+     * at w=180 (its smallest bucket), replacing any width already asked for.
+     * Anything else, a reading cover, comes in the one size its server has.
+     */
+    fun smallest(hubPath: String): String = when {
+        hubPath.startsWith(TMDB_IMAGES) -> {
+            val rest = hubPath.removePrefix(TMDB_IMAGES)
+            val slash = rest.indexOf('/')
+            if (slash <= 0) hubPath else TMDB_IMAGES + "w92" + rest.substring(slash)
+        }
+        hubPath.startsWith(JELLYFIN_IMAGES) -> {
+            val query = hubPath.substringAfter('?', "")
+            val params = query.split('&').filter { it.isNotEmpty() && !it.startsWith("w=") }
+            hubPath.substringBefore('?') + "?" + (params + "w=$SMALLEST_JELLYFIN_WIDTH").joinToString("&")
+        }
+        else -> hubPath
+    }
+
     private const val TMDB_IMAGES = "/v1/img/tmdb/"
+    private const val JELLYFIN_IMAGES = "/v1/img/jf/"
+    /** The hub's smallest width bucket for a Jellyfin image. */
+    private const val SMALLEST_JELLYFIN_WIDTH = 180
 
     /**
      * Trims a trailing slash from the base and guarantees exactly one between

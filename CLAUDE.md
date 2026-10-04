@@ -608,6 +608,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Titles requested this session | `state/RequestedTitles` (applied at card bind) |
 | Patching cards already on screen | `state/HitRefresh` |
 | Loading any hub image | `ui/Artwork.loader` / `bind` / `bindHub` (always cancels a recycled view's old request) |
+| The size of a hub picture to ask for | `HubEndpoints.sized(path, width)` for artwork shown large; `smallest(path)` for artwork drawn tiny or blurred (TMDB w92, Jellyfin w=180, a reading cover as it is) |
 | Watch progress | `ui/ArtworkProgressView` on artwork, `ui/ProgressLine` under titles |
 | An episode | `ui/EpisodeCardView`; names via `EpisodeLabel.of` / `code` / `season` ("S1E4 · Title", "Specials") |
 | A season or poster-shaped detail card | `ui/DetailArtworkCardView` |
@@ -641,7 +642,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Title and heading type | `ui/Type` (`typeRole(Type.Role.HERO …)`); body text is Figtree from the theme, never set per view |
 | An accent and the ink drawn on it | `AccentPreset.color(dark)` / `ink(dark)` via `Theme.colors`; Books default to gold (`AccentPreset.defaultFor`) |
 | A controller button drawn in the hint bar | `ui/KeyGlyphDrawable` |
-| A rounded action (Play, Details, Continue reading) | `ui/PillButton` (primary = accent fill; the ring keeps a gap). As a detail page's first action it takes `marginStart = -RING_DP`; `DetailHeaderView`'s action row leaves that room, so the pill lines up with the title and its ring is not clipped |
+| A rounded action (Play, Details, Continue reading) | `ui/PillButton` (primary = accent fill; the ring keeps a gap). As a detail page's first action it takes `marginStart = -RING_DP`; `DetailHeaderView`'s action row leaves that room, so the pill lines up with the title and its ring is not clipped. `glass = true`: the main action white with dark words, the others glass that follows the page, 11dp corners (Glass Home; other screens at their milestone) |
 | A rounded or round drawable from palette colours | `ThemeGradientDrawable.rounded` / `.oval`: inside `ThemeGradientDrawable().apply {}` a bare `colors` is GradientDrawable's own array |
 | Fading the page colour into artwork | `ui/ScrimDrawable` |
 | A vertical list of places with the blob (Settings' sections) | `ui/SideNavView` |
@@ -672,7 +673,14 @@ Most of these exist because several screens had drifted copies of the same thing
 | Hub: a service's own error sentence | `upstreamText` / `upstreamMessage` / `serviceOf` |
 | Hub: a title's request state changed | `invalidateTitle` (search, Discover, detail) |
 | An artwork's Glass colours on the Pocket | `ui/glass/ArtworkColors.shared(context, api)`: `prefetch` what a screen shows, `request` what is in focus, `peek`; when to ask again is `ArtworkColorBook` |
-| A Glass panel, bar and page | `ui/glass/GlassColors` (`panel`, `bar`, `over`, `contrast`), `GlassPanelDrawable` (`retint`), `AmbientLayerView` (`show(path, palette)`) |
+| A Glass panel, bar and page | `ui/glass/GlassColors` (`panel`, `bar`, `sheet` for a side sheet or dialog over a screen's own words, `over`, `contrast`), `GlassPanelDrawable` (`retint`), `AmbientLayerView` (`show(path, palette)`) |
+| Glass or Classic | `settings/LookSettings` (`Look.fromStored`: Glass unless Classic is stored; `Look.dark`: Glass is always dark) and `Theme.isGlass(context)`. A change rebuilds the Activity, as dark and light do. Classic goes once #11 is finished |
+| The Glass page: which artwork it shows | A screen's `pageArtwork` (the focused card, a title's backdrop, the cover in focus), re-read on focus changes, `showCurrent` and `ScreenHost.pageArtworkChanged`; `nav/PageArtwork` (`next`: none keeps the last, `title`); `ScreenHost.prefetchArtwork` for the cards a row binds. `HubActivity.showArtwork` feeds `AmbientLayerView`, the bars' `setPalette` and `GlassPage` |
+| The Glass page's colours, for what is drawn over it | `ui/glass/GlassPage`: `palette(context)` for a panel opening now; `follow(view) { palette -> … }` for glass that stays on screen (the bars, a Details pill, a play disc, a day chip), held only while the view is attached. `Theme.onGlass(colors)` decides, so the player's video palette stays solid |
+| Artwork fading into the Glass page | `ui/glass/FadedImageView`: `stops` (opacity down its height) and a `shade` for words over it, both inside its own layer, so neither ends in a line; `HERO` / `HERO_SHADE` for Home's hero |
+| A Glass tile or poster | `LandscapeCardView(glass = true)` (11dp corners, 3dp ring, a white progress bar inside the still, an accent tick, a glass play disc on focus) and `PosterCardView(glass = true)` (a white count pill, an accent tick, `setDayChip`); Home opts in, other screens at their milestone |
+| A Jellyfin profile's tile | `screens/home/ProfileAvatar` (`colors`: the profiles in alphabetical order take the palette, so four profiles get four colours; `initial`); Glass's "Who is watching?" is `ProfilePickerView`, a centred `SidePanelView` (`centredWidthDp`, `wrapsHeight`, `centreHeading`) |
+| Words and icons on a white pill (the selected tab, the status pill, a play mark) | `PocketColors.inverseText`, never `background`: Glass's page colour paints nothing |
 | Hub: an artwork's Glass colours | `internal/artcolor` (`Analyze` → `Palette`) behind `GET /v1/img/colors`; `artworkColorStore` keys a picture without its width and keeps `artwork-colors.json` |
 | Hub: the artwork routes | `imageRoutes`, registered on the API and on `artworkMux`, which the hub reads its own artwork through |
 
@@ -681,7 +689,7 @@ Cards measure at their natural height (`EpisodeCardView`, `DetailArtworkCardView
 
 `ConsolidationGuardTest` (part of `dev.sh test`) fails when a removed copy comes back -- a new
 `HubClient(context)`, a hand-built image loader or image request, a hand-written episode code or "Specials", a
-`"Selected"` detail line, an untinted progress bar, a bare `ScrollView(`, or a `delay(POLL…)` loop -- and names the owner
+`"Selected"` detail line, an untinted progress bar, a bare `ScrollView(`, a `delay(POLL…)` loop, or words drawn in the page colour -- and names the owner
 to use instead. Extend its rules when you consolidate something new.
 
 ---
@@ -1015,6 +1023,13 @@ focused item across detail navigation and section switches.
 Continue Watching and Next Up use 16:9 cards (176dp) with the series title and
 `SxxEyy · episode title` under them; the other rows are caption-less posters (100 x 150dp),
 since the hero names the focused one. A opens details and X plays or resumes, on any row.
+
+In Glass (#11) Home is the prototype's: a 204dp hero whose art runs under the bar and fades into
+the page through `FadedImageView` (solid to 40%, gone by 97%, the word shade inside the same
+layer), the eyebrow's code in the accent (`HeroContent.eyebrowMark`), Play as a white pill that
+names Next up's episode (`playAction`: "Play S2E1") beside a glass Details; rows from 204dp with
+Figtree bold titles, 186dp tiles and 82 x 123dp posters, Coming up's day on a glass chip, and no
+fades at the rows' edges. Classic keeps the sizes above.
 
 **Y / Profiles** opens the profile picker; the selection persists on the handheld and is sent as
 `X-Jellyfin-User`. The hub varies and keys Home and Library caches by that id. Changing profile

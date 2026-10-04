@@ -25,7 +25,11 @@ data class HeroContent(
     /** Hub-relative; empty when there is no artwork at all. */
     val backdrop: String,
     /** Coming-up titles are not in the library yet: Details only. */
-    val canPlay: Boolean = true
+    val canPlay: Boolean = true,
+    /** The end of [eyebrow] that Glass draws in the accent: the episode code, or the day on Coming up. */
+    val eyebrowMark: String = "",
+    /** The words on Glass's white Play pill: "Resume", "Play S2E1" on Next up, "Play". Classic keeps [playLabel]. */
+    val playAction: String = playLabel
 )
 
 object HomeHero {
@@ -64,26 +68,43 @@ object HomeHero {
             hit.rating.takeIf { it > 0 }?.let { String.format(Locale.US, "★ %.1f", it) }.orEmpty()
         ).filter(String::isNotBlank)
         val left = if (watching && runtime > 0) Fmt.runtime((runtime * (1 - hit.progress)).toLong()).let { "$it left" } else ""
-        // An episode shows its series' backdrop from the first frame: the card's
-        // poster is the series' own, so its id is known before any details
-        // arrive, and the hero never starts on the still and then swaps.
-        val seriesId = if (episode) detail?.seriesId?.takeIf(String::isNotBlank) ?: seriesIdFromPoster(hit.media.poster, hit.jellyfinItemId) else null
-        val backdrop = when {
-            seriesId != null -> "/v1/img/jf/$seriesId/Backdrop"
-            else -> detail?.backdrop?.takeIf(String::isNotBlank) ?: hit.media.backdrop.ifBlank { hit.media.poster }
-        }
+        val mark = if (rowId == HomeRows.UPCOMING) hit.subtitle.uppercase(Locale.ROOT) else code
         return HeroContent(
             itemId = hit.jellyfinItemId,
             type = hit.media.type,
-            eyebrow = listOf(eyebrowFor(rowId, rowTitle), if (rowId == HomeRows.UPCOMING) hit.subtitle.uppercase(Locale.ROOT) else code)
-                .filter(String::isNotBlank).joinToString(" · "),
+            eyebrow = listOf(eyebrowFor(rowId, rowTitle), mark).filter(String::isNotBlank).joinToString(" · "),
+            eyebrowMark = mark,
             title = hit.media.title,
             meta = meta,
             progress = if (watching) hit.progress else 0.0,
             progressLabel = left,
             playLabel = if (watching) "Resume" else "Play",
-            backdrop = backdrop,
+            // The next episode by name, as the prototype's pill says it: you are
+            // about to start something new, and which one is worth seeing.
+            playAction = when {
+                watching -> "Resume"
+                rowId == "nextup" && code.isNotEmpty() -> "Play $code"
+                else -> "Play"
+            },
+            backdrop = backdrop(hit, detail),
             canPlay = hit.jellyfinItemId.isNotEmpty()
         )
+    }
+
+    /**
+     * The hero's artwork for a card, which in Glass is also the page's: hub-
+     * relative, empty when there is none. On its own so a row can ask for the
+     * page's colours of every card it binds, before focus reaches one.
+     */
+    fun backdrop(hit: SearchHit, detail: LibraryItem? = null): String {
+        // An episode shows its series' backdrop from the first frame: the card's
+        // poster is the series' own, so its id is known before any details
+        // arrive, and the hero never starts on the still and then swaps.
+        val seriesId = if (hit.media.type == "episode") detail?.seriesId?.takeIf(String::isNotBlank)
+            ?: seriesIdFromPoster(hit.media.poster, hit.jellyfinItemId) else null
+        return when {
+            seriesId != null -> "/v1/img/jf/$seriesId/Backdrop"
+            else -> detail?.backdrop?.takeIf(String::isNotBlank) ?: hit.media.backdrop.ifBlank { hit.media.poster }
+        }
     }
 }

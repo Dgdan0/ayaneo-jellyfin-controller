@@ -60,6 +60,8 @@ class ConsolidationGuardTest {
         Rule(Regex("""IntentFilter\(\s*OfflineRepository\.ACTION_CHANGED"""),
             "offline/OfflineChanges: start in onShow, stop in onHide; no registered flag to keep",
             setOf("offline/OfflineChanges.kt")),
+        Rule(Regex("""(setTextColor\(|AppIconDrawable\([^,()]+,\s*)(this@\w+\.)?colors\.background\b"""),
+            "PocketColors.inverseText for words and icons on a white pill: Glass's page colour paints nothing"),
     )
 
     @Test

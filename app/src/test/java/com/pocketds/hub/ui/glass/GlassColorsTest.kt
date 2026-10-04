@@ -54,6 +54,40 @@ class GlassColorsTest {
         }
     }
 
+    @Test fun `the bars are more solid than a panel and their words and key caps read over any page`() {
+        val samples = listOf(
+            ArtworkPalette(0xFFD0B366.toInt(), 0xFF1D1500.toInt(), 0xFFD0B366.toInt(), 0xFFF2E4BF.toInt()),
+            ArtworkPalette(0xFFFDF010.toInt(), 0xFF191700.toInt(), 0xFFE2D700.toInt(), 0xFFE9E7C1.toInt()),
+            ArtworkPalette(0xFF6A0F0D.toInt(), 0xFF2C0806.toInt(), 0xFFDD2722.toInt(), 0xFFFFDBD6.toInt()),
+            ArtworkPalette.NEUTRAL
+        )
+        for (p in samples) {
+            assertTrue(GlassColors.alpha(GlassColors.bar(p)) > GlassColors.alpha(GlassColors.panel(p)))
+            val bar = GlassColors.over(GlassColors.bar(p), p.dark)
+            assertTrue("words on ${Integer.toHexString(bar)}", GlassColors.contrast(GlassColors.over(GlassColors.BAR_TEXT, bar), bar) >= 7.0)
+            // A cap's dark letter on the cap, and the cap against the bar it sits on.
+            val cap = GlassColors.over(GlassColors.KEY_CAP, bar)
+            assertTrue(GlassColors.contrast(GlassColors.INK, cap) >= 7.0)
+            assertTrue(GlassColors.contrast(cap, bar) >= 7.0)
+        }
+    }
+
+    @Test fun `a sheet is the panel's tint and hides the words under it`() {
+        val gold = ArtworkPalette(0xFFD0B366.toInt(), 0xFF1D1500.toInt(), 0xFFD0B366.toInt(), 0xFFF2E4BF.toInt())
+        val sheet = GlassColors.sheet(gold)
+        assertEquals(GlassColors.panel(gold) and 0xFFFFFF, sheet and 0xFFFFFF)
+        // White words under the sheet, already halved by the scrim, change it by under 3%.
+        val under = GlassColors.over(0x80FFFFFF.toInt(), 0xFF000000.toInt())
+        val through = GlassColors.over(sheet, under)
+        val solid = GlassColors.over(sheet, 0xFF000000.toInt())
+        assertTrue(GlassColors.red(through) - GlassColors.red(solid) <= 0.03 * 255)
+    }
+
+    @Test fun `the selected tab and a lit button keep their dark words readable`() {
+        assertTrue(GlassColors.contrast(GlassColors.INK, 0xFFFFFFFF.toInt()) >= 15.0)
+        assertEquals(0xFF, GlassColors.alpha(GlassColors.INK))
+    }
+
     @Test fun `contrast matches WCAG's endpoints`() {
         assertEquals(21.0, GlassColors.contrast(0xFF000000.toInt(), 0xFFFFFFFF.toInt()), 0.01)
         assertEquals(1.0, GlassColors.contrast(0xFF7F7F7F.toInt(), 0xFF7F7F7F.toInt()), 0.0001)

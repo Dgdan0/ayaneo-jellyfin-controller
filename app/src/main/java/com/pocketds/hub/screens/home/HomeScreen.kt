@@ -35,9 +35,11 @@ import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.PosterCardView
+import com.pocketds.hub.ui.SidePanelView
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.Type
+import com.pocketds.hub.ui.textWeight
 import com.pocketds.hub.ui.typeRole
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +71,12 @@ class HomeScreen(
     override val horizontalMode = HorizontalMode.CONFINED
     override val drawsUnderTopBar: Boolean get() = mode == ContentMode.MEDIA
     override val showsOwnTitle = true
+    /** The focused card's artwork, which the hero is already showing; on Books Home, the cover in focus. */
+    override val pageArtwork: String? get() = when {
+        mode == ContentMode.BOOKS -> if (::readingHome.isInitialized) readingHome.pageArtwork else null
+        ::hero.isInitialized -> hero.content?.backdrop
+        else -> null
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val adapter = RowsAdapter()
@@ -76,7 +84,10 @@ class HomeScreen(
     private lateinit var status: TextView
     private lateinit var hero: HomeHeroView
     private lateinit var rows: RecyclerView
-    private lateinit var userOverlay: ChoiceOverlay
+    /** Classic's list of names, or Glass's card of profile tiles (ProfilePickerView). */
+    private lateinit var userOverlay: SidePanelView
+    /** The Glass home (GLASS_PLAN.md): the prototype's hero, tiles, posters and profile card. */
+    private var glass = false
     private lateinit var mediaContent: FrameLayout
     private lateinit var readingHome: ReadingHomeView
     private var mode = ContentMode.MEDIA
@@ -105,6 +116,7 @@ class HomeScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
+        glass = Theme.onGlass(colors)
         mode = ContentModeSettings.get(host.viewContext)
         val frame = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
 
@@ -114,13 +126,13 @@ class HomeScreen(
         }
         frame.addView(mediaContent, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        hero = HomeHeroView(host.viewContext, colors, api, ringVisible).apply {
+        hero = HomeHeroView(host.viewContext, colors, api, ringVisible, glass).apply {
             visibility = View.INVISIBLE
             onPlay = ::playHero
             onDetails = { heroHit?.let(::open) }
             onButtonFocused = { host.refreshHints() }
         }
-        mediaContent.addView(hero, FrameLayout.LayoutParams(MATCH, dp(HERO_DP)))
+        mediaContent.addView(hero, FrameLayout.LayoutParams(MATCH, dp(if (glass) HomeHeroView.GLASS_HEIGHT_DP else HERO_DP)))
 
         status = TextView(host.viewContext).apply {
             textSize = 12f
@@ -128,14 +140,14 @@ class HomeScreen(
             gravity = Gravity.END
         }
         mediaContent.addView(status, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP).apply {
-            topMargin = dp(HomeHeroView.TOP_DP); leftMargin = dp(24); rightMargin = dp(24)
+            topMargin = dp(if (glass) HomeHeroView.GLASS_TOP_DP else HomeHeroView.TOP_DP); leftMargin = dp(24); rightMargin = dp(24)
         })
 
         rows = RecyclerView(host.viewContext).apply {
             adapter = this@HomeScreen.adapter
             // The focused row always rests at the top, so the hero above it
             // stays one size whichever row you are on.
-            pinFocusedRows(SHORTEST_ROW_DP)
+            pinFocusedRows(if (glass) GLASS_SHORTEST_ROW_DP else SHORTEST_ROW_DP)
             clipChildren = false
             setItemViewCacheSize(8)
             addOnChildAttachStateChangeListener(
@@ -156,27 +168,34 @@ class HomeScreen(
         // Rows that scroll up are clipped at the list's top edge rather than
         // drawn over the hero's words: this frame clips, the list does not.
         val rowsFrame = FrameLayout(host.viewContext).apply { addView(rows, FrameLayout.LayoutParams(MATCH, MATCH)) }
-        mediaContent.addView(rowsFrame, FrameLayout.LayoutParams(MATCH, MATCH).apply { topMargin = dp(ROWS_TOP_DP) })
-        // What scrolls up out of the rows fades instead of leaving a sliver of
-        // the row above. Only while a row is cut at the top edge: at rest the
-        // focused row starts exactly there, and the fade would dim its heading.
-        val topFade = View(host.viewContext).apply {
-            background = com.pocketds.hub.ui.ScrimDrawable(colors, com.pocketds.hub.ui.ScrimDrawable.Edge.TOP, listOf(0f to 1f, 1f to 0f))
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            visibility = View.INVISIBLE
-        }
-        mediaContent.addView(topFade, FrameLayout.LayoutParams(MATCH, dp(18), Gravity.TOP).apply { topMargin = dp(ROWS_TOP_DP) })
-        rows.addOnScrollListener(object : RecyclerView.OnScrollListener() {
-            override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
-                val cut = (0 until view.childCount).map(view::getChildAt).firstOrNull { it.bottom > 0 }?.let { it.top < 0 } == true
-                topFade.visibility = if (cut) View.VISIBLE else View.INVISIBLE
-            }
+        mediaContent.addView(rowsFrame, FrameLayout.LayoutParams(MATCH, MATCH).apply {
+            topMargin = dp(if (glass) GLASS_ROWS_TOP_DP else ROWS_TOP_DP)
         })
-        // The next row's heading peeks in under a fade rather than being cut.
-        mediaContent.addView(View(host.viewContext).apply {
-            background = com.pocketds.hub.ui.ScrimDrawable(colors, com.pocketds.hub.ui.ScrimDrawable.Edge.BOTTOM, listOf(0f to 1f, 1f to 0f))
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, FrameLayout.LayoutParams(MATCH, dp(26), Gravity.BOTTOM))
+        // Glass rows run straight onto the page and are cut by the hero's faded
+        // foot and the hint bar, as the prototype's are: a fade to the page
+        // colour would lay a dark band over the artwork's colours there.
+        if (!glass) {
+            // What scrolls up out of the rows fades instead of leaving a sliver of
+            // the row above. Only while a row is cut at the top edge: at rest the
+            // focused row starts exactly there, and the fade would dim its heading.
+            val topFade = View(host.viewContext).apply {
+                background = com.pocketds.hub.ui.ScrimDrawable(colors, com.pocketds.hub.ui.ScrimDrawable.Edge.TOP, listOf(0f to 1f, 1f to 0f))
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                visibility = View.INVISIBLE
+            }
+            mediaContent.addView(topFade, FrameLayout.LayoutParams(MATCH, dp(18), Gravity.TOP).apply { topMargin = dp(ROWS_TOP_DP) })
+            rows.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+                override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
+                    val cut = (0 until view.childCount).map(view::getChildAt).firstOrNull { it.bottom > 0 }?.let { it.top < 0 } == true
+                    topFade.visibility = if (cut) View.VISIBLE else View.INVISIBLE
+                }
+            })
+            // The next row's heading peeks in under a fade rather than being cut.
+            mediaContent.addView(View(host.viewContext).apply {
+                background = com.pocketds.hub.ui.ScrimDrawable(colors, com.pocketds.hub.ui.ScrimDrawable.Edge.BOTTOM, listOf(0f to 1f, 1f to 0f))
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, FrameLayout.LayoutParams(MATCH, dp(26), Gravity.BOTTOM))
+        }
 
         readingHome = ReadingHomeView(host.viewContext, api, host, colors, ringVisible).apply {
             onChooseProfile = { if (users.isEmpty()) loadUsers(openWhenReady = true) else showUsers() }
@@ -184,7 +203,7 @@ class HomeScreen(
         }
         frame.addView(readingHome, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        userOverlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
+        userOverlay = if (glass) ProfilePickerView(host.viewContext, colors, ringVisible) else ChoiceOverlay(host.viewContext, colors, ringVisible)
         frame.addView(userOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
         return frame
     }
@@ -234,7 +253,8 @@ class HomeScreen(
     override fun hints() = if (::userOverlay.isInitialized && userOverlay.isOpen) {
         listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
     } else if (mode == ContentMode.BOOKS) readingHome.hints() else if (heroHasFocus()) {
-        listOf(ButtonHint.activate(if (hero.play.isFocused) hero.content?.playLabel ?: "Play" else "Details"),
+        // The pill's own words, so A says "Play S2E1" where the Glass pill does.
+        listOf(ButtonHint.activate(if (hero.play.isFocused) hero.play.text.toString() else "Details"),
             ButtonHint.secondary("Profiles"), ButtonHint.refresh())
     } else {
         listOfNotNull(
@@ -355,8 +375,15 @@ class HomeScreen(
             host?.notify("No enabled Jellyfin users were found")
             return
         }
+        (userOverlay as? ProfilePickerView)?.let { picker ->
+            picker.show(users, onCancel = { host?.refreshHints() }) { picked ->
+                host?.selectJellyfinUser(picked.id, picked.name)
+            }
+            host?.refreshHints()
+            return
+        }
         val selectedIndex = users.indexOfFirst { it.selected }.coerceAtLeast(0)
-        userOverlay.show(
+        (userOverlay as ChoiceOverlay).show(
             title = "Who is watching?",
             subtitle = "Continue Watching, Next Up and progress use this profile.",
             choices = users.map {
@@ -475,6 +502,7 @@ class HomeScreen(
         heroHit = hit
         val id = hit.jellyfinItemId
         hero.bind(HomeHero.from(row.id, row.title, hit, heroDetails[id]))
+        host?.pageArtworkChanged()
         if (id.isEmpty() || heroDetails.containsKey(id)) return
         heroJob?.cancel()
         heroJob = scope.launch {
@@ -483,7 +511,10 @@ class HomeScreen(
             val detail = (api.libraryItem(id) as? HubResult.Ok)?.value?.item ?: return@launch
             heroDetails[id] = detail
             val current = heroHit
-            if (current?.jellyfinItemId == id) hero.bind(HomeHero.from(row.id, row.title, current, detail))
+            if (current?.jellyfinItemId == id) {
+                hero.bind(HomeHero.from(row.id, row.title, current, detail))
+                host?.pageArtworkChanged()
+            }
         }
     }
 
@@ -574,9 +605,16 @@ class HomeScreen(
             orientation = VERTICAL
             clipChildren = false
             label = TextView(context).apply {
-                typeRole(Type.Role.HEADING)
+                if (glass) {
+                    // The prototype's row title: Figtree, bold, 14.
+                    textSize = 14f
+                    textWeight(700)
+                    setPadding(dp(GLASS_EDGE_DP), dp(4), dp(GLASS_EDGE_DP), dp(2))
+                } else {
+                    typeRole(Type.Role.HEADING)
+                    setPadding(dp(24), dp(6), dp(24), dp(2))
+                }
                 setTextColor(colors.primaryText)
-                setPadding(dp(24), dp(6), dp(24), dp(2))
             }
             addView(label)
             strip = RecyclerView(context).apply {
@@ -588,7 +626,8 @@ class HomeScreen(
                 setItemViewCacheSize(8)
                 // The first card lines up with the hero's words; the focus lift
                 // still has room inside the edge.
-                setPadding(dp(24 - CARD_GAP_DP / 2), 0, dp(24 - CARD_GAP_DP / 2), 0)
+                val edge = if (glass) GLASS_EDGE_DP else 24
+                setPadding(dp(edge - CARD_GAP_DP / 2), 0, dp(edge - CARD_GAP_DP / 2), 0)
                 addOnChildAttachStateChangeListener(
                     object : RecyclerView.OnChildAttachStateChangeListener {
                         override fun onChildViewAttachedToWindow(view: View) {
@@ -653,14 +692,14 @@ class HomeScreen(
             override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder {
                 val margin = dp(CARD_GAP_DP / 2)
                 val card: View = if (viewType == CARD_LANDSCAPE) {
-                    LandscapeCardView(parent.context, colors).apply {
-                        layoutParams = RecyclerView.LayoutParams(dp(LANDSCAPE_CARD_DP), WRAP).apply {
+                    LandscapeCardView(parent.context, colors, glass).apply {
+                        layoutParams = RecyclerView.LayoutParams(dp(if (glass) GLASS_TILE_DP else LANDSCAPE_CARD_DP), WRAP).apply {
                             setMargins(margin, margin, margin, margin)
                         }
                     }
                 } else {
-                    PosterCardView(parent.context, colors, POSTER_DP, captions = false).apply {
-                        layoutParams = RecyclerView.LayoutParams(dp(POSTER_CARD_DP), WRAP).apply {
+                    PosterCardView(parent.context, colors, if (glass) GLASS_POSTER_DP else POSTER_DP, captions = false, glass = glass).apply {
+                        layoutParams = RecyclerView.LayoutParams(dp(if (glass) GLASS_POSTER_CARD_DP else POSTER_CARD_DP), WRAP).apply {
                             setMargins(margin, margin, margin, margin)
                         }
                     }
@@ -676,11 +715,16 @@ class HomeScreen(
                 when (card) {
                     is PosterCardView -> {
                         card.bind(hit, loader, api::imageUrl, showAvailability = false)
-                        if (row?.id == HomeRows.UPCOMING) card.setCornerTag(hit.subtitle.substringBefore(" · "))
+                        if (row?.id == HomeRows.UPCOMING) {
+                            val day = hit.subtitle.substringBefore(" · ")
+                            if (glass) card.setDayChip(day) else card.setCornerTag(day)
+                        }
                     }
                     is LandscapeCardView -> card.bind(hit, loader, api::imageUrl)
                 }
                 card.setTag(TAG_HIT, hit)
+                // The page's colours for this card, asked for before focus gets here.
+                host?.prefetchArtwork(listOf(HomeHero.backdrop(hit, heroDetails[hit.jellyfinItemId])).filter(String::isNotBlank))
                 card.activateOnTap { open(hit) }
                 FocusDecorator.listen(card, ringVisible) { _, focused ->
                     if (focused) {
@@ -715,6 +759,16 @@ class HomeScreen(
         const val POSTER_CARD_DP = 100
         const val LANDSCAPE_CARD_DP = 176
         const val CARD_GAP_DP = 12
+        /**
+         * Glass, the prototype's Pocket home: rows from the hero's 204dp foot,
+         * 22dp page edges, 186dp tiles and 82 x 123dp posters.
+         */
+        const val GLASS_ROWS_TOP_DP = 204
+        const val GLASS_EDGE_DP = 22
+        const val GLASS_TILE_DP = 186
+        const val GLASS_POSTER_CARD_DP = 82
+        const val GLASS_POSTER_DP = 123f
+        const val GLASS_SHORTEST_ROW_DP = 150f
         const val CARD_POSTER = 0
         const val CARD_LANDSCAPE = 1
         const val TAG_HIT = -0x7fffffe0

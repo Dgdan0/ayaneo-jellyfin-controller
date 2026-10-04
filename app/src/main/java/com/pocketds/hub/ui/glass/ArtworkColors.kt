@@ -40,6 +40,8 @@ class ArtworkColors private constructor(private val appContext: Context, private
         scope.launch {
             val kept = withContext(Dispatchers.IO) { load() }
             book.restore(kept)
+            // A page asked before the file was read: the file may answer it.
+            deliverKnown()
         }
     }
 
@@ -71,10 +73,23 @@ class ArtworkColors private constructor(private val appContext: Context, private
         listeners[src]?.remove(onReady)
     }
 
+    /**
+     * Calls back everyone waiting for colours the book has by now. Without
+     * this, an ask answered by the file rather than the hub was dropped from
+     * the queue unanswered, and the first page after a start stayed neutral.
+     */
+    private fun deliverKnown() {
+        for (src in listeners.keys.toList()) {
+            val palette = book.palette(src) ?: continue
+            listeners.remove(src)?.forEach { it(palette) }
+        }
+    }
+
     private fun schedule(afterMs: Long) {
         if (sending?.isActive == true) return
         sending = scope.launch {
             delay(afterMs)
+            deliverKnown()
             while (queued.isNotEmpty()) {
                 val asked = book.toAsk(queued.toList(), now())
                 queued.removeAll(queued.filter { book.palette(it) != null || book.isMissing(it) || it in asked }.toSet())

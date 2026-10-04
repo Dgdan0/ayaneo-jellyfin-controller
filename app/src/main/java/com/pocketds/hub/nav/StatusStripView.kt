@@ -39,7 +39,7 @@ class StatusStripView(context: Context, private val colors: PocketColors) : AppC
             cornerRadius = Styler.dp(context, 18f)
             setColor(this@StatusStripView.colors.primaryText)
         }
-        setTextColor(colors.background)
+        setTextColor(colors.inverseText)
         maxLines = 2
         val padH = Styler.dpInt(context, 16f)
         val padV = Styler.dpInt(context, 8f)

@@ -16,6 +16,9 @@ import com.pocketds.hub.model.Availability
 import com.pocketds.hub.model.SearchHit
 import com.pocketds.hub.model.ReadingItem
 import com.pocketds.hub.model.ReadingWork
+import com.pocketds.hub.ui.glass.GlassColors
+import com.pocketds.hub.ui.glass.GlassPage
+import com.pocketds.hub.ui.glass.GlassPanelDrawable
 
 /**
  * One title in a grid: poster, badge, title, subtitle.
@@ -23,6 +26,11 @@ import com.pocketds.hub.model.ReadingWork
  * The placeholder is a flat colour rather than a spinner. Twenty-five spinning
  * progress bars is twenty-five running animators and a screen that reads as
  * broken; a flat fill lets the grid appear instantly as a grid and fill in.
+ *
+ * [glass] is the Glass poster (GLASS_PLAN.md): 11dp corners and a 3dp ring, a
+ * count as a white pill and a tick in the accent, and the day of a coming-up
+ * title on a strip of the page's glass ([setDayChip]). Screens opt in as their
+ * Glass milestone lands.
  */
 class PosterCardView(
     context: Context,
@@ -38,7 +46,8 @@ class PosterCardView(
      * Title and subtitle under the poster. Home turns them off: its hero names
      * the focused card in large type, and a row without captions fits under it.
      */
-    private val captions: Boolean = true
+    private val captions: Boolean = true,
+    private val glass: Boolean = false
 ) : LinearLayout(context) {
 
     private val poster: ImageView
@@ -52,6 +61,8 @@ class PosterCardView(
     private val subtitle: TextView
     private val progressBar: ArtworkProgressView
     private val compactCard: Boolean
+    /** Glass: "Tomorrow" on a coming-up title, along the poster's foot. */
+    private var dayChip: TextView? = null
 
     init {
         orientation = VERTICAL
@@ -66,9 +77,10 @@ class PosterCardView(
         val compact = posterHeightDp < 170f
         setPadding(0, 0, 0, if (captions) Styler.dpInt(context, 6f) else 0)
 
-        val posterWrap = ArtworkFrame(context, 2f / 3f).apply {
+        val corner = if (glass) ArtworkFrame.GLASS_CORNER_DP else ArtworkFrame.CORNER_DP
+        val posterWrap = ArtworkFrame(context, 2f / 3f, corner).apply {
             isDuplicateParentStateEnabled = true
-            foreground = Styler.focusOutline(context, colors)
+            foreground = Styler.focusOutline(context, colors, corner, if (glass) 3f else 2f)
         }
         poster = ImageView(context).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -128,6 +140,26 @@ class PosterCardView(
         // downloading -- readable at a glance without reading any text.
         progressBar = ArtworkProgressView(context, colors.accent)
         posterWrap.addView(progressBar, FrameLayout.LayoutParams(MATCH, Styler.dpInt(context, 4f), Gravity.BOTTOM))
+        if (glass) dayChip = TextView(context).apply {
+            textSize = 11f
+            textWeight(700)
+            setTextColor(android.graphics.Color.WHITE)
+            gravity = Gravity.CENTER
+            maxLines = 1
+            includeFontPadding = false
+            setPadding(Styler.dpInt(context, 7f), Styler.dpInt(context, 5f), Styler.dpInt(context, 7f), Styler.dpInt(context, 5f))
+            // Nearly solid, as a sheet is: it sits on the poster's own lettering,
+            // and a see-through strip let "SLOW HORSES" run through "Wed".
+            val strip = GlassPanelDrawable(
+                GlassColors.sheet(GlassPage.palette(context)), Styler.dp(context, 9f))
+            background = strip
+            GlassPage.follow(this) { page -> strip.retint(GlassColors.sheet(page)) }
+            visibility = GONE
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        }.also { chip ->
+            val edge = Styler.dpInt(context, 6f)
+            posterWrap.addView(chip, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM).apply { setMargins(edge, 0, edge, edge) })
+        }
         addView(posterWrap, LayoutParams(MATCH, WRAP))
 
         title = TextView(context).apply {
@@ -166,6 +198,8 @@ class PosterCardView(
         showAvailability: Boolean
     ) {
         kindTag.visibility = GONE
+        // A recycled card keeps no day from the row it came from.
+        dayChip?.visibility = GONE
         title.text = hit.media.title
         contentDescription = listOf(hit.media.title, hit.subtitle).filter { it.isNotBlank() }.joinToString(", ")
         subtitle.text = hit.subtitle
@@ -285,6 +319,16 @@ class PosterCardView(
             onMissing = { if (token == bindToken) missingArt.visibility = VISIBLE })
     }
 
+    /**
+     * Glass: the day of a coming-up title on a strip of glass along the
+     * poster's foot ("Tomorrow"), as the prototype marks them. Null removes it.
+     */
+    fun setDayChip(text: String?) {
+        val chip = dayChip ?: return setCornerTag(text)
+        chip.text = text.orEmpty()
+        chip.visibility = if (text.isNullOrBlank()) GONE else VISIBLE
+    }
+
     /** A word in an accent pill at the top corner: "Fri" on a coming-up title. Null removes it. */
     fun setCornerTag(text: String?) {
         if (text.isNullOrBlank()) { badge.visibility = GONE; return }
@@ -301,6 +345,7 @@ class PosterCardView(
 
     /** A count or ✓ in a coloured circle: watched, unwatched episodes, books in a collection. */
     private fun roundBadge(text: String, color: Int) {
+        if (glass) return glassBadge(text)
         badge.visibility = VISIBLE
         badge.text = text
         badge.background = ThemeGradientDrawable().apply {
@@ -310,6 +355,33 @@ class PosterCardView(
         badge.minWidth = Styler.dpInt(context, 24f)
         badge.gravity = Gravity.CENTER
         badge.setTextColor(SemanticColor.foreground(color))
+    }
+
+    /**
+     * Glass: a count (or a star) in a white pill with dark figures, a tick in
+     * the accent's circle, as the prototype's posters carry them.
+     */
+    private fun glassBadge(text: String) {
+        val tick = text == "✓"
+        badge.visibility = VISIBLE
+        badge.text = text
+        badge.textSize = 11f
+        badge.textWeight(700)
+        badge.gravity = Gravity.CENTER
+        badge.includeFontPadding = false
+        val side = Styler.dpInt(context, if (tick) 0f else 7f)
+        badge.setPadding(side, 0, side, 0)
+        badge.minWidth = Styler.dpInt(context, if (tick) 22f else 24f)
+        badge.minHeight = Styler.dpInt(context, 22f)
+        badge.background = if (tick) ThemeGradientDrawable.oval(colors.accent)
+            else ThemeGradientDrawable.rounded(Styler.dp(context, 11f), GLASS_COUNT)
+        badge.setTextColor(if (tick) colors.accentText else GlassColors.INK)
+        (badge.layoutParams as? FrameLayout.LayoutParams)?.let {
+            val edge = Styler.dpInt(context, 6f)
+            it.topMargin = edge
+            it.marginEnd = edge
+            badge.layoutParams = it
+        }
     }
 
     private fun badgeColour(availability: Availability): Int = when (availability) {
@@ -327,5 +399,7 @@ class PosterCardView(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        /** A Glass poster's count pill: white at 90%. */
+        const val GLASS_COUNT = 0xE6FFFFFF.toInt()
     }
 }

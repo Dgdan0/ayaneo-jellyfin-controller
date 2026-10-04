@@ -36,6 +36,7 @@ import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FormOverlay
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
+import com.pocketds.hub.nav.PageArtwork
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubResult
@@ -101,6 +102,8 @@ class MediaDetailScreen(
     private lateinit var flow: RequestFlow
 
     override val drawsUnderTopBar = true
+    /** The picture across the top of the page: the backdrop, else the poster. */
+    override val pageArtwork: String? get() = detail?.let { PageArtwork.title(it.media.backdrop, it.media.poster) }
     override val showsOwnTitle = true
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
@@ -360,6 +363,7 @@ class MediaDetailScreen(
         header.bindArtwork(d.media.type,
             d.media.backdrop.takeIf(String::isNotBlank)?.let { api.imageUrl(HubEndpoints.sized(it, ART_WIDTH_PX)) },
             d.media.poster.takeIf(String::isNotBlank)?.let(api::imageUrl), Artwork.loader(api, header.context))
+        host?.pageArtworkChanged()
 
         host?.refreshHints()
     }

@@ -12,6 +12,8 @@ enum class AppIcon { CLOSE, CONTENTS, APPEARANCE, PREVIOUS, NEXT, PREVIOUS_ITEM,
 class AppIconDrawable(private val icon: AppIcon, color: Int) : Drawable() {
     private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {this.color=color;style=Paint.Style.STROKE;strokeWidth=1.8f;strokeCap=Paint.Cap.ROUND;strokeJoin=Paint.Join.ROUND}
     fun recolor(replacements: Map<Int, Int>) { replacements[paint.color]?.let { paint.color=it; invalidateSelf() } }
+    /** One colour, for an icon that follows its label's (a segment going from off to on). */
+    fun tint(color: Int) { if (paint.color != color) { paint.color=color; invalidateSelf() } }
     override fun draw(canvas: Canvas) {
         canvas.save();canvas.translate(bounds.left.toFloat(),bounds.top.toFloat());canvas.scale(bounds.width()/24f,bounds.height()/24f)
         fun line(x:Float,y:Float,a:Float,b:Float)=canvas.drawLine(x,y,a,b,paint)

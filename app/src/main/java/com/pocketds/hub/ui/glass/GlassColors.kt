@@ -46,6 +46,24 @@ object GlassColors {
     const val EDGE: Int = 0x2BFFFFFF
     const val HIGHLIGHT: Int = 0x26FFFFFF
 
+    /** Dark type on white: the selected tab, a lit icon button, a key cap. The prototype's #0B0D12. */
+    const val INK: Int = 0xFF0B0D12.toInt()
+    /** A key cap in the hint bar, and the words beside it: white at 92%. */
+    const val KEY_CAP: Int = 0xEBFFFFFF.toInt()
+    const val BAR_TEXT: Int = 0xEBFFFFFF.toInt()
+    /** The hint bar's top edge: white at 10%. */
+    const val BAR_EDGE: Int = 0x1AFFFFFF
+    /** The L1 and R1 caps: white words at 75% in a white outline at 45%. */
+    const val SHOULDER_TEXT: Int = 0xBFFFFFFF.toInt()
+    const val SHOULDER_EDGE: Int = 0x73FFFFFF
+    /**
+     * The shade behind the top bar, half black fading to nothing, so the
+     * capsules and the caps read over the brightest artwork.
+     */
+    const val BAR_SCRIM: Int = 0x80000000.toInt()
+    /** A notification count on its button. */
+    const val BADGE: Int = 0xFFFF5A5F.toInt()
+
     fun parse(hex: String): Int? {
         if (hex.length != 7 || hex[0] != '#') return null
         val rgb = hex.substring(1).toIntOrNull(16) ?: return null
@@ -74,6 +92,17 @@ object GlassColors {
     /** The bars along the top and the bottom of the Pocket: a touch more solid than a panel. */
     fun bar(palette: ArtworkPalette): Int =
         withAlpha(mix(PANEL_BASE, palette.dominant, PANEL_TINT * 0.9f), 0xD6)
+
+    /**
+     * A side sheet or a dialog: the panel's tint, nearly solid. A panel is see-
+     * through because what is under it is the already blurred page; a sheet
+     * opens over a screen's own words and posters, and without a blur, words
+     * showing through at a fifth of their strength fought the sheet's own
+     * (the hero's runtime ran through "Who is watching?").
+     */
+    fun sheet(palette: ArtworkPalette): Int = withAlpha(panel(palette), SHEET_ALPHA)
+
+    const val SHEET_ALPHA = 0xF2
 
     /** WCAG relative luminance, 0 for black to 1 for white. */
     fun luminance(c: Int): Double {

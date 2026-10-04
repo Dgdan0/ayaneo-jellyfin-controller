@@ -33,6 +33,8 @@ import com.pocketds.hub.settings.AccentPreset
 import com.pocketds.hub.settings.DomainPreferences
 import com.pocketds.hub.settings.HomeRowSettings
 import com.pocketds.hub.settings.HubSettings
+import com.pocketds.hub.settings.Look
+import com.pocketds.hub.settings.LookSettings
 import com.pocketds.hub.settings.NotificationSettings
 import com.pocketds.hub.settings.PlaybackSettings
 import com.pocketds.hub.settings.SubtitleSettings
@@ -68,7 +70,8 @@ import kotlinx.coroutines.launch
  * and the chosen section's cards on the right. Moving down the sections shows
  * each one as you pass; Right goes into it.
  *
- * Appearance picks the theme and a colour per media type, Home orders its
+ * Appearance picks the look (Glass, or Classic with its light and dark
+ * themes) and a colour per media type, Home orders its
  * rows, Playback holds what used to be in the player (skip distance, the next
  * episode, intros), and Subtitles has a live preview drawn by the player's own
  * subtitle renderer, so what you choose is what you get.
@@ -220,7 +223,18 @@ class SettingsScreen(
 
     private fun appearance() {
         val context = host.viewContext
-        card().title("Theme").body(blob(listOf("DARK" to "Dark", "LIGHT" to "Light", "SYSTEM" to "Match the system"),
+        val look = LookSettings.get(context)
+        // A new look rebuilds the app, as dark and light do; Settings reopens here.
+        card().title("Look").hint(if (look == Look.GLASS)
+                "The page takes the colour of the artwork in focus, under panels of tinted glass. Always dark."
+            else "The look before Glass, with its own light and dark themes. It goes once Glass is finished.")
+            .body(blob(Look.entries.map { it.name to it.label }, look.name, "look") { id ->
+                LookSettings.set(context, Look.valueOf(id))
+                host.refreshAppearance()
+                render()
+            })
+        // Glass is always dark, so the theme is Classic's alone.
+        if (look == Look.CLASSIC) card().title("Theme").body(blob(listOf("DARK" to "Dark", "LIGHT" to "Light", "SYSTEM" to "Match the system"),
             ThemeSettings.getMode(context).name, "theme") { id ->
             ThemeSettings.setMode(context, ThemeSettings.Mode.valueOf(id))
             host.refreshAppearance()
