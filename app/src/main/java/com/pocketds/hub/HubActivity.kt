@@ -352,6 +352,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             onFocused = { refreshHints() }
         }
         stage.addView(topBar, FrameLayout.LayoutParams(MATCH, Styler.dpInt(this, TopBarView.HEIGHT_DP), android.view.Gravity.TOP))
+        com.pocketds.hub.ui.TopChrome.register(topBar)
 
         pageTitle = android.widget.TextView(this).apply {
             com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 19f)

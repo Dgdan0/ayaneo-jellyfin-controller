@@ -62,6 +62,8 @@ class ConsolidationGuardTest {
             setOf("offline/OfflineChanges.kt")),
         Rule(Regex("""(setTextColor\(|AppIconDrawable\([^,()]+,\s*)(this@\w+\.)?colors\.background\b"""),
             "PocketColors.inverseText for words and icons on a white pill: Glass's page colour paints nothing"),
+        Rule(Regex("""StatusMessage\("(No |Nothing |This \w+ is empty)"""),
+            "StatusText.notice(…): why a list is empty must still show on Glass, where a line shows only with news"),
     )
 
     @Test

@@ -19,6 +19,9 @@ import coil.ImageLoader
  * The people in a title, as faces in a row: a round portrait (or initials),
  * the name, and who they played. Each is focusable so the pad can run along the
  * row; [onOpen] decides whether choosing one does anything.
+ *
+ * Each face is [DetailArtworkCardView.portrait], the one round portrait with
+ * its ring round it, as an author's is.
  */
 class CastRowView(
     context: Context,
@@ -49,38 +52,20 @@ class CastRowView(
 
     val first: View? get() = row.getChildAt(0)
 
-    private fun card(person: Person, loader: ImageLoader): View = LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
-        gravity = Gravity.CENTER_HORIZONTAL
-        clipChildren = false
+    private fun card(person: Person, loader: ImageLoader): View = DetailArtworkCardView(context, colors, ringVisible).apply {
+        portrait(FACE_DP)
+        setPadding(0, dp(4), 0, dp(4))
         contentDescription = listOf(person.name, person.role).filter(String::isNotBlank).joinToString(", as ")
-        Styler.makeFocusable(this)
-        descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-        val face = FrameLayout(context).apply {
-            isDuplicateParentStateEnabled = true
-            background = ThemeGradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(this@CastRowView.colors.posterPlaceholder) }
-            clipToOutline = true
-            foreground = StateListDrawable().apply {
-                addState(intArrayOf(android.R.attr.state_focused), ThemeGradientDrawable().apply {
-                    shape = GradientDrawable.OVAL; setColor(Color.TRANSPARENT); setStroke(dp(2), this@CastRowView.colors.focusRing)
-                })
-            }
-        }
-        val image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-        face.addView(image, FrameLayout.LayoutParams(MATCH, MATCH))
-        addView(face, LinearLayout.LayoutParams(dp(FACE_DP), dp(FACE_DP)))
-        addView(TextView(context).apply {
-            text = person.name; textSize = 12f; textWeight(600); setTextColor(colors.primaryText)
-            gravity = Gravity.CENTER; maxLines = 2; ellipsize = TextUtils.TruncateAt.END
-        }, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6) })
-        if (person.role.isNotBlank()) addView(TextView(context).apply {
-            text = person.role; textSize = 11f; setTextColor(colors.mutedText)
-            gravity = Gravity.CENTER; maxLines = 2; ellipsize = TextUtils.TruncateAt.END
-        }, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(1) })
+        titleView.text = person.name
+        titleView.textSize = 12f
+        titleView.textWeight(600)
+        (titleView.layoutParams as LinearLayout.LayoutParams).topMargin = dp(6)
+        subtitleView.text = person.role
+        subtitleView.visibility = if (person.role.isBlank()) View.GONE else View.VISIBLE
+        (subtitleView.layoutParams as LinearLayout.LayoutParams).topMargin = dp(1)
         Artwork.bind(image, loader, person.image, opaque = true, onMissing = {
             image.setImageDrawable(InitialsDrawable(person.name, colors))
         })
-        FocusDecorator.attach(this, ringVisible)
         FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) onFocused?.invoke() }
         activateOnTap { onOpen?.invoke(person) }
     }
@@ -99,11 +84,15 @@ class CastRowView(
  * The facts about a title in small cards, three across: studio, director,
  * genres, the file. Focusable, so the pad can reach the bottom of a long page;
  * there is nothing to do with one.
+ *
+ * [glass] draws them as the prototype's Details list: a small capital label
+ * over the words, no card, and only the focus ring round the one in focus.
  */
 class FactsGridView(
     context: Context,
     private val colors: PocketColors,
-    private val ringVisible: () -> Boolean
+    private val ringVisible: () -> Boolean,
+    private val glass: Boolean = false
 ) : LinearLayout(context) {
     data class Fact(val label: String, val value: String)
 
@@ -131,15 +120,16 @@ class FactsGridView(
     private fun card(fact: Fact) = LinearLayout(context).apply {
         orientation = VERTICAL
         setPadding(dp(12), dp(9), dp(12), dp(10))
-        background = Styler.cardBackground(context, colors, cornerDp = 12f, focusStrokeDp = 2f)
+        background = if (glass) Styler.focusOutline(context, colors, 11f) else Styler.cardBackground(context, colors, cornerDp = 12f, focusStrokeDp = 2f)
         contentDescription = "${fact.label}: ${fact.value}"
         Styler.makeFocusable(this)
         descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         addView(TextView(context).apply {
-            text = fact.label.uppercase(); typeRole(Type.Role.EYEBROW); setTextColor(colors.mutedText)
+            text = fact.label.uppercase(); typeRole(Type.Role.EYEBROW); setTextColor(if (glass) GLASS_LABEL else colors.mutedText)
         })
         addView(TextView(context).apply {
-            text = fact.value; textSize = 12.5f; setTextColor(ColorUtils.blendARGB(colors.mutedText, colors.primaryText, .75f))
+            text = fact.value; textSize = 12.5f
+            setTextColor(if (glass) GLASS_VALUE else ColorUtils.blendARGB(colors.mutedText, colors.primaryText, .75f))
             setLineSpacing(0f, 1.12f)
         }, LayoutParams(MATCH, WRAP).apply { topMargin = dp(4) })
         FocusDecorator.attach(this, ringVisible, scale = false)
@@ -152,5 +142,8 @@ class FactsGridView(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val COLUMNS = 3
+        /** Glass: the label white at 55%, the words at 92%. */
+        const val GLASS_LABEL = 0x8CFFFFFF.toInt()
+        const val GLASS_VALUE = 0xEBFFFFFF.toInt()
     }
 }

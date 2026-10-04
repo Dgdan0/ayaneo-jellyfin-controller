@@ -13,6 +13,9 @@ import android.view.ViewGroup
 import android.view.animation.PathInterpolator
 import android.widget.TextView
 import androidx.core.graphics.ColorUtils
+import com.pocketds.hub.ui.glass.GlassColors
+import com.pocketds.hub.ui.glass.GlassPage
+import com.pocketds.hub.ui.glass.GlassPanelDrawable
 
 /**
  * Pick one of a few: tabs, seasons, a skip distance, Media or Books.
@@ -43,7 +46,13 @@ class BlobSegmentedView(
         /** The blob is the accent: a setting's value, Media or Books. */
         ACCENT,
         /** No track; an accent bar slides under the chosen label: detail-page tabs. */
-        UNDERLINE
+        UNDERLINE,
+        /**
+         * Glass: each option its own pill of the page's glass, a gap between
+         * them, and the white blob on the chosen one: a title's seasons
+         * (GLASS_PLAN.md).
+         */
+        CHIPS
     }
 
     var heightDp = 34f
@@ -51,6 +60,8 @@ class BlobSegmentedView(
     var padXDp = 12f
     var growDp = 10f
     var trackPadDp = 3f
+    /** Room between options; only [Style.CHIPS] has any. */
+    var gapDp = if (style == Style.CHIPS) 8f else 0f
     /** Picks the option as soon as focus lands on it. */
     var followFocus = false
     var onPick: ((String) -> Unit)? = null
@@ -79,12 +90,15 @@ class BlobSegmentedView(
     private var spans = emptyList<SegmentGeometry.Span>()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
+    /** [Style.CHIPS]: one glass pill, drawn behind each option in turn, following the page. */
+    private val chip = if (style == Style.CHIPS) GlassPanelDrawable(GlassColors.panel(GlassPage.palette(context)), dp(999f).toFloat()) else null
 
     init {
         setWillNotDraw(false)
         clipChildren = false
         clipToPadding = false
         descendantFocusability = FOCUS_AFTER_DESCENDANTS
+        chip?.let { panel -> GlassPage.follow(this) { page -> panel.retint(GlassColors.panel(page)); invalidate() } }
     }
 
     fun setOptions(options: List<Option>, selected: String?) {
@@ -144,6 +158,16 @@ class BlobSegmentedView(
         requestLayout()
     }
 
+    /**
+     * Glass: the track as a capsule of the page's glass that follows the page,
+     * as the top bar's tabs are (Discover | Upcoming, the week switch). Once per view.
+     */
+    fun useGlassTrack() {
+        val panel = GlassPanelDrawable(GlassColors.panel(GlassPage.palette(context)), dp(999f).toFloat())
+        trackDrawable = panel
+        GlassPage.follow(this) { page -> panel.retint(GlassColors.panel(page)); invalidate() }
+    }
+
     fun optionView(id: String): View? = options.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let(labels::get)
     fun focus(id: String? = selected): Boolean =
         (id?.let(::optionView) ?: labels.firstOrNull { it.isFocusable })?.requestFocus() == true
@@ -190,13 +214,14 @@ class BlobSegmentedView(
     }
 
     private fun onInk(): Int = when (style) {
-        Style.PILL -> colors.inverseText
+        Style.PILL, Style.CHIPS -> colors.inverseText
         Style.ACCENT -> inkOverride ?: colors.accentText
         Style.UNDERLINE -> colors.primaryText
     }
 
     private fun offInk(): Int = when (style) {
         Style.UNDERLINE -> colors.mutedText
+        Style.CHIPS -> colors.primaryText
         else -> ColorUtils.blendARGB(colors.mutedText, colors.primaryText, 0.45f)
     }
 
@@ -222,7 +247,7 @@ class BlobSegmentedView(
             view.measuredWidth.toFloat()
         }
         spans = SegmentGeometry.spans(natural, SegmentGeometry.growth(labels.size, from, to, progress),
-            dp(growDp).toFloat(), dp(trackPadDp).toFloat())
+            dp(growDp).toFloat(), dp(trackPadDp).toFloat(), dp(gapDp).toFloat())
         labels.forEachIndexed { index, view ->
             view.measure(MeasureSpec.makeMeasureSpec(spans[index].width.toInt(), MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(inner, MeasureSpec.EXACTLY))
@@ -244,7 +269,12 @@ class BlobSegmentedView(
         val pad = dp(trackPadDp).toFloat()
         val trackRight = SegmentGeometry.total(spans, pad).coerceAtMost(width.toFloat())
         val track = trackDrawable
-        if (track != null && style != Style.UNDERLINE) {
+        if (chip != null) {
+            spans.forEach { span ->
+                chip.setBounds(span.left.toInt(), pad.toInt(), span.right.toInt(), (h - pad).toInt())
+                chip.draw(canvas)
+            }
+        } else if (track != null && style != Style.UNDERLINE) {
             track.setBounds(0, 0, trackRight.toInt(), h.toInt())
             track.draw(canvas)
         } else if (style != Style.UNDERLINE) {
@@ -269,7 +299,7 @@ class BlobSegmentedView(
                     canvas.drawRoundRect(rect, dp(1.5f).toFloat(), dp(1.5f).toFloat(), paint)
                 }
                 else -> {
-                    paint.color = if (style == Style.PILL) colors.primaryText else accentOverride ?: colors.accent
+                    paint.color = if (style == Style.PILL || style == Style.CHIPS) colors.primaryText else accentOverride ?: colors.accent
                     rect.set(blob.left, pad, blob.right, h - pad)
                     // A ring around the chosen option needs a gap, or it merges into the blob.
                     if (focused == to) rect.inset(dp(2.5f).toFloat(), dp(2.5f).toFloat())

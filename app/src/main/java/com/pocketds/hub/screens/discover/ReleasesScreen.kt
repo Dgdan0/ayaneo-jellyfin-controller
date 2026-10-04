@@ -62,6 +62,8 @@ class ReleasesScreen(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private lateinit var colors: PocketColors
+    /** Glass (#11): the releases on glass rows under a display heading, as the request sheet is drawn. */
+    private var glass = false
     private lateinit var heading: TextView
     private lateinit var status: TextView
     private lateinit var list: RecyclerView
@@ -79,13 +81,15 @@ class ReleasesScreen(
         this.host = host
         val context = host.viewContext
         colors = Theme.colors(context)
+        glass = Theme.onGlass(colors)
 
         val root = FrameLayout(context).apply { setBackgroundColor(colors.background) }
         val content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
 
         heading = TextView(context).apply {
-            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 18f)
+            if (glass) { typeface = com.pocketds.hub.ui.Type.display(context, 800); textSize = 21f }
+            else com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 18f)
             setTextColor(colors.primaryText)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -104,9 +108,8 @@ class ReleasesScreen(
                 Styler.dpInt(context, 24f), Styler.dpInt(context, 3f),
                 Styler.dpInt(context, 24f), Styler.dpInt(context, 8f)
             )
-            text = "Asking every indexer… this takes a few seconds."
         }
-        content.addView(status)
+        content.addView(status, LinearLayout.LayoutParams(if (glass) WRAP else MATCH, WRAP))
 
         list = RecyclerView(context).apply {
             layoutManager = LinearLayoutManager(context)
@@ -193,8 +196,8 @@ class ReleasesScreen(
     }
 
     private fun search(force: Boolean = false) {
-        status.setTextColor(colors.mutedText)
-        status.text = "Asking every indexer… this takes a few seconds."
+        // A notice even on Glass: the wait is long and the list empty meanwhile.
+        status.showStatus(StatusText.notice("Asking every indexer… this takes a few seconds."), colors)
         if (force) adapter.submit(emptyList())
         searchJob?.cancel()
         searchJob = scope.launch {
@@ -218,7 +221,7 @@ class ReleasesScreen(
                     }
                     val line = StatusText.loaded(summary, body.cache)
                     // Nothing acceptable is itself the warning here.
-                    status.showStatus(if (body.accepted == 0) line.copy(tone = StatusTone.WARNING) else line, colors)
+                    status.showStatus(if (body.accepted == 0) line.copy(tone = StatusTone.WARNING, news = true) else line, colors)
                     list.post { list.getChildAt(0)?.requestFocus() }
                 }
                 is HubResult.Failed ->
@@ -280,19 +283,17 @@ class ReleasesScreen(
     }
 
     private fun grab(release: Release) {
-        status.setTextColor(colors.mutedText)
-        status.text = "Sending to the download client…"
+        status.showStatus(StatusText.notice("Sending to the download client…"), colors)
         scope.launch {
             when (val result = api.grab(mediaKey, release.id, season, episode)) {
                 is HubResult.Ok -> {
                     DebugLog.log("net", "grabbed ${release.id}")
-                    status.setTextColor(colors.badgeAvailable)
-                    status.text = "Grabbed — ${result.value.title.ifEmpty { release.title }}"
+                    status.showStatus(StatusText.notice("Grabbed — ${result.value.title.ifEmpty { release.title }}"), colors)
+                    if (!glass) status.setTextColor(colors.badgeAvailable)
                     host?.notify("Grabbed ${release.quality} — check Downloads")
                 }
                 is HubResult.Failed -> {
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message
+                    status.showStatus(com.pocketds.hub.state.StatusMessage(result.message, StatusTone.ERROR), colors)
                     host?.notify(result.message)
                 }
             }
@@ -311,7 +312,7 @@ class ReleasesScreen(
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RowHolder {
-            val row = ReleaseRowView(parent.context, colors).apply {
+            val row = ReleaseRowView(parent.context, colors, glass).apply {
                 layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
                     val m = Styler.dpInt(parent.context, 4f)
                     setMargins(m, m, m, m)
@@ -346,7 +347,9 @@ class ReleasesScreen(
  */
 private class ReleaseRowView(
     context: android.content.Context,
-    private val colors: PocketColors
+    private val colors: PocketColors,
+    /** Glass: a row of the page's glass, its resolution a chip, as the request sheet's rows are. */
+    private val glass: Boolean = false
 ) : LinearLayout(context) {
 
     private val tile: TextView
@@ -357,7 +360,13 @@ private class ReleaseRowView(
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        background = Styler.cardBackground(context, colors, cornerDp = 16f)
+        if (glass) {
+            val panel = com.pocketds.hub.ui.glass.GlassPanelDrawable(
+                com.pocketds.hub.ui.glass.GlassColors.panel(com.pocketds.hub.ui.glass.GlassPage.palette(context)), dp(14).toFloat())
+            background = panel
+            foreground = Styler.focusOutline(context, colors, 14f)
+            com.pocketds.hub.ui.glass.GlassPage.follow(this) { page -> panel.retint(com.pocketds.hub.ui.glass.GlassColors.panel(page)) }
+        } else background = Styler.cardBackground(context, colors, cornerDp = 16f)
         setPadding(dp(12), dp(10), dp(14), dp(10))
         Styler.makeFocusable(this)
 
@@ -386,7 +395,7 @@ private class ReleaseRowView(
 
         statsView = TextView(context).apply {
             textSize = 11.5f
-            setTextColor(colors.mutedText)
+            setTextColor(if (glass) GLASS_STATS else colors.mutedText)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(0, dp(4), 0, 0)
@@ -409,9 +418,17 @@ private class ReleaseRowView(
 
         val tint = if (release.rejected) colors.mutedText else colors.badgeAvailable
         tile.text = RESOLUTION.find(release.quality)?.value?.lowercase() ?: release.quality.substringAfterLast('-').ifEmpty { "?" }
-        tile.setTextColor(tint)
-        tile.background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(12).toFloat(),
-            androidx.core.graphics.ColorUtils.setAlphaComponent(tint, 0x2E))
+        if (glass) {
+            // The prototype's status chips: green with white for one Sonarr or
+            // Radarr would take, a faint white for a refused one.
+            tile.setTextColor(if (release.rejected) GLASS_REFUSED_TEXT else android.graphics.Color.WHITE)
+            tile.background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(11).toFloat(),
+                if (release.rejected) GLASS_REFUSED else GLASS_ACCEPTED)
+        } else {
+            tile.setTextColor(tint)
+            tile.background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(12).toFloat(),
+                androidx.core.graphics.ColorUtils.setAlphaComponent(tint, 0x2E))
+        }
 
         statsView.text = buildList {
             if (release.quality.isNotEmpty()) add(release.quality)
@@ -438,5 +455,10 @@ private class ReleaseRowView(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         val RESOLUTION = Regex("""(?i)\d{3,4}p""")
+        /** Glass: the figures white at 62%; an accepted release's chip green, a refused one's white at 12%. */
+        const val GLASS_STATS = 0x9EFFFFFF.toInt()
+        const val GLASS_ACCEPTED = 0xE61C965C.toInt()
+        const val GLASS_REFUSED = 0x1FFFFFFF
+        const val GLASS_REFUSED_TEXT = 0xCCFFFFFF.toInt()
     }
 }

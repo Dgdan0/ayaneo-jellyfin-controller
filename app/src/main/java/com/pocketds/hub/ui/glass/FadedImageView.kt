@@ -84,5 +84,9 @@ class FadedImageView(context: Context) : ImageView(context) {
         val HERO = listOf(0f to 1f, 0.40f to 1f, 0.97f to 0f, 1f to 0f)
         /** The prototype's shade for the hero's words: half black at the left, gone by 62% across. */
         val HERO_SHADE = listOf(0f to 0.5f, 0.62f to 0f)
+        /** A title page's backdrop (`.dart`): solid to 30% of the way down, gone by 94%. */
+        val TITLE = listOf(0f to 1f, 0.30f to 1f, 0.94f to 0f, 1f to 0f)
+        /** Its shade for the words: 60% black at the left, gone by 72% across. */
+        val TITLE_SHADE = listOf(0f to 0.6f, 0.72f to 0f)
     }
 }

@@ -6,7 +6,7 @@ import android.graphics.drawable.Drawable
 import android.view.Gravity
 import android.widget.TextView
 
-enum class AppIcon { CLOSE, CONTENTS, APPEARANCE, PREVIOUS, NEXT, PREVIOUS_ITEM, NEXT_ITEM, THIRDS, FIT, DIRECTION, ZOOM_IN, ZOOM_OUT, SEARCH, OPEN, REFRESH, BOOK, HEADPHONES, READ_ALONG, BOOKMARK, BOOKMARK_FILLED, COMIC, MOVIE, TV, SETTINGS, CHECK, MEDIA, SORT, PANEL, PLAY, INFO, PERSON, SERIES }
+enum class AppIcon { CLOSE, CONTENTS, APPEARANCE, PREVIOUS, NEXT, PREVIOUS_ITEM, NEXT_ITEM, THIRDS, FIT, DIRECTION, ZOOM_IN, ZOOM_OUT, SEARCH, OPEN, REFRESH, BOOK, HEADPHONES, READ_ALONG, BOOKMARK, BOOKMARK_FILLED, COMIC, MOVIE, TV, SETTINGS, CHECK, MEDIA, SORT, PANEL, PLAY, INFO, PERSON, SERIES, ADD }
 
 /** Original vector geometry; controls do not depend on the vendor's symbol font. */
 class AppIconDrawable(private val icon: AppIcon, color: Int) : Drawable() {
@@ -47,6 +47,7 @@ class AppIconDrawable(private val icon: AppIcon, color: Int) : Drawable() {
             AppIcon.INFO->{canvas.drawCircle(12f,12f,9f,paint);line(12f,11f,12f,17f);line(12f,7.5f,12f,8f)}
             AppIcon.PERSON->{canvas.drawCircle(12f,8f,4f,paint);path("M4 21c0-4 3.6-7 8-7s8 3 8 7")}
             AppIcon.SERIES->{canvas.drawRoundRect(4f,6f,16f,21f,1.5f,1.5f,paint);path("M8 3h10.5a1.5 1.5 0 0 1 1.5 1.5V18")}
+            AppIcon.ADD->{line(12f,5f,12f,19f);line(5f,12f,19f,12f)}
         }
         canvas.restore()
     }

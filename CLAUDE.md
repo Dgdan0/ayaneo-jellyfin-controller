@@ -327,6 +327,16 @@ than the first cast card, which is below the fold.
 motion it read "Not requested" directly under a strip of five pending chips that already said
 exactly that.
 
+In Glass (#11) a title page is the prototype's: the backdrop across the top of the page, 330dp
+tall and fading through `FadedImageView.TITLE` under the tabs; the words at the left (the
+Bricolage title, the facts, the watch line in the accent, the overview); a white Play or Resume,
+Start over as a glass pill on a film or episode you can resume, and round glass toggles that
+turn white while on; underline tabs with the accent underline; seasons as glass chips; episodes
+as tiles with UP NEXT; cast as portraits; Details as words. A title you don't have reads "NOT IN
+YOUR LIBRARY" (or where it has got to, in the accent) over its title, with the pipeline as glass
+chips under the facts and the stage under way pulsing amber; Request opens the request form as a
+glass side sheet and the release picker's rows are glass.
+
 ### The floating trailer window
 
 A trailer plays in a window you can move and resize while the app stays usable underneath.
@@ -600,7 +610,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Talking to the hub | `HubClient.shared(context)` -- one per process. `net/CredentialGate` in its interceptor: one 401 stops all traffic, a ban's long `Retry-After` holds it, 403 is a scope (`FailureKind.FORBIDDEN`) |
 | One request at a time, busy flag that cannot stick | `state/JobSlot` |
 | Asking again on a timer | `state/Poller` + `PollCadence` (backoff, settle window, hidden stops) |
-| Status line wording and tone | `state/StatusText` + `TextView.showStatus` |
+| Status line wording and tone | `state/StatusText` + `TextView.showStatus`. On Glass a line shows only with news (`StatusText.shows`: data a minute or more old, partial, degraded or failed, or a `StatusText.notice` such as why a list is empty), as a quiet glass chip round its words; Home's sits in the hero's top corner, clear of its words |
 | Numbers, times, sizes | `state/Fmt` |
 | Resume point / finished / not started | `playback/ResumeRules` (mirrors the hub's `decideWatchPosition`) |
 | Watched tick vs progress bar | `ResumeRules.showsWatched` / `watchLabel`: a saved position wins, because watched + position is a rewatch |
@@ -613,23 +623,23 @@ Most of these exist because several screens had drifted copies of the same thing
 | An episode | `ui/EpisodeCardView`; names via `EpisodeLabel.of` / `code` / `season` ("S1E4 · Title", "Specials") |
 | A season or poster-shaped detail card | `ui/DetailArtworkCardView` |
 | A value menu / a destructive confirm | `ChoiceOverlay.pickValue` / `confirm` (harmless answer first) |
-| A side panel's look and parts | `ui/SidePanelView`: a full-height sheet at the right edge (centred card for `confirm`), heading and small round close; `choice` and `setting` (label, value, chevron) rows share a raised card until a `section`, `startGroup`, `note` or hand-added view starts the next; `choice(leading =)` puts a picture before the words; tabs are a `BlobSegmentedView` |
+| A side panel's look and parts | `ui/SidePanelView`: a full-height sheet at the right edge (centred card for `confirm`), heading and small round close; `choice` and `setting` (label, value, chevron) rows share a raised card until a `section`, `startGroup`, `note` or hand-added view starts the next; `choice(leading =)` puts a picture before the words; tabs are a `BlobSegmentedView`. `group()`, `reveal(view)` and `resetBody(keepScroll = true)` for rows a caller draws itself (the Glass request form). On a page that draws under the top bar a side sheet starts below it (`ui/TopChrome.overlap`; HubActivity registers its bar) |
 | Anything drawn over video | `Theme.onVideo` (the dark palette with the media accent, whatever the app theme) |
 | A dashboard's pieces: status dot and its colour, a disk with its bar, a figure card, a focusable row | `ui/DashboardParts` (`dot`, `stateColor`, `disk`, `stat`, `row`): Activity, Server monitor, Services, Notifications |
 | A service's logo | `ServiceLogo.resource(service)` (and `bind`, which follows the theme) |
 | A torrent's release name as words ("Dark Matter (2024) · S2E6 · 1080p") | `model/ReleaseNames.readable`; `ActivityItem.headline` uses it when the *arr has no title |
 | How long the PC has been up ("1 day 4 hours") | `Fmt.uptime` |
-| A pill that is a filter, lit while on | `PillButton.setPrimary` (a new background otherwise resets the padding) |
+| A pill that is a filter, lit while on | `PillButton.setPrimary` (a new background otherwise resets the padding); a Glass pill turns white in place (`GlassButtonBackground.lit`) |
 | A pushed page's header | `HubActivity.pageTitle`: a round back mark and the screen's `title` in the heading face; a page with its own heading sets `showsOwnTitle` |
 | A menu's cursor after a submenu | `SidePanelView` remembers the row last chosen per menu and tab; pass no start row and Back lands where you were |
-| On/off action icons (watched, favourite, downloaded) | `MediaActionIconDrawable.of` (`MediaActionIcon.isOn`): filled accent when on, outline when off; `DOWNLOADING` is a progress ring |
+| On/off action icons (watched, favourite, downloaded) | `MediaActionIconDrawable.of` (`MediaActionIcon.isOn`): filled accent when on, outline when off; `DOWNLOADING` is a progress ring. On a Glass toggle `onGlass`: dark on its white face while on, white on glass while off |
 | Reacting to offline downloads changing | `offline/OfflineChanges` (start in onShow, stop in onHide) |
 | Sorting a library | `ui/LibrarySortControls` (field button + one-press direction); wording from `SortPreference.directionLabel` |
 | A series' books as cards / their labels | `screens/library/SeriesBookStrip` + `SeriesBookLabels` ("#2 · 40% · Audio"); series page, author page and a book's own page |
 | A book's facts line | `ReadingBookFacts.line` ("Book 6 of Red Rising · 2023 · 735 pages"); how far through: `ReadingBookFacts.progress` ("49% · page 363 of 735") |
 | A book's place in its series on a card | `ReadingWork.cardSubtitle` ("Red Rising #6") and `seriesNumber` |
 | Books Library's view: Series, Authors, or every book on its own | `ReadingLibraryGridScreen` (`view`; Books asks the hub for `view=works`); each view's order in `DomainPreferences` (`sort`, `bookSort`, `readingView`) |
-| A person as a round portrait, the ring round it | `DetailArtworkCardView.portrait` |
+| A person as a round portrait, the ring round it | `DetailArtworkCardView.portrait` (an author, a title's cast row in `CastRowView`) |
 | Books Home's top: the book being read, the series being read | `screens/home/ContinueReadingView` (Resume reading opens `ReadingWorkScreen(openReader = true)`), `SeriesStackView` fed by `ReadingShelves.yourSeries` |
 | A series as a fan of covers (Books Home, the series page) | `ui/CoverFanView`; which covers from `ReadingShelves.fanCovers`, the book being read from `onNumber`; "On #6 · 1 of 6 finished" from `ReadingBookFacts.seriesProgress` |
 | Books Home rows | `ReadingShelves`: `onePerSeries`, `nextInSeries`, `BUILT_IN` (rows the app fills; list actions only on the person's own) |
@@ -637,12 +647,13 @@ Most of these exist because several screens had drifted copies of the same thing
 | Hub: an author page id | `readingAuthorRef` (Authors view and a book's author link) |
 | Hub: a Storyteller title | `reconcileStorytellerBook` (file-name titles, `withoutSeriesNote`) and `storytellerPeople` (writers, not narrators, as First Last) |
 | Activating a focusable on the first tap | `activateOnTap`, never `setOnClickListener` on a focusable |
-| Pick one of a few (tabs, seasons, a setting's value, Media/Books) | `ui/BlobSegmentedView` (`PILL`, `ACCENT`, `UNDERLINE`; `followFocus` for tabs that switch on focus); geometry in `SegmentGeometry` |
+| Pick one of a few (tabs, seasons, a setting's value, Media/Books) | `ui/BlobSegmentedView` (`PILL`, `ACCENT`, `UNDERLINE`, `CHIPS`: Glass seasons, each its own glass pill with the chosen one white; `useGlassTrack()` for a glass capsule; `followFocus` for tabs that switch on focus); geometry in `SegmentGeometry` (`gap` between pills) |
 | A line mixing a Hebrew title with English facts ("… פרק 6 · 11 min") | `ui/Bidi.join` / `isolateParts` (each part isolated); captions under cards align to the view's start, not the text's |
 | Title and heading type | `ui/Type` (`typeRole(Type.Role.HERO …)`); body text is Figtree from the theme, never set per view |
 | An accent and the ink drawn on it | `AccentPreset.color(dark)` / `ink(dark)` via `Theme.colors`; Books default to gold (`AccentPreset.defaultFor`) |
 | A controller button drawn in the hint bar | `ui/KeyGlyphDrawable` |
-| A rounded action (Play, Details, Continue reading) | `ui/PillButton` (primary = accent fill; the ring keeps a gap). As a detail page's first action it takes `marginStart = -RING_DP`; `DetailHeaderView`'s action row leaves that room, so the pill lines up with the title and its ring is not clipped. `glass = true`: the main action white with dark words, the others glass that follows the page, 11dp corners (Glass Home; other screens at their milestone) |
+| A rounded action (Play, Details, Continue reading) | `ui/PillButton` (primary = accent fill; the ring keeps a gap). As a detail page's first action it takes `marginStart = -RING_DP`; `DetailHeaderView`'s action row leaves that room, so the pill lines up with the title and its ring is not clipped. `glass = true`: the main action white with dark words, the others glass that follows the page, 11dp corners (Glass Home, title pages, Upcoming; other screens at their milestone) |
+| A Glass button's face: glass, or white while lit | `ui/glass/GlassButtonBackground` (`attach(view, colors, corner, ring, lit)`, then `lit`): `PillButton(glass = true)` and `DetailStyler.glassToggle`, a title's round toggles that turn white while on; one GlassPage.follow per view |
 | A rounded or round drawable from palette colours | `ThemeGradientDrawable.rounded` / `.oval`: inside `ThemeGradientDrawable().apply {}` a bare `colors` is GradientDrawable's own array |
 | Fading the page colour into artwork | `ui/ScrimDrawable` |
 | A vertical list of places with the blob (Settings' sections) | `ui/SideNavView` |
@@ -677,8 +688,10 @@ Most of these exist because several screens had drifted copies of the same thing
 | Glass or Classic | `settings/LookSettings` (`Look.fromStored`: Glass unless Classic is stored; `Look.dark`: Glass is always dark) and `Theme.isGlass(context)`. A change rebuilds the Activity, as dark and light do. Classic goes once #11 is finished |
 | The Glass page: which artwork it shows | A screen's `pageArtwork` (the focused card, a title's backdrop, the cover in focus), re-read on focus changes, `showCurrent` and `ScreenHost.pageArtworkChanged`; `nav/PageArtwork` (`next`: none keeps the last, `title`); `ScreenHost.prefetchArtwork` for the cards a row binds. `HubActivity.showArtwork` feeds `AmbientLayerView`, the bars' `setPalette` and `GlassPage` |
 | The Glass page's colours, for what is drawn over it | `ui/glass/GlassPage`: `palette(context)` for a panel opening now; `follow(view) { palette -> … }` for glass that stays on screen (the bars, a Details pill, a play disc, a day chip), held only while the view is attached. `Theme.onGlass(colors)` decides, so the player's video palette stays solid |
-| Artwork fading into the Glass page | `ui/glass/FadedImageView`: `stops` (opacity down its height) and a `shade` for words over it, both inside its own layer, so neither ends in a line; `HERO` / `HERO_SHADE` for Home's hero |
-| A Glass tile or poster | `LandscapeCardView(glass = true)` (11dp corners, 3dp ring, a white progress bar inside the still, an accent tick, a glass play disc on focus) and `PosterCardView(glass = true)` (a white count pill, an accent tick, `setDayChip`); Home opts in, other screens at their milestone |
+| Artwork fading into the Glass page | `ui/glass/FadedImageView`: `stops` (opacity down its height) and a `shade` for words over it, both inside its own layer, so neither ends in a line; `HERO` / `HERO_SHADE` for Home's hero, `TITLE` / `TITLE_SHADE` for a title page's backdrop (`DetailHeaderView(glass = true)`) |
+| A Glass tile or poster | `LandscapeCardView(glass = true)` and `EpisodeCardView(glass = true)` (11dp corners, 3dp ring and `ui/glass/GlassStillMarks`: the white progress bar inside the still, the accent tick, the glass play disc on focus; an episode's UP NEXT at its top left) and `PosterCardView(glass = true)` (a white count pill, an accent tick, where a title stands as a glass chip at the top left, `setDayChip`); Discover's featured card is `DiscoverFeatureCardView(glass = true)`. Home, title pages and Discover opt in, other screens at their milestone |
+| A title's pipeline as Glass chips | `screens/discover/PipelineChip` (`Tone.of(state)`: done in the accent, the stage under way amber with its dot pulsing, failed or stuck red, the rest waiting) |
+| The request form | `ui/FormOverlay` over `state/FormModel`; `glass = true` draws it into the shared side sheet, a heading where each part begins (`FormRow.section`), "‹ value ›" on a row that steps with left and right, Request white at the foot |
 | A Jellyfin profile's tile | `screens/home/ProfileAvatar` (`colors`: the profiles in alphabetical order take the palette, so four profiles get four colours; `initial`); Glass's "Who is watching?" is `ProfilePickerView`, a centred `SidePanelView` (`centredWidthDp`, `wrapsHeight`, `centreHeading`) |
 | Words and icons on a white pill (the selected tab, the status pill, a play mark) | `PocketColors.inverseText`, never `background`: Glass's page colour paints nothing |
 | Hub: an artwork's Glass colours | `internal/artcolor` (`Analyze` → `Palette`) behind `GET /v1/img/colors`; `artworkColorStore` keys a picture without its width and keeps `artwork-colors.json` |
@@ -917,6 +930,14 @@ hint bar, search field and status line there are ~340dp left. A row therefore ha
 `ROW_CARD_DP = 82`; the search grid gets `GRID_POSTER_DP = 138` across 8 columns since it has no
 row labels. `PosterCardView` takes the poster height as a parameter and drops to smaller type
 and tighter padding below 170dp.
+
+In Glass (#11) Discover is a glass capsule (Discover | Upcoming) beside a glass search pill, the
+featured card (picture and "FEATURED · NOT IN YOUR LIBRARY"), then rows of caption-less 82 x 123dp
+posters with where each stands as a glass chip (In library, Partial, On the way, Requested, in the
+badge colours above); search is the dense grid with captions. The page takes the colours of the
+card in focus (`pageArtwork`). Upcoming is the week as a glass capsule, the days with each release
+on a glass row and its state as a chip, the one in the preview lit in the accent, and the preview
+a glass card that tints the page.
 
 **Load on "do I have data", never on "have I tried".** A once-only flag left Discover stuck on
 "Loading…" forever: this device pauses and resumes the activity once during startup, `onHide`

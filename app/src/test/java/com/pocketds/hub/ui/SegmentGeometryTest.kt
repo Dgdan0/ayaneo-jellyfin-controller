@@ -16,6 +16,14 @@ class SegmentGeometryTest {
     }
 
     @Test
+    fun `separate pills keep their gap while the chosen one grows`() {
+        val spans = SegmentGeometry.spans(natural, SegmentGeometry.growth(3, -1, 0, 1f), grow = 10f, pad = 0f, gap = 8f)
+        assertEquals(listOf(0f, 68f, 146f), spans.map { it.left })
+        assertEquals(60f, spans[0].width)
+        assertEquals(206f, SegmentGeometry.total(spans, 0f))
+    }
+
+    @Test
     fun `halfway through a change both options share the extra width`() {
         val growth = SegmentGeometry.growth(3, 0, 2, 0.5f)
         assertEquals(listOf(0.5f, 0f, 0.5f), growth)

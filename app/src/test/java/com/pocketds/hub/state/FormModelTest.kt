@@ -176,4 +176,12 @@ class FormModelTest {
         model.focus(99)
         assertEquals(0, model.index)
     }
+
+    @Test
+    fun `a row names the part of the Glass sheet it starts, an action none`() {
+        assertEquals("Quality", FormRow.Choice("profile", "Quality profile", listOf("A"), section = "Quality").section)
+        assertEquals("", FormRow.Toggle("season:1", "Season 1").section)
+        assertEquals("Seasons", FormRow.Toggle("allSeasons", "All seasons", section = "Seasons").section)
+        assertEquals("", FormRow.Action("submit", "Request").section)
+    }
 }

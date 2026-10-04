@@ -61,6 +61,7 @@ import com.pocketds.hub.state.RequestedTitles
 import com.pocketds.hub.state.PagedLoadState
 import com.pocketds.hub.state.RowPaging
 import com.pocketds.hub.ui.showStatus
+import com.pocketds.hub.ui.textWeight
 
 /**
  * Browse and search — the Infuse/Findroid shape.
@@ -85,9 +86,22 @@ class DiscoverScreen(
 
     override val title: String = "Discover"
 
+    /**
+     * Glass: the card in focus, or on Upcoming the release in the preview;
+     * the search box and the tabs keep the page as it is.
+     */
+    override val pageArtwork: String?
+        get() = when {
+            !::colors.isInitialized || mode != ContentMode.MEDIA -> null
+            upcomingActive -> upcoming.pageArtwork
+            else -> focusedHit()?.let(::artworkOf)
+        }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private lateinit var colors: PocketColors
+    /** Glass (#11): the prototype's Discover; a styling switch only. */
+    private var glass = false
     private lateinit var searchBox: EditText
     private lateinit var readingFilters: HorizontalScrollView
     /** Discover | Upcoming, at the start of the search row. */
@@ -169,6 +183,7 @@ class DiscoverScreen(
         this.host = host
         val context = host.viewContext
         colors = Theme.colors(context)
+        glass = Theme.onGlass(colors)
         mode = ContentModeSettings.get(context)
 
         val frame = android.widget.FrameLayout(context)
@@ -186,9 +201,10 @@ class DiscoverScreen(
         root.addView(readingFilters, LinearLayout.LayoutParams(MATCH, WRAP))
 
         tabs = com.pocketds.hub.ui.BlobSegmentedView(context, colors, ringVisible).apply {
-            heightDp = 38f
-            textSp = 12.5f
-            trackColor = colors.cardSurface
+            heightDp = if (glass) 34f else 38f
+            textSp = if (glass) 12f else 12.5f
+            // Glass: a capsule of the page's glass, as the prototype's is.
+            if (glass) useGlassTrack() else trackColor = colors.cardSurface
             // A picks: the tabs sit beside the search box, and passing through
             // them on the way there should not swap the page.
             setOptions(listOf(com.pocketds.hub.ui.BlobSegmentedView.Option(TAB_DISCOVER, "Discover"),
@@ -199,16 +215,23 @@ class DiscoverScreen(
 
         searchBox = EditText(context).apply {
             hint = if (mode == ContentMode.BOOKS) "Search books, comics and audio" else "Search films and series"
-            textSize = 14f
+            textSize = if (glass) 12.5f else 14f
             setTextColor(colors.primaryText)
-            setHintTextColor(colors.mutedText)
-            background = InsetDrawable(ThemeGradientDrawable().apply {
+            setHintTextColor(if (glass) GLASS_HINT else colors.mutedText)
+            background = if (glass) {
+                // The prototype's search: a pill of the page's glass, 34dp of the 48dp target.
+                val panel = com.pocketds.hub.ui.glass.GlassPanelDrawable(
+                    com.pocketds.hub.ui.glass.GlassColors.panel(com.pocketds.hub.ui.glass.GlassPage.palette(context)), Styler.dp(context, 999f))
+                com.pocketds.hub.ui.glass.GlassPage.follow(this) { page -> panel.retint(com.pocketds.hub.ui.glass.GlassColors.panel(page)) }
+                InsetDrawable(panel, 0, Styler.dpInt(context, 7f), 0, Styler.dpInt(context, 7f))
+            } else InsetDrawable(ThemeGradientDrawable().apply {
                 cornerRadius = Styler.dp(context, 12f)
                 setColor(this@DiscoverScreen.colors.cardSurface)
                 setStroke(Styler.dpInt(context, 1f), this@DiscoverScreen.colors.stripBackground)
             }, 0, Styler.dpInt(context, 4f), 0, Styler.dpInt(context, 4f))
-            setCompoundDrawablesRelative(AppIconDrawable(AppIcon.SEARCH, colors.mutedText).apply {
-                setBounds(0, 0, Styler.dpInt(context, 18f), Styler.dpInt(context, 18f))
+            setCompoundDrawablesRelative(AppIconDrawable(AppIcon.SEARCH, if (glass) GLASS_ICON else colors.mutedText).apply {
+                val size = Styler.dpInt(context, if (glass) 15f else 18f)
+                setBounds(0, 0, size, size)
             }, null, null, null)
             compoundDrawablePadding = Styler.dpInt(context, 9f)
             setSingleLine()
@@ -302,7 +325,7 @@ class DiscoverScreen(
             adapter = rowsAdapter
             // The focused row rests at the top, as on Home, so each row comes
             // to the same place rather than wherever its cards first fit.
-            pinFocusedRows(SHORTEST_ROW_DP)
+            pinFocusedRows(if (glass) GLASS_SHORTEST_ROW_DP else SHORTEST_ROW_DP)
             // A row's focused card is scaled up and its ring must not be clipped
             // by the row above.
             clipChildren = false
@@ -376,7 +399,7 @@ class DiscoverScreen(
         }
         root.addView(readingResultsGrid)
 
-        form = FormOverlay(context, colors, ringVisible)
+        form = FormOverlay(context, colors, ringVisible, glass = Theme.onGlass(colors))
         frame.addView(form, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
 
         flow = RequestFlow(
@@ -384,8 +407,7 @@ class DiscoverScreen(
             scope = scope,
             overlay = { form },
             onStatus = { text, isError ->
-                statusLine.setTextColor(if (isError) colors.dangerText else colors.mutedText)
-                statusLine.text = text
+                statusLine.showStatus(StatusMessage(text, if (isError) com.pocketds.hub.state.StatusTone.ERROR else com.pocketds.hub.state.StatusTone.NORMAL), colors)
             },
             onNotify = { host.notify(it) },
             onHintsChanged = { host.refreshHints() },
@@ -458,7 +480,6 @@ class DiscoverScreen(
         searchBox.setText(lastQuery)
         readingFilters.visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
         applyModeVisibility()
-        statusLine.setTextColor(colors.mutedText)
         if (searching) {
             val count = if (mode == ContentMode.MEDIA) resultsAdapter.itemCount else readingResultsAdapter.itemCount
             statusLine.showStatus(
@@ -468,10 +489,10 @@ class DiscoverScreen(
             )
             if (count == 0 && lastQuery.isNotBlank()) runSearch(lastQuery, force = true)
         } else if (mode == ContentMode.MEDIA) {
-            statusLine.text = "${rowsAdapter.itemCount} rows"
+            statusLine.showStatus(StatusText.loaded("${rowsAdapter.itemCount} rows"), colors)
             if (rowsAdapter.itemCount == 0) loadRows()
         } else {
-            statusLine.text = "${readingRowsAdapter.itemCount} rows"
+            statusLine.showStatus(StatusText.loaded("${readingRowsAdapter.itemCount} rows"), colors)
             if (readingRowsAdapter.itemCount == 0) loadReadingRows()
         }
         activeList().post {
@@ -800,6 +821,8 @@ class DiscoverScreen(
                 is HubResult.Ok -> {
                     val body = result.value
                     rowsAdapter.submit(body.rows)
+                    // Glass: the colours of what the rows show, asked for in one go.
+                    host?.prefetchArtwork(body.rows.flatMap { row -> row.items.take(PREFETCH_COLOURS).map(::artworkOf) }.filter(String::isNotBlank))
                     if (mode == ContentMode.MEDIA && !searching) {
                         statusLine.showStatus(
                             StatusText.loaded("${body.rows.size} rows", body.cache, body.partial.map { it.service }),
@@ -915,7 +938,7 @@ class DiscoverScreen(
         searchBox.setText("")
         applyModeVisibility()
         val count = if (mode == ContentMode.MEDIA) rowsAdapter.itemCount else readingRowsAdapter.itemCount
-        statusLine.text = "$count rows"
+        statusLine.showStatus(StatusText.loaded("$count rows"), colors)
         // Children are already attached here, so this one can focus directly.
         activeList().post {
             activeList().getChildAt(0)?.requestFocus()
@@ -928,7 +951,7 @@ class DiscoverScreen(
     private fun runSearch(query: String, force: Boolean = false) {
         val trimmed = query.trim()
         if (trimmed.length < 2) {
-            statusLine.text = "Type at least two characters."
+            statusLine.showStatus(StatusText.notice("Type at least two characters."), colors)
             return
         }
         if (trimmed == lastQuery && !force && searching) return
@@ -941,8 +964,7 @@ class DiscoverScreen(
         lastQuery = trimmed
         searching = true
         applyModeVisibility()
-        statusLine.setTextColor(colors.mutedText)
-        statusLine.text = "Searching…"
+        statusLine.showStatus(StatusMessage("Searching…"), colors)
         host?.refreshHints()
         // Supersede whatever was in flight; the old query's results are no
         // longer what anyone is looking at.
@@ -1034,14 +1056,21 @@ class DiscoverScreen(
 
     // ---- adapters ----------------------------------------------------------
 
-    private fun newCard(parent: ViewGroup, posterHeight: Float, width: Int): PosterCardView =
-        PosterCardView(parent.context, colors, posterHeight).apply {
+    /**
+     * [glassCard]: Glass posters (media only; Books keep theirs until their
+     * milestone), caption-less in a row as the prototype's are.
+     */
+    private fun newCard(parent: ViewGroup, posterHeight: Float, width: Int, glassCard: Boolean = false, captions: Boolean = true): PosterCardView =
+        PosterCardView(parent.context, colors, posterHeight, captions = captions, glass = glassCard).apply {
             layoutParams = RecyclerView.LayoutParams(width, WRAP).apply {
-                val m = Styler.dpInt(parent.context, 8f)
+                val m = Styler.dpInt(parent.context, if (glassCard) (if (captions) 5f else 6f) else 8f)
                 setMargins(m, m, m, m)
             }
             FocusDecorator.attach(this, ringVisible)
         }
+
+    /** The picture a hit gives the Glass page: its backdrop, else its poster. */
+    private fun artworkOf(hit: SearchHit): String = hit.media.backdrop.ifBlank { hit.media.poster }
 
     private fun bindCard(card: PosterCardView, fromHub: SearchHit) {
         val hit = RequestedTitles.apply(fromHub)
@@ -1332,7 +1361,7 @@ class DiscoverScreen(
         context: android.content.Context,
         colors: PocketColors
     ) : LinearLayout(context), ShelfFocusRow, com.pocketds.hub.ui.PinnedRowsLayoutManager.Anchor {
-        private val feature = DiscoverFeatureCardView(context, colors, ringVisible)
+        private val feature = DiscoverFeatureCardView(context, colors, ringVisible, glass)
 
         private val label: TextView
         private val strip: RecyclerView
@@ -1351,14 +1380,17 @@ class DiscoverScreen(
             clipChildren = false
             feature.visibility = View.GONE
             addView(feature, LayoutParams(MATCH, WRAP).apply {
-                setMargins(Styler.dpInt(context, 18f), Styler.dpInt(context, 5f),
+                if (glass) setMargins(Styler.dpInt(context, 22f), Styler.dpInt(context, 8f), Styler.dpInt(context, 22f), Styler.dpInt(context, 6f))
+                else setMargins(Styler.dpInt(context, 18f), Styler.dpInt(context, 5f),
                     Styler.dpInt(context, 18f), Styler.dpInt(context, 9f))
             })
             label = TextView(context).apply {
-                com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 15f)
+                // Glass: a row title as Home's are, bold Figtree.
+                if (glass) { textSize = 14f; textWeight(700) }
+                else com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 15f)
                 setTextColor(colors.primaryText)
                 setPadding(
-                    Styler.dpInt(context, 24f), Styler.dpInt(context, 8f),
+                    Styler.dpInt(context, if (glass) 22f else 24f), Styler.dpInt(context, 8f),
                     Styler.dpInt(context, 12f), Styler.dpInt(context, 2f)
                 )
             }
@@ -1397,7 +1429,8 @@ class DiscoverScreen(
                 val image = hit.media.backdrop.ifBlank { hit.media.poster }
                 feature.bind(hit.media.title, hit.subtitle.ifBlank { hit.media.year.takeIf { it > 0 }?.toString().orEmpty() },
                     hit.overview, api.imageUrl(image), hit.media.backdrop.isNotBlank(),
-                    Artwork.loader(api, context))
+                    Artwork.loader(api, context),
+                    mark = com.pocketds.hub.model.Availability.fromWire(RequestedTitles.apply(hit).availability).label.ifEmpty { "Not in your library" })
                 feature.setTag(TAG_HIT, hit)
                 feature.activateOnTap { openDetail(hit) }
                 FocusDecorator.listen(feature, ringVisible) { _, focused ->
@@ -1441,7 +1474,8 @@ class DiscoverScreen(
 
             override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
                 CardHolder(
-                    newCard(parent, ROW_POSTER_DP, Styler.dpInt(parent.context, ROW_CARD_DP))
+                    if (glass) newCard(parent, GLASS_ROW_POSTER_DP, Styler.dpInt(parent.context, GLASS_ROW_CARD_DP), glassCard = true, captions = false)
+                    else newCard(parent, ROW_POSTER_DP, Styler.dpInt(parent.context, ROW_CARD_DP))
                 )
 
             override fun onBindViewHolder(holder: CardHolder, position: Int) {
@@ -1472,7 +1506,7 @@ class DiscoverScreen(
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
-            CardHolder(newCard(parent, GRID_POSTER_DP, MATCH))
+            CardHolder(newCard(parent, GRID_POSTER_DP, MATCH, glassCard = glass))
 
         override fun onBindViewHolder(holder: CardHolder, position: Int) {
             bindCard(holder.itemView as PosterCardView, items[position])
@@ -1507,6 +1541,16 @@ class DiscoverScreen(
         /** Search results get a little more room, since there is no row label. */
         const val GRID_POSTER_DP = 150f
         const val SEARCH_COLUMNS = 7
+
+        /** Glass: the prototype's caption-less 82 x 123dp posters, and a row's shortest. */
+        const val GLASS_ROW_POSTER_DP = 123f
+        const val GLASS_ROW_CARD_DP = 82f
+        const val GLASS_SHORTEST_ROW_DP = 160f
+        /** Glass: the search box's hint and icon, white at 60% and 80%. */
+        const val GLASS_HINT = 0x99FFFFFF.toInt()
+        const val GLASS_ICON = 0xCCFFFFFF.toInt()
+        /** How many cards of each row to ask the page colours for when the rows arrive. */
+        const val PREFETCH_COLOURS = 12
 
         /** Start fetching the next page this many cards from the end. */
         const val PREFETCH_AHEAD = 6

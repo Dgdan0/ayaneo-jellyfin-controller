@@ -50,6 +50,14 @@ class MediaActionIconDrawable(
         fun of(context: Context, icon: MediaActionIcon, colors: PocketColors, progress: Float = 0f) =
             MediaActionIconDrawable(context, icon, if (icon.isOn) colors.accent else colors.primaryText,
                 progress, colors.accent, colors.mutedText)
+
+        /**
+         * On a Glass toggle: dark on the white face it has while on, white on
+         * glass while off; a download's ring fills in the accent.
+         */
+        fun onGlass(context: Context, icon: MediaActionIcon, colors: PocketColors, progress: Float = 0f) =
+            MediaActionIconDrawable(context, icon, if (icon.isOn) com.pocketds.hub.ui.glass.GlassColors.INK else android.graphics.Color.WHITE,
+                progress, colors.accent, 0x4DFFFFFF)
     }
 
     private val size = Styler.dpInt(context, 21f)

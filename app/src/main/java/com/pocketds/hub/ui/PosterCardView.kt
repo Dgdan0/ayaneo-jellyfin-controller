@@ -215,10 +215,12 @@ class PosterCardView(
         if (!showAvailability && libraryBadge.isNotEmpty()) {
             roundBadge(libraryBadge, if (libraryBadge == "✓") colors.badgeAvailable else colors.accent)
         } else if (showAvailability && availability.label.isNotEmpty()) {
-            badge.visibility = VISIBLE
-            badge.text = availability.label
-            badge.setBackgroundColor(badgeColour(availability))
-            badge.setTextColor(SemanticColor.foreground(badgeColour(availability)))
+            if (glass) glassAvailability(availability) else {
+                badge.visibility = VISIBLE
+                badge.text = availability.label
+                badge.setBackgroundColor(badgeColour(availability))
+                badge.setTextColor(SemanticColor.foreground(badgeColour(availability)))
+            }
         } else {
             badge.visibility = GONE
         }
@@ -378,8 +380,37 @@ class PosterCardView(
         badge.setTextColor(if (tick) colors.accentText else GlassColors.INK)
         (badge.layoutParams as? FrameLayout.LayoutParams)?.let {
             val edge = Styler.dpInt(context, 6f)
+            it.gravity = Gravity.TOP or Gravity.END
             it.topMargin = edge
             it.marginEnd = edge
+            it.marginStart = 0
+            badge.layoutParams = it
+        }
+    }
+
+    /**
+     * Glass: where a title stands as a chip at the poster's top left (the
+     * prototype's `.av`): In library, Partial, On the way, Requested, in the
+     * badge colours of CLAUDE.md, with the glass edge and light.
+     */
+    private fun glassAvailability(availability: Availability) {
+        val fill = badgeColour(availability)
+        badge.visibility = VISIBLE
+        badge.text = availability.label
+        badge.textSize = 10.5f
+        badge.textWeight(800)
+        badge.includeFontPadding = false
+        badge.minWidth = 0
+        badge.minHeight = 0
+        badge.setPadding(Styler.dpInt(context, 8f), Styler.dpInt(context, 5f), Styler.dpInt(context, 8f), Styler.dpInt(context, 5f))
+        badge.background = GlassPanelDrawable(GlassColors.withAlpha(fill, 0xF0), Styler.dp(context, 999f))
+        badge.setTextColor(SemanticColor.foreground(fill))
+        (badge.layoutParams as? FrameLayout.LayoutParams)?.let {
+            it.gravity = Gravity.TOP or Gravity.START
+            val edge = Styler.dpInt(context, 6f)
+            it.topMargin = edge
+            it.marginStart = edge
+            it.marginEnd = 0
             badge.layoutParams = it
         }
     }

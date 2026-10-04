@@ -146,6 +146,11 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
             // Cards a menu built before opening take the same tint.
             (0 until body.childCount).forEach {(body.getChildAt(it).background as? GlassPanelDrawable)?.retint(glassFill)}
         }
+        // A side sheet on a page that draws under the top bar starts below it.
+        if(side) (card.layoutParams as LayoutParams).let {lp->
+            val inset=TopChrome.overlap((parent as? View) ?: this)
+            if(lp.topMargin!=inset){lp.topMargin=inset;card.layoutParams=lp}
+        }
         dismissed=onDismiss;titleView.text=title;menuKey=title;subtitle.text=detail;subtitle.visibility=if(detail.isBlank()) GONE else VISIBLE
         visibility=VISIBLE;bringToFront();ViewCompat.setAccessibilityPaneTitle(this,title)
         onPanelGeometryChanged?.invoke()
@@ -154,7 +159,21 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
             card.animate().alpha(1f).translationX(0f).setDuration(180).start()
         }
     }
-    fun resetBody() {body.removeAllViews();tabRow.removeAllViews();footer.removeAllViews();choiceRows.clear();scroll.scrollTo(0,0)}
+    /** [keepScroll]: a caller redrawing its own rows on every press (the request form) stays where it was. */
+    fun resetBody(keepScroll:Boolean=false) {body.removeAllViews();tabRow.removeAllViews();footer.removeAllViews();choiceRows.clear();if(!keepScroll)scroll.scrollTo(0,0)}
+    /** A card for rows the caller builds and selects itself (the request form's); a [section] before it starts a new one. */
+    fun group():LinearLayout=currentGroup()
+    /** Scrolls the body so [view], somewhere inside it, is on screen. */
+    fun reveal(view:View) {
+        scroll.post {
+            val rect=android.graphics.Rect();view.getDrawingRect(rect);body.offsetDescendantRectToMyCoords(view,rect)
+            val top=scroll.scrollY;val bottom=top+scroll.height-scroll.paddingBottom
+            when {
+                rect.top<top -> scroll.smoothScrollTo(0,(rect.top-dp(28)).coerceAtLeast(0))
+                rect.bottom>bottom -> scroll.smoothScrollTo(0,rect.bottom-scroll.height+dp(10))
+            }
+        }
+    }
     /** Focuses [preferred], else the row last chosen in this menu, else the first row. */
     fun focusBody(preferred:View?=null) {
         val back=returning?.takeIf {it.first==menuKey}?.let {returning=null;choiceRows.getOrNull(it.second)}

@@ -49,7 +49,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
+import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
+import com.pocketds.hub.state.StatusTone
+import com.pocketds.hub.ui.textWeight
 import com.pocketds.hub.state.PollCadence
 import com.pocketds.hub.state.PollOutcome
 import com.pocketds.hub.state.Poller
@@ -81,6 +84,8 @@ class MediaDetailScreen(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private lateinit var colors: PocketColors
+    /** Glass (#11): the prototype's request page; a styling switch only. */
+    private var glass = false
     private lateinit var header: DetailHeaderView
     private lateinit var scroll: FocusScrollView
     private lateinit var stageStrip: LinearLayout
@@ -90,6 +95,10 @@ class MediaDetailScreen(
     private lateinit var castLabel: TextView
     private lateinit var cast: CastRowView
     private lateinit var status: TextView
+    /** Glass: the seasons as pills under the buttons. */
+    private var seasonPills: LinearLayout? = null
+    private var shownSeasons: List<com.pocketds.hub.model.SeasonOption>? = null
+    private var shownStages: List<com.pocketds.hub.model.Stage>? = null
 
     private var host: ScreenHost? = null
     private var detail: MediaDetail? = null
@@ -110,6 +119,7 @@ class MediaDetailScreen(
         this.host = host
         val context = host.viewContext
         colors = Theme.colors(context)
+        glass = Theme.onGlass(colors)
 
         // The same header as a Library title: artwork to the edges behind the
         // tabs, the title over it, the overview and the actions under it.
@@ -125,7 +135,7 @@ class MediaDetailScreen(
             clipChildren = false
             setPadding(0, 0, 0, Styler.dpInt(context, 40f))
         }
-        header = DetailHeaderView(context, colors, ringVisible).apply {
+        header = DetailHeaderView(context, colors, ringVisible, glass).apply {
             topInsetDp = TopBarView.HEIGHT_DP.toInt()
             titleView.text = fallbackTitle
             overview.onChanged = { host.refreshHints() }
@@ -140,23 +150,38 @@ class MediaDetailScreen(
         stageStrip = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, Styler.dpInt(context, 2f), 0, Styler.dpInt(context, 2f))
+            clipChildren = false
         }
-        header.continuation.addView(FocusHorizontalScrollView(context).apply {
+        // Glass reads as the prototype's page: the pipeline under the facts,
+        // before the overview and the buttons.
+        val pipelineHome = if (glass) header.underFacts else header.continuation
+        pipelineHome.addView(FocusHorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            clipChildren = false
             addView(stageStrip)
         })
         summary = TextView(context).apply {
-            textSize = 13f
+            textSize = if (glass) 12f else 13f
+            if (glass) textWeight(700)
             setTextColor(colors.accent)
-            setPadding(0, Styler.dpInt(context, 2f), 0, 0)
+            setPadding(0, Styler.dpInt(context, if (glass) 4f else 2f), 0, 0)
         }
-        header.continuation.addView(summary)
+        pipelineHome.addView(summary)
+        if (glass) {
+            seasonPills = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+            header.continuation.addView(FocusHorizontalScrollView(context).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(seasonPills)
+            })
+        }
 
         castLabel = TextView(context).apply {
             text = "Cast"
-            typeRole(Type.Role.HEADING, 16f)
+            // Glass: a row title as Home's are, bold Figtree.
+            if (glass) { textSize = 14f; textWeight(700) } else typeRole(Type.Role.HEADING, 16f)
             setTextColor(colors.primaryText)
-            setPadding(Styler.dpInt(context, 24f), Styler.dpInt(context, 14f), 0, 0)
+            setPadding(Styler.dpInt(context, if (glass) 22f else 24f), Styler.dpInt(context, 14f), 0, 0)
             visibility = View.GONE
         }
         root.addView(castLabel)
@@ -171,9 +196,9 @@ class MediaDetailScreen(
             textSize = 12f
             setTextColor(colors.mutedText)
             setPadding(Styler.dpInt(context, 24f), Styler.dpInt(context, 14f), Styler.dpInt(context, 24f), 0)
-            text = "Loading…"
         }
-        root.addView(status)
+        status.showStatus(StatusMessage("Loading…"), colors)
+        root.addView(status, LinearLayout.LayoutParams(if (glass) WRAP else MATCH, WRAP))
 
         scroller.addView(root)
         // Once the backdrop has scrolled away, the tabs above need solid ground.
@@ -185,7 +210,7 @@ class MediaDetailScreen(
         val frame = FrameLayout(context)
         rootFrame = frame
         frame.addView(scroller, FrameLayout.LayoutParams(MATCH, MATCH))
-        form = FormOverlay(context, colors, ringVisible)
+        form = FormOverlay(context, colors, ringVisible, glass = Theme.onGlass(colors))
         frame.addView(form, FrameLayout.LayoutParams(MATCH, MATCH))
         picker = ChoiceOverlay(context, colors, ringVisible)
         frame.addView(picker, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -195,8 +220,7 @@ class MediaDetailScreen(
             scope = scope,
             overlay = { form },
             onStatus = { text, isError ->
-                status.setTextColor(if (isError) colors.dangerText else colors.mutedText)
-                status.text = text
+                status.showStatus(StatusMessage(text, if (isError) StatusTone.ERROR else StatusTone.NORMAL), colors)
             },
             onNotify = { host?.notify(it) },
             onHintsChanged = { host?.refreshHints() },
@@ -316,9 +340,25 @@ class MediaDetailScreen(
         detail = d
         header.titleView.text = d.media.title
         header.metadataView.text = describe(d)
+        if (glass) {
+            // "NOT IN YOUR LIBRARY", or where it has got to in the accent ("ON THE WAY").
+            val label = Availability.fromWire(d.availability).label
+            header.eyebrowView.text = label.ifEmpty { "Not in your library" }.uppercase()
+            header.eyebrowView.setTextColor(if (label.isEmpty()) GLASS_EYEBROW else colors.accent)
+            seasonPills?.takeIf { d.seasonList != shownSeasons }?.let { pills ->
+                shownSeasons = d.seasonList
+                pills.removeAllViews()
+                d.seasonList.forEach { season -> pills.addView(seasonPill(season), LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = Styler.dpInt(pills.context, 8f) }) }
+            }
+        }
 
-        stageStrip.removeAllViews()
-        d.pipeline.stages.forEach { stageStrip.addView(stageChip(it)) }
+        // The pipeline refreshes every four seconds while a stage is active;
+        // rebuilding unchanged chips restarted the Glass pulse each time.
+        if (d.pipeline.stages != shownStages) {
+            shownStages = d.pipeline.stages
+            stageStrip.removeAllViews()
+            d.pipeline.stages.forEach { stageStrip.addView(if (glass) PipelineChip(stageStrip.context, colors, it) else stageChip(it)) }
+        }
 
         // Hidden unless it adds something. With nothing in motion it read
         // "Not requested" directly under a strip of five pending chips that
@@ -336,7 +376,8 @@ class MediaDetailScreen(
             when (Availability.fromWire(d.availability)) {
                 Availability.AVAILABLE -> colors.badgeAvailable
                 Availability.BLOCKED, Availability.DELETED -> colors.badgeFailed
-                else -> colors.accent
+                // Glass: the active stage's amber, as the prototype's summary is.
+                else -> if (glass) PipelineChip.SUMMARY else colors.accent
             }
         )
 
@@ -444,7 +485,7 @@ class MediaDetailScreen(
         }
         if (d.canRequest) {
             actionRow.addView(
-                actionButton(if (flow.busy) "Requesting…" else "Request", null, primary = true) {
+                actionButton(if (flow.busy) "Requesting…" else "Request", if (glass) AppIcon.ADD else null, primary = true) {
                     if (!flow.busy) flow.start(mediaKey, d.media.title)
                 }
             )
@@ -485,15 +526,34 @@ class MediaDetailScreen(
 
     /** A pill like every detail page's; the first lines up with the title, its ring gap pulled back. */
     private fun actionButton(label: String, icon: AppIcon?, primary: Boolean = false, onClick: () -> Unit): View =
-        PillButton.create(actionRow.context, colors, label, icon, primary = primary, heightDp = 40f).apply {
+        PillButton.create(actionRow.context, colors, label, icon, primary = primary, heightDp = if (glass) 31f else 40f, glass = glass).apply {
             activateOnTap { onClick() }
             // No scale: these sit in a row and growing one shoves the next along.
             FocusDecorator.attach(this, ringVisible, scale = false)
             layoutParams = LinearLayout.LayoutParams(WRAP, WRAP).apply {
                 if (actionRow.childCount == 0) marginStart = -Styler.dpInt(context, PillButton.RING_DP)
-                marginEnd = Styler.dpInt(context, 6f)
+                // Glass: the prototype's 10dp between faces, the rings' room included.
+                marginEnd = Styler.dpInt(context, if (glass) 2f else 6f)
             }
         }
+
+    /** Glass: a season as a glass pill under the buttons, "Limited Series · 7 episodes"; there is nothing to do with one. */
+    private fun seasonPill(season: com.pocketds.hub.model.SeasonOption): View = TextView(actionRow.context).apply {
+        text = listOf(season.name.ifBlank { com.pocketds.hub.ui.EpisodeLabel.season(season.number) },
+            if (season.episodeCount > 0) "${season.episodeCount} episode${if (season.episodeCount == 1) "" else "s"}" else "")
+            .filter(String::isNotBlank).joinToString(" · ")
+        textSize = 12f
+        textWeight(600)
+        setTextColor(android.graphics.Color.WHITE)
+        includeFontPadding = false
+        val h = Styler.dpInt(context, 11f)
+        val v = Styler.dpInt(context, 7f)
+        setPadding(h, v, h, v)
+        val pill = com.pocketds.hub.ui.glass.GlassPanelDrawable(
+            com.pocketds.hub.ui.glass.GlassColors.panel(com.pocketds.hub.ui.glass.GlassPage.palette(context)), Styler.dp(context, 999f))
+        background = pill
+        com.pocketds.hub.ui.glass.GlassPage.follow(this) { page -> pill.retint(com.pocketds.hub.ui.glass.GlassColors.panel(page)) }
+    }
 
     /** Ⓨ: pick a release by hand. */
     private fun findRelease() {
@@ -522,5 +582,7 @@ class MediaDetailScreen(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val ART_WIDTH_PX = 1920
+        /** Glass: "NOT IN YOUR LIBRARY" in white at 72%. */
+        const val GLASS_EYEBROW = 0xB8FFFFFF.toInt()
     }
 }

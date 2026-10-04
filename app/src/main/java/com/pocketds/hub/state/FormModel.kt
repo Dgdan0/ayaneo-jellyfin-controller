@@ -17,7 +17,9 @@ sealed interface FormRow {
         val options: List<String>,
         val selected: Int = 0,
         /** Shown under the value, e.g. free space on a root folder. */
-        val details: List<String> = emptyList()
+        val details: List<String> = emptyList(),
+        /** A heading over the rows from here on, in the Glass side sheet ("Quality"); Classic draws none. */
+        val section: String = ""
     ) : FormRow {
         val value: String get() = options.getOrElse(selected) { "" }
         val detail: String get() = details.getOrElse(selected) { "" }
@@ -28,7 +30,9 @@ sealed interface FormRow {
         override val id: String,
         override val label: String,
         val checked: Boolean = false,
-        val detail: String = ""
+        val detail: String = "",
+        /** As [Choice.section]. */
+        val section: String = ""
     ) : FormRow
 
     /** Press it. A submits. */
@@ -38,6 +42,14 @@ sealed interface FormRow {
         val danger: Boolean = false
     ) : FormRow
 }
+
+/** The heading a row starts in the Glass side sheet, or "" to stay under the one before. */
+val FormRow.section: String
+    get() = when (this) {
+        is FormRow.Choice -> section
+        is FormRow.Toggle -> section
+        is FormRow.Action -> ""
+    }
 
 /**
  * A gamepad-drivable form.

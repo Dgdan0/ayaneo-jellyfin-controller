@@ -122,9 +122,10 @@ class RequestFlow(
             rows.add(
                 FormRow.Choice(
                     id = "profile",
-                    label = "Quality",
+                    label = "Quality profile",
                     options = opts.profiles.map { it.label },
-                    selected = if (profileIndex >= 0) profileIndex else opts.defaultProfileIndex
+                    selected = if (profileIndex >= 0) profileIndex else opts.defaultProfileIndex,
+                    section = "Quality"
                 )
             )
         }
@@ -132,7 +133,8 @@ class RequestFlow(
             rows.add(
                 FormRow.Choice(
                     id = "folder",
-                    label = "Folder",
+                    label = "Root folder",
+                    section = "Folder",
                     options = opts.rootFolders.map { it.label },
                     // Free space belongs next to the choice, not on another
                     // screen: "which folder" and "is there room" are one
@@ -143,7 +145,7 @@ class RequestFlow(
             )
         }
         if (opts.seasons.isNotEmpty()) {
-            rows.add(FormRow.Toggle("allSeasons", "All seasons", checked = allSeasons))
+            rows.add(FormRow.Toggle("allSeasons", "All seasons", checked = allSeasons, section = "Seasons"))
             if (!allSeasons) {
                 opts.seasons.forEach { season ->
                     val id = "season:" + season.number

@@ -25,11 +25,12 @@ object SegmentGeometry {
         }
     }
 
-    fun spans(natural: List<Float>, growth: List<Float>, grow: Float, pad: Float): List<Span> {
+    /** [gap] between options: Glass draws each of a title's seasons as its own pill. */
+    fun spans(natural: List<Float>, growth: List<Float>, grow: Float, pad: Float, gap: Float = 0f): List<Span> {
         var x = pad
         return natural.mapIndexed { index, width ->
             val w = width + grow * growth.getOrElse(index) { 0f }
-            Span(x, x + w).also { x += w }
+            Span(x, x + w).also { x += w + gap }
         }
     }
 

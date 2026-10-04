@@ -16,7 +16,6 @@ import com.pocketds.hub.playback.ResumeRules
 import com.pocketds.hub.settings.HubSettings
 import com.pocketds.hub.state.Fmt
 import com.pocketds.hub.state.PagedLoadState
-import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.EpisodeCardView
@@ -42,7 +41,9 @@ class SeasonEpisodesView(
     private val api: HubApi,
     private val colors: PocketColors,
     private val ringVisible: () -> Boolean,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    /** Glass episodes ([EpisodeCardView]'s glass tile), at the prototype's 176dp. */
+    private val glass: Boolean = false
 ) : LinearLayout(context) {
     var onPlay: ((LibraryItem) -> Unit)? = null
     var onFocusedEpisode: ((LibraryItem) -> Unit)? = null
@@ -68,7 +69,7 @@ class SeasonEpisodesView(
         isFocusable = false
         clipToPadding = false
         clipChildren = false
-        setPadding(dp(18), dp(8), dp(18), dp(10))
+        if (glass) setPadding(dp(16), dp(6), dp(16), dp(10)) else setPadding(dp(18), dp(8), dp(18), dp(10))
         addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
                 val state = current ?: return
@@ -160,7 +161,7 @@ class SeasonEpisodesView(
         val season = season ?: return
         val state = current ?: return
         if (loadJob?.isActive == true) return
-        if (state.items.isEmpty()) status.showStatus(StatusMessage("Loading episodes…"), colors)
+        if (state.items.isEmpty()) status.showStatus(StatusText.loading("episodes", refreshing = false), colors)
         status.visibility = if (state.items.isEmpty()) VISIBLE else GONE
         loadJob = scope.launch {
             when (val result = api.libraryEpisodes(seriesId, season.id, page)) {
@@ -186,7 +187,7 @@ class SeasonEpisodesView(
         if (current !== state) return
         adapter.submit(state.items)
         status.visibility = if (state.items.isEmpty()) VISIBLE else GONE
-        if (state.items.isEmpty()) status.showStatus(StatusMessage("No episodes in this season yet."), colors)
+        if (state.items.isEmpty()) status.showStatus(StatusText.notice("No episodes in this season yet."), colors)
         if (first) list.scrollToPosition(startPosition(state).coerceAtLeast(0))
     }
 
@@ -201,9 +202,9 @@ class SeasonEpisodesView(
         override fun getItemCount() = values.size
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EpisodeHolder {
-            val card = EpisodeCardView(parent.context, colors, ringVisible, compact = true).apply {
+            val card = EpisodeCardView(parent.context, colors, ringVisible, compact = true, glass = glass).apply {
                 showsPlayOnFocus = true
-                layoutParams = RecyclerView.LayoutParams(dp(EpisodeCardView.STRIP_WIDTH_DP), WRAP)
+                layoutParams = RecyclerView.LayoutParams(dp(if (glass) EpisodeCardView.GLASS_STRIP_WIDTH_DP else EpisodeCardView.STRIP_WIDTH_DP), WRAP)
                     .apply { setMargins(dp(6), dp(6), dp(6), dp(6)) }
             }
             val holder = EpisodeHolder(card)
