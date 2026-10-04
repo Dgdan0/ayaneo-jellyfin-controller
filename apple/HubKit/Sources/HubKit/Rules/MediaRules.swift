@@ -335,4 +335,37 @@ public enum DetailLines {
     public static func playLabel(_ item: LibraryItem) -> String {
         item.positionSeconds > 0 ? "Resume · " + Fmt.clock(millis: Int64(item.positionSeconds) * 1_000) : "Play"
     }
+
+    /// How Play starts a movie or an episode: where it was left when it has a
+    /// saved position, else from the start (Android's `canResume`). The
+    /// position was already judged, by the hub when it saved the stop, so it
+    /// is not judged again here.
+    public static func startMode(_ item: LibraryItem) -> PlaybackStartMode {
+        item.positionSeconds > 0 ? .resume : .restart
+    }
+
+    /// Start over sits beside Resume, for a movie or an episode with a saved
+    /// position. A series has none: its button is its next episode's.
+    public static func offersStartOver(_ item: LibraryItem) -> Bool {
+        (item.type == "movie" || item.type == "episode") && item.positionSeconds > 0
+    }
+
+    /// A series' Play: its part-watched episode resumes, a next or first one
+    /// starts from the beginning.
+    public static func startMode(_ target: SeriesPlayTarget) -> PlaybackStartMode {
+        target.kind == "resume" ? .resume : .restart
+    }
+}
+
+/// The three posters fanned on a library's tile on the Library page. The one
+/// place they are chosen, so the choice can move to the hub (one field for
+/// both apps) without touching the page.
+public enum LibraryFan {
+    public static let count = 3
+
+    /// The first three titles with a poster, in the order the library's page
+    /// came in (its saved sort).
+    public static func posters(_ page: LibraryPage) -> [String] {
+        Array(page.items.map(\.media.poster).filter { !$0.isEmpty }.prefix(count))
+    }
 }

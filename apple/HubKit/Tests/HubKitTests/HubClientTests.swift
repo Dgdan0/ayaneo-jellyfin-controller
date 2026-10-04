@@ -62,6 +62,19 @@ struct HubClientTests {
         #expect(await transport.sent.first?.value(forHTTPHeaderField: "X-Jellyfin-User") == nil)
     }
 
+    @Test func aSessionCallIsForTheProfileThatOpenedItWhicheverIsChosenNow() async throws {
+        // The hub answers 404 to a session's events from any other profile.
+        let transport = ScriptedTransport([.init(status: 200, body: #"{"ok":true}"#)])
+        let hub = client(transport, userId: "44444444444444444444444444444444")
+        try await hub.send(HubEndpoints.closePlayback(sessionId: "s1", user: "55555555555555555555555555555555"))
+        // Opened under the hub's default profile: no profile header at all.
+        try await hub.send(HubEndpoints.closePlayback(sessionId: "s2", user: ""))
+        let sent = await transport.sent
+        #expect(sent.first?.value(forHTTPHeaderField: "X-Jellyfin-User") == "55555555555555555555555555555555")
+        #expect(sent.last?.value(forHTTPHeaderField: "X-Jellyfin-User") == nil)
+        #expect(sent.first?.httpMethod == "DELETE")
+    }
+
     @Test func oneRejectionStopsAllTrafficWithThatToken() async {
         // Five wrong tokens ban the source for 15 minutes, and retrying through
         // the ban extends it. After the first 401 nothing more may leave.

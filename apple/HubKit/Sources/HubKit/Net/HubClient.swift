@@ -149,8 +149,9 @@ public actor HubClient {
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = request.method.rawValue
         urlRequest.setValue("Bearer " + creds.token, forHTTPHeaderField: "Authorization")
-        if !creds.userId.isEmpty {
-            urlRequest.setValue(creds.userId, forHTTPHeaderField: Self.userHeader)
+        let userId = request.user ?? creds.userId
+        if !userId.isEmpty {
+            urlRequest.setValue(userId, forHTTPHeaderField: Self.userHeader)
         }
         if request.method != .get {
             urlRequest.setValue("no-store, no-cache", forHTTPHeaderField: "Cache-Control")

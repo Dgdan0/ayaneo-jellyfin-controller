@@ -23,6 +23,7 @@ struct ResumeRulesTests {
         #expect(ResumeRules.judge(positionMillis: 3_312_000, durationMillis: hour) == .finished)
         #expect(ResumeRules.isFinished(positionMillis: 3_312_000, durationMillis: hour))
         #expect(ResumeRules.resumePosition(positionMillis: 3_312_000, durationMillis: hour) == 0)
+        #expect(ResumeRules.isFinished(positionMillis: hour, durationMillis: hour))
     }
 
     @Test func anythingShorterThanFiveMinutesIsWatchedOnceStarted() {
@@ -266,5 +267,17 @@ struct DetailLinesTests {
         let special = LibraryItem(id: "x", type: "episode", title: "Making of", played: true)
         #expect(DetailLines.episodeTitle(special) == "Making of")
         #expect(DetailLines.episodeMeta(special) == "Watched")
+    }
+}
+
+/// The posters fanned on a library's tile.
+struct LibraryFanTests {
+    @Test func theFirstThreeTitlesWithAPosterInTheLibrarysOwnOrder() {
+        let titles = ["", "/v1/img/jf/a/Primary", "/v1/img/jf/b/Primary", "", "/v1/img/jf/c/Primary", "/v1/img/jf/d/Primary"]
+        let page = LibraryPage(items: titles.enumerated().map { index, poster in
+            MediaHit(media: MediaRef(type: "series", title: "T\(index)", poster: poster), jellyfinItemId: "id\(index)")
+        })
+        #expect(LibraryFan.posters(page) == ["/v1/img/jf/a/Primary", "/v1/img/jf/b/Primary", "/v1/img/jf/c/Primary"])
+        #expect(LibraryFan.posters(LibraryPage()) == [])
     }
 }

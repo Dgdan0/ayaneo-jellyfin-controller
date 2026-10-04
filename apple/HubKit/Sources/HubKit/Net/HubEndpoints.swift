@@ -11,12 +11,18 @@ public struct HubRequest: Equatable, Sendable {
     public let body: Data?
     /// The longer budget for slow upstream work (interactive search, scans).
     public let slow: Bool
+    /// The Jellyfin profile this request is for, when it is not the client's
+    /// current one: a playback session belongs to the profile that opened it,
+    /// and the hub refuses its events from any other. Empty is the hub's
+    /// default profile; nil is whichever profile the client has now.
+    public let user: String?
 
-    public init(_ path: String, method: Method = .get, body: Data? = nil, slow: Bool = false) {
+    public init(_ path: String, method: Method = .get, body: Data? = nil, slow: Bool = false, user: String? = nil) {
         self.path = path
         self.method = method
         self.body = body
         self.slow = slow
+        self.user = user
     }
 
     /// GETs are retried; nothing else is (see `RetryPolicy`).
@@ -78,6 +84,41 @@ public enum HubEndpoints {
 
     public static func libraryState(itemId: String, body: Data) -> HubRequest {
         HubRequest("/v1/library/items/" + encode(itemId) + "/state", method: .post, body: body)
+    }
+
+    // MARK: Playback. Every call after `preparePlayback` names the profile that
+    // opened the session (`user`), which the hub checks.
+
+    public static func preparePlayback(itemId: String, body: PlaybackPrepareBody, user: String) -> HubRequest {
+        HubRequest("/v1/playback/items/" + encode(itemId) + "/prepare", method: .post, body: json(body), user: user)
+    }
+
+    public static func selectPlayback(sessionId: String, body: PlaybackSelectBody, user: String) -> HubRequest {
+        HubRequest(session(sessionId) + "/select", method: .post, body: json(body), user: user)
+    }
+
+    /// Addresses for the session's stream that need no token (`PlaybackGrant`).
+    public static func playbackGrant(sessionId: String, user: String) -> HubRequest {
+        HubRequest(session(sessionId) + "/cast-grant", method: .post, user: user)
+    }
+
+    public static func playbackEvent(sessionId: String, body: PlaybackEventBody, user: String) -> HubRequest {
+        HubRequest(session(sessionId) + "/events", method: .post, body: json(body), user: user)
+    }
+
+    /// Ends the session: the hub saves a position it was never told was
+    /// stopped, closes Jellyfin's transcode and revokes the session's grants.
+    public static func closePlayback(sessionId: String, user: String) -> HubRequest {
+        HubRequest(session(sessionId), method: .delete, user: user)
+    }
+
+    private static func session(_ id: String) -> String { "/v1/playback/sessions/" + encode(id) }
+
+    /// A request body: keys sorted, so a body is the same bytes every time.
+    static func json<T: Encodable>(_ value: T) -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return (try? encoder.encode(value)) ?? Data("{}".utf8)
     }
 
     /// Service history and current warnings, with Android's default history
