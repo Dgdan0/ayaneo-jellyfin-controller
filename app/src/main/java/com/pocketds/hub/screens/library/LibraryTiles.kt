@@ -37,6 +37,34 @@ object LibraryTiles {
         return if (titles <= 0) libraries else "$libraries · $titles ${if (titles == 1) "title" else "titles"}"
     }
 
+    /**
+     * The line under "Your reading libraries": how many, and the servers they
+     * come from, as the prototype says it ("3 libraries from Storyteller and
+     * Kavita, and Kavita's reading lists").
+     */
+    fun readingSummary(libraries: List<com.pocketds.hub.model.ReadingLibrary>): String {
+        val shelves = libraries.filter { it.kind != "reading_list" }
+        val servers = shelves.map { it.source.lowercase() }.distinct()
+            .map { com.pocketds.hub.model.ServiceNames.display(it) }
+        val count = "${shelves.size} ${if (shelves.size == 1) "library" else "libraries"}"
+        val from = when (servers.size) {
+            0 -> ""
+            1 -> " from ${servers[0]}"
+            else -> " from ${servers.dropLast(1).joinToString(", ")} and ${servers.last()}"
+        }
+        // The hub lists Kavita's reading lists only as a capability; the screen adds their tile.
+        val lists = if (servers.any { it == "Kavita" }) ", and Kavita's reading lists" else ""
+        return count + from + lists
+    }
+
+    /** The small capitals over a Books library tile's name, from the hub's reading kind. */
+    fun readingKindLabel(kind: String): String = when (kind) {
+        "comic" -> "Comics"
+        "manga" -> "Manga"
+        "reading_list" -> "Kavita"
+        else -> "Books & audio"
+    }
+
     /** The small capitals over a tile's name, from Jellyfin's collection type. */
     fun kindLabel(kind: String): String = when (kind) {
         "movies" -> "Movie library"

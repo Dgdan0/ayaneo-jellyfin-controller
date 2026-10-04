@@ -74,7 +74,8 @@ class LibraryRootView(
         textSize = 11f
         setTextColor(colors.mutedText)
     }
-    private val tiles = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+    /** Not clipped: a focused tile's ring stands outside it. */
+    private val tiles = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; clipChildren = false }
     private val scroll = FocusScrollView(context)
     private var views: List<LibraryView> = emptyList()
     private val tileViews = mutableListOf<LibraryTileView>()
@@ -161,7 +162,7 @@ class LibraryRootView(
                     continue
                 }
                 val index = rowIndex * COLUMNS + column
-                val tile = LibraryTileView(context, colors).apply {
+                val tile = LibraryTileView(context, colors, ringVisible).apply {
                     bind(view, api)
                     FocusDecorator.attach(this, ringVisible)
                     FocusDecorator.listen(this, ringVisible) { _, focused ->

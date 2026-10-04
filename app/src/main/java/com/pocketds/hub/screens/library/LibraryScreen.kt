@@ -85,6 +85,8 @@ class LibraryScreen(
     private lateinit var mediaContent: LinearLayout
     private lateinit var booksContent: LinearLayout
     private lateinit var heading: TextView
+    /** Glass: the line under "Your reading libraries". */
+    private var readingSummary: TextView? = null
     private lateinit var status: TextView
     private lateinit var list: RecyclerView
     private lateinit var chips: BlobSegmentedView
@@ -124,11 +126,25 @@ class LibraryScreen(
             visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
             heading = TextView(context).apply {
                 text = "Your reading libraries"
-                typeRole(Type.Role.SCREEN)
                 setTextColor(colors.primaryText)
-                setPadding(dp(24), dp(10), dp(24), dp(2))
+                // Glass: the prototype's page heading, over a line naming where they come from.
+                if (glass) {
+                    textSize = 21f; typeface = Type.display(context, 800); includeFontPadding = false
+                    setPadding(dp(22), dp(10), dp(22), 0)
+                } else {
+                    typeRole(Type.Role.SCREEN)
+                    setPadding(dp(24), dp(10), dp(24), dp(2))
+                }
             }
             addView(heading)
+            if (glass) {
+                readingSummary = TextView(context).apply {
+                    textSize = 12f
+                    setTextColor(com.pocketds.hub.ui.SettingsCard.GLASS_QUIET)
+                    setPadding(dp(22), dp(6), dp(22), 0)
+                }
+                addView(readingSummary)
+            }
             status = TextView(context).apply {
                 textSize = 11f
                 setTextColor(colors.mutedText)
@@ -141,7 +157,8 @@ class LibraryScreen(
                 setItemViewCacheSize(LIBRARY_COLUMNS * 2)
                 clipToPadding = false
                 clipChildren = false
-                setPadding(dp(16), dp(8), dp(16), dp(20))
+                // Glass: the tiles' 6dp margins make the prototype's 12dp gaps and 22dp sides.
+                if (glass) setPadding(dp(16), dp(6), dp(16), dp(20)) else setPadding(dp(16), dp(8), dp(16), dp(20))
                 layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
                 addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
                     val widthDp = ((right - left) / resources.displayMetrics.density).toInt()
@@ -442,6 +459,7 @@ class LibraryScreen(
             ReadingLibrary(id="kavita:reading-lists",source="kavita",kind="reading_list",title="Reading lists")
         ) else emptyList())
         readingArtworkDay = LocalDate.now().toString()
+        readingSummary?.text = LibraryTiles.readingSummary(body.libraries)
         status.showStatus(
             if (body.libraries.isEmpty()) StatusText.notice("No reading libraries were found.")
             else StatusText.loaded("${body.libraries.size} reading libraries", body.cache, body.partial.map { it.service }),
@@ -513,9 +531,10 @@ class LibraryScreen(
         override fun getItemCount() = values.size
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            val row = LibraryCardView(parent.context, colors).apply {
+            // Glass: the same tile as the Movies and TV root, the library's cover as its fan.
+            val row = (if (glass) LibraryTileView(parent.context, colors, ringVisible) else LibraryCardView(parent.context, colors)).apply {
                 layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
-                    setMargins(dp(12), dp(10), dp(12), dp(10))
+                    if (glass) setMargins(dp(6), dp(6), dp(6), dp(6)) else setMargins(dp(12), dp(10), dp(12), dp(10))
                 }
                 FocusDecorator.attach(this, ringVisible)
                 FocusDecorator.listen(this, ringVisible) { _, focused ->
@@ -531,9 +550,11 @@ class LibraryScreen(
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             val value = values[position]
-            val row = holder.itemView as LibraryCardView
-            row.setTag(TAG_READING_VIEW, value)
-            row.bindReading(value, Artwork.loader(api, row.context), api::imageUrl)
+            holder.itemView.setTag(TAG_READING_VIEW, value)
+            when (val row = holder.itemView) {
+                is LibraryTileView -> row.bind(value, api)
+                is LibraryCardView -> row.bindReading(value, Artwork.loader(api, row.context), api::imageUrl)
+            }
         }
     }
 

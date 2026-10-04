@@ -42,6 +42,26 @@ class LibraryTilesTest {
     }
 
     @Test
+    fun `the Books root says how many libraries and where they come from`() {
+        val libraries = listOf(
+            com.pocketds.hub.model.ReadingLibrary(id = "a", source = "kavita", kind = "manga"),
+            com.pocketds.hub.model.ReadingLibrary(id = "b", source = "kavita", kind = "comic"),
+            com.pocketds.hub.model.ReadingLibrary(id = "c", source = "storyteller", kind = "book")
+        )
+        assertEquals("3 libraries from Kavita and Storyteller, and Kavita's reading lists", LibraryTiles.readingSummary(libraries))
+        assertEquals("1 library from Storyteller",
+            LibraryTiles.readingSummary(listOf(com.pocketds.hub.model.ReadingLibrary(id = "c", source = "storyteller"))))
+    }
+
+    @Test
+    fun `a reading library's kind is named as the prototype names it`() {
+        assertEquals("Books & audio", LibraryTiles.readingKindLabel("book"))
+        assertEquals("Comics", LibraryTiles.readingKindLabel("comic"))
+        assertEquals("Manga", LibraryTiles.readingKindLabel("manga"))
+        assertEquals("Kavita", LibraryTiles.readingKindLabel("reading_list"))
+    }
+
+    @Test
     fun `a library's kind is named in words`() {
         assertEquals("Movie library", LibraryTiles.kindLabel("movies"))
         assertEquals("TV library", LibraryTiles.kindLabel("tvshows"))
