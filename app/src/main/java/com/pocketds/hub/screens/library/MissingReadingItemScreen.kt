@@ -48,8 +48,9 @@ class MissingReadingItemScreen(private val api:HubApi,private val item:ReadingSe
             overview.bind("This volume is part of the collection but is not available to read. Search for an edition to see its details and available request options.")
             bindArtwork("book",null,item.artwork.takeIf(String::isNotBlank)?.let(api::imageUrl),Artwork.loader(api, context))
         }
-        // Glass: the white pill, as a book page's main action.
-        button=(if (glass) PillButton.create(context,colors,"Find this book",AppIcon.SEARCH,primary=true,heightDp=31f,glass=true)
+        // Glass: the Books side's main action, gold (PillButton.mainFace).
+        button=(if (glass) PillButton.create(context,colors,"Find this book",AppIcon.SEARCH,primary=true,heightDp=31f,glass=true,
+            side=com.pocketds.hub.state.ContentMode.BOOKS)
         else TextView(context).apply {
             text="Find this book";textSize=14f;DetailStyler.action(this,colors,true)
             setPadding(Styler.dpInt(context,16f),0,Styler.dpInt(context,16f),0)

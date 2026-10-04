@@ -640,7 +640,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | A book's place in its series on a card | `ReadingWork.cardSubtitle` ("Red Rising #6") and `seriesNumber` |
 | Books Library's view: Series, Authors, or every book on its own | `ReadingLibraryGridScreen` (`view`; Books asks the hub for `view=works`); each view's order in `DomainPreferences` (`sort`, `bookSort`, `readingView`) |
 | A person as a round portrait, the ring round it | `DetailArtworkCardView.portrait` (an author, a title's cast row in `CastRowView`) |
-| Books Home's top: the book being read, the series being read | `screens/home/ContinueReadingView` (Resume reading opens `ReadingWorkScreen(openReader = true)`; on Glass no card, the cover at full size with the words beside its foot, Resume reading white), `SeriesStackView` fed by `ReadingShelves.yourSeries` |
+| Books Home's top: the book being read, the series being read | `screens/home/ContinueReadingView` (Resume reading opens `ReadingWorkScreen(openReader = true)`; on Glass no card, the cover at full size with the words beside its foot, Resume reading gold), `SeriesStackView` fed by `ReadingShelves.yourSeries` |
 | A series as a fan of covers (Books Home, the series page) | `ui/CoverFanView`; which covers from `ReadingShelves.fanCovers` (up to four), the book being read from `onNumber`; "On #6 · 1 of 6 finished" from `ReadingBookFacts.seriesProgress`. `glass = true` is the prototype's fan: 64dp covers leaning about their feet, the book being read on top at the right, the outer two leaning further with focus (`spread`) |
 | Books Home rows | `ReadingShelves`: `onePerSeries`, `nextInSeries`, `BUILT_IN` (rows the app fills; list actions only on the person's own) |
 | Reading times from the hub | `ReadingShelves.timestamp` (Storyteller writes `2026-09-27 03:16:47`, UTC with no zone) |
@@ -653,7 +653,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | An accent and the ink drawn on it | `AccentPreset.color(dark)` / `ink(dark)` via `Theme.colors`; Books default to gold (`AccentPreset.defaultFor`) |
 | A controller button drawn in the hint bar | `ui/KeyGlyphDrawable` |
 | A small glass button in a row of controls (Favourites, Sort, Mark all seen, a round search) | `PillButton.control(view, colors, icon, round)`: the prototype's 32dp `.cbtn` |
-| A rounded action (Play, Details, Continue reading) | `ui/PillButton` (primary = accent fill; the ring keeps a gap). As a detail page's first action it takes `marginStart = -RING_DP`; `DetailHeaderView`'s action row leaves that room, so the pill lines up with the title and its ring is not clipped. `glass = true`: the main action white with dark words, the others glass that follows the page, 11dp corners (Glass Home, title pages, Upcoming; other screens at their milestone) |
+| A rounded action (Play, Details, Continue reading) | `ui/PillButton` (primary = accent fill; the ring keeps a gap). As a detail page's first action it takes `marginStart = -RING_DP`; `DetailHeaderView`'s action row leaves that room, so the pill lines up with the title and its ring is not clipped. `glass = true`: the main action takes its side's face (`side`; `mainFace`/`mainInk`): white with dark words on Media, the Books accent (gold) with its ink on Books -- Resume reading, a book's Read or Resume, a series' Continue and its card's disc, Find a download and the request sheet's foot; the others glass that follows the page, 11dp corners |
 | A Glass button's face: glass, or white while lit | `ui/glass/GlassButtonBackground` (`attach(view, colors, corner, ring, lit)`, then `lit`): `PillButton(glass = true)` and `DetailStyler.glassToggle`, a title's round toggles that turn white while on; one GlassPage.follow per view |
 | A rounded or round drawable from palette colours | `ThemeGradientDrawable.rounded` / `.oval`: inside `ThemeGradientDrawable().apply {}` a bare `colors` is GradientDrawable's own array |
 | Fading the page colour into artwork | `ui/ScrimDrawable` |
@@ -942,13 +942,13 @@ not receive virtual missing episodes.
 ### Books in Glass (#11)
 
 Books Home is the prototype's: the book being read at full cover size with the words beside its foot
-(`ContinueReadingView`), Resume reading white and Details glass; the other books being read under it
+(`ContinueReadingView`), Resume reading gold and Details glass; the other books being read under it
 as glass rows two to a line, with their formats as glass chips; Your series as fans (`CoverFanView`);
 then rows of glass covers with their captions, comics with their kind pill. The page takes the colours
 of the cover in focus. A book's page is `DetailHeaderView(glass = true)` with `book` set: no backdrop,
 the cover at the left (square for an audiobook, a series' fan in its place), the eyebrow
 (`ReadingBookFacts.eyebrow`) over the title, the formats as glass chips (missing ones dimmed), the bar
-in the accent, the main action white and the toggles glass. A series' page adds its continue card; a
+in the accent, the main action gold and the toggles glass. A series' page adds its continue card; a
 comic run of several volumes shows one volume's issues at a time, picked with glass chips. An author's
 page is a round portrait in a white ring over the series as glass pills. The Books Library page is the
 library's name, Series | Authors | Books as a glass capsule with Sort, and seven columns of covers

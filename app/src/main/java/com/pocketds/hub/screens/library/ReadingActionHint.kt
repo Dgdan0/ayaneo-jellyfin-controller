@@ -11,6 +11,9 @@ object ReadingActionHint {
             // A comic run's volume chip shows that volume's issues.
             key.startsWith("list:volume:") -> "Show volume"
             key.startsWith("continue:") -> "Continue reading"
+            // A button that opens the reader says so: a series' "Continue · Book 6"
+            // was offered as "Open", which reads as harmless. Its words, short.
+            !key.startsWith("list:") && text.isNotBlank() && '\n' !in text -> text.substringBefore(" · ")
             else -> "Open"
         }
     }

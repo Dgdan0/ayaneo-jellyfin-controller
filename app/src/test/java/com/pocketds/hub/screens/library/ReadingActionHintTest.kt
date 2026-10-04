@@ -21,4 +21,12 @@ class ReadingActionHintTest {
         assertEquals("Continue reading", ReadingActionHint.label("continue:8338"))
         assertEquals("Open", ReadingActionHint.label("list:book:rw_1"))
     }
+
+    @Test fun a_button_that_opens_the_reader_names_itself() {
+        assertEquals("Continue", ReadingActionHint.label("8338", text = "Continue \u00b7 Book 6"))
+        // Links and cards keep "Open": a chip's words are a name, a card's are lines.
+        assertEquals("Open", ReadingActionHint.label("list:author:pb", text = "Pierce Brown"))
+        assertEquals("Open", ReadingActionHint.label("9001", text = "Ebook\nEPUB \u00b7 4 MB"))
+        assertEquals("Open", ReadingActionHint.label("9002"))
+    }
 }

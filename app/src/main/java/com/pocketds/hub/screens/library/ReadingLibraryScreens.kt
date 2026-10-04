@@ -882,9 +882,9 @@ class ReadingWorkScreen(
                     ReadingEntryMode.LISTEN -> AppIcon.HEADPHONES
                     ReadingEntryMode.READ_ALONG -> AppIcon.READ_ALONG
                 }
-                // Glass: the white pill, as a title page's Play.
+                // Glass: the Books side's main action, gold (PillButton.mainFace).
                 val primary: TextView = if (glass) PillButton.create(context, colors, label, icon, primary = true,
-                    heightDp = GLASS_PILL_DP, glass = true) else CenteredIconTextView(context).apply {
+                    heightDp = GLASS_PILL_DP, glass = true, side = ContentMode.BOOKS) else CenteredIconTextView(context).apply {
                     text = label
                     textSize = 14f
                     DetailStyler.action(this, colors, primary = true)
@@ -1036,7 +1036,7 @@ class ReadingWorkScreen(
     /**
      * Glass, a series' page: the book being read as its own glass card under
      * the series (the prototype's `.cont`), "Continue reading · Light
-     * Bringer", where in it, a bar in the accent and a white play disc. A
+     * Bringer", where in it, a bar in the accent and a gold play disc. A
      * opens it where it was left, as Continue does.
      */
     private fun continueCard(work: ReadingWork, point: ReadingContinue): View? {
@@ -1079,11 +1079,12 @@ class ReadingWorkScreen(
                     fraction = point.percentage
                 }, LinearLayout.LayoutParams(MATCH, dp(4)).apply { topMargin = dp(5) })
             }, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = dp(12); marginEnd = dp(12) })
+            // Its disc is the Books side's main action, as Continue is: gold.
             addView(android.widget.FrameLayout(context).apply {
-                background = com.pocketds.hub.ui.ThemeGradientDrawable.oval(android.graphics.Color.WHITE)
+                background = com.pocketds.hub.ui.ThemeGradientDrawable.oval(PillButton.mainFace(colors, ContentMode.BOOKS))
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 addView(android.widget.ImageView(context).apply {
-                    setImageDrawable(AppIconDrawable(AppIcon.PLAY, com.pocketds.hub.ui.glass.GlassColors.INK))
+                    setImageDrawable(AppIconDrawable(AppIcon.PLAY, PillButton.mainInk(colors, ContentMode.BOOKS)))
                 }, android.widget.FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER).apply { leftMargin = dp(1) })
             }, LinearLayout.LayoutParams(dp(GLASS_CONT_GO_DP), dp(GLASS_CONT_GO_DP)))
             Styler.makeFocusable(this)
@@ -1223,7 +1224,7 @@ class ReadingWorkScreen(
             else -> "Continue #${point.number}"
         }
         return PillButton.create(requireNotNull(host).viewContext, colors, label, AppIcon.BOOK, primary = true,
-            heightDp = if (glass) GLASS_PILL_DP else 38f, glass = glass).apply {
+            heightDp = if (glass) GLASS_PILL_DP else 38f, glass = glass, side = ContentMode.BOOKS).apply {
             contentDescription = "Continue reading ${point.title}"
             FocusDecorator.attach(this, ringVisible, scale = false)
             FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) { lastActionKey = point.sourceItemId; host?.refreshHints() } }

@@ -108,9 +108,9 @@ class ReadingDetailScreen(
         }
         if(ReadingRequestActionPolicy.showAction(item.inLibrary, item.actions.contains("request"), releaseTargets.isNotEmpty())) {
             val label = if (requested && releaseTargets.isNotEmpty()) "Choose release" else if (requested) "Open Transfers" else "Find a download"
-            // Glass: the white pill, as a title page's Request.
+            // Glass: the Books side's main action, gold (PillButton.mainFace).
             requestButton=(if (glass) com.pocketds.hub.ui.PillButton.create(context, colors, label, com.pocketds.hub.ui.AppIcon.DOWNLOAD,
-                primary = true, heightDp = 31f, glass = true) else TextView(context).apply {
+                primary = true, heightDp = 31f, glass = true, side = com.pocketds.hub.state.ContentMode.BOOKS) else TextView(context).apply {
                 text=label
                 textSize=14f
                 DetailStyler.action(this,colors,primary=true);setPadding(dp(16),0,dp(16),0)
@@ -143,7 +143,7 @@ class ReadingDetailScreen(
             FrameLayout.LayoutParams(MATCH, MATCH)
         )
         // Glass: the form is the shared side sheet, as a film's request is.
-        form = FormOverlay(context, colors, ringVisible, glass = glass)
+        form = FormOverlay(context, colors, ringVisible, glass = glass, side = com.pocketds.hub.state.ContentMode.BOOKS)
         frame.addView(form, FrameLayout.LayoutParams(MATCH, MATCH))
         seriesForm = ReadingSeriesSelectionOverlay(
             context, colors, ringVisible, loader, api::imageUrl

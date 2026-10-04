@@ -30,6 +30,8 @@ import com.pocketds.hub.ui.ThemeGradientDrawable
  *
  * Over a picture ([overPicture]: the player, a reader) the glass is the
  * nearly solid [GlassColors.overPicture], laid on the video palette's dark.
+ * A lit face is white, or what [litColor] gives: the Books side's main
+ * action is its accent (PillButton.mainFace).
  */
 class GlassButtonBackground private constructor(
     context: Context,
@@ -37,11 +39,12 @@ class GlassButtonBackground private constructor(
     cornerPx: Float,
     ringPx: Int,
     lit: Boolean,
-    pictureBase: Int? = null
+    pictureBase: Int? = null,
+    litColor: () -> Int = { Color.WHITE }
 ) : StateListDrawable() {
     private val page = GlassPage.palette(context)
-    private val faces = listOf(Face(cornerPx, true, page, pictureBase), Face(cornerPx, false, page, pictureBase),
-        Face(cornerPx, false, page, pictureBase))
+    private val faces = listOf(Face(cornerPx, true, page, pictureBase, litColor), Face(cornerPx, false, page, pictureBase, litColor),
+        Face(cornerPx, false, page, pictureBase, litColor))
 
     var lit: Boolean = lit
         set(value) {
@@ -69,8 +72,9 @@ class GlassButtonBackground private constructor(
          * Sets it as [view]'s background, following the page while the view is
          * shown. [cornerPx] past half the height draws a pill or a circle.
          */
-        fun attach(view: View, colors: PocketColors, cornerPx: Float, ringPx: Int, lit: Boolean): GlassButtonBackground {
-            val background = GlassButtonBackground(view.context, colors.focusRing, cornerPx, ringPx, lit)
+        fun attach(view: View, colors: PocketColors, cornerPx: Float, ringPx: Int, lit: Boolean,
+                   litColor: () -> Int = { Color.WHITE }): GlassButtonBackground {
+            val background = GlassButtonBackground(view.context, colors.focusRing, cornerPx, ringPx, lit, litColor = litColor)
             view.background = background
             GlassPage.follow(view) { page -> background.retint(page) }
             return background
@@ -92,13 +96,11 @@ class GlassButtonBackground private constructor(
 
     /** One state's face: glass, or white while lit; pressed is a touch lighter glass or greyer white. */
     private class Face(private val cornerPx: Float, private val pressed: Boolean, page: ArtworkPalette,
-                       private val pictureBase: Int?) : Drawable() {
+                       private val pictureBase: Int?, private val litColor: () -> Int) : Drawable() {
         var lit = false
             set(value) { field = value; invalidateSelf() }
         private val panel = GlassPanelDrawable(glass(page), cornerPx)
-        private val white = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = if (pressed) KeyPressTint.pressed(Color.WHITE, false) else Color.WHITE
-        }
+        private val white = Paint(Paint.ANTI_ALIAS_FLAG)
         private val rect = RectF()
 
         fun retint(page: ArtworkPalette) = panel.retint(glass(page))
@@ -118,6 +120,9 @@ class GlassButtonBackground private constructor(
             }
             rect.set(bounds)
             val r = cornerPx.coerceAtMost(rect.height() / 2f)
+            // Read when drawn: the Books accent can change under a screen that stays.
+            val face = litColor()
+            white.color = if (pressed) KeyPressTint.pressed(face, false) else face
             canvas.drawRoundRect(rect, r, r, white)
         }
 

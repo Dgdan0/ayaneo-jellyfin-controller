@@ -39,7 +39,7 @@ import com.pocketds.hub.ui.typeRole
  *
  * On Glass it is the prototype's (`.reading`): no card, the cover at full
  * size with the words beside its foot, the title in the display face, the
- * series number and the bar in the accent, Resume reading white and Details
+ * series number and the bar in the accent, Resume reading gold and Details
  * glass.
  */
 class ContinueReadingView(
@@ -49,8 +49,9 @@ class ContinueReadingView(
 ) : LinearLayout(context) {
 
     private val glass = Theme.onGlass(colors)
+    /** Glass: gold, as the Books side's main action is (PillButton.mainFace). */
     val resume: TextView = PillButton.create(context, colors, "Resume reading", AppIcon.BOOK, primary = true,
-        heightDp = if (glass) GLASS_BUTTON_DP else 36f, glass = glass)
+        heightDp = if (glass) GLASS_BUTTON_DP else 36f, glass = glass, side = com.pocketds.hub.state.ContentMode.BOOKS)
     val details: TextView = PillButton.create(context, colors, "Details", AppIcon.INFO,
         heightDp = if (glass) GLASS_BUTTON_DP else 36f, glass = glass)
     private val cover = ImageView(context)

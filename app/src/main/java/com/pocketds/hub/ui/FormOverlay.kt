@@ -40,7 +40,9 @@ class FormOverlay(
     context: Context,
     private val colors: PocketColors,
     private val ringVisible: () -> Boolean,
-    glass: Boolean = false
+    glass: Boolean = false,
+    /** Glass: the side whose request this is; its main action takes the side's face (PillButton.mainFace). */
+    private val side: com.pocketds.hub.state.ContentMode = com.pocketds.hub.state.ContentMode.MEDIA
 ) : FrameLayout(context) {
 
     private val card: LinearLayout
@@ -453,14 +455,14 @@ class FormOverlay(
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, WRAP).apply { topMargin = Styler.dpInt(context, 2f) })
     }
 
-    /** Request as the page's main action is: white with dark words; a destructive one is glass in the danger colour. */
+    /** Request as the page's main action is (white on Media, gold on Books); a destructive one is glass in the danger colour. */
     private fun sheetAction(row: FormRow.Action, position: Int, selected: Boolean): View = CenteredIconTextView(context).apply {
         text = row.label
         textSize = 13f
         textWeight(700)
         gravity = Gravity.CENTER
         includeFontPadding = false
-        val ink = if (row.danger) colors.dangerText else GlassColors.INK
+        val ink = if (row.danger) colors.dangerText else PillButton.mainInk(colors, side)
         setTextColor(ink)
         // The icon beside the word, the pair centred, as the prototype's Request has it.
         if (!row.danger) setCenteredIcon(MediaActionIconDrawable(context, MediaActionIcon.DOWNLOAD, ink),
@@ -468,7 +470,7 @@ class FormOverlay(
         val ring = Styler.dpInt(context, PillButton.RING_DP)
         val corner = Styler.dp(context, 11f)
         val fill = if (row.danger) com.pocketds.hub.ui.glass.GlassPanelDrawable(GlassColors.panel(GlassPage.palette(context)), corner)
-            else ThemeGradientDrawable.rounded(corner, Color.WHITE)
+            else ThemeGradientDrawable.rounded(corner, PillButton.mainFace(colors, side))
         background = if (selected && ringVisible()) android.graphics.drawable.LayerDrawable(arrayOf(
             ThemeGradientDrawable.rounded(corner + ring, Color.TRANSPARENT, Styler.dpInt(context, 2f), colors.focusRing),
             android.graphics.drawable.InsetDrawable(fill, ring)))

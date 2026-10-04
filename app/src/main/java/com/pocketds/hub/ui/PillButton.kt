@@ -19,15 +19,25 @@ import com.pocketds.hub.ui.glass.GlassColors
  * as Play with a ring rather than a bigger, paler button. The ring needs room,
  * so the view is [RING_DP] larger than the pill on every side.
  *
- * [glass] is the Glass look's pair (GLASS_PLAN.md): the main action white with
- * dark words, the others glass that takes the page's tint, both with the
- * prototype's 11dp corners rather than round ends. A screen opts in as its
- * Glass milestone lands; the rest keep the accent pill until then.
+ * [glass] is the Glass look's pair (GLASS_PLAN.md): the main action takes its
+ * side's face -- white with dark words on Media, the Books accent (gold) with
+ * its ink on Books ([mainFace], [mainInk]) -- and the others are glass that
+ * takes the page's tint, all with the prototype's 11dp corners rather than
+ * round ends. A screen opts in as its Glass milestone lands; the rest keep the
+ * accent pill until then.
  */
 object PillButton {
     const val RING_DP = 4f
     /** The prototype's Pocket button corner. */
     private const val GLASS_CORNER_DP = 11f
+
+    /** The face of a Glass main action on [side]: white on Media, the Books accent on Books. */
+    fun mainFace(colors: PocketColors, side: com.pocketds.hub.state.ContentMode): Int =
+        if (side == com.pocketds.hub.state.ContentMode.BOOKS) colors.accent else Color.WHITE
+
+    /** The words and icon on [mainFace]. */
+    fun mainInk(colors: PocketColors, side: com.pocketds.hub.state.ContentMode): Int =
+        if (side == com.pocketds.hub.state.ContentMode.BOOKS) colors.accentText else GlassColors.INK
 
     fun create(
         context: Context,
@@ -36,7 +46,9 @@ object PillButton {
         icon: AppIcon? = null,
         primary: Boolean = false,
         heightDp: Float = 38f,
-        glass: Boolean = false
+        glass: Boolean = false,
+        /** Glass: the side whose main action this is, which decides its face ([mainFace]). */
+        side: com.pocketds.hub.state.ContentMode = com.pocketds.hub.state.ContentMode.MEDIA
     ): TextView = TextView(context).apply {
         text = label
         textSize = 13f
@@ -45,13 +57,14 @@ object PillButton {
         isSingleLine = true
         includeFontPadding = false
         val ink = when {
-            glass && primary -> GlassColors.INK
+            glass && primary -> mainInk(colors, side)
             glass -> Color.WHITE
             primary -> colors.accentText
             else -> colors.primaryText
         }
         // Before the padding: a background with insets replaces the view's padding.
-        if (glass) GlassButtonBackground.attach(this, colors, Styler.dp(context, GLASS_CORNER_DP), Styler.dpInt(context, RING_DP), lit = primary)
+        if (glass) GlassButtonBackground.attach(this, colors, Styler.dp(context, GLASS_CORNER_DP), Styler.dpInt(context, RING_DP), lit = primary,
+            litColor = { mainFace(colors, side) })
         else background = background(context, colors, primary)
         val ring = Styler.dpInt(context, RING_DP)
         if (glass) {
