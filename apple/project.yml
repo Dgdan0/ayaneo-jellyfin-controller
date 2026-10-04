@@ -80,6 +80,21 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_PREVIEWS: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+  # What only a running app can show, driven in a simulator against the demo
+  # hub (-demo), never the real one: `scripts/mac.sh uitest`.
+  HubUITests:
+    type: bundle.ui-testing
+    supportedDestinations: [iOS]
+    sources:
+      - path: HubUITests
+    dependencies:
+      - target: Hub
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pocketds.hub.uitests
+        TEST_TARGET_NAME: Hub
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
 schemes:
   Hub:
     build:
@@ -89,3 +104,5 @@ schemes:
       config: Debug
     test:
       config: Debug
+      targets:
+        - HubUITests

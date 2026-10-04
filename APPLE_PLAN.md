@@ -121,15 +121,22 @@ The look is `GLASS_PLAN.md`. Its pieces in this app, so each screen uses one own
 | Behaviour | Owner |
 |---|---|
 | An artwork's colours: batched asks, the 3/10/30 s retries, the file | HubKit `ArtworkColorStore` (rules in `ArtworkColorBook`); the app's copy is `Glass/ArtworkColors` (`palette(for:)`, `want`) |
-| The page behind everything | `Glass/AmbientBackground`; pages report their picture with `.ambientArtwork(path)`; which one shows is HubKit `AmbientStack` |
+| The page behind everything | `Glass/AmbientBackground` (the hub's `HubEndpoints.smallest` picture, decoded at 64 px); pages report their picture with `.ambientArtwork(path)`; which one shows is HubKit `AmbientStack` |
 | A panel, the white and glass pills, a round toggle | `.glassPanel(shape)`, `PrimaryPillStyle`, `GlassPillStyle`, `GlassRoundButton` in `Glass/GlassStyle` |
+| A card's ring and lift, its marks | `Glass/GlassCards`: put the card in a `GlassCardStyle` button and give its artwork `.litArtwork(corner:)` (`.litRing` for a row card); `ArtworkProgress`, `WatchBadge`, `UpNextTag`, `PlayDisc`, `CardCaption` |
+| Sizes: margins, tiles, posters, episodes, type | `GlassMetrics` (`\.glassMetrics`), set by the shell: phone sizes where the width class is compact |
+| A filter or season pill, a capsule of places, a control, tabs, a page heading | `Glass/GlassControls`: `ChoicePill`, `GlassCapsulePicker`, `GlassControlStyle`, `UnderlineTabs`, `PageHeading`, `GlassLabel` |
+| Artwork fading into the page | `FadedArtwork.hero` / `.title` (`Media/Redesign`): a mask with the words' shade inside it, as Android's `FadedImageView` |
 | Panel, sheet and ink colours, accents | HubKit `GlassColors` (`panel`, `sheet`, `ink`, `badge`), `AccentPreset.defaultFor(side)` |
 | The bars, the sections and Media/Books | `Shell/` (`MainView`, `WideBar`, `PhoneBar`, `ShellTabBar`); top capsule or bottom tab bar by width, `ShellLayout.isWide` |
-| Pushing a page | `NavigationLink(value: AppRoute…)` or `@Environment(\.openRoute)`; the shell owns every stack and its back pill |
-| A profile's avatar and colour | HubKit `Profiles` |
+| Pushing a page, or swapping the top one | `NavigationLink(value: AppRoute…)` or `@Environment(\.openRoute)` (`push`, `replace`); the shell owns every stack and its back pill |
+| A profile's avatar and colour | HubKit `Profiles` (Android's `ProfileAvatar`, held to its test cases) |
 
 Debug builds also take `HUB_SIDE=books` and `HUB_SHEET=profiles` (the avatar's sheet) for
-screenshots, beside `HUB_SECTION` and `HUB_OPEN`.
+screenshots, beside `HUB_SECTION` and `HUB_OPEN` (a Home row's first title, or with
+`HUB_SECTION=library` a library by name, `HUB_OPEN=Anime`). `scripts/mac.sh uitest` runs the UI
+tests on the iPhone simulator against `-demo`, and `scripts/mac.sh transparency reduce|normal`
+turns the simulators' Reduce transparency on and off.
 
 ## Working on the Mac
 

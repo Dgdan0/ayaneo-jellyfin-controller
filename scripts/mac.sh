@@ -7,6 +7,9 @@
 #   scripts/mac.sh sims [-demo]     boot iPad Pro 13", iPad mini and iPhone; install,
 #                                   launch and screenshot each into shots/apple/
 #   scripts/mac.sh shot [-demo]     relaunch on the booted simulators and screenshot again
+#   scripts/mac.sh transparency reduce|normal
+#                                   turn the simulators' Reduce transparency on or off
+#   scripts/mac.sh uitest           the UI tests on the iPhone simulator, against -demo
 #   scripts/mac.sh mac [-demo]      build and run the Mac app
 #   scripts/mac.sh logs             stream the app's log from the booted simulators
 #
@@ -121,9 +124,40 @@ shot() {
   shoot
 }
 
+# The UI tests (apple/HubUITests) on the iPhone simulator. They launch the app
+# with -demo, so they never touch the real hub.
+uitest() {
+  project
+  local udid
+  udid="$(udid_of "iPhone 17 Pro")"
+  xcrun simctl boot "$udid" >/dev/null 2>&1 || true
+  xcodebuild -project "$APPLE/Hub.xcodeproj" -scheme Hub -configuration Debug \
+    -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$DERIVED" test 2>&1 |
+    grep -E "Test Case|Test Suite|error:|failed|passed|TEST (SUCCEEDED|FAILED)|\*\*" || true
+}
+
+# Reduce transparency on the three simulators: an accessibility setting inside
+# each simulator, not the Mac's. Relaunch with `shot` to see it.
+transparency() {
+  local value
+  case "${1:-}" in
+    reduce) value=YES ;;
+    normal) value=NO ;;
+    *) echo "scripts/mac.sh transparency reduce|normal"; exit 2 ;;
+  esac
+  for name in "${SIMS[@]}"; do
+    local udid
+    udid="$(udid_of "$name")"
+    xcrun simctl spawn "$udid" defaults write com.apple.Accessibility EnhancedBackgroundContrastEnabled -bool "$value"
+    xcrun simctl spawn "$udid" notifyutil -p com.apple.accessibility.cache.enhance.background.contrast >/dev/null 2>&1 || true
+    echo "$name: reduce transparency $1"
+  done
+}
+
 mac() {
   build_mac
-  pkill -x Hub >/dev/null 2>&1 || true
+  # Only this build of the Mac app: the simulators run apps named Hub too.
+  pkill -f "$(app_mac)/Contents/MacOS/Hub" >/dev/null 2>&1 || true
   # Detached, with its output in a file: an SSH session that starts it
   # (scripts/mac-remote.sh) otherwise stays open as long as the app runs.
   HUB_URL="${HUB_URL:-}" HUB_TOKEN="${HUB_TOKEN:-}" nohup "$(app_mac)/Contents/MacOS/Hub" $(launch_args "$@") \
@@ -137,6 +171,8 @@ case "${1:-build}" in
   build) build_ios && build_mac ;;
   sims) shift; sims "$@" ;;
   shot) shift; shot "$@" ;;
+  transparency) shift; transparency "$@" ;;
+  uitest) uitest ;;
   mac) shift; mac "$@" ;;
   logs) xcrun simctl spawn booted log stream --level debug --predicate "subsystem == '$BUNDLE_ID' OR process == 'Hub'" ;;
   *) sed -n '2,17p' "$0"; exit 2 ;;
