@@ -46,6 +46,15 @@ struct GlassTests {
         #expect(GlassColors.mix(0xFF00_0000, 0xFFFF_FFFF, 0.5) == 0xFF80_8080)
     }
 
+    @Test func aSheetIsThatPanelNearlySolidAndInkIsThePrototypesNearBlack() {
+        let sheet = GlassColors.sheet(gold)
+        #expect(GlassColors.alpha(sheet) == 0xF2)
+        #expect(GlassColors.red(sheet) == 0x4B)
+        #expect(GlassColors.green(sheet) == 0x44)
+        #expect(GlassColors.blue(sheet) == 0x32)
+        #expect(GlassColors.ink == 0xFF0B_0D12)
+    }
+
     @Test func whiteTypeStaysReadableOnAPanelOverAnyArtwork() {
         let recursion = ArtworkPalette(dominant: 0xFFFD_F010, dark: 0xFF19_1700, vivid: 0xFFE2_D700, light: 0xFFE9_E7C1)
         for p in [gold, recursion, red, ArtworkPalette.neutral] {

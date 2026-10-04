@@ -44,6 +44,14 @@ public enum GlassColors {
     /// The hairline round a panel and the light along its top edge.
     public static let edge: UInt32 = 0x2BFF_FFFF
     public static let highlight: UInt32 = 0x26FF_FFFF
+    /// A sheet's or a dialog's opacity: 95% (`sheet`).
+    public static let sheetAlpha: UInt32 = 0xF2
+    /// Words and icons on a white pill: the chosen tab, the white Play or
+    /// Resume button, a lit round button. Never the page colour, which in
+    /// Glass paints nothing. The prototype's #0B0D12.
+    public static let ink: UInt32 = 0xFF0B_0D12
+    /// A notification count on its button.
+    public static let badge: UInt32 = 0xFFFF_5A5F
 
     public static func parse(_ hex: String) -> UInt32? {
         guard hex.count == 7, hex.first == "#", let rgb = UInt32(hex.dropFirst(), radix: 16) else { return nil }
@@ -74,6 +82,12 @@ public enum GlassColors {
 
     /// The bars along the top and bottom: a touch more solid than a panel.
     public static func bar(_ p: ArtworkPalette) -> UInt32 { withAlpha(mix(panelBase, p.dominant, panelTint * 0.9), 0xD6) }
+
+    /// A side sheet or a dialog (the account sheet, a menu, the request
+    /// form): the panel's tint, nearly solid. A panel can be see-through
+    /// because what is under it is the already blurred page; a sheet opens
+    /// over a screen's own words, and those showing through fight its own.
+    public static func sheet(_ p: ArtworkPalette) -> UInt32 { withAlpha(panel(p), sheetAlpha) }
 
     /// WCAG relative luminance, 0 for black to 1 for white.
     public static func luminance(_ c: UInt32) -> Double {
@@ -126,6 +140,9 @@ public struct ArtworkColorBook: Sendable {
     }
 
     public func isMissing(_ src: String) -> Bool { missing.contains(src) }
+
+    /// Whether `src` has colours, without making them recent.
+    public func knows(_ src: String) -> Bool { known[src] != nil }
 
     /// Which of `sources` to ask for now, at most `limit`. They count as being
     /// asked until `answered` or `failed`.

@@ -17,6 +17,7 @@ public struct DemoTransport: HubTransport {
         let (status, body): (Int, String) = switch (request.httpMethod ?? "GET", path) {
         case ("GET", "/v1/health"): (200, Self.health)
         case ("GET", "/v1/users"): (200, Self.users)
+        case ("GET", "/v1/notifications"): (200, Self.notifications)
         case ("POST", "/v1/manage/jellyfin/scan"), ("POST", "/v1/manage/reading/scan"):
             (202, #"{"ok":true,"action":"scan_library"}"#)
         default: (404, #"{"error":{"code":"not_found","message":"Not in the demo hub yet"}}"#)
@@ -46,5 +47,16 @@ public struct DemoTransport: HubTransport {
               {"id":"66666666666666666666666666666666","name":"Hadas"},
               {"id":"77777777777777777777777777777777","name":"Horim"}],
      "partial":[],"cache":{"hit":true,"ageSeconds":3,"stale":false}}
+    """#
+
+    /// One active warning and one service the hub cannot reach: two need attention.
+    static let notifications = #"""
+    {"generatedAt":"2026-10-04T09:00:00Z","attentionCount":2,
+     "sections":[
+      {"service":"sonarr","state":"up","items":[
+        {"id":"sonarr:health:demo","service":"sonarr","kind":"health","severity":"warning",
+         "title":"IndexerLongTermStatusCheck","detail":"Indexers unavailable due to failures for more than 6 hours","active":true}]},
+      {"service":"storyteller","state":"unavailable","items":[]}],
+     "partial":[],"cache":{"hit":false,"ageSeconds":0,"stale":false}}
     """#
 }

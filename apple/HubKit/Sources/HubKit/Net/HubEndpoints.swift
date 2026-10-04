@@ -80,17 +80,23 @@ public enum HubEndpoints {
         HubRequest("/v1/library/items/" + encode(itemId) + "/state", method: .post, body: body)
     }
 
+    /// Service history and current warnings, with Android's default history
+    /// lengths, so both apps share the hub's cached answer.
+    public static func notifications(sonarr: Int = 60, radarr: Int = 20, bazarr: Int = 40) -> HubRequest {
+        HubRequest("/v1/notifications?sonarrLimit=\(sonarr)&radarrLimit=\(radarr)&bazarrLimit=\(bazarr)")
+    }
+
     private static let tmdbImages = "/v1/img/tmdb/"
 
-    /// A hub image path asking for `width` pixels, which the hub snaps to its
-    /// nearest size. Unsized, a Jellyfin image comes back 360 wide: right for a
-    /// poster, soft across a whole screen.
     /// The Glass colours of up to 60 hub image paths, each sent exactly as a
     /// screen shows it (issue #10). Mirrors Android's `HubEndpoints.artworkColors`.
     public static func artworkColors(_ sources: [String]) -> HubRequest {
         HubRequest("/v1/img/colors?" + sources.map { "src=" + encode($0) }.joined(separator: "&"))
     }
 
+    /// A hub image path asking for `width` pixels, which the hub snaps to its
+    /// nearest size. Unsized, a Jellyfin image comes back 360 wide: right for a
+    /// poster, soft across a whole screen.
     public static func sized(_ hubPath: String, width: Int) -> String {
         // A TMDB image names its size in the path; w1280 is the largest worth
         // fetching (original runs to 4K and several megabytes).
