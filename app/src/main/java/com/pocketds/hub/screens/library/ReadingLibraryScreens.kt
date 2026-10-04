@@ -80,7 +80,6 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import com.pocketds.hub.state.Fmt
-import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.showStatus
 
@@ -319,7 +318,7 @@ class ReadingLibraryGridScreen(
                         adapter.append(result.value.items)
                     }
                     status.showStatus(
-                        if (result.value.items.isEmpty() && adapter.itemCount == 0) StatusMessage("This reading library is empty.")
+                        if (result.value.items.isEmpty() && adapter.itemCount == 0) StatusText.notice("This reading library is empty.")
                         else StatusText.loaded(
                             "${adapter.itemCount} of ${result.value.total} · ${sortLabel()}",
                             result.value.cache,

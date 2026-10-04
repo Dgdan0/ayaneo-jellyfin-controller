@@ -138,9 +138,14 @@ class HomeScreen(
             textSize = 12f
             setTextColor(colors.mutedText)
             gravity = Gravity.END
+            // Glass: a chip in the hero's top corner, never as wide as the
+            // space the hero's words can take (GLASS_WORDS_DP from the left).
+            if (glass) { maxWidth = dp(GLASS_STATUS_MAX_DP); maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END }
         }
-        mediaContent.addView(status, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP).apply {
-            topMargin = dp(if (glass) HomeHeroView.GLASS_TOP_DP else HomeHeroView.TOP_DP); leftMargin = dp(24); rightMargin = dp(24)
+        mediaContent.addView(status, if (glass) FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
+            topMargin = dp(HomeHeroView.GLASS_TOP_DP); rightMargin = dp(GLASS_EDGE_DP)
+        } else FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP).apply {
+            topMargin = dp(HomeHeroView.TOP_DP); leftMargin = dp(24); rightMargin = dp(24)
         })
 
         rows = RecyclerView(host.viewContext).apply {
@@ -342,10 +347,7 @@ class HomeScreen(
 
     private fun loadUsers(openWhenReady: Boolean) {
         userJob?.cancel()
-        if (openWhenReady) {
-            status.setTextColor(colors.mutedText)
-            status.text = "Loading Jellyfin users…"
-        }
+        if (openWhenReady) status.showStatus(StatusText.loading("Jellyfin users", refreshing = false), colors)
         userJob = scope.launch {
             when (val result = api.users()) {
                 is HubResult.Ok -> {
@@ -354,14 +356,13 @@ class HomeScreen(
                         ?: users.firstOrNull { it.id == HubSettings.userId(status.context) }
                     readingHome.setUserName(selected?.name)
                     if (selected == null) {
-                        status.text = "Choose a profile with Y"
+                        status.showStatus(StatusText.notice("Choose a profile with Y"), colors)
                         status.contentDescription = "Choose a Jellyfin profile with Y"
-                    } else if (openWhenReady) status.text = ""
+                    } else if (openWhenReady) status.showStatus(StatusMessage(""), colors)
                     if (openWhenReady) showUsers()
                 }
                 is HubResult.Failed -> if (openWhenReady) {
-                    status.setTextColor(colors.dangerText)
-                    status.text = result.message
+                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = false, canRetry = false), colors)
                     host?.notify(result.message)
                 }
             }
@@ -435,7 +436,7 @@ class HomeScreen(
         val unavailable = body.partial.map { it.service }
         status.showStatus(
             when {
-                body.rows.isEmpty() && adapter.itemCount == 0 -> StatusMessage("Nothing to continue or show yet.")
+                body.rows.isEmpty() && adapter.itemCount == 0 -> StatusText.notice("Nothing to continue or show yet.")
                 StatusText.caveat(body.cache, unavailable).text.isEmpty() -> StatusMessage("")
                 else -> StatusText.loaded("${adapter.itemCount} rows", body.cache, unavailable)
             },
@@ -769,6 +770,11 @@ class HomeScreen(
         const val GLASS_POSTER_CARD_DP = 82
         const val GLASS_POSTER_DP = 123f
         const val GLASS_SHORTEST_ROW_DP = 150f
+        /**
+         * The status chip's widest: right of the hero's words on the Pocket
+         * (853dp less 22 + 520 for the words, a gap and the right edge).
+         */
+        const val GLASS_STATUS_MAX_DP = 260
         const val CARD_POSTER = 0
         const val CARD_LANDSCAPE = 1
         const val TAG_HIT = -0x7fffffe0

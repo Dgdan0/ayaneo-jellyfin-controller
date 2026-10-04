@@ -20,7 +20,6 @@ import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.state.HitRefresh
 import com.pocketds.hub.state.LibraryGridSizing
 import com.pocketds.hub.state.PagedLoadState
-import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.ChoiceOverlay
@@ -270,9 +269,9 @@ class LibraryGridView(
                     val empty = result.value.items.isEmpty() && adapter.itemCount == 0
                     status.showStatus(
                         when {
-                            empty && library.kind == "favorites" -> StatusMessage("No favourites yet. Star a title on its page.")
-                            empty && library.kind == "search" -> StatusMessage("No Jellyfin matches.")
-                            empty -> StatusMessage("This library is empty.")
+                            empty && library.kind == "favorites" -> StatusText.notice("No favourites yet. Star a title on its page.")
+                            empty && library.kind == "search" -> StatusText.notice("No Jellyfin matches.")
+                            empty -> StatusText.notice("This library is empty.")
                             else -> StatusText.loaded(
                                 when (library.kind) {
                                     "search" -> "${adapter.itemCount} of ${result.value.total} matches"

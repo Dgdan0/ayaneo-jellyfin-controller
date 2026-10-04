@@ -3,6 +3,8 @@ package com.pocketds.hub.state
 import com.pocketds.hub.model.CacheInfo
 import com.pocketds.hub.net.FailureKind
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StatusTextTest {
@@ -29,7 +31,7 @@ class StatusTextTest {
     @Test
     fun `stale data says how old it is`() {
         assertEquals(
-            StatusMessage("24 rows · updated 4 min ago"),
+            StatusMessage("24 rows · updated 4 min ago", news = true),
             StatusText.loaded("24 rows", CacheInfo(hit = true, ageSeconds = 250, stale = true))
         )
     }
@@ -55,7 +57,7 @@ class StatusTextTest {
     fun `the caveat alone is empty when everything is fresh and complete`() {
         assertEquals(StatusMessage(""), StatusText.caveat(CacheInfo(hit = true, ageSeconds = 5)))
         assertEquals(
-            StatusMessage("updated 2 min ago"),
+            StatusMessage("updated 2 min ago", news = true),
             StatusText.caveat(CacheInfo(stale = true, ageSeconds = 150))
         )
     }
@@ -63,7 +65,7 @@ class StatusTextTest {
     @Test
     fun `an empty summary does not leave a dangling separator`() {
         assertEquals(
-            StatusMessage("updated 1 min ago"),
+            StatusMessage("updated 1 min ago", news = true),
             StatusText.loaded("", CacheInfo(stale = true, ageSeconds = 61))
         )
     }
@@ -99,6 +101,34 @@ class StatusTextTest {
             StatusMessage("A service behind the hub is down", StatusTone.ERROR),
             StatusText.failed("A service behind the hub is down", FailureKind.UPSTREAM_DOWN, hasData = false, canRetry = false)
         )
+    }
+
+    @Test
+    fun `Glass shows a line only when it has news`() {
+        // "4 rows · updated moments ago" sat over Home's artwork saying nothing.
+        val moments = StatusText.loaded("4 rows", CacheInfo(hit = true, ageSeconds = 20, stale = true))
+        assertEquals("4 rows · updated moments ago", moments.text)
+        assertFalse(StatusText.shows(moments, glass = true))
+        assertTrue(StatusText.shows(moments, glass = false))
+        assertFalse(StatusText.shows(StatusText.loaded("24 rows"), glass = true))
+        assertFalse(StatusText.shows(StatusText.loading("Discover", refreshing = false), glass = true))
+        // Old, partial, degraded or failed data is news; so is a notice.
+        assertTrue(StatusText.shows(StatusText.loaded("4 rows", CacheInfo(ageSeconds = 90, stale = true)), glass = true))
+        assertTrue(StatusText.shows(StatusText.loaded("4 rows", unavailable = listOf("sonarr")), glass = true))
+        assertTrue(StatusText.shows(StatusText.loaded("4 rows", CacheInfo(ageSeconds = 30, stale = true, degraded = true)), glass = true))
+        assertTrue(StatusText.shows(StatusText.failed("Can't reach the hub", FailureKind.NO_NETWORK, hasData = true), glass = true))
+        assertTrue(StatusText.shows(StatusText.notice("This library is empty."), glass = true))
+        // Nothing to say is nothing to show, on either look.
+        assertFalse(StatusText.shows(StatusMessage("", news = true), glass = true))
+        assertFalse(StatusText.shows(StatusMessage(""), glass = false))
+    }
+
+    @Test
+    fun `a summary keeps its caveat's news`() {
+        val caveat = StatusText.caveat(CacheInfo(ageSeconds = 400, stale = true))
+        assertTrue(caveat.news)
+        assertTrue(StatusText.loaded("12 results", caveat).news)
+        assertFalse(StatusText.loaded("12 results", StatusText.caveat(CacheInfo())).news)
     }
 
     @Test

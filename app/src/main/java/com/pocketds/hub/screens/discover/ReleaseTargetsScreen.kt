@@ -36,7 +36,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import com.pocketds.hub.state.Fmt
-import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.showStatus
 
@@ -332,7 +331,7 @@ class ReleaseTargetsScreen(
         loadImage(seasonArt, next.seasonImage.ifEmpty { fallbackSeasonImage })
         adapter.submit(next.episodes)
         status.showStatus(
-            if (next.episodes.isEmpty()) StatusMessage("No episodes have aired yet · the season search is still available")
+            if (next.episodes.isEmpty()) StatusText.notice("No episodes have aired yet · the season search is still available")
             else StatusText.loaded(
                 "${next.episodes.size} aired episode${if (next.episodes.size == 1) "" else "s"}",
                 unavailable = next.partial.map { it.service }

@@ -54,7 +54,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import java.time.LocalDate
-import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.showStatus
 
@@ -366,7 +365,7 @@ class LibraryScreen(
         mediaArtworkDay = LocalDate.now().toString()
         views = body.views + LibraryView(id = FAVOURITES, name = "Favourites", kind = "favorites")
         if (body.views.isEmpty()) {
-            gridView.status.showStatus(StatusMessage("No movie or TV libraries were found."), colors)
+            gridView.status.showStatus(StatusText.notice("No movie or TV libraries were found."), colors)
             return
         }
         val remembered = host?.viewContext?.let { Prefs.of(it).getString(KEY_LAST_LIBRARY, null) }
@@ -383,7 +382,7 @@ class LibraryScreen(
         ) else emptyList())
         readingArtworkDay = LocalDate.now().toString()
         status.showStatus(
-            if (body.libraries.isEmpty()) StatusMessage("No reading libraries were found.")
+            if (body.libraries.isEmpty()) StatusText.notice("No reading libraries were found.")
             else StatusText.loaded("${body.libraries.size} reading libraries", body.cache, body.partial.map { it.service }),
             colors
         )

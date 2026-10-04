@@ -6,7 +6,17 @@ import com.pocketds.hub.net.FailureKind
 
 enum class StatusTone { NORMAL, WARNING, ERROR }
 
-data class StatusMessage(val text: String, val tone: StatusTone = StatusTone.NORMAL)
+/**
+ * @param news whether the line has something to tell the reader, which is what
+ *   decides it on Glass ([StatusText.shows]): data that is old, partial or
+ *   failed, or a [StatusText.notice]. A count of rows or "Loading…" is not
+ *   news; Classic shows every line regardless.
+ */
+data class StatusMessage(
+    val text: String,
+    val tone: StatusTone = StatusTone.NORMAL,
+    val news: Boolean = tone != StatusTone.NORMAL
+)
 
 /**
  * What a screen's status line says, and in which tone -- the only place that
@@ -21,6 +31,27 @@ data class StatusMessage(val text: String, val tone: StatusTone = StatusTone.NOR
 object StatusText {
 
     private const val SEPARATOR = " · "
+
+    /**
+     * Data served past its freshness is news once it is a minute old. "Updated
+     * moments ago" is the hub refreshing behind the screen, which is the cache
+     * working; it sat over Home's artwork as "4 rows · updated moments ago".
+     */
+    const val STALE_NEWS_SECONDS = 60
+
+    /**
+     * Whether the line shows. Glass shows only news, as a quiet chip
+     * (`TextView.showStatus`): a status line that always talked sat over the
+     * artwork saying nothing. Classic shows any line with words in it.
+     */
+    fun shows(message: StatusMessage, glass: Boolean): Boolean =
+        message.text.isNotBlank() && (!glass || message.news)
+
+    /**
+     * Something the reader must be told even on Glass: why a list is empty,
+     * what to do next ("Choose a profile with Y").
+     */
+    fun notice(text: String): StatusMessage = StatusMessage(text, news = true)
 
     fun loading(what: String, refreshing: Boolean): StatusMessage =
         StatusMessage(if (refreshing) "Refreshing $what…" else "Loading $what…")
@@ -37,7 +68,8 @@ object StatusText {
     /** For a screen that keeps the [caveat] while its summary changes (e.g. a results toggle). */
     fun loaded(summary: String, caveat: StatusMessage): StatusMessage = StatusMessage(
         listOf(summary, caveat.text).filter(String::isNotBlank).joinToString(SEPARATOR),
-        caveat.tone
+        caveat.tone,
+        caveat.news
     )
 
     /**
@@ -58,7 +90,8 @@ object StatusText {
         val services = unavailable.filter(String::isNotBlank).distinct()
         if (services.isNotEmpty()) parts += services.joinToString(", ", transform = ServiceNames::display) + " unavailable"
         val warning = cache.degraded || services.isNotEmpty()
-        return StatusMessage(parts.joinToString(SEPARATOR), if (warning) StatusTone.WARNING else StatusTone.NORMAL)
+        val old = cache.stale && cache.ageSeconds >= STALE_NEWS_SECONDS
+        return StatusMessage(parts.joinToString(SEPARATOR), if (warning) StatusTone.WARNING else StatusTone.NORMAL, warning || old)
     }
 
     /**

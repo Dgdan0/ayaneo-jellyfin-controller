@@ -2,16 +2,14 @@ package com.pocketds.hub.ui
 
 import android.content.Context
 import android.graphics.Color
-import android.graphics.drawable.Drawable
 import android.graphics.drawable.InsetDrawable
 import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.StateListDrawable
 import android.view.Gravity
 import android.widget.TextView
 import androidx.core.graphics.ColorUtils
+import com.pocketds.hub.ui.glass.GlassButtonBackground
 import com.pocketds.hub.ui.glass.GlassColors
-import com.pocketds.hub.ui.glass.GlassPage
-import com.pocketds.hub.ui.glass.GlassPanelDrawable
 
 /**
  * A rounded action: Play, Details, Continue reading.
@@ -53,7 +51,8 @@ object PillButton {
             else -> colors.primaryText
         }
         // Before the padding: a background with insets replaces the view's padding.
-        background = if (glass) glassBackground(this, colors, primary) else background(context, colors, primary)
+        if (glass) GlassButtonBackground.attach(this, colors, Styler.dp(context, GLASS_CORNER_DP), Styler.dpInt(context, RING_DP), lit = primary)
+        else background = background(context, colors, primary)
         val ring = Styler.dpInt(context, RING_DP)
         if (glass) {
             val side = Styler.dpInt(context, 14f)
@@ -76,8 +75,18 @@ object PillButton {
      * Switches a pill between the accent fill and the quiet one: a filter that
      * is on. A new background resets the view's padding to the drawable's
      * insets, which cut the text against the pill's edge, so it is put back.
+     *
+     * A Glass pill turns white or back to glass in place: replacing its
+     * background drew a Classic pill on the glass page.
      */
     fun setPrimary(view: TextView, colors: PocketColors, primary: Boolean) {
+        (view.background as? GlassButtonBackground)?.let { glass ->
+            glass.lit = primary
+            val ink = if (primary) GlassColors.INK else Color.WHITE
+            view.setTextColor(ink)
+            (view.compoundDrawables[0] as? AppIconDrawable)?.tint(ink)
+            return
+        }
         val left = view.paddingLeft; val top = view.paddingTop; val right = view.paddingRight; val bottom = view.paddingBottom
         view.background = background(view.context, colors, primary)
         view.setPadding(left, top, right, bottom)
@@ -102,32 +111,5 @@ object PillButton {
             addState(intArrayOf(android.R.attr.state_focused), LayerDrawable(arrayOf(outline(), InsetDrawable(fill(false), ring))))
             addState(intArrayOf(), InsetDrawable(fill(false), ring))
         }
-    }
-
-    /**
-     * Glass: white for the main action, the page's glass for the rest. The
-     * glass ones follow the page as it re-tints, for as long as [view] is shown.
-     */
-    private fun glassBackground(view: TextView, colors: PocketColors, primary: Boolean): StateListDrawable {
-        val context = view.context
-        val ring = Styler.dpInt(context, RING_DP)
-        val corner = Styler.dp(context, GLASS_CORNER_DP)
-        val panels = ArrayList<Pair<GlassPanelDrawable, Boolean>>()
-        fun glassFill(pressed: Boolean, page: Int) = if (pressed) KeyPressTint.pressed(page, true) else page
-        fun fill(pressed: Boolean): Drawable =
-            if (primary) ThemeGradientDrawable.rounded(corner, if (pressed) KeyPressTint.pressed(Color.WHITE, false) else Color.WHITE)
-            else GlassPanelDrawable(glassFill(pressed, GlassColors.panel(GlassPage.palette(context))), corner).also { panels += it to pressed }
-        fun outline() = ThemeGradientDrawable.rounded(corner + ring, Color.TRANSPARENT, Styler.dpInt(context, 2f), colors.focusRing)
-        val states = StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_pressed), InsetDrawable(fill(true), ring))
-            addState(intArrayOf(android.R.attr.state_focused), LayerDrawable(arrayOf(outline(), InsetDrawable(fill(false), ring))))
-            addState(intArrayOf(), InsetDrawable(fill(false), ring))
-        }
-        if (panels.isNotEmpty()) GlassPage.follow(view) { page ->
-            val tint = GlassColors.panel(page)
-            panels.forEach { (panel, pressed) -> panel.retint(glassFill(pressed, tint)) }
-            view.invalidate()
-        }
-        return states
     }
 }
