@@ -109,6 +109,30 @@ public enum HubEndpoints {
         return hubPath + (hubPath.contains("?") ? "&" : "?") + "w=\(width)"
     }
 
+    private static let jellyfinImages = "/v1/img/jf/"
+    /// The hub's smallest width bucket for a Jellyfin image.
+    private static let smallestJellyfinWidth = 180
+
+    /// The smallest picture the hub serves of `hubPath`, for artwork drawn tiny
+    /// or blurred: the Glass page decodes 64 pixels of it. A TMDB image at w92
+    /// rather than the w780 `sized` would ask for, a Jellyfin one at w=180,
+    /// replacing any width already asked for. Anything else, a reading cover,
+    /// comes in the one size its server has. Android's `HubEndpoints.smallest`.
+    public static func smallest(_ hubPath: String) -> String {
+        if hubPath.hasPrefix(tmdbImages) {
+            let rest = hubPath.dropFirst(tmdbImages.count)
+            guard let slash = rest.firstIndex(of: "/"), slash > rest.startIndex else { return hubPath }
+            return tmdbImages + "w92" + rest[slash...]
+        }
+        if hubPath.hasPrefix(jellyfinImages) {
+            let parts = hubPath.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+            let query = parts.count > 1 ? parts[1].split(separator: "&").map(String.init) : []
+            let kept = query.filter { !$0.isEmpty && !$0.hasPrefix("w=") }
+            return String(parts[0]) + "?" + (kept + ["w=\(smallestJellyfinWidth)"]).joined(separator: "&")
+        }
+        return hubPath
+    }
+
     /// Trims a trailing slash from the base and guarantees exactly one between
     /// the two halves.
     public static func join(_ base: String, _ path: String) -> String {

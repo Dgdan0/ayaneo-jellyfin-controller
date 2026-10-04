@@ -133,6 +133,12 @@ public struct HeroContent: Equatable, Sendable {
     /// Hub-relative; empty when there is no artwork at all.
     public var backdrop: String
     public var canPlay: Bool
+    /// The end of `eyebrow` that Glass draws in the accent: the episode code,
+    /// or the day on Coming up. Empty when the eyebrow has none.
+    public var eyebrowMark: String = ""
+    /// The words on Glass's white Play pill: "Resume", "Play S2E1" on Next
+    /// up, "Play".
+    public var playAction: String = ""
 }
 
 /// A port of Android's `screens/home/HomeHero`: built first from the card
@@ -223,12 +229,16 @@ public enum HomeHero {
         } else {
             backdrop = hit.media.backdrop.isEmpty ? hit.media.poster : hit.media.backdrop
         }
-        let second = rowId == "upcoming" ? hit.subtitle.uppercased() : code
+        let mark = rowId == "upcoming" ? hit.subtitle.uppercased() : code
+        // The next episode by name, as the prototype's pill says it: you are
+        // about to start something new, and which one is worth seeing.
+        let action = watching ? "Resume" : (rowId == "nextup" && !code.isEmpty ? "Play \(code)" : "Play")
         return HeroContent(
             itemId: hit.jellyfinItemId, type: hit.media.type,
-            eyebrow: [eyebrow(rowId: rowId, rowTitle: rowTitle), second].filter { !$0.isEmpty }.joined(separator: " · "),
+            eyebrow: [eyebrow(rowId: rowId, rowTitle: rowTitle), mark].filter { !$0.isEmpty }.joined(separator: " · "),
             title: hit.media.title, meta: meta, progress: watching ? hit.progress : 0, progressLabel: left,
-            playLabel: watching ? "Resume" : "Play", backdrop: backdrop, canPlay: !hit.jellyfinItemId.isEmpty)
+            playLabel: watching ? "Resume" : "Play", backdrop: backdrop, canPlay: !hit.jellyfinItemId.isEmpty,
+            eyebrowMark: mark, playAction: action)
     }
 
     /// What `EpisodeLabel.code` writes: "S1E4".

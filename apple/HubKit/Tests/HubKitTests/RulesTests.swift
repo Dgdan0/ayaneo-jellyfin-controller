@@ -94,6 +94,21 @@ struct EndpointTests {
         #expect(HubEndpoints.sized("/v1/img/tmdb/abc.jpg", width: 500) == "/v1/img/tmdb/abc.jpg")
     }
 
+    /// Android's `HubEndpointsTest` case for `smallest`.
+    @Test func theSmallestPictureIsW92FromTMDBW180FromJellyfinAndAnythingElseAsItIs() {
+        #expect(HubEndpoints.smallest("/v1/img/tmdb/w780/abc.jpg") == "/v1/img/tmdb/w92/abc.jpg")
+        #expect(HubEndpoints.smallest("/v1/img/tmdb/original/abc.jpg") == "/v1/img/tmdb/w92/abc.jpg")
+        #expect(HubEndpoints.smallest("/v1/img/jf/a/Backdrop") == "/v1/img/jf/a/Backdrop?w=180")
+        #expect(HubEndpoints.smallest("/v1/img/jf/a/Backdrop?tag=t") == "/v1/img/jf/a/Backdrop?tag=t&w=180")
+        // A width already asked for is replaced, not doubled.
+        #expect(HubEndpoints.smallest("/v1/img/jf/a/Backdrop?tag=t&w=1280") == "/v1/img/jf/a/Backdrop?tag=t&w=180")
+        #expect(HubEndpoints.smallest("/v1/img/jf/a/Primary?w=1920&tag=t") == "/v1/img/jf/a/Primary?tag=t&w=180")
+        // A reading cover has one size; a malformed path and a blank one are left alone.
+        #expect(HubEndpoints.smallest("/v1/img/reading/kavita/12") == "/v1/img/reading/kavita/12")
+        #expect(HubEndpoints.smallest("/v1/img/tmdb/abc.jpg") == "/v1/img/tmdb/abc.jpg")
+        #expect(HubEndpoints.smallest("") == "")
+    }
+
     @Test func onlyGetsAreIdempotent() {
         #expect(HubEndpoints.health.idempotent)
         #expect(!HubEndpoints.scanJellyfinLibrary.idempotent)

@@ -157,6 +157,31 @@ struct HomeHeroTests {
         #expect(hero.backdrop == "/b")
     }
 
+    @Test func theEyebrowsMarkIsTheEpisodeCodeOrTheDayOnComingUp() {
+        #expect(HomeHero.from(rowId: "continue", rowTitle: "Continue watching", hit: episode).eyebrowMark == "S3E4")
+        let movie = MediaHit(media: MediaRef(type: "movie", title: "Iron Man 3", backdrop: "/b"), jellyfinItemId: "m")
+        #expect(HomeHero.from(rowId: "latest", rowTitle: "Recently added", hit: movie).eyebrowMark == "")
+        #expect(HomeHero.from(rowId: "latest", rowTitle: "Recently added", hit: movie).eyebrow == "RECENTLY ADDED")
+        let coming = MediaHit(media: MediaRef(type: "series", title: "Lanterns"), subtitle: "Fri · S1E8")
+        let hero = HomeHero.from(rowId: "upcoming", rowTitle: "Coming up", hit: coming)
+        #expect(hero.eyebrowMark == "FRI · S1E8")
+        #expect(hero.eyebrow == "COMING UP · FRI · S1E8")
+        #expect(hero.eyebrow.hasSuffix(hero.eyebrowMark))
+    }
+
+    @Test func nextUpPlaysItsEpisodeByNameWhileTheShortLabelStays() {
+        var next = episode
+        next.progress = 0
+        next.subtitle = "S2E1 · Pilot"
+        let hero = HomeHero.from(rowId: "nextup", rowTitle: "Next up", hit: next)
+        #expect(hero.playAction == "Play S2E1")
+        #expect(hero.playLabel == "Play")
+        // A part-watched one resumes, on any row; a film just plays.
+        #expect(HomeHero.from(rowId: "continue", rowTitle: "Continue watching", hit: episode).playAction == "Resume")
+        let movie = MediaHit(media: MediaRef(type: "movie", title: "Iron Man 3", backdrop: "/b"), jellyfinItemId: "m")
+        #expect(HomeHero.from(rowId: "latest", rowTitle: "Recently added", hit: movie).playAction == "Play")
+    }
+
     @Test func anEpisodeWhosePosterIsItsOwnStillHasNoSeriesToBorrowFrom() {
         var own = episode
         own.media.poster = "/v1/img/jf/\(episodeId)/Primary?tag=still"

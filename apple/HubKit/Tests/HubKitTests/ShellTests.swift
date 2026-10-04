@@ -79,37 +79,50 @@ struct AmbientStackTests {
     }
 }
 
-/// Avatars and which profile is this device's.
+/// Android's `ProfileAvatarTest`, case for case, so a profile has one colour
+/// on the Pocket and on Apple devices; then which profile is this device's.
 struct ProfilesTests {
-    let users = [
-        HubUser(id: "d", name: "Dgdan", selected: true),
-        HubUser(id: "a", name: "Adirimo"),
-        HubUser(id: "o", name: "Horim"),
-        HubUser(id: "h", name: "hadas"),
+    let household = [
+        HubUser(id: "d1", name: "Dgdan", selected: true),
+        HubUser(id: "h2", name: "Horim"),
+        HubUser(id: "a3", name: "Adirimo"),
+        HubUser(id: "h4", name: "Hadas"),
     ]
 
-    @Test func profilesAreAlphabeticalAndKeepThePrototypesColours() {
-        #expect(Profiles.ordered(users).map(\.name) == ["Adirimo", "Dgdan", "hadas", "Horim"])
-        #expect(Profiles.color(of: "a", in: users) == 0xFF8B_7BFF)
-        #expect(Profiles.color(of: "d", in: users) == 0xFF2C_C4AD)
-        #expect(Profiles.color(of: "h", in: users) == 0xFFF2_A541)
-        #expect(Profiles.color(of: "o", in: users) == 0xFFFF_6B7D)
-        #expect(Profiles.color(of: "gone", in: users) == nil)
-        // A fifth profile starts the colours again.
-        #expect(Profiles.color(of: "z", in: users + [HubUser(id: "z", name: "Zohar")]) == 0xFF8B_7BFF)
+    @Test func theFourProfilesTakeThePrototypesColoursWhateverOrderTheHubSends() {
+        let expected: [String: UInt32] = ["a3": 0xFF8B_7BFF, "d1": 0xFF2C_C4AD, "h4": 0xFFF2_A541, "h2": 0xFFFF_6B7D]
+        #expect(Profiles.colors(household) == expected)
+        #expect(Profiles.colors(household.reversed()) == expected)
+        #expect(Profiles.color(of: "d1", in: household) == 0xFF2C_C4AD)
+        #expect(Profiles.color(of: "gone", in: household) == nil)
     }
 
-    @Test func theAvatarShowsTheNamesFirstLetter() {
+    @Test func everyProfileHasAColourDistinctUntilThePaletteRunsOut() {
+        let many = (1...10).map { HubUser(id: "id\($0)", name: "Profile \(Character(UnicodeScalar(UInt8(65 + $0))))") }
+        let colors = Profiles.colors(many)
+        #expect(colors.count == 10)
+        let inOrder = Profiles.ordered(many).compactMap { colors[$0.id] }
+        #expect(Set(inOrder.prefix(Profiles.palette.count)).count == Profiles.palette.count)
+        // Two profiles with one name still differ by id, and in a stable order.
+        let twins = Profiles.colors([HubUser(id: "b", name: "Sam"), HubUser(id: "a", name: "Sam")])
+        #expect(twins["a"] == Profiles.palette[0])
+        #expect(twins["b"] == Profiles.palette[1])
+    }
+
+    @Test func theInitialIsTheFirstLetterOrDigitInCapitals() {
         #expect(Profiles.initial("Dgdan") == "D")
         #expect(Profiles.initial("  hadas") == "H")
-        #expect(Profiles.initial("הדס") == "ה")
-        #expect(Profiles.initial("") == "")
+        #expect(Profiles.initial("דן") == "ד")
+        #expect(Profiles.initial("42") == "4")
+        #expect(Profiles.initial("🙂 Bob") == "B")
+        #expect(Profiles.initial("🙂") == "🙂")
+        #expect(Profiles.initial("   ") == "?")
     }
 
     @Test func thisDevicesChoiceWinsThenTheHubsDefault() {
-        #expect(Profiles.current(users, chosen: "")?.name == "Dgdan")
-        #expect(Profiles.current(users, chosen: "o")?.name == "Horim")
-        #expect(Profiles.current(users, chosen: "removed")?.name == "Dgdan")
+        #expect(Profiles.current(household, chosen: "")?.name == "Dgdan")
+        #expect(Profiles.current(household, chosen: "h2")?.name == "Horim")
+        #expect(Profiles.current(household, chosen: "removed")?.name == "Dgdan")
         #expect(Profiles.current([HubUser(id: "a", name: "Adirimo")], chosen: "") == nil)
     }
 }
