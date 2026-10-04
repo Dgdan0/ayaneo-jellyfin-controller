@@ -95,6 +95,9 @@ interface HubApi {
     suspend fun removalPreview(kind: String, id: String): HubResult<com.pocketds.hub.model.MediaRemovalPreview> = HubResult.Failed(FailureKind.UNKNOWN, "Server deletion is unavailable")
     suspend fun removeMedia(ticket: String): HubResult<ActionAck> = HubResult.Failed(FailureKind.UNKNOWN, "Server deletion is unavailable")
     suspend fun serverMonitor(): HubResult<com.pocketds.hub.model.ServerMonitor>
+    /** Glass colours for artwork; a hub without the endpoint leaves every page neutral. */
+    suspend fun artworkColors(sources: List<String>): HubResult<com.pocketds.hub.model.ArtworkColorsResponse> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Artwork colours are unavailable")
     suspend fun subtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleState>
     suspend fun searchSubtitles(itemId: String): HubResult<com.pocketds.hub.model.SubtitleSearch>
     suspend fun downloadSubtitle(itemId: String, ticket: String): HubResult<ActionAck>
@@ -697,6 +700,10 @@ class HubClient(private val context: Context, private val connection: HubConnect
 
     override suspend fun bandwidth(): HubResult<com.pocketds.hub.model.BandwidthState> =
         get(HubEndpoints.bandwidth(base()), noCache = true) { json.decodeFromString<com.pocketds.hub.model.BandwidthState>(it) }
+
+    override suspend fun artworkColors(sources: List<String>): HubResult<com.pocketds.hub.model.ArtworkColorsResponse> =
+        // Not the HTTP cache: pending answers change within seconds, and ArtworkColors keeps its own.
+        get(HubEndpoints.artworkColors(base(), sources), noCache = true) { json.decodeFromString<com.pocketds.hub.model.ArtworkColorsResponse>(it) }
 
     override suspend fun serverMonitor(): HubResult<com.pocketds.hub.model.ServerMonitor> =
         get(HubRequest(base().trimEnd('/')+"/v1/manage/monitor"),noCache=true) {json.decodeFromString<com.pocketds.hub.model.ServerMonitor>(it)}
