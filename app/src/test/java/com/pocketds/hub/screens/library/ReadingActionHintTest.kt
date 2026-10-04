@@ -15,4 +15,10 @@ class ReadingActionHintTest {
         assertEquals("Continue", ReadingActionHint.label("entry", text = "Continue"))
         assertEquals("Change format", ReadingActionHint.label("format"))
     }
+
+    @Test fun volume_chips_and_the_continue_card_say_what_they_do() {
+        assertEquals("Show volume", ReadingActionHint.label("list:volume:1"))
+        assertEquals("Continue reading", ReadingActionHint.label("continue:8338"))
+        assertEquals("Open", ReadingActionHint.label("list:book:rw_1"))
+    }
 }

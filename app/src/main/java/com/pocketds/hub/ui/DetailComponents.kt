@@ -206,6 +206,10 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
             overview.tone(12.5f, GLASS_OVERVIEW)
             body.clipChildren = false
             row.clipChildren = false
+            // A series' fan leans past the row's edge; the row must not cut it.
+            row.clipToPadding = false
+            // An eyebrow is capitals however a screen writes it ("Book 6 · Red Rising").
+            eyebrowView.isAllCaps = true
             // The bar in the accent and the words after it, as Books home has them.
             progressRow.removeView(progressBar)
             progressRow.addView(glassProgress, 0, LinearLayout.LayoutParams(dp(GLASS_PROGRESS_DP), dp(com.pocketds.hub.ui.glass.GlassProgressBar.HEIGHT_DP.toInt())))
@@ -551,6 +555,9 @@ class DetailArtworkCardView(context: Context, private val colors: PocketColors, 
         image.outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
         titleView.gravity = Gravity.CENTER_HORIZONTAL
         subtitleView.gravity = Gravity.CENTER_HORIZONTAL
+        // The words' own alignment wins over gravity: centred under the face, not at its start.
+        titleView.textAlignment = View.TEXT_ALIGNMENT_CENTER
+        subtitleView.textAlignment = View.TEXT_ALIGNMENT_CENTER
         background = null
         portraitRing = ThemeGradientDrawable.oval(Color.TRANSPARENT, dp(3), colors.focusRing)
         // A portrait's ring is round and drawn on focus; the cover's square one goes.

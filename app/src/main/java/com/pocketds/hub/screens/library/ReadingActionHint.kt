@@ -7,6 +7,11 @@ object ReadingActionHint {
         "format" -> "Change format"
         "list:want" -> if (description.startsWith("Remove ")) "Remove from Want to Read" else "Add to Want to Read"
         "list:more" -> "More actions"
-        else -> "Open"
+        else -> when {
+            // A comic run's volume chip shows that volume's issues.
+            key.startsWith("list:volume:") -> "Show volume"
+            key.startsWith("continue:") -> "Continue reading"
+            else -> "Open"
+        }
     }
 }

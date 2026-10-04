@@ -630,6 +630,8 @@ class ReadingHomeView(
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         GlassPanelDrawable.attach(this, Styler.dp(context, GLASS_MINI_CORNER_DP))
+        // The prototype's ring hugs the row (`.mini.pf`).
+        foreground = Styler.focusOutline(context, colors, GLASS_MINI_CORNER_DP, 3f)
         setPadding(dp(6), dp(6), dp(10), dp(6))
         val line = ReadingBookFacts.miniLine(work)
         contentDescription = listOf(work.title, line).filter(String::isNotBlank).joinToString(", ")
@@ -730,7 +732,9 @@ class ReadingHomeView(
                 isHorizontalScrollBarEnabled = false
                 clipToPadding = false
                 clipChildren = false
-                if (glass) setPadding(dp(GLASS_EDGE_DP), dp(8), dp(GLASS_EDGE_DP), dp(6))
+                // Glass: the first fan stands in from the edge by how far its
+                // outer cover leans with focus, so the screen does not cut it.
+                if (glass) setPadding(dp(GLASS_FAN_EDGE_DP), dp(8), dp(GLASS_EDGE_DP), dp(6))
                 else setPadding(dp(24), dp(10), dp(24), dp(6))
                 addView(line)
             })
@@ -853,6 +857,7 @@ class ReadingHomeView(
         const val GLASS_FORMAT_W_DP = 28
         const val GLASS_FORMAT_H_DP = 22
         const val GLASS_FAN_GAP_DP = 20
+        const val GLASS_FAN_EDGE_DP = 30
         const val GLASS_STATUS_MAX_DP = 260
         /** The track under an "Also reading" bar: white at 18%. */
         const val GLASS_MINI_TRACK = 0x2EFFFFFF

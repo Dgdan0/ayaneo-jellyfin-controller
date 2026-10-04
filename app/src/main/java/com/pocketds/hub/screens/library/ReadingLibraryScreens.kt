@@ -368,12 +368,12 @@ class ReadingLibraryGridScreen(
                     }
                     val line = "${adapter.itemCount} of ${result.value.total} · ${sortLabel()}"
                     status.showStatus(
-                        if (result.value.items.isEmpty() && adapter.itemCount == 0) StatusText.notice("This reading library is empty.")
-                        else StatusText.loaded(
-                            line,
-                            result.value.cache,
-                            result.value.partial.map { it.service }
-                        ),
+                        when {
+                            result.value.items.isEmpty() && adapter.itemCount == 0 -> StatusText.notice("This reading library is empty.")
+                            // Glass: the count is the page's own line; the chip says only what is news.
+                            glass -> StatusText.caveat(result.value.cache, result.value.partial.map { it.service })
+                            else -> StatusText.loaded(line, result.value.cache, result.value.partial.map { it.service })
+                        },
                         colors
                     )
                     if (glass && adapter.itemCount > 0) showSummary(line)
@@ -1048,6 +1048,8 @@ class ReadingWorkScreen(
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, GLASS_CONT_CORNER_DP))
+            // The prototype's ring hugs the card (`.cont.pf`).
+            foreground = Styler.focusOutline(context, colors, GLASS_CONT_CORNER_DP, 3f)
             setPadding(dp(6), dp(6), dp(10), dp(6))
             contentDescription = "Continue reading ${point.title}, $line"
             addView(android.widget.ImageView(context).apply {

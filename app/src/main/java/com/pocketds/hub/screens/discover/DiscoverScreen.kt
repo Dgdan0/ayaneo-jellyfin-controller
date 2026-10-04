@@ -1130,7 +1130,8 @@ class DiscoverScreen(
         private val rows = mutableListOf<ReadingDiscoverRow>()
 
         fun focusLanes(width: Int): List<ShelfFocusLane> = rows.flatMapIndexed { index, row ->
-            val feature = if (index == 0) DiscoverFeaturePolicy.readingFeature(row, width) else null
+            // Glass's Books Discover has no featured card: a cover cropped wide read badly.
+            val feature = if (index == 0 && !glass) DiscoverFeaturePolicy.readingFeature(row, width) else null
             val id = "books:${row.contentType}:${row.id}"
             buildList {
                 if (feature != null) add(ShelfFocusLane("$id:feature", index, true, listOf(feature.key)))
@@ -1247,7 +1248,7 @@ class DiscoverScreen(
         fun bind(row: ReadingDiscoverRow, first: Boolean) {
             current = row
             featuredRow = first
-            val selected = if (first) DiscoverFeaturePolicy.readingFeature(row, featureWidthDp) else null
+            val selected = if (first && !glass) DiscoverFeaturePolicy.readingFeature(row, featureWidthDp) else null
             feature.visibility = if (selected == null) View.GONE else View.VISIBLE
             selected?.let { item ->
                 feature.bind(item.title, item.subtitle, item.description, api.imageUrl(item.cover),
@@ -1265,7 +1266,7 @@ class DiscoverScreen(
 
         fun appendOnly(row: ReadingDiscoverRow) {
             current = row
-            stripAdapter.submit(if (featuredRow) DiscoverFeaturePolicy.readingShelf(row, featureWidthDp) else row.items)
+            stripAdapter.submit(if (featuredRow && !glass) DiscoverFeaturePolicy.readingShelf(row, featureWidthDp) else row.items)
         }
 
         private inner class ReadingStripAdapter : RecyclerView.Adapter<CardHolder>() {
