@@ -74,14 +74,19 @@ run() {
   # HUB_SIDE=books shows the Books side, and HUB_SHEET=profiles opens the
   # avatar's sheet. SHOT_WAIT gives a screen with artwork longer to load.
   # HUB_PLAY opens the player on an item (HUB_PLAY_EXIT leaves it after that
-  # many seconds, HUB_PLAY_CHROME=pinned keeps its controls up); SHOT_SIMS
-  # names the simulators to use, comma-separated (all three by default).
+  # many seconds, HUB_PLAY_CHROME=pinned keeps its controls up, HUB_PLAY_TOUR=1
+  # opens its panels in turn, HUB_PLAY_SUBTITLE=eng turns those subtitles on).
+  # SHOT_SIMS names the simulators to use, comma-separated (all three by
+  # default), SHOT_STATE names the screenshots and SHOT_TIMES takes several,
+  # that many seconds after launch. `turn landscape` turns the simulators.
   remote "export PATH=/opt/homebrew/bin:\$PATH; cd ~/$REMOTE_DIR && \
     HUB_SECTION=$(printf '%q' "${HUB_SECTION:-}") HUB_OPEN=$(printf '%q' "${HUB_OPEN:-}") \
     HUB_SIDE=$(printf '%q' "${HUB_SIDE:-}") HUB_SHEET=$(printf '%q' "${HUB_SHEET:-}") \
     HUB_PLAY=$(printf '%q' "${HUB_PLAY:-}") HUB_PLAY_EXIT=$(printf '%q' "${HUB_PLAY_EXIT:-}") \
     HUB_PLAY_CHROME=$(printf '%q' "${HUB_PLAY_CHROME:-}") HUB_PLAY_FROM_END=$(printf '%q' "${HUB_PLAY_FROM_END:-}") \
+    HUB_PLAY_TOUR=$(printf '%q' "${HUB_PLAY_TOUR:-}") HUB_PLAY_SUBTITLE=$(printf '%q' "${HUB_PLAY_SUBTITLE:-}") \
     SHOT_SIMS=$(printf '%q' "${SHOT_SIMS:-}") SHOT_WAIT=$(printf '%q' "${SHOT_WAIT:-3}") \
+    SHOT_STATE=$(printf '%q' "${SHOT_STATE:-}") SHOT_TIMES=$(printf '%q' "${SHOT_TIMES:-}") \
     HUB_DEV_ENV=\$HOME/$DEV_ENV bash scripts/mac.sh $(printf '%q ' "$@")"
   fetch_shots
 }

@@ -139,6 +139,14 @@ screenshots, beside `HUB_SECTION` and `HUB_OPEN` (a Home row's first title, or w
 tests on the iPhone simulator against `-demo`, and `scripts/mac.sh transparency reduce|normal`
 turns the simulators' Reduce transparency on and off.
 
+**Every screen works both ways up.** Each one works in portrait and in landscape on the iPad and
+the iPhone, and at any size of Mac window, and none is reported done until it has been checked
+both ways on the three devices below. `scripts/mac.sh turn landscape` turns the simulators
+themselves (an iPad app that shares the screen cannot turn itself), `shot` then names its
+pictures `<state>-<device>-landscape.png`, and `turn portrait` turns them back. Look for words
+cut off behind the bars or the notch, anything squeezed to "…", scrolling that stops, a turn
+that loses your place, and heights that suit a phone held sideways (about 400 points tall).
+
 ## Playback on Apple (#2)
 
 | Behaviour | Owner |
@@ -150,6 +158,12 @@ turns the simulators' Reduce transparency on and off.
 | Resume or start over | `DetailLines.startMode` / `offersStartOver` (Android's `canResume`); the hub judges the position |
 | Player wording, the up-next card, seeking and the end | HubKit `PlayerLabels`, `UpNext`, `PlaybackRules` (Android's, with their tests); the card is `UpNextCardView` |
 | Pages reading their progress again after playback | `@Environment(\.playbackClosed)`, which changes once the stop and the close have reached the hub |
+| The panels (Audio & subtitles, This video, Chapters and their pages) | `Playback/PlayerPanels`: `PlayerSheet` with `SheetGroup`, `SheetRow`, `SheetLabel`, `SheetNote`; opened by pills, round icons or one menu as `PlayerLayout.panelButtons` decides |
+| Another track, quality or version | `PlayerModel.change` through `select`; it plays on when `PlaybackChoices.sameStream`, else reopens where it was |
+| The choice kept per profile and series or film, the subtitle look for every video | HubKit `PlaybackChoices` (Android's `PlaybackPreferences`), stored by `Playback/PlaybackMemory` |
+| Subtitles the app draws | HubKit `SubtitleParser` (SRT, WebVTT, ASS as text; a broken block is skipped) and `SubtitleTimeline`; drawn by `SubtitleOverlay`; the delay is `SubtitleTimingPolicy` |
+| Chapters, Skip intro, where subtitles sit | HubKit `PlaybackEnhancements` (Android's, with its tests); the notches are `ChapterNotches` |
+| Picture in picture, AirPlay | `PlayerModel.attach` (`AVPictureInPictureController` on the surface's layer), `RoutePicker` under the round Cast icon |
 
 A session is prepared, then streamed, reported (started, paused and unpaused, seeks, progress
 every ten seconds of play, stopped) and deleted. Leaving is the only way out, and Back, the next
@@ -167,7 +181,35 @@ HLS test stream as Bleach S1E5), `HUB_PLAY_EXIT=<seconds>` leaves it through Bac
 `sims` and `shot` to some simulators, and `scripts/mac.sh capture` takes screenshots without
 relaunching. Against the real hub, play only a title that is unwatched and at 0:00, for under
 30 seconds, and leave through `HUB_PLAY_EXIT`: under Jellyfin's 5% nothing is kept, though the
-stop still sets the item's `lastPlayedAt`.
+stop still sets the item's `lastPlayedAt`. Then `POST /v1/library/items/{id}/state
+{"played": false}` clears it; read the title before and after, and report both reads.
+
+The player follows the device. Turned, the picture fills the screen; held upright it is a band
+across the middle, the title takes its own line under the buttons, drawn subtitles sit under the
+picture and the panels come up from the bottom. A narrow window never loses a function: the
+three pills become round icons, and where those do not fit either, one round menu. Over video
+nothing is white but the Play disc: every button, pill, panel and the up-next card is dark glass
+in the playing title's colours.
+
+On an iPhone or iPad, leaving the app ends playback unless picture in picture carries it on (it
+starts by itself when the system's setting allows); closing that small window in the background
+ends it too. The Mac plays on with its window minimised or the app hidden, as QuickTime does;
+closing the window or quitting ends it. The iPhone simulator has no picture in picture, so the
+button is not offered there; the iPad simulator has it.
+
+SwiftUI lays out some animation frames on a thread of its own (`com.apple.SwiftUI.AsyncRenderer`),
+and a `ForEach` or `Group(subviews:)` row built there runs main-actor code off the main thread,
+which Swift 6 stops with a trap. It crashed the player twice on 2026-10-04. So in the player
+nothing that holds rows moves while they are first laid out (the sheet appears in place, then
+slides), nothing re-lays them out four times a second (the model sets a property only when it
+changed, and the sheet does not read the position), and what changes while the chrome fades has
+no `ForEach` (the subtitles are one text, the chapter notches a `Shape`).
+
+`HUB_PLAY_TOUR=1` opens the panels in turn, 4 s apart (Audio & subtitles, its timing page, This
+video, Chapters), and `HUB_PLAY_SUBTITLE=eng` turns those subtitles on as the title opens.
+`SHOT_STATE` names a run's screenshots and `SHOT_TIMES="8 12 16"` takes several, that many
+seconds after launch. With `-demo` the stream has two audio tracks, subtitles in SRT, WebVTT and
+ASS, two versions, chapters with frames, an intro to skip and the credits.
 
 ## Working on the Mac
 
@@ -176,7 +218,8 @@ stop still sets the item's `lastPlayedAt`.
 `scripts/mac-remote.sh <command>` (Git Bash on the PC) copies `apple/` and `scripts/mac.sh` to
 a plain build copy at `~/Builds/ayaneo-jellyfin-controller` on the Mac and runs
 `scripts/mac.sh <command>` there. After the run it brings `shots/apple/` back to the PC. The
-commands are `test`, `build`, `sims [-demo]`, `shot`, `mac` and `logs`. It reaches the Mac through
+commands are `test`, `build`, `sims [-demo]`, `shot`, `capture`, `uitest`, `turn`, `transparency`,
+`mac` and `logs`. It reaches the Mac through
 the `mac` entry in `~/.ssh/config` (key login over the tailnet) and the System32 OpenSSH client,
 which uses the 1Password agent. The hub token stays in the Mac checkout's `apple/dev.env`; the
 build copy points at it through `HUB_DEV_ENV`. Measured on 2026-10-04: the tests take 16 s, and
@@ -197,9 +240,17 @@ sleeps after a minute.
 | wireless ADB pairing | connect each device by cable once; afterwards it works over Wi-Fi |
 | USB debugging | Developer Mode on each device (Settings > Privacy & Security, shown after first connecting to Xcode) |
 
-Simulators cover every screen size the user owns: the iPad Pro 12.9"/13", the iPad mini and an
-iPhone. Boot all three and screenshot each for layout work. Real devices are still needed for
-controller feel, playback performance and offline downloads.
+The user's devices, confirmed on 2026-10-04, and the simulators every check and screenshot uses:
+
+| Device | Points | Simulator |
+|---|---|---|
+| iPad Pro 12.9" (4th generation, 2020, A12Z) | 1024 × 1366 | `iPad Pro (12.9-inch) (4th generation)`, made by `scripts/mac.sh` from its device type with the iOS 26.3 runtime when the Mac has none |
+| iPad mini (A17 Pro) | 744 × 1133 | `iPad mini (A17 Pro)` |
+| iPhone 17 Pro Max | 440 × 956 | `iPhone 17 Pro Max` |
+
+`SIMS` in `scripts/mac.sh` names these three; do not drift back to Xcode's default iPad Pro 13" or
+iPhone 17 Pro. Check each both ways up, and the Mac at a small and a large window. Real devices are
+still needed for controller feel, playback performance and offline downloads.
 
 ### Setup
 
