@@ -15,13 +15,15 @@ final class PlayerTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
-    /// The app with the player open on the demo's Bleach S1E5, its chrome held up.
+    /// The app with the player open on the demo's Bleach S1E5, its chrome held
+    /// up; `width` lays it out in a window that narrow (`HUB_WIDTH`).
     @MainActor
-    private func launchPlaying() -> XCUIApplication {
+    private func launchPlaying(width: Int? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo"]
         app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "media",
                                  "HUB_PLAY": "demo-e5", "HUB_PLAY_CHROME": "pinned"]
+        if let width { app.launchEnvironment["HUB_WIDTH"] = String(width) }
         app.launch()
         XCTAssertTrue(app.buttons["Lock controls"].waitForExistence(timeout: 15), "the player did not open")
         XCTAssertTrue(app.staticTexts["Bleach"].exists)
@@ -49,6 +51,28 @@ final class PlayerTests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Lock controls"].exists, "the player was still open after the background")
+    }
+
+    /// In a window as narrow as Slide Over the three panel buttons are one
+    /// round menu, and no control is cut off at the window's edge. (The
+    /// buttons' row was once counted without its gaps and ran past it.)
+    @MainActor
+    func testANarrowWindowKeepsEveryControlInsideIt() {
+        let app = launchPlaying(width: 375)
+        let menu = app.buttons["Audio, chapters and this video"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), "the panel buttons are not one menu at 375 points")
+        for label in ["Back", "AirPlay", "Lock controls", "Audio, chapters and this video"] {
+            let button = app.buttons[label].firstMatch
+            XCTAssertTrue(button.exists, "\(label) is missing")
+            XCTAssertLessThanOrEqual(button.frame.maxX, 375, "\(label) runs past the window's edge")
+        }
+        menu.tap()
+        let chapters = app.buttons["Chapters"]
+        XCTAssertTrue(chapters.waitForExistence(timeout: 5), "the list of the three did not open")
+        chapters.tap()
+        let heading = app.staticTexts.matching(identifier: "panel-heading").firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 5), "Chapters did not open from the menu")
+        XCTAssertEqual(heading.label, "Chapters")
     }
 
     /// A panel opened upright stays open and usable when the device turns,

@@ -270,7 +270,8 @@ struct PlayerView: View {
     }
 
     /// Audio & subtitles, Chapters and This video: pills where they fit, round
-    /// icons where they do not, and one round menu in the narrowest window.
+    /// icons where they do not, and in the narrowest window one round button
+    /// that opens the three as a list.
     @ViewBuilder private func panelButtons(_ layout: PlayerLayout) -> some View {
         let disabled = player.plan == nil
         switch layout.panelButtons {
@@ -289,22 +290,12 @@ struct PlayerView: View {
             }
             .disabled(disabled)
         case .menu:
-            Menu {
-                Button("Audio & subtitles", systemImage: "captions.bubble") { open(.tracks) }
-                Button("Chapters", systemImage: "list.bullet") { open(.chapters) }
-                Button("This video", systemImage: "slider.horizontal.3") { open(.video) }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: layout.round * 0.4, weight: .semibold))
-                    .frame(width: layout.round, height: layout.round)
-                    .glassPanel(Circle())
-                    .contentShape(Circle())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .disabled(disabled)
-            .accessibilityLabel("Audio, chapters and this video")
+            // A glass page of the three rather than the system's menu: a
+            // UIKit menu over a view redrawn four times a second lost its
+            // choices (the narrow-window UI test, 2026-10-04).
+            GlassRoundButton(systemImage: "ellipsis", label: "Audio, chapters and this video",
+                             size: layout.round) { open(.choose) }
+                .disabled(disabled)
         }
     }
 
@@ -596,17 +587,21 @@ struct PlayerLayout {
     private var pillsFit: Bool { size.width >= 900 }
 
     /// The title goes on its own line under the buttons when the buttons and
-    /// at least 200 points of title (232 with the gaps) do not fit in one
-    /// row: a phone held upright, a narrow window.
+    /// at least 200 points of title do not fit in one row: a phone held
+    /// upright, a narrow window. The row's five parts sit 12 apart, with
+    /// the spacer's own 8 (`topBar`).
     var stacked: Bool {
-        let row: CGFloat = round + icons + tools + 232
+        let row: CGFloat = round + icons + tools + 200 + 4 * 12 + 8
         return !pillsFit && usable < row
     }
 
+    /// Stacked, the buttons have the row to themselves: four parts 8 apart and
+    /// the spacer's 8. Narrower than that (Slide Over, a third of a 12.9-inch
+    /// iPad), the three are one round menu, never cut off at the edge.
     var panelButtons: PanelButtons {
         if pillsFit { return .pills }
         if !stacked { return .icons }
-        let buttons: CGFloat = round + icons + tools + 16
+        let buttons: CGFloat = round + icons + tools + 3 * 8 + 8
         return usable >= buttons ? .icons : .menu
     }
 

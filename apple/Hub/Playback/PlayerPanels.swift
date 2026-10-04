@@ -5,6 +5,8 @@ import SwiftUI
 /// open from a row of one of them, and Back returns there (Android's
 /// `PlayerScreen` panels).
 enum PlayerPanel: Hashable {
+    /// The three in one list, for a window too narrow for their buttons.
+    case choose
     case tracks, video, chapters
     case timing, look, quality, version, speed, stream
 }
@@ -147,6 +149,7 @@ struct PlayerSheet: View {
     private var heading: (title: String, sub: String) {
         let name = player.plan.map { PlayerLabels.title($0.item) } ?? ""
         return switch panel {
+        case .choose: ("Playback", name)
         case .tracks: ("Audio & subtitles", name)
         case .video: ("This video", name)
         case .chapters: ("Chapters", name)
@@ -165,6 +168,7 @@ struct PlayerSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             if let plan = player.plan {
                 switch panel {
+                case .choose: choose
                 case .tracks: tracks(plan)
                 case .video: video(plan)
                 case .chapters: chapters(plan)
@@ -180,6 +184,22 @@ struct PlayerSheet: View {
             }
         }
         .padding(.bottom, 4)
+    }
+
+    /// The narrowest window's one round button opens this: the three pages
+    /// the wider windows have buttons for, each a row.
+    private var choose: some View {
+        SheetGroup {
+            SheetRow(title: "Audio & subtitles", chevron: true) { open(.tracks) } leading: {
+                Image(systemName: "captions.bubble").frame(width: 24)
+            }
+            SheetRow(title: "Chapters", chevron: true) { open(.chapters) } leading: {
+                Image(systemName: "list.bullet").frame(width: 24)
+            }
+            SheetRow(title: "This video", chevron: true) { open(.video) } leading: {
+                Image(systemName: "slider.horizontal.3").frame(width: 24)
+            }
+        }
     }
 
     @ViewBuilder private func tracks(_ plan: PlaybackPrepareResponse) -> some View {
