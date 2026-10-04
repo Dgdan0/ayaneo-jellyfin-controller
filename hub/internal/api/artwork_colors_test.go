@@ -119,6 +119,9 @@ func TestOnePictureAtTwoWidthsSharesItsColours(t *testing.T) {
 	if key("/v1/img/tmdb/w342/a.jpg") != key("/v1/img/tmdb/w1280/a.jpg") {
 		t.Error("a TMDB picture's size changed its key")
 	}
+	if key("/v1/img/reading/kavita/4928?w=180") != key("/v1/img/reading/kavita/4928") {
+		t.Error("a sized reading cover must share the unsized cover's colours")
+	}
 }
 
 func TestArtworkColoursAreWorkedOutOnceAndRemembered(t *testing.T) {

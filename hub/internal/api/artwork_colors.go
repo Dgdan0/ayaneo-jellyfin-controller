@@ -90,7 +90,8 @@ func artworkColorKey(src string) (string, bool) {
 		}
 		return "tmdb/" + parts[2], true
 	case "arr", "reading":
-		if len(parts) < 2 || u.RawQuery != "" {
+		// These routes ignore a query; a screen may still have sized the path.
+		if len(parts) < 2 {
 			return "", false
 		}
 		return rest, true
