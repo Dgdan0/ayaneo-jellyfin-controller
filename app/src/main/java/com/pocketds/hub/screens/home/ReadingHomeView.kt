@@ -101,6 +101,14 @@ class ReadingHomeView(
     private var focusedListHeader: String? = null
     /** The front cover of the series in focus under Your series, where no single book is selected. */
     private var focusedSeriesCover: String? = null
+    /**
+     * Where focus was when the screen went (row, book, list button). Opening a
+     * book clears this screen's focus while it is still showing, which hands
+     * focus to the first card the scroller finds -- and its listener then
+     * remembered that one: Back from Recursion landed on Mistborn, the row's
+     * first card, in Glass and Classic alike.
+     */
+    private var resumeAt: Triple<String, String, String?>? = null
     private val cards = mutableMapOf<Pair<String, String>, View>()
     private val headerActions = mutableMapOf<String, View>()
     private var observed: Map<String, ReadingWork> = emptyMap()
@@ -203,6 +211,7 @@ class ReadingHomeView(
     }
 
     fun onHide() {
+        if (hasFocus()) resumeAt = Triple(selectedRow, selectedWork, focusedListHeader)
         generation++
         job?.cancel()
         job = null
@@ -256,6 +265,8 @@ class ReadingHomeView(
     }
 
     fun requestInitialFocus(): Boolean {
+        resumeAt?.let { (row, work, header) -> selectedRow = row; selectedWork = work; focusedListHeader = header }
+        resumeAt = null
         focusedListHeader?.let { id -> headerActions[id]?.let { button ->
             button.post { button.requestFocus() }
             return true
