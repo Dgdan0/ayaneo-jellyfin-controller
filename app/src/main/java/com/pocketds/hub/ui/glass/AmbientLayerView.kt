@@ -35,14 +35,18 @@ class AmbientLayerView(context: Context, private val api: HubApi) : FrameLayout(
             scaleType = ImageView.ScaleType.CENTER_CROP
             alpha = 0f
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-            // The prototype's saturate(1.5) brightness(0.62): the colour of the
-            // artwork without the detail fighting the type above it.
+            // The prototype's Pocket filter, saturate(1.4) brightness(0.58): the
+            // colour of the artwork without the detail fighting the type above it.
             colorFilter = ColorMatrixColorFilter(ColorMatrix().apply {
-                setSaturation(1.5f)
-                postConcat(ColorMatrix().apply { setScale(0.62f, 0.62f, 0.62f, 1f) })
+                setSaturation(SATURATION)
+                postConcat(ColorMatrix().apply { setScale(BRIGHTNESS, BRIGHTNESS, BRIGHTNESS, 1f) })
             })
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val radius = 18f * resources.displayMetrics.density
+                // The Pocket's blur(34px) is a 34dp standard deviation. RenderEffect
+                // takes a radius and turns it into one (sigma = 0.577 r + 0.5), so
+                // ask for the radius that gives it. At 18dp a cover's title and a
+                // face still showed as shapes behind the rows on the device.
+                val radius = (BLUR_SIGMA_DP * resources.displayMetrics.density - 0.5f) / 0.57735f
                 setRenderEffect(RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP))
             }
         }
@@ -114,5 +118,9 @@ class AmbientLayerView(context: Context, private val api: HubApi) : FrameLayout(
         /** The prototype's 0.6–0.8 s cross-fade. */
         const val FADE_MS = 700L
         private const val DECODE_PX = 64
+        /** The prototype's `.app[data-dev="pocket"] .amb` filter. */
+        private const val BLUR_SIGMA_DP = 34f
+        private const val SATURATION = 1.4f
+        private const val BRIGHTNESS = 0.58f
     }
 }
