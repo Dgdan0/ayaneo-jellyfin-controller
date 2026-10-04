@@ -83,6 +83,25 @@ class GlassColorsTest {
         assertTrue(GlassColors.red(through) - GlassColors.red(solid) <= 0.03 * 255)
     }
 
+    @Test fun `a control over video reads on the brightest frame whatever is playing`() {
+        val videoBase = 0xFF0A0D12.toInt()
+        val samples = listOf(
+            ArtworkPalette(0xFFD0B366.toInt(), 0xFF1D1500.toInt(), 0xFFD0B366.toInt(), 0xFFF2E4BF.toInt()),
+            ArtworkPalette(0xFFFDF010.toInt(), 0xFF191700.toInt(), 0xFFE2D700.toInt(), 0xFFE9E7C1.toInt()), // the brightest
+            ArtworkPalette(0xFF6A0F0D.toInt(), 0xFF2C0806.toInt(), 0xFFDD2722.toInt(), 0xFFFFDBD6.toInt()),
+            ArtworkPalette.NEUTRAL
+        )
+        for (p in samples) {
+            val face = GlassColors.overPicture(p, videoBase)
+            assertEquals(GlassColors.PICTURE_ALPHA, GlassColors.alpha(face))
+            // White words on the face over a white window, and over black.
+            for (frame in listOf(0xFFFFFFFF.toInt(), 0xFF000000.toInt())) {
+                val seen = GlassColors.over(face, frame)
+                assertTrue("on ${Integer.toHexString(seen)}", GlassColors.contrast(0xFFFFFFFF.toInt(), seen) >= 7.0)
+            }
+        }
+    }
+
     @Test fun `the selected tab and a lit button keep their dark words readable`() {
         assertTrue(GlassColors.contrast(GlassColors.INK, 0xFFFFFFFF.toInt()) >= 15.0)
         assertEquals(0xFF, GlassColors.alpha(GlassColors.INK))

@@ -32,6 +32,12 @@ import com.pocketds.hub.ui.activateOnTap
  * construction was 300 lines of PlayerScreen assigning 25 of its fields as it
  * went; separating it leaves the screen with behaviour, and the views with one
  * place that decides how a control looks.
+ *
+ * On Glass (GLASS_PLAN.md › Player) every control but Play is dark glass
+ * tinted by what is playing ([com.pocketds.hub.ui.OverlayButtons]), the tools
+ * named in words carry their icons, and the timeline with its times sits in a
+ * frosted bar: a white line on a faint track, the buffered part lighter, a
+ * white thumb. Play stays the white disc with dark ink.
  */
 internal class PlayerChrome(
     private val context: Context,
@@ -79,6 +85,7 @@ internal class PlayerChrome(
     lateinit var seekPreviewFrame: FrameLayout; private set
     lateinit var seekPreviewTime: TextView; private set
     lateinit var seekPreviewDelta: TextView; private set
+    private val glass = com.pocketds.hub.ui.Theme.isGlass(context)
 
     val top: LinearLayout = buildTop()
     /** Previous, back, play, forward, next: in the middle of the picture. */
@@ -86,6 +93,11 @@ internal class PlayerChrome(
     val controller: LinearLayout = buildController(timeline)
     val seekPreview: LinearLayout = buildSeekPreview()
     val gestureFeedback: TextView = buildGestureFeedback()
+
+    /** Glass: how much is loaded ahead, a lighter part of the line (the prototype's `.buf`). */
+    fun showBuffered(fraction: Double) {
+        if (glass) seekBar.secondaryProgress = (fraction.coerceIn(0.0, 1.0) * seekBar.max).toInt()
+    }
 
     fun setLocked(locked: Boolean) {
         lockButton.setIcon(if (locked) PlayerControlIcon.LOCK else PlayerControlIcon.UNLOCK)
@@ -129,17 +141,17 @@ internal class PlayerChrome(
             }
             addView(subtitleView)
         }, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginEnd = dp(8) })
-        tracksButton = pill("Audio & subtitles", "Audio and subtitles", actions::showTracks)
+        tracksButton = pill("Audio & subtitles", "Audio and subtitles", com.pocketds.hub.ui.AppIcon.SUBTITLES, actions::showTracks)
         addView(tracksButton)
-        chaptersButton = pill("Chapters", "Chapters", actions::showChapters)
+        chaptersButton = pill("Chapters", "Chapters", com.pocketds.hub.ui.AppIcon.CONTENTS, actions::showChapters)
         addView(chaptersButton)
-        optionsButton = pill("This video", "Quality, speed and aspect for this video", actions::showOptions)
+        optionsButton = pill("This video", "Quality, speed and aspect for this video", null, actions::showOptions)
         addView(optionsButton)
         castButton = MediaRouteButton(context).apply {
             contentDescription = "Play on a TV"
             isFocusable = true
             isFocusableInTouchMode = true
-            background = roundBackground()
+            com.pocketds.hub.ui.OverlayButtons.dressDisc(this, colors.focusRing)
             CastButtonFactory.setUpMediaRouteButton(context, this)
             setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
         }
@@ -175,24 +187,36 @@ internal class PlayerChrome(
         addView(nextButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(20) })
     }
 
-    /** The timeline across the whole width; the time and chapter under its start, the time left under its end. */
+    /**
+     * The timeline across the whole width; the time and chapter under its
+     * start, the time left under its end. Glass puts both in a frosted bar
+     * 14dp in from the edges (the prototype's `.pl-bot`).
+     */
     private fun buildController(timeline: SeekBar.OnSeekBarChangeListener): LinearLayout =
         LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(34), dp(20), dp(12))
+            if (glass) setPadding(dp(14), dp(30), dp(14), dp(10)) else setPadding(dp(20), dp(34), dp(20), dp(12))
             background = ThemeGradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 intArrayOf(Color.TRANSPARENT, Color.argb(215, 0, 0, 0))
             )
+            val bar = if (glass) LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, GLASS_BAR_CORNER_DP)) { page ->
+                    com.pocketds.hub.ui.glass.GlassColors.overPicture(page, this@PlayerChrome.colors.background)
+                }
+                setPadding(dp(4), dp(4), dp(4), dp(6))
+            }.also { addView(it, LinearLayout.LayoutParams(MATCH, WRAP)) } else this
             seekBar = ChapterSeekBar(context).apply {
                 max = 10_000
                 contentDescription = "Playback position"
                 Styler.makeFocusable(this)
                 setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
                 setOnSeekBarChangeListener(timeline)
+                if (glass) glassLine(this)
             }
-            addView(seekBar, LinearLayout.LayoutParams(MATCH, WRAP))
-            addView(LinearLayout(context).apply {
+            bar.addView(seekBar, LinearLayout.LayoutParams(MATCH, WRAP))
+            bar.addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(8), dp(2), dp(8), 0)
@@ -203,12 +227,45 @@ internal class PlayerChrome(
             }, LinearLayout.LayoutParams(MATCH, WRAP))
         }
 
+    /**
+     * Glass: the prototype's line (`.pl-line`), 6dp: white on a faint track,
+     * the buffered part a little lighter, and a white thumb in a soft halo.
+     */
+    private fun glassLine(bar: SeekBar) {
+        val radius = Styler.dp(context, 3f)
+        fun line(color: Int) = ThemeGradientDrawable.rounded(radius, color)
+        fun clipped(color: Int) = android.graphics.drawable.ClipDrawable(line(color), Gravity.START, android.graphics.drawable.ClipDrawable.HORIZONTAL)
+        bar.progressDrawable = LayerDrawable(arrayOf(line(GLASS_TRACK), clipped(GLASS_BUFFERED), clipped(Color.WHITE))).apply {
+            setId(0, android.R.id.background)
+            setId(1, android.R.id.secondaryProgress)
+            setId(2, android.R.id.progress)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            bar.minHeight = dp(GLASS_LINE_DP)
+            bar.maxHeight = dp(GLASS_LINE_DP)
+        }
+        // With focus the halo becomes the white ring, standing off the thumb as
+        // every ring does: left and right then seek, so where focus is must show.
+        val halo = dp(GLASS_THUMB_HALO_DP)
+        val side = dp(GLASS_THUMB_DP) + 2 * halo
+        fun thumb(focused: Boolean) = LayerDrawable(arrayOf(
+            (if (focused) ThemeGradientDrawable.oval(Color.TRANSPARENT, dp(2f), colors.focusRing)
+                else ThemeGradientDrawable.oval(GLASS_THUMB_HALO)).apply { setSize(side, side) },
+            InsetDrawable(ThemeGradientDrawable.oval(Color.WHITE), halo)
+        ))
+        bar.thumb = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_focused), thumb(true))
+            addState(intArrayOf(), thumb(false))
+        }
+        bar.splitTrack = false
+    }
+
     private fun buildSeekPreview(): LinearLayout = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
         visibility = View.GONE
         isClickable = false
-        background = ThemeGradientDrawable().apply {
+        if (glass) glassFace(this, 12f) else background = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 12f)
             setColor(Color.argb(235, 22, 24, 29))
             setStroke(dp(1), Color.argb(120, 255, 255, 255))
@@ -244,26 +301,35 @@ internal class PlayerChrome(
         setTextColor(Color.WHITE)
         setTypeface(typeface, Typeface.BOLD)
         setPadding(dp(18), dp(12), dp(18), dp(12))
-        background = ThemeGradientDrawable().apply {
+        if (glass) glassFace(this, 18f) else background = ThemeGradientDrawable().apply {
             cornerRadius = Styler.dp(context, 18f)
             setColor(Color.argb(225, 22, 24, 29))
             setStroke(dp(1), Color.argb(110, 255, 255, 255))
         }
     }
 
-    /** A round button on a soft disc: back, cast, lock, picture in picture, previous and next. */
+    /** Glass: a panel of the controls' dark glass, as the seek preview and the gesture readout. */
+    private fun glassFace(view: View, cornerDp: Float) {
+        com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(view, Styler.dp(context, cornerDp)) { page ->
+            com.pocketds.hub.ui.glass.GlassColors.overPicture(page, colors.background)
+        }
+    }
+
+    /** A round button on a soft disc (dark glass on Glass): back, cast, lock, picture in picture, previous and next. */
     private fun round(icon: PlayerControlIcon, description: String, action: () -> Unit) =
         PlayerIconButton(context, icon).apply {
             contentDescription = description
-            background = roundBackground()
+            com.pocketds.hub.ui.OverlayButtons.dressDisc(this, colors.focusRing)
+            // On dark glass the white symbol needs no halo.
+            if (glass) setIconColor(Color.WHITE, halo = false)
             Styler.makeFocusable(this)
             activateOnTap(action)
             setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
         }
 
-    /** "Audio & subtitles", "Chapters", "This video": what a tool opens, in words. */
-    private fun pill(label: String, description: String, action: () -> Unit) =
-        com.pocketds.hub.ui.OverlayButtons.pill(context, colors.focusRing, label, description, action).apply {
+    /** "Audio & subtitles", "Chapters", "This video": what a tool opens, in words; on Glass with its [icon]. */
+    private fun pill(label: String, description: String, icon: com.pocketds.hub.ui.AppIcon?, action: () -> Unit) =
+        com.pocketds.hub.ui.OverlayButtons.pill(context, colors.focusRing, label, description, icon, action).apply {
             setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
             layoutParams = LinearLayout.LayoutParams(WRAP, dp(44)).apply { marginStart = dp(2) }
         }
@@ -276,13 +342,11 @@ internal class PlayerChrome(
         typeface = com.pocketds.hub.ui.Type.text(context, 700)
         setTextColor(Color.WHITE)
         gravity = Gravity.CENTER
-        background = roundBackground()
+        com.pocketds.hub.ui.OverlayButtons.dressDisc(this, colors.focusRing)
         Styler.makeFocusable(this)
         activateOnTap(action)
         setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
     }
-
-    private fun roundBackground(): StateListDrawable = com.pocketds.hub.ui.OverlayButtons.disc(context, colors.focusRing)
 
     /** Play: a white disc. */
     private fun discBackground(): StateListDrawable = com.pocketds.hub.ui.OverlayButtons.ringed(
@@ -297,9 +361,22 @@ internal class PlayerChrome(
     }
 
     private fun dp(value: Int) = Styler.dpInt(context, value.toFloat())
+    private fun dp(value: Float) = Styler.dpInt(context, value)
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        /**
+         * Glass, the prototype's Pocket player: the bar's 16dp corners, a 6dp
+         * line on a track of white at 22% with the buffered part at 30%, and a
+         * 16dp thumb in a 4dp halo of white at 25%.
+         */
+        const val GLASS_BAR_CORNER_DP = 16f
+        const val GLASS_LINE_DP = 6f
+        const val GLASS_TRACK = 0x38FFFFFF
+        const val GLASS_BUFFERED = 0x4DFFFFFF
+        const val GLASS_THUMB_DP = 16f
+        const val GLASS_THUMB_HALO_DP = 4f
+        const val GLASS_THUMB_HALO = 0x40FFFFFF
     }
 }

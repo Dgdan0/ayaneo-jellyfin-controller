@@ -512,7 +512,7 @@ class EpubReaderScreen(
         if (audioEditions.isNotEmpty() || alignedEditions.isNotEmpty() || readAlong) {
             topBar.addView(PlayerIconButton(host.viewContext, PlayerControlIcon.AUDIO).apply {
                 contentDescription = "Reading and listening"
-                background = com.pocketds.hub.ui.OverlayButtons.disc(host.viewContext, colors.focusRing)
+                com.pocketds.hub.ui.OverlayButtons.dressDisc(this, colors.focusRing)
                 layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(4) }
                 Styler.makeFocusable(this)
                 FocusDecorator.attach(this, ringVisible, scale = false)
@@ -615,7 +615,7 @@ class EpubReaderScreen(
             gravity = Gravity.CENTER_VERTICAL
             setTextColor(Color.WHITE)
             contentDescription = label
-            background = com.pocketds.hub.ui.OverlayButtons.disc(host.viewContext, colors.focusRing)
+            com.pocketds.hub.ui.OverlayButtons.dressDisc(this, colors.focusRing)
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
             FocusDecorator.listen(this, ringVisible) { view, focused ->

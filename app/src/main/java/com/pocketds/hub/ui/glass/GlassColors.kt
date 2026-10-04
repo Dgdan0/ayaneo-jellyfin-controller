@@ -114,6 +114,17 @@ object GlassColors {
 
     const val SHEET_ALPHA = 0xF2
 
+    /**
+     * A control drawn over video or a page being read (the player's, a
+     * reader's): the panel's tint of what is playing laid on [base], the video
+     * palette's dark, and nearly solid. A see-through panel is glass over the
+     * blurred page; over the brightest frame of a film it went grey, and the
+     * soft white discs before it washed out entirely (the Mentalist's window).
+     */
+    fun overPicture(palette: ArtworkPalette, base: Int): Int = withAlpha(over(panel(palette), base), PICTURE_ALPHA)
+
+    const val PICTURE_ALPHA = 0xEB
+
     /** WCAG relative luminance, 0 for black to 1 for white. */
     fun luminance(c: Int): Double {
         fun lin(v: Int): Double {

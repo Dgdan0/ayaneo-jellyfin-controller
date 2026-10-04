@@ -672,7 +672,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Up/Down through a scrolling page of rows (past an empty row, to rows scrolled away) | `ui/RowStep.move(rows, focused, up)` (Books home) |
 | A comic or manga among books: the pill on its cover and its line | `ReadingBookFacts.kindTag` / `comicLine`; `PosterCardView.bindReadingWork(showKind = true)` on Books home only |
 | A comic run's issues on its page; their names and counts | `screens/library/IssueStrip` (a lazy strip per volume, opening at the issue you are on); `ReadingBookFacts.issueTitle` / `issueLine`, "162 issues" in `length`, "On issue 51 · 1% read" in `progress`; the hub's `/v1/img/reading/kavita-chapter/{id}` cover per issue |
-| Controls drawn over a picture (the player, the comic reader) | `ui/OverlayButtons` (`round`, `pill`, `disc`, `ringed`: a soft disc or pill, the ring standing outside it) |
+| Controls drawn over a picture (the player, the comic reader) | `ui/OverlayButtons` (`round`, `pill`, `dressDisc`, `dressPill`, `ringed`: a soft disc or pill, the ring standing outside it; `light` for a pill that is on). On Glass no white discs: dark glass tinted by what is open, nearly solid on the video palette's dark (`GlassButtonBackground.overPicture`, `GlassColors.overPicture`), so it reads over the brightest frame; Play stays the white disc |
 | The comic reader's heading | `ReaderTitleFormatter.heading` / `issue` / `subtitle` ("Fantastic Four" over "Issue 51 · Page 2 of 24"; Kavita's "Chapter 51" is an issue for a comic) |
 | Reacting to focus while keeping the ring | `FocusDecorator.listen(view, ringVisible) { view, focused -> … }` |
 | Player and playback-option wording | `playback/PlayerLabels` (Locale.US decimals; `playMethod`: "Direct play", "Direct stream", "Converting") |
@@ -1152,6 +1152,11 @@ the selected user's resumable, next, or first episode. Playback options expose
 media version, audio, subtitles and Original/40/20/10/5/2 Mbps quality. The hub owns byte-range
 streaming, HLS manifest rewriting, external subtitle extraction, ordered Jellyfin events,
 session ownership and 30-minute abandoned-session cleanup.
+
+In Glass (#11, GLASS_PLAN.md › Player) every control but Play is that dark glass, Audio & subtitles and
+Chapters carry their icons, the timeline and its times sit in a frosted bar 14dp in from the edges
+(a 6dp white line on a faint track, the buffered part lighter, a white thumb that rings with focus),
+and the panels are the glass side sheet. What the controls do and where focus goes are unchanged.
 
 The player overlay (2026-10 redesign, `playback/PlayerChrome`) has a round Back at the top left, the
 title with the episode under it ("S1E1 · Somewhere Not Here", `PlayerLabels.title`/`subtitle`), pills

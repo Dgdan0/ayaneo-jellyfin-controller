@@ -333,7 +333,7 @@ class PagedImageReaderScreen(
         register(OverlayButtons.round(host.viewContext, colors.focusRing, icon, label, click))
 
     private fun pill(label: String, description: String, click: () -> Unit): TextView =
-        register(OverlayButtons.pill(host.viewContext, colors.focusRing, label, description, click))
+        register(OverlayButtons.pill(host.viewContext, colors.focusRing, label, description, onTap = click))
 
     /** In the pad's order through the controls, remembering which one had focus. */
     private fun <T : View> register(view: T): T = view.apply {
@@ -586,10 +586,8 @@ class PagedImageReaderScreen(
         val page = state?.pageIndex ?: value.currentPage
         thirdsEnabled = !thirdsEnabled
         state = PagedImageState(value.pageCount, page, if (thirdsEnabled) 3 else 1)
-        // Lit while on, like a filter.
-        thirdsButton.background = if (thirdsEnabled) OverlayButtons.ringed(host.viewContext, colors.focusRing,
-            android.graphics.drawable.GradientDrawable.RECTANGLE, colors.accent) else OverlayButtons.pillFace(host.viewContext, colors.focusRing)
-        thirdsButton.setTextColor(if (thirdsEnabled) colors.accentText else Color.WHITE)
+        // Lit while on, like a filter: the accent on Classic, white on Glass.
+        OverlayButtons.light(thirdsButton, colors, thirdsEnabled)
         thirdsButton.isSelected=thirdsEnabled
         if (thirdsEnabled) applyViewport() else { image.resetScaleAndCenter();applyViewport() }
         updatePosition()

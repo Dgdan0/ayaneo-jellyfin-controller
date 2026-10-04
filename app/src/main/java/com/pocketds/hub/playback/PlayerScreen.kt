@@ -296,7 +296,10 @@ class PlayerScreen(
             }
         )
 
-        choiceOverlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
+        // Glass: the panels are the glass side sheet, tinted by the page the player opened from.
+        choiceOverlay = ChoiceOverlay(host.viewContext,
+            if (Theme.isGlass(host.viewContext)) Theme.preview(host.viewContext, com.pocketds.hub.state.ContentMode.MEDIA) else colors,
+            ringVisible, sidePanel = true)
         root.addView(choiceOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
         subtitleOffsetOverlay = SubtitleOffsetOverlay(host.viewContext, colors, ringVisible)
         root.addView(subtitleOffsetOverlay, FrameLayout.LayoutParams(dp(320), WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(16) })
@@ -308,7 +311,12 @@ class PlayerScreen(
             setPadding(dp(18), 0, dp(18), 0)
             minimumHeight = dp(40)
             visibility = View.GONE
-            background = android.graphics.drawable.StateListDrawable().apply {
+            val glass = Theme.isGlass(context)
+            // Glass: a pill of the controls' dark glass, ringed on focus.
+            if (glass) {
+                com.pocketds.hub.ui.OverlayButtons.dressPill(this, colors.focusRing)
+                setPadding(dp(22), dp(4), dp(22), dp(4))
+            } else background = android.graphics.drawable.StateListDrawable().apply {
                 fun face(focused: Boolean) = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
                     cornerRadius = dp(999).toFloat()
                     setColor(if (focused) Color.WHITE else Color.argb(110, 0, 0, 0))
@@ -318,7 +326,7 @@ class PlayerScreen(
                 addState(intArrayOf(), face(false))
             }
             setOnFocusChangeListener { view, focused ->
-                (view as TextView).setTextColor(if (focused) Color.BLACK else Color.WHITE)
+                if (!glass) (view as TextView).setTextColor(if (focused) Color.BLACK else Color.WHITE)
                 if (focused && controlsVisible) scheduleHide()
             }
             com.pocketds.hub.ui.Styler.makeFocusable(this)
@@ -1020,6 +1028,7 @@ class PlayerScreen(
             seekBar.max = 10_000
             seekBar.progress = if (end > 0) ((current.toDouble() / end) * 10_000).toInt().coerceIn(0, 10_000) else 0
         }
+        if (end > 0) chrome.showBuffered(value.bufferedPosition.toDouble() / end)
         updateSegmentSkip(current)
         if (value.playbackState != Player.STATE_ENDED) updateUpNext(current, end)
     }

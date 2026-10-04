@@ -27,16 +27,21 @@ import com.pocketds.hub.ui.ThemeGradientDrawable
  * Lighting it swaps the face in place. A new background each time (a filter
  * pill turning on and off) reset the view's padding and registered another
  * GlassPage.follow; this keeps the one [attach] registered.
+ *
+ * Over a picture ([overPicture]: the player, a reader) the glass is the
+ * nearly solid [GlassColors.overPicture], laid on the video palette's dark.
  */
 class GlassButtonBackground private constructor(
     context: Context,
     focusRing: Int,
     cornerPx: Float,
     ringPx: Int,
-    lit: Boolean
+    lit: Boolean,
+    pictureBase: Int? = null
 ) : StateListDrawable() {
     private val page = GlassPage.palette(context)
-    private val faces = listOf(Face(cornerPx, true, page), Face(cornerPx, false, page), Face(cornerPx, false, page))
+    private val faces = listOf(Face(cornerPx, true, page, pictureBase), Face(cornerPx, false, page, pictureBase),
+        Face(cornerPx, false, page, pictureBase))
 
     var lit: Boolean = lit
         set(value) {
@@ -70,10 +75,24 @@ class GlassButtonBackground private constructor(
             GlassPage.follow(view) { page -> background.retint(page) }
             return background
         }
+
+        /**
+         * A control over video or a page being read: the page's tint of what
+         * is open, nearly solid on [base] (the video palette's dark) so it
+         * reads over any frame; white while [lit]. Follows the page as
+         * [attach] does once [view] is given one.
+         */
+        fun overPicture(view: View, focusRing: Int, cornerPx: Float, ringPx: Int, base: Int, lit: Boolean = false): GlassButtonBackground {
+            val background = GlassButtonBackground(view.context, focusRing, cornerPx, ringPx, lit, base)
+            view.background = background
+            GlassPage.follow(view) { page -> background.retint(page) }
+            return background
+        }
     }
 
     /** One state's face: glass, or white while lit; pressed is a touch lighter glass or greyer white. */
-    private class Face(private val cornerPx: Float, private val pressed: Boolean, page: ArtworkPalette) : Drawable() {
+    private class Face(private val cornerPx: Float, private val pressed: Boolean, page: ArtworkPalette,
+                       private val pictureBase: Int?) : Drawable() {
         var lit = false
             set(value) { field = value; invalidateSelf() }
         private val panel = GlassPanelDrawable(glass(page), cornerPx)
@@ -85,7 +104,8 @@ class GlassButtonBackground private constructor(
         fun retint(page: ArtworkPalette) = panel.retint(glass(page))
 
         private fun glass(page: ArtworkPalette): Int =
-            GlassColors.panel(page).let { if (pressed) KeyPressTint.pressed(it, true) else it }
+            (if (pictureBase != null) GlassColors.overPicture(page, pictureBase) else GlassColors.panel(page))
+                .let { if (pressed) KeyPressTint.pressed(it, true) else it }
 
         override fun onBoundsChange(bounds: Rect) {
             panel.bounds = bounds
