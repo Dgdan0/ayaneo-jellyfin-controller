@@ -442,6 +442,82 @@ data class EpubPositionBody(
     val expectedLocator: JsonObject? = null
 )
 
+/**
+ * An audiobook as the hub streams it (#19, A3): its tracks in the order to
+ * play them, the chapters inside them, and, on a book with a read-along
+ * edition, which of that edition's audio files is which track. [revision]
+ * names this list of files; every track URL carries it, and a stale one is
+ * refused (412 audio_changed), so a rescan cannot play another file.
+ */
+@Serializable
+data class ReadingAudioManifest(
+    val workId: String = "",
+    val sourceItemId: String = "",
+    val revision: String = "",
+    val narrator: String = "",
+    val totalMs: Long = 0,
+    val aligned: Boolean = false,
+    val tracks: List<ReadingAudioTrack> = emptyList(),
+    val chapters: List<ReadingAudioChapter> = emptyList(),
+    val alignment: ReadingAudioAlignment? = null,
+    val alignmentReason: String = "",
+    val cache: CacheInfo = CacheInfo()
+)
+
+@Serializable
+data class ReadingAudioTrack(
+    /** The `{n}` of the track's route. */
+    val index: Int = 0,
+    /** Stays the same when the order changes, so a place can name the track. */
+    val id: String = "",
+    val title: String = "",
+    val durationMs: Long = 0,
+    val bytes: Long = 0,
+    val mime: String = "",
+    /** The strong validator the bytes are served with: a new file is a new tag. */
+    val etag: String = ""
+)
+
+/** A chapter mark inside a track: [startMs] counts from the start of that [track]. */
+@Serializable
+data class ReadingAudioChapter(val title: String = "", val startMs: Long = 0, val track: Int = 0)
+
+@Serializable
+data class ReadingAudioAlignment(val audio: List<ReadingAlignedAudio> = emptyList())
+
+/** A read-along edition's audio file ([href], a path inside the EPUB) and where in which track it begins. */
+@Serializable
+data class ReadingAlignedAudio(val href: String = "", val track: Int = 0, val startMs: Long = 0)
+
+@Serializable
+data class ReadingAudioPositionResponse(
+    val workId: String = "",
+    val sourceItemId: String = "",
+    val position: ReadingAudioPosition? = null
+)
+
+/**
+ * Where the book's listener is (#19, A4). [exact] is false for a proportion
+ * of the whole, a guess from a reader's place in a book without alignment.
+ * [timestamp] is the hub's own clock: never compare it with this device's.
+ */
+@Serializable
+data class ReadingAudioPosition(
+    val trackId: String = "",
+    val track: Int = 0,
+    val offsetMs: Long = 0,
+    val globalMs: Long = 0,
+    val completed: Boolean = false,
+    val exact: Boolean = false,
+    val form: String = "",
+    val timestamp: Long = 0,
+    val updatedAt: String = "",
+    val sentence: ReadingAudioSentence? = null
+)
+
+@Serializable
+data class ReadingAudioSentence(val href: String = "", val fragment: String = "")
+
 @Serializable
 data class ReadingAuthor(val id:String="",val name:String="",val artwork:String="",
     /** The author's shelf: "2 series", "6 books". */

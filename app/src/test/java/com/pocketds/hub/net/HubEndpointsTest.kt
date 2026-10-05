@@ -123,6 +123,28 @@ class HubEndpointsTest {
         )
     }
 
+    /** #19: the audiobook's routes sit under the publication, beside /file and /position. */
+    @Test
+    fun `an audiobook's manifest, tracks, place and slim read-along are under its publication`() {
+        val work = "rw_1560ef0b13c76080a06f36ff849c3860"
+        val publication = "$base/v1/reading/works/$work/publications/3726292328809367"
+        assertEquals(HubRequest("$publication/audio"), HubEndpoints.readingAudioManifest(base, work, "3726292328809367"))
+        assertEquals("$publication/audio/tracks/0?rev=05c8b6c63e2b",
+            HubEndpoints.readingAudioTrack(base, work, "3726292328809367", 0, "05c8b6c63e2b"))
+        assertEquals("$publication/audio/tracks/7?rev=05c8b6c63e2b",
+            HubEndpoints.readingAudioTrack("$base/", work, "3726292328809367", 7, "05c8b6c63e2b"))
+        // A revision is the hub's own hex; anything else is still sent escaped, never as a second parameter.
+        assertEquals("$publication/audio/tracks/1?rev=a%26b%3Dc",
+            HubEndpoints.readingAudioTrack(base, work, "3726292328809367", 1, "a&b=c"))
+        assertTrue(runCatching { HubEndpoints.readingAudioTrack(base, work, "3726292328809367", -1, "05c8b6c63e2b") }.isFailure)
+        assertEquals(HubRequest("$publication/audio/position"), HubEndpoints.readingAudioPosition(base, work, "3726292328809367"))
+        assertEquals("$publication/file?format=readaloud&audio=omit",
+            HubEndpoints.readingEpubFile(base, work, "3726292328809367", readAlong = true, omitAudio = true))
+        // The whole edition, as before; omitting the audio means nothing without read-along.
+        assertEquals("$publication/file?format=readaloud", HubEndpoints.readingEpubFile(base, work, "3726292328809367", readAlong = true))
+        assertEquals("$publication/file", HubEndpoints.readingEpubFile(base, work, "3726292328809367", omitAudio = true))
+    }
+
     @Test
     fun `reading acquisition endpoints keep opaque candidate keys`() {
         val key = "reading:0123456789abcdef0123456789abcdef"

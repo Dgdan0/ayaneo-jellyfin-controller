@@ -217,7 +217,7 @@ object ReadingAudio {
             mutable.value = ListeningState()
         }
         player.setMediaItems(book.parts.mapIndexed { index, part ->
-            MediaItem.Builder().setUri(Uri.fromFile(part.file)).setMediaId("${book.sourceItemId}:$index")
+            MediaItem.Builder().setUri(part.file?.let(Uri::fromFile) ?: Uri.parse(part.uri)).setMediaId("${book.sourceItemId}:$index")
                 .setMediaMetadata(MediaMetadata.Builder().setTitle(book.title).setArtist(part.title)
                     .setTrackNumber(index + 1).setTotalTrackCount(book.parts.size).build())
                 .build()
@@ -232,7 +232,7 @@ object ReadingAudio {
         lastSave = SystemClock.elapsedRealtime()
         // The parts' lengths, for the time left in the book; read once, beside the player.
         scope.launch {
-            val lengths = withContext(Dispatchers.IO) { book.parts.map { length(it.file) } }
+            val lengths = withContext(Dispatchers.IO) { book.parts.map { part -> part.durationMs ?: part.file?.let(::length) } }
             if (mutable.value.book?.isSame(book) == true) mutable.value = mutable.value.copy(partsMs = lengths)
         }
     }

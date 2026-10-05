@@ -239,16 +239,45 @@ object HubEndpoints {
             method = "POST"
         )
 
-    fun readingEpubFile(base: String, workId: String, sourceItemId: String, readAlong: Boolean = false): String =
+    /**
+     * A book's EPUB; [readAlong] the read-along edition, and [omitAudio] that
+     * edition without its audio (#19): its words and SMIL, about a megabyte,
+     * while the narration streams from the audiobook's tracks.
+     */
+    fun readingEpubFile(base: String, workId: String, sourceItemId: String, readAlong: Boolean = false, omitAudio: Boolean = false): String =
         join(
             base,
             "/v1/reading/works/" + encode(workId) + "/publications/" +
                 encode(sourceItemId) + "/file"
-        ) + if (readAlong) "?format=readaloud" else ""
+        ) + when {
+            readAlong && omitAudio -> "?format=readaloud&audio=omit"
+            readAlong -> "?format=readaloud"
+            else -> ""
+        }
 
     fun readingAudiobookFile(base: String, workId: String, sourceItemId: String): String =
         join(base, "/v1/reading/works/" + encode(workId) +
             "/publications/" + encode(sourceItemId) + "/file?format=audiobook")
+
+    /** An audiobook's tracks, chapters and read-along map (#19, A3). */
+    fun readingAudioManifest(base: String, workId: String, sourceItemId: String): HubRequest =
+        HubRequest(join(base, readingAudioPath(workId, sourceItemId)))
+
+    /**
+     * One track's bytes, with Range: the manifest's [index] under its
+     * [revision], which the hub checks so a rescan cannot play another file.
+     */
+    fun readingAudioTrack(base: String, workId: String, sourceItemId: String, index: Int, revision: String): String {
+        require(index >= 0) { "A track number is not negative" }
+        return join(base, readingAudioPath(workId, sourceItemId) + "/tracks/$index") + "?rev=" + encode(revision)
+    }
+
+    /** The listening place, read and written (#19, A4). */
+    fun readingAudioPosition(base: String, workId: String, sourceItemId: String): HubRequest =
+        HubRequest(join(base, readingAudioPath(workId, sourceItemId) + "/position"))
+
+    private fun readingAudioPath(workId: String, sourceItemId: String) =
+        "/v1/reading/works/" + encode(workId) + "/publications/" + encode(sourceItemId) + "/audio"
 
     fun readingEpubPosition(base: String, workId: String, sourceItemId: String): HubRequest =
         HubRequest(

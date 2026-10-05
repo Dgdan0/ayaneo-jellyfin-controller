@@ -215,17 +215,34 @@ interface HubApi {
         body: EpubPositionBody
     ): HubResult<ActionAck> =
         HubResult.Failed(FailureKind.UNKNOWN, "EPUB position saving is unavailable")
+    /** [omitAudio]: the read-along edition without its audio (#19), whose narration streams from the tracks. */
     suspend fun downloadReadingEpub(
         workId: String,
         sourceItemId: String,
         destination: File,
-        readAlong: Boolean = false
+        readAlong: Boolean = false,
+        omitAudio: Boolean = false
     ): HubResult<ReadingEpubDownload> =
         HubResult.Failed(FailureKind.UNKNOWN, "EPUB downloading is unavailable")
     suspend fun downloadReadingAudiobook(
         workId: String, sourceItemId: String, destination: File
     ): HubResult<ReadingEpubDownload> =
         HubResult.Failed(FailureKind.UNKNOWN, "Audiobook downloading is unavailable")
+    /**
+     * An audiobook's tracks to stream (#19, A3). A hub from before 2026-10-05
+     * has no such route and answers 404; one that cannot read the book's files
+     * answers 409 `audio_not_streamable`, and the book is downloaded whole.
+     */
+    suspend fun readingAudioManifest(workId: String, sourceItemId: String): HubResult<com.pocketds.hub.model.ReadingAudioManifest> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Audiobook streaming is unavailable")
+    /** One track's URL under the manifest's [revision]; blank where nothing streams. */
+    fun readingAudioTrackUrl(workId: String, sourceItemId: String, index: Int, revision: String): String = ""
+    /** The listening place (#19, A4); `position` is null when none is kept. */
+    suspend fun readingAudioPosition(workId: String, sourceItemId: String): HubResult<com.pocketds.hub.model.ReadingAudioPositionResponse> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Listening places are unavailable")
+    /** Writes the listening place, checked against `expected` (see AudioPlace.body). */
+    suspend fun saveReadingAudioPosition(workId: String, sourceItemId: String, body: kotlinx.serialization.json.JsonObject): HubResult<ActionAck> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Listening places are unavailable")
     suspend fun readingRequestOptions(key: String): HubResult<ReadingRequestOptions>
     suspend fun readingSeriesPreview(key: String): HubResult<ReadingSeriesPreviewResponse>
     suspend fun requestReading(body: ReadingCreateRequestBody): HubResult<ReadingRequestResponse>
@@ -430,6 +447,29 @@ class HubClient(private val context: Context, private val connection: HubConnect
         .readTimeout(90, TimeUnit.SECONDS)
         .callTimeout(120, TimeUnit.SECONDS)
         .build()
+
+    /**
+     * An audiobook's tracks (#19, A3): long Range reads on their own HTTP/1.1
+     * pool, as offline transfers are, so a stream neither queues behind a
+     * screen's requests nor holds an HTTP/2 connection they share. The bearer
+     * and the credential gate come from [authorize], as for every request, and
+     * nothing goes in OkHttp's cache: the players keep their own
+     * (reader/AudioStreams). Built when first used, so a client made for a
+     * reading session does not open a pool it never needs.
+     */
+    val audioHttp: OkHttpClient by lazy {
+        api.newBuilder()
+            .connectionPool(ConnectionPool())
+            .protocols(listOf(Protocol.HTTP_1_1))
+            .dispatcher(Dispatcher().apply {
+                maxRequests = 4
+                maxRequestsPerHost = 4
+            })
+            .cache(null)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(0, TimeUnit.MILLISECONDS)
+            .build()
+    }
 
     val imageLoader: ImageLoader by lazy {
         ImageLoader.Builder(context)
@@ -934,14 +974,15 @@ class HubClient(private val context: Context, private val connection: HubConnect
         workId: String,
         sourceItemId: String,
         destination: File,
-        readAlong: Boolean
+        readAlong: Boolean,
+        omitAudio: Boolean
     ): HubResult<ReadingEpubDownload> {
         connectionFailure()?.let { return it }
         return try {
             withContext(Dispatchers.IO) {
                 destination.parentFile?.mkdirs()
                 val request = Request.Builder()
-                    .url(HubEndpoints.readingEpubFile(base(), workId, sourceItemId, readAlong))
+                    .url(HubEndpoints.readingEpubFile(base(), workId, sourceItemId, readAlong, omitAudio))
                     .cacheControl(noStore)
                     .build()
                 HubResult.Ok(ResumableEpubTransfer.downloadWithRetry(offlineHttp, request, destination))
@@ -949,7 +990,7 @@ class HubClient(private val context: Context, private val connection: HubConnect
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: EpubTransferHttpException) {
-            HubResult.Failed(HubFailures.classify(null, e.status), hubMessage(e.responseText) ?: "The EPUB could not be downloaded")
+            failure(e.status, e.responseText, "The EPUB could not be downloaded")
         } catch (e: Exception) {
             DebugLog.log("net", "epub download failed ${e.javaClass.name}: ${e.message?.take(160)}")
             HubResult.Failed(HubFailures.classify(e.javaClass.name, null), "The EPUB could not be downloaded")
@@ -980,6 +1021,28 @@ class HubClient(private val context: Context, private val connection: HubConnect
             HubResult.Failed(HubFailures.classify(e.javaClass.name, null), "The audiobook could not be downloaded")
         }
     }
+
+    // Never from the device's cache: the revision decides which files a track
+    // URL may play, and the hub already holds the list for a minute.
+    override suspend fun readingAudioManifest(workId: String, sourceItemId: String): HubResult<com.pocketds.hub.model.ReadingAudioManifest> =
+        get(HubEndpoints.readingAudioManifest(base(), workId, sourceItemId), noCache = true) {
+            json.decodeFromString<com.pocketds.hub.model.ReadingAudioManifest>(it)
+        }
+
+    override fun readingAudioTrackUrl(workId: String, sourceItemId: String, index: Int, revision: String): String =
+        HubEndpoints.readingAudioTrack(base(), workId, sourceItemId, index, revision)
+
+    override suspend fun readingAudioPosition(workId: String, sourceItemId: String): HubResult<com.pocketds.hub.model.ReadingAudioPositionResponse> =
+        get(HubEndpoints.readingAudioPosition(base(), workId, sourceItemId), noCache = true) {
+            json.decodeFromString<com.pocketds.hub.model.ReadingAudioPositionResponse>(it)
+        }
+
+    // Once: a write that timed out may have landed, and the next sync reads the
+    // place again before it sends (ReadingCheckpointSync).
+    override suspend fun saveReadingAudioPosition(workId: String, sourceItemId: String, body: kotlinx.serialization.json.JsonObject): HubResult<ActionAck> =
+        postOnce(HubEndpoints.readingAudioPosition(base(), workId, sourceItemId).copy(method = "POST"), body.toString()) {
+            json.decodeFromString<ActionAck>(it)
+        }
 
     override suspend fun readingRequestOptions(key: String): HubResult<ReadingRequestOptions> =
         get(HubEndpoints.readingRequestOptions(base(), key), noCache = true) {
@@ -1141,8 +1204,7 @@ class HubClient(private val context: Context, private val connection: HubConnect
                     if (response.isSuccessful) {
                         HubResult.Ok(decode(body))
                     } else {
-                        val kind = HubFailures.classify(null, response.code)
-                        HubResult.Failed(kind, hubMessage(body) ?: HubFailures.message(kind))
+                        failure(response.code, body)
                     }
                 }
             }
@@ -1223,6 +1285,17 @@ class HubClient(private val context: Context, private val connection: HubConnect
         null
     }
 
+    /**
+     * A failed answer, in the hub's own words when it sent its envelope, with
+     * its code and reason kept for a caller that branches on them.
+     */
+    private fun failure(status: Int, body: String, fallback: String? = null): HubResult.Failed {
+        val kind = HubFailures.classify(null, status)
+        val detail = try { json.decodeFromString<HubErrorBody>(body).error } catch (_: Exception) { null }
+        return HubResult.Failed(kind, detail?.message?.takeIf { it.isNotBlank() } ?: fallback ?: HubFailures.message(kind),
+            code = detail?.code.orEmpty(), reason = detail?.reason.orEmpty())
+    }
+
     private suspend fun <T> get(
         request: HubRequest,
         noCache: Boolean = false,
@@ -1271,8 +1344,7 @@ class HubClient(private val context: Context, private val connection: HubConnect
                     // first, then pick a release", and the generic "the hub
                     // sent something unexpected" threw that away and left the
                     // user with no idea what to do.
-                    val kind = HubFailures.classify(null, it.code)
-                    HubResult.Failed(kind, hubMessage(body) ?: HubFailures.message(kind))
+                    failure(it.code, body)
                 } else {
                     val value = decode(body)
                     onSuccess?.invoke(body, value)

@@ -3,7 +3,23 @@ package com.pocketds.hub.reader
 import java.io.File
 import java.util.zip.ZipFile
 
-data class AudiobookPart(val title: String, val file: File)
+/**
+ * A part of an audiobook on the reading-audio player: a track the hub streams
+ * ([uri], its [trackId] and the [cacheKey] its bytes are kept under, #19), or a
+ * [file] taken out of the whole book's ZIP when the hub cannot stream it.
+ * [durationMs] and [bytes] are known up front for a track, from its manifest.
+ */
+data class AudiobookPart(
+    val title: String,
+    val file: File? = null,
+    val uri: String = "",
+    val durationMs: Long? = null,
+    val bytes: Long? = null,
+    val trackId: String = "",
+    val cacheKey: String = ""
+) {
+    val streamed: Boolean get() = file == null && uri.isNotEmpty()
+}
 
 /** Storyteller returns audiobook parts as one ZIP; extract only known audio formats. */
 object AudiobookArchive {
@@ -24,9 +40,7 @@ object AudiobookArchive {
     fun extract(file: File, directory: File, checkCancelled: () -> Unit = {}): List<AudiobookPart> {
         directory.mkdirs()
         return ZipFile(file).use { zip ->
-            val entries = zip.entries().asSequence().filter(::isAudio).sortedWith(
-                compareBy<java.util.zip.ZipEntry> { numericSortKey(it.name) }.thenBy { it.name.lowercase() }
-            ).toList()
+            val entries = zip.entries().asSequence().filter(::isAudio).sortedWith(PART_ORDER).toList()
             require(entries.isNotEmpty()) { "The audiobook archive contains no supported audio" }
             require(entries.size <= 500) { "Too many audiobook parts" }
             var total = 0L
@@ -58,10 +72,22 @@ object AudiobookArchive {
                         require(temporary.renameTo(target)) { "Could not save audiobook part" }
                     } finally { temporary.delete() }
                 }
-                AudiobookPart(name, target)
+                AudiobookPart(name, target, bytes = entry.size)
             }
         }
     }
+
+    /**
+     * Each part's size in the order the ZIP's parts were played, read from its
+     * directory alone: how a place this device kept by part number is found
+     * among the hub's tracks, whose order may differ (#19: Dark Matter's
+     * unsuffixed file sorted last here and is the first track by its tags).
+     */
+    fun partSizes(file: File): List<Long> = runCatching {
+        ZipFile(file).use { zip -> zip.entries().asSequence().filter(::isAudio).sortedWith(PART_ORDER).map { it.size }.toList() }
+    }.getOrDefault(emptyList())
+
+    private val PART_ORDER = compareBy<java.util.zip.ZipEntry> { numericSortKey(it.name) }.thenBy { it.name.lowercase() }
 
     private fun isAudio(entry: java.util.zip.ZipEntry): Boolean =
         !entry.isDirectory && !entry.name.startsWith("/") &&

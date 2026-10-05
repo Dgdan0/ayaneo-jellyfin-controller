@@ -100,6 +100,10 @@ class ConsolidationGuardTest {
             "AudioHandoff: one sound at a time; each player reports started and stopped, and the others pause (#16, A1)",
             // The video player's own screen pausing its video, and the arbiter's hands.
             setOf("playback/PlayerScreen.kt", "reader/AudioHandoff.kt")),
+        Rule(Regex("""/audio/(tracks|position)|/audio"|[?&]rev=|audio=omit"""),
+            "HubEndpoints.readingAudioManifest / readingAudioTrack / readingAudioPosition and readingEpubFile(omitAudio = true), " +
+                "through HubApi.readingAudioTrackUrl: a track URL carries the manifest's revision, and only the hub's builder knows the routes (#19)",
+            setOf("net/HubEndpoints.kt")),
     )
 
     @Test

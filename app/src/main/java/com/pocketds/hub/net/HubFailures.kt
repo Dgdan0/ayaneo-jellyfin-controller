@@ -97,7 +97,14 @@ sealed interface HubResult<out T> {
 
     data class Failed(
         val kind: FailureKind,
-        val message: String = HubFailures.message(kind)
+        val message: String = HubFailures.message(kind),
+        /**
+         * The hub's own error code and reason, when it sent its envelope:
+         * what a caller branches on where one status has several meanings
+         * (409 `audio_not_streamable` against 409 `reading_position_conflict`).
+         */
+        val code: String = "",
+        val reason: String = ""
     ) : HubResult<Nothing>
 }
 

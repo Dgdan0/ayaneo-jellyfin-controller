@@ -253,6 +253,8 @@ data class HubErrorBody(
 data class HubErrorDetail(
     val code: String = "",
     val service: String = "",
+    /** Narrows a code with several causes (audio_not_streamable: unmapped_root, missing_file, …). */
+    val reason: String = "",
     val message: String = "",
     val retryable: Boolean = false
 )
