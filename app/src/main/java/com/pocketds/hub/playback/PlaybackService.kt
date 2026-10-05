@@ -307,6 +307,15 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
+        // What is heard, not what was asked for: the audio track the player chose.
+        // On a file played as it is, a change of track picks by language (#24).
+        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            val group = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSelected } ?: return
+            val format = (0 until group.length).firstOrNull(group::isTrackSelected)?.let(group::getTrackFormat) ?: return
+            DebugLog.log("player", "audio playing: ${format.language ?: "und"} ${format.sampleMimeType} " +
+                "${format.channelCount}ch, asked for ${plan?.selectedAudioIndex}")
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) {
             val current = plan ?: return
             if (playbackState == Player.STATE_READY) openAudioGate(current)
@@ -334,10 +343,8 @@ class PlaybackService : MediaSessionService() {
             serviceScope.launch {
                 val selected = api.selectPlayback(
                     sessionId,
-                    com.pocketds.hub.model.PlaybackSelectBody(
-                        positionMillis = position,
-                        forceTranscode = true
-                    ),
+                    // The version playing is named, so the audio chosen stays in the conversion.
+                    PlaybackRules.selection(current, position, forceTranscode = true),
                     userId
                 )
                 when (selected) {

@@ -39,7 +39,6 @@ import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.model.PlaybackPrepareResponse
-import com.pocketds.hub.model.PlaybackSelectBody
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
@@ -507,7 +506,7 @@ class PlayerScreen(
         )
         return when (val selected = api.selectPlayback(
             initial.sessionId,
-            PlaybackSelectBody(initial.positionMillis, audioStreamIndex = desiredAudio, subtitleStreamIndex = desiredSubtitle)
+            PlaybackRules.selection(initial, audioStreamIndex = desiredAudio, subtitleStreamIndex = desiredSubtitle)
         )) {
             is HubResult.Ok -> selected.value
             is HubResult.Failed -> initial
@@ -1588,14 +1587,7 @@ class PlayerScreen(
         selectionJob = scope.launch {
             when (val result = api.selectPlayback(
                 current.sessionId,
-                PlaybackSelectBody(
-                    positionMillis = at,
-                    mediaSourceId = source,
-                    audioStreamIndex = audio,
-                    subtitleStreamIndex = subtitle,
-                    maxBitrate = quality,
-                    forceTranscode = forceTranscode
-                )
+                PlaybackRules.selection(current, at, source, audio, subtitle, quality, forceTranscode)
             )) {
                 is HubResult.Ok -> {
                     plan = result.value

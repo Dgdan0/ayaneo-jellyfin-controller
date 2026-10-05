@@ -105,6 +105,10 @@ class ConsolidationGuardTest {
                 "leaves the window; a page that draws itself again carries it with FocusPlace.across (its views tagged) or marks " +
                 "the new view with FocusPlace.mark, and asks for it first in requestInitialFocus with FocusPlace.focus",
             setOf("ui/FocusPlace.kt")),
+        Rule(Regex("""PlaybackSelectBody\("""),
+            "PlaybackRules.selection(plan, …): a change to what plays names the version playing, since Jellyfin applies an " +
+                "audio or subtitle stream index only with its media source (#24)",
+            setOf("model/Playback.kt", "playback/PlaybackRules.kt")),
         Rule(Regex("""/audio/(tracks|position)|/audio"|[?&]rev=|audio=omit"""),
             "HubEndpoints.readingAudioManifest / readingAudioTrack / readingAudioPosition and readingEpubFile(omitAudio = true), " +
                 "through HubApi.readingAudioTrackUrl: a track URL carries the manifest's revision, and only the hub's builder knows the routes (#19)",

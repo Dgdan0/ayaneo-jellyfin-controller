@@ -15,6 +15,30 @@ object PlaybackRules {
         Quality("2 Mbps", 2_000_000)
     )
 
+    /**
+     * A change to what plays (a track, the quality, a conversion, a version) as the
+     * hub's select takes it, naming the version playing unless the change is another
+     * version. Jellyfin applies an audio or subtitle stream index only with the media
+     * source it belongs to; without one it converted the default track again, so a
+     * language chosen in the player never reached the sound (#24, measured on 10.11.8).
+     */
+    fun selection(
+        plan: com.pocketds.hub.model.PlaybackPrepareResponse,
+        positionMillis: Long = plan.positionMillis,
+        mediaSourceId: String? = null,
+        audioStreamIndex: Int? = null,
+        subtitleStreamIndex: Int? = null,
+        maxBitrate: Int? = null,
+        forceTranscode: Boolean? = null
+    ) = com.pocketds.hub.model.PlaybackSelectBody(
+        positionMillis = positionMillis,
+        mediaSourceId = mediaSourceId ?: plan.selectedMediaSourceId.takeIf(String::isNotEmpty),
+        audioStreamIndex = audioStreamIndex,
+        subtitleStreamIndex = subtitleStreamIndex,
+        maxBitrate = maxBitrate,
+        forceTranscode = forceTranscode
+    )
+
     fun seekStep(repeatCount: Int): Long = when {
         repeatCount >= 12 -> 60_000L
         repeatCount >= 5 -> 30_000L

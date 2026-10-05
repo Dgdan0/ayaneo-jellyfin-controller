@@ -212,6 +212,9 @@ two, and before the first sweep every lookup reports unknown rather than absent.
 - **`/Items/Latest` answers a bare array**, where every other paged query answers an
   object with `Items` and `TotalRecordCount`. Decoding it as a page yields an empty
   list and no error.
+- **PlaybackInfo applies `AudioStreamIndex` and `SubtitleStreamIndex` only with the matching
+  `MediaSourceId`.** Without one it converts the default track: choosing English on a film whose
+  default is Russian kept the Russian conversion until the app named the source (#24).
 - **Ticks, not seconds.** `RunTimeTicks / 10_000_000`. Forgetting the divide produces
   numbers around ten million that look like bytes.
 - **The season number on an episode is `ParentIndexNumber`**, which is not a name
@@ -716,6 +719,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | The end of an issue | `EndOfIssue.heading` / `next` ("End of Fantastic Four #51", "Next: #52", "That was the last issue") on `reader/EndOfIssueCard`: Ⓐ continues, Ⓑ stays on the last page, Select leaves |
 | Reacting to focus while keeping the ring | `FocusDecorator.listen(view, ringVisible) { view, focused -> … }` |
 | Player and playback-option wording | `playback/PlayerLabels` (Locale.US decimals; `playMethod`: "Direct play", "Direct stream", "Converting") |
+| A change to what plays: an audio or subtitle track, the quality, a version, a conversion | `PlaybackRules.selection(plan, …)`, the hub's select body naming the version playing: Jellyfin applies a stream index only with its media source (#24) |
 | Hub: a reading-lab fixture (generated test files; removed from the real reading servers on 2026-10-03, the guard stays in case they are generated again) | `isReadingFixture` (Storyteller) / `readingdomain.IsFixtureSeries` (Kavita "Lab Comics", "Lab Manga"); kept off shelves and off library cards, whose cover prefers the series read most recently |
 | "1 transfer needs attention" | `ActivityDashboard.needAttention` |
 | Subtitle decoding | `TolerantSubtitleDecoderFactory` in the text renderer (a broken ASS line is skipped, not fatal) |
@@ -763,7 +767,7 @@ Cards measure at their natural height (`EpisodeCardView`, `DetailArtworkCardView
 
 `ConsolidationGuardTest` (part of `dev.sh test`) fails when a removed copy comes back -- a new
 `HubClient(context)`, a hand-built image loader or image request, a hand-written episode code or "Specials", a
-`"Selected"` detail line, an untinted progress bar, a bare `ScrollView(`, a `delay(POLL…)` loop, words drawn in the page colour, a list of libraries sorted on the device, a reading percentage worked out by hand, a white Play disc of its own, a multiply over a page, a reader pausing the video itself, an audiobook route built by hand, or a page keeping its own default focus (#23) -- and names the owner
+`"Selected"` detail line, an untinted progress bar, a bare `ScrollView(`, a `delay(POLL…)` loop, words drawn in the page colour, a list of libraries sorted on the device, a reading percentage worked out by hand, a white Play disc of its own, a multiply over a page, a reader pausing the video itself, an audiobook route built by hand, a page keeping its own default focus (#23), or a playback selection built by hand (#24) -- and names the owner
 to use instead. Extend its rules when you consolidate something new. It also fails on a top-level class or
 object that nothing in the app names, only its tests (#22): delete it with its tests, or list it in `keptDormant`
 with the plan that needs it (`SpreadPlanner`, `EpubPackageCachePolicy`).

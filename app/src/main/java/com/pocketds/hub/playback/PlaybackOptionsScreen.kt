@@ -149,11 +149,7 @@ class PlaybackOptionsScreen(
         }
         return when (val result = api.selectPlayback(
             initial.sessionId,
-            PlaybackSelectBody(
-                positionMillis = initial.positionMillis,
-                audioStreamIndex = desiredAudio,
-                subtitleStreamIndex = desiredSubtitle
-            )
+            PlaybackRules.selection(initial, audioStreamIndex = desiredAudio, subtitleStreamIndex = desiredSubtitle)
         )) {
             is HubResult.Ok -> result.value
             is HubResult.Failed -> initial
@@ -197,13 +193,13 @@ class PlaybackOptionsScreen(
         "Media version",
         value.sources.map { ChoiceOverlay.Choice(it.id, it.name.ifEmpty { it.container.uppercase() }, PlayerLabels.source("", it.container, it.bitrate), selected = it.id == value.selectedMediaSourceId) },
         value.sources.indexOfFirst { it.id == value.selectedMediaSourceId }
-    ) { source -> select(PlaybackSelectBody(value.positionMillis, mediaSourceId = source)) }
+    ) { source -> select(PlaybackRules.selection(value, mediaSourceId = source)) }
 
     private fun showAudio(value: PlaybackPrepareResponse) = submenu(
         "Audio",
         value.audioTracks.map { val copy=TrackPresentation.of(it);ChoiceOverlay.Choice(it.index.toString(), copy.title, copy.detail, selected=it.index==value.selectedAudioIndex) },
         value.audioTracks.indexOfFirst { it.index == value.selectedAudioIndex }
-    ) { index -> select(PlaybackSelectBody(value.positionMillis, audioStreamIndex = index.toInt())) }
+    ) { index -> select(PlaybackRules.selection(value, audioStreamIndex = index.toInt())) }
 
     private fun showSubtitles(value: PlaybackPrepareResponse) {
         val choices = listOf(ChoiceOverlay.Choice("-1", "Off", selected = value.selectedSubtitleIndex == null || value.selectedSubtitleIndex == -1)) + value.subtitleTracks.map {
@@ -211,7 +207,7 @@ class PlaybackOptionsScreen(
             ChoiceOverlay.Choice(it.index.toString(),copy.title,copy.detail,selected=it.index==value.selectedSubtitleIndex)
         }
         submenu("Subtitles", choices, choices.indexOfFirst { it.id.toInt() == value.selectedSubtitleIndex }) {
-            select(PlaybackSelectBody(value.positionMillis, subtitleStreamIndex = it.toInt()))
+            select(PlaybackRules.selection(value, subtitleStreamIndex = it.toInt()))
         }
     }
 
@@ -219,7 +215,7 @@ class PlaybackOptionsScreen(
         "Quality",
         PlaybackRules.qualities.map { ChoiceOverlay.Choice(it.bitrate.toString(), it.label, selected=it.bitrate==qualityCap) },
         PlaybackRules.qualities.indexOfFirst { it.bitrate==qualityCap }
-    ) { bitrate -> select(PlaybackSelectBody(value.positionMillis, maxBitrate = bitrate.toInt())) }
+    ) { bitrate -> select(PlaybackRules.selection(value, maxBitrate = bitrate.toInt())) }
 
     private fun submenu(
         title: String,
