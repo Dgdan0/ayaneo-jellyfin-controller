@@ -14,6 +14,8 @@ import android.widget.SeekBar
 import android.widget.TextView
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
+import com.pocketds.hub.model.ReadingAudioManifest
+import com.pocketds.hub.model.ReadingAudioTrack
 import com.pocketds.hub.model.ReadingEdition
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.nav.ButtonHint
@@ -55,10 +57,12 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
+import kotlin.coroutines.resume
 
 /**
- * Storyteller audiobook player. Its archive is temporary; narration progress
- * is device-local. Its keys are [ReaderPadMap]'s (#16): Ⓑ leaves, Ⓧ plays or
+ * Storyteller audiobook player. Its tracks stream from the hub and its place
+ * follows you through the hub (#19); a book the hub cannot read is downloaded
+ * whole and keeps its place on this device. Its keys are [ReaderPadMap]'s (#16): Ⓑ leaves, Ⓧ plays or
  * pauses, L1 and R1 change part, L2 and R2 jump by the player's seek step;
  * every key stays here. A row along the foot says what the keys do, and Keys
  * lists them all.
@@ -351,37 +355,114 @@ class AudiobookScreen(
         block()
     }
 
+    /**
+     * The book onto the player (#19): streamed from the hub's tracks when it
+     * can read them, at the place kept for it (asked about when another device
+     * moved it, or when the hub only worked it out from a reader's page);
+     * otherwise downloaded whole as before, when the hub cannot read its files
+     * (409) or has no such route (404).
+     */
     private fun load() {
         loadJob = scope.launch {
-            status.text = "Downloading audiobook for temporary playback…"
-            val identity = ReadingProgress.get(host.viewContext).session().identity
-            val directory = File(host.viewContext.cacheDir, "reading-audio/$identity/${ReadingCheckpointKey.digest(workId + edition.sourceItemId)}")
-            directory.mkdirs()
-            val archive = File(directory, "book.zip")
-            if (!AudiobookArchive.hasPlayableAudio(archive)) {
-                val temporary = File(directory, "book.part")
-                when (val result = api.downloadReadingAudiobook(workId, edition.sourceItemId, temporary)) {
-                    is HubResult.Ok -> {
-                        if (!temporary.renameTo(archive)) { status.text = "Could not save audiobook"; return@launch }
-                    }
-                    is HubResult.Failed -> { status.text = result.message; return@launch }
-                }
+            status.text = "Preparing audiobook…"
+            when (val manifest = api.readingAudioManifest(workId, edition.sourceItemId)) {
+                is HubResult.Ok -> if (AudiobookStream.playable(manifest.value)) stream(manifest.value) else downloadWhole()
+                is HubResult.Failed -> if (AudiobookStream.downloadsWhole(manifest)) downloadWhole()
+                    else status.text = "${manifest.message} · Select retries"
             }
-            status.text = "Preparing audio parts…"
-            val parts = try { withContext(Dispatchers.IO) {
-                AudiobookArchive.extract(archive, File(directory, "parts")) { coroutineContext.ensureActive() }
-            } } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                status.text = error.message ?: "Could not open audiobook"
-                return@launch
-            }
-            val again = { AudiobookScreen(api, workId, edition, title, ringVisible, narrations, ebook, alignedOptions, work = book) }
-            ReadingAudio.open(host.viewContext, ReadingAudioBook(workId, edition.sourceItemId, title, parts,
-                ReadingCheckpointKey.digest("$identity:$workId:${edition.sourceItemId}"), again))
-            status.text = ""
         }
     }
+
+    private suspend fun stream(manifest: ReadingAudioManifest) {
+        val context = host.viewContext
+        val progress = ReadingProgress.get(context)
+        val session = progress.session()
+        val key = session.key(workId, edition.sourceItemId, AudioPlace.KIND)
+        withContext(Dispatchers.IO) { retireDevicePlace(context, progress, session, key, manifest.tracks) }
+        status.text = "Finding your place…"
+        val resume = try { progress.resume(session, key) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { status.text = "Your listening place could not be read. It has been kept · Select retries"; return }
+        val chosen = chooseReadingResume(overlay, progress, key, resume) { AudioPlace.label(it, manifest.tracks) }
+            ?: run { status.text = "Choose where to listen from · Select retries"; return }
+        var place = AudioPlace.of(chosen.location)
+        // A place the hub worked out from a reader's page in a book it cannot align is a guess: ask first.
+        val answered = progress.lastAudioPosition(key)
+        if (place != null && answered != null && !answered.exact && place == AudioPlace.fromServer(answered) &&
+            !listenFromEstimate(place, manifest)) place = null
+        val (part, offset) = place?.openAt(manifest.tracks) ?: (0 to 0L)
+        ReadingAudio.open(context, streamedAudiobook(api, workId, edition.sourceItemId, title, key, manifest, reopen()), part, offset)
+        status.text = ""
+    }
+
+    /**
+     * The place this device kept before the hub kept one (`audiobook_positions`,
+     * by part number in the ZIP's order): moved into the outbox once, its part
+     * found among the hub's tracks by size where the ZIP is still here, then
+     * gone. A checkpoint already there wins and the old place just goes.
+     */
+    private fun retireDevicePlace(context: Context, progress: ReadingProgress, session: ReadingProgress.Session,
+        key: ReadingCheckpointKey, tracks: List<ReadingAudioTrack>) {
+        val legacy = ReadingCheckpointKey.digest("${session.identity}:$workId:${edition.sourceItemId}")
+        val saved = ReadingAudio.positions(context)
+        if (!saved.contains("$legacy:part") && !saved.contains("$legacy:ms")) return
+        val part = saved.getInt("$legacy:part", 0)
+        val offset = saved.getLong("$legacy:ms", 0)
+        if (part > 0 || offset > 0) {
+            val sizes = AudiobookArchive.partSizes(File(zipDirectory(session.identity), "book.zip"))
+            AudioPlace.legacyTrack(part, sizes, tracks)?.let { AudioPlace.canonical(tracks, it, offset) }
+                ?.let { progress.store.seed(key, it.location(), System.currentTimeMillis()) }
+        }
+        saved.edit().remove("$legacy:part").remove("$legacy:ms").apply()
+    }
+
+    /** Whether to go to a place the hub only worked out: "Listen from there" first, Ⓑ the same. */
+    private suspend fun listenFromEstimate(place: AudioPlace, manifest: ReadingAudioManifest): Boolean =
+        kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            val where = AudioPlace.label(place.location(), manifest.tracks)
+            overlay.ask("Listen from where you were reading?",
+                "Worked out from your place in the book, so it may be a little off",
+                listOf(ChoiceOverlay.Choice("there", "Listen from there", where), ChoiceOverlay.Choice("start", "Start at the beginning")),
+                onCancel = { if (continuation.isActive) continuation.resume(true) }) { id ->
+                if (continuation.isActive) continuation.resume(id == "there")
+            }
+        }
+
+    /** The whole book downloaded and taken out of its ZIP: what the hub cannot stream (#19). */
+    private suspend fun downloadWhole() {
+        status.text = "Downloading audiobook for temporary playback…"
+        val identity = ReadingProgress.get(host.viewContext).session().identity
+        val directory = zipDirectory(identity)
+        directory.mkdirs()
+        val archive = File(directory, "book.zip")
+        if (!AudiobookArchive.hasPlayableAudio(archive)) {
+            val temporary = File(directory, "book.part")
+            when (val result = api.downloadReadingAudiobook(workId, edition.sourceItemId, temporary)) {
+                is HubResult.Ok -> {
+                    if (!temporary.renameTo(archive)) { status.text = "Could not save audiobook"; return }
+                }
+                is HubResult.Failed -> { status.text = result.message; return }
+            }
+        }
+        status.text = "Preparing audio parts…"
+        val parts = try { withContext(Dispatchers.IO) {
+            AudiobookArchive.extract(archive, File(directory, "parts")) { coroutineContext.ensureActive() }
+        } } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            status.text = error.message ?: "Could not open audiobook"
+            return
+        }
+        ReadingAudio.open(host.viewContext, ReadingAudioBook(workId, edition.sourceItemId, title, parts,
+            ReadingCheckpointKey.digest("$identity:$workId:${edition.sourceItemId}"), reopen = reopen()))
+        status.text = ""
+    }
+
+    private fun zipDirectory(identity: String) =
+        File(host.viewContext.cacheDir, "reading-audio/$identity/${ReadingCheckpointKey.digest(workId + edition.sourceItemId)}")
+
+    /** This screen again, for the mini player. */
+    private fun reopen(): () -> Screen = { AudiobookScreen(api, workId, edition, title, ringVisible, narrations, ebook, alignedOptions, work = book) }
 
     /** The screen shows the book's cover and its place in a series: read it once when the caller had no copy. */
     private fun readBook() {
@@ -418,9 +499,13 @@ class AudiobookScreen(
             if (before) status.text = "Stopped"
             return
         }
-        status.text = ""
+        // Why it stopped, when the stream failed or the book's files changed; nothing while it plays.
+        status.text = value.problem
         val parts = value.book?.parts.orEmpty()
-        partTitle.text = "Part ${value.part + 1} of ${parts.size} · ${parts.getOrNull(value.part)?.title?.let(AudiobookArchive::partLabel).orEmpty()}"
+        // The part, and what is playing in it: the chapter where the hub found chapters, else the part's own name.
+        val contents = value.contents
+        val entry = contents.getOrNull(AudiobookContents.current(contents, value.part, value.positionMs))
+        partTitle.text = "Part ${value.part + 1} of ${parts.size} · ${entry?.title ?: parts.getOrNull(value.part)?.title?.let(AudiobookArchive::partLabel).orEmpty()}"
         position.text = "${Fmt.clock(value.positionMs)} / ${Fmt.clock(value.partMs)}"
         remaining.text = if (value.partMs > 0) "−" + Fmt.clock((value.partMs - value.positionMs).coerceAtLeast(0)) else ""
         left.text = if (value.partMs > 0) PlayerLabels.timeLeft(value.partLeftMs, value.bookLeftMs) else ""
@@ -442,15 +527,22 @@ class AudiobookScreen(
         if (::keys.isInitialized) keys.setHints(ReaderPadMap.hints(padState()))
     }
 
-    /** The parts, each with its length once read, the one playing ticked: choose one to jump to. */
+    /**
+     * The chapters the hub found inside the tracks (#19), else the parts, each
+     * with its length, the one playing ticked: choose one to jump to.
+     */
     private fun showParts() {
         val book = listening.book ?: return
-        val choices = book.parts.mapIndexed { index, part ->
-            ChoiceOverlay.Choice(index.toString(), "${index + 1}. ${AudiobookArchive.partLabel(part.title)}",
-                listening.partsMs.getOrNull(index)?.let { Fmt.clock(it) }.orEmpty(), selected = index == listening.part)
+        val entries = listening.contents
+        val current = AudiobookContents.current(entries, listening.part, listening.positionMs)
+        val choices = entries.mapIndexed { index, entry ->
+            ChoiceOverlay.Choice(index.toString(), "${index + 1}. ${entry.title}",
+                entry.durationMs?.let { Fmt.clock(it) }.orEmpty(), selected = index == current)
         }
-        overlay.show("Parts", "${book.title} · ${book.parts.size} parts", choices, startIndex = listening.part) { id ->
-            id.toIntOrNull()?.let { ReadingAudio.seekTo(it, 0) }
+        val chapters = book.chapters.isNotEmpty()
+        overlay.show(if (chapters) "Chapters" else "Parts",
+            "${book.title} · ${entries.size} ${if (chapters) "chapters" else "parts"}", choices, startIndex = current) { id ->
+            id.toIntOrNull()?.let(entries::getOrNull)?.let { ReadingAudio.seekTo(it.part, it.startMs) }
         }
     }
 
@@ -544,3 +636,23 @@ class AudiobookScreen(
         const val LINE_INSET_DP = 10
     }
 }
+
+/**
+ * A streamed book for the player (#19): its tracks under the manifest's
+ * revision, its place's checkpoint, and how it reads its manifest again when
+ * the hub says its files changed. Built from values alone, so the player
+ * holds no screen.
+ */
+internal fun streamedAudiobook(api: HubApi, workId: String, sourceItemId: String, title: String, key: ReadingCheckpointKey,
+    manifest: ReadingAudioManifest, reopen: () -> Screen): ReadingAudioBook =
+    ReadingAudioBook(workId, sourceItemId, title,
+        AudiobookStream.parts(manifest, sourceItemId) { api.readingAudioTrackUrl(workId, sourceItemId, it, manifest.revision) },
+        positionKey = "", checkpoint = key, tracks = manifest.tracks, chapters = manifest.chapters, reopen = reopen,
+        reload = {
+            when (val fresh = api.readingAudioManifest(workId, sourceItemId)) {
+                is HubResult.Ok -> fresh.value.takeIf(AudiobookStream::playable)?.let {
+                    streamedAudiobook(api, workId, sourceItemId, title, key, it, reopen)
+                }
+                is HubResult.Failed -> null
+            }
+        })

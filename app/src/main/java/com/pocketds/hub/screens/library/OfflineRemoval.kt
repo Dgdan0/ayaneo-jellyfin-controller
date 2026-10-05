@@ -27,12 +27,14 @@ internal fun removeOfflineReading(host: ScreenHost, overlay: ChoiceOverlay, work
         val session=ReadingProgress.get(host.viewContext).session()
         val ids=work.editions.map {it.sourceItemId}+work.sections.flatMap {it.items}.map {it.sourceItemId}
         val files=withContext(Dispatchers.IO) {ReaderOfflineFiles.files(host.viewContext.cacheDir,session.identity,work.id,ids) {id,page->session.api.readingPublicationPageUrl(work.id,id,page)}}
-        if(files.isEmpty()){host.notify("No offline book files are saved on this device");return@launch}
+        // A streamed audiobook's tracks (#19) are kept by the players' cache, not as files of their own.
+        val streamed=withContext(Dispatchers.IO) {runCatching {AudioStreams.cachedBytes(host.viewContext,ids)}.getOrDefault(0L)}
+        if(files.isEmpty() && streamed<=0L){host.notify("No offline book files are saved on this device");return@launch}
         overlay.show("Remove offline copy?","${work.title}. Removes downloaded text, audio and cached comic pages for this title. Server files, bookmarks and reading progress are kept.",listOf(
             ChoiceOverlay.Choice("cancel","Keep offline copy"),ChoiceOverlay.Choice("remove","Remove from this device",danger=true)
         ),onCancel=host::refreshHints) {key->
             if(key=="remove") scope.launch {
-                val ok=withContext(Dispatchers.IO){ReaderOfflineFiles.remove(files)}
+                val ok=withContext(Dispatchers.IO){ReaderOfflineFiles.remove(files) && AudioStreams.remove(host.viewContext,ids)}
                 host.notify(if(ok) "Offline copy removed · reading progress kept" else "Some files could not be removed. Try again after closing the reader.")
             }
             host.refreshHints()

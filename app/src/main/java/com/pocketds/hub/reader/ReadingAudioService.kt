@@ -26,12 +26,14 @@ class ReadingAudioService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        player = ExoPlayer.Builder(this).build().apply {
+        // The tracks stream from the hub through the reading players' cache (#19), with the bearer;
+        // a book out of its ZIP plays its files as they are.
+        player = ExoPlayer.Builder(this).setMediaSourceFactory(AudioStreams.mediaSources(this)).build().apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(), true)
             setHandleAudioBecomingNoisy(true)
-            // Playing on with the screen off: the files are on this device.
-            setWakeMode(C.WAKE_MODE_LOCAL)
+            // Playing on with the screen off, streaming: the wake lock and the Wi-Fi lock while it plays.
+            setWakeMode(C.WAKE_MODE_NETWORK)
         }
         // Its own id: the video service's session has the default one, and two alike are refused.
         session = MediaSession.Builder(this, player)

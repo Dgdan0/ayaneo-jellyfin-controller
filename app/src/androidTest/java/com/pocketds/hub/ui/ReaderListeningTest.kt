@@ -309,6 +309,9 @@ class ReaderListeningTest {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     val path = request.path.orEmpty().substringBefore('?')
                     return when {
+                        // The hub cannot read this book's files (#19): the whole book is downloaded, as before.
+                        path.endsWith("/audio") -> MockResponse().setResponseCode(409).setHeader("Content-Type", "application/json")
+                            .setBody("""{"error":{"code":"audio_not_streamable","reason":"unmapped_root","message":"The hub has no access to this audiobook's folder.","retryable":false},"requestId":"x"}""")
                         path.endsWith("/file") -> {
                             downloads.incrementAndGet()
                             MockResponse().setHeader("Content-Type", "application/zip").setBody(Buffer().write(archive))
