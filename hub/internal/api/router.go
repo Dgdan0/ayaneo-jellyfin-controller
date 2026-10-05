@@ -81,6 +81,14 @@ type Server struct {
 	castGrants       map[string]*playbackCastGrant
 	playbackTTL      time.Duration
 	previewFrame     func(context.Context, string, int64) ([]byte, error)
+	// ffprobe for the audiobook routes: the seam a test stubs, how long one
+	// probe may take, the slots that bound how many run at once, and what has
+	// been learned about each file as it was (see audio_probe.go).
+	probeAudio       func(context.Context, string) (probedAudio, error)
+	probeTimeout     time.Duration
+	probeSlots       chan struct{}
+	probeMu          sync.Mutex
+	probeCache       map[probeKey]probedAudio
 	libraryScanMu    sync.Mutex
 	libraryScanWatch bool
 	readingScanMu    sync.Mutex
@@ -123,6 +131,10 @@ func NewServer(cfg *config.Config) *Server {
 		castGrants:            make(map[string]*playbackCastGrant),
 		playbackTTL:           30 * time.Minute,
 		previewFrame:          extractPreviewFrame,
+		probeAudio:            runFFprobe,
+		probeTimeout:          audioProbeTimeout,
+		probeSlots:            make(chan struct{}, audioProbeSlots),
+		probeCache:            map[probeKey]probedAudio{},
 		startedAt:             time.Now(),
 	}
 	for _, cidr := range cfg.Server.TrustProxyCIDRs {

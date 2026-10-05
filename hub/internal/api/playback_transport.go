@@ -254,15 +254,21 @@ func extractPreviewFrame(ctx context.Context, sourcePath string, positionMillis 
 	return output.Bytes(), nil
 }
 
-func findFFmpeg() (string, error) {
-	if binary, err := exec.LookPath("ffmpeg"); err == nil {
+func findFFmpeg() (string, error) { return findMediaTool("ffmpeg") }
+
+// findFFprobe is the same search for ffprobe, which Jellyfin ships beside its
+// ffmpeg. Neither is on PATH on the media PC.
+func findFFprobe() (string, error) { return findMediaTool("ffprobe") }
+
+func findMediaTool(name string) (string, error) {
+	if binary, err := exec.LookPath(name); err == nil {
 		return binary, nil
 	}
 	programFiles := os.Getenv("ProgramFiles")
 	if programFiles != "" {
 		for _, relative := range []string{
-			filepath.Join("Jellyfin", "Server", "ffmpeg.exe"),
-			filepath.Join("Jellyfin", "Server", "jellyfin-ffmpeg", "ffmpeg.exe"),
+			filepath.Join("Jellyfin", "Server", name+".exe"),
+			filepath.Join("Jellyfin", "Server", "jellyfin-ffmpeg", name+".exe"),
 		} {
 			candidate := filepath.Join(programFiles, relative)
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
@@ -270,7 +276,7 @@ func findFFmpeg() (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("ffmpeg executable was not found")
+	return "", fmt.Errorf("%s executable was not found", name)
 }
 
 func (s *Server) handlePlaybackHLS(w http.ResponseWriter, r *http.Request) {
