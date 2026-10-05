@@ -26,7 +26,6 @@ import android.widget.EditText
 import android.app.AlertDialog
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -563,7 +562,7 @@ class ReadingWorkScreen(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var colors: PocketColors
     private lateinit var status: TextView
-    private lateinit var scroll: ScrollView
+    private lateinit var scroll: FocusScrollView
     private lateinit var content: LinearLayout
     private var host: ScreenHost? = null
     private var loadJob: Job? = null
@@ -811,6 +810,8 @@ class ReadingWorkScreen(
 
     private fun hero(work: ReadingWork): View = DetailHeaderView(requireNotNull(host).viewContext, colors, ringVisible).apply {
         detailHeader = this
+        // Focus in the header shows all of it: the title stays over the overview (#23).
+        scroll.revealWhole = this
         // The prototype's book page: the cover at the left, "BOOK 6 · RED RISING" over the title.
         book = true
         squareCover = work.kind == com.pocketds.hub.model.ReadingType.AUDIOBOOK

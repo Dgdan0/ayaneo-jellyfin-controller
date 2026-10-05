@@ -29,6 +29,7 @@ import com.pocketds.hub.ui.glass.GlassButtonBackground
 import com.pocketds.hub.ui.glass.GlassPanelDrawable
 import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -211,6 +212,80 @@ class OfflineGlassTest {
         } finally {
             ins.runOnMainSync { screen.onHide(); screen.onDestroyView(); activity.finish() }
             repository.removeBatch(key)
+        }
+    }
+
+    /** A downloaded film's card says its size once (#23): on the line with ⋯, its caption the year. */
+    @Test fun aDownloadedFilmSaysItsSizeOnce() {
+        val activity = ins.startActivitySync(Intent(ins.targetContext, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val id = "glass-film-${System.nanoTime()}"
+        val repository = OfflineRepository.get(activity)
+        // The batch names the title in the catalogue.
+        repository.enqueue("Example film $id", "", listOf(OfflineManifest(batchKey = "$id-batch", clientItemKey = id,
+            item = LibraryItem(id = id, type = "movie", title = "Example film $id", year = 2008, runtimeSeconds = 6_960,
+                library = com.pocketds.hub.model.LibraryRef("fixture-films", "Fixture films")),
+            source = OfflineSource(id = "source", container = "mp4", sizeBytes = 4))))
+        val row = checkNotNull(repository.forItem(id))
+        repository.mediaFile(row).writeText("film")
+        repository.finish(row.id)
+        val screen = OfflineScreen(noHub(), { true })
+        try {
+            lateinit var root: View
+            ins.runOnMainSync { root = screen.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); screen.onShow() }
+            ins.waitForIdleSync()
+            ins.runOnMainSync {
+                val card = all(root).filterIsInstance<PosterCardView>().first { it.contentDescription?.startsWith("Example film $id") == true }
+                val size = com.pocketds.hub.state.Fmt.bytes(checkNotNull(repository.forItem(id)).totalBytes)
+                val words = all(card.parent as View).filterIsInstance<TextView>().filter { it.isShown }.map { it.text.toString() }
+                assertEquals("the size is said once: $words", 1, words.count { it.contains(size) })
+                assertTrue("the caption is the year, as a poster's: $words", words.contains("2008"))
+            }
+        } finally {
+            ins.runOnMainSync { screen.onHide(); screen.onDestroyView(); activity.finish() }
+            repository.forItem(id)?.let { repository.remove(it.id) }
+        }
+    }
+
+    /**
+     * A downloaded series of three seasons (#23): Down from the continue card is
+     * the first season, not the one under the card's middle; and on the page
+     * scrolled down to its seasons, Play in focus brings the whole header into
+     * view, the title over it.
+     */
+    @Test fun downFromTheContinueCardAndUpToTheHeader() {
+        val activity = ins.startActivitySync(Intent(ins.targetContext, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val series = "glass-down-${System.nanoTime()}"
+        val repository = OfflineRepository.get(activity)
+        val ids = (1..3).map { season -> episode(repository, series, season, 1) }
+        val page = OfflineSeriesScreen(noHub(), series, "Example series") { true }
+        fun season(root: View, number: Int) = all(root).filterIsInstance<DetailArtworkCardView>()
+            .first { it.isShown && it.contentDescription?.startsWith("Season $number,") == true }
+        try {
+            lateinit var root: View
+            ins.runOnMainSync { root = page.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); page.onShow() }
+            ins.waitForIdleSync()
+            ins.runOnMainSync {
+                val card = all(root).filterIsInstance<ContinuationCardView>().single()
+                assertTrue(card.requestFocus())
+                assertSame("Down from the continue card is the first season", season(root, 1), card.focusSearch(View.FOCUS_DOWN))
+                assertTrue(season(root, 1).requestFocus())
+            }
+            ins.waitForIdleSync()
+            lateinit var scroll: FocusScrollView
+            ins.runOnMainSync {
+                scroll = all(root).filterIsInstance<FocusScrollView>().first()
+                assertTrue("the page scrolled down to its seasons", scroll.scrollY > 0)
+                assertTrue(all(root).filterIsInstance<TextView>().first { it.text == "Play S1E1" }.requestFocus())
+            }
+            ins.waitForIdleSync()
+            ins.runOnMainSync {
+                val title = all(root).filterIsInstance<DetailHeaderView>().single().titleView
+                val bounds = android.graphics.Rect().also { title.getDrawingRect(it); scroll.offsetDescendantRectToMyCoords(title, it) }
+                assertTrue("the title is in view over Play: its top ${bounds.top}, the page at ${scroll.scrollY}", bounds.top >= scroll.scrollY)
+            }
+        } finally {
+            ins.runOnMainSync { page.onHide(); page.onDestroyView(); activity.finish() }
+            ids.forEach { id -> repository.forItem(id)?.let { repository.remove(it.id) } }
         }
     }
 

@@ -11,7 +11,6 @@ import android.widget.FrameLayout
 import com.pocketds.hub.ui.ChoiceOverlay
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.nav.ButtonHint
@@ -73,7 +72,7 @@ class OfflineSeriesScreen(
     private lateinit var repository: OfflineRepository
     private lateinit var content: LinearLayout
     private lateinit var overlay: ChoiceOverlay
-    private lateinit var scroll: ScrollView
+    private lateinit var scroll: FocusScrollView
     private var header: DetailHeaderView? = null
     private var selectedKey = ""
     /** The page's own view: where FocusPlace keeps its place. */
@@ -171,6 +170,8 @@ class OfflineSeriesScreen(
         // series page in Books has it: this page is not drawn under the bar.
         val detail = DetailHeaderView(host.viewContext, colors, ringVisible).apply { book = true }
         header = detail
+        // Focus in the header shows all of it: the title stays over the overview (#23).
+        scroll.revealWhole = detail
         detail.overview.onChanged = { host.refreshHints() }
         detail.titleView.text = snapshot?.item?.title?.ifBlank { seriesTitle } ?: seriesTitle
         detail.metadataView.text = "${rows.size} downloaded episodes · ${Fmt.bytes(rows.sumOf { it.totalBytes })} · Offline"
@@ -182,6 +183,7 @@ class OfflineSeriesScreen(
             return
         }
         val presentation = OfflineDetailPresentation.resolve(rows, progress, snapshot)
+        var continueCard: View? = null
         presentation.playable?.let { target ->
             // The white pill names the episode, as a series' Play does online.
             detail.actions.addView(PillButton.create(host.viewContext, colors, targetLabel(target), AppIcon.PLAY,
@@ -200,7 +202,7 @@ class OfflineSeriesScreen(
                 FocusDecorator.attach(this, ringVisible, scale = false)
                 activateOnTap { openMore(target) }
             }, LinearLayout.LayoutParams(dp(DetailStyler.GLASS_TOGGLE_VIEW_DP), dp(DetailStyler.GLASS_TOGGLE_VIEW_DP)))
-            content.addView(ContinuationCardView(host.viewContext, colors, ringVisible).apply {
+            content.addView(ContinuationCardView(host.viewContext, colors, ringVisible).also { continueCard = it }.apply {
                 val item = target.row.manifest.item
                 bind(targetLabel(target), buildList {
                     add(item.title)
@@ -229,6 +231,12 @@ class OfflineSeriesScreen(
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL; clipChildren = false
                 seasons.forEach { addView(seasonCard(it)) }
+                // Down from the continue card is the first season: the card spans the
+                // page, and Android's search took the season under its middle (#23).
+                getChildAt(0)?.let { first ->
+                    if (first.id == View.NO_ID) first.id = View.generateViewId()
+                    continueCard?.nextFocusDownId = first.id
+                }
             })
         }, LinearLayout.LayoutParams(MATCH, WRAP))
         // Rebuilt while away (an episode removed on the season page): the place is the new view.

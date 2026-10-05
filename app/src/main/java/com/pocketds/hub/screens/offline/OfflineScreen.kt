@@ -450,9 +450,11 @@ class OfflineScreen(
                 title = value.title,
                 poster = poster?.let { Uri.fromFile(it).toString() }.orEmpty()
             ),
+            // A series says how many episodes and their size; a film its year, as a poster
+            // does, since its size is on the line under it, with the ⋯ (#23).
             subtitle = if (value.isSeries) {
                 "${value.rows.size} episode${if (value.rows.size == 1) "" else "s"} · ${Fmt.bytes(size)}"
-            } else Fmt.bytes(size),
+            } else first.manifest.item.year.takeIf { it > 0 }?.toString().orEmpty(),
             jellyfinItemId = value.key
         )
         val card = PosterCardView(host.viewContext, colors).apply {

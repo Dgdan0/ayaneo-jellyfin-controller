@@ -19,12 +19,18 @@ import android.widget.ScrollView
  * in Upcoming). Without it the heading is scrolled half under whatever is above
  * the list, because ScrollView reveals exactly the focused row and nothing more.
  *
+ * [revealWhole] is a part of the page that comes into view whole while focus is
+ * in it, when it fits: a page's header, so the overview or the Play pill in
+ * focus keeps the title over it on a page scrolled down to its seasons (#23).
+ *
  * A scrolled page fades out at its top edge rather than running under the top
  * bar ([com.pocketds.hub.ui.glass.TopFade]), so every scrolling page gets it
  * from here.
  */
 open class FocusScrollView(context: Context, private val revealAbove: Int = 0) : ScrollView(context) {
     init { isFocusable = false; isFocusableInTouchMode = false }
+
+    var revealWhole: android.view.View? = null
 
     private val topFade = com.pocketds.hub.ui.glass.TopFade(this)
 
@@ -38,9 +44,20 @@ open class FocusScrollView(context: Context, private val revealAbove: Int = 0) :
     }
 
     override fun computeScrollDeltaToGetChildRectOnScreen(rect: Rect): Int {
-        if (revealAbove <= 0) return super.computeScrollDeltaToGetChildRectOnScreen(rect)
-        val widened = Rect(rect).apply { top = (top - revealAbove).coerceAtLeast(0) }
+        val widened = Rect(rect)
+        if (revealAbove > 0) widened.top = (widened.top - revealAbove).coerceAtLeast(0)
+        wholePart()?.let(widened::union)
         return super.computeScrollDeltaToGetChildRectOnScreen(widened)
+    }
+
+    /** [revealWhole]'s bounds, while focus is in it and it fits on screen. */
+    private fun wholePart(): Rect? {
+        val part = revealWhole?.takeIf { it.isShown } ?: return null
+        val focused = findFocus() ?: return null
+        // In this scroller, round the focused view: measured from here, so it must be inside.
+        if (generateSequence(focused) { it.parent as? android.view.View }.takeWhile { it !== this }.none { it === part }) return null
+        if (part.height > height - paddingTop - paddingBottom) return null
+        return Rect(0, 0, part.width, part.height).also { offsetDescendantRectToMyCoords(part, it) }
     }
 }
 
