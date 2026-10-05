@@ -17,12 +17,9 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.TextView
 import com.pocketds.hub.ui.AppIcon
-import com.pocketds.hub.ui.AppIconDrawable
 import com.pocketds.hub.ui.PillButton
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
-import com.pocketds.hub.ui.Theme
-import com.pocketds.hub.ui.ThemeGradientDrawable
 import kotlin.math.abs
 
 /**
@@ -72,7 +69,6 @@ class LibraryArrangeGrid(
 
     var listener: Listener? = null
     val columns: Int = style.columns
-    private val glass = Theme.onGlass(colors)
     private val gap = Styler.dpInt(context, style.gapDp)
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     /** The cells in their places: the ones that can be arranged, then the fixed ones. */
@@ -443,30 +439,16 @@ class LibraryArrangeGrid(
         }
     }
 
-    /** The grip: a round mark with two columns of dots, glass on Glass, lit while its one is lifted. */
+    /** The grip: a round glass mark with two columns of dots, lit while its one is lifted. */
     private fun gripMark(): TextView = TextView(context).apply {
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         isFocusable = false
         // Above its tile: a focused tile is lifted 8dp (FocusDecorator) and hid the grip under it.
         translationZ = Styler.dp(context, GRIP_LIFT_DP)
-        if (glass) PillButton.control(this, colors, AppIcon.GRIP, round = true) else {
-            val size = Styler.dpInt(context, 16f)
-            setCompoundDrawables(AppIconDrawable(AppIcon.GRIP, colors.mutedText).apply { setBounds(0, 0, size, size) }, null, null, null)
-            gravity = Gravity.CENTER
-            val pad = Styler.dpInt(context, 10f)
-            setPadding(pad, pad, pad, pad)
-            background = ThemeGradientDrawable.oval(androidx.core.graphics.ColorUtils.setAlphaComponent(colors.primaryText, 0x14))
-        }
+        PillButton.control(this, colors, AppIcon.GRIP, round = true)
     }
 
-    private fun lightGrip(mark: TextView, on: Boolean) {
-        if (glass) {
-            PillButton.setPrimary(mark, colors, on)
-            return
-        }
-        (mark.compoundDrawables[0] as? AppIconDrawable)?.tint(if (on) colors.accentText else colors.mutedText)
-        mark.background = ThemeGradientDrawable.oval(if (on) colors.accent else androidx.core.graphics.ColorUtils.setAlphaComponent(colors.primaryText, 0x14))
-    }
+    private fun lightGrip(mark: TextView, on: Boolean) = PillButton.setPrimary(mark, colors, on)
 
     companion object {
         /** A gentle wiggle: a degree either way, each swing a little over a tenth of a second. */

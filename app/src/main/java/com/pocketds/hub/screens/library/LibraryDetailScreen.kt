@@ -92,8 +92,6 @@ class LibraryDetailScreen(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var colors: PocketColors
-    /** Glass (#11): the prototype's title page; a styling switch only. */
-    private var glass = false
     private lateinit var scroll: FocusScrollView
     private lateinit var heading: TextView
     private lateinit var originalTitle: TextView
@@ -144,18 +142,18 @@ class LibraryDetailScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
-        glass = Theme.onGlass(colors)
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
         scroll = FocusScrollView(host.viewContext, revealAbove = dp(56)).apply {
             isFillViewport = true; clipChildren = false
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL; clipChildren = false
-                header = DetailHeaderView(context, colors, ringVisible, glass).apply { topInsetDp = TopBarView.HEIGHT_DP.toInt() }
+                // The prototype's title page (#11).
+                header = DetailHeaderView(context, colors, ringVisible, glass = true).apply { topInsetDp = TopBarView.HEIGHT_DP.toInt() }
                 heading = header.titleView; heading.text = fallbackTitle
                 originalTitle = header.subtitleView; meta = header.metadataView; progress = header.stateView
                 overview = header.overview; actions = header.actions
                 playAction = PillButton.create(context, colors, "Play", AppIcon.PLAY, primary = true,
-                    heightDp = if (glass) GLASS_PILL_DP else 40f, glass = glass).apply {
+                    heightDp = PILL_DP, glass = true).apply {
                     tag = ACTION_PLAY
                     FocusDecorator.attach(this, ringVisible, scale = false)
                     FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) scroll.smoothScrollTo(0, 0); host.refreshHints() }
@@ -165,29 +163,27 @@ class LibraryDetailScreen(
                 favoriteAction = actionButton("Favourite", ACTION_FAVORITE)
                 downloadAction = actionButton("Download", ACTION_DOWNLOAD)
                 moreAction = actionButton("More actions", ACTION_MORE)
-                // Glass: Start over is a glass pill beside Resume, as the prototype's
-                // film page has it; Classic keeps it under More.
-                restartAction = if (glass) PillButton.create(context, colors, "Start over", AppIcon.REFRESH, heightDp = GLASS_PILL_DP, glass = true).apply {
+                // Start over is a glass pill beside Resume, as the prototype's film page has it.
+                restartAction = PillButton.create(context, colors, "Start over", AppIcon.REFRESH, heightDp = PILL_DP, glass = true).apply {
                     tag = ACTION_RESTART
                     FocusDecorator.attach(this, ringVisible, scale = false)
                     FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) scroll.smoothScrollTo(0, 0); host.refreshHints() }
                     activateOnTap { performAction(ACTION_RESTART) }
-                } else actionButton("Start over", ACTION_RESTART)
+                }
                 optionsAction = actionButton("Audio & subtitles", ACTION_OPTIONS)
-                // Glass: the prototype's 10dp between faces, the rings' room included.
-                actions.addView(playAction, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = -dp(PillButton.RING_DP.toInt()); marginEnd = dp(if (glass) 2 else 6) })
-                if (glass) actions.addView(restartAction, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(2) })
+                // The prototype's 10dp between faces, the rings' room included.
+                actions.addView(playAction, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = -dp(PillButton.RING_DP.toInt()); marginEnd = dp(2) })
+                actions.addView(restartAction, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(2) })
                 listOf(watchedAction, favoriteAction, downloadAction, moreAction).forEach { actions.addView(it) }
-                if (!glass) actions.addView(restartAction)
                 actions.addView(optionsAction)
                 actions.visibility = View.GONE
                 addView(header, LinearLayout.LayoutParams(MATCH, WRAP))
                 status = TextView(context).apply {
-                    textSize = 11f; setTextColor(colors.mutedText); setPadding(dp(if (glass) 22 else 24), 0, dp(if (glass) 22 else 24), dp(4))
+                    textSize = 11f; setTextColor(colors.mutedText); setPadding(dp(22), 0, dp(22), dp(4))
                 }
                 addView(status)
                 tabs = BlobSegmentedView(context, colors, ringVisible, BlobSegmentedView.Style.UNDERLINE).apply {
-                    textSp = if (glass) 12.5f else 13f
+                    textSp = 12.5f
                     padXDp = 6f
                     growDp = 0f
                     heightDp = 38f
@@ -197,30 +193,29 @@ class LibraryDetailScreen(
                 }
                 tabRow = FrameLayout(context).apply {
                     visibility = View.GONE
-                    addView(tabs, FrameLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(if (glass) 16 else 18) })
+                    addView(tabs, FrameLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(16) })
                     // A hairline under the tabs, the full width of the words.
-                    val edge = if (glass) 22 else 24
+                    val edge = 22
                     addView(View(context).apply {
-                        setBackgroundColor(androidx.core.graphics.ColorUtils.setAlphaComponent(colors.primaryText, if (glass) 0x24 else 0x16))
+                        setBackgroundColor(androidx.core.graphics.ColorUtils.setAlphaComponent(colors.primaryText, 0x24))
                     }, FrameLayout.LayoutParams(MATCH, dp(1), android.view.Gravity.BOTTOM).apply { marginStart = dp(edge); marginEnd = dp(edge) })
                 }
                 addView(tabRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(4) })
                 episodesPanel = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL; clipChildren = false; visibility = View.GONE
-                    // Glass: each season its own glass pill, the chosen one white.
-                    seasonBlob = BlobSegmentedView(context, colors, ringVisible,
-                        if (glass) BlobSegmentedView.Style.CHIPS else BlobSegmentedView.Style.PILL).apply {
+                    // Each season its own glass pill, the chosen one white.
+                    seasonBlob = BlobSegmentedView(context, colors, ringVisible, BlobSegmentedView.Style.CHIPS).apply {
                         heightDp = 32f
-                        if (glass) { textSp = 12f; padXDp = 11f; growDp = 0f }
+                        textSp = 12f; padXDp = 11f; growDp = 0f
                         onPick = { id -> seasonList.firstOrNull { it.id == id }?.let(::selectSeason) }
                         onOptionFocused = { id -> lastFocusKey = "season:$id"; liftToTabs(); host.refreshHints() }
                     }
                     addView(FocusHorizontalScrollView(context).apply {
                         isHorizontalScrollBarEnabled = false; clipToPadding = false
-                        if (glass) setPadding(dp(19), dp(10), dp(19), dp(2)) else setPadding(dp(24), dp(14), dp(24), dp(2))
+                        setPadding(dp(19), dp(10), dp(19), dp(2))
                         addView(seasonBlob)
                     }, LinearLayout.LayoutParams(MATCH, WRAP))
-                    episodes = SeasonEpisodesView(context, api, colors, ringVisible, scope, glass).apply {
+                    episodes = SeasonEpisodesView(context, api, colors, ringVisible, scope).apply {
                         onPlay = { episode -> host.playItem(episode.id, if (episode.positionSeconds > 0) "resume" else "restart") }
                         onFocusedEpisode = { lastFocusKey = "episode"; liftToTabs(); host.refreshHints() }
                         onTotal = { seasonId, total -> seasonTotals[seasonId] = total; labelSeasons() }
@@ -228,7 +223,7 @@ class LibraryDetailScreen(
                     addView(episodes, LinearLayout.LayoutParams(MATCH, WRAP))
                 }
                 addView(episodesPanel, LinearLayout.LayoutParams(MATCH, WRAP))
-                similar = com.pocketds.hub.ui.PosterStripView(context, colors, ringVisible, if (glass) GLASS_POSTER_DP else 141f, glass).apply {
+                similar = com.pocketds.hub.ui.PosterStripView(context, colors, ringVisible, POSTER_DP, glass = true).apply {
                     visibility = View.GONE
                     onOpen = { hit -> if (hit.jellyfinItemId.isNotEmpty()) host.push(LibraryDetailScreen(api, hit.jellyfinItemId, hit.media.title, hit.media.type, ringVisible)) }
                     onFocused = { lastFocusKey = "similar"; liftToTabs(); host.refreshHints() }
@@ -239,7 +234,7 @@ class LibraryDetailScreen(
                     onFocused = { lastFocusKey = "cast"; liftToTabs(); host.refreshHints() }
                 }
                 addView(cast, LinearLayout.LayoutParams(MATCH, WRAP))
-                facts = FactsGridView(context, colors, ringVisible, glass).apply {
+                facts = FactsGridView(context, colors, ringVisible).apply {
                     visibility = View.GONE
                     onFocused = { lastFocusKey = "facts"; host.refreshHints() }
                 }
@@ -568,7 +563,7 @@ class LibraryDetailScreen(
         listOf(playAction, restartAction, optionsAction, watchedAction, moreAction, favoriteAction, downloadAction).forEach {
             it.visibility = if (it.tag in visibleActions) View.VISIBLE else View.GONE
         }
-        if (glass) restartAction.visibility = if (playable && canResume(value)) View.VISIBLE else View.GONE
+        restartAction.visibility = if (playable && canResume(value)) View.VISIBLE else View.GONE
         watchedAction.contentDescription = if (value.played) "Mark unwatched" else "Mark watched"
         setActionIcon(watchedAction, if (value.played) MediaActionIcon.WATCHED else MediaActionIcon.UNWATCHED)
         favoriteAction.contentDescription = if (value.favorite) "Remove from favourites" else "Add to favourites"
@@ -625,7 +620,6 @@ class LibraryDetailScreen(
                         seriesTarget = null
                         item?.let(::renderActions)
                         status.showStatus(StatusMessage("Updating next episode…"), colors)
-                        if (!glass) status.visibility = View.VISIBLE
                         if (staleTargetRetries++ < MAX_STALE_TARGET_RETRIES) {
                             scope.launch {
                                 delay(STALE_TARGET_RETRY_MILLIS)
@@ -761,7 +755,6 @@ class LibraryDetailScreen(
         )
         render(LibraryItemResponse(item = optimistic))
         status.showStatus(StatusMessage("Saving to Jellyfin…"), colors)
-        if (!glass) status.visibility = View.VISIBLE
         stateJob = scope.launch {
             when (val result = api.updateLibraryState(
                 itemId,
@@ -789,14 +782,13 @@ class LibraryDetailScreen(
     private fun actionButton(label: String, action: String) = CenteredIconTextView(requireNotNull(host).viewContext).apply {
         text = ""
         textSize = 14f
-        // Glass: a round glass toggle that turns white while on.
-        if (glass) DetailStyler.glassToggle(this, colors) else DetailStyler.action(this, colors)
+        // A round glass toggle that turns white while on.
+        DetailStyler.glassToggle(this, colors)
         tag = action
         contentDescription = label
         compoundDrawablePadding = 0
         setActionIcon(this, iconForAction(action))
-        layoutParams = if (glass) LinearLayout.LayoutParams(dp(DetailStyler.GLASS_TOGGLE_VIEW_DP), dp(DetailStyler.GLASS_TOGGLE_VIEW_DP)).apply { marginEnd = dp(2) }
-            else LinearLayout.LayoutParams(dp(46), dp(46)).apply { marginEnd = dp(8) }
+        layoutParams = LinearLayout.LayoutParams(dp(DetailStyler.GLASS_TOGGLE_VIEW_DP), dp(DetailStyler.GLASS_TOGGLE_VIEW_DP)).apply { marginEnd = dp(2) }
         FocusDecorator.attach(this, ringVisible, scale = false)
         FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) scroll.smoothScrollTo(0, 0); host?.refreshHints() }
         activateOnTap { performAction(action) }
@@ -811,16 +803,10 @@ class LibraryDetailScreen(
         else -> MediaActionIcon.MORE
     }
 
+    /** A round toggle's symbol, the toggle white while it is on. */
     private fun setActionIcon(view: TextView, icon: MediaActionIcon, progress: Float = 0f) {
-        val glassToggle = view.background as? com.pocketds.hub.ui.glass.GlassButtonBackground
-        if (glassToggle != null && view is CenteredIconTextView) {
-            glassToggle.lit = icon.isOn
-            view.setCenteredIcon(MediaActionIconDrawable.onGlass(view.context, icon, colors, progress), dp(16))
-            return
-        }
-        val drawable = MediaActionIconDrawable.of(view.context, icon, colors, progress)
-        if (view is CenteredIconTextView) view.setCenteredIcon(drawable, dp(20))
-        else view.setCompoundDrawablesRelativeWithIntrinsicBounds(drawable, null, null, null)
+        (view.background as? com.pocketds.hub.ui.glass.GlassButtonBackground)?.lit = icon.isOn
+        (view as? CenteredIconTextView)?.setCenteredIcon(MediaActionIconDrawable.onGlass(view.context, icon, colors, progress), dp(16))
     }
 
     private fun seriesActionLabel(target: SeriesPlayTargetResponse): String {
@@ -936,8 +922,8 @@ class LibraryDetailScreen(
         const val TAB_SIMILAR = "similar"
         const val ART_WIDTH_PX = 1920
         /** Glass: the prototype's Pocket Play pill, and More like this's 82 x 123dp posters. */
-        const val GLASS_PILL_DP = 31f
-        const val GLASS_POSTER_DP = 123f
+        const val PILL_DP = 31f
+        const val POSTER_DP = 123f
         const val RETURN_REFRESH_DELAY_MILLIS = 450L
         const val STALE_TARGET_RETRY_MILLIS = 700L
         const val MAX_STALE_TARGET_RETRIES = 3

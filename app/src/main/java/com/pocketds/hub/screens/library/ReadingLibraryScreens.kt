@@ -2,7 +2,6 @@ package com.pocketds.hub.screens.library
 
 import com.pocketds.hub.ui.CoverFanView
 
-import com.pocketds.hub.ui.typeRole
 import com.pocketds.hub.ui.textWeight
 
 import com.pocketds.hub.ui.ProgressLine.showFraction
@@ -86,10 +85,9 @@ import com.pocketds.hub.ui.showStatus
 /**
  * One Kavita or Storyteller library, paged through the Hub's normalized model.
  *
- * On Glass it is the prototype's library page (`.pg-blibf`): the library's
- * name, Series | Authors | Books as a glass capsule with Sort at the right, the
- * count under them, and seven columns of glass covers (round portraits for
- * Authors).
+ * It is the prototype's library page (`.pg-blibf`): the library's name,
+ * Series | Authors | Books as a glass capsule with Sort at the right, the count
+ * under them, and seven columns of glass covers (round portraits for Authors).
  */
 class ReadingLibraryGridScreen(
     private val api: HubApi,
@@ -99,11 +97,10 @@ class ReadingLibraryGridScreen(
     override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val title = library.title
     override val horizontalMode get() = if(view==VIEW_AUTHORS) HorizontalMode.CONFINED else HorizontalMode.GRID
-    /** Glass: the library's name heads the page. */
-    override val showsOwnTitle: Boolean get() = glass
+    /** The library's name heads the page. */
+    override val showsOwnTitle = true
     override val pageArtwork: String? get() = if (::grid.isInitialized) focusedWork()?.artwork?.takeIf(String::isNotBlank) else null
-    private var glass = false
-    /** Glass: the page's own line under the controls, "12 of 12 · Title · A to Z". */
+    /** The page's own line under the controls, "12 of 12 · Title · A to Z". */
     private lateinit var summary: TextView
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -149,7 +146,6 @@ class ReadingLibraryGridScreen(
             if (view == VIEW_BOOKS) { sortKey = booksSort.field; sortAscending = booksSort.ascending }
         }
         colors = Theme.colors(host.viewContext)
-        glass = Theme.onGlass(colors)
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
         screenRoot = root
         val content = LinearLayout(host.viewContext).apply {
@@ -157,51 +153,49 @@ class ReadingLibraryGridScreen(
             status = TextView(context).apply {
                 textSize = 11f
                 setTextColor(colors.mutedText)
-                if (glass) setPadding(dp(GLASS_EDGE_DP), dp(4), dp(GLASS_EDGE_DP), 0) else setPadding(dp(12), dp(6), dp(12), dp(4))
+                setPadding(dp(EDGE_DP), dp(4), dp(EDGE_DP), 0)
             }
             summary = TextView(context).apply {
                 textSize = 12f
                 setTextColor(com.pocketds.hub.ui.glass.GlassColors.QUIET)
-                setPadding(dp(GLASS_EDGE_DP), dp(6), dp(GLASS_EDGE_DP), 0)
+                setPadding(dp(EDGE_DP), dp(6), dp(EDGE_DP), 0)
                 visibility = View.GONE
             }
-            if (glass) addView(TextView(context).apply {
+            addView(TextView(context).apply {
                 // The prototype's page heading (`.phead h1`): Bricolage at its heaviest.
                 text = library.title
                 textSize = 21f
                 typeface = com.pocketds.hub.ui.Type.display(context, 800)
                 includeFontPadding = false
                 setTextColor(colors.primaryText)
-                setPadding(dp(GLASS_EDGE_DP), dp(8), dp(GLASS_EDGE_DP), 0)
+                setPadding(dp(EDGE_DP), dp(8), dp(EDGE_DP), 0)
             })
             val ring = dp(PillButton.RING_DP.toInt())
             val toolbar=LinearLayout(context).apply {
                 gravity=Gravity.CENTER_VERTICAL
                 clipChildren = false
-                if (glass) setPadding(dp(GLASS_EDGE_DP) - ring, dp(6), dp(GLASS_EDGE_DP) - ring, 0) else setPadding(dp(16),dp(2),dp(20),dp(2))
+                setPadding(dp(EDGE_DP) - ring, dp(6), dp(EDGE_DP) - ring, 0)
             }
             toolbarRow = toolbar
-            // Glass: the capsule at the left and Sort at the right, as the prototype's controls.
-            if (!glass) toolbar.addView(status,LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
+            // The capsule at the left and Sort at the right, as the prototype's controls.
             if (canGroupByAuthor) toolbar.addView(viewSwitch(context), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                if (glass) marginStart = ring else marginEnd = dp(10)
+                marginStart = ring
             })
-            if (glass) toolbar.addView(View(context), LinearLayout.LayoutParams(0, 0, 1f))
+            toolbar.addView(View(context), LinearLayout.LayoutParams(0, 0, 1f))
             sortControls=LibrarySortControls(context,colors,if (view == VIEW_BOOKS) sortFields else gridFields,SortPreference(sortKey,sortAscending),
                 {this@ReadingLibraryGridScreen.overlay},::applySort) {host?.refreshHints()}
             toolbar.addView(sortControls)
             showGrouping()
             addView(toolbar)
-            if (glass) { addView(summary); addView(status) }
+            addView(summary); addView(status)
             grid = RecyclerView(context).apply {
                 layoutManager = GridLayoutManager(context, MAX_COLUMNS)
                 adapter = this@ReadingLibraryGridScreen.adapter
                 setItemViewCacheSize(MAX_COLUMNS * 3)
                 clipToPadding = false
                 clipChildren = false
-                // Glass: the covers' 5dp margins inside the page's 22dp edge.
-                if (glass) setPadding(dp(GLASS_EDGE_DP - 5), dp(6), dp(GLASS_EDGE_DP - 5), dp(84))
-                else setPadding(dp(16), dp(12), dp(16), dp(84))
+                // The covers' 5dp margins inside the page's 22dp edge.
+                setPadding(dp(EDGE_DP - 5), dp(6), dp(EDGE_DP - 5), dp(84))
                 layoutParams = LinearLayout.LayoutParams(MATCH, 0, 1f)
                 addOnScrollListener(object : RecyclerView.OnScrollListener() {
                     override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
@@ -230,12 +224,10 @@ class ReadingLibraryGridScreen(
             shelfArea.addView(grid,FrameLayout.LayoutParams(MATCH,MATCH))
             authorGrid=AuthorGridView(context,api,library.id,colors,ringVisible,
                 {message,failed->
-                    if (glass) {
-                        // The count is the page's own line; a failure is news, as the chip.
-                        status.showStatus(com.pocketds.hub.state.StatusMessage(if (failed) message else "",
-                            if (failed) com.pocketds.hub.state.StatusTone.ERROR else com.pocketds.hub.state.StatusTone.NORMAL), colors)
-                        if (!failed) showSummary(message)
-                    } else { status.text=message;status.setTextColor(if(failed)colors.dangerText else colors.mutedText) }
+                    // The count is the page's own line; a failure is news, as the chip.
+                    status.showStatus(com.pocketds.hub.state.StatusMessage(if (failed) message else "",
+                        if (failed) com.pocketds.hub.state.StatusTone.ERROR else com.pocketds.hub.state.StatusTone.NORMAL), colors)
+                    if (!failed) showSummary(message)
                 },
                 {if(view==VIEW_AUTHORS){grid.visibility=View.GONE;authorGrid.visibility=View.VISIBLE}},
                 {author->host.push(ReadingAuthorScreen(api,library.id,author,ringVisible))}).apply {visibility=View.GONE}
@@ -344,7 +336,6 @@ class ReadingLibraryGridScreen(
             adapter.itemCount == 0 -> StatusText.loading(library.title, refreshing = false)
             else -> StatusText.loading("more", refreshing = false)
         }, colors)
-        if (!glass) status.visibility = View.VISIBLE
         loadJob = scope.launch {
             when (val result = api.readingLibraryItems(
                 library.id,
@@ -369,13 +360,12 @@ class ReadingLibraryGridScreen(
                     status.showStatus(
                         when {
                             result.value.items.isEmpty() && adapter.itemCount == 0 -> StatusText.notice("This reading library is empty.")
-                            // Glass: the count is the page's own line; the chip says only what is news.
-                            glass -> StatusText.caveat(result.value.cache, result.value.partial.map { it.service })
-                            else -> StatusText.loaded(line, result.value.cache, result.value.partial.map { it.service })
+                            // The count is the page's own line; the chip says only what is news.
+                            else -> StatusText.caveat(result.value.cache, result.value.partial.map { it.service })
                         },
                         colors
                     )
-                    if (glass && adapter.itemCount > 0) showSummary(line)
+                    if (adapter.itemCount > 0) showSummary(line)
                     if (page == 1 && !overlay.isOpen) restoreFocus()
                     host?.refreshHints()
                 }
@@ -432,11 +422,11 @@ class ReadingLibraryGridScreen(
         summary.visibility = if (line.isBlank()) View.GONE else View.VISIBLE
     }
 
-    /** Series (the default), Authors, or Books; each keeps its own order. On Glass a glass capsule. */
+    /** Series (the default), Authors, or Books, as a glass capsule; each keeps its own order. */
     private fun viewSwitch(context: android.content.Context) = BlobSegmentedView(context, colors, ringVisible).apply {
-        heightDp = if (glass) PillButton.CONTROL_DP else 34f
+        heightDp = PillButton.CONTROL_DP
         textSp = 12f
-        if (glass) useGlassTrack() else trackColor = colors.cardSurface
+        useGlassTrack()
         setOptions(listOf(
             BlobSegmentedView.Option(VIEW_SERIES, "Series"),
             BlobSegmentedView.Option(VIEW_AUTHORS, "Authors"),
@@ -500,12 +490,10 @@ class ReadingLibraryGridScreen(
         override fun getItemCount() = values.size
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): WorkHolder {
-            val card = PosterCardView(parent.context, colors, if (glass) GLASS_POSTER_DP else POSTER_DP, glass = glass).apply {
-                // Glass: seven columns of covers filling their cells, as the media grid's.
-                layoutParams = if (glass) RecyclerView.LayoutParams(MATCH, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            val card = PosterCardView(parent.context, colors, POSTER_DP, glass = true).apply {
+                // Seven columns of covers filling their cells, as the media grid's.
+                layoutParams = RecyclerView.LayoutParams(MATCH, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     setMargins(dp(5), dp(6), dp(5), dp(6))
-                } else RecyclerView.LayoutParams(dp(CARD_DP), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    setMargins(dp(8), dp(8), dp(8), dp(8))
                 }
                 FocusDecorator.attach(this, ringVisible)
                 FocusDecorator.listen(this, ringVisible) { _, focused ->
@@ -540,11 +528,9 @@ class ReadingLibraryGridScreen(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val MAX_COLUMNS = 7
         const val PREFETCH_AHEAD = 6
-        const val CARD_DP = 104
-        const val POSTER_DP = 150f
-        /** Glass: the prototype's Pocket grid, 22dp edges and 123dp covers. */
-        const val GLASS_EDGE_DP = 22
-        const val GLASS_POSTER_DP = 123f
+        /** The prototype's Pocket grid, 22dp edges and 123dp covers. */
+        const val EDGE_DP = 22
+        const val POSTER_DP = 123f
         const val TAG_WORK = -0x7fffffdf
         const val VIEW_SERIES = "series"
         const val VIEW_AUTHORS = "authors"
@@ -565,14 +551,12 @@ class ReadingWorkScreen(
     override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val title = initialTitle
     override val focusOnShow = true
-    /** Glass: the page's own heading is the title beside the cover. */
-    override val showsOwnTitle: Boolean get() = glass
-    /** Glass: the page takes the cover's colours; a series', the book being read. */
+    /** The page's own heading is the title beside the cover. */
+    override val showsOwnTitle = true
+    /** The page takes the cover's colours; a series', the book being read. */
     override val pageArtwork: String?
         get() = lastWork?.let { work -> work.continueAt?.artwork?.takeIf(String::isNotBlank) ?: work.artwork.takeIf(String::isNotBlank) }
-    /** The Glass book page (GLASS_PLAN.md): the cover beside the words, glass actions and rows. */
-    private var glass = false
-    /** Glass: the comic volume whose issues are shown, by its place in the run. */
+    /** The comic volume whose issues are shown, by its place in the run. */
     private var selectedVolume = -1
     private var libraryNamesAsked = false
 
@@ -601,15 +585,14 @@ class ReadingWorkScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
-        glass = Theme.onGlass(colors)
+        // The book page (GLASS_PLAN.md): the cover beside the words, glass actions and rows.
         val main = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(colors.background)
             status = TextView(context).apply {
                 textSize = 11f
                 setTextColor(colors.mutedText)
-                if (glass) setPadding(dp(GLASS_EDGE_DP), dp(6), dp(GLASS_EDGE_DP), dp(2))
-                else setPadding(dp(16), dp(6), dp(16), dp(4))
+                setPadding(dp(EDGE_DP), dp(6), dp(EDGE_DP), dp(2))
             }
             addView(status)
             scroll = FocusScrollView(context).apply {
@@ -746,28 +729,28 @@ class ReadingWorkScreen(
         if (work.entityType == "collection") work.continueAt?.let { point ->
             continueButton(work, point)?.let {
                 detailHeader.actions.addView(it, 0, LinearLayout.LayoutParams(WRAP, WRAP).apply {
-                    // Glass: the pill lines up with the words, its ring in the room left of it.
-                    if (glass) { marginStart = -dp(PillButton.RING_DP.toInt()); marginEnd = dp(2) }
+                    // The pill lines up with the words, its ring in the room left of it.
+                    marginStart = -dp(PillButton.RING_DP.toInt()); marginEnd = dp(2)
                 })
             }
-            // Glass: the book being read as a card of its own under the series.
-            if (glass) continueCard(work, point)?.let(content::addView)
+            // The book being read as a card of its own under the series.
+            continueCard(work, point)?.let(content::addView)
         }
-        if (glass && ReadingBookFacts.kindTag(work.kind) != null && work.libraryId.isNotBlank() &&
+        if (ReadingBookFacts.kindTag(work.kind) != null && work.libraryId.isNotBlank() &&
             ReadingLibraryNames.of(work.libraryId) == null) loadLibraryNames()
         if (work.editions.isNotEmpty() && primaryRead == null) {
             content.addView(sectionTitle("Editions"))
             work.editions.forEach { content.addView(editionCard(work, it)) }
         }
-        val volumes = glass && ReadingBookFacts.kindTag(work.kind) != null && work.entityType != "collection" &&
+        val volumes = ReadingBookFacts.kindTag(work.kind) != null && work.entityType != "collection" &&
             work.sections.count { it.items.isNotEmpty() } > 1
         if (volumes) content.addView(volumeChips(work))
         work.sections.forEachIndexed { index, section ->
-            // Glass: one volume's issues at a time, picked with the chips above.
+            // One volume's issues at a time, picked with the chips above.
             if (volumes && index != selectedVolume) return@forEachIndexed
             // A series' one list of books is its reading order.
             content.addView(sectionTitle(if (work.entityType == "collection" && work.sections.size == 1) "In reading order" else section.title,
-                if (glass && ReadingBookFacts.kindTag(work.kind) != null) ReadingBookFacts.length(work.copy(sections = listOf(section))).firstOrNull() else null))
+                if (ReadingBookFacts.kindTag(work.kind) != null) ReadingBookFacts.length(work.copy(sections = listOf(section))).firstOrNull() else null))
             if (work.entityType == "collection" && section.items.isNotEmpty()) {
                 hasChildLinks = hasChildLinks || section.items.any(ReadingWorkPresentation::canOpen)
                 content.addView(bookRow(section))
@@ -813,15 +796,13 @@ class ReadingWorkScreen(
         host?.pageArtworkChanged()
     }
 
-    private fun hero(work: ReadingWork): View = DetailHeaderView(requireNotNull(host).viewContext, colors, ringVisible, glass).apply {
+    private fun hero(work: ReadingWork): View = DetailHeaderView(requireNotNull(host).viewContext, colors, ringVisible, glass = true).apply {
         detailHeader = this
         compact = true
-        if (glass) {
-            // The prototype's book page: the cover at the left, "BOOK 6 · RED RISING" over the title.
-            book = true
-            squareCover = work.kind == com.pocketds.hub.model.ReadingType.AUDIOBOOK
-            eyebrowView.text = ReadingBookFacts.eyebrow(work, ReadingLibraryNames.of(work.libraryId).orEmpty())
-        }
+        // The prototype's book page: the cover at the left, "BOOK 6 · RED RISING" over the title.
+        book = true
+        squareCover = work.kind == com.pocketds.hub.model.ReadingType.AUDIOBOOK
+        eyebrowView.text = ReadingBookFacts.eyebrow(work, ReadingLibraryNames.of(work.libraryId).orEmpty())
         overview.onChanged = { host?.refreshHints() }
         titleView.text = work.title
         subtitleView.visibility = View.GONE
@@ -841,12 +822,12 @@ class ReadingWorkScreen(
         progressRow.visibility = if (fraction > 0 || progressLabel.text.isNotEmpty()) View.VISIBLE else View.GONE
         bookLinks(work, links)
         if (work.entityType == "collection") {
-            val coverDp = if (glass) CoverFanView.GLASS_COVER else FAN_COVER_DP
-            val (width, height) = CoverFanView.sizeDp(coverDp, glass)
-            // Glass: in from the page's edge by how far its outer cover leans, or the screen cuts it.
-            replacePoster(CoverFanView(context, colors, coverDp, glass).apply {
+            val coverDp = CoverFanView.GLASS_COVER
+            val (width, height) = CoverFanView.sizeDp(coverDp, glass = true)
+            // In from the page's edge by how far its outer cover leans, or the screen cuts it.
+            replacePoster(CoverFanView(context, colors, coverDp, glass = true).apply {
                 bind(com.pocketds.hub.screens.home.ReadingShelves.fanCovers(work), Artwork.loader(api, context), api::imageUrl)
-            }, width, height, startDp = if (glass) CoverFanView.GLASS_LEAN_DP else 0)
+            }, width, height, startDp = CoverFanView.GLASS_LEAN_DP)
         }
         bindArtwork("book", null, work.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
             Artwork.loader(api, context))
@@ -882,41 +863,28 @@ class ReadingWorkScreen(
                     ReadingEntryMode.LISTEN -> AppIcon.HEADPHONES
                     ReadingEntryMode.READ_ALONG -> AppIcon.READ_ALONG
                 }
-                // Glass: the Books side's main action, gold (PillButton.mainFace).
-                val primary: TextView = if (glass) PillButton.create(context, colors, label, icon, primary = true,
-                    heightDp = GLASS_PILL_DP, glass = true, side = ContentMode.BOOKS) else CenteredIconTextView(context).apply {
-                    text = label
-                    textSize = 14f
-                    DetailStyler.action(this, colors, primary = true)
-                    setCenteredIcon(AppIconDrawable(icon, colors.accentText), dp(20), dp(8))
-                    setPadding(dp(16), 0, dp(16), 0)
-                }
+                // The Books side's main action, gold (PillButton.mainFace).
+                val primary: TextView = PillButton.create(context, colors, label, icon, primary = true,
+                    heightDp = PILL_DP, glass = true, side = ContentMode.BOOKS)
                 primary.apply {
                     contentDescription = "$label ${work.title}, $modeName"
                     attachActionFocus(this)
                     activateOnTap { launchEntry(work, previewFormat ?: choice) }
                 }
-                actions.addView(primary, if (glass) LinearLayout.LayoutParams(WRAP, WRAP).apply {
+                actions.addView(primary, LinearLayout.LayoutParams(WRAP, WRAP).apply {
                     marginStart = -dp(PillButton.RING_DP.toInt()); marginEnd = dp(2)
-                } else LinearLayout.LayoutParams(WRAP, dp(48)).apply { marginEnd = dp(8) })
+                })
                 actionViews["entry"] = primary
                 hasChildLinks = true
             }
             if (formatMenu.options.size > 1) {
-                val changeFormat = if (glass) PillButton.create(context, colors, "Change format", heightDp = GLASS_PILL_DP, glass = true)
-                else TextView(context).apply {
-                    text = "Change format"
-                    textSize = 12f
-                    DetailStyler.action(this, colors)
-                    setPadding(dp(12), 0, dp(12), 0)
-                }
+                val changeFormat = PillButton.create(context, colors, "Change format", heightDp = PILL_DP, glass = true)
                 changeFormat.apply {
                     contentDescription = "Change reading format or narration"
                     attachActionFocus(this)
                     activateOnTap { showFormatMenu(work, formatMenu) }
                 }
-                actions.addView(changeFormat, if (glass) LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(2) }
-                    else LinearLayout.LayoutParams(WRAP, dp(48)).apply { marginEnd = dp(8) })
+                actions.addView(changeFormat, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(2) })
                 actionViews["format"] = changeFormat
             }
             val read = CenteredIconTextView(context).apply {
@@ -952,10 +920,7 @@ class ReadingWorkScreen(
                 text = ""
                 contentDescription = if (wanted) "Remove ${work.title} from Want to Read" else "Add ${work.title} to Want to Read"
                 textSize = 13f
-                if (glass) DetailStyler.glassToggle(this, colors, lit = wanted) else {
-                    DetailStyler.action(this, colors, primary = false)
-                    setPadding(dp(12), 0, dp(12), 0)
-                }
+                DetailStyler.glassToggle(this, colors, lit = wanted)
                 bookmark(this, wanted)
                 attachActionFocus(this)
                 activateOnTap {
@@ -971,7 +936,7 @@ class ReadingWorkScreen(
                     host?.refreshHints()
                 }
             }
-            actions.addView(want, if (glass) glassToggleParams() else LinearLayout.LayoutParams(WRAP, dp(48)).apply { marginEnd = dp(8) })
+            actions.addView(want, glassToggleParams())
             actionViews["list:want"] = want
             val lists = CenteredIconTextView(context).apply {
                 text = ""
@@ -988,14 +953,8 @@ class ReadingWorkScreen(
                     text = ""
                     contentDescription = "More actions for ${work.title}"
                     textSize = 21f
-                    if (glass) {
-                        DetailStyler.glassToggle(this, colors)
-                        setCenteredIcon(MediaActionIconDrawable.onGlass(context, MediaActionIcon.MORE, colors), dp(16))
-                    } else {
-                        DetailStyler.action(this, colors)
-                        setCenteredIcon(MediaActionIconDrawable(context,
-                            MediaActionIcon.MORE, colors.primaryText), dp(21))
-                    }
+                    DetailStyler.glassToggle(this, colors)
+                    setCenteredIcon(MediaActionIconDrawable.onGlass(context, MediaActionIcon.MORE, colors), dp(16))
                     attachActionFocus(this)
                     activateOnTap {
                         listOverlay.show("More actions", work.title, buildList {
@@ -1015,27 +974,24 @@ class ReadingWorkScreen(
                         host?.refreshHints()
                     }
                 }
-                actions.addView(editions, if (glass) glassToggleParams() else LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(8) })
+                actions.addView(editions, glassToggleParams())
                 actionViews["list:more"] = editions
             }
         }
     }
 
-    /** Want to Read's mark: on Glass dark on the toggle's white face while on, white on glass while off. */
+    /** Want to Read's mark: dark on the toggle's white face while on, white on glass while off. */
     private fun bookmark(view: CenteredIconTextView, selected: Boolean) {
         val icon = if (selected) AppIcon.BOOKMARK_FILLED else AppIcon.BOOKMARK
-        val glassFace = view.background as? com.pocketds.hub.ui.glass.GlassButtonBackground
-        if (glassFace != null) {
-            glassFace.lit = selected
-            view.setCenteredIcon(AppIconDrawable(icon, if (selected) com.pocketds.hub.ui.glass.GlassColors.INK else android.graphics.Color.WHITE), dp(16))
-        } else view.setCenteredIcon(AppIconDrawable(icon, colors.primaryText), dp(21))
+        (view.background as? com.pocketds.hub.ui.glass.GlassButtonBackground)?.lit = selected
+        view.setCenteredIcon(AppIconDrawable(icon, if (selected) com.pocketds.hub.ui.glass.GlassColors.INK else android.graphics.Color.WHITE), dp(16))
     }
 
     private fun glassToggleParams() = LinearLayout.LayoutParams(dp(DetailStyler.GLASS_TOGGLE_VIEW_DP), dp(DetailStyler.GLASS_TOGGLE_VIEW_DP)).apply { marginEnd = dp(2) }
 
     /**
-     * Glass, a series' page: the book being read as its own glass card under
-     * the series (the prototype's `.cont`), "Continue reading · Light
+     * A series' page: the book being read as its own glass card under the
+     * series (the prototype's `.cont`), "Continue reading · Light
      * Bringer", where in it, a bar in the accent and a gold play disc. A
      * opens it where it was left, as Continue does.
      */
@@ -1094,12 +1050,12 @@ class ReadingWorkScreen(
             actionViews[key] = this
             hasChildLinks = true
             activateOnTap { openPublication(work, point.sourceItemId, point.title, point.source) }
-            layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(GLASS_EDGE_DP), dp(10), dp(GLASS_EDGE_DP), dp(2)) }
+            layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(EDGE_DP), dp(10), dp(EDGE_DP), dp(2)) }
         }
     }
 
     /**
-     * Glass, a comic run of several volumes: each volume as a glass chip,
+     * A comic run of several volumes: each volume as a glass chip,
      * "Volume 1961 · 147 issues", the one shown white; picking one shows its
      * issues in place of the last.
      */
@@ -1133,12 +1089,12 @@ class ReadingWorkScreen(
         sections.forEach { (index, _) -> chips.optionView(index.toString())?.let { actionViews["list:volume:$index"] = it } }
         return FocusHorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false; clipToPadding = false; clipChildren = false
-            setPadding(dp(GLASS_EDGE_DP - 3), dp(10), dp(GLASS_EDGE_DP - 3), dp(2))
+            setPadding(dp(EDGE_DP - 3), dp(10), dp(EDGE_DP - 3), dp(2))
             addView(chips)
         }
     }
 
-    /** Glass: a comic's page names its library ("Comic · My Marvelous Year"); asked once when nobody listed them yet. */
+    /** A comic's page names its library ("Comic · My Marvelous Year"); asked once when nobody listed them yet. */
     private fun loadLibraryNames() {
         if (libraryNamesAsked) return
         libraryNamesAsked = true
@@ -1218,13 +1174,9 @@ class ReadingWorkScreen(
     /** "Continue #6" on a series page: the book being read, opened where it was left. */
     private fun continueButton(work: ReadingWork, point: ReadingContinue): View? {
         if (!canReadPublication(work.kind, point.sourceItemId)) return null
-        val label = when {
-            point.number.isBlank() -> "Continue reading"
-            glass -> "Continue · Book ${point.number}"
-            else -> "Continue #${point.number}"
-        }
+        val label = if (point.number.isBlank()) "Continue reading" else "Continue · Book ${point.number}"
         return PillButton.create(requireNotNull(host).viewContext, colors, label, AppIcon.BOOK, primary = true,
-            heightDp = if (glass) GLASS_PILL_DP else 38f, glass = glass, side = ContentMode.BOOKS).apply {
+            heightDp = PILL_DP, glass = true, side = ContentMode.BOOKS).apply {
             contentDescription = "Continue reading ${point.title}"
             FocusDecorator.attach(this, ringVisible, scale = false)
             FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) { lastActionKey = point.sourceItemId; host?.refreshHints() } }
@@ -1360,7 +1312,7 @@ class ReadingWorkScreen(
         into.visibility = if (work.authorRefs.isEmpty() && work.seriesId.isBlank()) View.GONE else View.VISIBLE
         val context = requireNotNull(host).viewContext
         fun link(key: String, label: CharSequence, icon: AppIcon, description: String, open: () -> Unit) =
-            PillButton.create(context, colors, description, icon, heightDp = if (glass) 26f else 30f, glass = glass).apply {
+            PillButton.create(context, colors, description, icon, heightDp = 26f, glass = true).apply {
                 text = label
                 textSize = 12f
                 contentDescription = description
@@ -1420,15 +1372,10 @@ class ReadingWorkScreen(
         }
     }
 
-    /** A section's heading; on Glass a row's (`.row h3`), with a quiet count ("Volume 1961  147 issues"). */
+    /** A section's heading, a row's (`.row h3`), with a quiet count ("Volume 1961  147 issues"). */
     private fun sectionTitle(text: String, count: String? = null): TextView =
-        if (glass) com.pocketds.hub.ui.glass.GlassHeading.create(requireNotNull(host).viewContext, text, count).apply {
-            setPadding(dp(GLASS_EDGE_DP), dp(10), dp(GLASS_EDGE_DP), dp(0))
-        } else TextView(requireNotNull(host).viewContext).apply {
-            this.text = text
-            typeRole(com.pocketds.hub.ui.Type.Role.HEADING, 16f)
-            setTextColor(colors.primaryText)
-            setPadding(dp(24), dp(14), dp(24), dp(2))
+        com.pocketds.hub.ui.glass.GlassHeading.create(requireNotNull(host).viewContext, text, count).apply {
+            setPadding(dp(EDGE_DP), dp(10), dp(EDGE_DP), dp(0))
         }
 
     private fun infoCard(title: String, subtitle: String): TextView =
@@ -1436,12 +1383,10 @@ class ReadingWorkScreen(
             text = if (subtitle.isBlank()) title else "$title\n$subtitle"
             textSize = 13f
             setTextColor(colors.primaryText)
-            // Glass: a row of the page's glass, as the prototype's lists are.
-            if (glass) com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, 13f))
-            else background = Styler.cardBackground(context, colors)
+            // A row of the page's glass, as the prototype's lists are.
+            com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, 13f))
             setPadding(dp(12), dp(9), dp(12), dp(9))
-            val edge = if (glass) GLASS_EDGE_DP else 24
-            layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(edge), dp(6), dp(edge), dp(6)) }
+            layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(EDGE_DP), dp(6), dp(EDGE_DP), dp(6)) }
         }
 
     private fun progressText(progress: ReadingProgress?): String? = progress?.let {
@@ -1457,15 +1402,13 @@ class ReadingWorkScreen(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-        /** A series page's fan of covers, a little larger than a book page's poster. */
-        const val FAN_COVER_DP = 88
         /**
-         * Glass, the prototype's Pocket book page: 22dp edges, 31dp pills, and
-         * the series' continue card (`.cont`) with 18dp corners, a 32dp cover,
-         * an 18% track and a 30dp play disc.
+         * The prototype's Pocket book page: 22dp edges, 31dp pills, and the
+         * series' continue card (`.cont`) with 18dp corners, a 32dp cover, an
+         * 18% track and a 30dp play disc.
          */
-        const val GLASS_EDGE_DP = 22
-        const val GLASS_PILL_DP = 31f
+        const val EDGE_DP = 22
+        const val PILL_DP = 31f
         const val GLASS_CONT_CORNER_DP = 18f
         const val GLASS_CONT_THUMB_DP = 32
         const val GLASS_CONT_GO_DP = 30

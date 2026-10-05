@@ -13,7 +13,7 @@ import kotlinx.coroutines.*
 
 /**
  * Kavita's ordered server lists are kept separate from editable device-only shelves.
- * On Glass each list or issue is a glass row (the prototype's `.lrow`) with a chevron.
+ * Each list or issue is a glass row (the prototype's `.lrow`) with a chevron.
  */
 class ServerReadingListsScreen(private val api: HubApi, private val ring: () -> Boolean, private val selected: ServerReadingList? = null) : Screen {
     override val title = selected?.title ?: "Reading lists"
@@ -26,20 +26,19 @@ class ServerReadingListsScreen(private val api: HubApi, private val ring: () -> 
     private var job: Job? = null
     private var focusId: String? = null
     private val rows = mutableListOf<View>()
-    private var glass = false
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
-        this.host=host; colors=Theme.colors(host.viewContext); glass=Theme.onGlass(colors)
+        this.host=host; colors=Theme.colors(host.viewContext)
         return LinearLayout(host.viewContext).apply {
             orientation=LinearLayout.VERTICAL; setBackgroundColor(colors.background)
             status=TextView(context).apply {
-                textSize=if(glass) 12f else 13f
-                setTextColor(if(glass) com.pocketds.hub.ui.glass.GlassColors.QUIET else colors.mutedText)
+                textSize=12f
+                setTextColor(com.pocketds.hub.ui.glass.GlassColors.QUIET)
                 setPadding(dp(22),dp(10),dp(22),dp(8))
             }
             addView(status)
             val scroll=FocusScrollView(context).apply { clipToPadding=false }
-            body=LinearLayout(context).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(if(glass) 22 else 20),dp(5),dp(if(glass) 22 else 20),dp(24)); clipChildren=false }
+            body=LinearLayout(context).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(22),dp(5),dp(22),dp(24)); clipChildren=false }
             scroll.addView(body); addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         }
     }
@@ -84,22 +83,8 @@ class ServerReadingListsScreen(private val api: HubApi, private val ring: () -> 
         status.text=result.message; body.removeAllViews(); rows.clear()
         row("retry","Try again","Reload from Kavita") { load() };requestInitialFocus()
     }
+    /** The prototype's list row, a 13dp glass row with the words and a chevron, ringed on focus. */
     private fun row(id: String, title: String, detail: String, action: () -> Unit) {
-        if (glass) return glassRow(id, title, detail, action)
-        val view=LinearLayout(host.viewContext).apply {
-            tag=id; orientation=LinearLayout.VERTICAL; minimumHeight=dp(72); setPadding(dp(16),dp(12),dp(16),dp(12))
-            background=Styler.chipBackground(context,colors); contentDescription="$title, $detail"
-            addView(TextView(context).apply { text=title; textSize=17f; setTextColor(colors.primaryText) })
-            addView(TextView(context).apply { text=detail; textSize=12f; setTextColor(colors.mutedText);setPadding(0,dp(5),0,0) })
-            Styler.makeFocusable(this); FocusDecorator.attach(this,ring,scale=false)
-            FocusDecorator.listen(this,ring) { v,focused -> if(focused)focusId=id }
-            activateOnTap(action)
-        }
-        body.addView(view,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(10)});rows+=view
-    }
-
-    /** Glass: the prototype's list row, a 13dp glass row with the words and a chevron, ringed on focus. */
-    private fun glassRow(id: String, title: String, detail: String, action: () -> Unit) {
         val view=LinearLayout(host.viewContext).apply {
             tag=id; orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL
             com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, 13f))

@@ -53,13 +53,12 @@ class AuthorGridView(
     private var totalPages = 0
     private var selected = ""
     private var visible = false
-    private val glass = com.pocketds.hub.ui.Theme.onGlass(colors)
 
     init {
         layoutManager = GridLayoutManager(context, 6)
         adapter = Cards()
         clipToPadding = false; clipChildren = false
-        if (glass) setPadding(dp(17), dp(8), dp(17), dp(84)) else setPadding(dp(16), dp(12), dp(16), dp(84))
+        setPadding(dp(17), dp(8), dp(17), dp(84))
         addOnScrollListener(object : OnScrollListener() {
             override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
                 val last = (layoutManager as GridLayoutManager).findLastVisibleItemPosition()
@@ -119,10 +118,10 @@ class AuthorGridView(
         override fun getItemCount() = authors.size
         override fun onCreateViewHolder(parent: ViewGroup, type: Int): ViewHolder =
             object : ViewHolder(DetailArtworkCardView(context, colors, ringVisible).apply {
-                portrait(if (glass) GLASS_PORTRAIT_DP else PORTRAIT_DP)
-                if (glass) { titleView.maxLines = 2; titleView.textSize = 11.5f; subtitleView.textSize = 10.5f }
+                portrait(PORTRAIT_DP)
+                titleView.maxLines = 2; titleView.textSize = 11.5f; subtitleView.textSize = 10.5f
                 layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                    .apply { if (glass) setMargins(dp(5), dp(6), dp(5), dp(10)) else setMargins(dp(6), dp(6), dp(6), dp(10)) }
+                    .apply { setMargins(dp(5), dp(6), dp(5), dp(10)) }
             }) {}
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
@@ -142,10 +141,8 @@ class AuthorGridView(
 
     private companion object {
         const val MAX_COLUMNS = 7
-        /** A writer is a round portrait, or their initials in one. */
-        const val PORTRAIT_DP = 100
-        /** Glass: the prototype's Pocket face. */
-        const val GLASS_PORTRAIT_DP = 64
+        /** A writer is a round portrait, or their initials in one: the prototype's Pocket face. */
+        const val PORTRAIT_DP = 64
     }
 }
 

@@ -41,9 +41,7 @@ class SeasonEpisodesView(
     private val api: HubApi,
     private val colors: PocketColors,
     private val ringVisible: () -> Boolean,
-    private val scope: CoroutineScope,
-    /** Glass episodes ([EpisodeCardView]'s glass tile), at the prototype's 176dp. */
-    private val glass: Boolean = false
+    private val scope: CoroutineScope
 ) : LinearLayout(context) {
     var onPlay: ((LibraryItem) -> Unit)? = null
     var onFocusedEpisode: ((LibraryItem) -> Unit)? = null
@@ -69,7 +67,7 @@ class SeasonEpisodesView(
         isFocusable = false
         clipToPadding = false
         clipChildren = false
-        if (glass) setPadding(dp(16), dp(6), dp(16), dp(10)) else setPadding(dp(18), dp(8), dp(18), dp(10))
+        setPadding(dp(16), dp(6), dp(16), dp(10))
         addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
                 val state = current ?: return
@@ -202,9 +200,10 @@ class SeasonEpisodesView(
         override fun getItemCount() = values.size
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EpisodeHolder {
-            val card = EpisodeCardView(parent.context, colors, ringVisible, compact = true, glass = glass).apply {
+            // EpisodeCardView's glass tile, at the prototype's 176dp.
+            val card = EpisodeCardView(parent.context, colors, ringVisible, compact = true, glass = true).apply {
                 showsPlayOnFocus = true
-                layoutParams = RecyclerView.LayoutParams(dp(if (glass) EpisodeCardView.GLASS_STRIP_WIDTH_DP else EpisodeCardView.STRIP_WIDTH_DP), WRAP)
+                layoutParams = RecyclerView.LayoutParams(dp(EpisodeCardView.GLASS_STRIP_WIDTH_DP), WRAP)
                     .apply { setMargins(dp(6), dp(6), dp(6), dp(6)) }
             }
             val holder = EpisodeHolder(card)

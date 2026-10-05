@@ -12,7 +12,6 @@ import com.pocketds.hub.ui.DetailLayout
 import com.pocketds.hub.ui.DetailStyler
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
-import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
 
 /**
@@ -26,13 +25,11 @@ import com.pocketds.hub.ui.activateOnTap
  * on, else the first one not finished.
  */
 object IssueStrip {
-    private const val ARTWORK_DP = 120
-    private const val CARD_DP = 88
-    /** Glass: the prototype's 82 x 123dp covers, 12dp apart from the page's 22dp edge. */
-    private const val GLASS_ARTWORK_DP = 123
-    private const val GLASS_CARD_DP = 82
-    private const val GLASS_GAP_DP = 12
-    private const val GLASS_EDGE_DP = 22
+    /** The prototype's 82 x 123dp covers, 12dp apart from the page's 22dp edge. */
+    private const val ARTWORK_DP = 123
+    private const val CARD_DP = 82
+    private const val GAP_DP = 12
+    private const val EDGE_DP = 22
 
     fun create(
         context: Context,
@@ -50,12 +47,11 @@ object IssueStrip {
         clipToPadding = false
         clipChildren = false
         setItemViewCacheSize(10)
-        val glass = Theme.onGlass(colors)
-        val clearance = DetailLayout.focusClearance(DetailLayout.posterCardHeight(if (glass) GLASS_ARTWORK_DP else ARTWORK_DP,
+        val clearance = DetailLayout.focusClearance(DetailLayout.posterCardHeight(ARTWORK_DP,
             resources.configuration.fontScale)).coerceAtLeast(10)
-        val edge = if (glass) GLASS_EDGE_DP else 24
+        val edge = EDGE_DP
         setPadding(dp(context, edge), dp(context, clearance), dp(context, edge), dp(context, clearance))
-        adapter = Adapter(colors, ringVisible, api, items, kind, seriesArtwork, glass, onOpen)
+        adapter = Adapter(colors, ringVisible, api, items, kind, seriesArtwork, onOpen)
         val start = items.indexOfFirst { val p = it.progress; p != null && !p.completed && p.percentage > 0 }
             .takeIf { it >= 0 } ?: items.indexOfFirst { it.progress?.completed != true }.coerceAtLeast(0)
         if (start > 0) (layoutManager as LinearLayoutManager).scrollToPositionWithOffset(start, dp(context, edge))
@@ -70,7 +66,6 @@ object IssueStrip {
         private val items: List<ReadingSectionItem>,
         private val kind: String,
         private val seriesArtwork: String,
-        private val glass: Boolean,
         private val onOpen: (ReadingSectionItem) -> Unit
     ) : RecyclerView.Adapter<Holder>() {
         override fun getItemCount() = items.size
@@ -78,10 +73,10 @@ object IssueStrip {
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
             val context = parent.context
             return Holder(DetailArtworkCardView(context, colors, ringVisible).apply {
-                artworkHeight(if (glass) GLASS_ARTWORK_DP else ARTWORK_DP)
+                artworkHeight(ARTWORK_DP)
                 titleView.minLines = 1
-                layoutParams = RecyclerView.LayoutParams(dp(context, if (glass) GLASS_CARD_DP else CARD_DP), ViewGroup.LayoutParams.WRAP_CONTENT)
-                    .apply { marginEnd = dp(context, if (glass) GLASS_GAP_DP else 14) }
+                layoutParams = RecyclerView.LayoutParams(dp(context, CARD_DP), ViewGroup.LayoutParams.WRAP_CONTENT)
+                    .apply { marginEnd = dp(context, GAP_DP) }
             })
         }
 

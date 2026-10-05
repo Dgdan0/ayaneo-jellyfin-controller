@@ -13,8 +13,8 @@ import com.pocketds.hub.settings.SortPreference
  * then Ascending / Descending underneath, so changing only the direction meant
  * scrolling past every field, and the two choices read as one list.
  *
- * On the Glass page they are the prototype's control buttons
- * ([PillButton.control]): "Name ▾" after the sort mark, and "↑ A to Z".
+ * They are the prototype's control buttons ([PillButton.control]): "Name ▾"
+ * after the sort mark, and "↑ A to Z".
  */
 class LibrarySortControls(
     context: Context,
@@ -26,7 +26,6 @@ class LibrarySortControls(
     /** The hint bar follows the menu opening and closing. */
     private val onMenu: () -> Unit
 ) : LinearLayout(context) {
-    private val glass = Theme.onGlass(colors)
     var value: SortPreference = initial
         private set
     /** The fields on offer; Books Library's views offer different ones. */
@@ -39,9 +38,9 @@ class LibrarySortControls(
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         addView(fieldButton)
-        // Glass buttons carry their rings' room, which is most of the prototype's 10dp gap.
+        // The buttons carry their rings' room, which is most of the prototype's 10dp gap.
         addView(directionButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-            marginStart = Styler.dpInt(context, if (glass) 2f else 8f)
+            marginStart = Styler.dpInt(context, 2f)
         })
         refresh()
     }
@@ -62,10 +61,9 @@ class LibrarySortControls(
     private fun fieldLabel(field: String) = fields.firstOrNull { it.first == field }?.second ?: field
 
     private fun refresh() {
-        val gap = if (glass) " " else "  "
-        fieldButton.text = "${fieldLabel(value.field)}$gap▾"
+        fieldButton.text = "${fieldLabel(value.field)} ▾"
         fieldButton.contentDescription = "Sort by ${fieldLabel(value.field)}"
-        directionButton.text = "${if (value.ascending) "↑" else "↓"}$gap${value.directionLabel()}"
+        directionButton.text = "${if (value.ascending) "↑" else "↓"} ${value.directionLabel()}"
         directionButton.contentDescription = "${value.directionLabel()}, press to reverse"
     }
 
@@ -84,15 +82,7 @@ class LibrarySortControls(
     }
 
     private fun button(icon: AppIcon?, open: () -> Unit) = CenteredIconTextView(context).apply {
-        if (glass) PillButton.control(this, colors, icon) else {
-            textSize = 12f
-            gravity = Gravity.CENTER
-            minimumHeight = Styler.dpInt(context, 48f)
-            setTextColor(colors.primaryText)
-            setPadding(Styler.dpInt(context, 12f), 0, Styler.dpInt(context, 12f), 0)
-            if (icon != null) setCenteredIcon(AppIconDrawable(icon, colors.mutedText), Styler.dpInt(context, 20f), Styler.dpInt(context, 8f))
-            background = Styler.chipBackground(context, colors)
-        }
+        PillButton.control(this, colors, icon)
         Styler.makeFocusable(this)
         activateOnTap(open)
     }

@@ -55,8 +55,6 @@ class LibraryGridView(
     overlay: () -> ChoiceOverlay
 ) : FrameLayout(context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    /** Glass (#11): the prototype's posters, filling seven columns, with a title and year under each. */
-    private val glass = com.pocketds.hub.ui.Theme.onGlass(colors)
     private var libraryRevision = MediaLibraryChanges.revision
     private val paging = PagedLoadState(PREFETCH_AHEAD)
     private val adapter = ItemAdapter()
@@ -91,7 +89,7 @@ class LibraryGridView(
         isFocusable = false
         clipToPadding = false
         clipChildren = false
-        if (glass) setPadding(dp(17), dp(6), dp(17), dp(20)) else setPadding(dp(18), dp(8), dp(18), dp(20))
+        setPadding(dp(17), dp(6), dp(17), dp(20))
         addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
                 if (refreshing) return
@@ -269,7 +267,7 @@ class LibraryGridView(
                         adapter.append(result.value.items)
                     }
                     // Their colours before focus reaches them, so the page re-tints at once.
-                    if (glass) host.prefetchArtwork(result.value.items.take(PREFETCH_COLOURS)
+                    host.prefetchArtwork(result.value.items.take(PREFETCH_COLOURS)
                         .mapNotNull { com.pocketds.hub.nav.PageArtwork.title(it.media.backdrop, it.media.poster) })
                     val empty = result.value.items.isEmpty() && adapter.itemCount == 0
                     status.showStatus(
@@ -364,11 +362,10 @@ class LibraryGridView(
         }
         override fun getItemCount() = values.size
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ItemHolder {
-            val card = PosterCardView(parent.context, colors, POSTER_DP, glass = glass).apply {
-                layoutParams = if (glass) RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            // The prototype's posters, filling the columns, with a title and year under each (#11).
+            val card = PosterCardView(parent.context, colors, POSTER_DP, glass = true).apply {
+                layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     setMargins(dp(5), dp(6), dp(5), dp(6))
-                } else RecyclerView.LayoutParams(dp(CARD_DP), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    setMargins(dp(7), dp(7), dp(7), dp(7))
                 }
                 FocusDecorator.attach(this, ringVisible)
                 FocusDecorator.listen(this, ringVisible) { _, focused ->
@@ -400,7 +397,6 @@ class LibraryGridView(
         private const val PREFETCH_COLOURS = 21
         private const val PAYLOAD_STATE = "state"
         private const val POSTER_DP = 150f
-        private const val CARD_DP = 104
         private const val TAG_HIT = -0x7fffffe2
         val SORT_FIELDS = listOf(
             "name" to "Name",

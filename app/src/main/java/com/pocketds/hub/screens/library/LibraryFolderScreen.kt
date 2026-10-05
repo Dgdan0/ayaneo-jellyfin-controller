@@ -17,7 +17,6 @@ import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
-import com.pocketds.hub.settings.Prefs
 import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.ui.AppIcon
 import com.pocketds.hub.ui.BlobSegmentedView
@@ -148,8 +147,6 @@ class LibraryFolderScreen(
     }
 
     private fun showLibrary(view: LibraryView) {
-        // The Classic Library opens on the library chosen last.
-        host?.viewContext?.let { Prefs.of(it).edit().putString(LibraryScreen.KEY_LAST_LIBRARY, view.id).apply() }
         capsule.select(view.id)
         gridView.show(view)
         // The search looks inside the library on show (#14), and says so.

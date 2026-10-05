@@ -12,7 +12,6 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.graphics.ColorUtils
 import coil.ImageLoader
 
 /**
@@ -85,14 +84,13 @@ class CastRowView(
  * genres, the file. Focusable, so the pad can reach the bottom of a long page;
  * there is nothing to do with one.
  *
- * [glass] draws them as the prototype's Details list: a small capital label
- * over the words, no card, and only the focus ring round the one in focus.
+ * They are the prototype's Details list: a small capital label over the
+ * words, no card, and only the focus ring round the one in focus.
  */
 class FactsGridView(
     context: Context,
     private val colors: PocketColors,
-    private val ringVisible: () -> Boolean,
-    private val glass: Boolean = false
+    private val ringVisible: () -> Boolean
 ) : LinearLayout(context) {
     data class Fact(val label: String, val value: String)
 
@@ -120,16 +118,16 @@ class FactsGridView(
     private fun card(fact: Fact) = LinearLayout(context).apply {
         orientation = VERTICAL
         setPadding(dp(12), dp(9), dp(12), dp(10))
-        background = if (glass) Styler.focusOutline(context, colors, 11f) else Styler.cardBackground(context, colors, cornerDp = 12f, focusStrokeDp = 2f)
+        background = Styler.focusOutline(context, colors, 11f)
         contentDescription = "${fact.label}: ${fact.value}"
         Styler.makeFocusable(this)
         descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         addView(TextView(context).apply {
-            text = fact.label.uppercase(); typeRole(Type.Role.EYEBROW); setTextColor(if (glass) GLASS_LABEL else colors.mutedText)
+            text = fact.label.uppercase(); typeRole(Type.Role.EYEBROW); setTextColor(LABEL)
         })
         addView(TextView(context).apply {
             text = fact.value; textSize = 12.5f
-            setTextColor(if (glass) GLASS_VALUE else ColorUtils.blendARGB(colors.mutedText, colors.primaryText, .75f))
+            setTextColor(VALUE)
             setLineSpacing(0f, 1.12f)
         }, LayoutParams(MATCH, WRAP).apply { topMargin = dp(4) })
         FocusDecorator.attach(this, ringVisible, scale = false)
@@ -142,8 +140,8 @@ class FactsGridView(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val COLUMNS = 3
-        /** Glass: the label white at 55%, the words at 92%. */
-        const val GLASS_LABEL = 0x8CFFFFFF.toInt()
-        const val GLASS_VALUE = 0xEBFFFFFF.toInt()
+        /** The label white at 55%, the words at 92%. */
+        const val LABEL = 0x8CFFFFFF.toInt()
+        const val VALUE = 0xEBFFFFFF.toInt()
     }
 }
