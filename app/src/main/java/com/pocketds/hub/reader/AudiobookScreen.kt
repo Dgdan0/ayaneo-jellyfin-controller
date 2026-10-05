@@ -151,9 +151,9 @@ class AudiobookScreen(
         // What the keys do: the app's own hint bar is hidden while a reader is open.
         val keys = ReaderKeys.row(host.viewContext, colors) { onPad(it) }
         keys.setHints(ReaderPadMap.hints(padState()))
-        root.addView(keys, FrameLayout.LayoutParams(MATCH, Styler.dpInt(host.viewContext, com.pocketds.hub.nav.HintBarView.HEIGHT_DP),
+        root.addView(keys, FrameLayout.LayoutParams(MATCH, Styler.dpInt(host.viewContext, ReaderKeys.ROW_DP.toFloat()),
             Gravity.BOTTOM))
-        (content.layoutParams as FrameLayout.LayoutParams).bottomMargin = Styler.dpInt(host.viewContext, com.pocketds.hub.nav.HintBarView.HEIGHT_DP)
+        (content.layoutParams as FrameLayout.LayoutParams).bottomMargin = Styler.dpInt(host.viewContext, ReaderKeys.ROW_DP.toFloat())
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         return root

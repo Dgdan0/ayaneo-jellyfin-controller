@@ -15,6 +15,9 @@ import com.pocketds.hub.ui.Theme
  * from what the keys do.
  */
 object ReaderKeys {
+    /** The row's height in dp: the hint bar's own, which each reader's bar leaves room for. */
+    val ROW_DP: Int = HintBarView.HEIGHT_DP.toInt()
+
     /**
      * The app's hint bar, over a page: its chips are buttons too, handed to
      * [onAction] as the key would be. Classic draws it in the dark video

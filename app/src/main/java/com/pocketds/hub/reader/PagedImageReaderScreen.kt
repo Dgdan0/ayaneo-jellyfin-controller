@@ -417,7 +417,7 @@ class PagedImageReaderScreen(
         navigation.addView(round(AppIcon.NEXT, "Next page") { turnWholePage(1) }, LinearLayout.LayoutParams(dp(48), dp(48)))
         // What the keys do, inside the controls: the app's own hint bar is hidden here.
         keyRow = ReaderKeys.row(host.viewContext, colors) { onPad(it) }
-        bottomBar.addView(keyRow, LinearLayout.LayoutParams(MATCH, dp(KEY_ROW_DP)))
+        bottomBar.addView(keyRow, LinearLayout.LayoutParams(MATCH, dp(ReaderKeys.ROW_DP)))
     }
 
     private fun round(icon: AppIcon, label: String, click: () -> Unit): View =
@@ -1004,8 +1004,7 @@ class PagedImageReaderScreen(
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         /** The navigation row, and the keys' row under it. */
-        const val KEY_ROW_DP = 36
-        const val BOTTOM_DP = 52 + KEY_ROW_DP + 6
+        val BOTTOM_DP = 52 + ReaderKeys.ROW_DP + 6
         /** Before a page's size is known, a comic page's three. */
         const val DEFAULT_STEPS = 3
         /** The right stick at full push: screens a second. */

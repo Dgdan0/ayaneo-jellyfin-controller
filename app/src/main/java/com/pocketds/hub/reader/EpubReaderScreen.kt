@@ -580,7 +580,7 @@ class EpubReaderScreen(
             setPadding(dp(14), dp(5), dp(14), dp(5))
             setBackgroundColor(BAR)
         }
-        root.addView(bottomBar, FrameLayout.LayoutParams(MATCH, dp(88 + KEY_ROW_DP), Gravity.BOTTOM))
+        root.addView(bottomBar, FrameLayout.LayoutParams(MATCH, dp(88 + ReaderKeys.ROW_DP), Gravity.BOTTOM))
         val navigationRow = LinearLayout(host.viewContext).apply { gravity = Gravity.CENTER_VERTICAL }
         bottomBar.addView(navigationRow, LinearLayout.LayoutParams(MATCH, dp(44)))
         navigationRow.addView(control("‹", "Previous page", { turn(-1) }))
@@ -622,7 +622,7 @@ class EpubReaderScreen(
         bottomBar.addView(bookSeek, LinearLayout.LayoutParams(MATCH, dp(34)))
         // What the keys do, inside the menu: the app's own hint bar is hidden here.
         keyRow = ReaderKeys.row(host.viewContext, colors) { onPad(it) }
-        bottomBar.addView(keyRow, LinearLayout.LayoutParams(MATCH, dp(KEY_ROW_DP)))
+        bottomBar.addView(keyRow, LinearLayout.LayoutParams(MATCH, dp(ReaderKeys.ROW_DP)))
     }
 
     private fun buildNarrationDock() {
@@ -1187,7 +1187,7 @@ class EpubReaderScreen(
         pagePreview.setControlsVisible(visible)
         if (::narrationDock.isInitialized) {
             val params = narrationDock.layoutParams as FrameLayout.LayoutParams
-            params.bottomMargin = dp(if (visible) 96 + KEY_ROW_DP else 12)
+            params.bottomMargin = dp(if (visible) 96 + ReaderKeys.ROW_DP else 12)
             narrationDock.layoutParams = params
             narrationDock.visibility = if (visible && narration != null) View.VISIBLE else View.GONE
         }
@@ -1231,8 +1231,6 @@ class EpubReaderScreen(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-        /** The keys' row under the menu's position and scrubber. */
-        const val KEY_ROW_DP = 36
         /** Continuous scrolling: the D-pad moves a third of a screen, the right stick at full push 1.5 screens a second. */
         const val SCROLL_STEP = 1f / 3f
         const val GLIDE = 1.5f
