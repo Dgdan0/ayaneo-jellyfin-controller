@@ -26,6 +26,8 @@ class ReadingCompletionViewTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,
             DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        // A profile of its own, put back afterwards: a device's test build keeps the one it browses with.
+        val oldUser = HubSettings.userId(activity) to HubSettings.userName(activity)
         HubSettings.selectUser(activity, UUID.randomUUID().toString(), "Test reader")
         val work = ReadingWork(id = "book", title = "Book", progress = ReadingProgress(.5, false))
         val api = Proxy.newProxyInstance(HubApi::class.java.classLoader, arrayOf(HubApi::class.java)) { _, method, _ ->
@@ -64,6 +66,9 @@ class ReadingCompletionViewTest {
                 assertEquals(0.0, completion.project(work).progress!!.percentage, 0.0)
                 assertTrue(completion.shouldStartAtBeginning(work.id))
             }
-        } finally { instrumentation.runOnMainSync { screen.onHide(); screen.onDestroyView(); activity.finish() } }
+        } finally {
+            instrumentation.runOnMainSync { screen.onHide(); screen.onDestroyView(); activity.finish() }
+            HubSettings.selectUser(activity, oldUser.first, oldUser.second)
+        }
     }
 }

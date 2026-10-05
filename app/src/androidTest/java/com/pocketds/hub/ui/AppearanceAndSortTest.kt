@@ -94,6 +94,7 @@ class AppearanceAndSortTest {
     }
     @Test fun changingAccentRepaintsRetainedControlsWithoutReplacingThem() {
         val ins=InstrumentationRegistry.getInstrumentation()
+        val oldUser=HubSettings.userId(ins.targetContext) to HubSettings.userName(ins.targetContext)
         val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         try {ins.runOnMainSync {
             HubSettings.selectUser(activity,UUID.randomUUID().toString(),"Theme test")
@@ -109,10 +110,11 @@ class AppearanceAndSortTest {
             assertEquals(Theme.preview(activity,ContentMode.MEDIA).accent,label.currentTextColor)
             assertEquals(label.currentTextColor,bar.progressTintList!!.defaultColor)
             assertEquals(label.currentTextColor,colors.accent)
-        }}finally{ins.runOnMainSync{activity.finish()}}
+        }}finally{ins.runOnMainSync{activity.finish()};HubSettings.selectUser(ins.targetContext,oldUser.first,oldUser.second)}
     }
     @Test fun rememberedSortIsIndependentByProfile() {
         val ins=InstrumentationRegistry.getInstrumentation()
+        val oldUser=HubSettings.userId(ins.targetContext) to HubSettings.userName(ins.targetContext)
         val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         try {ins.runOnMainSync {
             val user=UUID.randomUUID().toString();HubSettings.selectUser(activity,user,"Sort test")
@@ -122,7 +124,7 @@ class AppearanceAndSortTest {
             assertEquals(SortPreference("name",true),DomainPreferences.sort(activity,ContentMode.MEDIA,listOf("name","added"),"name"))
             HubSettings.selectUser(activity,"other-$user","Other")
             assertEquals(SortPreference("series",true),DomainPreferences.sort(activity,ContentMode.BOOKS,listOf("title","series","author"),"series"))
-        }}finally{ins.runOnMainSync{activity.finish()}}
+        }}finally{ins.runOnMainSync{activity.finish()};HubSettings.selectUser(ins.targetContext,oldUser.first,oldUser.second)}
     }
     /**
      * A service's logo follows the look (#11): Classic swaps its light and dark

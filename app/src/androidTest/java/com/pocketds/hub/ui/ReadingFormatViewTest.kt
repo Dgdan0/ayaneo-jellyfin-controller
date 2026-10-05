@@ -28,6 +28,8 @@ class ReadingFormatViewTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,
             DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        // A profile of its own, put back afterwards: a device's test build keeps the one it browses with.
+        val oldUser = HubSettings.userId(activity) to HubSettings.userName(activity)
         HubSettings.selectUser(activity, UUID.randomUUID().toString(), "Format test")
         val work = ReadingWork(id = UUID.randomUUID().toString(), title = "Test book", editions = listOf(
             ReadingEdition(source = "storyteller", sourceItemId = "text", kind = "ebook", format = "epub", availability = "available"),
@@ -70,6 +72,7 @@ class ReadingFormatViewTest {
             }
         } finally {
             instrumentation.runOnMainSync { screen.onHide(); screen.onDestroyView(); activity.finish() }
+            HubSettings.selectUser(activity, oldUser.first, oldUser.second)
         }
     }
 }
