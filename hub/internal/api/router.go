@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -81,6 +82,25 @@ type Server struct {
 	castGrants       map[string]*playbackCastGrant
 	playbackTTL      time.Duration
 	previewFrame     func(context.Context, string, int64) ([]byte, error)
+	// ffprobe for the audiobook routes: the seam a test stubs, how long one
+	// probe may take, the slots that bound how many run at once, and what has
+	// been learned about each file as it was (see audio_probe.go).
+	probeAudio   func(context.Context, string) (probedAudio, error)
+	probeTimeout time.Duration
+	probeSlots   chan struct{}
+	probeMu      sync.Mutex
+	probeCache   map[probeKey]probedAudio
+	// openMedia opens an audiobook's file read-only through the media mapping
+	// (reading.ResolveMediaFile), and is the seam a test wraps to watch handles.
+	openMedia func([]config.MediaRemovalRoot, string, string) (readingdomain.MediaFile, error)
+	// openEPUB is the same for a read-along edition, and readAlignment reads what
+	// it narrates (reading.ReadAlignment); both are seams a test wraps to count.
+	openEPUB      func([]config.MediaRemovalRoot, string, string) (readingdomain.MediaFile, error)
+	readAlignment func(io.ReaderAt, int64) (*readingdomain.Alignment, error)
+	// now is the clock the hub stamps a listening place with.
+	now func() time.Time
+	// How long a track's transfer may stall before it is cut (stream_deadline.go).
+	audioStall       stallPolicy
 	libraryScanMu    sync.Mutex
 	libraryScanWatch bool
 	readingScanMu    sync.Mutex
@@ -123,6 +143,15 @@ func NewServer(cfg *config.Config) *Server {
 		castGrants:            make(map[string]*playbackCastGrant),
 		playbackTTL:           30 * time.Minute,
 		previewFrame:          extractPreviewFrame,
+		probeAudio:            runFFprobe,
+		probeTimeout:          audioProbeTimeout,
+		probeSlots:            make(chan struct{}, audioProbeSlots),
+		probeCache:            map[probeKey]probedAudio{},
+		openMedia:             readingdomain.ResolveMediaFile,
+		openEPUB:              readingdomain.ResolveEPUBFile,
+		readAlignment:         readingdomain.ReadAlignment,
+		now:                   time.Now,
+		audioStall:            defaultStallPolicy,
 		startedAt:             time.Now(),
 	}
 	for _, cidr := range cfg.Server.TrustProxyCIDRs {
@@ -292,6 +321,10 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/pages/{page}/thumb", s.handleReadingPageThumb)
 	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/progress", s.handleReadingPublicationProgress)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/file", s.handleReadingEpubFile)
+	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/audio", s.handleReadingAudioManifest)
+	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/audio/tracks/{n}", s.handleReadingAudioTrack)
+	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/audio/position", s.handleReadingAudioPosition)
+	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/audio/position", s.handleReadingAudioPosition)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/position", s.handleReadingEpubPosition)
 	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/position", s.handleReadingEpubPosition)
 	authed.HandleFunc("GET /v1/reading/requests/options", s.handleReadingRequestOptions)

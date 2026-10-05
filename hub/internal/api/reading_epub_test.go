@@ -7,8 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type epubUpstreamState struct {
@@ -20,6 +24,102 @@ type epubUpstreamState struct {
 	readaloud  bool
 	audiobook  bool
 	formatSeen string
+	// audio is the raw JSON of the "audiobook" field Storyteller reports for
+	// book 12 when a test needs its real shape: the folder it lives in, in
+	// Storyteller's own filesystem, and a manifest of its files (see
+	// storytellerAudiobook). Empty keeps the bare edition older tests use.
+	audio string
+	// narrators is the raw JSON array of the book's narrators.
+	narrators string
+	// noFiles makes Storyteller's /files route, the one that builds and sends a
+	// ZIP, fail the test if it is called: audio streamed from the hub's own files
+	// must never go through it.
+	noFiles bool
+	// readaloudJSON is the raw JSON of the "readaloud" field for book 12 beside
+	// an audio one: the aligned EPUB's path in Storyteller's filesystem and its
+	// status.
+	readaloudJSON string
+	// positions, when set, is Storyteller's real position table for book 12,
+	// with the rules of its database/positions.ts, in place of the fixed
+	// locator and the one-shot conflict switch of the older tests.
+	positions *storytellerPositions
+}
+
+// storytellerPositions is Storyteller's position table for one book, kept as
+// database/positions.ts keeps it: one row, a Readium locator and a timestamp.
+// A write is refused when the stored timestamp is newer, or equal with another
+// locator; a read of an empty table is a 404.
+type storytellerPositions struct {
+	mu        sync.Mutex
+	locator   json.RawMessage
+	timestamp int64
+	has       bool
+	posts     int // writes asked for
+	refused   int // writes refused
+	// race, when set, runs once as a write arrives and before it is judged, with
+	// the table unlocked: another writer getting in first.
+	race func()
+	// history is each locator the table accepted, in the order it did.
+	history []json.RawMessage
+}
+
+func (p *storytellerPositions) seed(locator string, timestamp int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.locator, p.timestamp, p.has = json.RawMessage(locator), timestamp, true
+}
+
+// stored is the locator and timestamp now held, as a test reads them.
+func (p *storytellerPositions) stored() (json.RawMessage, int64, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.locator, p.timestamp, p.has
+}
+
+func (p *storytellerPositions) serve(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		p.mu.Lock()
+		race := p.race
+		p.race = nil
+		p.mu.Unlock()
+		if race != nil {
+			race()
+		}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch r.Method {
+	case http.MethodGet:
+		if !p.has {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, `{"uuid":"position-12","locator":`+string(p.locator)+`,"timestamp":`+strconv.FormatInt(p.timestamp, 10)+`,"updatedAt":"2026-10-05T12:00:00Z"}`)
+	case http.MethodPost:
+		var body struct {
+			Locator   json.RawMessage `json:"locator"`
+			Timestamp int64           `json:"timestamp"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("the hub wrote an unreadable position: %v", err)
+			http.Error(w, "bad body", http.StatusBadRequest)
+			return
+		}
+		p.posts++
+		if p.has && (p.timestamp > body.Timestamp || (p.timestamp == body.Timestamp && !sameJSON(p.locator, body.Locator))) {
+			p.refused++
+			http.Error(w, "a newer position exists", http.StatusConflict)
+			return
+		}
+		p.locator, p.timestamp, p.has = body.Locator, body.Timestamp, true
+		p.history = append(p.history, body.Locator)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func sameJSON(a, b json.RawMessage) bool {
+	var left, right any
+	return json.Unmarshal(a, &left) == nil && json.Unmarshal(b, &right) == nil && reflect.DeepEqual(left, right)
 }
 
 func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
@@ -31,6 +131,19 @@ func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
 		case "/api/v2/books":
 			_, _ = io.WriteString(w, `[{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":{"uuid":"ebook-12","pageCount":400}}]`)
 		case "/api/v2/books/12":
+			if state.audio != "" {
+				narrators := state.narrators
+				if narrators == "" {
+					narrators = "[]"
+				}
+				readaloud := ""
+				if state.readaloudJSON != "" {
+					readaloud = `,"readaloud":` + state.readaloudJSON
+				}
+				_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"narrators":`+narrators+
+					`,"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":{"uuid":"ebook-12","pageCount":400},"audiobook":`+state.audio+readaloud+`}`)
+				return
+			}
 			if state.readaloud {
 				_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","ebook":{"uuid":"ebook-12"},"audiobook":{"uuid":"audio-12"},"readaloud":{"uuid":"aligned-12"}}`)
 				return
@@ -41,6 +154,11 @@ func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
 			}
 			_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":{"uuid":"ebook-12","pageCount":400}}`)
 		case "/api/v2/books/12/files":
+			if state.noFiles {
+				t.Errorf("Storyteller's /files route was called (%s): streaming must read the files itself", r.URL)
+				http.Error(w, "streaming must not build an archive", http.StatusInternalServerError)
+				return
+			}
 			state.fileCalls++
 			state.rangeSeen = r.Header.Get("Range")
 			state.formatSeen = r.URL.Query().Get("format")
@@ -61,6 +179,10 @@ func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
 			w.WriteHeader(http.StatusPartialContent)
 			_, _ = io.WriteString(w, "4567")
 		case "/api/v2/books/12/positions":
+			if state.positions != nil {
+				state.positions.serve(t, w, r)
+				return
+			}
 			switch r.Method {
 			case http.MethodGet:
 				_, _ = io.WriteString(w, `{"uuid":"position-12","locator":{"href":"chapter-4.xhtml","type":"application/xhtml+xml","locations":{"progression":0.4,"totalProgression":0.32,"position":44},"text":{"highlight":"Darrow"}},"timestamp":1700000000000}`)
@@ -183,7 +305,11 @@ func TestReadingEpubProgressRoundTripsFullLocatorAndSurfacesConflict(t *testing.
 	state := &epubUpstreamState{}
 	upstream := newEpubUpstream(t, state)
 	defer upstream.Close()
-	handler := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})).Handler()
+	server := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"}))
+	// The hub stamps the write, once the check has passed, with its own clock: the
+	// app's `timestamp` below is accepted and not used (reading_epub_stamp_test.go).
+	server.now = func() time.Time { return time.UnixMilli(1_800_000_000_000) }
+	handler := server.Handler()
 	_, childID := bindEpubWork(t, handler)
 	path := "/v1/reading/works/" + childID + "/publications/12/position"
 
@@ -193,7 +319,7 @@ func TestReadingEpubProgressRoundTripsFullLocatorAndSurfacesConflict(t *testing.
 	}
 	locator := `{"href":"chapter-5.xhtml","type":"application/xhtml+xml","locations":{"progression":0.1,"totalProgression":0.4,"position":51},"text":{"before":"red","highlight":"rising"}}`
 	saved := publicationRequest(handler, http.MethodPost, path, `{"locator":`+locator+`,"timestamp":1700000001234}`)
-	if saved.Code != http.StatusOK || state.timestamp != 1700000001234 || !bytes.Equal(state.saved, []byte(locator)) {
+	if saved.Code != http.StatusOK || state.timestamp != 1_800_000_000_000 || !bytes.Equal(state.saved, []byte(locator)) {
 		t.Fatalf("save = %d %s upstream=%s @ %d", saved.Code, saved.Body.String(), state.saved, state.timestamp)
 	}
 	state.conflict = true

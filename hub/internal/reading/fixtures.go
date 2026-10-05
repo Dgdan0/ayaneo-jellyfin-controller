@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -400,7 +401,11 @@ func retagFixtureMP3(audio []byte, fields map[string]string) ([]byte, error) {
 	}
 
 	var frames bytes.Buffer
-	for _, id := range []string{"TIT2", "TPE1", "TALB"} {
+	ids := []string{"TIT2", "TPE1", "TALB"}
+	if fields["TRCK"] != "" {
+		ids = append(ids, "TRCK")
+	}
+	for _, id := range ids {
 		textValue := fields[id]
 		payload := append([]byte{3}, []byte(textValue)...)
 		frames.WriteString(id)
@@ -423,6 +428,319 @@ func decodeSynchsafe(value []byte) int {
 
 func encodeSynchsafe(value int) []byte {
 	return []byte{byte(value >> 21 & 0x7f), byte(value >> 14 & 0x7f), byte(value >> 7 & 0x7f), byte(value & 0x7f)}
+}
+
+// AudiobookFixtureFile is one generated audio file of an audiobook folder.
+type AudiobookFixtureFile struct {
+	Name string
+	// Track is the number the file's own tags give it; 0 when it has none.
+	Track int
+	Size  int64
+}
+
+// AudiobookFixture describes a generated audiobook folder.
+type AudiobookFixture struct {
+	Dir      string // the folder on this machine
+	Relative string // the same, slash-separated, relative to the root it was generated under
+	// Files are in the order Storyteller's manifest would list them, which is
+	// not always the story's.
+	Files []AudiobookFixtureFile
+	// Others are files in the folder that are not audio.
+	Others []string
+}
+
+// GenerateTrackedAudiobook writes the folder of a book split into five MP3s
+// whose names do not sort in the story's order, as Dark Matter's did: the file
+// with no suffix is its first track by its tags and sorts after the others. The
+// names are the kind that break paths (spaces, brackets, a percent sign, an
+// ampersand, a hash, an apostrophe, accents, Hebrew, an upper-case extension)
+// and every one is a legal Windows name. The audio in each is the lab's
+// one-second narration, retagged so that no two files have the same bytes.
+func GenerateTrackedAudiobook(root string) (AudiobookFixture, error) {
+	const title = "Fixture Odyssey"
+	// The manifest order is a plausible localeCompare one, declared rather than
+	// computed: a test needs it fixed, not faithful to ICU.
+	listed := []struct {
+		name  string
+		track int
+	}{
+		{"Part 5 - 100% Pure & Co., It's #5 [Ünïcode] פרק.mp3", 5},
+		{"Fixture Odyssey (1).mp3", 2},
+		{"Fixture Odyssey (2).mp3", 3},
+		{"Fixture Odyssey (3).MP3", 4},
+		{"Fixture Odyssey.mp3", 1},
+	}
+	book, err := newAudiobookFolder(root, "audiobooks/"+title)
+	if err != nil {
+		return AudiobookFixture{}, err
+	}
+	base, err := base64.StdEncoding.DecodeString(fixtureMP3Base64)
+	if err != nil {
+		return AudiobookFixture{}, err
+	}
+	for _, file := range listed {
+		audio, err := retagFixtureMP3(base, map[string]string{
+			"TIT2": fmt.Sprintf("%s, part %d", title, file.track),
+			"TPE1": "Fixture Author",
+			"TALB": title,
+			"TRCK": fmt.Sprintf("%d/%d", file.track, len(listed)),
+		})
+		if err != nil {
+			return AudiobookFixture{}, err
+		}
+		if err := book.write(file.name, audio); err != nil {
+			return AudiobookFixture{}, err
+		}
+		book.Files = append(book.Files, AudiobookFixtureFile{Name: file.name, Track: file.track, Size: int64(len(audio))})
+	}
+	return book.AudiobookFixture, nil
+}
+
+// GenerateM4BAudiobook writes the folder of a book that is one M4B, beside a
+// cover and a note. Storyteller reads a folder with exactly one .m4b as that
+// file's chapters and ignores the rest. The M4B's bytes are stored, not audio: a
+// box header and a body of a known pattern, so a test can check any byte range
+// the hub serves without decoding anything.
+func GenerateM4BAudiobook(root string) (AudiobookFixture, error) {
+	book, err := newAudiobookFolder(root, "audiobooks/Fixture Chapters")
+	if err != nil {
+		return AudiobookFixture{}, err
+	}
+	m4b := fixtureM4B(96 << 10)
+	if err := book.write("Fixture Chapters.m4b", m4b); err != nil {
+		return AudiobookFixture{}, err
+	}
+	book.Files = append(book.Files, AudiobookFixtureFile{Name: "Fixture Chapters.m4b", Size: int64(len(m4b))})
+	for name, body := range map[string]string{
+		"cover.jpg": "\xff\xd8\xff\xe0 a cover that is not an image",
+		"notes.txt": "A folder Storyteller reads as one audiobook.\n",
+	} {
+		if err := book.write(name, []byte(body)); err != nil {
+			return AudiobookFixture{}, err
+		}
+		book.Others = append(book.Others, name)
+	}
+	sort.Strings(book.Others)
+	return book.AudiobookFixture, nil
+}
+
+type audiobookFolder struct {
+	AudiobookFixture
+}
+
+func newAudiobookFolder(root, relative string) (*audiobookFolder, error) {
+	dir := filepath.Join(root, filepath.FromSlash(relative))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	return &audiobookFolder{AudiobookFixture{Dir: dir, Relative: relative}}, nil
+}
+
+func (f *audiobookFolder) write(name string, data []byte) error {
+	return os.WriteFile(filepath.Join(f.Dir, name), data, 0o644)
+}
+
+// fixtureM4B is an ftyp box naming the brand and an mdat box that fills the rest
+// of size bytes with a pattern in which no two nearby offsets agree.
+func fixtureM4B(size int) []byte {
+	brands := []byte("M4B \x00\x00\x00\x00M4B mp42isom")
+	var out bytes.Buffer
+	_ = binary.Write(&out, binary.BigEndian, uint32(8+len(brands)))
+	out.WriteString("ftyp")
+	out.Write(brands)
+	body := size - out.Len() - 8
+	_ = binary.Write(&out, binary.BigEndian, uint32(8+body))
+	out.WriteString("mdat")
+	for i := 0; i < body; i++ {
+		out.WriteByte(byte(i*7 + i/251))
+	}
+	return out.Bytes()
+}
+
+// FixtureNarration is one narrated source file of an aligned book as Storyteller
+// cuts it: a source over its maximum track length (two hours) is split into
+// chunks, each its own audio file in the edition.
+type FixtureNarration struct {
+	// ChunkMs is each chunk's narrated length: where its last sentence ends.
+	ChunkMs []int64
+	// Sentences is how many sentences each chunk narrates.
+	Sentences []int
+}
+
+type AlignedEPUBOptions struct {
+	Narrations []FixtureNarration
+	// PackageDir is the folder the package document lives in ("OEBPS"); empty puts
+	// it at the root of the archive. Every path in the SMIL is relative to it.
+	PackageDir string
+	// AudioBytes is the size of each stored audio entry: filler, not audio.
+	AudioBytes int
+}
+
+// FixturePar is one narrated sentence, as the SMIL says it, in millisecond
+// terms: the truth a reader of the edition is tested against.
+type FixturePar struct {
+	Text     string // zip path of the text document
+	Fragment string
+	Audio    string // zip path of the audio file
+	BeginMs  int64
+	EndMs    int64
+}
+
+type FixtureChunk struct {
+	Entry    string
+	Source   int
+	Chunk    int
+	LengthMs int64
+}
+
+type AlignedEPUBFixture struct {
+	Path    string
+	Package string // zip path of the package document
+	Pars    []FixturePar
+	Audio   []string
+	Chunks  []FixtureChunk
+}
+
+// GenerateAlignedEPUB writes a read-along edition shaped as Storyteller's are
+// (audio stored, files named NNNNN-CCCCC, one SMIL per narrated source with one
+// <par> per sentence, gapless) and says exactly what it holds. The same moment
+// is written in every way a clock value can be: 12.500s, 0:00:12.500,
+// 00:12.500, 12500ms, 0.208333min, 0.003472h, a bare number and npt=.
+func GenerateAlignedEPUB(path string, options AlignedEPUBOptions) (AlignedEPUBFixture, error) {
+	dir := options.PackageDir
+	rel := func(name string) string { // a path inside the package folder
+		if dir == "" {
+			return name
+		}
+		return dir + "/" + name
+	}
+	fixture := AlignedEPUBFixture{Path: path, Package: rel("content.opf")}
+	files := []zipFileSpec{}
+	var manifest, spine strings.Builder
+	manifest.WriteString(`<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`)
+	var navigation strings.Builder
+	parIndex := 0
+	for sourceIndex, narration := range options.Narrations {
+		source := sourceIndex + 1
+		chapter := fmt.Sprintf("part%04d", source)
+		textHref, smilHref := "text/"+chapter+".xhtml", "smil/"+chapter+".smil"
+		var smil, body strings.Builder
+		sentence := 0
+		for chunkIndex, length := range narration.ChunkMs {
+			chunk := chunkIndex + 1
+			audioHref := fmt.Sprintf("Audio/%05d-%05d.mp3", source, chunk)
+			audioEntry := rel(audioHref)
+			count := narration.Sentences[chunkIndex]
+			step := length / int64(count)
+			fixture.Audio = append(fixture.Audio, audioEntry)
+			fixture.Chunks = append(fixture.Chunks, FixtureChunk{Entry: audioEntry, Source: source, Chunk: chunk, LengthMs: length})
+			fmt.Fprintf(&manifest, `<item id="au%d-%d" href="%s" media-type="audio/mpeg"/>`, source, chunk, audioHref)
+			filler := make([]byte, options.AudioBytes)
+			for i := range filler {
+				filler[i] = byte(i*13 + source*7 + chunk)
+			}
+			files = append(files, zipFileSpec{name: audioEntry, data: filler, store: true})
+			for k := 0; k < count; k++ {
+				begin, end := int64(k)*step, int64(k+1)*step
+				if k == count-1 {
+					end = length
+				}
+				fragment := fmt.Sprintf("id%d-s%d", source, sentence)
+				sentence++
+				fmt.Fprintf(&body, `<span id="%s">Sentence %d of part %d.</span> `, fragment, sentence, source)
+				fmt.Fprintf(&smil, `<par id="p%d"><text src="../%s#%s"/><audio src="../%s" clipBegin="%s" clipEnd="%s"/></par>`,
+					parIndex, textHref, fragment, audioHref, fixtureClock(begin, parIndex), fixtureClock(end, parIndex+3))
+				parIndex++
+				fixture.Pars = append(fixture.Pars, FixturePar{Text: rel(textHref), Fragment: fragment, Audio: audioEntry, BeginMs: begin, EndMs: end})
+			}
+		}
+		files = append(files,
+			zipFileSpec{name: rel(textHref), data: []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Part %d</title></head><body><p>%s</p></body></html>`, source, body.String()))},
+			zipFileSpec{name: rel(smilHref), data: []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><seq id="s%d" epub:textref="../%s" epub:type="bodymatter chapter">%s</seq></body></smil>`, source, textHref, smil.String()))},
+		)
+		fmt.Fprintf(&manifest, `<item id="ch%d" href="%s" media-type="application/xhtml+xml" media-overlay="ov%d"/><item id="ov%d" href="%s" media-type="application/smil+xml"/>`, source, textHref, source, source, smilHref)
+		fmt.Fprintf(&spine, `<itemref idref="ch%d"/>`, source)
+		fmt.Fprintf(&navigation, `<li><a href="%s">Part %d</a></li>`, textHref, source)
+	}
+	container := fmt.Sprintf(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="%s" media-type="application/oebps-package+xml"/></rootfiles></container>`, fixture.Package)
+	pack := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">%saligned</dc:identifier><dc:title>Aligned fixture</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta></metadata><manifest>%s</manifest><spine>%s</spine></package>`, FixtureIdentifierPrefix, manifest.String(), spine.String())
+	nav := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol>%s</ol></nav></body></html>`, navigation.String())
+	head := []zipFileSpec{
+		{name: "META-INF/container.xml", data: []byte(container)},
+		{name: fixture.Package, data: []byte(pack)},
+		{name: rel("nav.xhtml"), data: []byte(nav)},
+	}
+	data, err := writeZip("application/epub+zip", append(head, files...))
+	if err != nil {
+		return AlignedEPUBFixture{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return AlignedEPUBFixture{}, err
+	}
+	return fixture, os.WriteFile(path, data, 0o644)
+}
+
+// fixtureClock writes a moment as a SMIL clock value, in a form chosen by n.
+func fixtureClock(ms int64, n int) string {
+	seconds := float64(ms) / 1000
+	h, m, s := ms/3_600_000, (ms/60_000)%60, float64(ms%60_000)/1000
+	switch n % 8 {
+	case 0:
+		return fmt.Sprintf("%.3fs", seconds)
+	case 1:
+		return fmt.Sprintf("%d:%02d:%06.3f", h, m, s)
+	case 2:
+		return fmt.Sprintf("%02d:%06.3f", ms/60_000, s)
+	case 3:
+		return fmt.Sprintf("%dms", ms)
+	case 4:
+		return fmt.Sprintf("%.9fmin", float64(ms)/60_000)
+	case 5:
+		return fmt.Sprintf("%.12fh", float64(ms)/3_600_000)
+	case 6:
+		return fmt.Sprintf("%.3f", seconds)
+	default:
+		return fmt.Sprintf("npt=%.3fs", seconds)
+	}
+}
+
+type zipFileSpec struct {
+	name  string
+	data  []byte
+	store bool // kept as is rather than compressed
+}
+
+// writeZip writes an archive with a stored mimetype first, then the files in the
+// order given, each with a fixed time so the bytes are the same every run.
+func writeZip(mimetype string, files []zipFileSpec) ([]byte, error) {
+	var output bytes.Buffer
+	writer := zip.NewWriter(&output)
+	modified := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	entry, err := writer.CreateHeader(&zip.FileHeader{Name: "mimetype", Method: zip.Store})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := io.WriteString(entry, mimetype); err != nil {
+		return nil, err
+	}
+	for _, file := range files {
+		header := &zip.FileHeader{Name: file.name, Method: zip.Deflate}
+		if file.store {
+			header.Method = zip.Store
+		}
+		header.SetModTime(modified)
+		entry, err := writer.CreateHeader(header)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := entry.Write(file.data); err != nil {
+			return nil, err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return output.Bytes(), nil
 }
 
 const fixtureMP3Base64 = "SUQzBAAAAAAASFRJVDIAAAAcAAADQ2xvY2t3b3JrIElzbGFuZCBuYXJyYXRpb24AVFNTRQAAAA4AAANMYXZmNjIuMy4xMDAAAAAAAAAAAAAAAP/zWMAAAAAAAAAAAABJbmZvAAAADwAAAB4AAAkkABsbGyMjIysrKzMzMzM7OztCQkJKSkpKUlJSWlpaYmJiYmpqanJycnp6enqBgYGJiYmRkZGRmZmZoaGhqampqbGxsbm5ucDAwMDIyMjQ0NDY2NjY4ODg6Ojo8PDw8Pj4+P///wAAAABMYXZjNjIuMTEAAAAAAAAAAAAAAAAkAsAAAAAAAAAJJFHIIbsAAAAAAAAAAAAAAP/zKMQAC8ACzb9BGAKpAGS4f/gAA+D4Pg+fBCD4Pgg45Lg+D4P8EHYPn/+UD/Bw5iAH9YOHMgD/Ajuf6GlKBf/+DQBPX3j9/f/zKMQMEDDmiAGbkAAwovOEZgYZHGKIFFDxxUB8g3hD4QHGLegA6h3MQIc4c4o/5FSKmReL3/oomIiPfWCoiPfwVf//+5Gnav/zKMQGDkh2OAHeEABuQFwjAFAmAQNRgbAumFgPKacAwxv+kDGK+LoYcwV5hJCRhcHUwLgBUfXqfq1Miv////SqpXeXaX9CoP/zKMQHDWBqMAAHtiwICAEzADAuMBYG8wWRbjJq8oNUEeYwRgXTHQQ4azMrNQUjIitOis8Mb//////+qv///OMP29rCRABDAP/zKMQMDsByLADn+ICGzCg6Mcoc0pnjDQUJQxvQIyMDPAtTM5rNTQAxyRAMT0DGnvxL6TAPf///93/7av///ckfF0ldIsjw+P/zKMQMDMhuMADfuIByQBqc9IONKUIY56AMjD1BPMcnEwVcBCdCQGqPPTJK9Qz///////ZV///90z+s6SGLcgkFGBBCYbKxmP/zKMQTDLBqNADntoAlZlC5MmrsMaYK4HxhAmbTeGPGwKMU1nFi1kez////vf///VPFIGZkhzCgOMCisw4ZjLNJMhDW00dRv//zKMQbC7BuNADntoEwhAhDRkA4GdMmIw40Um8kXllsMf///Ufeh0WSothw4Aks1ISPRVzScOjOdkI0w9gYDIByMS28AHMUBf/zKMQnDHhuMADfuIAtt6I/MVw9////0P///VK7TOUhS4QAA5gkNGJCaZziRlwXdGxyLUYOAFoFIDXNsxlBARUnS40Vtcg1sf/zKMQwC5huNADntoEjgVkKTgjALBAERgGgsmBsJQYseGhmCDIGC6DebdafDEaEYLK1uQuct2Aj///////a///9zEfjzzK8DP/zKMQ8DHhuOAAHtCwHMUADORc5hoM3dIw3agnjC5BPMYlMxNDgCTguAW4ROYrgg///////9dX///3Kn1Z0kMXdMBBDDhUy1P/zKMRFDMhqOADfuIAjhPczM6szbgFFMIcBggLzT/QxJKMQAU6ndjVL0t////0KtyZ1lpFQAEYAQCoFpgDA1GBOK6YhnH5kmv/zKMRMDJhuNADftoA65gqA/GfFRwqSZQAkR4oW9kjnLYW////6Kv///U28ElbMgPAQwZGJmnHB5OCaMT85ytiKmHkD0ZOOhv/zKMRUDJBuNAAHtixPrphA1mAAQre+kTpKcPf///9N///9Slwl2oOlmjCAMxkUM+Qzq/Yz9K1jh7FEMLQAcKEYyZNTCZhMJv/zKMRcDOhuMADfuIAGSJcqM0x0N////97///7egZlqVJCBiEMiIbAk/mDMoYDig0GB/BDxgIYEaaKSnODA8zFCcjC2eDp+wP/zKMRjDPhqMADfuIBH//////+y///7sQbnADbgoAGFQeYyFRmsynAJ4au+QR3ODcGJ6FuZ1TpoTbGKUUYVCaEhlcMRuksAT//zKMRqDXBuMADn9oD///7v/2VV///7sBLRROARjYM+qMDgCEwdQVjEeE9NkPcE9WBlxomsw2hzMf2MOKgw8HSyywrtSkgDP//zKMRvDphyKADnuID///3//oqd/////3L///5POquovcKAshDxVIZIkgtzzAnUq8wXoJpMAgAmjSBo7MYM+ABphIgZisKkFv/zKMRvD+hqJADHuGTC3////TX///1XiFPGFAwAAGIiZlx0cHmmYBEibOYkJhUAzGdJxp/SYgggYIYm/lPSVxz///1HW5LlQP/zKMRqDRhuLADn9oAIQDAohMpBjWCk+O2NQaJA6uw6DD4ASMPGwxZjzAqBMEhBHllUMzRMz////3f/t3X///7OuMsUuqIQUP/zKMRwCzhuOADftoGIPiEgARImJeMYLsk3GGhhLg4BHmfgZ1zCZ6MhjEPAq/oTR2Aj///////a///90kbnImnIBQMwwWMrQ//zKMR+DehqLADfuIA3jmMsWZY18BQDCfBtM9SzWNYxU4BQuuiH5ZT2Az////0//9v///3HnhZUmEJAIkNBCKaeFHlM5pEq+v/zKMSBDXhuLADn9oBzYA/mHKBOYlMpgmzBY5AQFqVOjEqoYf//////+tX///5TO6xJBMFgKFwoCBmYJOxjy/mPH+GaEQ/5gf/zKMSGDPhuOADftoAINg8onHwhlxIEJKETawNO2xb////o//Uq///9St/JO2AvOYACBhUWmNjUaTqJmhbMm32OaYYgTBlgxP/zKMSNDRBqMADfuIBoeAmKCOAhomu4kPyynzE1///9SiGGFpMInmAKAyYCoABgkA4GGQOkaEBLxuYjbmIOEGYDYOpg+iDhUP/zKMSTDUhuMADntoBrMDcAtDd6n4ljAhUON11bYXC4bAUDAYAAD/31yW5fhhMIZlpmthFoRMzrOmYoSQaohzEwMmLDME+Bg//zKMSYDFhyMADnuIEEAQFC/npuggJREdDHkG+zp2GVIYTpFin+gzp2NiZLDF47/KsCv/KsCpVn/4VJCg8kKISeNI0jqjl9EP/zKMShDZBqPAFeAAGQkKFKU0Tpi1YS2k5cy2j0mTETyHIczQDAIKSciRI7JFHIQVkFPBTYpvArxtVMQU1FMy4xMDBVVVVVVf/zKMSlGDki3l+aoAJVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zKMR/DUimRAHPMAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ=="

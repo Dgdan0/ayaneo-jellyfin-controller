@@ -482,6 +482,8 @@ func (s *Server) handleReadingWork(w http.ResponseWriter, r *http.Request) {
 	}
 	combined.ID = workID
 	combined.Partial = partial
+	// Storyteller can hold one book twice; the work offers one audiobook of it.
+	combined.Editions = oneAudiobookPerWork(combined.Editions)
 	writeJSON(w, http.StatusOK, combined)
 }
 

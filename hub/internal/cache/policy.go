@@ -63,6 +63,26 @@ var (
 	// stale-if-error keeps the previous timeline visible during a brief outage.
 	Notifications = Spec{Fresh: 15 * time.Second, Stale: 45 * time.Second, IfError: 10 * time.Minute}
 
+	// An audiobook's track list as the hub read it from the disk: which files,
+	// in which order, how big, how long. It is rebuilt from the book's record
+	// and the files themselves, so it only has to outlive a burst of requests
+	// (the app asks to open a book, and again for the next track). Never stale:
+	// a track list that names a file that moved is not slightly old, it is wrong.
+	// A rescan or a deletion clears it at once, and a track request checks the
+	// file against it, so a change inside the minute is caught there.
+	ReadingAudio = Spec{Fresh: time.Minute, Stale: 0, IfError: 0}
+
+	// What a read-along edition says about its narration, read from the edition's
+	// zip directory and its SMIL. The key already holds the file's size and
+	// modified time, so a changed file is a different key and this only bounds
+	// how long an unused reading is kept. Never stale.
+	ReadingAlignment = Spec{Fresh: 6 * time.Hour, Stale: 0, IfError: 0}
+
+	// A read-along edition without its audio: its text and SMIL, about a
+	// megabyte, kept so that a book opened on several devices, or resumed, is
+	// built once. The key holds the edition's size and modified time. Never stale.
+	ReadingSlimEPUB = Spec{Fresh: 6 * time.Hour, Stale: 0, IfError: 0}
+
 	// A reading page scaled to a thumbnail. A chapter's pages do not change
 	// while it is in the library, so it lives as long as any image; an old
 	// copy is still the same page, so stale and if-error match.

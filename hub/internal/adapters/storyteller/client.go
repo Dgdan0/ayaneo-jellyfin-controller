@@ -81,12 +81,24 @@ type Ebook struct {
 	Missing   bool   `json:"missing"`
 }
 
+// AudiobookLink is one entry of an audiobook's manifest, the snapshot Storyteller
+// takes when it scans the folder. For a folder of audio files it is one link per
+// file and Href is the file's name; for a folder with exactly one .m4b it is one
+// link per chapter and Href is a name that exists nowhere on disk
+// ("00000-00001.mp3"), Title and Duration those of the chapter.
+type AudiobookLink struct {
+	Href  string `json:"href"`
+	Type  string `json:"type,omitempty"`
+	Title string `json:"title,omitempty"`
+	// Duration is in seconds, as every Storyteller duration is.
+	Duration float64 `json:"duration,omitempty"`
+	Size     int64   `json:"size,omitempty"`
+}
+
 type Audiobook struct {
 	Filepath string `json:"filepath"`
 	Manifest struct {
-		ReadingOrder []struct {
-			Href string `json:"href"`
-		} `json:"readingOrder"`
+		ReadingOrder []AudiobookLink `json:"readingOrder"`
 	} `json:"manifest"`
 	UUID     string  `json:"uuid"`
 	Duration float64 `json:"duration,omitempty"`

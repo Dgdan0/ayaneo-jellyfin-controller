@@ -50,7 +50,7 @@ func TestOfflineMediaRangeOutlivesServerWriteTimeout(t *testing.T) {
 			request.Header.Set(jellyfinUserHeader, playbackUserID)
 			request.Header.Set("Range", "bytes=2-5")
 			client := server.Client()
-			client.Timeout = 3 * time.Second
+			client.Timeout = patient
 			response, err := client.Do(request)
 			if err != nil {
 				t.Fatalf("resumed offline stream failed: %v", err)

@@ -25,8 +25,12 @@ type Partial struct {
 
 // Error is returned only when nothing renderable exists.
 type Error struct {
-	Code              string `json:"code"`
-	Service           string `json:"service,omitempty"`
+	Code    string `json:"code"`
+	Service string `json:"service,omitempty"`
+	// Reason narrows a code that has several causes (audio_not_streamable:
+	// unmapped_root, missing_file, unsupported_layout). Message is for people;
+	// this is for the app to branch on.
+	Reason            string `json:"reason,omitempty"`
 	Message           string `json:"message"`
 	Retryable         bool   `json:"retryable"`
 	RetryAfterSeconds int    `json:"retryAfterSeconds,omitempty"`
