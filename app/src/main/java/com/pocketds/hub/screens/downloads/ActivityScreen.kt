@@ -41,6 +41,7 @@ import com.pocketds.hub.ui.AppIconDrawable
 import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.BlobSegmentedView
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.FocusPlace
 import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.PillButton
 import com.pocketds.hub.ui.PocketColors
@@ -272,12 +273,12 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
             is HubResult.Ok -> {
                 activity = result.value
                 activityError = result.value.partial.firstOrNull { it.service == "qbittorrent" }?.message.orEmpty()
-                renderTransfers(); renderAttention()
+                rebuilt { renderTransfers(); renderAttention() }
                 PollOutcome(ok = true, active = result.value.anyActive)
             }
             is HubResult.Failed -> {
                 activityError = result.message
-                renderTransfers()
+                rebuilt { renderTransfers() }
                 PollOutcome(ok = false)
             }
         }
@@ -286,10 +287,10 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
     private fun loadSlow() {
         slowLoadedAt = System.currentTimeMillis()
         scope.launch {
-            (api.health() as? HubResult.Ok)?.value?.let { health = it; renderServices(); renderAttention() }
+            (api.health() as? HubResult.Ok)?.value?.let { health = it; rebuilt { renderServices(); renderAttention() } }
         }
         scope.launch {
-            (api.serverMonitor() as? HubResult.Ok)?.value?.let { disks = it.host.disks; renderStorage(); renderAttention() }
+            (api.serverMonitor() as? HubResult.Ok)?.value?.let { disks = it.host.disks; rebuilt { renderStorage(); renderAttention() } }
         }
         scope.launch {
             bandwidth = (api.bandwidth() as? HubResult.Ok)?.value
@@ -299,7 +300,7 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
             val today = LocalDate.now(zone)
             // The hub serves at most 31 days: a fortnight back for anything missed, a little over two weeks ahead.
             when (val result = api.calendar(today.minusDays(14).toString(), today.plusDays(17).toString(), zone.id)) {
-                is HubResult.Ok -> renderAgenda(result.value.items)
+                is HubResult.Ok -> rebuilt { renderAgenda(result.value.items) }
                 is HubResult.Failed -> if (agendaRows.childCount == 0) agendaRows.addView(quiet(result.message))
             }
         }
@@ -312,9 +313,12 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
 
     // ---- rendering -----------------------------------------------------------
 
-    private fun renderAll() {
+    private fun renderAll() = rebuilt {
         renderTransfers(); renderAttention(); renderServices(); renderStorage(); renderSpeed()
     }
+
+    /** Rows drawn again, while away too (a poll on coming back): the place Back returns to moves with them (#23). */
+    private fun rebuilt(draw: () -> Unit) = if (::root.isInitialized) FocusPlace.across(root, draw) else draw()
 
     /** Glass: what the cards below say, in one line under the heading. */
     private fun renderHeadline() {
@@ -494,6 +498,7 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
     }
 
     override fun requestInitialFocus(): Boolean {
+        if (::root.isInitialized && FocusPlace.focus(root)) return true
         if (mode == ContentMode.BOOKS) return books.requestInitialFocus()
         return columns.firstNotNullOfOrNull { focusables(it).firstOrNull() }?.requestFocus() ?: false
     }

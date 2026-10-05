@@ -44,7 +44,18 @@ class CastRowView(
         addView(row, ViewGroup.LayoutParams(WRAP, WRAP))
     }
 
+    /** The people shown now. */
+    private var bound: List<Person>? = null
+
+    /**
+     * Shows [people]; the same people again leave the faces as they are. A title
+     * page reads its title again on coming back, and Discover's every four seconds
+     * while a download runs: drawing the faces again dropped the one in focus, so
+     * Back from a filmography landed elsewhere a moment later (#23).
+     */
     fun bind(people: List<Person>, loader: ImageLoader) {
+        if (people == bound) return
+        bound = people
         row.removeAllViews()
         people.forEach { person -> row.addView(card(person, loader), LinearLayout.LayoutParams(dp(CARD_DP), WRAP).apply { marginEnd = dp(10) }) }
     }
@@ -101,7 +112,13 @@ class FactsGridView(
         setPadding(dp(24), dp(12), dp(24), dp(16))
     }
 
+    /** The facts shown now. */
+    private var bound: List<Fact>? = null
+
+    /** Shows [facts]; the same facts again leave the cards, and the one in focus, as they are (#23). */
     fun bind(facts: List<Fact>) {
+        if (facts == bound) return
+        bound = facts
         removeAllViews()
         facts.chunked(COLUMNS).forEach { chunk ->
             val line = LinearLayout(context).apply { orientation = HORIZONTAL }

@@ -112,6 +112,12 @@ class ReadingHomeView(
      */
     private var resumeAt: Triple<String, String, String?>? = null
     private val cards = mutableMapOf<Pair<String, String>, View>()
+    /**
+     * Details on the continue card rather than Resume reading: the two share the
+     * card's row and book, and coming back to the app landed on Resume reading,
+     * where A opens the reader (#23).
+     */
+    private var onContinueDetails = false
     private val headerActions = mutableMapOf<String, View>()
     private var observed: Map<String, ReadingWork> = emptyMap()
     private var current: List<ReadingWork> = emptyList()
@@ -269,7 +275,9 @@ class ReadingHomeView(
         if (row == null) return createButton.requestFocus()
         val id = if (row.id == selectedRow && row.items.any { it.id == selectedWork }) selectedWork
             else row.items.getOrNull(row.nextIndex)?.id ?: row.items.first().id
-        val card = cards[row.id to id] ?: return false
+        val card = cards[row.id to id]?.let { card ->
+            continueView?.takeIf { onContinueDetails && card === it.resume }?.details ?: card
+        } ?: return false
         card.post { card.requestFocus() }
         return true
     }
@@ -401,6 +409,10 @@ class ReadingHomeView(
             addView(createButton)
             addView(profileButton, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(2) })
         })
+        // What can take focus carries its key, so the place Back returns to finds its new view (#23).
+        cards.forEach { (key, view) -> view.tag = "${key.first}:${key.second}" }
+        seriesFans.forEach { (id, fan) -> fan.tag = "series:$id" }
+        headerActions.forEach { (id, button) -> button.tag = "list:$id" }
         scroll.post {
             scroll.scrollTo(0, scrollY)
             if (hadFocus) requestInitialFocus()
@@ -501,11 +513,16 @@ class ReadingHomeView(
             details.activateOnTap { host.push(ReadingWorkScreen(api, hero.id, hero.title, ringVisible)) }
             listOf(resume, details).forEach { button ->
                 FocusDecorator.listen(button, ringVisible) { _, focused ->
-                    if (focused) { focusedListHeader = null; focusedSeries = null; selectedRow = row.id; selectedWork = hero.id; host.refreshHints() }
+                    if (focused) {
+                        focusedListHeader = null; focusedSeries = null; selectedRow = row.id; selectedWork = hero.id
+                        onContinueDetails = button === details
+                        host.refreshHints()
+                    }
                 }
             }
         }
         continueView = card
+        card.details.tag = "details:${hero.id}"
         selfActing += listOf(card.resume, card.details)
         cards[row.id to hero.id] = card.resume
         addView(card, LinearLayout.LayoutParams(MATCH, WRAP))

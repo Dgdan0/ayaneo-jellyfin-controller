@@ -33,6 +33,7 @@ import com.pocketds.hub.ui.DetailLayout
 import com.pocketds.hub.ui.DetailSnapshotStore
 import com.pocketds.hub.ui.DetailStyler
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.FocusPlace
 import com.pocketds.hub.ui.MediaActionIcon
 import com.pocketds.hub.ui.MediaActionIconDrawable
 import com.pocketds.hub.ui.PocketColors
@@ -75,19 +76,8 @@ class OfflineSeriesScreen(
     private lateinit var scroll: ScrollView
     private var header: DetailHeaderView? = null
     private var selectedKey = ""
-    /**
-     * Whether the page is in front. Leaving it, the host clears focus before
-     * hiding the page, and Android hands focus to the view nearest the scroll
-     * position -- the continue card under a scrolled page -- whose listener then
-     * wrote over the season you had opened, so Back landed on the card.
-     */
-    private var shown = false
-    /**
-     * What Back lands on, marked as the page's default focus. Coming back, the
-     * page's first layout restores its default focus before the page asks for
-     * its own, and with none Android took that same continue card.
-     */
-    private var defaultFocus: View? = null
+    /** The page's own view: where FocusPlace keeps its place. */
+    private lateinit var pageView: View
     private var renderedSignature = ""
     private val offlineChanges = OfflineChanges { render() }
 
@@ -101,7 +91,7 @@ class OfflineSeriesScreen(
             clipToPadding = false; clipChildren = false; setPadding(0, 0, 0, dp(18))
             addView(content, ViewGroup.LayoutParams(MATCH, WRAP))
         }
-        val root = FrameLayout(host.viewContext)
+        val root = FrameLayout(host.viewContext).also { pageView = it }
         root.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -112,15 +102,11 @@ class OfflineSeriesScreen(
     override fun onShow() {
         offlineChanges.start(host.viewContext)
         header?.overview?.collapse()
-        // Before it is in front again: what has focus now is not where the person was here.
         render()
-        shown = true
         scroll.post { if (scroll.isShown) requestInitialFocus() }
     }
     override fun onHide() {
         ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedKey)?.let { selectedKey = it.key }
-        shown = false
-        markDefaultFocus()
         overlay.dismiss()
         unregister()
     }
@@ -128,13 +114,6 @@ class OfflineSeriesScreen(
     override fun requestInitialFocus(): Boolean =
         findTagged(content, selectedKey)?.requestFocus() == true || firstFocusable(content)?.requestFocus() == true
 
-    private fun markDefaultFocus() {
-        val target = findTagged(content, selectedKey)
-        if (target === defaultFocus) return
-        defaultFocus?.isFocusedByDefault = false
-        target?.isFocusedByDefault = true
-        defaultFocus = target
-    }
 
     override fun hints(): List<ButtonHint> = buildList {
         if (overlay.isOpen) { add(ButtonHint.activate("Choose")); add(ButtonHint.back("Cancel")); return@buildList }
@@ -185,7 +164,7 @@ class OfflineSeriesScreen(
         }
         if (!force && signature == renderedSignature) return
         renderedSignature = signature
-        if (shown) ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedKey)?.key?.let { selectedKey = it }
+        ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedKey)?.key?.let { selectedKey = it }
         val oldScroll = scroll.scrollY
         content.removeAllViews()
         // The glass header with the series' cover beside the words, as a
@@ -229,7 +208,7 @@ class OfflineSeriesScreen(
                     if (presentation.localSuggestion) add("On this device")
                 }.joinToString(" · "), if (item.runtimeSeconds > 0) target.positionMillis / (item.runtimeSeconds * 1000.0) else 0.0, false)
                 tag = TaggedTarget(target, "continue")
-                onFocused = { if (shown) selectedKey = "continue"; host.refreshHints() }
+                onFocused = { selectedKey = "continue"; host.refreshHints() }
                 DetailStyler.image(image, artwork(target.row, "thumb"), imageLoader())
                 activateOnTap { host.playItem(item.id, resumeMode(target)) }
             }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(EDGE_DP), dp(10), dp(EDGE_DP), dp(2)) })
@@ -252,7 +231,8 @@ class OfflineSeriesScreen(
                 seasons.forEach { addView(seasonCard(it)) }
             })
         }, LinearLayout.LayoutParams(MATCH, WRAP))
-        markDefaultFocus()
+        // Rebuilt while away (an episode removed on the season page): the place is the new view.
+        FocusPlace.mark(pageView, findTagged(content, selectedKey))
         content.post { scroll.scrollTo(0, oldScroll); findTagged(content, selectedKey)?.requestFocus() }
     }
 
@@ -264,7 +244,7 @@ class OfflineSeriesScreen(
             layoutParams = LinearLayout.LayoutParams(dp(112), WRAP).apply { marginEnd = dp(12) }
             contentDescription = "${seasonName(season.number)}, ${season.rows.size} downloaded episodes"
             FocusDecorator.listen(this, ringVisible) { view, focused ->
-                if (focused && shown) { selectedKey = (view.tag as TaggedKey).key; host.refreshHints() }
+                if (focused) { selectedKey = (view.tag as TaggedKey).key; host.refreshHints() }
             }
             activateOnTap { host.push(OfflineSeasonScreen(api, seriesTitle, season, ringVisible)) }
             DetailStyler.image(image, artwork(season.rows.first(), "season"), imageLoader())

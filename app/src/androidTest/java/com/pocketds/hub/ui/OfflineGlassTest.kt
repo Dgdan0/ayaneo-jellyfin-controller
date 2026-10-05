@@ -94,73 +94,48 @@ class OfflineGlassTest {
     }
 
     /**
-     * Opening a season and coming back lands on that season. Leaving, the host
-     * clears focus before it hides the page, and Android hands focus to the view
-     * nearest the scroll position: the continue card, which then took over. And
-     * coming back, the page's first layout restores its default focus before the
-     * page asks for its own, which took the same card.
+     * Back from a season lands on that season (#22, #23), and Back from a series on
+     * its poster in the catalogue, through the host's own way of changing pages. The
+     * host used to hand focus to the view nearest the scroll position while it hid
+     * a page, and the page's first layout coming back took that same view.
      */
-    @Test fun backFromASeasonLandsOnTheSeasonYouOpened() {
-        val activity = ins.startActivitySync(Intent(ins.targetContext, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        val series = "glass-return-${System.nanoTime()}"
-        val repository = OfflineRepository.get(activity)
-        val ids = listOf(1 to 1, 2 to 1).map { (season, episode) -> episode(repository, series, season, episode) }
-        val page = OfflineSeriesScreen(noHub(), series, "Example series") { true }
-        try {
-            lateinit var root: View
-            ins.runOnMainSync { root = page.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); page.onShow() }
-            ins.waitForIdleSync()
-            lateinit var season: View
-            ins.runOnMainSync {
-                season = all(root).filterIsInstance<DetailArtworkCardView>().first()
-                assertTrue(season.requestFocus())
-                page.onHide()
-                // What the host's clearFocus does to a page it is about to hide.
-                assertTrue(all(root).filterIsInstance<ContinuationCardView>().single().requestFocus())
-                page.onShow()
-                // What the page's first layout does when it is shown again.
-                assertTrue(root.restoreDefaultFocus())
-                assertTrue("the page's default focus is the season that was opened", season.isFocused)
-            }
-            ins.waitForIdleSync()
-            ins.runOnMainSync {
-                assertTrue(page.requestInitialFocus())
-                assertTrue("Back lands on the season that was opened", season.isFocused)
-            }
-        } finally {
-            ins.runOnMainSync { page.onHide(); page.onDestroyView(); activity.finish() }
-            ids.forEach { id -> repository.forItem(id)?.let { repository.remove(it.id) } }
-        }
-    }
-
-    /** The same for the catalogue: Back from a series lands on its poster, not on the tabs. */
-    @Test fun backFromASeriesLandsOnItsPosterInTheCatalogue() {
+    @Test fun backFromASeasonAndFromASeriesLandsWhereYouWere() {
         val activity = ins.startActivitySync(Intent(ins.targetContext, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         val stamp = System.nanoTime()
         val repository = OfflineRepository.get(activity)
-        val ids = listOf(episode(repository, "glass-cat-a-$stamp", 1, 1, "Example A $stamp"),
-            episode(repository, "glass-cat-b-$stamp", 1, 1, "Example B $stamp"))
-        val screen = OfflineScreen(noHub(), { true })
+        val ids = listOf(1 to 1, 2 to 1).map { (season, episode) -> episode(repository, "glass-a-$stamp", season, episode, "Example A $stamp") } +
+            episode(repository, "glass-b-$stamp", 1, 1, "Example B $stamp")
+        lateinit var harness: PageHarness
+        val catalogue = OfflineScreen(noHub(), { true })
         try {
-            lateinit var root: View
-            ins.runOnMainSync { root = screen.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); screen.onShow() }
+            ins.runOnMainSync { harness = PageHarness(activity); harness.push(catalogue) }
             ins.waitForIdleSync()
-            fun poster(title: String) = all(root).filterIsInstance<PosterCardView>().first { it.contentDescription?.startsWith(title) == true }
+            fun poster(title: String) = all(harness.stage).filterIsInstance<PosterCardView>().first { it.isShown && it.contentDescription?.startsWith(title) == true }
+            // Into the second series, not the first poster the page would start on.
+            ins.runOnMainSync { assertTrue(poster("Example B $stamp").requestFocus()); assertTrue(catalogue.onPad(PadAction.Activate)) }
+            ins.waitForIdleSync()
+            ins.runOnMainSync { assertTrue(harness.back()) }
+            ins.waitForIdleSync()
+            ins.runOnMainSync { assertTrue("Back from a series lands on its poster", poster("Example B $stamp").isFocused) }
+
+            // A series whose page scrolls: into its second season and back.
+            ins.runOnMainSync { assertTrue(poster("Example A $stamp").requestFocus()); assertTrue(catalogue.onPad(PadAction.Activate)) }
+            ins.waitForIdleSync()
+            fun season(number: Int) = all(harness.stage).filterIsInstance<DetailArtworkCardView>()
+                .first { it.isShown && it.contentDescription?.startsWith("Season $number,") == true }
+            lateinit var series: com.pocketds.hub.nav.Screen
             ins.runOnMainSync {
-                assertTrue(poster("Example B $stamp").requestFocus())
-                screen.onHide()
-                // What the host's clearFocus does to a page it is about to hide.
-                assertTrue(poster("Example A $stamp").requestFocus())
-                screen.onShow()
+                assertTrue(season(2).requestFocus())
+                series = harness.top()
+                assertTrue(series.onPad(PadAction.Activate))
             }
             ins.waitForIdleSync()
-            ins.runOnMainSync {
-                // What the page's first layout does when it is shown again.
-                assertTrue(root.restoreDefaultFocus())
-                assertTrue("Back lands on the series that was opened", poster("Example B $stamp").isFocused)
-            }
+            ins.runOnMainSync { assertTrue(harness.top() is OfflineSeasonScreen); assertTrue(harness.back()) }
+            ins.waitForIdleSync()
+            ins.runOnMainSync { assertTrue("Back from a season lands on that season", season(2).isFocused) }
+            assertTrue("nothing was played", harness.asked.isEmpty())
         } finally {
-            ins.runOnMainSync { screen.onHide(); screen.onDestroyView(); activity.finish() }
+            ins.runOnMainSync { harness.close(); activity.finish() }
             ids.forEach { id -> repository.forItem(id)?.let { repository.remove(it.id) } }
         }
     }
@@ -260,9 +235,13 @@ class OfflineGlassTest {
             if (method.name == "getViewContext") activity else null
         } as ScreenHost
 
-    /** No hub: a picture's address is all a page may ask for, and it gets none. */
+    /** No hub: a picture's address is all a page may ask for, and it gets none; a library lookup finds nothing. */
     private fun noHub() = Proxy.newProxyInstance(HubApi::class.java.classLoader, arrayOf(HubApi::class.java)) { _, method, _ ->
-        if (method.name == "imageUrl") "" else error("Unexpected ${method.name}")
+        when (method.name) {
+            "imageUrl" -> ""
+            "libraryItem" -> HubResult.Failed(com.pocketds.hub.net.FailureKind.NO_NETWORK, "fixture")
+            else -> error("Unexpected ${method.name}")
+        }
     } as HubApi
 
     private fun all(view: View): List<View> = listOf(view) + (view as? ViewGroup)?.let { group ->

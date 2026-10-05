@@ -42,6 +42,7 @@ import com.pocketds.hub.ui.DetailActions
 import com.pocketds.hub.ui.DetailSnapshotStore
 import com.pocketds.hub.ui.FactsGridView
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.FocusPlace
 import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.ui.MediaActionIcon
 import com.pocketds.hub.ui.MediaActionIconDrawable
@@ -92,6 +93,8 @@ class LibraryDetailScreen(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var colors: PocketColors
+    /** The page's own view: where FocusPlace keeps the place Back returns to. */
+    private lateinit var pageView: View
     private lateinit var scroll: FocusScrollView
     private lateinit var heading: TextView
     private lateinit var originalTitle: TextView
@@ -142,7 +145,7 @@ class LibraryDetailScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
-        val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
+        val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }.also { pageView = it }
         scroll = FocusScrollView(host.viewContext, revealAbove = dp(56)).apply {
             isFillViewport = true; clipChildren = false
             addView(LinearLayout(context).apply {
@@ -258,8 +261,9 @@ class LibraryDetailScreen(
         if (expectedType == "series" && seasonList.isEmpty() && seasonsJob?.isActive != true) loadSeasons()
         if (item?.type == "series" && seriesTarget == null && targetJob?.isActive != true) loadPlayTarget()
         if (returning) {
-            // Android can auto-focus the nearest view while the retained page
-            // becomes visible. Restore the user's explicit selection.
+            // Back puts focus on the place you left (FocusPlace, #23); this asks again
+            // for a return the host does not settle (the app resumed), and asking for
+            // the page's start gets that same place first.
             header.post { if (header.isShown) requestInitialFocus() }
             applyPendingPlaybackProgress()
             invalidateFinishedSeriesTarget()
@@ -298,6 +302,7 @@ class LibraryDetailScreen(
     override fun onDestroyView() { offlineChanges.stop(); scope.cancel(); host = null }
 
     override fun requestInitialFocus(): Boolean {
+        if (FocusPlace.focus(pageView)) return true
         val key = lastFocusKey
         when {
             key == "episode" && episodesPanel.visibility == View.VISIBLE && episodes.focusEpisode() -> return true

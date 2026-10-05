@@ -32,6 +32,7 @@ import com.pocketds.hub.ui.LandscapeCardView
 import com.pocketds.hub.ui.pinFocusedRows
 import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.FocusPlace
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.PosterCardView
 import com.pocketds.hub.ui.Styler
@@ -106,12 +107,14 @@ class HomeScreen(
     private var hubRows: List<DiscoverRow> = emptyList()
     private val extraRows = LinkedHashMap<String, DiscoverRow>()
     private var extrasJob: Job? = null
+    /** The page's own view: where FocusPlace keeps the place Back returns to. */
+    private lateinit var pageView: View
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
         mode = ContentModeSettings.get(host.viewContext)
-        val frame = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
+        val frame = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }.also { pageView = it }
 
         mediaContent = FrameLayout(host.viewContext).apply {
             visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
@@ -191,7 +194,8 @@ class HomeScreen(
             return
         }
         if (mode == ContentMode.BOOKS) {
-            readingHome.onShow()
+            // Books Home draws its rows again when they changed: the place Back returns to moves with them (#23).
+            FocusPlace.across(pageView) { readingHome.onShow() }
             readingHome.requestInitialFocus()
             return
         }

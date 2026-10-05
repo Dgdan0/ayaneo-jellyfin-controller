@@ -66,6 +66,7 @@ import com.pocketds.hub.ui.MediaActionIcon
 import com.pocketds.hub.ui.MediaActionIconDrawable
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.FocusPlace
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.PosterCardView
 import com.pocketds.hub.ui.Styler
@@ -580,6 +581,8 @@ class ReadingWorkScreen(
     private var previewFormat: ReadingEntryChoice? = null
     private val completionSession = ReadingCompletionSession()
     @Volatile private var visible = false
+    /** The page's own view: where FocusPlace keeps the place Back returns to. */
+    private lateinit var pageView: View
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -611,15 +614,16 @@ class ReadingWorkScreen(
             addView(main, FrameLayout.LayoutParams(MATCH, MATCH))
             listOverlay = ChoiceOverlay(context, colors, ringVisible, sidePanel = true)
             addView(listOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
-        }
+        }.also { pageView = it }
     }
 
     override fun onShow() {
         visible = true
         if (::detailHeader.isInitialized) detailHeader.overview.collapse()
         if (::listOverlay.isInitialized && listOverlay.isOpen) listOverlay.dismiss()
+        // Drawn again on coming back: the place Back returns to moves to its new view,
+        // and the host puts focus there (#23).
         lastWork?.let(::render)
-        if (actionViews.isNotEmpty()) scroll.post { if (scroll.isShown) requestInitialFocus() }
         // A page kept on the stack reads its work again whenever it comes back (#21): a read-along
         // edition that finished aligning while it waited, a format added or gone, a place moved by a
         // reader. The work route is no-store; the page keeps showing what it had until the answer.
@@ -644,7 +648,7 @@ class ReadingWorkScreen(
         host = null
     }
 
-    override fun requestInitialFocus(): Boolean =
+    override fun requestInitialFocus(): Boolean = FocusPlace.focus(pageView) ||
         actionViews[DetailLayout.restoreFocus(lastActionKey,
             actionViews.keys.filterNot { it.startsWith("list:") } + actionViews.keys.filter { it.startsWith("list:") })]?.requestFocus() == true
 
@@ -714,13 +718,18 @@ class ReadingWorkScreen(
         }
     }
 
-    private fun render(source: ReadingWork) {
+    /** The page drawn from [source]; the place Back returns to moves to its new view (#23). */
+    private fun render(source: ReadingWork) = FocusPlace.across(pageView) { draw(source) }
+
+    private fun draw(source: ReadingWork) {
         lastWork = source
         val checkpoints = com.pocketds.hub.reader.ReadingProgress.get(requireNotNull(host).viewContext)
         val work = ReadingCompletionRepository.get(requireNotNull(host).viewContext).project(
             com.pocketds.hub.reader.ReadingProgressPresentation.project(source,
                 checkpoints.store.pending(checkpoints.session().identity)))
         val previouslyFocusedSource = actionViews.entries.firstOrNull { it.value.hasFocus() }?.key ?: lastActionKey
+        // A comic's issue: its strip opens at it, and focus goes back to it once the strip has its cards.
+        val issueKey = previouslyFocusedSource?.takeIf(IssueStrip::isTag)
         val previousScrollY = scroll.scrollY
         content.removeAllViews()
         actionViews.clear()
@@ -759,7 +768,8 @@ class ReadingWorkScreen(
                 // A comic's issues, a manga's chapters: covers in a strip, opening the reader.
                 hasChildLinks = true
                 content.addView(IssueStrip.create(requireNotNull(host).viewContext, colors, ringVisible, api,
-                    section.items, work.kind, work.artwork) { item ->
+                    section.items, work.kind, work.artwork, openAt = issueKey?.let(IssueStrip::sourceOf),
+                    onFocused = { item -> lastActionKey = IssueStrip.tag(item) }) { item ->
                     if (canReadPublication(item.kind.ifBlank { work.kind }, item.sourceItemId))
                         openPublication(work, item.sourceItemId, ReadingBookFacts.issueTitle(item, work.kind), "kavita")
                 })
@@ -775,6 +785,8 @@ class ReadingWorkScreen(
                 content.addView(seriesStrip(work, books))
             }
         }
+        // The actions carry their keys, so the place Back returns to finds its new view (#23).
+        actionViews.forEach { (key, view) -> view.tag = key }
         val preferredSource = previouslyFocusedSource?.takeIf { it.startsWith("list:") && it in actionViews }
             ?: ReadingWorkPresentation.preferredActionSource(
             continueSourceItemId = work.continueAt?.sourceItemId.orEmpty(),
@@ -784,7 +796,7 @@ class ReadingWorkScreen(
         content.post {
             if (visible) {
                 scroll.scrollTo(0, previousScrollY)
-                actionViews[preferredSource]?.requestFocus()
+                (issueKey?.let { content.findViewWithTag<View>(it) } ?: actionViews[preferredSource])?.requestFocus()
                 if (openReader && !readerOpened) {
                     readerOpened = true
                     actionViews["entry"]?.performClick()

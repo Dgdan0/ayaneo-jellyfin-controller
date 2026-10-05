@@ -34,6 +34,7 @@ import com.pocketds.hub.offline.OfflineState
 import com.pocketds.hub.screens.library.SubtitleScreen
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.FocusPlace
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.PosterCardView
 import com.pocketds.hub.ui.Styler
@@ -95,12 +96,8 @@ class OfflineScreen(
     private var mode = MODE_LIBRARY
     private var selectedId = ""
     private var targetOpened = false
-    /**
-     * Whether the page is in front. Leaving it, the host clears focus before it
-     * hides the page, and Android hands focus to the view nearest the scroll
-     * position; that is not where the person was, so it is not remembered.
-     */
-    private var shown = false
+    /** The page's own view: where FocusPlace keeps its place. */
+    private lateinit var pageView: View
     private var renderedSignature = ""
     private var renderPosted = false
     private val queueRows = mutableMapOf<String, QueueRowBinding>()
@@ -111,7 +108,7 @@ class OfflineScreen(
         this.host = host
         colors = Theme.colors(host.viewContext)
         repository = OfflineRepository.get(host.viewContext)
-        val root = FrameLayout(host.viewContext)
+        val root = FrameLayout(host.viewContext).also { pageView = it }
         val page = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(8), dp(22), 0)
@@ -179,9 +176,7 @@ class OfflineScreen(
 
     override fun onShow() {
         offlineChanges.start(host.viewContext)
-        // Before it is in front again: what has focus now is not where the person was here.
         render(force = true)
-        shown = true
         lookUpLibraries()
         if (repository.batches().any { batch ->
                 !batch.paused && batch.jobs.any { it.state in setOf(OfflineState.QUEUED, OfflineState.WAITING) }
@@ -189,12 +184,6 @@ class OfflineScreen(
         ) OfflineDownloadService.start(host.viewContext)
     }
     override fun onHide() {
-        when (val row = focusedRow()) {
-            is TaggedCatalog -> selectedId = row.value.key
-            is TaggedDownload -> selectedId = row.value.id
-            is TaggedBatch -> selectedId = row.value.id
-        }
-        shown = false
         scope.coroutineContext[kotlinx.coroutines.Job]?.children?.forEach { it.cancel() }
         cancelScheduledRender()
         offlineChanges.stop()
@@ -308,11 +297,9 @@ class OfflineScreen(
         renderedSignature = signature
         val hadFocus = host.viewContext.let { (it as? android.app.Activity)?.currentFocus }
         val focusedTag = hadFocus?.tag
-        if (shown) {
-            if (focusedTag is TaggedDownload) selectedId = focusedTag.value.id
-            if (focusedTag is TaggedBatch) selectedId = focusedTag.value.id
-            if (focusedTag is TaggedCatalog) selectedId = focusedTag.value.key
-        }
+        if (focusedTag is TaggedDownload) selectedId = focusedTag.value.id
+        if (focusedTag is TaggedBatch) selectedId = focusedTag.value.id
+        if (focusedTag is TaggedCatalog) selectedId = focusedTag.value.key
         val previousScrollY = scroll.scrollY
         content.removeAllViews()
         queueRows.clear()
@@ -470,9 +457,8 @@ class OfflineScreen(
         )
         val card = PosterCardView(host.viewContext, colors).apply {
             tag = TaggedCatalog(value)
-            // Back from a title: the page's first layout restores its default focus
-            // before the page asks for its own, and with none it took the tabs.
-            isFocusedByDefault = value.key == selectedId
+            // Rebuilt on every show: the title you opened is the new view of the place.
+            if (value.key == selectedId) FocusPlace.mark(pageView, this)
             contentDescription = if (value.isSeries) {
                 "${value.title}, ${value.rows.size} downloaded episodes"
             } else "${value.title}, downloaded movie"
@@ -480,7 +466,7 @@ class OfflineScreen(
             bind(hit, loader, { it }, showAvailability = false)
             FocusDecorator.attach(this, ringVisible)
             FocusDecorator.listen(this, ringVisible) { view, hasFocus ->
-                if (hasFocus && shown) {
+                if (hasFocus) {
                     selectedId = value.key
                     host.refreshHints()
                 }
@@ -541,7 +527,7 @@ class OfflineScreen(
             glassRow(this, 11f)
             setPadding(dp(12), dp(8), dp(12), dp(8))
             tag = TaggedBatch(batch)
-            isFocusedByDefault = batch.id == selectedId
+            if (batch.id == selectedId) FocusPlace.mark(pageView, this)
             Styler.makeFocusable(this)
             descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
             addView(LinearLayout(context).apply {
@@ -583,7 +569,7 @@ class OfflineScreen(
         val view = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(7), dp(7), dp(12), dp(7)); tag = TaggedDownload(row)
-            isFocusedByDefault = row.id == selectedId
+            if (row.id == selectedId) FocusPlace.mark(pageView, this)
             glassRow(this, 13f)
             Styler.makeFocusable(this); descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
             image = ImageView(context).apply {
@@ -656,7 +642,7 @@ class OfflineScreen(
     private fun decorate(view: View) {
         FocusDecorator.attach(view, ringVisible, scale = false)
         FocusDecorator.listen(view, ringVisible) { focused, hasFocus ->
-            if (hasFocus && shown) {
+            if (hasFocus) {
                 when (val value = focused.tag) {
                     is TaggedCatalog -> selectedId = value.value.key
                     is TaggedDownload -> selectedId = value.value.id

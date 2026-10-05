@@ -677,6 +677,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Hub: intro/credits segments | Jellyfin's own, else `segmentsOrChapters` from whole chapter names ("OP", "Ending", "Credits") |
 | Paging with L2/R2 | `HubActivity.page` (moves focus with the scroll) |
 | Up from the top of a screen that walks its own columns | `ScreenHost.focusTabs()`: the tabs, as Up from the top of any page reaches them (Activity's left column reached "See all" in the next) |
+| Where Back, a tab or Down from the tabs returns focus on a page | `ui/FocusPlace` (#23). The host changes pages only through `show` (the page left is closed to focus while its focus is cleared, and what had focus is marked as its place, Android's default focus) and `settle` (focus back on the place, else the page's start); a step on the page spends it, and a place that leaves the window is let go. A page that draws itself again carries the place with `across` (its focusables tagged, as a book page's actions are) or marks the new view with `mark`, and its `requestInitialFocus` asks `FocusPlace.focus` first |
 | Switching between Media and Books | `nav/SidePages` (#18): each content tab keeps a stack per side. Choosing a side takes the other side's pages off every tab, kept alive as they were (`ScreenStack.park` / `restore`), and puts back the ones this side left, so switching back returns each tab to where it was. A page's side is its `contentDomain`, else the side it was opened on (`HubActivity.openedOn`); a page that follows the side itself (a root, the transfers) stays on both. A profile change still recreates everything |
 | Books Discover's rows | `screens/discover/ReadingDiscoverRows.shown`: an empty row is left out, and under All a row whose name does not say what it holds says it ("Trending now · Manga"), since BookKeeprr names each kind's rows alike |
 | Loading the next page of a list or row | `state/PagedLoadState`; one per row via `state/RowPaging` |
@@ -762,7 +763,7 @@ Cards measure at their natural height (`EpisodeCardView`, `DetailArtworkCardView
 
 `ConsolidationGuardTest` (part of `dev.sh test`) fails when a removed copy comes back -- a new
 `HubClient(context)`, a hand-built image loader or image request, a hand-written episode code or "Specials", a
-`"Selected"` detail line, an untinted progress bar, a bare `ScrollView(`, a `delay(POLL…)` loop, words drawn in the page colour, a list of libraries sorted on the device, a reading percentage worked out by hand, a white Play disc of its own, a multiply over a page, a reader pausing the video itself, or an audiobook route built by hand -- and names the owner
+`"Selected"` detail line, an untinted progress bar, a bare `ScrollView(`, a `delay(POLL…)` loop, words drawn in the page colour, a list of libraries sorted on the device, a reading percentage worked out by hand, a white Play disc of its own, a multiply over a page, a reader pausing the video itself, an audiobook route built by hand, or a page keeping its own default focus (#23) -- and names the owner
 to use instead. Extend its rules when you consolidate something new. It also fails on a top-level class or
 object that nothing in the app names, only its tests (#22): delete it with its tests, or list it in `keptDormant`
 with the plan that needs it (`SpreadPlanner`, `EpubPackageCachePolicy`).
@@ -1367,14 +1368,19 @@ Design consequences:
 - **Clearing focus hands it to the first focusable in the window.** The top bar is added after
   the content for exactly this reason, so a clear cannot strand the selection in the tabs.
   Expect focus to be *somewhere* after a clear, not nowhere.
-- **Focus passes through a page while it is pushed away and while it comes back** (#22). Leaving,
-  `showCurrent` clears focus before hiding the page, so the view nearest the scroll position takes it
-  for a moment; coming back, the page's first layout restores the window's default focus before the
-  page's own `requestInitialFocus` runs, and takes that same nearest view. A page whose focus
-  listeners remember "where you were" recorded those, and Back landed on the continue card or the
-  tabs. The offline pages remember the place only while they are in front (a `shown` flag set after
-  `onShow`'s rebuild, cleared in `onHide`) and mark it `isFocusedByDefault`, so Android's own restore
-  lands there.
+- **Focus passes through a page while it is pushed away and while it comes back** (#22, #23).
+  Leaving, the host cleared focus while the page was still on screen, so the view nearest the scroll
+  position took it for a moment; coming back, the page's first layout restores the window's default
+  focus before the page's own `requestInitialFocus` runs, and took that same nearest view. A page
+  whose focus listeners remember "where you were" recorded those: Back landed on a continue card,
+  the tabs, or Settings' list of sections rather than its switch. `FocusPlace.show` now closes the
+  page to focus while the focus is cleared and marks what had focus as its default focus, so
+  Android's own restore lands there. A page that draws itself again on coming back loses that view,
+  so it carries the place to the new one (`across`, `mark`): before #23 a comic run's page landed on
+  its Want to Read toggle. A page that reads itself again a moment after it is back must not draw
+  what is unchanged: both title pages drew their cast again (the Library's 450 ms after Back,
+  Discover's every four seconds while a download runs) and dropped the card in focus; `CastRowView`
+  and `FactsGridView` now leave the same people and facts as they are.
 - **Neither form of `requestFocus` gives traversal order inside a ScrollView.** It overrides
   `onRequestFocusInDescendants` to prefer whatever is nearest the current scroll position. A
   screen that cares must say where focus starts: `Screen.requestInitialFocus()`.

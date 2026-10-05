@@ -10,6 +10,7 @@ import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.DetailArtworkCardView
 import com.pocketds.hub.ui.DetailLayout
 import com.pocketds.hub.ui.DetailStyler
+import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.activateOnTap
@@ -25,6 +26,13 @@ import com.pocketds.hub.ui.activateOnTap
  * on, else the first one not finished.
  */
 object IssueStrip {
+    private const val TAG = "issue:"
+
+    /** An issue card's tag: its page finds the issue's new card by it when it draws the strip again (#23). */
+    fun tag(item: ReadingSectionItem) = TAG + item.sourceItemId
+    fun isTag(key: String) = key.startsWith(TAG)
+    fun sourceOf(key: String) = key.removePrefix(TAG)
+
     /** The prototype's 82 x 123dp covers, 12dp apart from the page's 22dp edge. */
     private const val ARTWORK_DP = 123
     private const val CARD_DP = 82
@@ -40,6 +48,9 @@ object IssueStrip {
         kind: String,
         /** The series cover, for an issue the hub sent no cover of its own (an older hub). */
         seriesArtwork: String,
+        /** The issue to open at, by its source id, before the one being read: where focus was when the page was drawn again. */
+        openAt: String? = null,
+        onFocused: (ReadingSectionItem) -> Unit = {},
         onOpen: (ReadingSectionItem) -> Unit
     ): RecyclerView = RecyclerView(context).apply {
         layoutManager = LinearLayoutManager(context, RecyclerView.HORIZONTAL, false)
@@ -51,8 +62,9 @@ object IssueStrip {
             resources.configuration.fontScale)).coerceAtLeast(10)
         val edge = EDGE_DP
         setPadding(dp(context, edge), dp(context, clearance), dp(context, edge), dp(context, clearance))
-        adapter = Adapter(colors, ringVisible, api, items, kind, seriesArtwork, onOpen)
-        val start = items.indexOfFirst { val p = it.progress; p != null && !p.completed && p.percentage > 0 }
+        adapter = Adapter(colors, ringVisible, api, items, kind, seriesArtwork, onFocused, onOpen)
+        val start = openAt?.let { id -> items.indexOfFirst { it.sourceItemId == id } }?.takeIf { it >= 0 }
+            ?: items.indexOfFirst { val p = it.progress; p != null && !p.completed && p.percentage > 0 }
             .takeIf { it >= 0 } ?: items.indexOfFirst { it.progress?.completed != true }.coerceAtLeast(0)
         if (start > 0) (layoutManager as LinearLayoutManager).scrollToPositionWithOffset(start, dp(context, edge))
     }
@@ -66,6 +78,7 @@ object IssueStrip {
         private val items: List<ReadingSectionItem>,
         private val kind: String,
         private val seriesArtwork: String,
+        private val onFocused: (ReadingSectionItem) -> Unit,
         private val onOpen: (ReadingSectionItem) -> Unit
     ) : RecyclerView.Adapter<Holder>() {
         override fun getItemCount() = items.size
@@ -87,6 +100,8 @@ object IssueStrip {
             card.subtitleView.text = ReadingBookFacts.issueLine(item)
             card.marks(item.progress?.percentage ?: 0.0, item.progress?.completed == true)
             card.contentDescription = "${card.titleView.text}, ${card.subtitleView.text}"
+            card.tag = tag(item)
+            FocusDecorator.listen(card, ringVisible) { _, focused -> if (focused) onFocused(item) }
             val artwork = item.artwork.ifBlank { seriesArtwork }
             DetailStyler.image(card.image, artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl), Artwork.loader(api, card.context))
             card.activateOnTap { onOpen(item) }

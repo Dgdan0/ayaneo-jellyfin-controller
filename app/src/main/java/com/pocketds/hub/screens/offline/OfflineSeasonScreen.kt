@@ -22,6 +22,7 @@ import com.pocketds.hub.offline.OfflineDownload
 import com.pocketds.hub.offline.OfflineDownloadService
 import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.ui.ChoiceOverlay
+import com.pocketds.hub.ui.FocusPlace
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
@@ -61,8 +62,8 @@ class OfflineSeasonScreen(
     private lateinit var empty: TextView
     private lateinit var overlay: ChoiceOverlay
     private var selectedId = ""
-    /** Whether the page is in front: focus the host moves while hiding it is not the person's (see OfflineSeriesScreen). */
-    private var shown = false
+    /** The page's own view: where FocusPlace keeps its place. */
+    private lateinit var pageView: View
     private var renderedSignature = ""
     private val offlineChanges = OfflineChanges { render() }
 
@@ -70,7 +71,7 @@ class OfflineSeasonScreen(
         this.host = host
         colors = Theme.colors(host.viewContext)
         repository = OfflineRepository.get(host.viewContext)
-        val root = FrameLayout(host.viewContext)
+        val root = FrameLayout(host.viewContext).also { pageView = it }
         root.addView(LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             // The words on the page's 22dp edge; the row keeps 10dp of it inside
@@ -106,14 +107,11 @@ class OfflineSeasonScreen(
 
     override fun onShow() {
         offlineChanges.start(host.viewContext)
-        // Before it is in front again: what has focus now is not where the person was here.
         render(force = true)
-        shown = true
     }
 
     override fun onHide() {
         focusedEpisode()?.let { selectedId = it.id }
-        shown = false
         unregister()
         if (::overlay.isInitialized) overlay.dismiss()
     }
@@ -154,7 +152,7 @@ class OfflineSeasonScreen(
         }
         if (!force && signature == renderedSignature) return
         renderedSignature = signature
-        if (shown) ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedEpisode)?.row?.id?.let { selectedId = it }
+        ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedEpisode)?.row?.id?.let { selectedId = it }
         row.removeAllViews()
         summary.showSummary(StatusText.loaded(listOf(seriesTitle,
             "${currentRows.size} downloaded episode${if (currentRows.size == 1) "" else "s"}", "available offline")
@@ -171,9 +169,9 @@ class OfflineSeasonScreen(
             tag = TaggedEpisode(download)
             layoutParams = LinearLayout.LayoutParams(dp(EpisodeCardView.WIDTH_DP), ViewGroup.LayoutParams.WRAP_CONTENT)
                 .apply { marginEnd = dp(9) }
-            onFocused = { if (shown) selectedId = download.id; host.refreshHints() }
-            // The page's first layout after coming back restores its default focus: this episode.
-            isFocusedByDefault = download.id == selectedId
+            onFocused = { selectedId = download.id; host.refreshHints() }
+            // Rebuilt on every show: the episode you were on is the new view of the place.
+            if (download.id == selectedId) FocusPlace.mark(pageView, this)
             onActivate = { host.playItem(item.id) }
             // More actions stay on Y and its hint chip, as everywhere else.
             val watched = progress?.takeUnless { it.isComplete() }?.takeIf { it.durationMillis > 0 }

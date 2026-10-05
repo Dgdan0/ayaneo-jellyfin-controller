@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- FocusPlace: the view a page's Back returns to, kept on the page's root. -->
+    <item name="focus_place" type="id" />
+    <!-- FocusPlace: on the place itself, what lets it go when it leaves the window. -->
+    <item name="focus_place_hold" type="id" />
+</resources>

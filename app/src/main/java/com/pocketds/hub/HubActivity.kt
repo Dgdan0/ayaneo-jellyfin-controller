@@ -139,7 +139,6 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private var pagePalette = ArtworkPalette.NEUTRAL
     private var paletteWait: ((ArtworkPalette) -> Unit)? = null
     private var lastContentSection = 0
-    private var utilityReturnFocus: View? = null
 
     private val focusTick = KeyHaptics.RepeatGate(80L)
 
@@ -521,16 +520,12 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         val top = sections.stack().peek() as? Screen ?: return
         if (sections.current < CONTENT_SECTION_COUNT) lastContentSection = sections.current
         applyImmersive(top.immersive)
-        // Clear focus before hiding: a GONE view can keep window focus, and the
-        // next directional press then searches outward from something invisible
-        // and appears to do nothing. This was the search box on the screen we
-        // just left still holding focus behind a detail page.
-        content.findFocus()?.clearFocus()
-        for (i in 0 until content.childCount) {
-            content.getChildAt(i).visibility = View.GONE
-        }
+        // The page that has focus is left (its place kept, closed to focus while
+        // the focus is cleared) before the page in front is shown: a GONE view can
+        // keep window focus, and a page that hears the clear takes it for the
+        // person's (#22, #23). FocusPlace is the one way pages change.
         val view = views[top]
-        view?.visibility = View.VISIBLE
+        com.pocketds.hub.ui.FocusPlace.show(content, view)
         view?.let { layoutScreen(top, it) }
         topBar.setCurrent(sections.current)
         topBar.setMode(if (top is ContentModeScreen) ContentModeSettings.get(this) else null)
@@ -538,9 +533,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         hintBar.setHints(top.hints())
         showArtwork()
         view?.post {
-            if (top.focusOnShow && view.findFocus() == null) {
-                if (!top.requestInitialFocus()) focusFirst(view)
-            }
+            // Back where the page was left, or where it starts on a first visit.
+            com.pocketds.hub.ui.FocusPlace.settle(view, top.focusOnShow, top::requestInitialFocus, ::focusFirst)
             // Again, after focus has actually landed. Contextual hints are read
             // off the focused item, and the setHints above runs a frame too
             // early -- on the downloads screen X read blank even though the
@@ -695,7 +689,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
 
     /** Any touch -- a finger, or the bottom-screen trackpad's cursor. */
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) router.onPointer()
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) { router.onPointer(); spendPlace() }
         return super.dispatchTouchEvent(event)
     }
 
@@ -737,6 +731,10 @@ class HubActivity : AppCompatActivity(), ScreenHost {
                 else -> Unit
             }
         }
+        // A step on the page is the person's own move, whether the page makes it
+        // (Home's Up to its hero) or the host does: the place Back or the tabs
+        // left them at has served, and a later restore must not go back to it (#23).
+        if (action is PadAction.Step) spendPlace()
         val screen = sections.stack().peek() as? Screen
         if (screen?.onPad(action) == true) return
 
@@ -818,7 +816,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         if (direction == Direction.UP && candidate != null &&
             generateSequence(candidate) { it.parent as? View }.any { it === topBar }
         ) {
-            utilityReturnFocus = from
+            // Where Down or B comes back to from the tabs: the page's place.
+            currentPage()?.let { com.pocketds.hub.ui.FocusPlace.mark(it, from) }
             if (topBar.focusFirst()) refreshHints()
             return
         }
@@ -861,21 +860,23 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     }
 
     override fun focusTabs(): Boolean {
-        utilityReturnFocus = currentFocus?.takeIf { it.isShown }
+        currentFocus?.takeIf { it.isShown }?.let { focused -> currentPage()?.let { com.pocketds.hub.ui.FocusPlace.mark(it, focused) } }
         return topBar.focusFirst().also { if (it) refreshHints() }
     }
 
+    /** From the tabs back to the page: its place, else where the page starts. */
     private fun returnFocusFromUtilities() {
-        val remembered = utilityReturnFocus
-        if (remembered != null && remembered.isShown && remembered.requestFocus()) {
-            utilityReturnFocus = null
-            refreshHints()
-            return
+        val page = currentPage()
+        if (page == null || !com.pocketds.hub.ui.FocusPlace.restore(page)) {
+            (sections.stack().peek() as? Screen)?.requestInitialFocus()
         }
-        utilityReturnFocus = null
-        (sections.stack().peek() as? Screen)?.requestInitialFocus()
         refreshHints()
     }
+
+    private fun currentPage(): View? = (sections.stack().peek() as? Screen)?.let { views[it] }
+
+    /** The person moved on the page or touched the screen: the place it was left at has served. */
+    private fun spendPlace() { currentPage()?.let(com.pocketds.hub.ui.FocusPlace::spend) }
 
     /**
      * Where a view actually is, in window coordinates.

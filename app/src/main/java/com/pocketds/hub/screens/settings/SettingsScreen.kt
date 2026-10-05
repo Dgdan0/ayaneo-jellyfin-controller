@@ -41,6 +41,7 @@ import com.pocketds.hub.ui.AppIcon
 import com.pocketds.hub.ui.BlobSegmentedView
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.FocusPlace
 import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.SettingsCard
@@ -88,6 +89,8 @@ class SettingsScreen(
     /** Settings › Libraries; none without a hub to ask. */
     private var libraryOrder: LibraryOrderSection? = null
     private lateinit var colors: PocketColors
+    /** The page's own view: where FocusPlace keeps the place Back returns to. */
+    private lateinit var pageView: View
     private lateinit var overlay: ChoiceOverlay
     private lateinit var nav: SideNavView
     private lateinit var pane: LinearLayout
@@ -104,7 +107,7 @@ class SettingsScreen(
         colors = Theme.colors(host.viewContext)
         libraryOrder = api?.let { LibraryOrderSection(host, it, colors, ringVisible, scope, saveScope, ::render) }
         // The prototype's Settings (#11): a 150dp list of places with their icons beside glass cards.
-        val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
+        val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }.also { pageView = it }
         val columns = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(22), dp(8), dp(22), 0)
@@ -167,7 +170,7 @@ class SettingsScreen(
         saveScope.cancel()
     }
 
-    override fun requestInitialFocus(): Boolean = nav.focus()
+    override fun requestInitialFocus(): Boolean = FocusPlace.focus(pageView) || nav.focus()
 
     override fun hints(): List<ButtonHint> = when {
         ::overlay.isInitialized && overlay.isOpen -> listOf(ButtonHint.activate("Choose"), ButtonHint.back("Cancel"))
@@ -220,15 +223,18 @@ class SettingsScreen(
         // Home row or a library jumped to Appearance. The chosen section holds
         // focus meanwhile, and the control with the same tag takes it back.
         if (focusedTags.isNotEmpty() && ::nav.isInitialized) nav.focus()
-        pane.removeAllViews()
-        when (section) {
-            SECTION_APPEARANCE -> appearance()
-            SECTION_HOME -> homeRows()
-            SECTION_LIBRARIES -> libraries()
-            SECTION_PLAYBACK -> playback()
-            SECTION_SUBTITLES -> subtitles()
-            SECTION_DOWNLOADS -> downloads()
-            else -> more()
+        // Drawn again while away (every show): the place Back returns to moves to the new control (#23).
+        FocusPlace.across(pageView) {
+            pane.removeAllViews()
+            when (section) {
+                SECTION_APPEARANCE -> appearance()
+                SECTION_HOME -> homeRows()
+                SECTION_LIBRARIES -> libraries()
+                SECTION_PLAYBACK -> playback()
+                SECTION_SUBTITLES -> subtitles()
+                SECTION_DOWNLOADS -> downloads()
+                else -> more()
+            }
         }
         focusedTags.firstNotNullOfOrNull { tag -> pane.findViewWithTag<View>(tag) }?.let { target ->
             pane.post { firstFocusable(target)?.requestFocus() }
