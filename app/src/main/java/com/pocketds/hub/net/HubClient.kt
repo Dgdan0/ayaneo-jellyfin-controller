@@ -194,6 +194,9 @@ interface HubApi {
         sourceItemId: String
     ): HubResult<ReadingPublicationManifest>
     fun readingPublicationPageUrl(workId: String, sourceItemId: String, pageIndex: Int): String
+    /** A page's thumbnail, [width] pixels wide (#16, C4: the hub's H1 route). */
+    fun readingPublicationThumbUrl(workId: String, sourceItemId: String, pageIndex: Int, width: Int): String =
+        HubEndpoints.readingPublicationThumb(readingPublicationPageUrl(workId, sourceItemId, pageIndex), width)
     suspend fun saveReadingPublicationProgress(
         workId: String,
         sourceItemId: String,

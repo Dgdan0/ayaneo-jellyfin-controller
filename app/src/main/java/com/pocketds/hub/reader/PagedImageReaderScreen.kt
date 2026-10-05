@@ -11,7 +11,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
-import coil.request.ImageRequest
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
@@ -113,9 +112,9 @@ class PagedImageReaderScreen(
     private lateinit var waitPill: TextView
     private lateinit var pageMap: PageMapView
     private lateinit var endCard: EndOfIssueCard
+    private lateinit var pageGrid: PageGridView
     private lateinit var comfortLayer: ComfortLayerView
     private var previewJob: Job? = null
-    private var previewRequest: coil.request.Disposable? = null
     private var repository: ReaderPageRepository? = null
 
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -209,6 +208,13 @@ class PagedImageReaderScreen(
         root.addView(waitPill, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER_HORIZONTAL or Gravity.TOP).apply { topMargin = dp(24) })
         endCard = EndOfIssueCard(context, colors) { onPad(it) }
         root.addView(endCard, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(28) })
+        // C4: every page as the hub's thumbnail; the cursor is the grid's own.
+        pageGrid = PageGridView(context, colors, com.pocketds.hub.ui.Artwork.loader(api, context), ringVisible).apply {
+            onPick = { page -> jumpTo(page) }
+            // Closed with B: back to the controls it was opened from, on Pages.
+            onClosed = { setControlsVisible(true) }
+        }
+        root.addView(pageGrid, FrameLayout.LayoutParams(MATCH, MATCH))
         options = ChoiceOverlay(context, colors, ringVisible, sidePanel = true)
         root.addView(options, FrameLayout.LayoutParams(MATCH, MATCH))
         // Over everything the reader draws, controls and sheets too, as a backlight would dim.
@@ -281,7 +287,7 @@ class PagedImageReaderScreen(
         surface.slots.filter { it !== surface.front && !it.ready }.forEach { it.clear() }
         previewJob?.cancel()
         endJob?.cancel()
-        previewRequest?.dispose()
+        com.pocketds.hub.ui.Artwork.bind(previewImage, com.pocketds.hub.ui.Artwork.loader(api, host.viewContext), null)
         regionHint.removeCallbacks(hideRegionHint)
         waitPill.removeCallbacks(showWait)
         pageMap.dismiss()
@@ -316,6 +322,7 @@ class PagedImageReaderScreen(
             onEndCard(action)
             return true
         }
+        if (pageGrid.onPad(action)) return true
         if (options.onPad(action)) return true
         when (val command = ReaderPadMap.command(padState(), action)) {
             ReaderCommand.Forward -> moveReadingFlow(true)
@@ -340,6 +347,7 @@ class PagedImageReaderScreen(
     // Android edge-back leaves the reader; physical B follows the reading flow.
     override fun onSystemBack(): Boolean {
         if (options.isOpen) { options.cancel(); return true }
+        if (pageGrid.isOpen) { pageGrid.hide(); return true }
         return false
     }
 
@@ -411,7 +419,7 @@ class PagedImageReaderScreen(
                 }
 
                 override fun onStopTrackingTouch(seekBar: SeekBar) {
-                    previewJob?.cancel(); previewRequest?.dispose(); previewCard.visibility = View.GONE
+                    previewJob?.cancel(); previewCard.visibility = View.GONE
                     state?.seek(seekBar.progress)
                     arriveAtEnd = false
                     forward = true
@@ -429,7 +437,8 @@ class PagedImageReaderScreen(
             gravity = Gravity.CENTER_VERTICAL or Gravity.END
             setTextColor(ReaderBars.SOFT_TEXT)
         }
-        navigation.addView(positionView, LinearLayout.LayoutParams(WRAP, MATCH).apply { marginEnd = dp(8) })
+        navigation.addView(positionView, LinearLayout.LayoutParams(WRAP, MATCH).apply { marginEnd = dp(6) })
+        navigation.addView(round(AppIcon.PAGES, "Pages") { showPages() }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(2) })
         // The last control registered is the forward page (ReaderControlFocusPolicy).
         navigation.addView(round(AppIcon.NEXT, "Next page") { turnWholePage(1) }, LinearLayout.LayoutParams(dp(44), dp(44)))
     }
@@ -1085,22 +1094,45 @@ class PagedImageReaderScreen(
         options.focusBody()
     }
 
+    /**
+     * The scrubber's preview: the page's thumbnail from the hub (C4), a few
+     * kilobytes rather than the whole scan, asked for once the thumb rests.
+     */
     private fun showPagePreview(page: Int) {
         previewJob?.cancel()
-        previewRequest?.dispose()
-        previewImage.setImageDrawable(null); previewLabel.text = "Page ${page + 1}"; previewCard.visibility = View.VISIBLE
+        previewLabel.text = "Page ${page + 1}"; previewCard.visibility = View.VISIBLE
         val value = manifest ?: return
-        val repo = repository ?: return
         previewJob = uiScope.launch {
-            delay(160)
-            try {
-                val file = repo.obtain(readingSession.api.readingPublicationPageUrl(workId, value.sourceItemId, page))
-                if (seek.progress != page || previewCard.visibility != View.VISIBLE) return@launch
-                previewRequest = com.pocketds.hub.ui.Artwork.loader(api, host.viewContext)
-                    .enqueue(ImageRequest.Builder(host.viewContext).data(file).size(dp(88), dp(112)).target(previewImage).build())
-            } catch (_: kotlinx.coroutines.CancellationException) { /* A newer scrub target replaced this one. */ }
-            catch (_: Exception) { previewLabel.text = "Page ${page + 1} · preview unavailable" }
+            delay(PREVIEW_REST_MS)
+            if (seek.progress != page || previewCard.visibility != View.VISIBLE) return@launch
+            com.pocketds.hub.ui.Artwork.bind(previewImage, com.pocketds.hub.ui.Artwork.loader(api, host.viewContext), thumbnail(value, page),
+                onMissing = { previewLabel.text = "Page ${page + 1} · preview unavailable" })
         }
+    }
+
+    private fun thumbnail(value: ReadingPublicationManifest, page: Int): String =
+        readingSession.api.readingPublicationThumbUrl(workId, value.sourceItemId, page, PageGrid.THUMB_WIDTH)
+
+    /** The Pages grid (C4): every page of the issue, the one you are on under the cursor; the bars step aside. */
+    private fun showPages() {
+        val value = manifest ?: return
+        val position = state ?: return
+        setControlsVisible(false)
+        pageGrid.show("Pages", ReaderTitleFormatter.subtitle(issueName, position.pageIndex + 1, value.pageCount),
+            value.pageCount, position.pageIndex) { page -> thumbnail(value, page) }
+        refreshKeys()
+        host.refreshHints()
+    }
+
+    /** A page chosen in the grid: it opens at its top, the controls out of the way. */
+    private fun jumpTo(page: Int) {
+        val position = state ?: return
+        setControlsVisible(false)
+        if (page == position.pageIndex) return
+        forward = page > position.pageIndex
+        position.seek(page)
+        arriveAtEnd = false
+        loadPage()
     }
 
     /** The zoom keys and buttons: the scale changes round the middle of the view, and the zoom is kept. */
@@ -1179,5 +1211,7 @@ class PagedImageReaderScreen(
         const val MAGNIFY = 2f
         /** How long a page may take before "Loading page 5" says so over the page you were on. */
         const val WAIT_MS = 300L
+        /** How long the scrubber's thumb rests before its page's thumbnail is asked for. */
+        const val PREVIEW_REST_MS = 120L
     }
 }

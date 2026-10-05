@@ -225,6 +225,13 @@ object HubEndpoints {
             encode(sourceItemId) + "/pages/$pageIndex"
     )
 
+    /**
+     * A page's thumbnail beside its page (#16, C4): `.../pages/{page}/thumb?w=`,
+     * scaled in the hub, which clamps [width] to 64-512 and keeps each size.
+     */
+    fun readingPublicationThumb(pageUrl: String, width: Int): String =
+        pageUrl.substringBefore('?') + "/thumb?w=" + width.coerceIn(64, 512)
+
     fun readingPublicationProgress(base: String, workId: String, sourceItemId: String): HubRequest =
         HubRequest(
             join(base, "/v1/reading/works/" + encode(workId) +

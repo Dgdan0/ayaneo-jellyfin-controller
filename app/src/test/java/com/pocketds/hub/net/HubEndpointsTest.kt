@@ -101,6 +101,11 @@ class HubEndpointsTest {
             "$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef/publications/6/pages/2",
             HubEndpoints.readingPublicationPage(base, "rw_0123456789abcdef0123456789abcdef", "6", 2)
         )
+        // A page's thumbnail sits beside it; the width is clamped as the hub clamps it (#16, C4).
+        val page = HubEndpoints.readingPublicationPage(base, "rw_0123456789abcdef0123456789abcdef", "6", 2)
+        assertEquals("$page/thumb?w=240", HubEndpoints.readingPublicationThumb(page, 240))
+        assertEquals("$page/thumb?w=64", HubEndpoints.readingPublicationThumb(page, 10))
+        assertEquals("$page/thumb?w=512", HubEndpoints.readingPublicationThumb(page, 4096))
         assertEquals(
             HubRequest(
                 "$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef/publications/6/progress",
