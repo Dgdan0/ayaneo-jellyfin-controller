@@ -557,4 +557,190 @@ func fixtureM4B(size int) []byte {
 	return out.Bytes()
 }
 
+// FixtureNarration is one narrated source file of an aligned book as Storyteller
+// cuts it: a source over its maximum track length (two hours) is split into
+// chunks, each its own audio file in the edition.
+type FixtureNarration struct {
+	// ChunkMs is each chunk's narrated length: where its last sentence ends.
+	ChunkMs []int64
+	// Sentences is how many sentences each chunk narrates.
+	Sentences []int
+}
+
+type AlignedEPUBOptions struct {
+	Narrations []FixtureNarration
+	// PackageDir is the folder the package document lives in ("OEBPS"); empty puts
+	// it at the root of the archive. Every path in the SMIL is relative to it.
+	PackageDir string
+	// AudioBytes is the size of each stored audio entry: filler, not audio.
+	AudioBytes int
+}
+
+// FixturePar is one narrated sentence, as the SMIL says it, in millisecond
+// terms: the truth a reader of the edition is tested against.
+type FixturePar struct {
+	Text     string // zip path of the text document
+	Fragment string
+	Audio    string // zip path of the audio file
+	BeginMs  int64
+	EndMs    int64
+}
+
+type FixtureChunk struct {
+	Entry    string
+	Source   int
+	Chunk    int
+	LengthMs int64
+}
+
+type AlignedEPUBFixture struct {
+	Path    string
+	Package string // zip path of the package document
+	Pars    []FixturePar
+	Audio   []string
+	Chunks  []FixtureChunk
+}
+
+// GenerateAlignedEPUB writes a read-along edition shaped as Storyteller's are
+// (audio stored, files named NNNNN-CCCCC, one SMIL per narrated source with one
+// <par> per sentence, gapless) and says exactly what it holds. The same moment
+// is written in every way a clock value can be: 12.500s, 0:00:12.500,
+// 00:12.500, 12500ms, 0.208333min, 0.003472h, a bare number and npt=.
+func GenerateAlignedEPUB(path string, options AlignedEPUBOptions) (AlignedEPUBFixture, error) {
+	dir := options.PackageDir
+	rel := func(name string) string { // a path inside the package folder
+		if dir == "" {
+			return name
+		}
+		return dir + "/" + name
+	}
+	fixture := AlignedEPUBFixture{Path: path, Package: rel("content.opf")}
+	files := []zipFileSpec{}
+	var manifest, spine strings.Builder
+	manifest.WriteString(`<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`)
+	var navigation strings.Builder
+	parIndex := 0
+	for sourceIndex, narration := range options.Narrations {
+		source := sourceIndex + 1
+		chapter := fmt.Sprintf("part%04d", source)
+		textHref, smilHref := "text/"+chapter+".xhtml", "smil/"+chapter+".smil"
+		var smil, body strings.Builder
+		sentence := 0
+		for chunkIndex, length := range narration.ChunkMs {
+			chunk := chunkIndex + 1
+			audioHref := fmt.Sprintf("Audio/%05d-%05d.mp3", source, chunk)
+			audioEntry := rel(audioHref)
+			count := narration.Sentences[chunkIndex]
+			step := length / int64(count)
+			fixture.Audio = append(fixture.Audio, audioEntry)
+			fixture.Chunks = append(fixture.Chunks, FixtureChunk{Entry: audioEntry, Source: source, Chunk: chunk, LengthMs: length})
+			fmt.Fprintf(&manifest, `<item id="au%d-%d" href="%s" media-type="audio/mpeg"/>`, source, chunk, audioHref)
+			filler := make([]byte, options.AudioBytes)
+			for i := range filler {
+				filler[i] = byte(i*13 + source*7 + chunk)
+			}
+			files = append(files, zipFileSpec{name: audioEntry, data: filler, store: true})
+			for k := 0; k < count; k++ {
+				begin, end := int64(k)*step, int64(k+1)*step
+				if k == count-1 {
+					end = length
+				}
+				fragment := fmt.Sprintf("id%d-s%d", source, sentence)
+				sentence++
+				fmt.Fprintf(&body, `<span id="%s">Sentence %d of part %d.</span> `, fragment, sentence, source)
+				fmt.Fprintf(&smil, `<par id="p%d"><text src="../%s#%s"/><audio src="../%s" clipBegin="%s" clipEnd="%s"/></par>`,
+					parIndex, textHref, fragment, audioHref, fixtureClock(begin, parIndex), fixtureClock(end, parIndex+3))
+				parIndex++
+				fixture.Pars = append(fixture.Pars, FixturePar{Text: rel(textHref), Fragment: fragment, Audio: audioEntry, BeginMs: begin, EndMs: end})
+			}
+		}
+		files = append(files,
+			zipFileSpec{name: rel(textHref), data: []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Part %d</title></head><body><p>%s</p></body></html>`, source, body.String()))},
+			zipFileSpec{name: rel(smilHref), data: []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><seq id="s%d" epub:textref="../%s" epub:type="bodymatter chapter">%s</seq></body></smil>`, source, textHref, smil.String()))},
+		)
+		fmt.Fprintf(&manifest, `<item id="ch%d" href="%s" media-type="application/xhtml+xml" media-overlay="ov%d"/><item id="ov%d" href="%s" media-type="application/smil+xml"/>`, source, textHref, source, source, smilHref)
+		fmt.Fprintf(&spine, `<itemref idref="ch%d"/>`, source)
+		fmt.Fprintf(&navigation, `<li><a href="%s">Part %d</a></li>`, textHref, source)
+	}
+	container := fmt.Sprintf(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="%s" media-type="application/oebps-package+xml"/></rootfiles></container>`, fixture.Package)
+	pack := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">%saligned</dc:identifier><dc:title>Aligned fixture</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta></metadata><manifest>%s</manifest><spine>%s</spine></package>`, FixtureIdentifierPrefix, manifest.String(), spine.String())
+	nav := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol>%s</ol></nav></body></html>`, navigation.String())
+	head := []zipFileSpec{
+		{name: "META-INF/container.xml", data: []byte(container)},
+		{name: fixture.Package, data: []byte(pack)},
+		{name: rel("nav.xhtml"), data: []byte(nav)},
+	}
+	data, err := writeZip("application/epub+zip", append(head, files...))
+	if err != nil {
+		return AlignedEPUBFixture{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return AlignedEPUBFixture{}, err
+	}
+	return fixture, os.WriteFile(path, data, 0o644)
+}
+
+// fixtureClock writes a moment as a SMIL clock value, in a form chosen by n.
+func fixtureClock(ms int64, n int) string {
+	seconds := float64(ms) / 1000
+	h, m, s := ms/3_600_000, (ms/60_000)%60, float64(ms%60_000)/1000
+	switch n % 8 {
+	case 0:
+		return fmt.Sprintf("%.3fs", seconds)
+	case 1:
+		return fmt.Sprintf("%d:%02d:%06.3f", h, m, s)
+	case 2:
+		return fmt.Sprintf("%02d:%06.3f", ms/60_000, s)
+	case 3:
+		return fmt.Sprintf("%dms", ms)
+	case 4:
+		return fmt.Sprintf("%.9fmin", float64(ms)/60_000)
+	case 5:
+		return fmt.Sprintf("%.12fh", float64(ms)/3_600_000)
+	case 6:
+		return fmt.Sprintf("%.3f", seconds)
+	default:
+		return fmt.Sprintf("npt=%.3fs", seconds)
+	}
+}
+
+type zipFileSpec struct {
+	name  string
+	data  []byte
+	store bool // kept as is rather than compressed
+}
+
+// writeZip writes an archive with a stored mimetype first, then the files in the
+// order given, each with a fixed time so the bytes are the same every run.
+func writeZip(mimetype string, files []zipFileSpec) ([]byte, error) {
+	var output bytes.Buffer
+	writer := zip.NewWriter(&output)
+	modified := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	entry, err := writer.CreateHeader(&zip.FileHeader{Name: "mimetype", Method: zip.Store})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := io.WriteString(entry, mimetype); err != nil {
+		return nil, err
+	}
+	for _, file := range files {
+		header := &zip.FileHeader{Name: file.name, Method: zip.Deflate}
+		if file.store {
+			header.Method = zip.Store
+		}
+		header.SetModTime(modified)
+		entry, err := writer.CreateHeader(header)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := entry.Write(file.data); err != nil {
+			return nil, err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return output.Bytes(), nil
+}
+
 const fixtureMP3Base64 = "SUQzBAAAAAAASFRJVDIAAAAcAAADQ2xvY2t3b3JrIElzbGFuZCBuYXJyYXRpb24AVFNTRQAAAA4AAANMYXZmNjIuMy4xMDAAAAAAAAAAAAAAAP/zWMAAAAAAAAAAAABJbmZvAAAADwAAAB4AAAkkABsbGyMjIysrKzMzMzM7OztCQkJKSkpKUlJSWlpaYmJiYmpqanJycnp6enqBgYGJiYmRkZGRmZmZoaGhqampqbGxsbm5ucDAwMDIyMjQ0NDY2NjY4ODg6Ojo8PDw8Pj4+P///wAAAABMYXZjNjIuMTEAAAAAAAAAAAAAAAAkAsAAAAAAAAAJJFHIIbsAAAAAAAAAAAAAAP/zKMQAC8ACzb9BGAKpAGS4f/gAA+D4Pg+fBCD4Pgg45Lg+D4P8EHYPn/+UD/Bw5iAH9YOHMgD/Ajuf6GlKBf/+DQBPX3j9/f/zKMQMEDDmiAGbkAAwovOEZgYZHGKIFFDxxUB8g3hD4QHGLegA6h3MQIc4c4o/5FSKmReL3/oomIiPfWCoiPfwVf//+5Gnav/zKMQGDkh2OAHeEABuQFwjAFAmAQNRgbAumFgPKacAwxv+kDGK+LoYcwV5hJCRhcHUwLgBUfXqfq1Miv////SqpXeXaX9CoP/zKMQHDWBqMAAHtiwICAEzADAuMBYG8wWRbjJq8oNUEeYwRgXTHQQ4azMrNQUjIitOis8Mb//////+qv///OMP29rCRABDAP/zKMQMDsByLADn+ICGzCg6Mcoc0pnjDQUJQxvQIyMDPAtTM5rNTQAxyRAMT0DGnvxL6TAPf///93/7av///ckfF0ldIsjw+P/zKMQMDMhuMADfuIByQBqc9IONKUIY56AMjD1BPMcnEwVcBCdCQGqPPTJK9Qz///////ZV///90z+s6SGLcgkFGBBCYbKxmP/zKMQTDLBqNADntoAlZlC5MmrsMaYK4HxhAmbTeGPGwKMU1nFi1kez////vf///VPFIGZkhzCgOMCisw4ZjLNJMhDW00dRv//zKMQbC7BuNADntoEwhAhDRkA4GdMmIw40Um8kXllsMf///Ufeh0WSothw4Aks1ISPRVzScOjOdkI0w9gYDIByMS28AHMUBf/zKMQnDHhuMADfuIAtt6I/MVw9////0P///VK7TOUhS4QAA5gkNGJCaZziRlwXdGxyLUYOAFoFIDXNsxlBARUnS40Vtcg1sf/zKMQwC5huNADntoEjgVkKTgjALBAERgGgsmBsJQYseGhmCDIGC6DebdafDEaEYLK1uQuct2Aj///////a///9zEfjzzK8DP/zKMQ8DHhuOAAHtCwHMUADORc5hoM3dIw3agnjC5BPMYlMxNDgCTguAW4ROYrgg///////9dX///3Kn1Z0kMXdMBBDDhUy1P/zKMRFDMhqOADfuIAjhPczM6szbgFFMIcBggLzT/QxJKMQAU6ndjVL0t////0KtyZ1lpFQAEYAQCoFpgDA1GBOK6YhnH5kmv/zKMRMDJhuNADftoA65gqA/GfFRwqSZQAkR4oW9kjnLYW////6Kv///U28ElbMgPAQwZGJmnHB5OCaMT85ytiKmHkD0ZOOhv/zKMRUDJBuNAAHtixPrphA1mAAQre+kTpKcPf///9N///9Slwl2oOlmjCAMxkUM+Qzq/Yz9K1jh7FEMLQAcKEYyZNTCZhMJv/zKMRcDOhuMADfuIAGSJcqM0x0N////97///7egZlqVJCBiEMiIbAk/mDMoYDig0GB/BDxgIYEaaKSnODA8zFCcjC2eDp+wP/zKMRjDPhqMADfuIBH//////+y///7sQbnADbgoAGFQeYyFRmsynAJ4au+QR3ODcGJ6FuZ1TpoTbGKUUYVCaEhlcMRuksAT//zKMRqDXBuMADn9oD///7v/2VV///7sBLRROARjYM+qMDgCEwdQVjEeE9NkPcE9WBlxomsw2hzMf2MOKgw8HSyywrtSkgDP//zKMRvDphyKADnuID///3//oqd/////3L///5POquovcKAshDxVIZIkgtzzAnUq8wXoJpMAgAmjSBo7MYM+ABphIgZisKkFv/zKMRvD+hqJADHuGTC3////TX///1XiFPGFAwAAGIiZlx0cHmmYBEibOYkJhUAzGdJxp/SYgggYIYm/lPSVxz///1HW5LlQP/zKMRqDRhuLADn9oAIQDAohMpBjWCk+O2NQaJA6uw6DD4ASMPGwxZjzAqBMEhBHllUMzRMz////3f/t3X///7OuMsUuqIQUP/zKMRwCzhuOADftoGIPiEgARImJeMYLsk3GGhhLg4BHmfgZ1zCZ6MhjEPAq/oTR2Aj///////a///90kbnImnIBQMwwWMrQ//zKMR+DehqLADfuIA3jmMsWZY18BQDCfBtM9SzWNYxU4BQuuiH5ZT2Az////0//9v///3HnhZUmEJAIkNBCKaeFHlM5pEq+v/zKMSBDXhuLADn9oBzYA/mHKBOYlMpgmzBY5AQFqVOjEqoYf//////+tX///5TO6xJBMFgKFwoCBmYJOxjy/mPH+GaEQ/5gf/zKMSGDPhuOADftoAINg8onHwhlxIEJKETawNO2xb////o//Uq///9St/JO2AvOYACBhUWmNjUaTqJmhbMm32OaYYgTBlgxP/zKMSNDRBqMADfuIBoeAmKCOAhomu4kPyynzE1///9SiGGFpMInmAKAyYCoABgkA4GGQOkaEBLxuYjbmIOEGYDYOpg+iDhUP/zKMSTDUhuMADntoBrMDcAtDd6n4ljAhUON11bYXC4bAUDAYAAD/31yW5fhhMIZlpmthFoRMzrOmYoSQaohzEwMmLDME+Bg//zKMSYDFhyMADnuIEEAQFC/npuggJREdDHkG+zp2GVIYTpFin+gzp2NiZLDF47/KsCv/KsCpVn/4VJCg8kKISeNI0jqjl9EP/zKMShDZBqPAFeAAGQkKFKU0Tpi1YS2k5cy2j0mTETyHIczQDAIKSciRI7JFHIQVkFPBTYpvArxtVMQU1FMy4xMDBVVVVVVf/zKMSlGDki3l+aoAJVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zKMR/DUimRAHPMAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ=="
