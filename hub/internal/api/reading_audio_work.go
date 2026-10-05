@@ -107,17 +107,29 @@ func copyRank(kinds map[string]bool) int {
 
 // sameRecording says two audiobook editions are one recording: read by the same
 // people, and as long as each other (within two percent) where both lengths are
-// known. A narrator that is not named is not known to be the same.
+// known.
+//
+// Storyteller leaves the narrator off a book it made from the audio alone: Dark
+// Matter's second book names nobody, where the first names Jon Lindstrom, and both
+// are 36,538,680 ms (measured 2026-10-05). So when one names a narrator and the
+// other names nobody, only an exact copy counts: both lengths known and within a
+// second of each other. When neither names anyone, they are not known to be the
+// same.
 func sameRecording(a, b ReadingEdition) bool {
 	left, right := narratorSet(a.Narrator), narratorSet(b.Narrator)
-	if left == "" || left != right {
-		return false
+	difference := a.DurationMS - b.DurationMS
+	if difference < 0 {
+		difference = -difference
 	}
-	if a.DurationMS > 0 && b.DurationMS > 0 {
-		difference := a.DurationMS - b.DurationMS
-		if difference < 0 {
-			difference = -difference
-		}
+	bothKnown := a.DurationMS > 0 && b.DurationMS > 0
+	switch {
+	case left == "" && right == "":
+		return false
+	case left == "" || right == "":
+		return bothKnown && difference <= 1000
+	case left != right:
+		return false
+	case bothKnown:
 		return difference*50 <= max(a.DurationMS, b.DurationMS)
 	}
 	return true

@@ -76,6 +76,16 @@ func TestOneAudiobookPerWorkKeepsTheCopyThatHasTheReadAlong(t *testing.T) {
 		{"nobody named is not known to be the same", []ReadingEdition{
 			pairEdition("12", "audiobook", "", length), pairEdition("13", "audiobook", "", length),
 		}, []string{"audiobook:12", "audiobook:13"}},
+		// Dark Matter as Storyteller really holds it: the audio-only book names nobody.
+		{"a copy that names nobody is the same audio when the lengths agree to the second", []ReadingEdition{
+			pairEdition("12", "ebook", "", 0), pairEdition("12", "audiobook", jon, length), pairEdition("12", "readaloud", jon, 0), pairEdition("13", "audiobook", "", length),
+		}, []string{"ebook:12", "audiobook:12", "readaloud:12"}},
+		{"an unnamed narration a few seconds apart is another recording", []ReadingEdition{
+			pairEdition("12", "audiobook", jon, length), pairEdition("13", "audiobook", "", length-5000),
+		}, []string{"audiobook:12", "audiobook:13"}},
+		{"an unnamed copy of unknown length is not known to be the same", []ReadingEdition{
+			pairEdition("12", "audiobook", jon, length), pairEdition("13", "audiobook", "", 0),
+		}, []string{"audiobook:12", "audiobook:13"}},
 		{"one audiobook is left as it is", []ReadingEdition{
 			pairEdition("12", "ebook", "", 0), pairEdition("12", "audiobook", jon, length),
 		}, []string{"ebook:12", "audiobook:12"}},
