@@ -240,7 +240,9 @@ struct FeaturedCard: View {
                     words
                 }
             } else {
-                FeaturedSplit {
+                // A phone held sideways has about 400 points of height: a
+                // wider picture leaves the first row in view under it.
+                FeaturedSplit(pictureRatio: metrics.short ? 2.8 : 2) {
                     picture
                     words
                 }
@@ -377,8 +379,10 @@ struct DiscoverSearchGrid: View {
 }
 
 /// The featured card's two halves (`.feat`'s `1.15fr 1fr`): the picture 16:8
-/// at 1.15 parts of the width, the words in the rest, centred down its height.
+/// (or wider, by `pictureRatio`) at 1.15 parts of the width, the words in the
+/// rest, centred down its height.
 struct FeaturedSplit: Layout {
+    var pictureRatio: CGFloat = 2
     private static let pictureShare: CGFloat = 1.15 / 2.15
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -386,7 +390,7 @@ struct FeaturedSplit: Layout {
         let picture = width * Self.pictureShare
         let words = subviews.count > 1
             ? subviews[1].sizeThatFits(ProposedViewSize(width: width - picture, height: nil)).height : 0
-        return CGSize(width: width, height: max(picture / 2, words))
+        return CGSize(width: width, height: max(picture / pictureRatio, words))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
