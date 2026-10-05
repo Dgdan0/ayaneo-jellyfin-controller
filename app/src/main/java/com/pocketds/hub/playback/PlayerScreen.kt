@@ -845,7 +845,7 @@ class PlayerScreen(
         if (side == PlayerGestureView.Side.LEFT) {
             val next = (brightnessStart + fraction).coerceIn(0.02f, 1f)
             videoBrightness = next
-            videoDimmer.alpha = PlayerBrightnessPolicy.overlayAlpha(next)
+            videoDimmer.alpha = com.pocketds.hub.ui.ScreenComfort.dimAlpha(next)
             showLevelFeedback(PlayerLevelView.Kind.BRIGHTNESS, next, side)
         } else {
             val manager = audioManager()
