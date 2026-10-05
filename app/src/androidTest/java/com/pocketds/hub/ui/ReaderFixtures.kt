@@ -128,9 +128,10 @@ object ReaderFixtures {
 
     /**
      * A short generated book; [aligned] adds a media overlay narrating its
-     * first eight sentences, [sentenceSeconds] each, over generated silence.
+     * first eight sentences, [sentenceSeconds] each, over generated silence;
+     * [withAudio] false leaves the silence out, as the hub's slim edition does.
      */
-    fun epub(aligned: Boolean, sentenceSeconds: Int = 1): ByteArray {
+    fun epub(aligned: Boolean, sentenceSeconds: Int = 1, withAudio: Boolean = true): ByteArray {
         val output = ByteArrayOutputStream()
         val sentences = (0 until 8).map { "The pines marked the quiet path, and Mara followed the lantern toward the ridge, sentence ${it + 1}." }
         ZipOutputStream(output).use { zip ->
@@ -151,7 +152,8 @@ object ReaderFixtures {
                     "<par id=\"p$it\"><text src=\"one.xhtml#s$it\"/><audio src=\"voice.wav\" clipBegin=\"${it * sentenceSeconds}s\" clipEnd=\"${(it + 1) * sentenceSeconds}s\"/></par>"
                 }
                 files["EPUB/one.smil"] = """<smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><seq epub:textref="one.xhtml">$pars</seq></body></smil>""".toByteArray()
-                files["EPUB/voice.wav"] = silence(seconds = sentences.size * sentenceSeconds)
+                // Without its audio it is the hub's slim edition (#19): the SMIL still names voice.wav.
+                if (withAudio) files["EPUB/voice.wav"] = silence(seconds = sentences.size * sentenceSeconds)
             }
             files.forEach { (name, bytes) -> zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry() }
         }

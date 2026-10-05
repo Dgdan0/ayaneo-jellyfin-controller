@@ -30,7 +30,7 @@ class ReadAlongPlaybackTest {
         try {
             i.runOnMainSync {
                 val segments = (0..3).map { ReadAlongSegment("chapter.xhtml", "s$it", "voice.wav", it * 1000L, (it + 1) * 1000L) }
-                audio = ReadAlongPlayback(activity, ReadAlongTimeline(listOf(ReadAlongTrack("voice.wav", segments))), listOf(file),
+                audio = ReadAlongPlayback(activity, ReadAlongTimeline(listOf(ReadAlongTrack("voice.wav", segments))), listOf(NarrationSource(android.net.Uri.fromFile(file).toString())),
                     ReadAlongPosition(0, 1100), { highlighted = it }, {}, { point, _ -> saved = point }, { failed = true })
             }
             Thread.sleep(400)

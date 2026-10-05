@@ -15,7 +15,6 @@ import com.pocketds.hub.screens.home.ReadingListsState
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.longOrNull
 import java.io.File
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
@@ -46,11 +45,8 @@ class ReadingProgress private constructor(private val context: Context) {
         store.save(key,location,System.currentTimeMillis())
         // Remove immediately, including offline. Never mutate a newly selected profile's shelves.
         val fraction = ((location.locator?.get("locations") as? JsonObject)?.get("totalProgression") as? JsonPrimitive)?.doubleOrNull
-        val audio = (location.locator?.get("locations") as? JsonObject)?.get("pocketdsAudio") as? JsonObject
-        val narrated = ((audio?.get("offsetMs") as? JsonPrimitive)?.longOrNull ?: 0) > 0 ||
-            ((audio?.get("track") as? JsonPrimitive)?.longOrNull ?: 0) > 0
         if (key.scope == session().identity && ((fraction != null && fraction.isFinite() && fraction > 0.0) ||
-                (location.pageIndex ?: 0) > 0 || narrated || AudioPlace.started(location))) {
+                (location.pageIndex ?: 0) > 0 || AudioPlace.started(location))) {
             ReadingListsRepository.update(context) { it.remove(ReadingListsState.WANT_TO_READ, key.workId) }
         }
         if (sync) requestSync()

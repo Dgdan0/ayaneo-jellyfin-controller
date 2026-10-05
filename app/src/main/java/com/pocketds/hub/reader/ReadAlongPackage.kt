@@ -86,7 +86,13 @@ object ReadAlongPackage {
     private const val XML_LIMIT = 4 * 1024 * 1024
     private const val AUDIO_LIMIT = 2L * 1024 * 1024 * 1024
 
-    fun read(file: File): ReadAlongTimeline = ZipFile(file).use { zip ->
+    /**
+     * The narration's timeline. [requireAudio] false reads the edition without
+     * its audio (#19: the hub's slim edition), whose narration streams from the
+     * audiobook's tracks: its SMIL still names the audio files, which are not
+     * in the archive.
+     */
+    fun read(file: File, requireAudio: Boolean = true): ReadAlongTimeline = ZipFile(file).use { zip ->
         val container = xml(zip, "META-INF/container.xml")
         val opf = container.children("rootfile").firstOrNull()?.getAttribute("full-path") ?: error("No EPUB package")
         val packagePath = resolve("", opf).first
@@ -104,7 +110,7 @@ object ReadAlongPackage {
                 val (href, fragment) = resolve(smilPath, text.getAttribute("src"))
                 require(fragment.isNotBlank()) { "Narrated text needs a fragment" }
                 val audioHref = resolve(smilPath, audio.getAttribute("src")).first
-                require(zip.getEntry(href) != null && zip.getEntry(audioHref) != null) { "Missing narration resource" }
+                require(zip.getEntry(href) != null && (!requireAudio || zip.getEntry(audioHref) != null)) { "Missing narration resource" }
                 val begin = clock(audio.getAttribute("clipBegin").ifBlank { "0s" })
                 val end = clock(audio.getAttribute("clipEnd"))
                 // Word alignment can legitimately emit a zero-length boundary

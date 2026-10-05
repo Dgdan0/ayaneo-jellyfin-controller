@@ -22,8 +22,9 @@ object ReaderOfflineFiles {
                 File(cache,"reader-pages/$name").takeIf(File::isFile)?.let(result::add)
             }
         }
-        for(folder in listOf(File(cache,"reading-epub/$scope"),File(cache,"reading-epub/$scope/aligned"))) {
-            // Complete packages, partial transfers, and extracted aligned audio share this prefix.
+        for(folder in listOf(File(cache,"reading-epub/$scope"),File(cache,"reading-epub/$scope/aligned"),File(cache,"reading-epub/$scope/aligned-slim"))) {
+            // Complete packages, partial transfers, and extracted aligned audio share this prefix; the slim
+            // read-along edition (#19) has its own folder, its narration in the players' cache (AudioStreams).
             folder.listFiles().orEmpty().filter {it.name.startsWith(work+"_")}.forEach {entry->
                 if(entry.isDirectory) result+=entry.walkTopDown().filter(File::isFile).toList() else result+=entry
             }

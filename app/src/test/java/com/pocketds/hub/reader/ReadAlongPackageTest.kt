@@ -68,16 +68,19 @@ class ReadAlongPackageTest {
         assertTrue(timeline.tracks.all { it.durationMs > 0 && it.audioHref.endsWith(".mp3") })
     }
 
-    private fun book(audio: String = "../audio/voice.mp3", begin: String = "1s", end: String = "2s", doctype: String = ""): File {
+    private fun book(audio: String = "../audio/voice.mp3", begin: String = "1s", end: String = "2s", doctype: String = "",
+                     withAudio: Boolean = true, withText: Boolean = true): File {
         val file = File.createTempFile("readalong-", ".epub").apply { deleteOnExit() }
         ZipOutputStream(file.outputStream()).use { zip ->
-            val entries = mapOf(
+            val entries = mutableMapOf(
                 "META-INF/container.xml" to "<container><rootfiles><rootfile full-path='EPUB/package.opf'/></rootfiles></container>",
                 "EPUB/package.opf" to "<package><manifest><item id='c' href='chapter.xhtml' media-overlay='s'/><item id='s' href='overlays/one.smil'/></manifest><spine><itemref idref='c'/></spine></package>",
                 "EPUB/chapter.xhtml" to "<html><body><p id='sentence1'>A test.</p><p id='sentence2'>Another.</p></body></html>",
                 "EPUB/overlays/one.smil" to "$doctype<smil><body><seq><par><text src='../chapter.xhtml#sentence1'/><audio src='$audio' clipBegin='$begin' clipEnd='$end'/></par><par><text src='../chapter.xhtml#sentence2'/><audio src='$audio' clipBegin='3s' clipEnd='4s'/></par></seq></body></smil>",
                 "EPUB/audio/voice.mp3" to "test audio"
             )
+            if (!withAudio) entries.remove("EPUB/audio/voice.mp3")
+            if (!withText) entries.remove("EPUB/chapter.xhtml")
             entries.forEach { (path, text) -> zip.putNextEntry(ZipEntry(path)); zip.write(text.toByteArray()); zip.closeEntry() }
         }
         return file
@@ -119,6 +122,17 @@ class ReadAlongPackageTest {
             assertTrue(runCatching { ReadAlongPackage.read(book(begin = begin, end = end)) }.isFailure)
         }
         assertTrue(runCatching { ReadAlongPackage.read(book(doctype = "<!DOCTYPE smil [<!ENTITY x SYSTEM 'file:///secret'>]>")) }.isFailure)
+    }
+
+    /** #19: the hub's slim edition keeps its SMIL but not its audio, which streams from the tracks. */
+    @Test fun theEditionWithoutItsAudioReadsWhenAskedToAndOnlyThen() {
+        val slim = book(withAudio = false)
+        assertTrue("The whole edition must hold its audio", runCatching { ReadAlongPackage.read(slim) }.isFailure)
+        val timeline = ReadAlongPackage.read(slim, requireAudio = false)
+        assertEquals("EPUB/audio/voice.mp3", timeline.tracks.single().audioHref)
+        assertEquals(listOf("sentence1", "sentence2"), timeline.tracks.single().segments.map { it.fragment })
+        // The words must still be there.
+        assertTrue(runCatching { ReadAlongPackage.read(book(withAudio = false, withText = false), requireAudio = false) }.isFailure)
     }
 
     @Test fun audioExtractionCannotEscapeCacheAndIsExact() {

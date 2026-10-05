@@ -23,7 +23,12 @@ class StandInHub(
     seconds: List<Int>,
     private val chapters: List<Triple<String, Int, Long>> = emptyList(),
     /** What the manifest route answers instead, a status and a code (409 audio_not_streamable). */
-    var refuse: Pair<Int, String>? = null
+    var refuse: Pair<Int, String>? = null,
+    /** A read-along edition's audio files mapped onto the tracks: its path in the EPUB, the track, where it begins. */
+    private val alignment: List<Triple<String, Int, Long>> = emptyList(),
+    /** The read-along edition whole, and without its audio (`audio=omit`). */
+    private val whole: ByteArray? = null,
+    private val slim: ByteArray? = null
 ) {
     data class Track(val index: Int, val id: String, val bytes: ByteArray, val durationMs: Long)
     data class Place(val trackId: String, val offsetMs: Long, val completed: Boolean = false, val exact: Boolean = true)
@@ -50,6 +55,7 @@ class StandInHub(
     fun manifestReads() = requests.count { it.path == "$publication/audio" }
     fun trackReads(index: Int) = requests.filter { it.path == "$publication/audio/tracks/$index" }
     fun fileReads() = requests.count { it.path.endsWith("/file") }
+    fun fileQueries() = requests.filter { it.path.endsWith("/file") }.map { it.query }
 
     private fun json(body: Any, status: Int = 200) =
         MockResponse().setResponseCode(status).setHeader("Content-Type", "application/json").setBody(body.toString())
@@ -67,14 +73,22 @@ class StandInHub(
             path.startsWith("$publication/audio/tracks/") -> track(path.substringAfterLast('/').toInt(), url.queryParameter("rev"), request.getHeader("Range"))
             path == "$publication/audio/position" && request.method == "GET" -> position()
             path == "$publication/audio/position" && request.method == "POST" -> write(JSONObject(request.body.readUtf8()))
-            path.endsWith("/file") -> MockResponse().setResponseCode(404)
+            path == "$publication/file" && url.queryParameter("audio") == "omit" ->
+                slim?.let { MockResponse().setHeader("Content-Type", "application/epub+zip").setBody(Buffer().write(it)) } ?: error(409, "audio_not_streamable", "unreadable")
+            path == "$publication/file" -> whole?.let { MockResponse().setHeader("Content-Type", "application/epub+zip").setBody(Buffer().write(it)) }
+                ?: MockResponse().setResponseCode(404)
+            // A reader's place in the text: none kept, and a write taken (the stand-in keeps no text places).
+            path == "$publication/position" && request.method == "GET" -> json(JSONObject().put("locator", JSONObject.NULL))
+            path == "$publication/position" -> json(JSONObject().put("ok", true))
             else -> json(JSONObject(), 404)
         }
     }
 
     private fun manifest(): MockResponse = json(JSONObject()
         .put("workId", work).put("sourceItemId", book).put("revision", revision).put("narrator", "A generated voice")
-        .put("totalMs", tracks.sumOf { it.durationMs }).put("aligned", false)
+        .put("totalMs", tracks.sumOf { it.durationMs }).put("aligned", alignment.isNotEmpty())
+        .apply { if (alignment.isNotEmpty()) put("alignment", JSONObject().put("audio", JSONArray(alignment.map { (href, track, start) ->
+            JSONObject().put("href", href).put("track", track).put("startMs", start) }))) }
         .put("tracks", JSONArray(tracks.map { track ->
             JSONObject().put("index", track.index).put("id", track.id).put("title", "Track %02d".format(track.index + 1))
                 .put("durationMs", track.durationMs).put("bytes", track.bytes.size).put("mime", "audio/wav").put("etag", "\"e${track.index}\"")

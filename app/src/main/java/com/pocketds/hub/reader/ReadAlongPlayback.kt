@@ -8,19 +8,23 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import java.io.File
 import kotlinx.coroutines.*
 
 /**
  * Foreground narration owned by its reader. Pauses on hide/background; never
  * starts on opening a book. It reports to [AudioHandoff] (#16, A1), so starting
  * it pauses video or an audiobook and either of those pauses it.
+ *
+ * Each stretch of the [timeline] plays from its [NarrationSource] (#19): a
+ * track the hub streams, read through the reading players' cache
+ * ([AudioStreams]), or a file taken out of the whole edition; clipped from
+ * where its file begins in the source plus its first sentence's begin.
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class ReadAlongPlayback(
     context: Context,
     val timeline: ReadAlongTimeline,
-    files: List<File>,
+    sources: List<NarrationSource>,
     initial: ReadAlongPosition?,
     private val onSegment: (ReadAlongSegment?) -> Unit,
     private val onState: (Boolean) -> Unit,
@@ -29,7 +33,7 @@ class ReadAlongPlayback(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val app = context.applicationContext
-    private val player = ExoPlayer.Builder(app).build()
+    private val player = ExoPlayer.Builder(app).setMediaSourceFactory(AudioStreams.mediaSources(app)).build()
     private val pauser: () -> Unit = { pause() }
     private var active: ReadAlongSegment? = null
     private var lastSaved = 0L
@@ -62,9 +66,11 @@ class ReadAlongPlayback(
             override fun onPlayerError(error: PlaybackException) { pause(); onError() }
         })
         player.setMediaItems(timeline.tracks.mapIndexed { index, track ->
-            MediaItem.Builder().setUri(Uri.fromFile(files[index])).setClippingConfiguration(
-                MediaItem.ClippingConfiguration.Builder().setStartPositionMs(track.startMs)
-                    .setEndPositionMs(track.startMs + track.durationMs).build()
+            val source = sources[index]
+            MediaItem.Builder().setUri(Uri.parse(source.uri)).setCustomCacheKey(source.cacheKey.ifEmpty { null })
+                .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(source.startMs + track.startMs)
+                    .setEndPositionMs(source.startMs + track.startMs + track.durationMs).build()
             ).build()
         })
         initial?.let { seek(it) }

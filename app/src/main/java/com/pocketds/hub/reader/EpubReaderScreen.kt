@@ -29,6 +29,7 @@ import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.EpubPositionBody
+import com.pocketds.hub.model.ReadingAudioManifest
 import com.pocketds.hub.model.ReadingEdition
 import com.pocketds.hub.screens.library.ReadingEntryMode
 import com.pocketds.hub.screens.library.ReadingEntryPreferences
@@ -515,27 +516,32 @@ class EpubReaderScreen(
         loading.visibility = View.VISIBLE
         loading.text = "Preparing book…"
         loadJob = uiScope.launch {
-            val cache = EpubPackageCache(File(host.viewContext.cacheDir, "reading-epub/${readingSession.identity}" + if (readAlong) "/aligned" else ""))
-            if (forceDownload) {
-                cache.completeFile(workId, sourceItemId).delete()
-                cache.clearDownload(workId, sourceItemId)
-            }
-            val file = if (cache.isComplete(workId, sourceItemId)) {
-                cache.completeFile(workId, sourceItemId)
-            } else {
-                val temporary = cache.temporaryFile(workId, sourceItemId)
-                loading.text = if (readAlong) "Downloading aligned book and narration…" else "Downloading book…"
-                when (val result = readingSession.api.downloadReadingEpub(workId, sourceItemId, temporary, readAlong)) {
-                    is HubResult.Ok -> runCatching { cache.promote(workId, sourceItemId) }.getOrElse {
-                        showFailure("The downloaded EPUB is incomplete")
-                        return@launch
-                    }
-                    is HubResult.Failed -> {
-                        showFailure(result.message)
-                        return@launch
-                    }
+            // Read along (#19): the edition without its audio and the narration streamed from the
+            // audiobook's tracks, when the hub can map them; the whole edition otherwise.
+            var plan: NarrationPlan? = if (readAlong) {
+                loading.text = "Preparing synchronized narration…"
+                ReadAlongStream.plan(readingSession.api.readingAudioManifest(workId, sourceItemId))
+            } else null
+            val slimCache = editionCache("aligned-slim")
+            val wholeCache = editionCache("aligned")
+            // The hub could not be asked: the whole edition kept here reads along without it, the
+            // slim one only as words.
+            (plan as? NarrationPlan.Unreachable)?.let { unreachable ->
+                plan = when {
+                    !forceDownload && wholeCache.isComplete(workId, sourceItemId) -> NarrationPlan.Whole
+                    !forceDownload && slimCache.isComplete(workId, sourceItemId) -> unreachable
+                    else -> { showFailure(unreachable.failure.message); return@launch }
                 }
             }
+            val streamed = plan is NarrationPlan.Stream
+            var file = editionFile(if (!readAlong) editionCache("") else if (streamed || plan is NarrationPlan.Unreachable) slimCache else wholeCache,
+                forceDownload, omitAudio = streamed)
+            if (file == null && streamed && lastDownload?.code == AudiobookStream.NOT_STREAMABLE) {
+                // The hub cannot cut this edition's audio out: the whole edition, as before.
+                plan = NarrationPlan.Whole
+                file = editionFile(wholeCache, forceDownload, omitAudio = false)
+            }
+            if (file == null) { showFailure(lastDownload?.message ?: "The EPUB could not be downloaded"); return@launch }
             loading.text = "Opening book…"
             val resume = try { progress.resume(readingSession, checkpointKey) }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
@@ -549,8 +555,12 @@ class EpubReaderScreen(
             try {
                 runCatching { attachNavigator(file, saved) }
                     .onFailure { showFailure("This EPUB could not be opened") }
+                val narrated = plan
                 if (navigator != null && readAlong) {
-                    try { prepareNarration(file, saved) }
+                    if (narrated is NarrationPlan.Unreachable) {
+                        host.notify("The narration needs the hub. You can read this book meanwhile.")
+                        loading.visibility = View.GONE
+                    } else try { prepareNarration(file, saved, (narrated as? NarrationPlan.Stream)?.manifest) }
                     catch (e: kotlinx.coroutines.CancellationException) { throw e }
                     catch (e: Exception) {
                         DebugLog.log("reader", "aligned narration setup failed: ${e.javaClass.simpleName}")
@@ -561,6 +571,36 @@ class EpubReaderScreen(
             } finally {
                 if (readAlong) narrationCheckpoint.endOpenIfPending()
             }
+        }
+    }
+
+    /** The last download's failure, for the caller that tries another edition after a 409. */
+    private var lastDownload: HubResult.Failed? = null
+
+    /** This profile's copies of the book: the ebook ([kind] blank), the whole read-along edition, the slim one (#19). */
+    private fun editionCache(kind: String) =
+        EpubPackageCache(File(host.viewContext.cacheDir, "reading-epub/${readingSession.identity}" + if (kind.isEmpty()) "" else "/$kind"))
+
+    /** The edition from [cache], downloaded first when it is not complete there; null when it could not be. */
+    private suspend fun editionFile(cache: EpubPackageCache, forceDownload: Boolean, omitAudio: Boolean): File? {
+        lastDownload = null
+        if (forceDownload) {
+            cache.completeFile(workId, sourceItemId).delete()
+            cache.clearDownload(workId, sourceItemId)
+        }
+        if (cache.isComplete(workId, sourceItemId)) return cache.completeFile(workId, sourceItemId)
+        val temporary = cache.temporaryFile(workId, sourceItemId)
+        loading.text = when {
+            !readAlong -> "Downloading book…"
+            omitAudio -> "Downloading the book…"
+            else -> "Downloading aligned book and narration…"
+        }
+        return when (val result = readingSession.api.downloadReadingEpub(workId, sourceItemId, temporary, readAlong, omitAudio)) {
+            is HubResult.Ok -> runCatching { cache.promote(workId, sourceItemId) }.getOrElse {
+                lastDownload = HubResult.Failed(com.pocketds.hub.net.FailureKind.BAD_RESPONSE, "The downloaded EPUB is incomplete")
+                null
+            }
+            is HubResult.Failed -> { lastDownload = result; null }
         }
     }
 
@@ -850,19 +890,33 @@ class EpubReaderScreen(
             controls += this
         }
 
-    private suspend fun prepareNarration(file: File, saved: Locator?) {
+    /**
+     * The narration (#19): streamed from the audiobook's tracks the hub mapped
+     * the edition's audio onto ([manifest]), the slim edition's SMIL giving the
+     * sentences; without a manifest, from the whole edition's own audio, taken
+     * out of it here.
+     */
+    private suspend fun prepareNarration(file: File, saved: Locator?, manifest: ReadingAudioManifest?) {
         loading.visibility = View.VISIBLE
         loading.text = "Preparing synchronized narration…"
-        val (timeline, files) = withContext(Dispatchers.IO) {
+        val (timeline, sources) = withContext(Dispatchers.IO) {
             val context = coroutineContext
-            val timeline = ReadAlongPackage.read(file)
-            val folder = File(file.parentFile, file.nameWithoutExtension + "-audio")
-            timeline to ReadAlongPackage.extractAudio(file, timeline, folder) { context.ensureActive() }
+            if (manifest != null) {
+                val timeline = ReadAlongPackage.read(file, requireAudio = false)
+                timeline to ReadAlongStream.sources(timeline, manifest, sourceItemId) {
+                    readingSession.api.readingAudioTrackUrl(workId, sourceItemId, it, manifest.revision)
+                }
+            } else {
+                val timeline = ReadAlongPackage.read(file)
+                val folder = File(file.parentFile, file.nameWithoutExtension + "-audio")
+                timeline to ReadAlongPackage.extractAudio(file, timeline, folder) { context.ensureActive() }
+                    .map { NarrationSource(android.net.Uri.fromFile(it).toString()) }
+            }
         }
         val resume = saved?.let { ReadAlongLocation.resume(locatorJson(it), timeline) }
         matchNarrationToPage = saved != null && resume == null
         narration?.release()
-        narration = ReadAlongPlayback(host.viewContext, timeline, files, resume,
+        narration = ReadAlongPlayback(host.viewContext, timeline, sources, resume,
             onSegment = ::highlightNarration,
             onState = { playing ->
                 if (playing) narrationCompleted = false

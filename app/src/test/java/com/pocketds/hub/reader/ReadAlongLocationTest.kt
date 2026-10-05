@@ -11,16 +11,26 @@ class ReadAlongLocationTest {
     ))))
     private val locator = Json.parseToJsonElement("""{"href":"old.xhtml","type":"application/xhtml+xml","locations":{"totalProgression":0.2,"cssSelector":"#old"},"text":{"highlight":"old sentence"}}""").jsonObject
 
-    @Test fun checkpointKeepsExactAudioAndAlignedTextWithoutStaleSelectors() {
+    /** #19: the place is the sentence, a text locator any reader understands; the hub maps it to the audio. */
+    @Test fun theSentenceIsThePlaceWithoutStaleSelectorsOrAPrivateOffset() {
         val saved = ReadAlongLocation.save(locator, timeline, ReadAlongPosition(0, 2500), false)
         assertEquals("book/ch1.xhtml", saved["href"]!!.jsonPrimitive.content)
         val locations = saved["locations"]!!.jsonObject
         assertEquals("s2", locations["fragments"]!!.jsonArray.single().jsonPrimitive.content)
         assertFalse(locations.containsKey("cssSelector"))
         assertFalse(saved.containsKey("text"))
-        assertEquals(ReadAlongPosition(0, 2500), ReadAlongLocation.resume(saved, timeline))
-        assertTrue(locations.containsKey("pocketdsAudio")) // Readium preserves custom location properties.
+        assertFalse("No private offset is written", locations.containsKey("pocketdsAudio"))
+        // It resumes at the sentence's start.
+        assertEquals(ReadAlongPosition(0, 2000), ReadAlongLocation.resume(saved, timeline))
     }
+
+    @Test fun anOldPrivateOffsetIsDroppedAndNotTrusted() {
+        val old = Json.parseToJsonElement("""{"href":"book/ch1.xhtml","locations":{"fragments":["s2"],"pocketdsAudio":{"track":0,"offsetMs":3900}}}""").jsonObject
+        assertEquals("The sentence decides", ReadAlongPosition(0, 2000), ReadAlongLocation.resume(old, timeline))
+        val saved = ReadAlongLocation.save(old, timeline, ReadAlongPosition(0, 500), false)
+        assertFalse(saved["locations"]!!.jsonObject.containsKey("pocketdsAudio"))
+    }
+
     @Test fun completionAndTextOnlyFallbackAreExplicit() {
         val saved = ReadAlongLocation.save(locator, timeline, ReadAlongPosition(0, 4000), true)
         assertEquals(1.0, saved["locations"]!!.jsonObject["totalProgression"]!!.jsonPrimitive.double, 0.0)
