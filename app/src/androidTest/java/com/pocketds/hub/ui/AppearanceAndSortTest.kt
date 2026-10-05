@@ -21,8 +21,28 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class AppearanceAndSortTest {
     private fun all(view:View):List<View> = listOf(view)+(view as? ViewGroup)?.let{g->(0 until g.childCount).flatMap{all(g.getChildAt(it))}}.orEmpty()
+    /**
+     * Settings in each look (#11): the same places and colour choices in both;
+     * Glass has no theme to choose, since it is always dark, and Classic keeps
+     * its light and dark.
+     */
     @Test fun settingsShowsItsSectionsAndColoursApplyPerMediaType() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val oldLook = LookSettings.get(context)
+        val oldTheme = ThemeSettings.getMode(context)
+        val oldUser = HubSettings.userId(context) to HubSettings.userName(context)
+        try {
+            for (look in listOf(Look.GLASS, Look.CLASSIC)) settingsIn(look)
+        } finally {
+            LookSettings.set(context, oldLook)
+            ThemeSettings.setMode(context, oldTheme)
+            HubSettings.selectUser(context, oldUser.first, oldUser.second)
+        }
+    }
+
+    private fun settingsIn(look: Look) {
         val ins=InstrumentationRegistry.getInstrumentation()
+        LookSettings.set(ins.targetContext, look)
         val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         lateinit var root:FrameLayout
         lateinit var current:Screen
@@ -40,7 +60,9 @@ class AppearanceAndSortTest {
                 root=FrameLayout(activity);activity.setContentView(root)
                 current=SettingsScreen(null){true};root.addView(current.onCreateView(host,root));current.onShow()
                 val labels=all(root).filterIsInstance<TextView>().map{it.text.toString()}
-                assertTrue(labels.containsAll(listOf("Appearance","Home","Playback","Subtitles","Downloads","More","Theme","Movies and TV","Books")))
+                assertTrue(labels.containsAll(listOf("Appearance","Home","Playback","Subtitles","Downloads","More","Look","Movies and TV","Books")))
+                // Glass is always dark: the theme is Classic's alone.
+                assertEquals("A theme to choose in $look", look == Look.CLASSIC, labels.contains("Theme"))
                 fun swatch(mode:String,id:String)=all(root.findViewWithTag<View>("palette:$mode")).first{it.tag==id}
                 swatch("media","sky").performClick()
                 swatch("books","rose").performClick()
@@ -52,14 +74,20 @@ class AppearanceAndSortTest {
                 assertTrue(all(root).any{it is androidx.media3.ui.SubtitleView})
                 assertTrue(all(root).filterIsInstance<TextView>().any{it.text=="Look"})
                 all(root).first{it.contentDescription=="Appearance"}.performClick()
-                for(mode in listOf("LIGHT","DARK")) {
-                    (root.findViewWithTag<View>("theme") as BlobSegmentedView).optionView(mode)!!.performClick()
+                fun shot(name: String) {
                     root.measure(View.MeasureSpec.makeMeasureSpec(Styler.dpInt(activity,850f),View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(Styler.dpInt(activity,410f),View.MeasureSpec.EXACTLY))
                     root.layout(0,0,root.measuredWidth,root.measuredHeight)
                     val bitmap=android.graphics.Bitmap.createBitmap(root.width,root.height,android.graphics.Bitmap.Config.ARGB_8888)
                     root.draw(android.graphics.Canvas(bitmap))
-                    java.io.File(activity.getExternalFilesDir(null),"polish-appearance-${mode.lowercase()}.png").outputStream().use {bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
+                    java.io.File(activity.getExternalFilesDir(null),"polish-appearance-$name.png").outputStream().use {bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
                     bitmap.recycle()
+                }
+                if (look == Look.CLASSIC) for(mode in listOf("LIGHT","DARK")) {
+                    (root.findViewWithTag<View>("theme") as BlobSegmentedView).optionView(mode)!!.performClick()
+                    shot(mode.lowercase())
+                } else {
+                    assertNull("No theme on Glass", root.findViewWithTag<View>("theme"))
+                    shot("glass")
                 }
             }
         } finally {ins.runOnMainSync{current.onHide();current.onDestroyView();activity.finish()};hostRef=null}
@@ -96,25 +124,50 @@ class AppearanceAndSortTest {
             assertEquals(SortPreference("series",true),DomainPreferences.sort(activity,ContentMode.BOOKS,listOf("title","series","author"),"series"))
         }}finally{ins.runOnMainSync{activity.finish()}}
     }
+    /**
+     * A service's logo follows the look (#11): Classic swaps its light and dark
+     * assets in place; Glass is always dark, so it keeps the dark one whatever
+     * the theme says.
+     */
     @Test fun serviceLogoChangesWithAppearanceWithoutReplacingItsView() {
         val ins=InstrumentationRegistry.getInstrumentation()
-        val activity=ins.startActivitySync(Intent(ins.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        try {ins.runOnMainSync {
-            val root=FrameLayout(activity)
-            val logo=ImageView(activity);root.addView(logo);activity.setContentView(root)
-            ThemeSettings.setMode(activity,ThemeSettings.Mode.LIGHT);Theme.refresh(activity,root)
-            ServiceLogo.bind(logo,com.pocketds.hub.R.drawable.logo_sonarr)
-            fun pixels():Int {
-                val bitmap=android.graphics.Bitmap.createBitmap(64,64,android.graphics.Bitmap.Config.ARGB_8888)
-                logo.drawable.setBounds(0,0,64,64);logo.drawable.draw(android.graphics.Canvas(bitmap))
-                val values=IntArray(4096);bitmap.getPixels(values,0,64,0,0,64,64);bitmap.recycle();return values.contentHashCode()
-            }
-            val light=pixels()
-            ThemeSettings.setMode(activity,ThemeSettings.Mode.DARK);Theme.refresh(activity,root)
-            val dark=pixels();assertNotEquals(light,dark);assertSame(logo,root.getChildAt(0))
-            ThemeSettings.setMode(activity,ThemeSettings.Mode.LIGHT);Theme.refresh(activity,root)
-            assertEquals(light,pixels());assertNull(logo.imageTintList)
-        }}finally{ins.runOnMainSync{activity.finish()}}
+        val context=ins.targetContext
+        val oldLook=LookSettings.get(context)
+        val oldTheme=ThemeSettings.getMode(context)
+        fun pixels(logo:ImageView):Int {
+            val bitmap=android.graphics.Bitmap.createBitmap(64,64,android.graphics.Bitmap.Config.ARGB_8888)
+            logo.drawable.setBounds(0,0,64,64);logo.drawable.draw(android.graphics.Canvas(bitmap))
+            val values=IntArray(4096);bitmap.getPixels(values,0,64,0,0,64,64);bitmap.recycle();return values.contentHashCode()
+        }
+        var dark=0
+        try {
+            LookSettings.set(context,Look.CLASSIC)
+            val activity=ins.startActivitySync(Intent(context,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            try {ins.runOnMainSync {
+                val root=FrameLayout(activity)
+                val logo=ImageView(activity);root.addView(logo);activity.setContentView(root)
+                ThemeSettings.setMode(activity,ThemeSettings.Mode.LIGHT);Theme.refresh(activity,root)
+                ServiceLogo.bind(logo,com.pocketds.hub.R.drawable.logo_sonarr)
+                val light=pixels(logo)
+                ThemeSettings.setMode(activity,ThemeSettings.Mode.DARK);Theme.refresh(activity,root)
+                dark=pixels(logo);assertNotEquals(light,dark);assertSame(logo,root.getChildAt(0))
+                ThemeSettings.setMode(activity,ThemeSettings.Mode.LIGHT);Theme.refresh(activity,root)
+                assertEquals(light,pixels(logo));assertNull(logo.imageTintList)
+            }}finally{ins.runOnMainSync{activity.finish()}}
+            // Glass: the dark asset, though the theme still says light.
+            LookSettings.set(context,Look.GLASS)
+            val glass=ins.startActivitySync(Intent(context,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            try {ins.runOnMainSync {
+                val root=FrameLayout(glass)
+                val logo=ImageView(glass);root.addView(logo);glass.setContentView(root)
+                ThemeSettings.setMode(glass,ThemeSettings.Mode.LIGHT);Theme.refresh(glass,root)
+                ServiceLogo.bind(logo,com.pocketds.hub.R.drawable.logo_sonarr)
+                assertEquals("Glass is always dark",dark,pixels(logo));assertNull(logo.imageTintList)
+            }}finally{ins.runOnMainSync{glass.finish()}}
+        } finally {
+            LookSettings.set(context,oldLook)
+            ThemeSettings.setMode(context,oldTheme)
+        }
     }
     private var hostRef:ScreenHost?=null
 }
