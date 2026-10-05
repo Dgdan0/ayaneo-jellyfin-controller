@@ -91,7 +91,9 @@ type Server struct {
 	probeCache   map[probeKey]probedAudio
 	// openMedia opens an audiobook's file read-only through the media mapping
 	// (reading.ResolveMediaFile), and is the seam a test wraps to watch handles.
-	openMedia        func([]config.MediaRemovalRoot, string, string) (readingdomain.MediaFile, error)
+	openMedia func([]config.MediaRemovalRoot, string, string) (readingdomain.MediaFile, error)
+	// How long a track's transfer may stall before it is cut (stream_deadline.go).
+	audioStall       stallPolicy
 	libraryScanMu    sync.Mutex
 	libraryScanWatch bool
 	readingScanMu    sync.Mutex
@@ -139,6 +141,7 @@ func NewServer(cfg *config.Config) *Server {
 		probeSlots:            make(chan struct{}, audioProbeSlots),
 		probeCache:            map[probeKey]probedAudio{},
 		openMedia:             readingdomain.ResolveMediaFile,
+		audioStall:            defaultStallPolicy,
 		startedAt:             time.Now(),
 	}
 	for _, cidr := range cfg.Server.TrustProxyCIDRs {
@@ -309,6 +312,7 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/progress", s.handleReadingPublicationProgress)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/file", s.handleReadingEpubFile)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/audio", s.handleReadingAudioManifest)
+	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/audio/tracks/{n}", s.handleReadingAudioTrack)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/position", s.handleReadingEpubPosition)
 	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/position", s.handleReadingEpubPosition)
 	authed.HandleFunc("GET /v1/reading/requests/options", s.handleReadingRequestOptions)

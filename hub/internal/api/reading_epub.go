@@ -18,6 +18,24 @@ import (
 
 var singleByteRange = regexp.MustCompile(`^bytes=(?:[0-9]+-[0-9]*|-[0-9]+)$`)
 
+// requireSingleByteRange reads the Range and If-Range headers of a file
+// request. One byte range, at most, is what a player or a resumed download asks
+// for; anything else is answered 400 here, so a multipart answer is never built
+// (by Storyteller's server for an EPUB, by http.ServeContent for a track).
+func requireSingleByteRange(w http.ResponseWriter, r *http.Request) (byteRange, ifRange string, ok bool) {
+	byteRange = strings.TrimSpace(r.Header.Get("Range"))
+	if byteRange != "" && !singleByteRange.MatchString(byteRange) {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "only one valid byte range may be requested"})
+		return "", "", false
+	}
+	ifRange = strings.TrimSpace(r.Header.Get("If-Range"))
+	if len(ifRange) > 512 {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "invalid If-Range validator"})
+		return "", "", false
+	}
+	return byteRange, ifRange, true
+}
+
 type ReadingEpubPosition struct {
 	WorkID       string          `json:"workId"`
 	SourceItemID string          `json:"sourceItemId"`
@@ -35,14 +53,8 @@ func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "invalid publication format"})
 		return
 	}
-	byteRange := strings.TrimSpace(r.Header.Get("Range"))
-	if byteRange != "" && !singleByteRange.MatchString(byteRange) {
-		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "only one valid byte range may be requested"})
-		return
-	}
-	ifRange := strings.TrimSpace(r.Header.Get("If-Range"))
-	if len(ifRange) > 512 {
-		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "invalid If-Range validator"})
+	byteRange, ifRange, ok := requireSingleByteRange(w, r)
+	if !ok {
 		return
 	}
 	ctx, cancel := timeoutFor(r, s.cfg.Server.RequestTimeout.OrDefault(25*time.Second))

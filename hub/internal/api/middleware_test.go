@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -149,5 +150,33 @@ func TestRequireScopeRefusesWithAScopeErrorNotAnAuthError(t *testing.T) {
 	allowed := request.WithContext(context.WithValue(request.Context(), ctxToken, auth.Token{Label: "x", Scopes: []string{"control"}}))
 	if !requireScope(httptest.NewRecorder(), allowed, "control", "control downloads") {
 		t.Fatal("a control token was refused")
+	}
+}
+
+// An audiobook's tracks are transport, like a book's file: a player asks for
+// ranges of one track and the head of the next. Its manifest and its place are
+// screen-sized, as progress is, and must not hide behind a path that merely
+// contains "/audio".
+func TestAudioTracksAreTransportWhileTheManifestAndThePlaceAreScreens(t *testing.T) {
+	cfg := libraryAPIConfig("", "")
+	cfg.Auth.RateLimit = config.RateLimitConfig{RPM: 1, Burst: 1}
+	server := NewServer(cfg)
+	handler := server.withAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	base := "/v1/reading/works/rw_00000000000000000000000000000000/publications/12"
+	if got := authenticatedMiddlewareRequest(handler, base+"/audio").Code; got != http.StatusNoContent {
+		t.Fatalf("manifest returned %d", got)
+	}
+	for i := 0; i < 60; i++ {
+		path := fmt.Sprintf("%s/audio/tracks/%d?rev=0123456789ab", base, i%7)
+		if got := authenticatedMiddlewareRequest(handler, path).Code; got != http.StatusNoContent {
+			t.Fatalf("track request %d (%s) returned %d", i+1, path, got)
+		}
+	}
+	for _, screen := range []string{"/audio", "/audio/position", "/audio/"} {
+		if got := authenticatedMiddlewareRequest(handler, base+screen).Code; got != http.StatusTooManyRequests {
+			t.Errorf("%s was taken off the screen budget: %d", screen, got)
+		}
 	}
 }

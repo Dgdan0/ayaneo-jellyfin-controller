@@ -250,11 +250,13 @@ func (s *Server) limiterFor(r *http.Request) *auth.Limiter {
 		// A reader skims: each page turn is an image, and the scrubber and
 		// prefetch ask for several at once. On the screen budget a fast skim
 		// ran out like a Library grid did (#16). Pages and their thumbnails
-		// are images, as artwork is; a book's file or audio is transport.
+		// are images, as artwork is; a book's file or an audio track is
+		// transport. An audiobook's manifest and its place are screen-sized,
+		// like progress, so only /audio/tracks/ is.
 		if strings.Contains(path, "/pages/") {
 			return s.artworkLimiter
 		}
-		if strings.HasSuffix(path, "/file") || strings.Contains(path, "/audio") {
+		if strings.HasSuffix(path, "/file") || strings.Contains(path, "/audio/tracks/") {
 			return s.playbackLimiter
 		}
 		return s.limiter
