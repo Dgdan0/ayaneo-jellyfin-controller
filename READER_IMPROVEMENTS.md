@@ -42,7 +42,9 @@ An iPhone in landscape (about 6.3 x 2.9 in) behaves the same way.
   - **Books:** Ⓑ opens **menu mode**, where the page shrinks and the menu sits around it. Ⓑ again leaves the book.
   - **Audiobooks:** Ⓑ leaves, as now.
 - **Comic zoom persists between pages.** Zoom in a little and turn the page: the next page opens at the same zoom and horizontal anchor, at its top. This is part of C1.
-- **Controls over the page (Q3):** undecided. The owner will compare "glass bars over the page" with "page shrinks to make room" in an interactive viewer first.
+- **Controls over the page (Q3), decided 2026-10-05 after comparing both in the viewer:** comics get
+  **glass bars over the page**, so the page keeps its size and the bars float over it. Books get **the page
+  makes room**, so the page shrinks with the menu around it, matching Ⓑ's menu mode. This settles X7.
 - **Everything is read here:** comics and manga, ebooks, audiobooks and read-along, and webtoons, PDFs and Hebrew (right-to-left) books. So the webtoon, PDF and RTL rows move from "later" into scope.
 - **Second screen (X6):** not now. The Pocket is treated as single-display; revisit later.
 
