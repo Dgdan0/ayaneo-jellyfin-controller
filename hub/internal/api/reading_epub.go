@@ -303,19 +303,19 @@ func (s *Server) resolveStorytellerBook(w http.ResponseWriter, r *http.Request, 
 // shelf is built from the list endpoint, which is not the place to read an
 // audiobook's folder and manifest from.
 func (s *Server) storytellerBookRecord(ctx context.Context, id int64) (*storyteller.Book, cache.Meta, error) {
-	return cache.Fetch(ctx, s.cache, storytellerWorkKey(id), cache.Metadata, func(fetchCtx context.Context) (*storyteller.Book, error) {
+	return cache.Fetch(ctx, s.cache, storytellerWorkKey(strconv.FormatInt(id, 10)), cache.Metadata, func(fetchCtx context.Context) (*storyteller.Book, error) {
 		return s.storyteller.Book(fetchCtx, id)
 	})
 }
 
-func storytellerWorkKey(id int64) string {
-	return "reading:storyteller:work:" + strconv.FormatInt(id, 10)
+func storytellerWorkKey(sourceItemID string) string {
+	return "reading:storyteller:work:" + sourceItemID
 }
 
 // invalidateStorytellerWork drops what the hub holds of one Storyteller book: its
 // record, and the audiobook track list read from the disk on its account.
 func (s *Server) invalidateStorytellerWork(sourceItemID string) {
-	s.cache.Invalidate("reading:storyteller:work:" + sourceItemID)
+	s.cache.Invalidate(storytellerWorkKey(sourceItemID))
 	s.cache.Invalidate(audioPlanKey(sourceItemID))
 }
 

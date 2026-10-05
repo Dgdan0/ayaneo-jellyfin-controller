@@ -24,10 +24,14 @@ server:
   # Stable work IDs and source bindings for the reading catalog.
   reading_catalog: "reading-catalog.json"
   reading_transfers: "reading-transfers.json"
-  # Optional explicit mappings for confirmed reader-file deletion. The Hub
-  # service needs write access. Use library folders, never a drive root.
-  # Without mappings, reader deletion previews fail closed; Jellyfin continues
-  # to use its own native deletion API.
+  # Optional explicit mappings from a reader service's own paths to folders on
+  # this PC. They serve two things: confirmed reader-file deletion (the Hub
+  # service needs write access for that) and streaming an audiobook's files
+  # straight from disk, which only reads. Use library folders, never a drive
+  # root, and map every path Storyteller reports for its audiobooks.
+  # Without mappings, reader deletion previews fail closed (Jellyfin continues
+  # to use its own native deletion API) and an audiobook is answered 409
+  # audio_not_streamable, unmapped_root, so apps fall back to the ZIP.
   media_removal_roots: []
   # - service: kavita
   #   remote: /reading

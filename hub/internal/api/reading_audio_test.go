@@ -898,3 +898,20 @@ func TestAudioManifestRefusesTwoLinksToOneFile(t *testing.T) {
 		t.Fatalf("two names for one file = %d: %s", response.Code, response.Body.String())
 	}
 }
+
+// The whole path with the real tool, when there is one: the generated book's
+// own TRCK tags, read by ffprobe, put its files in the story's order.
+func TestAudioManifestWithTheRealFFprobeOrdersTheGeneratedBookByItsTags(t *testing.T) {
+	if _, err := findFFprobe(); err != nil {
+		t.Skip("no ffprobe on this machine")
+	}
+	env := newTrackedAudioEnv(t)
+	env.server.probeAudio = runFFprobe
+	manifest := env.manifest()
+	if got := env.namesOf(manifest); !reflect.DeepEqual(got, trackedTagOrder) {
+		t.Fatalf("order = %q\nwant %q", got, trackedTagOrder)
+	}
+	if len(manifest.Chapters) != 0 {
+		t.Fatalf("one-second narrations have no chapters: %+v", manifest.Chapters)
+	}
+}
