@@ -31,6 +31,22 @@ struct ShellLayoutTests {
         #expect(ShellLayout.isShort(height: height) == short)
     }
 
+    @Test(arguments: [
+        (440.0, 956.0, false, false),  // iPhone 17 Pro Max upright
+        (956.0, 440.0, true, true),    // and sideways
+        (744.0, 1133.0, false, false), // iPad mini upright, a tab bar with room
+        (1024.0, 1366.0, false, false), // iPad Pro upright
+        (1366.0, 1024.0, false, false), // and sideways
+        (760.0, 560.0, false, true),   // a small Mac window: the bar covered Play
+        (760.0, 700.0, false, false),  // a taller one
+        (1440.0, 560.0, false, false), // a wide one: the capsule is at the top
+    ])
+    func aTitlesWordsStartUnderTheBarsWhereTheTabBarWouldCoverItsActions(
+        width: Double, height: Double, short: Bool, under: Bool
+    ) {
+        #expect(ShellLayout.titleWordsUnderBars(width: width, height: height, short: short) == under)
+    }
+
     @Test func theBackPillNamesThePageUnderneath() {
         #expect(ShellLayout.backTitle(pages: ["Bleach"], root: "Library") == "Library")
         #expect(ShellLayout.backTitle(pages: ["Bleach", "Beat the Invisible Enemy!"], root: "Library") == "Bleach")

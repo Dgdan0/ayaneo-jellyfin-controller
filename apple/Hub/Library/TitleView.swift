@@ -51,21 +51,23 @@ struct TitleView: View {
 
     var body: some View {
         GeometryReader { proxy in
+            // A small Mac window lays the words out as a phone turned sideways does.
+            let page = metrics.forTitlePage(size: proxy.size, safe: proxy.safeAreaInsets)
             ScrollView {
                 ZStack(alignment: .top) {
                     // The prototype's `.dart`: 590 tall on an iPad, 470 on an
                     // iPhone; on a phone turned sideways, what can be seen.
                     FadedArtwork.title(backdropPath)
-                        .frame(height: metrics.short ? proxy.size.height + proxy.safeAreaInsets.top
-                               : (metrics.compact ? 470 : 590))
+                        .frame(height: page.short ? proxy.size.height + proxy.safeAreaInsets.top
+                               : (page.compact ? 470 : 590))
                         .frame(maxWidth: .infinity)
                         .clipped()
                     VStack(alignment: .leading, spacing: 0) {
                         // On a short screen the words start under the bars,
                         // so Play is never below the fold.
-                        header
-                            .padding(.top, metrics.short ? proxy.safeAreaInsets.top + 10
-                                     : max(metrics.compact ? 290 : 236, proxy.safeAreaInsets.top + 120))
+                        header(page)
+                            .padding(.top, page.short ? proxy.safeAreaInsets.top + 10
+                                     : max(page.compact ? 290 : 236, proxy.safeAreaInsets.top + 120))
                             .padding(.horizontal, metrics.margin)
                         StatusLine(message: status) { Task { await load() } }
                             .padding(.horizontal, metrics.margin)
@@ -100,7 +102,7 @@ struct TitleView: View {
     }
 
     /// The prototype's `.dhead`: lines 10 apart, at most 860 wide.
-    private var header: some View {
+    private func header(_ page: GlassMetrics) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if let item, item.type == "episode", !item.seriesTitle.isEmpty {
                 NavigationLink(value: AppRoute.title(TitleRoute(itemId: item.seriesId, title: item.seriesTitle))) {
@@ -113,8 +115,8 @@ struct TitleView: View {
                 .disabled(item.seriesId.isEmpty)
             }
             Text(item?.title ?? route.title)
-                .font(HubType.heading(metrics.heroTitle, weight: .heavy))
-                .tracking(-0.02 * metrics.heroTitle)
+                .font(HubType.heading(page.heroTitle, weight: .heavy))
+                .tracking(-0.02 * page.heroTitle)
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 .minimumScaleFactor(0.6)

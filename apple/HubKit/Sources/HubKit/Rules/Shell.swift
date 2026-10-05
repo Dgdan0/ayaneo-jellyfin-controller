@@ -22,6 +22,18 @@ public enum ShellLayout {
 
     public static func isShort(height: Double) -> Bool { height < shortMaximum }
 
+    /// The height a title page needs below the bars with the tab bar at the
+    /// bottom: its words from 236 down, two lines of title, the facts, two of
+    /// the overview and the actions, then the bar itself.
+    public static let titleRoomMinimum = 660.0
+
+    /// Whether a title page starts its words under the bars, as on a phone
+    /// turned sideways: on a short window, and where a bottom tab bar would
+    /// cover the actions at the usual place (a 760 x 560 Mac window, #12).
+    public static func titleWordsUnderBars(width: Double, height: Double, short: Bool) -> Bool {
+        short || (!isWide(width: width) && height < titleRoomMinimum)
+    }
+
     /// What the back pill says: the page under the one shown, or the
     /// section's own name when the first page is pushed.
     public static func backTitle(pages: [String], root: String) -> String {
