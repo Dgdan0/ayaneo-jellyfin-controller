@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"errors"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -177,6 +178,39 @@ func TestAlignmentFindToleratesHowALocatorSpellsAHref(t *testing.T) {
 	}
 }
 
+// A reader spells a name with spaces and brackets as it is, or percent-encoded
+// as a URL reference is, with or without a slash in front; the edition's package
+// is at the root, so its documents have no folder to be relative to.
+func TestAlignmentFindTakesANameWithSpacesAndBracketsHoweverItIsSpelt(t *testing.T) {
+	fixture := generateAligned(t, calibreShape())
+	alignment, err := readAlignmentOf(t, fixture.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fixture.Pars[4] // chapter 2, whose second sentence opens the second chunk
+	if want.Text != "Brandon Sanderson - [Mistborn 01] - The Final Empire_split_002.htm" {
+		t.Fatalf("the sentence is in %q", want.Text)
+	}
+	for name, href := range map[string]string{
+		"as it is":                     want.Text,
+		"percent-encoded":              url.PathEscape(want.Text),
+		"a slash in front":             "/" + want.Text,
+		"percent-encoded, a slash":     "/" + url.PathEscape(want.Text),
+		"the fragment on the name":     want.Text + "#" + want.Fragment,
+		"the fragment, encoded name":   url.PathEscape(want.Text) + "#" + want.Fragment,
+		"lower-case escapes (%5b %5d)": strings.NewReplacer("%5B", "%5b", "%5D", "%5d").Replace(url.PathEscape(want.Text)),
+	} {
+		fragment := want.Fragment
+		if strings.Contains(href, "#") {
+			fragment = ""
+		}
+		file, par, ok := alignment.Find(href, fragment)
+		if !ok || par.Fragment != want.Fragment || par.BeginMs != want.BeginMs || alignment.Files[file].Entry != want.Audio {
+			t.Errorf("%s: Find(%q, %q) = file %d, %+v, %v", name, href, fragment, file, par, ok)
+		}
+	}
+}
+
 func TestAlignmentSourcesGroupTheChunksOfOneNarratedFile(t *testing.T) {
 	fixture := generateAligned(t, threeFileNarration())
 	alignment, err := readAlignmentOf(t, fixture.Path)
@@ -240,8 +274,8 @@ func TestMatchSourcesPairsNarrationWithFilesByLengthNotByNumber(t *testing.T) {
 		[]AlignedSource{span(1, 100_000), span(2, 10_500_000), span(1, 50_000)},
 		[]int64{50_012, 100_012, 10_500_030},
 	)
-	if err != nil || !reflect.DeepEqual(got, []int{1, 2, 0}) {
-		t.Fatalf("match = %v, %v", got, err)
+	if err != nil || !reflect.DeepEqual(got.File, []int{1, 2, 0}) || got.ByOrder {
+		t.Fatalf("match = %+v, %v", got, err)
 	}
 
 	// The tolerance is 250 ms and 15 ms for each chunk.
@@ -268,23 +302,67 @@ func TestMatchSourcesPairsNarrationWithFilesByLengthNotByNumber(t *testing.T) {
 	if _, err := MatchSources([]AlignedSource{span(1, 5_000), span(1, 9_000)}, []int64{5_000, 12_000}); !errors.Is(err, ErrAlignmentMismatch) {
 		t.Errorf("a file with no length to match: %v", err)
 	}
-	// Two files of one length cannot be told apart by it.
-	if _, err := MatchSources([]AlignedSource{span(1, 3_600_000), span(1, 3_600_050)}, []int64{3_600_000, 3_600_020}); !errors.Is(err, ErrAlignmentAmbiguous) {
-		t.Errorf("two files of nearly one length: %v", err)
-	}
-	// But a file that only one narration can be settles what is left: the first
-	// narration fits one file alone, the second fits both, so it is the other.
+	// A file that only one narration can be settles what is left: the first
+	// narration fits one file alone, the second fits both, so it is the other. That
+	// is the lengths' doing, and the order of the files has no part in it.
 	for durations, want := range map[[2]int64][]int{
 		{3_600_050, 3_600_500}: {0, 1},
 		{3_600_500, 3_600_050}: {1, 0},
 	} {
 		got, err = MatchSources([]AlignedSource{span(1, 3_600_000), span(1, 3_600_300)}, durations[:])
-		if err != nil || !reflect.DeepEqual(got, want) {
-			t.Errorf("durations %v: %v, %v, want %v", durations, got, err, want)
+		if err != nil || !reflect.DeepEqual(got.File, want) || got.ByOrder {
+			t.Errorf("durations %v: %+v, %v, want %v by length", durations, got, err, want)
 		}
 	}
 	if _, err := MatchSources(nil, nil); !errors.Is(err, ErrAlignmentCount) {
 		t.Errorf("nothing to match: %v", err)
+	}
+}
+
+// Lengths cannot always tell the narrated files apart: Mistborn's two parts are
+// 12:20:13 and 12:20:13, fourteen milliseconds apart in what was narrated. The
+// narration takes the book's files in the order it reads them, so the files
+// lengths leave open are paired in the order they are given (the order they are
+// played in), and the pairing says that is how it was made.
+func TestMatchSourcesPairsFilesOfOneLengthInTheOrderTheyAreRead(t *testing.T) {
+	span := func(number, chunks int, length int64) AlignedSource {
+		return AlignedSource{Number: number, Files: make([]int, chunks), LengthMs: length}
+	}
+	// The real two: seven chunks each, so a tolerance of 355 ms, which both fit.
+	got, err := MatchSources(
+		[]AlignedSource{span(1, 7, 44_413_476), span(2, 7, 44_413_462)},
+		[]int64{44_413_512, 44_413_530})
+	if err != nil || !reflect.DeepEqual(got.File, []int{0, 1}) || !got.ByOrder {
+		t.Fatalf("two parts of one length = %+v, %v", got, err)
+	}
+
+	// Lengths decide first, and order only what they leave open: the file nothing
+	// else can be is settled, and the two that are alike are paired in order.
+	got, err = MatchSources(
+		[]AlignedSource{span(1, 1, 1_000_000), span(2, 1, 3_599_990), span(3, 1, 3_600_090)},
+		[]int64{3_600_000, 1_000_012, 3_600_100})
+	if err != nil || !reflect.DeepEqual(got.File, []int{1, 0, 2}) || !got.ByOrder {
+		t.Fatalf("one told apart and two alike = %+v, %v", got, err)
+	}
+
+	// More than two alike, in order.
+	got, err = MatchSources(
+		[]AlignedSource{span(1, 1, 3_600_000), span(2, 1, 3_600_005), span(3, 1, 3_600_010), span(4, 1, 3_600_015)},
+		[]int64{3_600_000, 3_600_005, 3_600_010, 3_600_015})
+	if err != nil || !reflect.DeepEqual(got.File, []int{0, 1, 2, 3}) || !got.ByOrder {
+		t.Fatalf("four alike = %+v, %v", got, err)
+	}
+
+	// The order is not a guess against the lengths: where what is left open would
+	// have to put a narration on a file it is not the length of, nothing is paired.
+	// These three are 3600.000, 3600.200 and 3600.400 s long; the first narration is
+	// the length of the second or third, the second of the first or second, and the
+	// third of any, so in order the first would be the first file, which it cannot be.
+	_, err = MatchSources(
+		[]AlignedSource{span(1, 1, 3_600_300), span(2, 1, 3_600_100), span(3, 1, 3_600_200)},
+		[]int64{3_600_000, 3_600_200, 3_600_400})
+	if !errors.Is(err, ErrAlignmentAmbiguous) {
+		t.Fatalf("an order that lengths contradict: %v", err)
 	}
 }
 
@@ -394,10 +472,6 @@ func TestReadAlignmentRefusesWhatCouldHarmOrMislead(t *testing.T) {
 		"a sentence that is not a time": func(f map[string][]byte, _ *[]string) {
 			replaceIn(f, smil, `clipEnd="12500ms"`, `clipEnd="soon"`)
 		},
-		"sentences out of order in one file": func(f map[string][]byte, _ *[]string) {
-			replaceIn(f, smil, `clipBegin="0:00:12.500"`, `clipBegin="3000ms"`)
-			replaceIn(f, smil, `clipBegin="00:25.000"`, `clipBegin="1000ms"`)
-		},
 		"not a zip": func(f map[string][]byte, o *[]string) {},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -421,6 +495,133 @@ func TestReadAlignmentRefusesWhatCouldHarmOrMislead(t *testing.T) {
 				t.Fatalf("the error repeats what it was given: %v", err)
 			}
 		})
+	}
+}
+
+// The text of an edition is in the order of the book and its narration is in the
+// order it is spoken, and they need not agree. Mistborn's lists a short chapter
+// (two sentences) among its front matter and speaks it in the middle of the second
+// audio file, between the end of one chapter and the beginning of another. Taken in
+// the order the overlays are listed, that file's sentences go back in time; taken in
+// the order they are spoken, which their own times say, they do not.
+func TestReadAlignmentReadsNarrationInTheOrderItIsSpokenWhateverOrderTheTextIsListedIn(t *testing.T) {
+	options := calibreShape()
+	options.Narrations = []FixtureNarration{
+		{ChunkMs: []int64{3_600_000, 1_800_000}, Sentences: []int{6, 4}, Chapters: []int{4, 6}},
+		// Chapters 3, 4 and 5 share the first chunk; the second is two sentences.
+		{ChunkMs: []int64{3_600_000, 3_600_000, 900_000}, Sentences: []int{5, 6, 3}, Chapters: []int{2, 2, 10}},
+	}
+	// Chapter 4, spoken after chapter 3, is listed ahead of everything.
+	options.SpineOrder = []int{3, 0, 1, 2, 4}
+	fixture := generateAligned(t, options)
+	alignment, err := readAlignmentOf(t, fixture.Path)
+	if err != nil {
+		t.Fatalf("a chapter spoken later than it is listed: %v", err)
+	}
+
+	// The audio files are in the order they are spoken, not the order the text first
+	// reaches them, and each holds its sentences as they are spoken.
+	if len(alignment.Files) != len(fixture.Audio) {
+		t.Fatalf("%d audio files, want %d", len(alignment.Files), len(fixture.Audio))
+	}
+	spoken := map[string][]FixturePar{}
+	for _, par := range fixture.Pars {
+		spoken[par.Audio] = append(spoken[par.Audio], par)
+	}
+	for i, file := range alignment.Files {
+		if file.Entry != fixture.Audio[i] {
+			t.Fatalf("file %d is %s, want %s", i, file.Entry, fixture.Audio[i])
+		}
+		want := spoken[file.Entry]
+		if len(file.Pars) != len(want) {
+			t.Fatalf("%s holds %d sentences, want %d", file.Entry, len(file.Pars), len(want))
+		}
+		for k, par := range file.Pars {
+			if par.Text != want[k].Text || par.Fragment != want[k].Fragment || par.BeginMs != want[k].BeginMs || par.EndMs != want[k].EndMs {
+				t.Fatalf("%s sentence %d = %+v, want %+v", file.Entry, k, par, want[k])
+			}
+		}
+		if file.LengthMs != want[len(want)-1].EndMs {
+			t.Errorf("%s ends at %d, want %d", file.Entry, file.LengthMs, want[len(want)-1].EndMs)
+		}
+	}
+
+	// Every sentence is found where it is spoken, and every moment of it names it,
+	// the displaced chapter's among them.
+	for _, par := range fixture.Pars {
+		index, found, ok := alignment.Find(par.Text, par.Fragment)
+		if !ok || alignment.Files[index].Entry != par.Audio || found.BeginMs != par.BeginMs {
+			t.Fatalf("Find(%s, %s) = file %d %+v, %v", par.Text, par.Fragment, index, found, ok)
+		}
+		for _, at := range []int64{par.BeginMs, (par.BeginMs + par.EndMs) / 2, par.EndMs - 1} {
+			if got, ok := alignment.Sentence(index, at); !ok || got.Fragment != par.Fragment || got.Text != par.Text {
+				t.Fatalf("at %d ms of %s: %+v, %v, want %s", at, par.Audio, got, ok, par.Fragment)
+			}
+		}
+	}
+}
+
+// A sentence that is out of its place within one overlay is no more a reason to
+// refuse the edition than one out of its place among them: each is where its own
+// times put it.
+func TestReadAlignmentSortsSentencesOfOneOverlayByWhenTheyAreSpoken(t *testing.T) {
+	base := generateAligned(t, threeFileNarration()).Path
+	changed := rewriteEPUB(t, base, func(f map[string][]byte, _ *[]string) {
+		replaceIn(f, "OEBPS/smil/part0001.smil", `clipBegin="0:00:12.500"`, `clipBegin="3000ms"`)
+		replaceIn(f, "OEBPS/smil/part0001.smil", `clipBegin="00:25.000"`, `clipBegin="1000ms"`)
+	})
+	alignment, err := readAlignmentOf(t, changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range alignment.Files {
+		for i := 1; i < len(file.Pars); i++ {
+			if file.Pars[i].BeginMs < file.Pars[i-1].BeginMs {
+				t.Fatalf("%s: sentence %d begins at %d, before the one ahead of it at %d", file.Entry, i, file.Pars[i].BeginMs, file.Pars[i-1].BeginMs)
+			}
+		}
+	}
+	// What moved can still be found, and heard.
+	first := alignment.Files[0]
+	if got, ok := alignment.Sentence(0, 1000); !ok || got.BeginMs != 1000 {
+		t.Fatalf("at 1 s of %s: %+v, %v", first.Entry, got, ok)
+	}
+}
+
+// Mistborn: The Final Empire, as measured: two narrated files of seven chunks each,
+// every chunk cut where a sentence ends, so none is two hours exactly; the audio
+// is .mp4, the package is at the root and its names have spaces and brackets. The
+// two files are 44413.476 and 44413.462 seconds long.
+func TestReadAlignmentOfTheShapeOfARealCalibreEdition(t *testing.T) {
+	options := calibreShape()
+	options.Narrations = []FixtureNarration{
+		{ChunkMs: []int64{7_198_016, 7_198_670, 7_183_314, 7_218_066, 7_196_612, 7_204_781, 1_214_017}, Sentences: []int{4, 4, 4, 4, 4, 4, 2}},
+		{ChunkMs: []int64{7_198_368, 7_201_550, 7_194_720, 7_204_909, 7_197_192, 7_201_760, 1_214_963}, Sentences: []int{4, 4, 4, 4, 4, 4, 2}},
+	}
+	for _, encoded := range []bool{false, true} {
+		options.Layout.EncodedRefs = encoded
+		fixture := generateAligned(t, options)
+		alignment, err := readAlignmentOf(t, fixture.Path)
+		if err != nil {
+			t.Fatalf("encoded references %v: %v", encoded, err)
+		}
+		if alignment.Package != "content.opf" || len(alignment.Files) != 14 {
+			t.Fatalf("package %q, %d audio files", alignment.Package, len(alignment.Files))
+		}
+		sources, err := alignment.Sources()
+		if err != nil || len(sources) != 2 || len(sources[0].Files) != 7 || len(sources[1].Files) != 7 ||
+			sources[0].LengthMs != 44_413_476 || sources[1].LengthMs != 44_413_462 {
+			t.Fatalf("sources = %+v, %v", sources, err)
+		}
+		if want := []int64{0, 7_198_016, 14_396_686, 21_580_000, 28_798_066, 35_994_678, 43_199_459}; !reflect.DeepEqual(sources[0].ChunkStartMs, want) {
+			t.Fatalf("chunk starts = %v, want %v", sources[0].ChunkStartMs, want)
+		}
+		// The two are the length of both of two files 12:20:13 long, and are paired
+		// by the order they are read in.
+		got, err := MatchSources(sources, []int64{44_413_512, 44_413_530})
+		if err != nil || !reflect.DeepEqual(got.File, []int{0, 1}) || !got.ByOrder {
+			t.Fatalf("pairing = %+v, %v", got, err)
+		}
 	}
 }
 

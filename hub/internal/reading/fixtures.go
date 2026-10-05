@@ -13,6 +13,7 @@ import (
 	"image/color"
 	"image/png"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -565,6 +566,12 @@ type FixtureNarration struct {
 	ChunkMs []int64
 	// Sentences is how many sentences each chunk narrates.
 	Sentences []int
+	// Chapters says how the narration's sentences, in the order they are spoken
+	// across its chunks, are divided among the edition's text documents: each
+	// number is how many sentences the next chapter holds, and together they are
+	// all of them. A chapter may begin in one chunk and end in the next, as the
+	// real ones do. Empty is one chapter for the whole narration.
+	Chapters []int
 }
 
 type AlignedEPUBOptions struct {
@@ -574,6 +581,36 @@ type AlignedEPUBOptions struct {
 	PackageDir string
 	// AudioBytes is the size of each stored audio entry: filler, not audio.
 	AudioBytes int
+	// SpineOrder is the order the package lists its chapters in, as indexes into
+	// them in the order they are spoken (the first chapter of the first narration
+	// is 0). Empty is the order they are spoken in. A book's text and its
+	// narration need not agree: a heading that sits among the front matter may be
+	// spoken in the middle of the audio.
+	SpineOrder []int
+	// Layout names the files; its zero value is the plain one.
+	Layout AlignedLayout
+}
+
+// AlignedLayout is where an edition keeps its files and what it calls them. The
+// zero value is text/partNNNN.xhtml, smil/partNNNN.smil and Audio/NNNNN-CCCCC.mp3.
+type AlignedLayout struct {
+	// AudioExt is the audio files' extension with its dot (".mp4"); the package
+	// says audio/mp4 for it and audio/mpeg otherwise.
+	AudioExt string
+	// OverlayDir and TextDir are folders inside the package folder, and TextAtRoot
+	// puts the text documents in the package folder itself, as a Calibre book does.
+	OverlayDir string
+	TextDir    string
+	TextAtRoot bool
+	// TextExt is the text documents' extension with its dot.
+	TextExt string
+	// ChapterName is a chapter's file name before its extension, from its number
+	// (the first chapter spoken is 1).
+	ChapterName func(chapter int) string
+	// EncodedRefs writes the references in the package and the overlays as URL
+	// references (a space as %20, a bracket as %5B), where the default writes the
+	// name as it is. The names in the archive are the same either way.
+	EncodedRefs bool
 }
 
 // FixturePar is one narrated sentence, as the SMIL says it, in millisecond
@@ -601,11 +638,20 @@ type AlignedEPUBFixture struct {
 	Chunks  []FixtureChunk
 }
 
+// fixtureChapter is one text document and its overlay while an edition is built.
+type fixtureChapter struct {
+	number            int
+	textHref          string // inside the package folder
+	smilHref          string
+	smil, body        strings.Builder
+	sentences, wanted int
+}
+
 // GenerateAlignedEPUB writes a read-along edition shaped as Storyteller's are
-// (audio stored, files named NNNNN-CCCCC, one SMIL per narrated source with one
-// <par> per sentence, gapless) and says exactly what it holds. The same moment
-// is written in every way a clock value can be: 12.500s, 0:00:12.500,
-// 00:12.500, 12500ms, 0.208333min, 0.003472h, a bare number and npt=.
+// (audio stored, files named NNNNN-CCCCC, one SMIL per chapter with one <par> per
+// sentence, gapless) and says exactly what it holds. The same moment is written
+// in every way a clock value can be: 12.500s, 0:00:12.500, 00:12.500, 12500ms,
+// 0.208333min, 0.003472h, a bare number and npt=.
 func GenerateAlignedEPUB(path string, options AlignedEPUBOptions) (AlignedEPUBFixture, error) {
 	dir := options.PackageDir
 	rel := func(name string) string { // a path inside the package folder
@@ -614,27 +660,66 @@ func GenerateAlignedEPUB(path string, options AlignedEPUBOptions) (AlignedEPUBFi
 		}
 		return dir + "/" + name
 	}
+	layout := options.Layout
+	if layout.AudioExt == "" {
+		layout.AudioExt = ".mp3"
+	}
+	audioType := "audio/mpeg"
+	if layout.AudioExt == ".mp4" || layout.AudioExt == ".m4a" || layout.AudioExt == ".m4b" {
+		audioType = "audio/mp4"
+	}
+	if layout.OverlayDir == "" {
+		layout.OverlayDir = "smil"
+	}
+	if layout.TextDir == "" && !layout.TextAtRoot {
+		layout.TextDir = "text"
+	}
+	if layout.TextExt == "" {
+		layout.TextExt = ".xhtml"
+	}
+	if layout.ChapterName == nil {
+		layout.ChapterName = func(chapter int) string { return fmt.Sprintf("part%04d", chapter) }
+	}
+	// ref writes a path as a reference to it from a document in another folder.
+	ref := func(href string) string {
+		if !layout.EncodedRefs {
+			return href
+		}
+		parts := strings.Split(href, "/")
+		for i, part := range parts {
+			parts[i] = url.PathEscape(part)
+		}
+		return strings.Join(parts, "/")
+	}
+
 	fixture := AlignedEPUBFixture{Path: path, Package: rel("content.opf")}
 	files := []zipFileSpec{}
-	var manifest, spine strings.Builder
+	var manifest strings.Builder
 	manifest.WriteString(`<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`)
-	var navigation strings.Builder
 	parIndex := 0
+	var chapters []*fixtureChapter
 	for sourceIndex, narration := range options.Narrations {
 		source := sourceIndex + 1
-		chapter := fmt.Sprintf("part%04d", source)
-		textHref, smilHref := "text/"+chapter+".xhtml", "smil/"+chapter+".smil"
-		var smil, body strings.Builder
-		sentence := 0
+		sizes := narration.Chapters
+		if len(sizes) == 0 {
+			total := 0
+			for _, count := range narration.Sentences {
+				total += count
+			}
+			sizes = []int{total}
+		}
+		var current *fixtureChapter
+		nextChapter := 0
+		var made []*fixtureChapter
 		for chunkIndex, length := range narration.ChunkMs {
 			chunk := chunkIndex + 1
-			audioHref := fmt.Sprintf("Audio/%05d-%05d.mp3", source, chunk)
+			audioHref := fmt.Sprintf("Audio/%05d-%05d%s", source, chunk, layout.AudioExt)
 			audioEntry := rel(audioHref)
 			count := narration.Sentences[chunkIndex]
 			step := length / int64(count)
 			fixture.Audio = append(fixture.Audio, audioEntry)
 			fixture.Chunks = append(fixture.Chunks, FixtureChunk{Entry: audioEntry, Source: source, Chunk: chunk, LengthMs: length})
-			fmt.Fprintf(&manifest, `<item id="au%d-%d" href="%s" media-type="audio/mpeg"/>`, source, chunk, audioHref)
+			fmt.Fprintf(&manifest, `<item id="au%d-%d" href="%s" media-type="%s"/>`, source, chunk, ref(audioHref), audioType)
 			filler := make([]byte, options.AudioBytes)
 			for i := range filler {
 				filler[i] = byte(i*13 + source*7 + chunk)
@@ -645,22 +730,63 @@ func GenerateAlignedEPUB(path string, options AlignedEPUBOptions) (AlignedEPUBFi
 				if k == count-1 {
 					end = length
 				}
-				fragment := fmt.Sprintf("id%d-s%d", source, sentence)
-				sentence++
-				fmt.Fprintf(&body, `<span id="%s">Sentence %d of part %d.</span> `, fragment, sentence, source)
-				fmt.Fprintf(&smil, `<par id="p%d"><text src="../%s#%s"/><audio src="../%s" clipBegin="%s" clipEnd="%s"/></par>`,
-					parIndex, textHref, fragment, audioHref, fixtureClock(begin, parIndex), fixtureClock(end, parIndex+3))
+				if current == nil || current.sentences == current.wanted {
+					if nextChapter >= len(sizes) {
+						return AlignedEPUBFixture{}, fmt.Errorf("the chapters of narration %d hold fewer sentences than it narrates", source)
+					}
+					current = &fixtureChapter{number: len(chapters) + len(made) + 1, wanted: sizes[nextChapter]}
+					base := layout.ChapterName(current.number)
+					if layout.TextAtRoot {
+						current.textHref = base + layout.TextExt
+					} else {
+						current.textHref = layout.TextDir + "/" + base + layout.TextExt
+					}
+					current.smilHref = layout.OverlayDir + "/" + base + ".smil"
+					made = append(made, current)
+					nextChapter++
+				}
+				fragment := fmt.Sprintf("id%d-s%d", current.number, current.sentences)
+				current.sentences++
+				fmt.Fprintf(&current.body, `<span id="%s">Sentence %d of part %d.</span> `, fragment, current.sentences, current.number)
+				// From the overlay's folder to the text and to the audio.
+				fmt.Fprintf(&current.smil, `<par id="p%d"><text src="../%s#%s"/><audio src="../%s" clipBegin="%s" clipEnd="%s"/></par>`,
+					parIndex, ref(current.textHref), fragment, ref(audioHref), fixtureClock(begin, parIndex), fixtureClock(end, parIndex+3))
 				parIndex++
-				fixture.Pars = append(fixture.Pars, FixturePar{Text: rel(textHref), Fragment: fragment, Audio: audioEntry, BeginMs: begin, EndMs: end})
+				fixture.Pars = append(fixture.Pars, FixturePar{Text: rel(current.textHref), Fragment: fragment, Audio: audioEntry, BeginMs: begin, EndMs: end})
 			}
 		}
-		files = append(files,
-			zipFileSpec{name: rel(textHref), data: []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Part %d</title></head><body><p>%s</p></body></html>`, source, body.String()))},
-			zipFileSpec{name: rel(smilHref), data: []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><seq id="s%d" epub:textref="../%s" epub:type="bodymatter chapter">%s</seq></body></smil>`, source, textHref, smil.String()))},
-		)
-		fmt.Fprintf(&manifest, `<item id="ch%d" href="%s" media-type="application/xhtml+xml" media-overlay="ov%d"/><item id="ov%d" href="%s" media-type="application/smil+xml"/>`, source, textHref, source, source, smilHref)
-		fmt.Fprintf(&spine, `<itemref idref="ch%d"/>`, source)
-		fmt.Fprintf(&navigation, `<li><a href="%s">Part %d</a></li>`, textHref, source)
+		if nextChapter != len(sizes) || (current != nil && current.sentences != current.wanted) {
+			return AlignedEPUBFixture{}, fmt.Errorf("the chapters of narration %d hold more sentences than it narrates", source)
+		}
+		for _, chapter := range made {
+			files = append(files,
+				zipFileSpec{name: rel(chapter.textHref), data: []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Part %d</title></head><body><p>%s</p></body></html>`, chapter.number, chapter.body.String()))},
+				zipFileSpec{name: rel(chapter.smilHref), data: []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><seq id="s%d" epub:textref="../%s" epub:type="bodymatter chapter">%s</seq></body></smil>`, chapter.number, ref(chapter.textHref), chapter.smil.String()))},
+			)
+			fmt.Fprintf(&manifest, `<item id="ch%d" href="%s" media-type="application/xhtml+xml" media-overlay="ov%d"/><item id="ov%d" href="%s" media-type="application/smil+xml"/>`,
+				chapter.number, ref(chapter.textHref), chapter.number, chapter.number, ref(chapter.smilHref))
+		}
+		chapters = append(chapters, made...)
+	}
+
+	order := options.SpineOrder
+	if len(order) == 0 {
+		order = make([]int, len(chapters))
+		for i := range order {
+			order[i] = i
+		}
+	}
+	if len(order) != len(chapters) {
+		return AlignedEPUBFixture{}, fmt.Errorf("the spine lists %d chapters of %d", len(order), len(chapters))
+	}
+	var spine, navigation strings.Builder
+	for _, index := range order {
+		if index < 0 || index >= len(chapters) {
+			return AlignedEPUBFixture{}, fmt.Errorf("the spine names chapter %d of %d", index, len(chapters))
+		}
+		chapter := chapters[index]
+		fmt.Fprintf(&spine, `<itemref idref="ch%d"/>`, chapter.number)
+		fmt.Fprintf(&navigation, `<li><a href="%s">Part %d</a></li>`, ref(chapter.textHref), chapter.number)
 	}
 	container := fmt.Sprintf(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="%s" media-type="application/oebps-package+xml"/></rootfiles></container>`, fixture.Package)
 	pack := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">%saligned</dc:identifier><dc:title>Aligned fixture</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta></metadata><manifest>%s</manifest><spine>%s</spine></package>`, FixtureIdentifierPrefix, manifest.String(), spine.String())

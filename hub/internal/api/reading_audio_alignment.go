@@ -66,6 +66,9 @@ type audioAlignment struct {
 	// edition is the edition's size and time, for the revision.
 	edition string
 	listing []ReadingAlignedAudio
+	// byOrder says some narrated files could not be told apart by their lengths and
+	// were paired in the order they are read (readingdomain.MatchSources).
+	byOrder bool
 }
 
 type alignedPlace struct {
@@ -103,7 +106,7 @@ func mapNarration(narration *readingdomain.Alignment, targets []alignTarget) (*a
 		}
 		durations[i] = target.durationMs
 	}
-	assigned, err := readingdomain.MatchSources(sources, durations)
+	pairing, err := readingdomain.MatchSources(sources, durations)
 	switch {
 	case errors.Is(err, readingdomain.ErrAlignmentMismatch):
 		return nil, alignReasonLengths
@@ -112,9 +115,9 @@ func mapNarration(narration *readingdomain.Alignment, targets []alignTarget) (*a
 	case err != nil:
 		return nil, alignReasonFiles
 	}
-	mapped := &audioAlignment{narration: narration, places: make([]alignedPlace, len(narration.Files)), byTrack: map[int][]int{}}
+	mapped := &audioAlignment{narration: narration, places: make([]alignedPlace, len(narration.Files)), byTrack: map[int][]int{}, byOrder: pairing.ByOrder}
 	for i, source := range sources {
-		target := targets[assigned[i]]
+		target := targets[pairing.File[i]]
 		for k, file := range source.Files {
 			mapped.places[file] = alignedPlace{track: target.track, startMs: target.startMs + source.ChunkStartMs[k]}
 		}
@@ -157,13 +160,22 @@ func (a *audioAlignment) placeOf(href, fragment string) (track int, offsetMs int
 	return place.track, place.startMs + par.BeginMs, true
 }
 
-// alignTargets are what the narrated files can be matched to, in Storyteller's
-// manifest order.
+// alignTargets are what the narrated files can be matched to, in the order they
+// are played. That is the order that decides between files whose lengths cannot
+// tell the narration apart: the narration takes the book's files in the order it
+// reads them, and the hub plays them in that order (by their own tags, else as
+// Storyteller lists them), not in the order Storyteller lists them.
 func (p *audioPlan) alignTargets() []alignTarget {
 	targets := make([]alignTarget, len(p.entries))
 	for i, entry := range p.entries {
 		targets[i] = alignTarget{track: entry.track, startMs: entry.startMs, durationMs: entry.durationMs}
 	}
+	sort.SliceStable(targets, func(i, j int) bool {
+		if targets[i].track != targets[j].track {
+			return targets[i].track < targets[j].track
+		}
+		return targets[i].startMs < targets[j].startMs
+	})
 	return targets
 }
 
@@ -204,6 +216,11 @@ func (s *Server) alignPlan(ctx context.Context, book storyteller.Book, plan *aud
 	mapped, reason := mapNarration(narration, plan.alignTargets())
 	if reason != "" {
 		return refuse(reason)
+	}
+	if mapped.byOrder {
+		// The book and nothing else, never a path. The lengths of some files could not
+		// tell them apart, so which narrated file is which was settled by order.
+		slog.Info("read-along edition mapped by order for files of one length", "book", book.ID)
 	}
 	mapped.edition = strconv.FormatInt(file.Size, 10) + "\x00" + strconv.FormatInt(file.ModTime.UnixNano(), 10)
 	plan.alignment = mapped

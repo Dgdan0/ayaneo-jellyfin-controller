@@ -207,11 +207,16 @@ func TestAudioManifestSaysWhyItCannotMapAnAlignment(t *testing.T) {
 		}}, "no_narration"},
 		{"the edition narrates fewer files than the book has", alignedOptions{omit: []string{"Fixture Odyssey (3).MP3"}}, "files_do_not_match"},
 		{"a narrated file is no length of the book", alignedOptions{narrate: map[string]readingdomain.FixtureNarration{"Fixture Odyssey (1).mp3": shifted("Fixture Odyssey (1).mp3")}}, "lengths_do_not_match"},
-		{"two files cannot be told apart by their lengths", alignedOptions{
-			seconds: map[string]float64{"Fixture Odyssey (1).mp3": 3600.000, "Fixture Odyssey (3).MP3": 3600.100},
+		// Three files 3600.000, 3600.200 and 3600.400 s long, and narrations of 3600.300,
+		// 3600.100 and 3600.200 in the order they are played: the first narration is
+		// no length of the first file, so the order that would pair them is not one the
+		// lengths allow, and nothing is paired.
+		{"files of one length that the order of reading contradicts", alignedOptions{
+			seconds: map[string]float64{"Fixture Odyssey (1).mp3": 3600.000, "Fixture Odyssey (2).mp3": 3600.200, "Fixture Odyssey (3).MP3": 3600.400},
 			narrate: map[string]readingdomain.FixtureNarration{
-				"Fixture Odyssey (1).mp3": {ChunkMs: []int64{3_599_988}, Sentences: []int{4}},
-				"Fixture Odyssey (3).MP3": {ChunkMs: []int64{3_600_088}, Sentences: []int{4}},
+				"Fixture Odyssey (1).mp3": {ChunkMs: []int64{3_600_300}, Sentences: []int{4}},
+				"Fixture Odyssey (2).mp3": {ChunkMs: []int64{3_600_100}, Sentences: []int{4}},
+				"Fixture Odyssey (3).MP3": {ChunkMs: []int64{3_600_200}, Sentences: []int{4}},
 			},
 		}, "lengths_ambiguous"},
 	} {
@@ -226,6 +231,149 @@ func TestAudioManifestSaysWhyItCannotMapAnAlignment(t *testing.T) {
 				t.Fatalf("the tracks stopped working: %+v", manifest.Tracks)
 			}
 		})
+	}
+}
+
+// Two files of one length cannot be told apart by it, and the narration took the
+// book's files in the order it reads them: they are paired in the order they are
+// played, not the order Storyteller lists them in.
+func TestAudioManifestPairsFilesOfOneLengthInTheOrderTheyArePlayed(t *testing.T) {
+	// The story's first file is the last in Storyteller's manifest, and is the length
+	// of the second.
+	env := newAlignedTrackedEnv(t, alignedOptions{
+		seconds: map[string]float64{"Fixture Odyssey.mp3": 3600.000, "Fixture Odyssey (1).mp3": 3600.100},
+		narrate: map[string]readingdomain.FixtureNarration{
+			"Fixture Odyssey.mp3":     {ChunkMs: []int64{3_599_988}, Sentences: []int{4}},
+			"Fixture Odyssey (1).mp3": {ChunkMs: []int64{3_600_088}, Sentences: []int{4}},
+		},
+	})
+	manifest := env.manifest()
+	if !manifest.Aligned || manifest.AlignmentReason != "" {
+		t.Fatalf("aligned %v, reason %q", manifest.Aligned, manifest.AlignmentReason)
+	}
+	tracks, starts, _ := env.alignedTracks(manifest)
+	if want := []int{0, 1, 2, 2, 3, 4}; !reflect.DeepEqual(tracks, want) {
+		t.Errorf("tracks = %v, want %v", tracks, want)
+	}
+	if want := []int64{0, 0, 0, 1_000_000, 0, 0}; !reflect.DeepEqual(starts, want) {
+		t.Errorf("starts = %v, want %v", starts, want)
+	}
+}
+
+// Mistborn: The Final Empire as it is on this machine: two M4B parts 44413.407 and
+// 44413.403 seconds long (the book was cut in two equal halves), narrated in seven
+// chunks each whose sentences, taken in the order the text lists them, go back in
+// time once: a two-sentence chapter among the front matter is spoken in the middle of
+// the second part.
+func calibreEdition() readingdomain.AlignedEPUBOptions {
+	return readingdomain.AlignedEPUBOptions{
+		AudioBytes: 1024,
+		Layout: readingdomain.AlignedLayout{
+			AudioExt: ".mp4", OverlayDir: "MediaOverlays", TextAtRoot: true, TextExt: ".htm",
+			ChapterName: func(chapter int) string {
+				return fmt.Sprintf("Brandon Sanderson - [Mistborn 01] - The Final Empire_split_%03d", chapter)
+			},
+		},
+		Narrations: []readingdomain.FixtureNarration{
+			{ChunkMs: []int64{7_198_016, 7_198_670, 7_183_314, 7_218_066, 7_196_612, 7_204_781, 1_214_017}, Sentences: []int{4, 4, 4, 4, 4, 4, 2}},
+			// Chapters 2, 3 and 4: the third is the two sentences that close the third chunk,
+			// spoken after the second chapter's and listed before it.
+			{ChunkMs: []int64{7_198_368, 7_201_550, 7_194_720, 7_204_909, 7_197_192, 7_201_760, 1_214_963}, Sentences: []int{4, 4, 4, 4, 4, 4, 2}, Chapters: []int{10, 2, 14}},
+		},
+		// The displaced chapter is listed ahead of all the others.
+		SpineOrder: []int{2, 0, 1, 3},
+	}
+}
+
+const calibreEditionFile = "Mistborn- The Final Empire.epub"
+
+// newCalibreEnv is a book of two parts with that edition beside them.
+func newCalibreEnv(t *testing.T) *audioEnv {
+	t.Helper()
+	env := newAudioEnv(t, audioEnvOptions{}, func(root string) audioBuild {
+		book, err := readingdomain.GenerateTrackedAudiobook(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		links := []audioLink{
+			{Href: book.Files[1].Name, Type: "audio/mpeg", Title: "Track 1", Duration: 44413.406656, Size: book.Files[1].Size},
+			{Href: book.Files[2].Name, Type: "audio/mpeg", Title: "Track 2", Duration: 44413.403344, Size: book.Files[2].Size},
+		}
+		fixture, err := readingdomain.GenerateAlignedEPUB(filepath.Join(book.Dir, calibreEditionFile), calibreEdition())
+		if err != nil {
+			t.Fatal(err)
+		}
+		readaloud := `{"uuid":"aligned-12","filepath":"/library/` + book.Relative + `/` + calibreEditionFile + `","status":"ALIGNED"}`
+		return audioBuild{json: storytellerAudiobook(t, "/library/"+book.Relative, links, false), book: book, links: links, readaloud: readaloud, epub: fixture}
+	})
+	env.tags[env.build.links[0].Href], env.tags[env.build.links[1].Href] = 1, 2
+	return env
+}
+
+func TestAudioManifestMapsTheShapeOfARealCalibreEdition(t *testing.T) {
+	env := newCalibreEnv(t)
+	manifest := env.manifest()
+	if !manifest.Aligned || manifest.AlignmentReason != "" || len(manifest.Tracks) != 2 {
+		t.Fatalf("aligned %v, reason %q, %d tracks", manifest.Aligned, manifest.AlignmentReason, len(manifest.Tracks))
+	}
+	tracks, starts, hrefs := env.alignedTracks(manifest)
+	// Seven chunks of each part, the first part's first: the lengths cannot tell the
+	// two parts apart, so they are paired in the order they are read.
+	var wantTracks []int
+	var wantStarts []int64
+	var wantHrefs []string
+	var start int64
+	for i, chunk := range env.build.epub.Chunks {
+		if i > 0 && chunk.Source != env.build.epub.Chunks[i-1].Source {
+			start = 0
+		}
+		wantTracks = append(wantTracks, chunk.Source-1)
+		wantHrefs = append(wantHrefs, chunk.Entry)
+		wantStarts = append(wantStarts, start)
+		start += chunk.LengthMs
+	}
+	if !reflect.DeepEqual(tracks, wantTracks) || !reflect.DeepEqual(starts, wantStarts) || !reflect.DeepEqual(hrefs, wantHrefs) {
+		t.Fatalf("tracks %v starts %v hrefs %v, want %v %v %v", tracks, starts, hrefs, wantTracks, wantStarts, wantHrefs)
+	}
+	if hrefs[0] != "Audio/00001-00001.mp4" || starts[7] != 0 || starts[8] != 7_198_368 {
+		t.Fatalf("the files are named from the root of the archive: %v, starts %v", hrefs, starts)
+	}
+}
+
+// Every sentence is where the edition says, the one that is spoken out of its place
+// in the text included: its place in the audio is the moment it is spoken, and the
+// moment names it.
+func TestAudioPositionOfARealCalibreEditionFindsEverySentenceWhereItIsSpoken(t *testing.T) {
+	env := withPositions(newCalibreEnv(t))
+	truth := env.sentences()
+	if len(truth) != 52 {
+		t.Fatalf("the edition has %d sentences", len(truth))
+	}
+	parts := []string{env.build.links[0].Href, env.build.links[1].Href}
+	for _, sentence := range truth {
+		locator := fmt.Sprintf(`{"href":%s,"type":"application/xhtml+xml","locations":{"fragments":[%s],"totalProgression":0.4}}`, jsonString(sentence.href), jsonString(sentence.fragment))
+		env.positions.seed(locator, clockStart-1)
+		got := env.position()
+		if got == nil || got.Track != sentence.track || got.OffsetMs != sentence.offset || !got.Exact || got.TrackID != trackIDFor(parts[sentence.track]) {
+			t.Fatalf("%s#%s read as %+v, want track %d at %d", sentence.href, sentence.fragment, got, sentence.track, sentence.offset)
+		}
+		// And the other way: the moment names the sentence.
+		env.write(parts[sentence.track], sentence.offset+1)
+		if back := env.position(); back == nil || back.Sentence == nil || back.Sentence.Href != sentence.href || back.Sentence.Fragment != sentence.fragment {
+			t.Fatalf("%s @ %d names %+v, want %s#%s", parts[sentence.track], sentence.offset+1, back, sentence.href, sentence.fragment)
+		}
+	}
+	// The displaced chapter's two sentences are in the second part, at the end of the
+	// third chunk, though the text lists their chapter among the front matter.
+	var displaced []alignedSentence
+	for _, sentence := range truth {
+		if strings.Contains(sentence.href, "_split_003.htm") {
+			displaced = append(displaced, sentence)
+		}
+	}
+	// The third chunk is four sentences, so its third sentence begins half way in.
+	if len(displaced) != 2 || displaced[0].track != 1 || displaced[0].offset != 7_198_368+7_201_550+2*(7_194_720/4) {
+		t.Fatalf("the displaced chapter: %+v", displaced)
 	}
 }
 

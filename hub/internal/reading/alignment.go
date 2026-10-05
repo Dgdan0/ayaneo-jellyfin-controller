@@ -56,7 +56,9 @@ type Alignment struct {
 	// what the edition's own SMIL names after resolving it, which is also how the
 	// app's reader names a text document in the locators it writes.
 	Package string
-	// Files are the audio files, in the order the narration first uses them.
+	// Files are the audio files in the order they are narrated: by the number and
+	// the chunk their names carry, and as the text first reaches them for names
+	// that are not Storyteller's.
 	Files []AlignedFile
 
 	finds    map[findKey]findLocation
@@ -102,7 +104,9 @@ var chunkName = regexp.MustCompile(`^([0-9]{5})-([0-9]{5})\.[A-Za-z0-9]+$`)
 // archive, a sentence needs a fragment and both its resources must exist, a
 // zero-length sentence is left out, and one that ends before it begins refuses
 // the edition. Documents are read with a 4 MB cap and a DOCTYPE or entity
-// declaration refuses them.
+// declaration refuses them. Its overlays are listed in the order of the text, and
+// the narration need not follow that order, so the sentences of each audio file
+// are taken in the order they are spoken.
 func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 	archive, err := zip.NewReader(file, size)
 	if err != nil {
@@ -196,9 +200,6 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 				alignment.Files = append(alignment.Files, audioFile)
 			}
 			audio := &alignment.Files[index]
-			if n := len(audio.Pars); n > 0 && sentence.begin < audio.Pars[n-1].BeginMs {
-				return nil, badf("a file's sentences are not in order")
-			}
 			audio.Pars = append(audio.Pars, AlignedPar{Text: sentence.text, Fragment: sentence.fragment, BeginMs: sentence.begin, EndMs: sentence.end})
 			audio.LengthMs = max(audio.LengthMs, sentence.end)
 		}
@@ -206,6 +207,22 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 	if pars == 0 {
 		return nil, ErrNoAlignment
 	}
+	// The overlays are listed in the order of the text, and the narration is in the
+	// order it is spoken. They usually agree and need not: Mistborn's lists a short
+	// chapter among its front matter and speaks it in the middle of the second audio
+	// file. So each file's sentences are put in the order they are spoken, which
+	// their own times say, and the files in the order they are narrated.
+	for i := range alignment.Files {
+		pars := alignment.Files[i].Pars
+		sort.SliceStable(pars, func(a, b int) bool { return pars[a].BeginMs < pars[b].BeginMs })
+	}
+	sort.SliceStable(alignment.Files, func(a, b int) bool {
+		left, right := alignment.Files[a], alignment.Files[b]
+		if left.Source != right.Source {
+			return left.Source < right.Source
+		}
+		return left.Chunk < right.Chunk
+	})
 	alignment.index()
 	return alignment, nil
 }
@@ -563,17 +580,36 @@ func (a *Alignment) Sources() ([]AlignedSource, error) {
 	return sources, nil
 }
 
+// Pairing is which file of the book each narrated source is.
+type Pairing struct {
+	// File is, for each source, the index of its file among the lengths given.
+	File []int
+	// ByOrder says lengths could not settle every pair, and the pairs they left open
+	// were made by order.
+	ByOrder bool
+}
+
 // MatchSources pairs each narrated file with the file of the book it is, by
 // length: a source's narrated length against a file's own, within 250 ms and 15
-// ms for each chunk, since a chunk ends a few milliseconds short of the audio
-// it was cut from (12 ms measured). The pairing must be complete and one to
-// one, and it must be certain: two files whose lengths cannot tell the
-// narration apart leave it ambiguous rather than guessed, because a wrong guess
-// puts every sentence of the file in another one. The result is, for each source,
-// the index of its file in durationsMs.
-func MatchSources(sources []AlignedSource, durationsMs []int64) ([]int, error) {
+// ms for each chunk, since a chunk's last sentence ends a few milliseconds from
+// the end of the audio it was cut from (12 ms short on Dark Matter's files, about
+// 10 ms long for each chunk on Mistborn's, 69 ms over seven). The pairing must be
+// complete and one to one, because a wrong one puts every sentence of a file in
+// another.
+//
+// Lengths come first, and a file only one narration can be settles that
+// narration. When they leave files open (Mistborn's two parts are 12:20:13 and
+// 12:20:13, and what was narrated of them differs by 14 ms) the narration took the
+// book's files in the order it reads them, so sources, which are in the order of
+// their numbers, are paired with the files left open in the order the files are
+// given, which is the order they are played in. That is taken only where it fits:
+// a source whose length is not the length of the file its place would give it
+// leaves the pairing ambiguous, which is refused.
+//
+// The result is, for each source, the index of its file in durationsMs.
+func MatchSources(sources []AlignedSource, durationsMs []int64) (Pairing, error) {
 	if len(sources) == 0 || len(sources) != len(durationsMs) {
-		return nil, ErrAlignmentCount
+		return Pairing{}, ErrAlignmentCount
 	}
 	candidates := make([][]int, len(sources))
 	for i, source := range sources {
@@ -588,7 +624,7 @@ func MatchSources(sources []AlignedSource, durationsMs []int64) ([]int, error) {
 			}
 		}
 		if len(candidates[i]) == 0 {
-			return nil, ErrAlignmentMismatch
+			return Pairing{}, ErrAlignmentMismatch
 		}
 	}
 	assigned := make([]int, len(sources))
@@ -611,7 +647,7 @@ func MatchSources(sources []AlignedSource, durationsMs []int64) ([]int, error) {
 			candidates[i] = remaining
 			switch len(remaining) {
 			case 0:
-				return nil, ErrAlignmentMismatch
+				return Pairing{}, ErrAlignmentMismatch
 			case 1:
 				assigned[i], taken[remaining[0]] = remaining[0], true
 				changed = true
@@ -639,10 +675,34 @@ func MatchSources(sources []AlignedSource, durationsMs []int64) ([]int, error) {
 			}
 		}
 	}
-	for _, j := range assigned {
+	var open, free []int
+	for i, j := range assigned {
 		if j < 0 {
-			return nil, ErrAlignmentAmbiguous
+			open = append(open, i)
 		}
 	}
-	return assigned, nil
+	if len(open) == 0 {
+		return Pairing{File: assigned}, nil
+	}
+	for j := range durationsMs {
+		if !taken[j] {
+			free = append(free, j)
+		}
+	}
+	if len(open) != len(free) {
+		return Pairing{}, ErrAlignmentAmbiguous
+	}
+	for k, i := range open {
+		fits := false
+		for _, candidate := range candidates[i] {
+			fits = fits || candidate == free[k]
+		}
+		if !fits {
+			return Pairing{}, ErrAlignmentAmbiguous
+		}
+	}
+	for k, i := range open {
+		assigned[i] = free[k]
+	}
+	return Pairing{File: assigned, ByOrder: true}, nil
 }
