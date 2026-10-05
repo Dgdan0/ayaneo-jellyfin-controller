@@ -1,6 +1,12 @@
 package com.pocketds.hub.reader
 
 import com.pocketds.hub.ui.ThemeGradientDrawable
+import android.animation.ValueAnimator
+import android.os.SystemClock
+import android.view.animation.DecelerateInterpolator
+import com.pocketds.hub.settings.ReadingPaceSettings
+import org.readium.r2.navigator.HyperlinkNavigator
+import org.readium.r2.shared.util.AbsoluteUrl
 import android.graphics.Color
 import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
@@ -95,6 +101,14 @@ import org.readium.r2.streamer.parser.DefaultPublicationParser
  * the sentence being read glows in the accent ([ReadAlongGlow]). Comfort (X3)
  * dims and warms the reader, can make the page black, and keeps the screen on
  * while narration plays.
+ *
+ * Reading with the sticks (#18, E1): with Scroll on, the D-pad's up and down
+ * scroll a third of a screen and the right stick glides, both on into the next
+ * part of the book at the end of one ([BookScroll]). Under the title, the time
+ * left in the chapter and the book, from a pace learnt as you read
+ * ([ReadingPace]) or, following the narration, from the narration (E3). A
+ * footnote opens as a card over the page ([FootnoteCard]), and a link followed
+ * leaves "Return to previous place" in the menu (E5).
  */
 @OptIn(ExperimentalReadiumApi::class)
 class EpubReaderScreen(
@@ -174,6 +188,20 @@ class EpubReaderScreen(
     private var following = true
     /** Narration playing with the menu hidden: "Following · 1.25×" in a corner. */
     private lateinit var narrationPill: TextView
+    /** Scrolling with the D-pad and the right stick (E1): whole pixels, and on into the next part at the end. */
+    private var bookScroll = BookScroll(edgePx = 0f)
+    private var stepAnimator: ValueAnimator? = null
+    /** Time left (E3): the positions in each part, this book's pace, and where it was last measured from. */
+    private var sectionSizes: List<Int> = emptyList()
+    private var pace = ReadingPace()
+    private var pacePrior = ReadingPace.DEFAULT_MINUTES_PER_POSITION
+    private val paceTracker = ReadingPace.Tracker()
+    /** Under the title: "12 min left in chapter · 4h 10m in book". */
+    private lateinit var timeLeftView: TextView
+    /** Footnotes and links (E5): the note's card, and where a link was followed from, for a moment. */
+    private lateinit var footnoteCard: FootnoteCard
+    @Volatile private var linkOrigin: Locator? = null
+    @Volatile private var linkOriginAt = 0L
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -233,6 +261,13 @@ class EpubReaderScreen(
             onPlay = { playFromSelection() }
         }
         root.addView(dictionaryCard, FrameLayout.LayoutParams(MATCH, MATCH))
+        footnoteCard = FootnoteCard(host.viewContext, colors, ringVisible).apply {
+            onClose = ::closeFootnote
+        }
+        root.addView(footnoteCard, FrameLayout.LayoutParams(MATCH, MATCH))
+        bookScroll = BookScroll(edgePx = host.viewContext.resources.displayMetrics.heightPixels * EDGE_SCREENS)
+        pace = ReadingPaceSettings.book(host.viewContext, paceKey())
+        pacePrior = ReadingPaceSettings.prior(host.viewContext)
         // Over everything the reader draws, the menu and its sheets too, as a backlight would dim.
         comfort = ComfortSettings.load(host.viewContext)
         comfortLayer = ComfortLayerView(host.viewContext).apply { apply(comfort) }
@@ -250,6 +285,8 @@ class EpubReaderScreen(
     }
 
     override fun onShow() {
+        // The time away from the book is not reading.
+        paceTracker.restart()
         val shared = loadPreferences()
         val kept = ComfortSettings.load(host.viewContext)
         if (shared != preferences || kept != comfort) {
@@ -267,6 +304,8 @@ class EpubReaderScreen(
     override fun onHide() {
         cancelSearch()
         closeDictionary(resumeNarration = false)
+        if (::footnoteCard.isInitialized) footnoteCard.dismiss()
+        stepAnimator?.end()
         narration?.pause()
         root.keepScreenOn = false
         dockJob?.cancel()
@@ -297,9 +336,10 @@ class EpubReaderScreen(
     override fun onAppBackgrounded() { narration?.pause(); saveCurrent(immediate = true) }
 
     override val requiresTriggerHold: Boolean get() = navigator != null &&
-        !appearance.isOpen && !overlay.isOpen && !dictionaryCard.isOpen
+        !appearance.isOpen && !overlay.isOpen && !dictionaryCard.isOpen && !footnoteCard.isOpen
 
     override fun onSystemBack(): Boolean {
+        if (::footnoteCard.isInitialized && footnoteCard.isOpen) { closeFootnote(); return true }
         if (::dictionaryCard.isInitialized && dictionaryCard.isOpen) { closeDictionary(resumeNarration = true); return true }
         if (::appearance.isInitialized && appearance.isOpen) { appearance.cancel(); return true }
         if (::overlay.isInitialized && overlay.isOpen) {
@@ -309,7 +349,9 @@ class EpubReaderScreen(
         return false
     }
 
-    override fun hints(): List<ButtonHint> = if (::appearance.isInitialized && appearance.isOpen) {
+    override fun hints(): List<ButtonHint> = if (::footnoteCard.isInitialized && footnoteCard.isOpen) {
+        listOf(ButtonHint.activate("Choose"), ButtonHint.back("Close note"))
+    } else if (::appearance.isInitialized && appearance.isOpen) {
         listOf(ButtonHint.activate("Adjust"), ButtonHint.back("Close appearance"))
     } else if (::dictionaryCard.isInitialized && dictionaryCard.isOpen) {
         listOf(ButtonHint.activate("Choose"), ButtonHint.back("Close definition"))
@@ -329,6 +371,10 @@ class EpubReaderScreen(
     )
 
     override fun onPad(action: PadAction): Boolean {
+        if (::footnoteCard.isInitialized && footnoteCard.onPad(action)) {
+            host.refreshHints()
+            return true
+        }
         if (::dictionaryCard.isInitialized && dictionaryCard.onPad(action)) return true
         if (appearance.onPad(action)) return true
         if (::overlay.isInitialized && overlay.onPad(action)) {
@@ -357,8 +403,8 @@ class EpubReaderScreen(
                 showAppearance()
             }
             ReaderCommand.Retry -> openBook()
-            is ReaderCommand.Scroll -> scrollPage(if (command.direction == Direction.UP) -SCROLL_STEP else SCROLL_STEP)
-            is ReaderCommand.Glide -> scrollPage(command.dy * GLIDE)
+            is ReaderCommand.Scroll -> step(if (command.direction == Direction.UP) -1 else 1)
+            is ReaderCommand.Glide -> glide(command.dy)
             ReaderCommand.FollowNarration -> follow()
             is ReaderCommand.Sentence -> narration?.let { audio ->
                 following = true
@@ -415,13 +461,44 @@ class EpubReaderScreen(
     }
 
     /**
-     * Continuous scrolling: moves the text by [screens] of a screen (the
-     * D-pad a third, the right stick smoothly). Readium scrolls each part of
-     * the book inside its own web view; the one on screen takes the scroll.
+     * Continuous scrolling, the D-pad (E1): a third of a screen, eased over
+     * [STEP_MS] rather than jumped, and at the end of a part on into the next.
+     * Readium scrolls each part of the book inside its own web view; the one
+     * on screen takes the scroll.
      */
-    private fun scrollPage(screens: Float) {
+    private fun step(sign: Int) {
         val web = visibleWebView() ?: return
-        web.scrollBy(0, (screens * web.height).toInt())
+        // A step still easing in finishes first, so the ends are judged from where it lands.
+        stepAnimator?.end()
+        scroll(web, bookScroll.step(sign * (web.height * SCROLL_STEP).toInt(), web.canScrollVertically(1), web.canScrollVertically(-1)), ease = true)
+    }
+
+    /** The right stick (E1): [dy] stick-seconds, at most [GLIDE] screens a second, the parts of a pixel carried. */
+    private fun glide(dy: Float) {
+        val web = visibleWebView() ?: return
+        stepAnimator?.end()
+        scroll(web, bookScroll.glide(dy * GLIDE * web.height, web.canScrollVertically(1), web.canScrollVertically(-1)), ease = false)
+    }
+
+    private fun scroll(web: android.webkit.WebView, move: BookScroll.Move, ease: Boolean) {
+        when (move) {
+            is BookScroll.Move.By -> if (!ease) web.scrollBy(0, move.px) else {
+                var moved = 0
+                stepAnimator = ValueAnimator.ofInt(0, move.px).apply {
+                    duration = STEP_MS
+                    interpolator = DecelerateInterpolator()
+                    addUpdateListener { animation ->
+                        val now = animation.animatedValue as Int
+                        web.scrollBy(0, now - moved)
+                        moved = now
+                    }
+                    start()
+                }
+            }
+            BookScroll.Move.NextPart -> turn(1)
+            BookScroll.Move.PreviousPart -> turn(-1)
+            BookScroll.Move.Stay -> Unit
+        }
     }
 
     private fun visibleWebView(): android.webkit.WebView? {
@@ -502,10 +579,12 @@ class EpubReaderScreen(
         publication = opened
         bookPositions = withContext(Dispatchers.Default) { opened.positions() }
         bookSections = bookPositions.distinctBy { it.href }
+        sectionSizes = bookSections.map { section -> bookPositions.count { it.href == section.href } }
 
         val factory = EpubNavigatorFactory(opened).createFragmentFactory(
             initialLocator = initialLocator,
             initialPreferences = readiumPreferences(preferences),
+            listener = linkListener,
             configuration = EpubNavigatorFragment.Configuration(decorationTemplates = narrationTemplates()),
             paginationListener = object : EpubNavigatorFragment.PaginationListener {
                 override fun onPageChanged(pageIndex: Int, totalPages: Int, locator: Locator) {
@@ -542,6 +621,7 @@ class EpubReaderScreen(
         locatorJob = uiScope.launch {
             fragment.currentLocator.drop(1).collect { locator ->
                 latestLocator = locator
+                observePace()
                 updatePosition()
                 refreshBookmarkButton()
                 scheduleSave()
@@ -562,6 +642,7 @@ class EpubReaderScreen(
     }
 
     private fun turn(delta: Int) {
+        bookScroll.reset()
         val audio = narration
         if (audio != null && audio.isOn) {
             following = false
@@ -607,14 +688,28 @@ class EpubReaderScreen(
             if (bars.glass) setPadding(dp(4), 0, dp(4), 0) else setPadding(dp(14), dp(4), dp(14), dp(4))
         }
         topBar.addView(control("×", "Close reader", click = { host.back() }))
-        topBar.addView(TextView(host.viewContext).apply {
-            text = title
-            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, if (bars.glass) 15f else 17f)
-            setTextColor(Color.WHITE)
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
+        // The title, and under it the time left (E3), as the comic reader's issue and page.
+        topBar.addView(LinearLayout(host.viewContext).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(10), 0, dp(8), 0)
+            addView(TextView(host.viewContext).apply {
+                text = title
+                com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, if (bars.glass) 15f else 17f)
+                setTextColor(Color.WHITE)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            timeLeftView = TextView(host.viewContext).apply {
+                textSize = if (bars.glass) 11.5f else 12f
+                setTextColor(ReaderBars.SOFT_TEXT)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(0, dp(1), 0, 0)
+                contentDescription = "Time left"
+                visibility = View.GONE
+            }
+            addView(timeLeftView)
         }, LinearLayout.LayoutParams(0, MATCH, 1f))
         topBar.addView(control("☷", "Table of contents", click = {
             showNavigator()
@@ -807,6 +902,7 @@ class EpubReaderScreen(
         // The pill: narration playing with the menu hidden says so, and where the page stands (A5).
         narrationPill.visibility = if (audio.isOn && !controlsVisible) View.VISIBLE else View.GONE
         narrationPill.text = "▶  $label · ${com.pocketds.hub.playback.PlayerLabels.rate(audio.speed)}"
+        updateTimeLeft()
     }
 
     /** "Following", "Reading", or "Alignment unavailable" on a page the narration never reaches. */
@@ -1045,6 +1141,8 @@ class EpubReaderScreen(
 
     private fun jumpTo(target: Locator, remember: Boolean = true): Boolean {
         val previous = latestLocator
+        paceTracker.restart()
+        bookScroll.reset()
         switchToReading()
         if (navigator?.go(target, animated = false) != true) {
             host.notify("This reading position could not be opened")
@@ -1314,6 +1412,111 @@ class EpubReaderScreen(
             if (!bookSeek.isPressed && !bookSeek.hasFocus()) bookSeek.progress = com.pocketds.hub.state.Fmt.readingPercent(progression ?: 0.0)
         }
         if (::returnButton.isInitialized) returnButton.visibility = if (returnLocator == null) View.GONE else View.VISIBLE
+        updateTimeLeft()
+    }
+
+    /** Where in the whole book the page is, in positions. */
+    private fun bookPosition(): Double? {
+        val current = latestLocator ?: return null
+        return TimeLeft.position(sectionSizes, bookSections.indexOfFirst { it.href == current.href }, current.locations.progression ?: 0.0)
+    }
+
+    /**
+     * The pace learns from the reading (E3): each new place on the page, and
+     * when it was reached. The page turning with the narration is listening,
+     * not reading, so it teaches nothing.
+     */
+    private fun observePace() {
+        val position = bookPosition() ?: return
+        if (narration?.isOn == true) { paceTracker.restart(); return }
+        val reading = paceTracker.at(position, SystemClock.elapsedRealtime()) ?: return
+        pace = ReadingPaceSettings.record(host.viewContext, paceKey(), pace, reading)
+    }
+
+    /**
+     * Under the title: the time left in the chapter and the book (E3). Reading
+     * along with the page following the voice, the narration's own; otherwise
+     * the pace's over the positions left.
+     */
+    private fun updateTimeLeft() {
+        if (!::timeLeftView.isInitialized) return
+        val audio = narration
+        val current = latestLocator
+        val left = if (audio != null && following) TimeLeft.ofNarration(audio.timeline, audio.position, audio.speed)
+            else if (current == null) null
+            else TimeLeft.ofPositions(sectionSizes, bookSections.indexOfFirst { it.href == current.href },
+                current.locations.progression ?: 0.0, pace.minutesPerPosition(pacePrior))
+        timeLeftView.text = left?.label().orEmpty()
+        timeLeftView.visibility = if (left == null) View.GONE else View.VISIBLE
+    }
+
+    private fun paceKey(): String = "$workId:$sourceItemId"
+
+    /**
+     * Readium's link listener (E5). A footnote reference opens its note as a
+     * card and stays put; any other link in the book is followed, remembering
+     * where it was followed from for "Return to previous place". A footnote's
+     * is asked on the web view's own thread, so the card is posted.
+     */
+    private val linkListener = object : EpubNavigatorFragment.Listener {
+        override fun shouldFollowInternalLink(link: Link, context: HyperlinkNavigator.LinkContext?): Boolean {
+            if (context is HyperlinkNavigator.FootnoteContext) {
+                val note = context.noteContent
+                root.post { showFootnote(note, link) }
+                return false
+            }
+            linkOrigin = latestLocator
+            linkOriginAt = SystemClock.uptimeMillis()
+            root.post { leavePageForLink() }
+            return true
+        }
+
+        override fun onJumpToLocator(locator: Locator) {
+            val origin = linkOrigin ?: return
+            linkOrigin = null
+            if (SystemClock.uptimeMillis() - linkOriginAt > LINK_MS) return
+            root.post {
+                returnLocator = origin
+                paceTracker.restart()
+                updatePosition()
+                host.notify("Return to previous place is in the menu")
+            }
+        }
+
+        override fun onExternalLinkActivated(url: AbsoluteUrl) {
+            root.post { host.notify("This link leads out of the book, so it is not opened here") }
+        }
+    }
+
+    /** A link followed: the page leaves the narration, as a page turned by hand does (A5). */
+    private fun leavePageForLink() {
+        val audio = narration
+        if (audio != null && audio.isOn) {
+            following = false
+            updateDock()
+        } else switchToReading()
+    }
+
+    /** A footnote's card (E5); an empty note is simply followed. */
+    private fun showFootnote(html: String, link: Link) {
+        val text = FootnoteText.plain(html)
+        val target = publication?.locatorFromLink(link)
+        if (text.isBlank()) {
+            target?.let { jumpTo(it) }
+            return
+        }
+        footnoteCard.onFollow = {
+            closeFootnote()
+            target?.let { jumpTo(it) }
+        }
+        footnoteCard.show(text, canFollow = target != null)
+        host.refreshHints()
+    }
+
+    private fun closeFootnote() {
+        if (!::footnoteCard.isInitialized || !footnoteCard.isOpen) return
+        footnoteCard.dismiss()
+        host.refreshHints()
     }
 
     private fun showFailure(message: String) {
@@ -1330,6 +1533,11 @@ class EpubReaderScreen(
         /** Continuous scrolling: the D-pad moves a third of a screen, the right stick at full push 1.5 screens a second. */
         const val SCROLL_STEP = 1f / 3f
         const val GLIDE = 1.5f
+        /** How long the D-pad's step eases, and how far the stick pushes past the end of a part before it goes on. */
+        const val STEP_MS = 160L
+        const val EDGE_SCREENS = 0.5f
+        /** A jump within this long of a link being followed is the link's. */
+        const val LINK_MS = 3_000L
         /** The lower bar: the position row over the book's line, with their padding. */
         const val BOTTOM_ROW_DP = 44 + 30 + 8
     }

@@ -37,23 +37,94 @@ object ReaderFixtures {
     }
 
     /** A generated square cover: a night sky with a low sun and the title, never a real book's. */
-    fun cover(size: Int, title: String): ByteArray {
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    fun cover(size: Int, title: String): ByteArray = cover(size, size, title)
+
+    /**
+     * A generated cover [width] by [height]: a sky that warms towards its
+     * foot, a low sun and the title. No dark band at the foot: one read as a
+     * gap under the cover on the audiobook's screen (#18).
+     */
+    fun cover(width: Int, height: Int, title: String): ByteArray {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.rgb(28, 44, 86))
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.shader = android.graphics.LinearGradient(0f, 0f, 0f, height.toFloat(),
+            Color.rgb(28, 44, 86), Color.rgb(176, 92, 74), android.graphics.Shader.TileMode.CLAMP)
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
+        paint.shader = null
+        val size = minOf(width, height)
         paint.color = Color.rgb(233, 150, 64)
-        canvas.drawCircle(size * .68f, size * .62f, size * .2f, paint)
-        paint.color = Color.rgb(14, 22, 44)
-        canvas.drawRect(0f, size * .7f, size.toFloat(), size.toFloat(), paint)
+        canvas.drawCircle(width * .68f, height * .66f, size * .2f, paint)
         paint.color = Color.WHITE
         paint.textSize = size / 11f
         paint.textAlign = Paint.Align.CENTER
         title.split(' ').chunked(2).forEachIndexed { line, words ->
-            canvas.drawText(words.joinToString(" "), size / 2f, size * (.18f + line * .11f), paint)
+            canvas.drawText(words.joinToString(" "), width / 2f, height * .18f + line * size * .11f, paint)
         }
         return ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 88, it) }.toByteArray().also { bitmap.recycle() }
     }
+
+    /**
+     * A comic page with a plain paper border (#18, C5): [borderX] of its width
+     * at each side and [borderY] of its height at the top and the foot, the
+     * art inside drawn in bands as [page] draws a whole page.
+     */
+    fun borderedPage(width: Int, height: Int, borderX: Float, borderY: Float, label: String, paper: Int = Color.rgb(244, 241, 232)): ByteArray {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(paper)
+        val left = width * borderX
+        val top = height * borderY
+        val right = width - left
+        val bottom = height - top
+        val bands = listOf(Color.rgb(196, 64, 52), Color.rgb(52, 118, 170), Color.rgb(60, 140, 70), Color.rgb(170, 130, 40))
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = width / 12f; textAlign = Paint.Align.CENTER }
+        val band = (bottom - top) / 4f
+        for (i in 0 until 4) {
+            paint.color = bands[i]
+            canvas.drawRect(left, top + band * i, right, top + band * (i + 1), paint)
+            paint.color = Color.WHITE
+            canvas.drawText("$label · ${i + 1}/4", width / 2f, top + band * (i + 0.55f), paint)
+        }
+        return ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray().also { bitmap.recycle() }
+    }
+
+    /** A page's thumbnail as the hub's H1 route makes one: [width] across, its shape kept, a JPEG at quality 80. */
+    fun thumbnail(page: ByteArray, width: Int): ByteArray {
+        val full = android.graphics.BitmapFactory.decodeByteArray(page, 0, page.size)
+        val small = Bitmap.createScaledBitmap(full, width, (full.height.toLong() * width / full.width).toInt().coerceAtLeast(1), true)
+        return ByteArrayOutputStream().also { small.compress(Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
+            .also { full.recycle(); if (small !== full) small.recycle() }
+    }
+
+    /**
+     * A generated book of two chapters (#18): the first opens with a note
+     * reference ([NOTE_ID]'s aside) and a link on to the second, then runs on
+     * long enough to scroll; the second follows.
+     */
+    fun notedEpub(): ByteArray {
+        val output = ByteArrayOutputStream()
+        val passages = (1..50).joinToString("") { "<p>The pines marked the quiet path. Mara followed the lantern toward the ridge. This is passage $it of the first chapter.</p>" }
+        val later = (1..50).joinToString("") { "<p>The observatory kept its light on through the night. This is passage $it of the second chapter.</p>" }
+        val files = mapOf(
+            "mimetype" to "application/epub+zip",
+            "META-INF/container.xml" to """<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""",
+            "EPUB/package.opf" to """<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">urn:reader-notes</dc:identifier><dc:title>The Last Observatory</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-10-05T00:00:00Z</meta></metadata><manifest><item id="one" href="one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="two.xhtml" media-type="application/xhtml+xml"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>""",
+            "EPUB/one.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>A light beyond the ridge</title></head><body><h1>A light beyond the ridge</h1><p>The lantern<a id="$NOTE_REF" epub:type="noteref" href="#$NOTE_ID">1</a> swung over the path. <a id="$LINK_ID" href="two.xhtml">On to the observatory</a>.</p>$passages<aside id="$NOTE_ID" epub:type="footnote"><p>A ship's lantern, &amp; older than the observatory. <a href="#$NOTE_REF">↩</a></p></aside></body></html>""",
+            "EPUB/two.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>The observatory</title></head><body><h1>The observatory</h1>$later</body></html>""",
+            "EPUB/nav.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol><li><a href="one.xhtml">A light beyond the ridge</a></li><li><a href="two.xhtml">The observatory</a></li></ol></nav></body></html>"""
+        )
+        ZipOutputStream(output).use { zip ->
+            files.forEach { (name, text) -> zip.putNextEntry(ZipEntry(name)); zip.write(text.toByteArray()); zip.closeEntry() }
+        }
+        return output.toByteArray()
+    }
+
+    const val NOTE_REF = "ref1"
+    const val NOTE_ID = "note1"
+    const val LINK_ID = "onward"
+    /** What the note's card says, the link back gone. */
+    const val NOTE_TEXT = "A ship's lantern, & older than the observatory."
 
     /**
      * A short generated book; [aligned] adds a media overlay narrating its
