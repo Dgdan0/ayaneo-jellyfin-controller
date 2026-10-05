@@ -131,4 +131,18 @@ class FmtTest {
         assertEquals("99", Fmt.badge(99))
         assertEquals("99+", Fmt.badge(100))
     }
+
+    @Test
+    fun `how far through a book rounds one way everywhere`() {
+        // The facts said 1% and the Resume button 2% for one place, 1.6% through.
+        assertEquals("1%", Fmt.readingPercentLabel(0.016))
+        assertEquals(49, Fmt.readingPercent(0.4999))
+        // Started is never 0%, unfinished never 100%, finished always is.
+        assertEquals(1, Fmt.readingPercent(0.0004))
+        assertEquals(99, Fmt.readingPercent(0.9999))
+        assertEquals(99, Fmt.readingPercent(1.0))
+        assertEquals(100, Fmt.readingPercent(0.3, completed = true))
+        assertEquals(0, Fmt.readingPercent(0.0))
+        assertEquals(0, Fmt.readingPercent(Double.NaN))
+    }
 }

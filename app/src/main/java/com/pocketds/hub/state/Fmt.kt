@@ -60,6 +60,22 @@ object Fmt {
         if (fraction < 0) "—" else "${(fraction * 100).toInt()}%"
 
     /**
+     * How far through a book or a comic, as a whole percent (#16): rounded
+     * down, at least 1 once started and at most 99 until finished, so 0% never
+     * means started and 100% only means finished. Every reading line goes
+     * through here, so a book's facts and its Resume button say the same:
+     * they used to say 1% and 2% for one place.
+     */
+    fun readingPercent(fraction: Double, completed: Boolean = false): Int = when {
+        completed -> 100
+        !fraction.isFinite() || fraction <= 0.0 -> 0
+        else -> (fraction * 100).toInt().coerceIn(1, 99)
+    }
+
+    /** [readingPercent] with its sign: "49%". */
+    fun readingPercentLabel(fraction: Double, completed: Boolean = false): String = "${readingPercent(fraction, completed)}%"
+
+    /**
      * A position within something playing: "24:05", or "1:15:30" once it
      * passes an hour. Minutes never run past 59.
      */

@@ -37,7 +37,7 @@ class DetailComponentsTest {
     @Test fun longTitleNeverOverlapsActionsInEitherRailWidth() = onUi {
         val context = instrumentation.targetContext
         for (width in listOf(663, 785)) {
-            val header = DetailHeaderView(context, Theme.colors(context)) { true }
+            val header = DetailHeaderView(context, Theme.colors(context), { true })
             header.titleView.text = "A very long title with multiple lines — וגם כותרת ארוכה בעברית"
             header.metadataView.text = "2026 · 2h 12m · Drama"
             header.setPresentation("movie", true, true)
@@ -147,7 +147,7 @@ class DetailComponentsTest {
     @Test fun croppedHeroArtworkCannotPaintOverTheContentBelowIt() = onUi {
         val context = instrumentation.targetContext
         val root = FrameLayout(context).apply { setBackgroundColor(Color.MAGENTA); clipChildren = false }
-        val header = DetailHeaderView(context, Theme.colors(context)) { true }
+        val header = DetailHeaderView(context, Theme.colors(context), { true })
         header.titleView.text = "A movie title"
         header.setPresentation("movie", true, false)
         val art = Bitmap.createBitmap(640, 360, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }

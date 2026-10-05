@@ -236,6 +236,24 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
         if(selected)row.addView(ImageView(context).apply {setImageDrawable(AppIconDrawable(AppIcon.CHECK,colors.accent));importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO},LinearLayout.LayoutParams(dp(20),dp(20)).apply{marginStart=dp(8)})
         return row
     }
+    /**
+     * A key and what it does (a reader's Controls sheet, #16): the caps as
+     * the hint bar draws them in a column of their own, then the words. The
+     * row takes focus so the pad can scroll a long list; pressing it does
+     * nothing.
+     */
+    fun keys(caps:List<String>,label:String):View {
+        val row=row(label,"",false,false) {}
+        row.contentDescription=caps.joinToString(" ")+": "+label
+        val column=LinearLayout(context).apply {orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
+        caps.forEach { cap ->
+            val glyph=KeyGlyphDrawable(colors,cap,dp(20),Type.text(context,800),glass)
+            column.addView(ImageView(context).apply {setImageDrawable(glyph);importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO},
+                LinearLayout.LayoutParams(glyph.intrinsicWidth,glyph.intrinsicHeight).apply {marginEnd=dp(5)})
+        }
+        row.addView(column,0,LinearLayout.LayoutParams(dp(KEY_COLUMN_DP),-2).apply {marginEnd=dp(10)})
+        return row
+    }
     /** A row that opens its own menu: the setting, its current value, and a chevron. */
     fun setting(label:String,value:String,onPick:()->Unit):View {
         val row=row(label,"",false,false,onPick)
@@ -308,6 +326,8 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     protected fun dp(n:Int)=Styler.dpInt(context,n.toFloat())
 
     companion object {
+        /** The caps' column in a [keys] row, wide enough for "D-pad ← →". */
+        const val KEY_COLUMN_DP=118
         /** Android edge-back follows the same modal-first ordering as the controller's B. */
         fun dismissTopIn(root: View): Boolean {
             if(root.visibility!=VISIBLE)return false

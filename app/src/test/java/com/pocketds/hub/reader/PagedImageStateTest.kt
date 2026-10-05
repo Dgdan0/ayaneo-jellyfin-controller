@@ -44,25 +44,118 @@ class PagedImageStateTest {
     }
 
     @Test
-    fun `viewport thirds overlap and reverse horizontally for manga`() {
-        val ltr = ViewportStepPlanner.steps(ViewportAxis.HORIZONTAL, PageDirection.LTR)
-        val rtl = ViewportStepPlanner.steps(ViewportAxis.HORIZONTAL, PageDirection.RTL)
-
-        assertEquals(3, ltr.size)
-        assertEquals(ltr.reversed(), rtl)
-        assertEquals(0.0, ltr.first().left, 0.0001)
-        assertEquals(1.0, ltr.last().right, 0.0001)
-        assertTrue(ltr[0].right > ltr[1].left)
+    fun `thirds come from the page's shape and the screen's`() {
+        // The Pocket's 1920 x 1080 top screen.
+        assertEquals(3, ViewportStepPlanner.count(1988, 3056, 1920, 1080))   // a US comic page
+        assertEquals(3, ViewportStepPlanner.count(1400, 2000, 1920, 1080))   // a manga page
+        assertEquals(2, ViewportStepPlanner.count(3976, 3056, 1920, 1080))   // a two-page spread
+        assertEquals(1, ViewportStepPlanner.count(4000, 1500, 1920, 1080))   // a page that fits at its width
+        assertEquals(1, ViewportStepPlanner.count(0, 0, 1920, 1080))         // size unknown
+        // A long strip keeps going, a screen at a time less the overlap, up to a limit.
+        assertEquals(ViewportStepPlanner.MAX_STEPS, ViewportStepPlanner.count(800, 400_000, 1920, 1080))
     }
 
     @Test
-    fun `vertical thirds run from top to bottom`() {
-        val steps = ViewportStepPlanner.steps(ViewportAxis.VERTICAL, PageDirection.RTL)
-
+    fun `thirds fit the width and run top to bottom, overlapping, never cropped`() {
+        val steps = ViewportStepPlanner.fitWidth(1988, 3056, 1920, 1080)
         assertEquals(3, steps.size)
+        steps.forEach {
+            assertEquals(0.0, it.left, 0.0001)
+            assertEquals(1.0, it.right, 0.0001)
+        }
         assertEquals(0.0, steps.first().top, 0.0001)
         assertEquals(1.0, steps.last().bottom, 0.0001)
-        assertTrue(steps[0].bottom > steps[1].top)
+        // Each shows the screen's share of the page at its width, and a little of the step before.
+        val visible = 1080.0 * 1988 / 1920 / 3056
+        steps.forEach { assertEquals(visible, it.bottom - it.top, 0.0001) }
+        assertTrue(steps[0].bottom - steps[1].top >= visible * ViewportStepPlanner.OVERLAP - 0.0001)
+        assertEquals(listOf(NormalizedViewport(0.0, 0.0, 1.0, 1.0)), ViewportStepPlanner.fitWidth(4000, 1500, 1920, 1080))
+    }
+
+    @Test
+    fun `each page takes its own steps, and going back lands on the last`() {
+        // Page 1 is a spread (2 steps), the others comic pages (3).
+        val state = PagedImageState(pageCount = 3, startPage = 0, stepsFor = { if (it == 1) 2 else 3 })
+        state.advance(); state.advance()
+        assertEquals(0 to 2, state.pageIndex to state.viewportIndex)
+        state.advance()
+        assertEquals(1 to 0, state.pageIndex to state.viewportIndex)
+        assertEquals(2, state.viewportSteps)
+        state.advance(); state.advance()
+        assertEquals(2 to 0, state.pageIndex to state.viewportIndex)
+        state.retreat()
+        assertEquals(1 to 1, state.pageIndex to state.viewportIndex)
+        assertTrue(state.turnPage(-1))
+        assertEquals(0 to 2, state.pageIndex to state.viewportIndex)
+    }
+
+    @Test
+    fun `a saved step comes back, and a page that changes size keeps the step inside it`() {
+        var spread = false
+        val state = PagedImageState(pageCount = 4, startPage = 2, stepsFor = { if (spread) 2 else 3 }, startStep = 2)
+        assertEquals(2, state.viewportIndex)
+        // It decoded as a spread: two steps, so the third becomes the second.
+        spread = true
+        state.refit()
+        assertEquals(1, state.viewportIndex)
+        state.jump(3, 7)
+        assertEquals(3 to 1, state.pageIndex to state.viewportIndex)
+        // A start step past the page's last is its last.
+        assertEquals(2, PagedImageState(pageCount = 2, startPage = 1, stepsFor = { 3 }, startStep = Int.MAX_VALUE).viewportIndex)
+    }
+
+    @Test
+    fun `a series keeps its fit and direction, and the default covers the rest`() {
+        assertEquals(ComicView(ComicFit.THIRDS), ComicView.decode(null, ComicView.DEFAULT_FIT))
+        assertEquals(ComicView(ComicFit.WHOLE), ComicView.decode(null, ComicFit.WHOLE))
+        val chosen = ComicView(ComicFit.WIDTH, "rtl")
+        assertEquals(chosen, ComicView.decode(chosen.encode(), ComicFit.THIRDS))
+        assertEquals(ComicView(ComicFit.WHOLE, null), ComicView.decode(ComicView(ComicFit.WHOLE).encode(), ComicFit.THIRDS))
+        // Something unreadable falls back rather than breaking the reader.
+        assertEquals(ComicView(ComicFit.THIRDS, null), ComicView.decode("sideways|up", ComicFit.THIRDS))
+    }
+
+    @Test
+    fun `the third you were on comes back only on the same page of the same issue`() {
+        val place = ComicPlace("kavita:51", page = 4, step = 2)
+        assertEquals(place, ComicPlace.decode(place.encode()))
+        assertEquals(2, place.stepFor("kavita:51", 4, steps = 3))
+        assertEquals(1, place.stepFor("kavita:51", 4, steps = 2))
+        assertEquals(0, place.stepFor("kavita:51", 5, steps = 3))
+        assertEquals(0, place.stepFor("kavita:52", 4, steps = 3))
+        assertEquals(null, ComicPlace.decode("kavita:51|four|2"))
+        assertEquals(null, ComicPlace.decode(null))
+    }
+
+    @Test
+    fun `a zoom stays for the next page, at the same place across and at its top`() {
+        // Zoomed to 1.5 times the fit, the middle of the view 70% across a 2000-wide page.
+        val zoom = ComicZoom.of(scale = 1.5f, base = 1f, centerX = 1400f, pageWidth = 2000f)
+        assertTrue(zoom.active)
+        assertEquals(1.5f, zoom.factor, 0.001f)
+        assertEquals(0.7f, zoom.anchorX, 0.001f)
+        assertEquals(1.2f, zoom.scaleFor(base = 0.8f, min = 0.5f, max = 6f), 0.001f)
+        // The next page, 2000 x 3000, of which 1280 x 720 shows: 70% across, at its top.
+        val (x, y) = zoom.center(2000f, 3000f, 1280f, 720f, atEnd = false)
+        assertEquals(1360f, x, 0.5f)   // as far right as the view can go
+        assertEquals(360f, y, 0.5f)
+        // Going back it opens at the bottom; a page narrower than the view is centred.
+        assertEquals(2640f, zoom.center(2000f, 3000f, 1280f, 720f, atEnd = true).second, 0.5f)
+        assertEquals(500f, zoom.center(1000f, 3000f, 1280f, 720f, atEnd = false).first, 0.5f)
+        // Pinched back to the fit, the zoom ends.
+        assertFalse(ComicZoom.of(scale = 1.01f, base = 1f, centerX = 900f, pageWidth = 2000f).active)
+    }
+
+    @Test
+    fun `the end card names the issue and what comes next`() {
+        assertEquals("End of Fantastic Four #51", EndOfIssue.heading("Fantastic Four", "Chapter 51", "51"))
+        assertEquals("End of Fantastic Four · Annual 1965", EndOfIssue.heading("Fantastic Four", "Annual 1965", "1"))
+        assertEquals("End of Saga #7", EndOfIssue.heading("Saga", "7", ""))
+        assertEquals("Next: #52", EndOfIssue.next("Fantastic Four", "Fantastic Four", "Chapter 52", "52", readingList = false))
+        // A reading list passing to another series names it.
+        assertEquals("Next: Spider-Man #1", EndOfIssue.next("Fantastic Four", "Spider-Man", "Issue 1", "", readingList = true))
+        assertEquals("That was the last issue", EndOfIssue.next("Fantastic Four", null, "", "", readingList = false))
+        assertEquals("End of the reading list", EndOfIssue.next("Fantastic Four", null, "", "", readingList = true))
     }
 
     @Test
@@ -149,6 +242,8 @@ class PagedImageStateTest {
         assertEquals("Annual 1965", ReaderTitleFormatter.issue("comic", "Fantastic Four", "Annual 1965", "1"))
         assertEquals("", ReaderTitleFormatter.issue("comic", "Saga", "Saga", ""))
         assertEquals("Issue 51 · Page 2 of 24", ReaderTitleFormatter.subtitle("Issue 51", 2, 24))
-        assertEquals("Page 2 of 24 · 1/3", ReaderTitleFormatter.subtitle("", 2, 24, third = 1))
+        assertEquals("Page 2 of 24 · Part 1 of 3", ReaderTitleFormatter.subtitle("", 2, 24, part = 1, parts = 3))
+        // A page read whole has no parts.
+        assertEquals("Page 2 of 24", ReaderTitleFormatter.subtitle("", 2, 24, part = 1, parts = 1))
     }
 }

@@ -87,10 +87,11 @@ class EpubReaderPolishTest {
             open("polish-${System.nanoTime()}")
             withContext(Dispatchers.Main) {
                 assertTrue(screen!!.requiresTriggerHold)
-                assertTrue(screen!!.hints().any { it.label == "Navigator" })
+                // The keys are ReaderPadMap's (#16): Y opens the contents, B the menu and then leaves.
+                assertTrue(screen!!.hints().any { it.label == "Contents" })
                 screen!!.onPad(PadAction.Back)
                 assertEquals(0, exits)
-                assertTrue(screen!!.hints().any { it.action == PadAction.Back && it.label == "Close reader" })
+                assertTrue(screen!!.hints().any { it.action == PadAction.Back && it.label == "Leave the book" })
                 screen!!.onPad(PadAction.Back)
                 assertEquals(1, exits)
                 // The proxy records the exit without destroying the fixture screen.
@@ -116,9 +117,9 @@ class EpubReaderPolishTest {
                 assertTrue("Appearance opener should regain focus", all(root).first { it.contentDescription == "Reading appearance" }.hasFocus())
                 assertEquals(org.readium.r2.navigator.preferences.ColumnCount.ONE, reader()!!.settings.value.columnCount)
                 assertFalse(reader()!!.settings.value.scroll)
+                // Keys sits at the end of the top bar now (#16), so Down from Appearance
+                // lands on the position under it rather than on Next page.
                 screen!!.onPad(PadAction.Step(Direction.DOWN))
-                assertEquals("Next page", root.findFocus()?.contentDescription)
-                screen!!.onPad(PadAction.Step(Direction.LEFT))
                 assertEquals("Reading position and navigation", root.findFocus()?.contentDescription)
                 screen!!.onPad(PadAction.Step(Direction.DOWN))
                 assertEquals("Browse book percentage", root.findFocus()?.contentDescription)

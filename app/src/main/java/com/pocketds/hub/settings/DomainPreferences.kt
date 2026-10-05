@@ -18,4 +18,25 @@ object DomainPreferences {
     fun bookSort(context: Context, fields: List<String>, fallback: String) =
         SortPreference.decode(Prefs.of(context).getString(key(context,ContentMode.BOOKS,"book_sort"),null),fallback).supported(fields,fallback)
     fun setBookSort(context: Context, sort: SortPreference) { Prefs.of(context).edit().putString(key(context,ContentMode.BOOKS,"book_sort"),sort.encode()).apply() }
+
+    /** How every comic series opens until it has a way of its own (#16, C1); Thirds unless chosen otherwise. */
+    fun comicDefaultFit(context: Context): com.pocketds.hub.reader.ComicFit =
+        com.pocketds.hub.reader.ComicFit.fromStored(Prefs.of(context).getString(key(context,ContentMode.BOOKS,"comic_fit"),null),
+            com.pocketds.hub.reader.ComicView.DEFAULT_FIT)
+    fun setComicDefaultFit(context: Context, fit: com.pocketds.hub.reader.ComicFit) {
+        Prefs.of(context).edit().putString(key(context,ContentMode.BOOKS,"comic_fit"),fit.stored).apply()
+    }
+    /** A comic series' fit and direction, kept per series so its next issue and a reading list open the same way. */
+    fun comicView(context: Context, workId: String): com.pocketds.hub.reader.ComicView =
+        com.pocketds.hub.reader.ComicView.decode(Prefs.of(context).getString(key(context,ContentMode.BOOKS,"comic_view:$workId"),null),
+            comicDefaultFit(context))
+    fun setComicView(context: Context, workId: String, view: com.pocketds.hub.reader.ComicView) {
+        Prefs.of(context).edit().putString(key(context,ContentMode.BOOKS,"comic_view:$workId"),view.encode()).apply()
+    }
+    /** The page and third last shown in a series, so its third comes back; one per series. */
+    fun comicPlace(context: Context, workId: String): com.pocketds.hub.reader.ComicPlace? =
+        com.pocketds.hub.reader.ComicPlace.decode(Prefs.of(context).getString(key(context,ContentMode.BOOKS,"comic_place:$workId"),null))
+    fun setComicPlace(context: Context, workId: String, place: com.pocketds.hub.reader.ComicPlace) {
+        Prefs.of(context).edit().putString(key(context,ContentMode.BOOKS,"comic_place:$workId"),place.encode()).apply()
+    }
 }

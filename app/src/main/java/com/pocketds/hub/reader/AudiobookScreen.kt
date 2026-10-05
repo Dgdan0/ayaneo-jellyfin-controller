@@ -46,7 +46,13 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import com.pocketds.hub.state.Fmt
 
-/** Storyteller audiobook player. Its archive is temporary; narration progress is device-local. */
+/**
+ * Storyteller audiobook player. Its archive is temporary; narration progress
+ * is device-local. Its keys are [ReaderPadMap]'s (#16): Ⓑ leaves, Ⓧ plays or
+ * pauses, L1 and R1 change part, L2 and R2 jump; every key stays here (L1 and
+ * R1 used to fall through to the app and switch tabs, closing the player). A
+ * row along the foot says what the keys do, and Keys lists them all.
+ */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class AudiobookScreen(
     private val api: HubApi,
@@ -132,19 +138,31 @@ class AudiobookScreen(
         val transport = LinearLayout(host.viewContext).apply { gravity = Gravity.CENTER }
         content.addView(transport, LinearLayout.LayoutParams(MATCH, dp(58)))
         transport.addView(icon(PlayerControlIcon.PREVIOUS, "Previous part") { previous() })
-        transport.addView(icon(PlayerControlIcon.REWIND, "Back 10 seconds") { jump(-10_000) })
+        transport.addView(icon(PlayerControlIcon.REWIND, "Back 10 seconds") { jump(-SEEK_SECONDS * 1_000L) })
         playButton = icon(PlayerControlIcon.PLAY, "Play audiobook") { toggle() }
         transport.addView(playButton)
-        transport.addView(icon(PlayerControlIcon.FORWARD, "Forward 10 seconds") { jump(10_000) })
+        transport.addView(icon(PlayerControlIcon.FORWARD, "Forward 10 seconds") { jump(SEEK_SECONDS * 1_000L) })
         transport.addView(icon(PlayerControlIcon.NEXT, "Next part") { next() })
         val actions = LinearLayout(host.viewContext).apply { gravity = Gravity.CENTER; orientation = LinearLayout.HORIZONTAL }
         content.addView(actions, LinearLayout.LayoutParams(MATCH, dp(58)))
         if (ebook != null || narrations.size > 1) actions.addView(action("Reading & listening") { showReadingModes() })
+        actions.addView(action("Keys") { showKeys() })
         actions.addView(action("Close") { host.back() })
+        // What the keys do: the app's own hint bar is hidden while a reader is open.
+        val keys = ReaderKeys.row(host.viewContext, colors) { onPad(it) }
+        keys.setHints(ReaderPadMap.hints(padState()))
+        root.addView(keys, FrameLayout.LayoutParams(MATCH, Styler.dpInt(host.viewContext, com.pocketds.hub.nav.HintBarView.HEIGHT_DP),
+            Gravity.BOTTOM))
+        (content.layoutParams as FrameLayout.LayoutParams).bottomMargin = Styler.dpInt(host.viewContext, com.pocketds.hub.nav.HintBarView.HEIGHT_DP)
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         return root
     }
+
+    private fun padState() = ReaderPadState(ReaderKind.AUDIOBOOK, controlsVisible = true,
+        loading = !initialized, seekSeconds = SEEK_SECONDS)
+
+    private fun showKeys() = ReaderKeys.show(overlay, padState())
 
     override fun onShow() {
         ReadingEntryPreferences.put(host.viewContext, workId, ReadingEntryMode.LISTEN, edition.sourceItemId)
@@ -169,22 +187,29 @@ class AudiobookScreen(
 
     override fun onAppBackgrounded() { player?.pause(); savePosition() }
     override fun onSystemBack(): Boolean = if (overlay.isOpen) { overlay.dismiss(); true } else false
-    override fun hints(): List<ButtonHint> = listOf(ButtonHint.activate("Choose"), ButtonHint.back("Close audiobook"))
+    override fun hints(): List<ButtonHint> = ReaderPadMap.hints(padState())
     override fun requestInitialFocus(): Boolean = playButton.requestFocus()
 
     override fun onPad(action: PadAction): Boolean {
         if (overlay.onPad(action)) return true
-        return when (action) {
-            PadAction.Back -> { host.back(); true }
-            PadAction.Activate -> { controls.getOrNull(focusedControl)?.performClick(); true }
-            is PadAction.Step -> {
-                val step = if (action.direction == Direction.LEFT || action.direction == Direction.UP) -1 else 1
+        when (val command = ReaderPadMap.command(padState(), action)) {
+            ReaderCommand.Leave -> host.back()
+            ReaderCommand.Choose -> controls.getOrNull(focusedControl)?.performClick()
+            is ReaderCommand.Focus -> {
+                val step = if (command.direction == Direction.LEFT || command.direction == Direction.UP) -1 else 1
                 focusedControl = (focusedControl + step).coerceIn(0, controls.lastIndex.coerceAtLeast(0))
                 controls.getOrNull(focusedControl)?.requestFocus()
-                true
             }
-            else -> false
+            ReaderCommand.PlayPause -> toggle()
+            is ReaderCommand.Chapter -> if (command.delta > 0) next() else previous()
+            is ReaderCommand.Seek -> jump(command.seconds * 1_000L)
+            ReaderCommand.Formats -> if (ebook != null || narrations.size > 1) showReadingModes()
+            ReaderCommand.Keys -> showKeys()
+            ReaderCommand.Retry -> if (loadJob?.isActive != true) load()
+            // Taken here: nothing reaches the app, whose shoulders and triggers would switch tabs.
+            else -> Unit
         }
+        return true
     }
 
     private fun load() {
@@ -346,5 +371,9 @@ class AudiobookScreen(
 
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
 
-    private companion object { const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT }
+    private companion object {
+        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+        /** The jump of the transport's buttons and of L2 and R2 (the player's own setting comes in #16's run B). */
+        const val SEEK_SECONDS = 10
+    }
 }

@@ -28,7 +28,7 @@ class VisualFixtureTest {
                 val context=activity.createConfigurationContext(Configuration(activity.resources.configuration).apply{uiMode=if(dark)Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO;fontScale=1f})
                 val colors=Theme.colors(context)
                 val page=LinearLayout(context).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(colors.background)}
-                val header=DetailHeaderView(context,colors){true}.apply {
+                val header=DetailHeaderView(context,colors,{true}).apply {
                     compact=true;titleView.text="The Meridian Collection";subtitleView.visibility=View.GONE
                     metadataView.text="Alex Morgan · 3 available · 1 missing";overview.bind("Four lives intersect as a city searches for its vanished past. A fixture synopsis with enough words to exercise the bounded description.")
                     setPresentation("book",false,true);poster.setImageDrawable(art(0xff386273.toInt(),0xff111a29.toInt()))

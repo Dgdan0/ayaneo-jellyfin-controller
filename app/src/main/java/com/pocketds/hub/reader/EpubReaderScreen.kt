@@ -77,7 +77,14 @@ import org.readium.r2.shared.util.http.DefaultHttpClient
 import org.readium.r2.streamer.PublicationOpener
 import org.readium.r2.streamer.parser.DefaultPublicationParser
 
-/** Native reflowable EPUB reader. Readium renders the book; this screen owns Pocket input and sync. */
+/**
+ * Native reflowable EPUB reader. Readium renders the book; this screen owns
+ * Pocket input and sync. Its keys are [ReaderPadMap]'s (#16): Ⓑ opens the
+ * menu, the page shrinking inside it, and Ⓑ again leaves the book; every key
+ * stays here; in continuous scrolling the D-pad and the right stick scroll;
+ * read along, L3 goes back to the narrated sentence; R3 lists the keys. The
+ * menu carries a row of the keys and a Keys control.
+ */
 @OptIn(ExperimentalReadiumApi::class)
 class EpubReaderScreen(
     private val api: HubApi,
@@ -104,6 +111,7 @@ class EpubReaderScreen(
     private lateinit var bottomBar: LinearLayout
     private lateinit var position: TextView
     private lateinit var bookSeek: SeekBar
+    private lateinit var keyRow: com.pocketds.hub.nav.HintBarView
     private lateinit var returnButton: TextView
     private var bookPositions: List<Locator> = emptyList()
     private var bookSections: List<Locator> = emptyList()
@@ -282,14 +290,15 @@ class EpubReaderScreen(
             ButtonHint.activate("Choose"),
             ButtonHint.back("Cancel")
         )
-    } else {
-        listOf(
-            ButtonHint.activate(if (controlsVisible) "Choose" else "Next page"),
-            ButtonHint.back(if (controlsVisible) "Close reader" else "Show controls"),
-            ButtonHint.primary("Bookmark"),
-            ButtonHint.secondary("Navigator")
-        )
-    }
+    } else ReaderPadMap.hints(padState())
+
+    private fun padState() = ReaderPadState(
+        ReaderKind.BOOK,
+        controlsVisible = controlsVisible,
+        scrolling = preferences.scroll && !preferences.onePagePerScreen,
+        narration = narration != null,
+        loading = navigator == null
+    )
 
     override fun onPad(action: PadAction): Boolean {
         if (::dictionaryCard.isInitialized && dictionaryCard.onPad(action)) return true
@@ -298,29 +307,64 @@ class EpubReaderScreen(
             host.refreshHints()
             return true
         }
-        when (action) {
-            PadAction.Menu -> setControlsVisible(!controlsVisible)
-            PadAction.Back -> if (controlsVisible) host.back() else setControlsVisible(true)
-            PadAction.Activate -> if (controlsVisible && bookSeek.hasFocus()) seekBook()
-                else if (controlsVisible) (root.findFocus() ?: controls.getOrNull(focusedControl))?.performClick() else turn(1)
-            PadAction.Primary -> toggleBookmark()
-            PadAction.Secondary -> {
+        when (val command = ReaderPadMap.command(padState(), action)) {
+            ReaderCommand.Forward -> turn(1)
+            is ReaderCommand.Page -> turn(command.delta)
+            is ReaderCommand.Chapter -> changeChapter(if (command.delta > 0) Direction.DOWN else Direction.UP)
+            is ReaderCommand.Controls -> setControlsVisible(command.visible)
+            ReaderCommand.Leave -> host.back()
+            ReaderCommand.Choose -> if (bookSeek.hasFocus()) seekBook()
+                else (root.findFocus() ?: controls.getOrNull(focusedControl))?.performClick()
+            is ReaderCommand.Focus -> if (bookSeek.hasFocus() && (command.direction == Direction.LEFT || command.direction == Direction.RIGHT)) {
+                bookSeek.progress = (bookSeek.progress + if (command.direction == Direction.RIGHT) 1 else -1).coerceIn(0, bookSeek.max)
+                position.text = "Browse · ${bookSeek.progress}% · A to jump"
+            } else moveControlFocus(command.direction)
+            ReaderCommand.Bookmark -> toggleBookmark()
+            ReaderCommand.Contents -> {
                 setControlsVisible(true)
                 showNavigator()
             }
-            PadAction.Refresh -> if (navigator == null) openBook() else { setControlsVisible(true); showAppearance() }
-            is PadAction.Section -> turn(action.delta)
-            is PadAction.Page -> changeChapter(action.direction)
-            is PadAction.Step -> if (controlsVisible && bookSeek.hasFocus() && action.direction in listOf(Direction.LEFT, Direction.RIGHT)) {
-                bookSeek.progress = (bookSeek.progress + if (action.direction == Direction.RIGHT) 1 else -1).coerceIn(0, bookSeek.max)
-                position.text = "Browse · ${bookSeek.progress}% · A to jump"
-            } else if (controlsVisible) moveControlFocus(action.direction) else when (action.direction) {
-                Direction.LEFT -> turn(-1)
-                Direction.RIGHT -> turn(1)
-                Direction.UP, Direction.DOWN -> setControlsVisible(true)
+            ReaderCommand.Display -> {
+                setControlsVisible(true)
+                showAppearance()
             }
+            ReaderCommand.Retry -> openBook()
+            is ReaderCommand.Scroll -> scrollPage(if (command.direction == Direction.UP) -SCROLL_STEP else SCROLL_STEP)
+            is ReaderCommand.Glide -> scrollPage(command.dy * GLIDE)
+            ReaderCommand.FollowNarration -> narration?.let { highlightNarration(it.timeline.active(it.position.track, it.position.offsetMs)) }
+            ReaderCommand.Keys -> showKeys()
+            else -> Unit
         }
         return true
+    }
+
+    /** The Controls sheet: every key and what it does in this book, as it is set to read. */
+    private fun showKeys() {
+        setControlsVisible(true)
+        ReaderKeys.show(overlay, padState().copy(controlsVisible = false))
+    }
+
+    private fun refreshKeys() {
+        if (::keyRow.isInitialized) keyRow.setHints(ReaderPadMap.hints(padState().copy(controlsVisible = true)))
+    }
+
+    /**
+     * Continuous scrolling: moves the text by [screens] of a screen (the
+     * D-pad a third, the right stick smoothly). Readium scrolls each part of
+     * the book inside its own web view; the one on screen takes the scroll.
+     */
+    private fun scrollPage(screens: Float) {
+        val web = visibleWebView() ?: return
+        web.scrollBy(0, (screens * web.height).toInt())
+    }
+
+    private fun visibleWebView(): android.webkit.WebView? {
+        fun all(view: View): Sequence<View> = sequenceOf(view) +
+            if (view is ViewGroup) (0 until view.childCount).asSequence().flatMap { all(view.getChildAt(it)) } else emptySequence()
+        val rect = android.graphics.Rect()
+        return all(navigatorContainer).filterIsInstance<android.webkit.WebView>()
+            .filter { it.isShown && it.getGlobalVisibleRect(rect) }
+            .maxByOrNull { if (it.getGlobalVisibleRect(rect)) rect.width() * rect.height() else 0 }
     }
 
     private fun openBook(forceDownload: Boolean = false) {
@@ -526,6 +570,7 @@ class EpubReaderScreen(
         bookmarkButton = control("☆", "Add bookmark", click = { toggleBookmark() })
         topBar.addView(bookmarkButton)
         topBar.addView(control("Aa", "Reading appearance", { showAppearance() }))
+        topBar.addView(control("pad", "Keys", { showKeys() }))
     }
 
     private fun buildBottomBar() {
@@ -535,7 +580,7 @@ class EpubReaderScreen(
             setPadding(dp(14), dp(5), dp(14), dp(5))
             setBackgroundColor(BAR)
         }
-        root.addView(bottomBar, FrameLayout.LayoutParams(MATCH, dp(88), Gravity.BOTTOM))
+        root.addView(bottomBar, FrameLayout.LayoutParams(MATCH, dp(88 + KEY_ROW_DP), Gravity.BOTTOM))
         val navigationRow = LinearLayout(host.viewContext).apply { gravity = Gravity.CENTER_VERTICAL }
         bottomBar.addView(navigationRow, LinearLayout.LayoutParams(MATCH, dp(44)))
         navigationRow.addView(control("‹", "Previous page", { turn(-1) }))
@@ -575,6 +620,9 @@ class EpubReaderScreen(
         }
         controls += bookSeek
         bottomBar.addView(bookSeek, LinearLayout.LayoutParams(MATCH, dp(34)))
+        // What the keys do, inside the menu: the app's own hint bar is hidden here.
+        keyRow = ReaderKeys.row(host.viewContext, colors) { onPad(it) }
+        bottomBar.addView(keyRow, LinearLayout.LayoutParams(MATCH, dp(KEY_ROW_DP)))
     }
 
     private fun buildNarrationDock() {
@@ -608,7 +656,7 @@ class EpubReaderScreen(
 
     private fun control(glyph: String, label: String, click: () -> Unit): TextView =
         TextView(host.viewContext).apply {
-            val icon = when (glyph) { "×" -> AppIcon.CLOSE; "☷" -> AppIcon.CONTENTS; "search" -> AppIcon.SEARCH; "return" -> AppIcon.PREVIOUS_ITEM; "☆" -> AppIcon.BOOKMARK; "Aa" -> AppIcon.APPEARANCE; "‹" -> AppIcon.PREVIOUS; "▣" -> AppIcon.BOOK; else -> AppIcon.NEXT }
+            val icon = when (glyph) { "×" -> AppIcon.CLOSE; "☷" -> AppIcon.CONTENTS; "search" -> AppIcon.SEARCH; "return" -> AppIcon.PREVIOUS_ITEM; "☆" -> AppIcon.BOOKMARK; "Aa" -> AppIcon.APPEARANCE; "‹" -> AppIcon.PREVIOUS; "▣" -> AppIcon.BOOK; "pad" -> AppIcon.PAD; else -> AppIcon.NEXT }
             setCompoundDrawables(AppIconDrawable(icon, Color.WHITE).apply { setBounds(0,0,dp(20),dp(20)) },null,null,null)
             // A 44dp disc with the 20dp icon in its middle.
             setPadding(dp(12),0,0,0)
@@ -1139,11 +1187,12 @@ class EpubReaderScreen(
         pagePreview.setControlsVisible(visible)
         if (::narrationDock.isInitialized) {
             val params = narrationDock.layoutParams as FrameLayout.LayoutParams
-            params.bottomMargin = dp(if (visible) 96 else 12)
+            params.bottomMargin = dp(if (visible) 96 + KEY_ROW_DP else 12)
             narrationDock.layoutParams = params
             narrationDock.visibility = if (visible && narration != null) View.VISIBLE else View.GONE
         }
         pagePreview.refresh()
+        refreshKeys()
         if (!visible) root.findFocus()?.clearFocus() else root.post { controls.getOrNull(focusedControl)?.requestFocus() }
         if (::host.isInitialized) host.refreshHints()
     }
@@ -1161,12 +1210,12 @@ class EpubReaderScreen(
         position.text = buildList {
             add(latestLocator?.title?.takeIf { it.isNotBlank() } ?: "Reading")
             if (pageCount > 0) add("Section page ${pageIndex + 1}/$pageCount")
-            if (progression != null) add("${(progression * 100).toInt()}% of book")
+            if (progression != null) add("${com.pocketds.hub.state.Fmt.readingPercentLabel(progression)} of book")
         }.joinToString(" · ")
         position.maxLines = 2
         if (::bookSeek.isInitialized) {
             bookSeek.isEnabled = bookPositions.isNotEmpty()
-            if (!bookSeek.isPressed && !bookSeek.hasFocus()) bookSeek.progress = ((progression ?: 0.0) * 100).toInt()
+            if (!bookSeek.isPressed && !bookSeek.hasFocus()) bookSeek.progress = com.pocketds.hub.state.Fmt.readingPercent(progression ?: 0.0)
         }
         if (::returnButton.isInitialized) returnButton.visibility = if (returnLocator == null) View.GONE else View.VISIBLE
     }
@@ -1182,6 +1231,11 @@ class EpubReaderScreen(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        /** The keys' row under the menu's position and scrubber. */
+        const val KEY_ROW_DP = 36
+        /** Continuous scrolling: the D-pad moves a third of a screen, the right stick at full push 1.5 screens a second. */
+        const val SCROLL_STEP = 1f / 3f
+        const val GLIDE = 1.5f
         /** The bars over the page: the app's ground, nearly opaque. */
         val BAR = Color.argb(235, 10, 13, 18)
         val SOFT_TEXT = Color.rgb(213, 219, 227)
