@@ -620,11 +620,13 @@ class ReadingWorkScreen(
         if (::listOverlay.isInitialized && listOverlay.isOpen) listOverlay.dismiss()
         lastWork?.let(::render)
         if (actionViews.isNotEmpty()) scroll.post { if (scroll.isShown) requestInitialFocus() }
-        if (refreshOnShow && loadJob?.isActive != true) {
+        // A page kept on the stack reads its work again whenever it comes back (#21): a read-along
+        // edition that finished aligning while it waited, a format added or gone, a place moved by a
+        // reader. The work route is no-store; the page keeps showing what it had until the answer.
+        if (loadJob?.isActive != true) {
+            val shown = content.childCount > 0
             refreshOnShow = false
-            load(force = true)
-        } else if (content.childCount == 0 && loadJob?.isActive != true) {
-            load()
+            load(force = shown)
         }
     }
 

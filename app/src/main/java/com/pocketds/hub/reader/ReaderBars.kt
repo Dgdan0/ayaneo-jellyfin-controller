@@ -22,7 +22,8 @@ import com.pocketds.hub.ui.PocketColors
  * A reader adds [top] and [bottom] to its root and hands them to
  * ReaderPagePreviewController. Each is as tall as everything it holds, so a
  * book's page makes room for exactly that much; over a comic they float. The
- * reader fills [topRow] and [bottomRow] with its controls.
+ * reader fills [topRow] and [bottomRow] with its controls, or gives the lower
+ * bar's place to a view of its own ([useAsLowerBar]: read along's player).
  */
 class ReaderBars(
     context: Context,
@@ -70,18 +71,29 @@ class ReaderBars(
 
     fun bottomParams() = FrameLayout.LayoutParams(MATCH, bottomHeight, Gravity.BOTTOM)
 
+    /** What stands as the lower bar instead of [bottomRow]: read along, the narration's dock. */
+    var lowerBar: View? = null
+        private set
+
     /**
-     * Read along, the narration's dock takes the lower bar's place: the row
-     * goes, the keys stay, and the dock sits [dockMargin] up from the foot.
+     * Read along (#21), the narration's dock is the menu's lower bar: it stands
+     * where a book's position row does, above the keys, inset as the row is,
+     * and shows and hides with the bars, so the page makes room for it as it
+     * does for the row. Its own height is [heightDp].
      */
-    fun showBottomRow(show: Boolean) {
-        bottomRow.visibility = if (show) View.VISIBLE else View.GONE
-        bottomHeight = bottomHeightFor(show)
+    fun useAsLowerBar(view: View, heightDp: Int) {
+        if (lowerBar === view) return
+        lowerBar?.let(bottom::removeView)
+        (view.parent as? ViewGroup)?.removeView(view)
+        lowerBar = view
+        bottomRow.visibility = View.GONE
+        view.visibility = View.VISIBLE
+        bottom.addView(view, 0, LinearLayout.LayoutParams(MATCH, dp(heightDp)).apply {
+            setMargins(dp(INSET_DP), 0, dp(INSET_DP), dp(GAP_DP))
+        })
+        bottomHeight = dp(ReaderKeys.ROW_DP + heightDp + GAP_DP)
         bottom.layoutParams?.let { it.height = bottomHeight; bottom.layoutParams = it }
     }
-
-    /** Where a dock over the keys stands: the gap above them, as a bar would. */
-    val dockMargin: Int get() = dp(ReaderKeys.ROW_DP + GAP_DP)
 
     private fun bottomHeightFor(row: Boolean): Int =
         dp(ReaderKeys.ROW_DP + if (row) bottomRowDp + GAP_DP else 0)

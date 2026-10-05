@@ -22,8 +22,7 @@ class ReaderPagePreviewController(
     private val bottomBar: View,
     private val panels: List<SidePanelView>,
     private val animate: Boolean = true,
-    private val makesRoom: Boolean = true,
-    private val extraBottom: () -> Int = { 0 }
+    private val makesRoom: Boolean = true
 ) {
     private var controlsVisible = false
     private var target: ReaderPageTransform? = null
@@ -56,8 +55,7 @@ class ReaderPagePreviewController(
         val result = if (!makesRoom) ReaderPageTransform(1f, 0f, 0f) else ReaderPagePreview.fit(
             root.width, root.height,
             top = if (showBars) topBar.layoutParams.height.coerceAtLeast(0) else 0,
-            bottom = maxOf(if (showBars) bottomBar.layoutParams.height.coerceAtLeast(0) else 0,
-                extraBottom().coerceAtLeast(0)),
+            bottom = if (showBars) bottomBar.layoutParams.height.coerceAtLeast(0) else 0,
             right = active.minOfOrNull { it.panelStartX }?.let { root.width - it } ?: 0,
             margin = margin
         )

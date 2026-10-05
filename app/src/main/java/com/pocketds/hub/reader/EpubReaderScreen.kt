@@ -97,8 +97,11 @@ import org.readium.r2.streamer.parser.DefaultPublicationParser
  *
  * The menu is bars of the cover's glass (#16, X7), and the page makes
  * room for them (the owner's choice for books): it shrinks with the menu round
- * it. Read along, the glass narration dock takes the lower bar's place and
- * the sentence being read glows in the accent ([ReadAlongGlow]). Comfort (X3)
+ * it. Read along is the book with a player (#21): the glass narration dock is
+ * the menu's lower bar, the page closed round it fills the screen with the
+ * "Following" pill, and the sentence being read glows in the accent
+ * ([ReadAlongGlow]). A tap on the page shows or hides the menu and leaves the
+ * voice alone. Comfort (X3)
  * dims and warms the reader, can make the page black, and keeps the screen on
  * while narration plays.
  *
@@ -273,12 +276,9 @@ class EpubReaderScreen(
         comfortLayer = ComfortLayerView(host.viewContext).apply { apply(comfort) }
         root.addView(comfortLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         // The owner's choice for books (X7): the page makes room, shrinking with the menu round it.
-        pagePreview = ReaderPagePreviewController(root, navigatorContainer, bars.top, bars.bottom, listOf(overlay, appearance),
-            extraBottom = {
-                if (narrationDock.visibility == View.VISIBLE) narrationDock.layoutParams.height +
-                    (narrationDock.layoutParams as FrameLayout.LayoutParams).bottomMargin else 0
-            })
-        narrationDock.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> pagePreview.refresh() }
+        // Read along is the book with a player (#21): the narration's dock is the menu's lower bar,
+        // so the page makes room for it as for the book's row, and it goes with the menu.
+        pagePreview = ReaderPagePreviewController(root, navigatorContainer, bars.top, bars.bottom, listOf(overlay, appearance))
         focusedControl = controls.indexOfLast { it.contentDescription == "Next page" }.coerceAtLeast(0)
         setControlsVisible(false)
         return root
@@ -604,14 +604,30 @@ class EpubReaderScreen(
             .commitNowAllowingStateLoss()
         navigator = fragment
         fragment.addInputListener(object : org.readium.r2.navigator.input.InputListener {
+            /** A drag began since the finger went down: Readium sends an End with every tap too (#21). */
+            private var dragging = false
+
             override fun onDrag(event: org.readium.r2.navigator.input.DragEvent): Boolean {
-                if (event.type == org.readium.r2.navigator.input.DragEvent.Type.End && !matchNarrationToPage)
-                    inspectSelection(onNoSelection = { switchToReading() })
+                when (event.type) {
+                    org.readium.r2.navigator.input.DragEvent.Type.Start, org.readium.r2.navigator.input.DragEvent.Type.Move -> dragging = true
+                    org.readium.r2.navigator.input.DragEvent.Type.End -> {
+                        // Only a real drag: a page dragged by hand, or a selection's handles. The End that
+                        // comes with a tap took every tap for a page turned by hand, which paused the
+                        // narration as the tap closed the menu (#21).
+                        if (dragging && !matchNarrationToPage) inspectSelection(onNoSelection = { turnedByHand() })
+                        dragging = false
+                    }
+                }
                 return false
             }
             override fun onTap(event: org.readium.r2.navigator.input.TapEvent): Boolean {
+                dragging = false
                 val horizontal = event.point.x / navigatorContainer.width.coerceAtLeast(1)
-                if (!EpubChromePolicy.handlesTap(horizontal, controlsVisible)) { switchToReading(); return false }
+                // The edges turn no page here; while the voice reads they leave it alone (#21).
+                if (!EpubChromePolicy.handlesTap(horizontal, controlsVisible)) {
+                    if (narration?.isOn != true) switchToReading()
+                    return false
+                }
                 setControlsVisible(!controlsVisible)
                 return true
             }
@@ -792,10 +808,7 @@ class EpubReaderScreen(
             onSpeed = { narration?.let { setNarrationSpeed(Listening.nextSpeed(it.speed)) } }
             onFollow = { follow() }
         }
-        root.addView(narrationDock, FrameLayout.LayoutParams(MATCH, dp(ReadAlongDock.HEIGHT_DP), Gravity.BOTTOM).apply {
-            leftMargin = dp(ReaderBars.INSET_DP); rightMargin = dp(ReaderBars.INSET_DP)
-            bottomMargin = bars.dockMargin
-        })
+        // The dock joins the bars as the lower bar once the narration is ready (prepareNarration).
         narrationPill = TextView(host.viewContext).apply {
             textSize = 12f
             setTextColor(Color.WHITE)
@@ -862,8 +875,8 @@ class EpubReaderScreen(
         narration?.speed = com.pocketds.hub.settings.ListeningSettings.speed(host.viewContext, workId)
         following = true
         narrationCheckpoint.ready(resume)
-        bars.showBottomRow(false)
-        narrationDock.visibility = if (controlsVisible) View.VISIBLE else View.GONE
+        // The player is the menu's lower bar (#21): it shows and hides with the menu.
+        bars.useAsLowerBar(narrationDock, ReadAlongDock.HEIGHT_DP)
         pagePreview.refresh()
         startDockUpdates()
         DebugLog.log("reader", "aligned narration ready: ${timeline.tracks.size} tracks, resumed=${resume != null}")
@@ -1380,11 +1393,9 @@ class EpubReaderScreen(
 
     private fun setControlsVisible(visible: Boolean) {
         controlsVisible = visible
+        // The bars, the narration's dock among them, show and hide together.
         pagePreview.setControlsVisible(visible)
-        if (::narrationDock.isInitialized) {
-            narrationDock.visibility = if (visible && narration != null) View.VISIBLE else View.GONE
-            updateDock()
-        }
+        updateDock()
         pagePreview.refresh()
         refreshKeys()
         if (!visible) root.findFocus()?.clearFocus() else root.post { controls.getOrNull(focusedControl)?.requestFocus() }
@@ -1467,7 +1478,7 @@ class EpubReaderScreen(
             }
             linkOrigin = latestLocator
             linkOriginAt = SystemClock.uptimeMillis()
-            root.post { leavePageForLink() }
+            root.post { turnedByHand() }
             return true
         }
 
@@ -1488,8 +1499,12 @@ class EpubReaderScreen(
         }
     }
 
-    /** A link followed: the page leaves the narration, as a page turned by hand does (A5). */
-    private fun leavePageForLink() {
+    /**
+     * The page moved by hand, by a link followed or a drag (A5): while the voice
+     * reads it carries on and the page stops following it ("Reading"); quiet, the
+     * book is read on its own and Play starts from the page.
+     */
+    private fun turnedByHand() {
         val audio = narration
         if (audio != null && audio.isOn) {
             following = false

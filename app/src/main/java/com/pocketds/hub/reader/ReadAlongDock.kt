@@ -24,7 +24,8 @@ import com.pocketds.hub.ui.activateOnTap
  * far through this part of the narration, "Read along" over the time, −10, a
  * white Play and +10 in the middle, the speed and a way back to the sentence
  * being read at the end. Glass, tinted by the cover, with the player's discs.
- * It takes the lower bar's place while the controls show.
+ * Read along, it is the menu's lower bar (#21, [ReaderBars.useAsLowerBar]):
+ * it shows and hides with the menu, and the page makes room for it.
  */
 class ReadAlongDock(context: Context, colors: PocketColors, seekSeconds: Int = 10) : LinearLayout(context) {
     private val density = resources.displayMetrics.density
@@ -62,7 +63,8 @@ class ReadAlongDock(context: Context, colors: PocketColors, seekSeconds: Int = 1
     init {
         orientation = VERTICAL
         setPadding(dp(14), dp(8), dp(10), dp(6))
-        OverlayButtons.panel(this, 18f)
+        // The lower bar's glass and corners, as a book's position row has.
+        OverlayButtons.panel(this, ReaderBars.CORNER_DP)
         line.progress = 0
         addView(line, LayoutParams(LayoutParams.MATCH_PARENT, dp(4)).apply { bottomMargin = dp(4) })
         val row = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
