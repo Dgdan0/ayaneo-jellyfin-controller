@@ -111,6 +111,9 @@ func newAudioEnv(t *testing.T, options audioEnvOptions, build func(root string) 
 	t.Cleanup(env.upstream.Close)
 	cfg := readingCatalogConfig(env.upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), options.scopes)
 	cfg.Server.MediaRemovalRoots = options.roots(root)
+	// A test that walks every sentence of a book asks a few hundred times; the
+	// screen budget is not what it is about (middleware_test.go is).
+	cfg.Auth.RateLimit = config.RateLimitConfig{RPM: 1_000_000, Burst: 100_000}
 	env.server = NewServer(cfg)
 	env.server.probeAudio = env.probe
 	env.handler = env.server.Handler()

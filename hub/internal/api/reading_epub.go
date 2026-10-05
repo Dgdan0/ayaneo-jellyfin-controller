@@ -120,14 +120,13 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 	}
 	workID, sourceItemID := r.PathValue("workId"), r.PathValue("sourceItemId")
 	if r.Method == http.MethodGet {
-		position, err := s.storyteller.Position(ctx, bookID)
+		position, err := s.currentStorytellerPosition(ctx, bookID)
 		if err != nil {
-			var upstream *httpx.Error
-			if errors.As(err, &upstream) && upstream.Status == http.StatusNotFound {
-				writeJSON(w, http.StatusOK, ReadingEpubPosition{WorkID: workID, SourceItemID: sourceItemID, Locator: json.RawMessage("null")})
-				return
-			}
 			writeUpstreamError(w, r, "storyteller", err)
+			return
+		}
+		if position == nil {
+			writeJSON(w, http.StatusOK, ReadingEpubPosition{WorkID: workID, SourceItemID: sourceItemID, Locator: json.RawMessage("null")})
 			return
 		}
 		writeJSON(w, http.StatusOK, ReadingEpubPosition{
@@ -155,26 +154,24 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 	unlock := lockReadingCheckpoint("storyteller", strconv.FormatInt(bookID, 10))
 	defer unlock()
 	if body.CheckBase {
-		current, err := s.storyteller.Position(ctx, bookID)
-		var locator json.RawMessage
+		current, err := s.currentStorytellerPosition(ctx, bookID)
 		if err != nil {
-			var upstream *httpx.Error
-			if !errors.As(err, &upstream) || upstream.Status != http.StatusNotFound {
-				writeUpstreamError(w, r, "storyteller", err)
-				return
-			}
-		} else {
+			writeUpstreamError(w, r, "storyteller", err)
+			return
+		}
+		var locator json.RawMessage
+		if current != nil {
 			locator = current.Locator
 		}
 		if !sameReadingLocator(body.ExpectedLocator, locator) {
-			writeError(w, r, http.StatusConflict, Error{Code: "reading_position_conflict", Message: "Reading progress changed on another device. Choose which position to continue from."})
+			writePositionChanged(w, r)
 			return
 		}
 	}
 	if err := s.storyteller.SavePosition(ctx, bookID, body.Locator, body.Timestamp); err != nil {
 		var upstream *httpx.Error
 		if errors.As(err, &upstream) && upstream.Status == http.StatusConflict {
-			writeError(w, r, http.StatusConflict, Error{Code: "reading_position_conflict", Service: "storyteller", Message: "a newer reading position already exists"})
+			writeStorytellerNewerPosition(w, r)
 			return
 		}
 		writeUpstreamError(w, r, "storyteller", err)
@@ -310,6 +307,42 @@ func (s *Server) storytellerBookRecord(ctx context.Context, id int64) (*storytel
 
 func storytellerWorkKey(sourceItemID string) string {
 	return "reading:storyteller:work:" + sourceItemID
+}
+
+// What a refused write of a reading position says, the same for the EPUB route and
+// the audio one so an app has one conflict to know: another device moved the place
+// since the app last looked (it chose to be asked), or Storyteller itself holds a
+// newer one.
+const codeReadingPositionConflict = "reading_position_conflict"
+
+func writePositionChanged(w http.ResponseWriter, r *http.Request) {
+	writeError(w, r, http.StatusConflict, Error{Code: codeReadingPositionConflict, Message: "Reading progress changed on another device. Choose which position to continue from."})
+}
+
+func writeStorytellerNewerPosition(w http.ResponseWriter, r *http.Request) {
+	writeError(w, r, http.StatusConflict, Error{Code: codeReadingPositionConflict, Service: "storyteller", Message: "a newer reading position already exists"})
+}
+
+// currentStorytellerPosition is the account's place in a book, or nil when it has
+// none (Storyteller answers 404 for a book never opened).
+func (s *Server) currentStorytellerPosition(ctx context.Context, bookID int64) (*storyteller.PositionRecord, error) {
+	record, err := s.storyteller.Position(ctx, bookID)
+	if err != nil {
+		var upstream *httpx.Error
+		if errors.As(err, &upstream) && upstream.Status == http.StatusNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return record, nil
+}
+
+// invalidateStorytellerPosition drops what carries a book's place: its record and
+// Storyteller's list, which the shelves read it from. Not the audiobook's track
+// list, which a place does not change.
+func (s *Server) invalidateStorytellerPosition(sourceItemID string) {
+	s.cache.Invalidate(storytellerWorkKey(sourceItemID))
+	s.cache.Invalidate("reading:storyteller:books")
 }
 
 // invalidateStorytellerWork drops what the hub holds of one Storyteller book: its

@@ -55,6 +55,11 @@ type storytellerPositions struct {
 	has       bool
 	posts     int // writes asked for
 	refused   int // writes refused
+	// race, when set, runs once as a write arrives and before it is judged, with
+	// the table unlocked: another writer getting in first.
+	race func()
+	// history is each locator the table accepted, in the order it did.
+	history []json.RawMessage
 }
 
 func (p *storytellerPositions) seed(locator string, timestamp int64) {
@@ -71,6 +76,15 @@ func (p *storytellerPositions) stored() (json.RawMessage, int64, bool) {
 }
 
 func (p *storytellerPositions) serve(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		p.mu.Lock()
+		race := p.race
+		p.race = nil
+		p.mu.Unlock()
+		if race != nil {
+			race()
+		}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch r.Method {
@@ -97,6 +111,7 @@ func (p *storytellerPositions) serve(t *testing.T, w http.ResponseWriter, r *htt
 			return
 		}
 		p.locator, p.timestamp, p.has = body.Locator, body.Timestamp, true
+		p.history = append(p.history, body.Locator)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

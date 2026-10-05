@@ -323,6 +323,8 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/file", s.handleReadingEpubFile)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/audio", s.handleReadingAudioManifest)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/audio/tracks/{n}", s.handleReadingAudioTrack)
+	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/audio/position", s.handleReadingAudioPosition)
+	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/audio/position", s.handleReadingAudioPosition)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/position", s.handleReadingEpubPosition)
 	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/position", s.handleReadingEpubPosition)
 	authed.HandleFunc("GET /v1/reading/requests/options", s.handleReadingRequestOptions)
