@@ -32,6 +32,10 @@ type playbackUpstream struct {
 	// for an API-key caller.
 	positions []int64
 	played    int
+	// infoRequests is every PlaybackInfo body Jellyfin was sent, as it read it, and
+	// infoResponse (when set) answers PlaybackInfo in place of the one-source default.
+	infoRequests []map[string]any
+	infoResponse func(request map[string]any) string
 }
 
 func newPlaybackUpstream(t *testing.T) *playbackUpstream {
@@ -67,6 +71,14 @@ func (u *playbackUpstream) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.Header.Get("Authorization") == "" || r.Header.Get("X-Application") == "" {
 			u.t.Errorf("playback device headers missing: %v", r.Header)
+		}
+		u.mu.Lock()
+		u.infoRequests = append(u.infoRequests, request)
+		respond := u.infoResponse
+		u.mu.Unlock()
+		if respond != nil {
+			_, _ = io.WriteString(w, respond(request))
+			return
 		}
 		_, _ = io.WriteString(w, `{"PlaySessionId":"upstream-play", "MediaSources":[{`+
 			`"Id":"source-1","Name":"1080p","Path":"X:/media/pilot.mkv","Container":"mkv","Bitrate":7000000,"SupportsDirectPlay":true,`+
@@ -137,6 +149,13 @@ func (u *playbackUpstream) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// playbackInfoRequests are the PlaybackInfo bodies Jellyfin has been sent so far.
+func (u *playbackUpstream) playbackInfoRequests() []map[string]any {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]map[string]any(nil), u.infoRequests...)
 }
 
 func (u *playbackUpstream) savedPositions() []int64 {

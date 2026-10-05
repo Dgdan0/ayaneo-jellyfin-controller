@@ -149,6 +149,11 @@ type PlaybackTrack struct {
 	ExternalURL     string `json:"externalUrl,omitempty"`
 }
 
+// PlaybackSelectBody changes what a session plays: a track, a version, the
+// quality, or a conversion. Everything but positionMillis is optional, and what is
+// left out stays as it was. A select that names a track and no mediaSourceId means
+// the version playing: Jellyfin applies a track index only to a named source, so
+// the hub names it (negotiatePlayback).
 type PlaybackSelectBody struct {
 	PositionMillis      int64   `json:"positionMillis"`
 	MediaSourceID       *string `json:"mediaSourceId,omitempty"`
@@ -356,11 +361,22 @@ func (s *Server) negotiatePlayback(
 ) (PlaybackPrepareResponse, error) {
 	durationMillis := session.Item.RunTimeTicks / 10_000
 	positionMillis := playbackStartPosition(session.Item, session.Prepare, durationMillis)
+	// Jellyfin applies a track index only to the media source it is named with: asked
+	// for an audio or subtitle track without one, it converts the default track again
+	// and the index does nothing (#24). A change that carries an index and names no
+	// source means the version already playing, so that is the one named. A session
+	// that has not been negotiated yet has no version playing, and a change that
+	// carries no index leaves the choice of version where it was.
+	mediaSourceID := session.Prepare.MediaSourceID
+	if mediaSourceID == "" && session.Source.ID != "" &&
+		(session.Prepare.AudioStreamIndex != nil || session.Prepare.SubtitleStreamIndex != nil) {
+		mediaSourceID = session.Source.ID
+	}
 	request := jellyfin.PlaybackInfoRequest{
 		StartTimeTicks:       positionMillis * 10_000,
 		AudioStreamIndex:     session.Prepare.AudioStreamIndex,
 		SubtitleStreamIndex:  session.Prepare.SubtitleStreamIndex,
-		MediaSourceID:        session.Prepare.MediaSourceID,
+		MediaSourceID:        mediaSourceID,
 		DeviceProfile:        buildDeviceProfile(session.Prepare),
 		EnableDirectPlay:     !session.Prepare.ForceTranscode,
 		EnableDirectStream:   !session.Prepare.ForceTranscode,
@@ -378,10 +394,10 @@ func (s *Server) negotiatePlayback(
 		return PlaybackPrepareResponse{}, fmt.Errorf("jellyfin: no playable media source")
 	}
 	source := info.MediaSources[0]
-	if session.Prepare.MediaSourceID != "" {
+	if mediaSourceID != "" {
 		found := false
 		for _, candidate := range info.MediaSources {
-			if candidate.ID == session.Prepare.MediaSourceID {
+			if candidate.ID == mediaSourceID {
 				source, found = candidate, true
 				break
 			}
