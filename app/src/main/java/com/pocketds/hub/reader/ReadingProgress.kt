@@ -5,6 +5,7 @@ import android.app.job.JobScheduler
 import android.content.ComponentName
 import android.content.Context
 import com.pocketds.hub.model.EpubPositionBody
+import com.pocketds.hub.model.ReadingAudioPosition
 import com.pocketds.hub.model.ReadingPublicationProgressBody
 import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubConnection
@@ -39,18 +40,29 @@ class ReadingProgress private constructor(private val context: Context) {
     }
 
     // The local write completes before the view can be destroyed. Only network traffic is debounced.
-    fun save(key:ReadingCheckpointKey,location:ReadingLocation) {
+    // [sync] false keeps the write on this device until the caller asks for a sync itself: the
+    // audiobook player sends its place no more often than every 15 seconds (#19, A4).
+    fun save(key:ReadingCheckpointKey,location:ReadingLocation,sync:Boolean=true) {
         store.save(key,location,System.currentTimeMillis())
         // Remove immediately, including offline. Never mutate a newly selected profile's shelves.
         val fraction = ((location.locator?.get("locations") as? JsonObject)?.get("totalProgression") as? JsonPrimitive)?.doubleOrNull
         val audio = (location.locator?.get("locations") as? JsonObject)?.get("pocketdsAudio") as? JsonObject
         val narrated = ((audio?.get("offsetMs") as? JsonPrimitive)?.longOrNull ?: 0) > 0 ||
             ((audio?.get("track") as? JsonPrimitive)?.longOrNull ?: 0) > 0
-        if (key.scope == session().identity && ((fraction != null && fraction.isFinite() && fraction > 0.0) || (location.pageIndex ?: 0) > 0 || narrated)) {
+        if (key.scope == session().identity && ((fraction != null && fraction.isFinite() && fraction > 0.0) ||
+                (location.pageIndex ?: 0) > 0 || narrated || AudioPlace.started(location))) {
             ReadingListsRepository.update(context) { it.remove(ReadingListsState.WANT_TO_READ, key.workId) }
         }
-        requestSync()
+        if (sync) requestSync()
     }
+
+    /**
+     * The listening place the hub last answered for [key], with what the
+     * outbox does not keep: whether it is exact or a proportion of a reader's
+     * place (#19), and the sentence spoken there.
+     */
+    fun lastAudioPosition(key:ReadingCheckpointKey):ReadingAudioPosition? = audioPositions[key]
+    private val audioPositions=java.util.concurrent.ConcurrentHashMap<ReadingCheckpointKey,ReadingAudioPosition>()
 
     @Synchronized fun requestSync(immediate:Boolean=false) {
         scheduleBackground()
@@ -65,6 +77,15 @@ class ReadingProgress private constructor(private val context: Context) {
     suspend fun fetch(session:Session,key:ReadingCheckpointKey):RemoteReadingPosition = when(key.kind) {
         "epub" -> when(val response=session.api.readingEpubPosition(key.workId,key.sourceItemId)) {
             is HubResult.Ok -> RemoteReadingPosition.Available(response.value.locator?.let { ReadingLocation(locator=it) })
+            is HubResult.Failed -> RemoteReadingPosition.Unavailable
+        }
+        // The place as the hub reads it, never its clock (#19): the hub stamps every write itself.
+        AudioPlace.KIND -> when(val response=session.api.readingAudioPosition(key.workId,key.sourceItemId)) {
+            is HubResult.Ok -> {
+                val position=response.value.position
+                if (position==null) audioPositions.remove(key) else audioPositions[key]=position
+                RemoteReadingPosition.Available(position?.let(AudioPlace::fromServer)?.location())
+            }
             is HubResult.Failed -> RemoteReadingPosition.Unavailable
         }
         else -> when(val response=session.api.readingPublication(key.workId,key.sourceItemId)) {
@@ -87,6 +108,10 @@ class ReadingProgress private constructor(private val context: Context) {
                     "epub" -> bound.api.saveReadingEpubPosition(checkpoint.key.workId,checkpoint.key.sourceItemId,
                         EpubPositionBody(requireNotNull(checkpoint.local?.locator),checkpoint.updatedAt,
                             checkBase=true,expectedLocator=checkpoint.base?.locator)) is HubResult.Ok
+                    // Checked against the place last read (`expected`); a refusal is retried, and the
+                    // next pass reads the place again and asks the person when it moved.
+                    AudioPlace.KIND -> bound.api.saveReadingAudioPosition(checkpoint.key.workId,checkpoint.key.sourceItemId,
+                        requireNotNull(AudioPlace.body(checkpoint))) is HubResult.Ok
                     else -> bound.api.saveReadingPublicationCheckpoint(checkpoint.key.workId,checkpoint.key.sourceItemId,
                         ReadingPublicationProgressBody(requireNotNull(checkpoint.local?.pageIndex),checkpoint.base?.pageIndex)) is HubResult.Ok
                 }

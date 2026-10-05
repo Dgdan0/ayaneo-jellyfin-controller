@@ -93,6 +93,12 @@ data class AudioPlace(val trackId: String, val offsetMs: Long, val completed: Bo
             if (baseKnown) put("expected", base?.let { buildJsonObject { put(TRACK_ID, it.trackId); put(OFFSET_MS, it.offsetMs) } } ?: JsonNull)
         }
 
+        /** The write for an `audio` checkpoint in the outbox, or null for one that holds no place. */
+        fun body(checkpoint: ReadingCheckpoint): JsonObject? {
+            val local = of(checkpoint.local) ?: return null
+            return body(local, of(checkpoint.base), checkpoint.baseKnown)
+        }
+
         /** A place in words for the choose-which sheet: "Part 3 of 8 · 1:02:13", "Finished". */
         fun label(location: ReadingLocation?, tracks: List<ReadingAudioTrack>): String {
             val place = of(location) ?: return location?.label().orEmpty()

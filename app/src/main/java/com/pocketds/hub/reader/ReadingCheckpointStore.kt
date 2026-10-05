@@ -81,6 +81,18 @@ class ReadingCheckpointStore(private val root: File) {
         return write(previous.copy(local = location, revision = previous.revision + 1, updatedAt = now, pending = true))
     }
 
+    /**
+     * A place kept before this store knew the book (#19: an audiobook's old
+     * device-only place), written once and only when there is no checkpoint.
+     * It is kept as made while the server had no place: it goes out as it is
+     * when the server still has none, and the person chooses when it has one.
+     */
+    @Synchronized fun seed(key: ReadingCheckpointKey, location: ReadingLocation, now: Long): Boolean {
+        if (read(key) != null) return false
+        write(ReadingCheckpoint(key, local = location, base = null, baseKnown = true, revision = 1, updatedAt = now, pending = true))
+        return true
+    }
+
     @Synchronized fun reconcile(key: ReadingCheckpointKey, server: RemoteReadingPosition): ReadingResume {
         val previous = read(key)
         if (server is RemoteReadingPosition.Unavailable) {
