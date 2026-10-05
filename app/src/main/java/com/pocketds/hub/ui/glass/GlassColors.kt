@@ -115,6 +115,14 @@ object GlassColors {
     const val SHEET_ALPHA = 0xF2
 
     /**
+     * A card over a page's own words, such as a book's footnote: the sheet's
+     * tint made opaque. A sheet's last twentieth of see-through still showed
+     * the lines of text behind the note as a second, fainter paragraph, and
+     * a note is read word by word (#20).
+     */
+    fun card(palette: ArtworkPalette): Int = over(sheet(palette), PANEL_BASE)
+
+    /**
      * A control drawn over video or a page being read (the player's, a
      * reader's): the panel's tint of what is playing laid on [base], the video
      * palette's dark, and nearly solid. A see-through panel is glass over the

@@ -137,6 +137,38 @@ class BookNotesAndTimeTest {
                 assertEquals("Close note", screen!!.hints().last().label)
             }
             shot("02-footnote-card")
+            // #20: the card's face is solid. Away from its own words and buttons it is one colour,
+            // however many lines of the page lie under it (they showed through at a twentieth).
+            val (panelAt, panelSize, drawn) = withContext(Dispatchers.Main) {
+                val card = screen!!.field<FootnoteCard>("footnoteCard")
+                val panel = card.getChildAt(0) as ViewGroup
+                val at = IntArray(2).also(panel::getLocationOnScreen)
+                // What the card draws itself: its eyebrow, each line of the note, its two buttons.
+                fun box(view: View, left: Int = 0, top: Int = 0, right: Int = view.width, bottom: Int = view.height) =
+                    android.graphics.Rect(left, top, right, bottom).also { panel.offsetDescendantRectToMyCoords(view, it) }
+                val words = card.field<TextView>("words")
+                val lines = (0 until words.layout.lineCount).map { line ->
+                    box(words, words.paddingLeft + words.layout.getLineLeft(line).toInt(), words.layout.getLineTop(line),
+                        words.paddingLeft + words.layout.getLineRight(line).toInt() + 1, words.layout.getLineBottom(line))
+                }
+                Triple(at, panel.width to panel.height,
+                    listOf(box(panel.getChildAt(0)), box(card.field<View>("follow")), box(card.field<View>("close"))) + lines)
+            }
+            val screenshot = ins.uiAutomation.takeScreenshot()
+            val edge = (16 * activity.resources.displayMetrics.density).toInt()
+            var lightest = 0
+            var darkest = 255
+            var sampled = 0
+            for (y in edge until panelSize.second - edge step 2) for (x in edge until panelSize.first - edge step 3) {
+                // Clear of what the card draws, focus ring and all.
+                if (drawn.any { android.graphics.Rect(it).apply { inset(-edge / 2, -edge / 2) }.contains(x, y) }) continue
+                val pixel = screenshot.getPixel(panelAt[0] + x, panelAt[1] + y)
+                val luma = (android.graphics.Color.red(pixel) * 299 + android.graphics.Color.green(pixel) * 587 + android.graphics.Color.blue(pixel) * 114) / 1000
+                lightest = maxOf(lightest, luma); darkest = minOf(darkest, luma); sampled++
+            }
+            screenshot.recycle()
+            assertTrue("Enough of the card's face was looked at: $sampled", sampled > 1_000)
+            assertTrue("Nothing of the page shows through the note's card: luma $darkest..$lightest", lightest - darkest <= 3)
             pad(PadAction.Back)
             withContext(Dispatchers.Main) { assertTrue(!screen!!.field<FootnoteCard>("footnoteCard").isOpen) }
             assertEquals("The page did not move", before?.href, locator()?.href)

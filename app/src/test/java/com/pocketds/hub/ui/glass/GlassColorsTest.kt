@@ -107,6 +107,18 @@ class GlassColorsTest {
         assertEquals(0xFF, GlassColors.alpha(GlassColors.INK))
     }
 
+    @Test fun `a card over a page's words is opaque, the sheet's tint, and its white words read`() {
+        for (p in listOf(ArtworkPalette.NEUTRAL, ArtworkPalette(0xFFC8A040.toInt(), 0xFF20180A.toInt(), 0xFFF0C050.toInt(), 0xFFFFF4D0.toInt()))) {
+            val card = GlassColors.card(p)
+            assertEquals(0xFF, GlassColors.alpha(card))
+            // Whatever lies under it, a cream page or its dark words, the card looks the same.
+            assertEquals(GlassColors.over(card, 0xFFEFE1C6.toInt()), GlassColors.over(card, 0xFF3B3020.toInt()))
+            // Close to the sheet it stands in for over the dark page.
+            assertTrue(GlassColors.contrast(card, GlassColors.over(GlassColors.sheet(p), GlassColors.PANEL_BASE)) < 1.05)
+            assertTrue(GlassColors.contrast(0xFFFFFFFF.toInt(), card) >= 7.0)
+        }
+    }
+
     @Test fun `contrast matches WCAG's endpoints`() {
         assertEquals(21.0, GlassColors.contrast(0xFF000000.toInt(), 0xFFFFFFFF.toInt()), 0.01)
         assertEquals(1.0, GlassColors.contrast(0xFF7F7F7F.toInt(), 0xFF7F7F7F.toInt()), 0.0001)

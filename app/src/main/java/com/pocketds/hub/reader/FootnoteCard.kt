@@ -49,7 +49,8 @@ class FootnoteCard(context: Context, colors: PocketColors, ringVisible: () -> Bo
         isClickable = true
         val pad = dp(18)
         setPadding(pad, dp(14), pad, dp(12))
-        if (glass) GlassPanelDrawable.attach(this, Styler.dp(context, 16f), GlassColors::sheet)
+        // Opaque: a note is read over lines of text, which must not show through it (#20).
+        if (glass) GlassPanelDrawable.attach(this, Styler.dp(context, 16f), GlassColors::card)
         else background = ThemeGradientDrawable.rounded(Styler.dp(context, 16f), colors.background,
             dp(1), ColorUtils.setAlphaComponent(colors.primaryText, 0x1A))
         elevation = Styler.dp(context, 12f)
