@@ -160,8 +160,12 @@ upright), `678` (half sideways) and `981` (two thirds sideways): debug builds la
 window that wide, compact below 660 as Apple's table has it. The Mac's windows are checked with
 `scripts/mac.sh mac-shot 760x560` and `1440x860`: the app opens a fresh window of that size, draws
 it into its container (a screenshot over SSH needs Screen Recording, which stays off) and quits.
+A sheet open on the window is drawn over it where it sits, since on the Mac it is a window of its
+own; `-demo` goes after AppKit's own arguments, or the app opens a stray "YES" as a document.
 The Mac's Debug build is `com.dgdan.jellyhub.debug`: the TestFlight copy in `/Applications` owns
-the plain id's container, and macOS keeps another app's container from an SSH session.
+the plain id's container, and macOS keeps another app's container from an SSH session. The Mac's
+disk is small: `scripts/mac.sh shots-prune` deletes the build copy's pictures older than two hours,
+which every run has already copied back.
 
 ## Discover, search and requests (#17)
 

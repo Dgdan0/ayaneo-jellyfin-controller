@@ -12,6 +12,9 @@
 #                                   turn the simulators' Reduce transparency on or off
 #   scripts/mac.sh uitest           the UI tests on the iPhone simulator, against -demo
 #                                   (UITEST_ONLY=<Class>[/<test>] runs one alone)
+#   scripts/mac.sh shots-prune [minutes]
+#                                   delete the build copy's screenshots older than that
+#                                   (120); each run has already copied its own back
 #   scripts/mac.sh turn landscape|portrait
 #                                   turn the simulators themselves (SHOT_SIMS, or all
 #                                   three); shot then names its pictures -landscape
@@ -273,6 +276,19 @@ turn() {
   done < <(selected_sims)
 }
 
+# Screenshots in the build copy older than MINUTES (120 by default) are
+# deleted: every run copies its own pictures back to the PC, and the Mac's
+# disk is small. The .turned files stay.
+shots_prune() {
+  local minutes="${1:-120}"
+  [[ -d "$SHOTS" ]] || return 0
+  local before after
+  before="$(du -sh "$SHOTS" | cut -f1)"
+  find "$SHOTS" -type f -name '*.png' -mmin +"$minutes" -delete
+  after="$(du -sh "$SHOTS" | cut -f1)"
+  echo "shots/apple: $before before, $after after"
+}
+
 # Reduce transparency on the three simulators: an accessibility setting inside
 # each simulator, not the Mac's. Relaunch with `shot` to see it.
 transparency() {
@@ -319,6 +335,9 @@ mac_shot() {
   # A first run has no defaults yet, which pipefail would count as failing.
   { defaults read "$prefs" 2>/dev/null || true; } | sed -n 's/^ *"\(NSWindow Frame [^"]*\)" = .*/\1/p' |
     while IFS= read -r key; do defaults delete "$prefs" "$key"; done
+  # -demo goes last: before the pair, AppKit read it as a key and
+  # -ApplePersistenceIgnoreState as its value, opened the "YES" left over as a
+  # document, and its alert held the app until the script gave up.
   # The player only against the demo hub: the app quits itself once it has
   # drawn the window, and a real session must leave through the player's path.
   if [[ -n "${HUB_PLAY:-}" && " $* " != *" -demo "* ]]; then
@@ -328,7 +347,7 @@ mac_shot() {
   HUB_URL="${HUB_URL:-}" HUB_TOKEN="${HUB_TOKEN:-}" HUB_SECTION="${HUB_SECTION:-}" HUB_SIDE="${HUB_SIDE:-}" \
     HUB_OPEN="${HUB_OPEN:-}" HUB_SHEET="${HUB_SHEET:-}" HUB_WINDOW="$size" HUB_SNAPSHOT="${SHOT_WAIT:-8}" \
     HUB_PLAY="${HUB_PLAY:-}" HUB_PLAY_CHROME="${HUB_PLAY_CHROME:-}" \
-    nohup "$app" $(launch_args "$@") -ApplePersistenceIgnoreState YES > "$DERIVED/mac-app.log" 2>&1 < /dev/null &
+    nohup "$app" -ApplePersistenceIgnoreState YES $(launch_args "$@") > "$DERIVED/mac-app.log" 2>&1 < /dev/null &
   pid=$!
   for _ in $(seq 1 90); do
     kill -0 "$pid" 2>/dev/null || break
@@ -532,9 +551,10 @@ case "${1:-build}" in
   transparency) shift; transparency "$@" ;;
   uitest) uitest ;;
   turn) shift; turn "$@" ;;
+  shots-prune) shift; shots_prune "$@" ;;
   mac) shift; mac "$@" ;;
   mac-shot) shift; mac_shot "$@" ;;
   testflight) testflight ;;
   logs) xcrun simctl spawn booted log stream --level debug --predicate "subsystem == '$BUNDLE_ID' OR process == 'Hub'" ;;
-  *) sed -n '2,42p' "$0"; exit 2 ;;
+  *) sed -n '2,45p' "$0"; exit 2 ;;
 esac

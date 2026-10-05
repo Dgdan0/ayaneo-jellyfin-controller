@@ -121,15 +121,47 @@ enum DebugWindow {
     static func apply() async {
         let environment = ProcessInfo.processInfo.environment
         try? await Task.sleep(for: .milliseconds(400))
-        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { return }
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.sheetParent == nil })
+        else { return }
         guard let seconds = environment["HUB_SNAPSHOT"].flatMap(Double.init), seconds > 0 else { return }
         try? await Task.sleep(for: .seconds(seconds))
-        if let view = window.contentView, let picture = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
-            view.cacheDisplay(in: view.bounds, to: picture)
+        if let picture = picture(of: window) {
             let file = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("hub-window.png")
             try? picture.representation(using: .png, properties: [:])?.write(to: file)
         }
+        // An open sheet refuses the app's quit (ending it first did not help),
+        // and the script then waited out its 90 seconds. Nothing plays in a
+        // picture run (mac-shot opens the player only on the demo hub), so a
+        // run with a sheet simply ends.
+        if window.attachedSheet != nil { exit(0) }
         NSApp.terminate(nil)
+    }
+
+    /// The window as drawn, and a sheet open on it drawn over it where it
+    /// sits: on the Mac a sheet is a window of its own, which drawing the
+    /// window alone left out (the profiles and the request form, #12).
+    private static func picture(of window: NSWindow) -> NSBitmapImageRep? {
+        guard let view = window.contentView, let base = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            return nil
+        }
+        view.cacheDisplay(in: view.bounds, to: base)
+        guard let sheet = window.attachedSheet, let sheetView = sheet.contentView,
+              let top = sheetView.bitmapImageRepForCachingDisplay(in: sheetView.bounds),
+              let out = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: base.pixelsWide, pixelsHigh: base.pixelsHigh,
+                                         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        else { return base }
+        sheetView.cacheDisplay(in: sheetView.bounds, to: top)
+        out.size = view.bounds.size
+        // The window's content fills the window (the title bar is hidden), so
+        // the sheet's place in window coordinates is its place in the picture.
+        let origin = window.convertPoint(fromScreen: sheet.frame.origin)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: out)
+        base.draw(in: view.bounds)
+        top.draw(in: NSRect(origin: origin, size: sheet.frame.size))
+        NSGraphicsContext.restoreGraphicsState()
+        return out
     }
 
     /// "900x620".
