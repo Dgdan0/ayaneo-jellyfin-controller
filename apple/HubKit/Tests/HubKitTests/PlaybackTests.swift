@@ -389,6 +389,24 @@ struct DemoPlaybackTests {
         try await hub.send(HubEndpoints.closePlayback(sessionId: plan.sessionId, user: ""))
     }
 
+    /// So the UI tests that play prove the app sends #2's profile.
+    @Test func theDemoRefusesAPrepareWithoutAVPlayersContainersAndFMP4() async throws {
+        let hub = HubClient(credentials: HubCredentials(baseURL: DemoTransport.address, token: DemoTransport.token),
+                            screens: DemoTransport(), sleep: { _ in })
+        var media3 = PlaybackProfile.capabilities(width: 1, height: 1, hevc: false)
+        media3.containers = []
+        media3.hlsSegments = ""
+        let body = PlaybackPrepareBody(startMode: .resume, device: PlaybackDevice(id: "d", name: "n", version: "v"),
+                                       capabilities: media3)
+        await #expect(throws: HubFailure.self) {
+            _ = try await hub.fetch(HubEndpoints.preparePlayback(itemId: "demo-e5", body: body, user: ""),
+                                    as: PlaybackPrepareResponse.self)
+        }
+        #expect(DemoPlayback.namesAVPlayer(HubEndpoints.json(PlaybackPrepareBody(
+            startMode: .resume, device: PlaybackDevice(id: "d", name: "n", version: "v"),
+            capabilities: PlaybackProfile.capabilities(width: 1, height: 1, hevc: false)))))
+    }
+
     @Test func aDemoSessionKeepsEachChangeAsTheHubDoes() async throws {
         let hub = HubClient(credentials: HubCredentials(baseURL: DemoTransport.address, token: DemoTransport.token),
                             screens: DemoTransport(), sleep: { _ in })

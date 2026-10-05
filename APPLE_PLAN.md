@@ -201,7 +201,7 @@ hub (`-demo`) answers every one of these calls, for the UI tests.
 | Playing something from a page | `@Environment(\.play)` with a `PlayRequest` (item, resume or restart, or a series whose episode the hub picks) |
 | The player, its AVPlayer and its hub session | `Playback/PlayerModel`, one per window, shown by the shell over everything (`Playback/PlayerView`) |
 | What the hub is told, and when | HubKit `PlaybackReporter` (Android `PlaybackService`'s rules); sent in order by `PlaybackOutbox` |
-| What AVPlayer can open | HubKit `PlaybackProfile` (mp4/m4v/mov files, fMP4 HLS), filled in for this device by `Playback/PlaybackDeviceInfo` |
+| What AVPlayer can open | HubKit `PlaybackProfile` (mp4/m4v/mov files, fMP4 HLS), filled in for this device by `Playback/PlaybackDeviceInfo`; the demo hub refuses a prepare without it, so every UI test that plays proves the app sends it (#2) |
 | Resume or start over | `DetailLines.startMode` / `offersStartOver` (Android's `canResume`); the hub judges the position |
 | Player wording, the up-next card, seeking and the end | HubKit `PlayerLabels`, `UpNext`, `PlaybackRules` (Android's, with their tests); the card is `UpNextCardView` |
 | Pages reading their progress again after playback | `@Environment(\.playbackClosed)`, which changes once the stop and the close have reached the hub |

@@ -10,6 +10,11 @@ import Synchronization
 /// as SRT, WebVTT and ASS files, two versions, chapters with frames, an intro
 /// to skip and the credits. A change of track, quality or version is kept
 /// per session, as the hub keeps it, so a second change keeps the first.
+///
+/// Stricter than the hub on one point (#2): it refuses a prepare that does not
+/// name AVPlayer's containers and ask for fMP4 HLS, which the hub would serve
+/// with the Pocket's Media3 profile. So every UI test that plays proves the
+/// app sends them.
 enum DemoPlayback {
     /// fMP4 HLS, H.264 and AAC, about ten minutes.
     static let stream = "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8"
@@ -38,6 +43,9 @@ enum DemoPlayback {
         let ok = DemoTransport.Answer(200, #"{"ok":true}"#)
         switch (method, parts[2], parts.count >= 5 ? parts[4] : "") {
         case ("POST", "items", "prepare"):
+            guard namesAVPlayer(body) else {
+                return DemoTransport.Answer(400, #"{"error":{"code":"invalid_request","message":"Name AVPlayer's containers and ask for fMP4 HLS (#2)"}}"#)
+            }
             let number = Int(parts[3].split(separator: "e").last ?? "") ?? 5
             choices.withLock { $0[sessionId(number)] = Choice() }
             return DemoTransport.Answer(200, plan(number: number, choice: Choice()))
@@ -66,6 +74,16 @@ enum DemoPlayback {
         default:
             return nil
         }
+    }
+
+    /// A prepare from this app: AVPlayer's containers (mp4 among them, no
+    /// Matroska) and fMP4 segments, the profile #2 describes.
+    static func namesAVPlayer(_ body: Data?) -> Bool {
+        guard let body, let fields = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let capabilities = fields["capabilities"] as? [String: Any],
+              let containers = capabilities["containers"] as? [String] else { return false }
+        return containers.contains("mp4") && !containers.contains("mkv")
+            && (capabilities["hlsSegments"] as? String)?.lowercased() == "fmp4"
     }
 
     private static let episodes = [4: "Cursed Parakeet", 5: "Beat the Invisible Enemy!", 6: "Fight to the Death! Ichigo vs. Ichigo"]
