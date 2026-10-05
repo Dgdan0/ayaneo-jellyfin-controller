@@ -92,6 +92,12 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_PREVIEWS: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+      configs:
+        Debug:
+          # The Mac's Debug build has an id of its own: the TestFlight copy in
+          # /Applications owns com.dgdan.jellyhub's container, which macOS
+          # keeps from every other app, an SSH session included (mac-shot).
+          PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]: com.dgdan.jellyhub.debug
   # What only a running app can show, driven in a simulator against the demo
   # hub (-demo), never the real one: `scripts/mac.sh uitest`.
   HubUITests:

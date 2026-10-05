@@ -46,6 +46,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APPLE="$ROOT/apple"
 DERIVED="$APPLE/build"
 BUNDLE_ID="com.dgdan.jellyhub"
+# The Mac's Debug build (apple/project.yml): the TestFlight copy owns the plain id.
+MAC_DEBUG_ID="$BUNDLE_ID.debug"
 SHOTS="$ROOT/shots/apple"
 # The devices the user owns (APPLE_PLAN.md): an iPad Pro 12.9" (4th
 # generation, 2020, A12Z; 1024 x 1366 pt), an iPad mini (A17 Pro) and an
@@ -299,14 +301,15 @@ mac_shot() {
   local size="${1:-1280x820}" app container file pid
   shift || true
   app="$(app_mac)/Contents/MacOS/JellyHub"
-  container="$HOME/Library/Containers/$BUNDLE_ID/Data"
+  container="$HOME/Library/Containers/$MAC_DEBUG_ID/Data"
   pkill -f "$app" >/dev/null 2>&1 || true
   rm -f "$container/hub-window.png"
   # The window's last frame is kept in the app's own defaults and wins over
   # the size asked for, so it is forgotten first. A window resized after it
   # opened drew its scrolled pages where they had been.
-  local prefs="$container/Library/Preferences/$BUNDLE_ID"
-  defaults read "$prefs" 2>/dev/null | sed -n 's/^ *"\(NSWindow Frame [^"]*\)" = .*/\1/p' |
+  local prefs="$container/Library/Preferences/$MAC_DEBUG_ID"
+  # A first run has no defaults yet, which pipefail would count as failing.
+  { defaults read "$prefs" 2>/dev/null || true; } | sed -n 's/^ *"\(NSWindow Frame [^"]*\)" = .*/\1/p' |
     while IFS= read -r key; do defaults delete "$prefs" "$key"; done
   HUB_URL="${HUB_URL:-}" HUB_TOKEN="${HUB_TOKEN:-}" HUB_SECTION="${HUB_SECTION:-}" HUB_SIDE="${HUB_SIDE:-}" \
     HUB_OPEN="${HUB_OPEN:-}" HUB_SHEET="${HUB_SHEET:-}" HUB_WINDOW="$size" HUB_SNAPSHOT="${SHOT_WAIT:-8}" \
