@@ -9,10 +9,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.ScrollView
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -22,6 +19,7 @@ import com.pocketds.hub.model.OfflinePrepareItem
 import com.pocketds.hub.model.OfflineSelectionItem
 import com.pocketds.hub.model.OfflineSelectionResponse
 import com.pocketds.hub.nav.ButtonHint
+import com.pocketds.hub.nav.PageArtwork
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
@@ -29,12 +27,18 @@ import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.offline.OfflineDownloadService
 import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.settings.OfflineSettings
+import com.pocketds.hub.ui.AppIcon
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
+import com.pocketds.hub.ui.PillButton
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
+import com.pocketds.hub.ui.Type
 import com.pocketds.hub.ui.activateOnTap
+import com.pocketds.hub.ui.glass.GlassColors
+import com.pocketds.hub.ui.glass.GlassHeading
+import com.pocketds.hub.ui.textWeight
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -44,9 +48,16 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import com.pocketds.hub.state.Fmt
 import com.pocketds.hub.state.StatusText
-import com.pocketds.hub.ui.showStatus
+import com.pocketds.hub.ui.showSummary
 
-/** Controller-first episode picker used by series and season download actions. */
+/**
+ * Controller-first episode picker used by series and season download actions.
+ *
+ * On Glass (#22): the series as the page's heading with the count and Download
+ * as the white pill, the page's own line under it, each season under a glass
+ * heading over its episode tiles, the quick choices on the side sheet, and the
+ * page in the series' colours.
+ */
 class OfflineSelectionScreen(
     private val api: HubApi,
     private val seriesId: String,
@@ -56,6 +67,9 @@ class OfflineSelectionScreen(
 ) : Screen {
     override val title = "Choose downloads"
     override val focusOnShow = true
+    /** The series' picture, the same one its title page shows, so the page keeps its colours. */
+    override val pageArtwork: String?
+        get() = catalog?.series?.let { PageArtwork.title(it.backdrop, it.poster.ifBlank { it.thumb }) }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var host: ScreenHost
@@ -64,7 +78,6 @@ class OfflineSelectionScreen(
     private lateinit var content: LinearLayout
     private lateinit var status: TextView
     private lateinit var counter: TextView
-    private lateinit var loading: ProgressBar
     private lateinit var overlay: ChoiceOverlay
     private val selected = linkedSetOf<String>()
     private val cards = linkedMapOf<String, EpisodeCard>()
@@ -76,43 +89,36 @@ class OfflineSelectionScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
-        root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
+        root = FrameLayout(host.viewContext)
         val page = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(10), dp(16), dp(6))
+            setPadding(dp(22), dp(6), dp(22), dp(6))
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
+                // The series, as the release picker names its title under its page's name.
                 addView(TextView(context).apply {
                     text = fallbackTitle
-                    textSize = 22f
+                    textSize = 21f; typeface = Type.display(context, 800); includeFontPadding = false
                     setTextColor(colors.primaryText)
-                    maxLines = 1
+                    maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
                 }, LinearLayout.LayoutParams(0, WRAP, 1f))
                 counter = TextView(context).apply {
-                    textSize = 13f
-                    setTextColor(colors.accent)
+                    textSize = 12.5f; textWeight(600)
+                    setTextColor(GlassColors.FACTS)
                     gravity = Gravity.END
                 }
-                addView(counter, LinearLayout.LayoutParams(dp(210), WRAP))
-                addView(TextView(context).apply {
-                    text = "↓"; textSize = 20f; gravity = Gravity.CENTER; setTextColor(colors.primaryText)
+                addView(counter, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(12); marginEnd = dp(10) })
+                // The main action, the white pill: what X does from anywhere on the page.
+                addView(PillButton.create(context, colors, "Download", AppIcon.DOWNLOAD, primary = true, heightDp = PILL_DP).apply {
                     contentDescription = "Download selected episodes"
-                    background = Styler.cardBackground(context, colors, cornerDp = 10f)
-                    Styler.makeFocusable(this); FocusDecorator.attach(this, ringVisible, scale = false)
-                    FocusDecorator.listen(this, ringVisible) { view, _ -> host.refreshHints() }
+                    FocusDecorator.attach(this, ringVisible, scale = false)
+                    FocusDecorator.listen(this, ringVisible) { _, _ -> host.refreshHints() }
                     activateOnTap { confirmSelection() }
-                }, LinearLayout.LayoutParams(dp(48), dp(42)).apply { marginStart = dp(7) })
+                }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = -dp(PillButton.RING_DP.toInt()) })
             })
-            status = TextView(context).apply {
-                text = "Loading available episodes…"
-                textSize = 11f
-                setTextColor(colors.mutedText)
-                setPadding(0, dp(4), 0, dp(6))
-            }
+            status = TextView(context).apply { textSize = 12f; setPadding(0, dp(4), 0, dp(4)) }
             addView(status)
-            loading = ProgressBar(context).apply { isIndeterminate = true }
-            addView(loading, LinearLayout.LayoutParams(MATCH, dp(26)))
             content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
             addView(FocusScrollView(context).apply {
                 clipToPadding = false
@@ -121,7 +127,8 @@ class OfflineSelectionScreen(
             }, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }
         root.addView(page, FrameLayout.LayoutParams(MATCH, MATCH))
-        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
+        // The quick choices and the count open as the side sheet, beside the tiles they choose.
+        overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         updateCounter()
         return root
@@ -174,15 +181,11 @@ class OfflineSelectionScreen(
 
     private fun load() {
         loadJob?.cancel()
-        loading.visibility = View.VISIBLE
-        status.showStatus(StatusText.loading("available episodes", refreshing = false), colors)
+        status.showSummary(StatusText.loading("available episodes", refreshing = false), colors)
         loadJob = scope.launch {
             when (val result = api.offlineSelection(seriesId)) {
                 is HubResult.Ok -> render(result.value)
-                is HubResult.Failed -> {
-                    loading.visibility = View.GONE
-                    status.showStatus(StatusText.failed(result.message, result.kind, hasData = false), colors)
-                }
+                is HubResult.Failed -> status.showSummary(StatusText.failed(result.message, result.kind, hasData = false), colors)
             }
             loadJob = null
         }
@@ -190,22 +193,15 @@ class OfflineSelectionScreen(
 
     private fun render(value: OfflineSelectionResponse) {
         catalog = value
-        loading.visibility = View.GONE
+        host.pageArtworkChanged()
         content.removeAllViews(); cards.clear(); selected.clear()
         val shown = value.seasons.filter { seasonId.isEmpty() || it.season.id == seasonId }
         shown.forEach { season ->
-            content.addView(LinearLayout(host.viewContext).apply {
-                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                val seasonPoster = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-                addView(seasonPoster, LinearLayout.LayoutParams(dp(36), dp(52)).apply { marginEnd = dp(9) })
-                addView(TextView(context).apply {
-                    text = season.season.title.ifBlank {
-                        EpisodeLabel.season(season.season.seasonNumber)
-                    }
-                    textSize = 16f; setTextColor(colors.primaryText)
-                })
-                setPadding(dp(2), dp(7), 0, dp(3))
-                loadImage(seasonPoster, season.season.poster.ifEmpty { season.season.thumb })
+            val available = season.episodes.count { it.available }
+            content.addView(GlassHeading.create(host.viewContext,
+                season.season.title.ifBlank { EpisodeLabel.season(season.season.seasonNumber) },
+                "$available episode${if (available == 1) "" else "s"}").apply {
+                setPadding(0, dp(10), 0, dp(2))
             })
             val recycler = RecyclerView(host.viewContext).apply {
                 layoutManager = LinearLayoutManager(context, RecyclerView.HORIZONTAL, false)
@@ -215,8 +211,7 @@ class OfflineSelectionScreen(
             }
             content.addView(recycler)
         }
-        status.setTextColor(colors.mutedText)
-        status.text = "Original files · embedded audio and subtitles included · external subtitles saved beside them"
+        status.showSummary(StatusText.loaded("Original files · embedded audio and subtitles included · external subtitles saved beside them"), colors)
         updateCounter()
         if (!initialMenuShown) {
             initialMenuShown = true
@@ -326,7 +321,7 @@ class OfflineSelectionScreen(
         val value = catalog ?: return
         val chosen = availableItems().filter { it.item.id in selected }
         val batchKey = "offline-${System.currentTimeMillis()}-${seriesId.take(8)}"
-        status.setTextColor(colors.mutedText); status.text = "Preparing secure download links…"
+        status.showSummary(StatusText.loaded("Preparing secure download links…"), colors)
         prepareJob = scope.launch {
             val body = OfflinePrepareBody(
                 batchKey, seriesId,
@@ -343,11 +338,11 @@ class OfflineSelectionScreen(
                         host.back()
                     } else {
                         host.notify("Those episodes are already downloaded or queued")
-                        status.text = "Nothing new was added"
+                        status.showSummary(StatusText.loaded("Nothing new was added"), colors)
                     }
                 }
                 is HubResult.Failed -> {
-                    status.setTextColor(colors.dangerText); status.text = result.message
+                    status.showSummary(StatusText.failed(result.message, result.kind, hasData = true, canRetry = false), colors)
                     host.notify(result.message)
                 }
             }
@@ -430,13 +425,12 @@ class OfflineSelectionScreen(
 
     private class EpisodeHolder(view: View, val card: EpisodeCard) : RecyclerView.ViewHolder(view)
 
-    private fun loadImage(view: ImageView, path: String) =
-        Artwork.bindHub(view, api, path, opaque = true, placeholderColor = colors.posterPlaceholder)
-
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        /** The prototype's Pocket pill, as a title page's. */
+        const val PILL_DP = 31f
     }
 }

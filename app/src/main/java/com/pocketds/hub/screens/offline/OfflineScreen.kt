@@ -40,7 +40,13 @@ import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.textWeight
+import com.pocketds.hub.ui.DashboardParts
+import com.pocketds.hub.ui.glass.GlassColors
+import com.pocketds.hub.ui.showStatus
+import com.pocketds.hub.nav.PageArtwork
+import com.pocketds.hub.offline.OfflineQueueLabels
 import com.pocketds.hub.state.Fmt
+import com.pocketds.hub.state.StatusText
 import kotlinx.coroutines.launch
 
 /**
@@ -50,7 +56,10 @@ import kotlinx.coroutines.launch
  *
  * It is the prototype's page (#11): the heading and its line, a glass
  * capsule, library headings in small capitals, glass posters and glass queue
- * rows with the white bar; the actions open as the side sheet.
+ * rows with the white bar; the actions open as the side sheet. A queue row
+ * reads as a transfer on Activity does (#22): the state as a chip by the
+ * title, the figures on one quiet line, a failure in red under them; and the
+ * page takes the colours of the title in focus.
  */
 class OfflineScreen(
     private val api: HubApi,
@@ -60,6 +69,14 @@ class OfflineScreen(
     override val title = "Downloads"
     override val focusOnShow = true
     override val showsOwnTitle = true
+    /** The title in focus, a poster or a transfer, by its backdrop as the player asks for it. */
+    override val pageArtwork: String?
+        get() = when (val row = if (::host.isInitialized) focusedRow() else null) {
+            is TaggedCatalog -> PageArtwork.backdrop(row.value.key)
+            is TaggedDownload -> row.value.manifest.item.let { PageArtwork.backdrop(it.id, it.seriesId) }
+            is TaggedBatch -> row.value.jobs.firstOrNull()?.manifest?.item?.let { PageArtwork.backdrop(it.id, it.seriesId) }
+            else -> null
+        }
 
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
     /** Library lookups for downloads made before manifests named one; each asked once. */
@@ -88,7 +105,7 @@ class OfflineScreen(
         this.host = host
         colors = Theme.colors(host.viewContext)
         repository = OfflineRepository.get(host.viewContext)
-        val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
+        val root = FrameLayout(host.viewContext)
         val page = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(8), dp(22), 0)
@@ -358,6 +375,7 @@ class OfflineScreen(
         val entries = OfflineCatalog.titles(completed, batchTitles, com.pocketds.hub.offline.OfflineLibraryNames.all(host.viewContext))
         summary.text = "Plays without the server · grouped by library"
         if (entries.isEmpty()) { empty("Downloaded movies and series will appear here and stay playable without a network."); return }
+        host.prefetchArtwork(entries.mapNotNull { PageArtwork.backdrop(it.key) })
         OfflineCatalog.byLibrary(entries).forEach { (library, group) ->
             val size = group.sumOf { entry -> entry.rows.sumOf { it.totalBytes } }
             content.addView(sectionLabel(library, "${group.size} title${if (group.size == 1) "" else "s"} · ${Fmt.bytes(size)}"))
@@ -457,7 +475,7 @@ class OfflineScreen(
             addView(card,LinearLayout.LayoutParams(MATCH,WRAP))
             addView(TextView(context).apply {
                 // The size, and a ⋯ a finger can tap for the actions Y opens.
-                text="${Fmt.bytes(size)}   ⋯";textSize=11f;setTextColor(colors.mutedText)
+                text="${Fmt.bytes(size)}   ⋯";textSize=11f;setTextColor(GlassColors.QUIET)
                 setPadding(dp(2),dp(3),dp(8),dp(5))
                 contentDescription="More actions for ${value.title}"
                 activateOnTap { value.rows.firstOrNull()?.let(::showMediaOptions) }
@@ -497,6 +515,7 @@ class OfflineScreen(
     private fun batchHeader(batch: OfflineBatch): View {
         lateinit var detail: TextView
         lateinit var control: TextView
+        val chipSlot = FrameLayout(host.viewContext)
         val view = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -507,21 +526,18 @@ class OfflineScreen(
             descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
             addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(context).apply { text = batch.title; textSize = 13f; textWeight(700); setTextColor(colors.primaryText) })
-            detail = TextView(context).apply {
-                val active = batch.jobs.firstOrNull { it.state == OfflineState.DOWNLOADING }
-                val transfer = active?.speedBytesPerSecond?.takeIf { it > 0 }?.let { speed ->
-                    val remaining = batch.totalBytes - batch.downloadedBytes
-                    " · ${Fmt.speed(speed)} · ${Fmt.eta(remaining / speed)} left"
-                }.orEmpty()
-                text = "${batch.completeCount}/${batch.jobs.size} complete · ${Fmt.bytes(batch.downloadedBytes)} / ${Fmt.bytes(batch.totalBytes)}$transfer"
-                textSize = 10f; setTextColor(colors.mutedText)
-            }
-            addView(detail)
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(context).apply {
+                    text = batch.title; textSize = 13f; textWeight(700); setTextColor(colors.primaryText)
+                    isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.END
+                }, LinearLayout.LayoutParams(0, WRAP, 1f))
+                addView(chipSlot, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(8) })
+            })
+            detail = TextView(context).apply { textSize = 11f; setTextColor(GlassColors.QUIET); isSingleLine = true }
+            addView(detail, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(3) })
         }, LinearLayout.LayoutParams(0, WRAP, 1f))
-        control = TextView(context).apply {
-            text = if (batch.paused) "▶" else "Ⅱ"; textSize = 18f; gravity = Gravity.CENTER; setTextColor(colors.accent)
-        }
+        control = TextView(context).apply { textSize = 18f; gravity = Gravity.CENTER; setTextColor(colors.accent) }
         addView(control, LinearLayout.LayoutParams(dp(44), dp(40)))
         layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(7); bottomMargin = dp(3) }
         decorate(this)
@@ -530,7 +546,7 @@ class OfflineScreen(
             else OfflineDownloadService.pauseBatch(context, batch.id)
         }
         }
-        QueueHeaderBinding(view, detail, control).also {
+        QueueHeaderBinding(view, detail, control, chipSlot).also {
             queueHeaders[batch.id] = it
             it.bind(batch)
         }
@@ -539,29 +555,44 @@ class OfflineScreen(
 
     private fun downloadRow(row: OfflineDownload): View {
         lateinit var image: ImageView
-        lateinit var state: TextView
+        lateinit var trailing: TextView
         lateinit var progress: ProgressBar
-        lateinit var percent: TextView
+        lateinit var figures: TextView
+        lateinit var problem: TextView
+        val chipSlot = FrameLayout(host.viewContext)
         val view = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(7), dp(6), dp(10), dp(6)); tag = TaggedDownload(row)
+            setPadding(dp(7), dp(7), dp(12), dp(7)); tag = TaggedDownload(row)
             glassRow(this, 13f)
             Styler.makeFocusable(this); descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-            image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+            image = ImageView(context).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(Styler.dp(context, 8f), colors.posterPlaceholder)
+                clipToOutline = true
+            }
             addView(image, LinearLayout.LayoutParams(dp(112), dp(63)))
             addView(LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0)
-                addView(TextView(context).apply {
-                    text = episodeTitle(row); textSize = 14f; maxLines = 1; setTextColor(colors.primaryText)
+                orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0)
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                    addView(TextView(context).apply {
+                        text = episodeTitle(row); textSize = 13f; textWeight(700); setTextColor(colors.primaryText)
+                        isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.END
+                    }, LinearLayout.LayoutParams(0, WRAP, 1f))
+                    addView(chipSlot, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(8) })
+                    trailing = TextView(context).apply { textSize = 12f; textWeight(600); setTextColor(colors.mutedText) }
+                    addView(trailing, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(10) })
                 })
-                state = TextView(context).apply { textSize = 12f; maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END }
-                addView(state)
                 // The white bar, 5dp, as the prototype's queue rows have it.
                 progress = ProgressLine.create(context, colors, android.graphics.Color.WHITE)
-                addView(progress, LinearLayout.LayoutParams(MATCH, dp(5)).apply { topMargin = dp(4) })
+                addView(progress, LinearLayout.LayoutParams(MATCH, dp(5)).apply { topMargin = dp(6) })
+                figures = TextView(context).apply { textSize = 11f; setTextColor(GlassColors.QUIET); isSingleLine = true }
+                addView(figures, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(5) })
+                problem = TextView(context).apply {
+                    textSize = 12f; setTextColor(colors.dangerText); maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
+                }
+                addView(problem, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(3) })
             }, LinearLayout.LayoutParams(0, WRAP, 1f))
-            percent = TextView(context).apply { textSize = 13f; gravity = Gravity.CENTER; setTextColor(colors.accent) }
-            addView(percent, LinearLayout.LayoutParams(dp(58), MATCH))
             minimumHeight=dp(76)
             layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(5); marginStart = dp(10) }
             decorate(this)
@@ -569,7 +600,7 @@ class OfflineScreen(
                 if (row.state == OfflineState.COMPLETE) host.playItem(row.manifest.item.id) else showDownloadDetails(row)
             }
         }
-        QueueRowBinding(view, state, progress, percent).also {
+        QueueRowBinding(view, chipSlot, trailing, progress, figures, problem).also {
             queueRows[row.id] = it
             it.bind(row)
         }
@@ -583,15 +614,16 @@ class OfflineScreen(
             // The prototype's group heading, small capitals at 55%.
             text = title.uppercase(); textSize = 12f; textWeight(800); letterSpacing = 0.12f; setTextColor(GROUP_INK)
         })
-        addView(TextView(context).apply { text = detail; textSize = 11f; setTextColor(colors.mutedText); setPadding(dp(10), 0, 0, dp(1)) })
+        addView(TextView(context).apply { text = detail; textSize = 11f; setTextColor(GlassColors.QUIET); setPadding(dp(10), 0, 0, dp(1)) })
         setPadding(0, dp(12), dp(2), dp(2))
     }
 
+    /** Why a tab is empty: the quiet glass chip, in the middle of the page. */
     private fun empty(message: String) {
         content.addView(TextView(host.viewContext).apply {
-            text = message; textSize = 14f; gravity = Gravity.CENTER; setTextColor(colors.mutedText)
-            setPadding(dp(40), dp(70), dp(40), dp(40))
-        })
+            textSize = 13f; gravity = Gravity.CENTER
+            showStatus(StatusText.notice(message), colors)
+        }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(40), dp(70), dp(40), dp(40)) })
     }
 
     /** A queue row's or batch's panel of the page's glass, with the white ring on focus. */
@@ -697,8 +729,11 @@ class OfflineScreen(
     private inner class QueueHeaderBinding(
         private val view: View,
         private val detail: TextView,
-        private val control: TextView
+        private val control: TextView,
+        private val chipSlot: FrameLayout
     ) {
+        private var paused: Boolean? = null
+
         fun bind(batch: OfflineBatch) {
             view.tag = TaggedBatch(batch)
             val active = batch.jobs.firstOrNull { it.state == OfflineState.DOWNLOADING }
@@ -707,24 +742,49 @@ class OfflineScreen(
                 " \u00b7 ${Fmt.speed(speed)} \u00b7 ${Fmt.eta(remaining / speed)} left"
             }.orEmpty()
             detail.text = "${batch.completeCount}/${batch.jobs.size} complete \u00b7 " +
-                "${Fmt.bytes(batch.downloadedBytes)} / ${Fmt.bytes(batch.totalBytes)}$transfer"
+                "${Fmt.bytes(batch.downloadedBytes)} of ${Fmt.bytes(batch.totalBytes)}$transfer"
             control.text = if (batch.paused) "\u25b6" else "\u2161"
+            // Rebuilt only when it changes: this runs with every progress update.
+            if (paused != batch.paused) {
+                paused = batch.paused
+                chipSlot.removeAllViews()
+                if (batch.paused) chipSlot.addView(DashboardParts.chip(view.context, "Paused", DashboardParts.Tone.QUIET))
+            }
+            view.contentDescription = listOf(batch.title, if (batch.paused) "paused" else "", detail.text)
+                .filter { it.isNotBlank() }.joinToString(", ")
         }
     }
 
     private inner class QueueRowBinding(
         private val view: View,
-        private val state: TextView,
+        private val chipSlot: FrameLayout,
+        private val trailing: TextView,
         private val progress: ProgressBar,
-        private val percent: TextView
+        private val figures: TextView,
+        private val problem: TextView
     ) {
+        private var chip: String? = null
+
         fun bind(row: OfflineDownload) {
             view.tag = TaggedDownload(row)
-            state.text = stateText(row)
-            state.setTextColor(if (row.state == OfflineState.FAILED) colors.dangerText else colors.mutedText)
-            progress.progress = (row.progress * 1_000).toInt()
-            progress.visibility = if (row.state == OfflineState.COMPLETE) View.GONE else View.VISIBLE
-            percent.text = if (row.state == OfflineState.COMPLETE) "\u2713" else "${(row.progress * 100).toInt()}%"
+            val (label, tone) = OfflineQueueLabels.chip(row.state)
+            // Rebuilt only when the state changes: this runs with every progress update.
+            if (chip != label) {
+                chip = label
+                chipSlot.removeAllViews()
+                chipSlot.addView(DashboardParts.chip(view.context, label, tone))
+            }
+            // As a transfer on Activity: a percentage once something has arrived, and no
+            // empty bar under a download that failed before it began.
+            trailing.text = if (row.state != OfflineState.COMPLETE && row.progress > 0f) "${(row.progress * 100).toInt()}%" else ""
+            progress.progress = (row.progress * ProgressLine.MAX).toInt()
+            progress.visibility = if (row.state == OfflineState.COMPLETE ||
+                (row.state == OfflineState.FAILED && row.progress <= 0f)) View.GONE else View.VISIBLE
+            figures.text = OfflineQueueLabels.figures(row)
+            problem.text = row.error
+            problem.visibility = if (row.error.isBlank()) View.GONE else View.VISIBLE
+            view.contentDescription = listOf(episodeTitle(row), label, figures.text, row.error)
+                .filter { it.isNotBlank() }.joinToString(", ")
         }
     }
 

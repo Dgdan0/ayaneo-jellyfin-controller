@@ -1,5 +1,7 @@
 package com.pocketds.hub.nav
 
+import com.pocketds.hub.net.HubEndpoints
+
 /**
  * Which artwork the Glass page shows (GLASS_PLAN.md, #11).
  *
@@ -20,4 +22,13 @@ object PageArtwork {
      */
     fun title(backdrop: String, poster: String, still: String = ""): String? =
         listOf(backdrop, still, poster).firstOrNull(String::isNotBlank)
+
+    /**
+     * A title's backdrop by id alone: an episode's series' backdrop, else the
+     * title's own. What is playing, and a downloaded title whose page has no
+     * fresher path, ask for it this way, so the same picture is one string and
+     * one entry in the colour caches whichever of them showed it first (#22).
+     */
+    fun backdrop(itemId: String, seriesId: String = ""): String? =
+        seriesId.ifBlank { itemId }.takeIf(String::isNotBlank)?.let { HubEndpoints.jellyfinImage(it, "Backdrop") }
 }

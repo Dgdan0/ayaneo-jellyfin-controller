@@ -24,6 +24,8 @@ import com.pocketds.hub.offline.OfflineCatalogSeason
 import com.pocketds.hub.offline.OfflineDetailPresentation
 import com.pocketds.hub.offline.OfflineDownload
 import com.pocketds.hub.offline.OfflineRepository
+import com.pocketds.hub.ui.AppIcon
+import com.pocketds.hub.ui.CenteredIconTextView
 import com.pocketds.hub.ui.ContinuationCardView
 import com.pocketds.hub.ui.DetailArtworkCardView
 import com.pocketds.hub.ui.DetailHeaderView
@@ -34,12 +36,25 @@ import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.MediaActionIcon
 import com.pocketds.hub.ui.MediaActionIconDrawable
 import com.pocketds.hub.ui.PocketColors
+import com.pocketds.hub.ui.PillButton
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
+import com.pocketds.hub.ui.glass.GlassHeading
+import com.pocketds.hub.ui.showStatus
+import com.pocketds.hub.nav.PageArtwork
 import com.pocketds.hub.state.Fmt
+import com.pocketds.hub.state.StatusText
 
-/** Shared online detail anatomy, backed only by downloaded files and scoped display snapshots. */
+/**
+ * A downloaded series: the online detail anatomy, backed only by downloaded
+ * files and scoped display snapshots.
+ *
+ * On Glass (#22) it is a series page as Books has one: the cover beside the
+ * words, Play or Resume as the white pill with More as a round glass toggle,
+ * the next episode as a continue card, notices as quiet chips and the seasons
+ * under a glass heading, on a page in the series' colours.
+ */
 class OfflineSeriesScreen(
     private val api: HubApi,
     private val seriesId: String,
@@ -48,6 +63,10 @@ class OfflineSeriesScreen(
 ) : Screen {
     override val title = seriesTitle
     override val focusOnShow = true
+    /** The header names the series, as a book page's does. */
+    override val showsOwnTitle = true
+    /** The series' backdrop, as the player asks for it, so its colours are likely known offline. */
+    override val pageArtwork: String? get() = PageArtwork.backdrop(seriesId)
     private lateinit var host: ScreenHost
     private lateinit var colors: PocketColors
     private lateinit var repository: OfflineRepository
@@ -65,7 +84,7 @@ class OfflineSeriesScreen(
         repository = OfflineRepository.get(host.viewContext)
         content = LinearLayout(host.viewContext).apply { orientation = LinearLayout.VERTICAL; clipChildren = false }
         scroll = FocusScrollView(host.viewContext).apply {
-            setBackgroundColor(colors.background); isFillViewport = true
+            isFillViewport = true
             clipToPadding = false; clipChildren = false; setPadding(0, 0, 0, dp(18))
             addView(content, ViewGroup.LayoutParams(MATCH, WRAP))
         }
@@ -160,26 +179,23 @@ class OfflineSeriesScreen(
         }
         val presentation = OfflineDetailPresentation.resolve(rows, progress, snapshot)
         presentation.playable?.let { target ->
-            detail.actions.addView(TextView(host.viewContext).apply {
-                DetailStyler.action(this, colors, primary = true)
-                text = if (target.kind == OfflineCatalogPlayTarget.Kind.RESUME) Fmt.clock(target.positionMillis) else ""
-                setCompoundDrawablesRelativeWithIntrinsicBounds(MediaActionIconDrawable(context, MediaActionIcon.PLAY, colors.accentText), null, null, null)
-                compoundDrawablePadding = dp(8); setPadding(dp(16), 0, dp(16), 0)
-                layoutParams = LinearLayout.LayoutParams(WRAP, dp(48)); tag = TaggedTarget(target)
+            // The white pill names the episode, as a series' Play does online.
+            detail.actions.addView(PillButton.create(host.viewContext, colors, targetLabel(target), AppIcon.PLAY,
+                primary = true, heightDp = PILL_DP).apply {
+                tag = TaggedTarget(target)
                 contentDescription = "${targetLabel(target)}, ${target.row.manifest.item.title}"
                 FocusDecorator.attach(this, ringVisible, scale = false)
                 activateOnTap { host.playItem(target.row.manifest.item.id, resumeMode(target)) }
-            })
-            detail.actions.addView(TextView(host.viewContext).apply {
-                DetailStyler.action(this,colors,primary=false)
-                text="⋯"; textSize=22f
-                setPadding(dp(16), 0, dp(16), 0)
-                layoutParams=LinearLayout.LayoutParams(WRAP,dp(48)).apply { marginStart = dp(8) }
-                tag=TaggedMore(target)
-                contentDescription="More actions for ${target.row.manifest.item.title}"
-                FocusDecorator.attach(this,ringVisible,scale=false)
+            }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = -dp(PillButton.RING_DP.toInt()); marginEnd = dp(2) })
+            detail.actions.addView(CenteredIconTextView(host.viewContext).apply {
+                text = ""
+                DetailStyler.glassToggle(this, colors)
+                setCenteredIcon(MediaActionIconDrawable.onGlass(context, MediaActionIcon.MORE, colors), dp(16))
+                tag = TaggedMore(target)
+                contentDescription = "More actions for ${target.row.manifest.item.title}"
+                FocusDecorator.attach(this, ringVisible, scale = false)
                 activateOnTap { openMore(target) }
-            })
+            }, LinearLayout.LayoutParams(dp(DetailStyler.GLASS_TOGGLE_VIEW_DP), dp(DetailStyler.GLASS_TOGGLE_VIEW_DP)))
             content.addView(ContinuationCardView(host.viewContext, colors, ringVisible).apply {
                 val item = target.row.manifest.item
                 bind(targetLabel(target), buildList {
@@ -191,7 +207,7 @@ class OfflineSeriesScreen(
                 onFocused = { selectedKey = "continue"; host.refreshHints() }
                 DetailStyler.image(image, artwork(target.row, "thumb"), imageLoader())
                 activateOnTap { host.playItem(item.id, resumeMode(target)) }
-            }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(24), dp(8), dp(24), 0) })
+            }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(EDGE_DP), dp(10), dp(EDGE_DP), dp(2)) })
         }
         presentation.missing?.let { item ->
             content.addView(message("Last known next episode: ${episodeCode(item)} · ${item.title}\nNot downloaded. Choose from the available seasons below."))
@@ -199,14 +215,13 @@ class OfflineSeriesScreen(
         if (presentation.playable == null && presentation.missing == null) {
             content.addView(message("You have finished the downloaded episodes. Choose a season to watch again."))
         }
-        content.addView(TextView(host.viewContext).apply {
-            text = "Downloaded seasons"; textSize = 17f; setTextColor(colors.primaryText)
-            setPadding(dp(24), dp(16), dp(24), dp(2))
+        content.addView(GlassHeading.create(host.viewContext, "Downloaded seasons", seasons.size.toString()).apply {
+            setPadding(dp(EDGE_DP), dp(14), dp(EDGE_DP), 0)
         })
         content.addView(FocusHorizontalScrollView(host.viewContext).apply {
             isHorizontalScrollBarEnabled = false; clipToPadding = false; clipChildren = false
             val clearance = DetailLayout.focusClearance(DetailLayout.posterCardHeight(156, resources.configuration.fontScale)).coerceAtLeast(10)
-            setPadding(dp(24), dp(clearance), dp(24), dp(clearance))
+            setPadding(dp(EDGE_DP), dp(clearance), dp(EDGE_DP), dp(clearance))
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL; clipChildren = false
                 seasons.forEach { addView(seasonCard(it)) }
@@ -232,8 +247,11 @@ class OfflineSeriesScreen(
     private fun artwork(row: OfflineDownload, preferred: String) = sequenceOf(preferred, "poster", "thumb", "backdrop")
         .map { repository.artworkFile(row, it) }.firstOrNull { it.isFile && it.length() > 0 }
     private fun imageLoader() = Artwork.loader(api, host.viewContext)
+    /** Something to tell, as the quiet glass chip every page uses for it. */
     private fun message(text: String) = TextView(host.viewContext).apply {
-        this.text = text; textSize = 13f; setTextColor(colors.mutedText); setPadding(dp(24), dp(12), dp(24), dp(8))
+        textSize = 12f
+        showStatus(StatusText.notice(text), colors)
+        layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(dp(EDGE_DP), dp(12), dp(EDGE_DP), dp(4)) }
     }
     private fun unregister() = offlineChanges.stop()
     private fun findTagged(root: ViewGroup, key: String): View? {
@@ -266,5 +284,11 @@ class OfflineSeriesScreen(
     private data class TaggedTarget(val target: OfflineCatalogPlayTarget, override val key: String = "play") : TaggedKey
     private data class TaggedMore(val target: OfflineCatalogPlayTarget) : TaggedKey { override val key = "more" }
     private data class TaggedSeason(val season: OfflineCatalogSeason) : TaggedKey { override val key = "season:${season.key}" }
-    private companion object { const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT; const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT }
+    private companion object {
+        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+        const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        /** The page's edge, as a title or book page has it, and its pills' height. */
+        const val EDGE_DP = 22
+        const val PILL_DP = 31f
+    }
 }

@@ -990,63 +990,21 @@ class ReadingWorkScreen(
     private fun glassToggleParams() = LinearLayout.LayoutParams(dp(DetailStyler.GLASS_TOGGLE_VIEW_DP), dp(DetailStyler.GLASS_TOGGLE_VIEW_DP)).apply { marginEnd = dp(2) }
 
     /**
-     * A series' page: the book being read as its own glass card under the
-     * series (the prototype's `.cont`), "Continue reading · Light
-     * Bringer", where in it, a bar in the accent and a gold play disc. A
-     * opens it where it was left, as Continue does.
+     * A series' page: the book being read as its own continue card under the
+     * series (`ContinuationCardView`, the prototype's `.cont`), "Continue
+     * reading · Light Bringer", where in it, a bar in the accent and a gold
+     * play disc. A opens it where it was left, as Continue does.
      */
     private fun continueCard(work: ReadingWork, point: ReadingContinue): View? {
         if (!canReadPublication(work.kind, point.sourceItemId)) return null
         val context = requireNotNull(host).viewContext
         val pages = work.sections.flatMap { it.items }.firstOrNull { it.workId == point.workId && it.workId.isNotBlank() }?.pageCount ?: 0
         val line = ReadingBookFacts.continueLine(point, work.kind, pages)
-        return LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, GLASS_CONT_CORNER_DP))
-            // The prototype's ring hugs the card (`.cont.pf`).
-            foreground = Styler.focusOutline(context, colors, GLASS_CONT_CORNER_DP, 3f)
-            setPadding(dp(6), dp(6), dp(10), dp(6))
-            contentDescription = "Continue reading ${point.title}, $line"
-            addView(android.widget.ImageView(context).apply {
-                scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-                background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(Styler.dp(context, 4f), colors.posterPlaceholder)
-                clipToOutline = true
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                Artwork.bind(this, Artwork.loader(api, context), point.artwork.takeIf(String::isNotBlank)?.let(api::imageUrl), opaque = true)
-            }, LinearLayout.LayoutParams(dp(GLASS_CONT_THUMB_DP), dp(GLASS_CONT_THUMB_DP * 3 / 2)))
-            addView(LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                addView(TextView(context).apply {
-                    text = "Continue reading · ${point.title}"
-                    textSize = 13f
-                    textWeight(700)
-                    setTextColor(android.graphics.Color.WHITE)
-                    isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.END
-                })
-                addView(TextView(context).apply {
-                    text = line
-                    textSize = 11.5f
-                    setTextColor(com.pocketds.hub.ui.glass.GlassColors.QUIET)
-                    isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.END
-                }, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(2) })
-                addView(com.pocketds.hub.ui.glass.GlassProgressBar(context, colors.accent, GLASS_CONT_TRACK).apply {
-                    fraction = point.percentage
-                }, LinearLayout.LayoutParams(MATCH, dp(4)).apply { topMargin = dp(5) })
-            }, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = dp(12); marginEnd = dp(12) })
-            // Its disc is the Books side's main action, as Continue is: gold.
-            addView(android.widget.FrameLayout(context).apply {
-                background = com.pocketds.hub.ui.ThemeGradientDrawable.oval(PillButton.mainFace(colors, ContentMode.BOOKS))
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                addView(android.widget.ImageView(context).apply {
-                    setImageDrawable(AppIconDrawable(AppIcon.PLAY, PillButton.mainInk(colors, ContentMode.BOOKS)))
-                }, android.widget.FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER).apply { leftMargin = dp(1) })
-            }, LinearLayout.LayoutParams(dp(GLASS_CONT_GO_DP), dp(GLASS_CONT_GO_DP)))
-            Styler.makeFocusable(this)
-            FocusDecorator.attach(this, ringVisible, scale = false)
+        return com.pocketds.hub.ui.ContinuationCardView(context, colors, ringVisible, portrait = true, side = ContentMode.BOOKS).apply {
+            bind("Continue reading · ${point.title}", line, point.percentage, completed = false)
+            Artwork.bind(image, Artwork.loader(api, context), point.artwork.takeIf(String::isNotBlank)?.let(api::imageUrl), opaque = true)
             val key = "continue:${point.sourceItemId}"
-            FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) { lastActionKey = key; host?.refreshHints() } }
+            onFocused = { lastActionKey = key; host?.refreshHints() }
             actionViews[key] = this
             hasChildLinks = true
             activateOnTap { openPublication(work, point.sourceItemId, point.title, point.source) }
@@ -1402,16 +1360,8 @@ class ReadingWorkScreen(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-        /**
-         * The prototype's Pocket book page: 22dp edges, 31dp pills, and the
-         * series' continue card (`.cont`) with 18dp corners, a 32dp cover, an
-         * 18% track and a 30dp play disc.
-         */
+        /** The prototype's Pocket book page: 22dp edges and 31dp pills. */
         const val EDGE_DP = 22
         const val PILL_DP = 31f
-        const val GLASS_CONT_CORNER_DP = 18f
-        const val GLASS_CONT_THUMB_DP = 32
-        const val GLASS_CONT_GO_DP = 30
-        const val GLASS_CONT_TRACK = 0x2EFFFFFF
     }
 }

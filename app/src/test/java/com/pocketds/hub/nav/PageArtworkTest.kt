@@ -30,4 +30,10 @@ class PageArtworkTest {
         assertEquals("/p", PageArtwork.title(backdrop = "", poster = "/p"))
         assertNull(PageArtwork.title(backdrop = "", poster = ""))
     }
+
+    @Test fun `by id, an episode shows its series' backdrop and a film its own`() {
+        assertEquals("/v1/img/jf/series1/Backdrop", PageArtwork.backdrop(itemId = "episode1", seriesId = "series1"))
+        assertEquals("/v1/img/jf/movie1/Backdrop", PageArtwork.backdrop(itemId = "movie1"))
+        assertNull(PageArtwork.backdrop(itemId = "", seriesId = ""))
+    }
 }

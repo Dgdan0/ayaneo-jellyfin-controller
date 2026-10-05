@@ -14,8 +14,6 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
-import com.pocketds.hub.ui.ProgressLine.showFraction
 import android.widget.ScrollView
 import android.widget.TextView
 import coil.ImageLoader
@@ -369,37 +367,72 @@ class DetailOverviewView(context: Context, private val colors: PocketColors, pri
     }
 }
 
-/** Same image, title, progress and focus treatment for online, downloaded and reading continuations. */
-class ContinuationCardView(context: Context, colors: PocketColors, private val ringVisible: () -> Boolean, portrait: Boolean = false) : LinearLayout(context) {
-    val image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
-    val titleView = label(context, 14f, colors.primaryText).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
-    val metadataView = label(context, 11f, colors.mutedText).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
-    val progressView = ProgressLine.create(context, colors)
+/**
+ * Where to carry on, as its own card: the prototype's `.cont` (GLASS_PLAN.md).
+ * A card of the page's glass with 18dp corners and the ring hugging it, the
+ * picture small at its left, the words with a bar in the accent, and a play
+ * disc in the side's main face -- white on Media, gold on Books
+ * ([PillButton.mainFace]). A Books series' book being read and a downloaded
+ * series' next episode both draw this one.
+ */
+class ContinuationCardView(
+    context: Context,
+    colors: PocketColors,
+    private val ringVisible: () -> Boolean,
+    /** A cover (2:3) rather than a still (16:9). */
+    portrait: Boolean = false,
+    /** Whose main action the disc is, which decides its face. */
+    side: com.pocketds.hub.state.ContentMode = com.pocketds.hub.state.ContentMode.MEDIA
+) : LinearLayout(context) {
+    val image = ImageView(context).apply {
+        scaleType = ImageView.ScaleType.CENTER_CROP; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        background = ThemeGradientDrawable.rounded(Styler.dp(context, 4f), colors.posterPlaceholder)
+        clipToOutline = true
+    }
+    val titleView = label(context, 13f, Color.WHITE).apply { textWeight(700); isSingleLine = true; ellipsize = TextUtils.TruncateAt.END }
+    val metadataView = label(context, 11.5f, com.pocketds.hub.ui.glass.GlassColors.QUIET).apply {
+        isSingleLine = true; ellipsize = TextUtils.TruncateAt.END
+    }
+    /** How far through, in the accent; nothing to show hides it. */
+    val progressView = com.pocketds.hub.ui.glass.GlassProgressBar(context, colors.accent, TRACK)
     var onFocused: (() -> Unit)? = null
     init {
         orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(8), dp(if(portrait)6 else 8), dp(12), dp(if(portrait)6 else 8))
-        background = Styler.cardBackground(context, colors, 12f, focusStrokeDp = 2f)
+        com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, CORNER_DP))
+        // The prototype's ring hugs the card (`.cont.pf`).
+        foreground = Styler.focusOutline(context, colors, CORNER_DP, 3f)
+        setPadding(dp(6), dp(6), dp(10), dp(6))
         Styler.makeFocusable(this); descendantFocusability = FOCUS_BLOCK_DESCENDANTS
-        addView(image, LayoutParams(dp(if (portrait) 32 else 112), dp(if (portrait) 48 else 63)).apply { marginEnd = dp(12) })
+        addView(image, LayoutParams(dp(if (portrait) PICTURE_DP * 2 / 3 else PICTURE_DP * 16 / 9), dp(PICTURE_DP)))
         addView(LinearLayout(context).apply {
             orientation = VERTICAL
-            addView(titleView, LayoutParams(MATCH, WRAP))
-            addView(metadataView, LayoutParams(MATCH, WRAP).apply { topMargin = dp(5) })
-            addView(progressView, LayoutParams(MATCH, dp(3)).apply { topMargin = dp(7) })
-        }, LayoutParams(0, WRAP, 1f))
-        addView(ImageView(context).apply {
-            setImageDrawable(MediaActionIconDrawable(context, MediaActionIcon.PLAY, colors.mutedText))
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LayoutParams(dp(21), dp(21)).apply { marginStart = dp(12) })
+            addView(titleView, LayoutParams(MATCH, WRAP))
+            addView(metadataView, LayoutParams(MATCH, WRAP).apply { topMargin = dp(2) })
+            addView(progressView, LayoutParams(MATCH, dp(4)).apply { topMargin = dp(5) })
+        }, LayoutParams(0, WRAP, 1f).apply { marginStart = dp(12); marginEnd = dp(12) })
+        addView(FrameLayout(context).apply {
+            background = ThemeGradientDrawable.oval(PillButton.mainFace(colors, side))
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            addView(ImageView(context).apply {
+                setImageDrawable(AppIconDrawable(AppIcon.PLAY, PillButton.mainInk(colors, side)))
+            }, FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER).apply { leftMargin = dp(1) })
+        }, LayoutParams(dp(DISC_DP), dp(DISC_DP)))
         FocusDecorator.attach(this, ringVisible, scale = false)
-        FocusDecorator.listen(this, ringVisible) { view, focused -> if (focused) onFocused?.invoke()
-        }
+        FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) onFocused?.invoke() }
     }
     fun bind(title: String, metadata: String, fraction: Double, completed: Boolean) {
         titleView.text = title; metadataView.text = metadata
-        progressView.showFraction(if (completed) 0.0 else fraction)
+        progressView.fraction = if (completed) 0.0 else fraction
         contentDescription = "$title, $metadata"
+    }
+
+    private companion object {
+        /** The prototype's Pocket `.cont`: 18dp corners, a 48dp picture, an 18% track and a 30dp play disc. */
+        const val CORNER_DP = 18f
+        const val PICTURE_DP = 48
+        const val TRACK = 0x2EFFFFFF
+        const val DISC_DP = 30
     }
 }
 

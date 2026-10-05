@@ -83,7 +83,7 @@ class PlayerScreen(
      * hero shows it, a film its own.
      */
     override val pageArtwork: String?
-        get() = plan?.item?.let { com.pocketds.hub.net.HubEndpoints.jellyfinImage(it.seriesId.ifEmpty { it.id }, "Backdrop") }
+        get() = plan?.item?.let { com.pocketds.hub.nav.PageArtwork.backdrop(it.id, it.seriesId) }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val handler = Handler(Looper.getMainLooper())
