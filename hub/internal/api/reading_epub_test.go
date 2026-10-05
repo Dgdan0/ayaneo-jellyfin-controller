@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type epubUpstreamState struct {
@@ -304,7 +305,11 @@ func TestReadingEpubProgressRoundTripsFullLocatorAndSurfacesConflict(t *testing.
 	state := &epubUpstreamState{}
 	upstream := newEpubUpstream(t, state)
 	defer upstream.Close()
-	handler := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"})).Handler()
+	server := NewServer(readingCatalogConfig(upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), []string{"reading"}))
+	// The hub stamps the write, once the check has passed, with its own clock: the
+	// app's `timestamp` below is accepted and not used (reading_epub_stamp_test.go).
+	server.now = func() time.Time { return time.UnixMilli(1_800_000_000_000) }
+	handler := server.Handler()
 	_, childID := bindEpubWork(t, handler)
 	path := "/v1/reading/works/" + childID + "/publications/12/position"
 
@@ -314,7 +319,7 @@ func TestReadingEpubProgressRoundTripsFullLocatorAndSurfacesConflict(t *testing.
 	}
 	locator := `{"href":"chapter-5.xhtml","type":"application/xhtml+xml","locations":{"progression":0.1,"totalProgression":0.4,"position":51},"text":{"before":"red","highlight":"rising"}}`
 	saved := publicationRequest(handler, http.MethodPost, path, `{"locator":`+locator+`,"timestamp":1700000001234}`)
-	if saved.Code != http.StatusOK || state.timestamp != 1700000001234 || !bytes.Equal(state.saved, []byte(locator)) {
+	if saved.Code != http.StatusOK || state.timestamp != 1_800_000_000_000 || !bytes.Equal(state.saved, []byte(locator)) {
 		t.Fatalf("save = %d %s upstream=%s @ %d", saved.Code, saved.Body.String(), state.saved, state.timestamp)
 	}
 	state.conflict = true

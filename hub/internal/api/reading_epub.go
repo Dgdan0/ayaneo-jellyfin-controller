@@ -158,6 +158,11 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// `timestamp` is the app's own clock. Older apps send it, so it is accepted;
+	// it is not used: the hub stamps the write itself (nextPositionStamp), as the
+	// audio route does, so a phone whose clock runs behind the PC cannot be told
+	// another device moved the book when none did. What protects a save that was
+	// made offline and arrives late is the base (checkBase and expectedLocator).
 	var body struct {
 		Locator         json.RawMessage `json:"locator"`
 		Timestamp       int64           `json:"timestamp"`
@@ -170,17 +175,15 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "invalid EPUB reading position"})
 		return
 	}
-	if body.Timestamp <= 0 {
-		body.Timestamp = time.Now().UnixMilli()
-	}
 	unlock := lockReadingCheckpoint("storyteller", strconv.FormatInt(bookID, 10))
 	defer unlock()
+	// What is held now: the base is checked against it, and the stamp follows it.
+	current, err := s.currentStorytellerPosition(ctx, bookID)
+	if err != nil {
+		writeUpstreamError(w, r, "storyteller", err)
+		return
+	}
 	if body.CheckBase {
-		current, err := s.currentStorytellerPosition(ctx, bookID)
-		if err != nil {
-			writeUpstreamError(w, r, "storyteller", err)
-			return
-		}
 		var locator json.RawMessage
 		if current != nil {
 			locator = current.Locator
@@ -195,7 +198,8 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 			}
 		}
 	}
-	if err := s.storyteller.SavePosition(ctx, bookID, body.Locator, body.Timestamp); err != nil {
+	stamp := s.nextPositionStamp(current)
+	if err := s.storyteller.SavePosition(ctx, bookID, body.Locator, stamp); err != nil {
 		var upstream *httpx.Error
 		if errors.As(err, &upstream) && upstream.Status == http.StatusConflict {
 			writeStorytellerNewerPosition(w, r)
@@ -207,9 +211,10 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 	s.invalidateStorytellerWork(sourceItemID)
 	s.cache.Invalidate("reading:storyteller:books")
 	writeJSON(w, http.StatusOK, struct {
-		OK     bool   `json:"ok"`
-		Action string `json:"action"`
-	}{OK: true, Action: "save_epub_position"})
+		OK        bool   `json:"ok"`
+		Action    string `json:"action"`
+		Timestamp int64  `json:"timestamp"`
+	}{OK: true, Action: "save_epub_position", Timestamp: stamp})
 }
 
 // resolveStorytellerEbook is resolveStorytellerBook for the routes that serve an
@@ -430,6 +435,21 @@ func looksLikeAudioLocator(raw json.RawMessage) bool {
 		}
 	}
 	return false
+}
+
+// nextPositionStamp is the timestamp a place is written with, the same on the EPUB
+// route and the audio one, once the write's check has passed: now, or one after
+// what Storyteller holds when that is later (a phone whose clock runs ahead wrote
+// it). Storyteller refuses a write older than the place it holds, or equal with
+// another locator, so a clock that is wrong can neither lose to that refusal nor
+// make a write look older than it is; the hub's clock is the one clock every
+// writer shares. current is what Storyteller holds now, nil when nothing.
+func (s *Server) nextPositionStamp(current *storyteller.PositionRecord) int64 {
+	stamp := s.now().UnixMilli()
+	if current != nil && current.Timestamp >= stamp {
+		stamp = current.Timestamp + 1
+	}
+	return stamp
 }
 
 // invalidateStorytellerPosition drops what carries a book's place: its record and

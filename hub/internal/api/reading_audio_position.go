@@ -443,14 +443,8 @@ func (s *Server) handleReadingAudioPosition(w http.ResponseWriter, r *http.Reque
 		writePositionChanged(w, r)
 		return
 	}
-	// The hub stamps the write once the check has passed: now, or one after what
-	// Storyteller holds when that is later (a phone whose clock runs ahead wrote
-	// it), so a clock that is wrong can neither lose to Storyteller's refusal of
-	// an older write nor make this one look older than it is.
-	stamp := s.now().UnixMilli()
-	if current != nil && current.Timestamp >= stamp {
-		stamp = current.Timestamp + 1
-	}
+	// The hub stamps the write once the check has passed, as the EPUB route does.
+	stamp := s.nextPositionStamp(current)
 	if err := s.storyteller.SavePosition(ctx, book.ID, locator, stamp); err != nil {
 		var upstream *httpx.Error
 		if errors.As(err, &upstream) && upstream.Status == http.StatusConflict {

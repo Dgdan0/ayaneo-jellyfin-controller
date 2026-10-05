@@ -184,8 +184,9 @@ func TestEpubPositionBaseMayBeTheSentenceAnAudioPlaceWasShownAs(t *testing.T) {
 		t.Fatalf("the sentence that was shown = %d", got)
 	}
 	// The write was the text locator, as the reader sent it, and it is now what
-	// the table holds.
-	if held, stamped, _ := env.positions.stored(); !sameJSON(held, json.RawMessage(next)) || stamped != clockStart+1000 {
+	// the table holds, stamped by the hub: one after the listener's, the clock not
+	// having moved.
+	if held, stamped, _ := env.positions.stored(); !sameJSON(held, json.RawMessage(next)) || stamped != clockStart+1 {
 		t.Fatalf("held %s @ %d", held, stamped)
 	}
 
