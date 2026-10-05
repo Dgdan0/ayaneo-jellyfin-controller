@@ -202,28 +202,38 @@ public struct LibraryResponse: Decodable, Equatable, Sendable {
 
 /// One of Kavita's or Storyteller's libraries (`ReadingLibrary` in
 /// `reading_catalog.go`): "kavita:2", "storyteller:books".
-public struct ReadingLibrary: Decodable, Equatable, Sendable, Identifiable {
+public struct ReadingLibrary: Decodable, Equatable, Sendable, Identifiable, Hashable {
     public var id: String
     /// "kavita" or "storyteller".
     public var source: String
+    /// "book", "comic" or "manga".
     public var kind: String
     public var title: String
     public var artwork: String
+    /// "poster": the artwork is one of its covers.
+    public var artworkStyle: String
+    /// What it can do: "browse", "details", "progress", and the sorts it
+    /// honours ("sort:title", "sort:author", "sort:last_read", …) (#25).
+    public var capabilities: [String]
 
-    public init(id: String, source: String = "", kind: String = "", title: String, artwork: String = "") {
+    public init(id: String, source: String = "", kind: String = "", title: String, artwork: String = "",
+                artworkStyle: String = "poster", capabilities: [String] = []) {
         self.id = id
         self.source = source
         self.kind = kind
         self.title = title
         self.artwork = artwork
+        self.artworkStyle = artworkStyle
+        self.capabilities = capabilities
     }
 
-    enum CodingKeys: String, CodingKey { case id, source, kind, title, artwork }
+    enum CodingKeys: String, CodingKey { case id, source, kind, title, artwork, artworkStyle, capabilities }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(id: c.value(.id, ""), source: c.value(.source, ""), kind: c.value(.kind, ""),
-                  title: c.value(.title, ""), artwork: c.value(.artwork, ""))
+                  title: c.value(.title, ""), artwork: c.value(.artwork, ""),
+                  artworkStyle: c.value(.artworkStyle, "poster"), capabilities: c.value(.capabilities, []))
     }
 }
 

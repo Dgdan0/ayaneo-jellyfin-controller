@@ -20,11 +20,10 @@ enum DemoMedia {
         Folder(id: "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5", name: "Shows", kind: "tvshows", total: 43),
     ]
 
-    static let books: [(id: String, source: String, title: String)] = [
-        ("storyteller:books", "storyteller", "Books & Audiobooks"),
-        ("kavita:2", "kavita", "Manga"),
-        ("kavita:3", "kavita", "My Marvelous Year"),
-    ]
+    /// The reading libraries, as the live stack names them (#25: `DemoReading` has their books).
+    static var books: [(id: String, source: String, title: String)] {
+        DemoReading.libraries.map { ($0.id, $0.source, $0.title) }
+    }
 
     private static let saved = Mutex<[String: [String]]>([:])
 
@@ -38,10 +37,13 @@ enum DemoMedia {
             return DemoTransport.Answer(200, #"{"views":[\#(views.joined(separator: ","))],"order":"\#(custom ? "custom" : "name")","partial":[]}"#)
         case ("GET", "/v1/reading/libraries"):
             let (ids, custom) = arranged(books.map { ($0.id, $0.title) }, side: "books")
-            let list = ids.compactMap { id in books.first { $0.id == id } }.map { book in
-                #"{"id":"\#(book.id)","source":"\#(book.source)","kind":"books","title":"\#(book.title)","capabilities":[]}"#
+            let list = ids.compactMap { id in DemoReading.libraries.first { $0.id == id } }.map { library -> [String: Any] in
+                ["id": library.id, "source": library.source, "kind": library.kind, "title": library.title,
+                 "artwork": library.artwork, "artworkStyle": "poster", "capabilities": library.capabilities]
             }
-            return DemoTransport.Answer(200, #"{"libraries":[\#(list.joined(separator: ","))],"order":"\#(custom ? "custom" : "name")","partial":[]}"#)
+            let body: [String: Any] = ["libraries": list, "order": custom ? "custom" : "name", "partial": []]
+            return DemoTransport.Answer(200, data: (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8),
+                                        type: "application/json")
         case ("PUT", "/v1/library/order"):
             guard let body, let fields = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
                   let side = fields["side"] as? String, side == "media" || side == "books",
