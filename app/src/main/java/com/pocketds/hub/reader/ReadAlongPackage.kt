@@ -36,6 +36,49 @@ data class ReadAlongTimeline(val tracks: List<ReadAlongTrack>) {
         }
         return null
     }
+
+    /**
+     * L1 and R1 read along (#16, A5): where the sentence [delta] away from
+     * [position] begins, across tracks. Back from more than [RESTART_MS] into
+     * a sentence goes to its own start first, as a player's Previous does.
+     * Null past either end.
+     */
+    fun step(position: ReadAlongPosition, delta: Int): ReadAlongPosition? {
+        val all = tracks.flatMapIndexed { track, value -> value.segments.map { track to it } }
+        if (all.isEmpty() || delta == 0) return null
+        val track = tracks.getOrNull(position.track) ?: return null
+        val absolute = track.startMs + position.offsetMs
+        // The sentence playing, or the last one begun before a gap.
+        val here = all.indexOfLast { (index, segment) -> index < position.track || (index == position.track && segment.beginMs <= absolute) }
+        val target = when {
+            here < 0 -> if (delta > 0) delta - 1 else return null
+            delta < 0 && all[here].first == position.track && absolute - all[here].second.beginMs > RESTART_MS -> here + delta + 1
+            else -> here + delta
+        }
+        val (index, segment) = all.getOrNull(target) ?: return null
+        return ReadAlongPosition(index, segment.beginMs - tracks[index].startMs)
+    }
+
+    /** Some sentence of [href]'s text is narrated: the page can be followed. */
+    fun narrates(href: String): Boolean = tracks.any { track -> track.segments.any { it.textHref == href } }
+
+    companion object {
+        /** Further into a sentence than this, back goes to its start rather than the sentence before. */
+        const val RESTART_MS = 1_500L
+    }
+}
+
+/**
+ * What a read-along page says about the narration (#16, A5): the page turns
+ * with the voice, you have turned away to read on your own while it plays, or
+ * this part of the book has no narration to follow.
+ */
+object ReadAlongFollow {
+    fun label(following: Boolean, narrated: Boolean): String = when {
+        !narrated -> "Alignment unavailable"
+        following -> "Following"
+        else -> "Reading"
+    }
 }
 
 /** EPUB 3 media overlays. Only in-package resources are accepted; source files are never modified. */

@@ -9,6 +9,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReaderPadMapTest {
+    @Test fun `read along, the shoulders step through sentences`() {
+        val narrating = ReaderPadState(ReaderKind.BOOK, narration = true)
+        assertEquals(ReaderCommand.Sentence(1), ReaderPadMap.command(narrating, PadAction.Section(1)))
+        assertEquals(ReaderCommand.Sentence(-1), ReaderPadMap.command(narrating, PadAction.Section(-1)))
+        // In the menu, or without narration, they still turn pages.
+        assertEquals(ReaderCommand.Page(1), ReaderPadMap.command(narrating.copy(controlsVisible = true), PadAction.Section(1)))
+        assertEquals(ReaderCommand.Page(1), ReaderPadMap.command(ReaderPadState(ReaderKind.BOOK), PadAction.Section(1)))
+        val sheet = ReaderPadMap.sheet(ReaderKind.BOOK, narrating)
+        assertTrue(sheet.toString(), sheet.any { it.keys == listOf(ReaderPadMap.L1) && it.does == "Previous sentence" })
+        assertTrue(sheet.toString(), sheet.any { it.keys == listOf(ReaderPadMap.R1) && it.does == "Next sentence" })
+    }
+
     private val comic = ReaderPadState(ReaderKind.COMIC)
     private val book = ReaderPadState(ReaderKind.BOOK)
     private val audiobook = ReaderPadState(ReaderKind.AUDIOBOOK, controlsVisible = true)

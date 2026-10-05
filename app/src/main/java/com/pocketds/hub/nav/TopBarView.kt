@@ -69,6 +69,8 @@ class TopBarView(
     private val tabs: BlobSegmentedView
     private val modeToggle: BlobSegmentedView
     private val icons = linkedMapOf<Int, FrameLayout>()
+    /** The audiobook playing while you browse (#16, A1), before Media and Books. */
+    val miniPlayer: MiniPlayerView
     private val badge: View
     private var activeMode: ContentMode? = null
     private var current = 0
@@ -112,6 +114,10 @@ class TopBarView(
         })
         addView(shoulder("R1"))
         addView(View(context), LayoutParams(0, 1, 1f))
+        miniPlayer = MiniPlayerView(context, colors, glass).apply {
+            onFocusChangeListener = OnFocusChangeListener { _, focused -> if (focused) onFocused?.invoke() }
+        }
+        addView(miniPlayer, LayoutParams(LayoutParams.WRAP_CONTENT, dp(34)).apply { marginEnd = dp(8) })
         modeToggle = BlobSegmentedView(context, colors, ringVisible, BlobSegmentedView.Style.ACCENT).apply {
             padXDp = if (glass) 10f else 11f
             heightDp = if (glass) 34f else 32f
@@ -259,6 +265,7 @@ class TopBarView(
     fun setPalette(next: ArtworkPalette) {
         if (!glass || next == pagePalette) return
         pagePalette = next
+        miniPlayer.setPalette(next)
         val fill = GlassColors.panel(next)
         tabsPanel.retint(fill)
         modePanel.retint(fill)
@@ -336,6 +343,7 @@ class TopBarView(
 
     private fun order(): List<View> = buildList {
         tabs.optionIds.forEach { add(tabs.optionView(it)!!) }
+        if (miniPlayer.visibility == VISIBLE) add(miniPlayer)
         if (activeMode != null) modeToggle.optionIds.forEach { add(modeToggle.optionView(it)!!) }
         icons.values.forEach(::add)
     }

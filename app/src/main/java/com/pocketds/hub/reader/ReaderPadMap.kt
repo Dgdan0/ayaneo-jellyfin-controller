@@ -44,6 +44,8 @@ sealed interface ReaderCommand {
     data class Magnifier(val on: Boolean) : ReaderCommand
     /** Read along: back to the sentence being read aloud. */
     data object FollowNarration : ReaderCommand
+    /** Read along, L1 and R1: the sentence before or after (#16, A5). */
+    data class Sentence(val delta: Int) : ReaderCommand
     /** Comics: show or hide the controls. Books: open the menu, or go back to the page. */
     data class Controls(val visible: Boolean) : ReaderCommand
     data object Leave : ReaderCommand
@@ -113,7 +115,8 @@ object ReaderPadMap {
         PadAction.Back -> if (state.controlsVisible) ReaderCommand.Leave else ReaderCommand.Controls(true)
         PadAction.Primary -> ReaderCommand.Bookmark
         PadAction.Secondary -> ReaderCommand.Contents
-        is PadAction.Section -> ReaderCommand.Page(action.delta)
+        // Read along, the shoulders step through the narration a sentence at a time (A5).
+        is PadAction.Section -> if (state.narration && !state.controlsVisible) ReaderCommand.Sentence(action.delta) else ReaderCommand.Page(action.delta)
         // Held: the reader asks for a deliberate hold before a chapter jumps.
         is PadAction.Page -> ReaderCommand.Chapter(if (action.direction == Direction.DOWN) 1 else -1)
         is PadAction.Step -> when {
@@ -164,6 +167,7 @@ object ReaderPadMap {
         is ReaderCommand.Scroll -> "Scroll"
         is ReaderCommand.Magnifier -> "Magnifier, while held"
         ReaderCommand.FollowNarration -> "Back to the narration"
+        is ReaderCommand.Sentence -> if (command.delta > 0) "Next sentence" else "Previous sentence"
         is ReaderCommand.Controls -> when {
             kind == ReaderKind.BOOK -> if (command.visible) "Menu" else "Back to the page"
             command.visible -> "Controls"

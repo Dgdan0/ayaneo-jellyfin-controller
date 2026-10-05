@@ -27,7 +27,7 @@ import com.pocketds.hub.ui.activateOnTap
  * on Classic a dark card. It takes the lower bar's place while the controls
  * show.
  */
-class ReadAlongDock(context: Context, colors: PocketColors) : LinearLayout(context) {
+class ReadAlongDock(context: Context, colors: PocketColors, seekSeconds: Int = 10) : LinearLayout(context) {
     private val density = resources.displayMetrics.density
     private fun dp(value: Int) = (value * density + .5f).toInt()
     val focusableControls = mutableListOf<View>()
@@ -38,6 +38,13 @@ class ReadAlongDock(context: Context, colors: PocketColors) : LinearLayout(conte
     var onFollow: () -> Unit = {}
 
     private val line: ProgressBar = ProgressLine.create(context, colors, Color.WHITE)
+    private val heading = TextView(context).apply {
+        text = "Read along"
+        textSize = 13f
+        setTypeface(typeface, Typeface.BOLD)
+        setTextColor(Color.WHITE)
+        maxLines = 1
+    }
     private val timeLabel = TextView(context).apply {
         text = "0:00 of 0:00"
         textSize = 11.5f
@@ -66,18 +73,13 @@ class ReadAlongDock(context: Context, colors: PocketColors) : LinearLayout(conte
         val row = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         addView(row, LayoutParams(LayoutParams.MATCH_PARENT, dp(52)))
         val words = LinearLayout(context).apply { orientation = VERTICAL; gravity = Gravity.CENTER_VERTICAL }
-        words.addView(TextView(context).apply {
-            text = "Read along"
-            textSize = 13f
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(Color.WHITE)
-        })
+        words.addView(heading)
         words.addView(timeLabel)
         row.addView(words, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(control(OverlayButtons.jump(context, colors.focusRing, "−10", "Back 10 seconds") { onBack() }),
+        row.addView(control(OverlayButtons.jump(context, colors.focusRing, "−$seekSeconds", "Back $seekSeconds seconds") { onBack() }),
             LayoutParams(dp(44), dp(44)))
         row.addView(control(playButton), LayoutParams(dp(52), dp(52)).apply { marginStart = dp(10); marginEnd = dp(10) })
-        row.addView(control(OverlayButtons.jump(context, colors.focusRing, "+10", "Forward 10 seconds") { onForward() }),
+        row.addView(control(OverlayButtons.jump(context, colors.focusRing, "+$seekSeconds", "Forward $seekSeconds seconds") { onForward() }),
             LayoutParams(dp(44), dp(44)))
         val end = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL or Gravity.END }
         end.addView(control(speedButton), LayoutParams(LayoutParams.WRAP_CONTENT, dp(44)))
@@ -89,12 +91,14 @@ class ReadAlongDock(context: Context, colors: PocketColors) : LinearLayout(conte
 
     private fun <T : View> control(view: T): T = view.also { focusableControls += it }
 
-    fun update(playing: Boolean, position: ReadAlongPosition, timeline: ReadAlongTimeline, speed: Float) {
+    /** [follow]: where the page stands with the voice, "Following" or "Reading" (A5). */
+    fun update(playing: Boolean, position: ReadAlongPosition, timeline: ReadAlongTimeline, speed: Float, follow: String = "") {
+        heading.text = if (follow.isBlank()) "Read along" else "Read along · $follow"
         playButton.setIcon(if (playing) PlayerControlIcon.PAUSE else PlayerControlIcon.PLAY)
         playButton.contentDescription = if (playing) "Pause narration" else "Play narration"
         timeLabel.text = ReadAlongDockText.time(position, timeline)
         line.progress = (ReadAlongDockText.fraction(position, timeline) * ProgressLine.MAX).toInt()
-        speedButton.text = ReadAlongDockText.speed(speed)
+        speedButton.text = com.pocketds.hub.playback.PlayerLabels.rate(speed)
     }
 
     companion object {
@@ -119,9 +123,4 @@ object ReadAlongDockText {
         return (position.offsetMs.toDouble() / track.durationMs).coerceIn(0.0, 1.0)
     }
 
-    /** "1×", "1.25×": the speed without a trailing ".0". */
-    fun speed(value: Float): String {
-        val text = if (value == value.toInt().toFloat()) value.toInt().toString() else String.format(java.util.Locale.US, "%.2f", value).trimEnd('0').trimEnd('.')
-        return "$text×"
-    }
 }

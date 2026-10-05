@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- The reading-audio player keeps the device awake while an audiobook plays with the screen off (#16, A1). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- The device is a games handheld; declaring this stops the app being
          filtered out of listings and documents what it is actually driven by. -->
@@ -75,6 +77,15 @@
 
         <service
             android:name=".playback.PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+        <!-- Reading audio, apart from the video service: an audiobook that outlives its screen (#16, A1). -->
+        <service
+            android:name=".reader.ReadingAudioService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>

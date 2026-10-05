@@ -284,6 +284,9 @@ class PlaybackService : MediaSessionService() {
 
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            // One sound at a time (#16, A1): video playing pauses a book's narration or an audiobook.
+            if (isPlaying) com.pocketds.hub.reader.AudioHandoff.started(this@PlaybackService, com.pocketds.hub.reader.AudioSource.VIDEO)
+            else com.pocketds.hub.reader.AudioHandoff.stopped(com.pocketds.hub.reader.AudioSource.VIDEO)
             val current = plan ?: return
             if (isPlaying) {
                 enqueueEvent(current, if (started) "unpaused" else "started", false)

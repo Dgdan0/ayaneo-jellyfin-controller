@@ -1,7 +1,5 @@
 package com.pocketds.hub.reader
 
-import android.graphics.Color
-import android.net.Uri
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -9,16 +7,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
-import androidx.media3.common.AudioAttributes
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.ReadingEdition
-import com.pocketds.hub.screens.library.ReadingEntryMode
-import com.pocketds.hub.screens.library.ReadingEntryPreferences
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
@@ -26,6 +17,11 @@ import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.playback.PlayerControlIcon
 import com.pocketds.hub.playback.PlayerIconButton
+import com.pocketds.hub.playback.PlayerLabels
+import com.pocketds.hub.screens.library.ReadingEntryMode
+import com.pocketds.hub.screens.library.ReadingEntryPreferences
+import com.pocketds.hub.settings.PlaybackSettings
+import com.pocketds.hub.state.Fmt
 import com.pocketds.hub.ui.ChoiceOverlay
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
@@ -39,21 +35,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
-import com.pocketds.hub.state.Fmt
 
 /**
  * Storyteller audiobook player. Its archive is temporary; narration progress
  * is device-local. Its keys are [ReaderPadMap]'s (#16): Ⓑ leaves, Ⓧ plays or
- * pauses, L1 and R1 change part, L2 and R2 jump; every key stays here (L1 and
- * R1 used to fall through to the app and switch tabs, closing the player). A
- * row along the foot says what the keys do, and Keys lists them all.
+ * pauses, L1 and R1 change part, L2 and R2 jump by the player's seek step;
+ * every key stays here. A row along the foot says what the keys do, and Keys
+ * lists them all.
+ *
+ * The book plays on [ReadingAudio]'s service (A1): leaving this screen, or
+ * the screen going off, does not stop it, and a mini player in the top bar
+ * brings you back. Stop ends it. The listening controls (A2) are the speed,
+ * kept per book, a sleep timer that fades and steps back when it fires, the
+ * time left in the part and the book, and the parts to jump between.
  */
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class AudiobookScreen(
     private val api: HubApi,
     private val workId: String,
@@ -72,20 +71,30 @@ class AudiobookScreen(
     private lateinit var colors: PocketColors
     private lateinit var status: TextView
     private lateinit var position: TextView
+    private lateinit var left: TextView
     private lateinit var partTitle: TextView
     private lateinit var timeline: SeekBar
     private lateinit var playButton: PlayerIconButton
+    private lateinit var speedButton: TextView
+    private lateinit var sleepButton: TextView
+    private lateinit var rewindButton: PlayerIconButton
+    private lateinit var forwardButton: PlayerIconButton
+    private lateinit var keys: com.pocketds.hub.nav.HintBarView
     private lateinit var overlay: ChoiceOverlay
     private lateinit var comfortLayer: com.pocketds.hub.ui.ComfortLayerView
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var loadJob: Job? = null
-    private var updateJob: Job? = null
-    private var player: ExoPlayer? = null
-    private var parts: List<AudiobookPart> = emptyList()
-    private var initialized = false
+    private var watchJob: Job? = null
+    private var listening = ListeningState()
     private val controls = mutableListOf<View>()
     private var focusedControl = 0
     private val aligned: ReadingEdition? get() = alignedOptions.firstOrNull { it.sourceItemId == edition.sourceItemId }
+
+    /** This screen's book is the one on the player. */
+    private val mine: Boolean get() = listening.book?.let { it.workId == workId && it.sourceItemId == edition.sourceItemId } == true
+
+    /** The jump of the transport's ±, L2 and R2: the player's own setting. */
+    private val seekSeconds: Int get() = PlaybackSettings.seekSeconds(host.viewContext)
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -94,7 +103,7 @@ class AudiobookScreen(
         val content = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(22), dp(12), dp(22), dp(18))
+            setPadding(dp(22), dp(12), dp(22), dp(10))
         }
         root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
         content.addView(TextView(host.viewContext).apply {
@@ -105,54 +114,59 @@ class AudiobookScreen(
             maxLines = 2
         }, LinearLayout.LayoutParams(MATCH, 0, 1f))
         partTitle = TextView(host.viewContext).apply {
-            textSize = 14f; setTextColor(colors.mutedText); gravity = Gravity.CENTER
+            textSize = 14f; setTextColor(colors.mutedText); gravity = Gravity.CENTER; maxLines = 1
         }
-        content.addView(partTitle, LinearLayout.LayoutParams(MATCH, dp(30)))
+        content.addView(partTitle, LinearLayout.LayoutParams(MATCH, dp(26)))
         status = TextView(host.viewContext).apply {
             text = "Preparing audiobook…"
             textSize = 13f; setTextColor(colors.mutedText); gravity = Gravity.CENTER
         }
-        content.addView(status, LinearLayout.LayoutParams(MATCH, dp(36)))
+        content.addView(status, LinearLayout.LayoutParams(MATCH, dp(24)))
         timeline = SeekBar(host.viewContext).apply {
             max = 1000
             contentDescription = "Audiobook position"
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
-                    if (fromUser) player?.let { audio ->
-                        if (audio.duration > 0) position.text = Fmt.clock(audio.duration * value / 1000) + " / " + Fmt.clock(audio.duration)
-                    }
+                    if (fromUser && listening.partMs > 0) position.text = Fmt.clock(listening.partMs * value / 1000) + " / " + Fmt.clock(listening.partMs)
                 }
                 override fun onStartTrackingTouch(bar: SeekBar?) = Unit
                 override fun onStopTrackingTouch(bar: SeekBar?) {
-                    player?.let { audio -> if (audio.duration > 0) {
-                        audio.seekTo(audio.duration * (bar?.progress ?: 0) / 1000)
-                        savePosition()
-                    } }
+                    if (mine && listening.partMs > 0) ReadingAudio.seekTo(listening.part, listening.partMs * (bar?.progress ?: 0) / 1000)
                 }
             })
         }
-        content.addView(timeline, LinearLayout.LayoutParams(MATCH, dp(48)))
+        content.addView(timeline, LinearLayout.LayoutParams(MATCH, dp(44)))
         position = TextView(host.viewContext).apply {
             text = "0:00 / 0:00"; textSize = 13f; setTextColor(colors.primaryText); gravity = Gravity.CENTER
         }
-        content.addView(position, LinearLayout.LayoutParams(MATCH, dp(26)))
+        content.addView(position, LinearLayout.LayoutParams(MATCH, dp(22)))
+        left = TextView(host.viewContext).apply {
+            textSize = 12f; setTextColor(colors.mutedText); gravity = Gravity.CENTER
+        }
+        content.addView(left, LinearLayout.LayoutParams(MATCH, dp(20)))
         val transport = LinearLayout(host.viewContext).apply { gravity = Gravity.CENTER }
         content.addView(transport, LinearLayout.LayoutParams(MATCH, dp(58)))
-        transport.addView(icon(PlayerControlIcon.PREVIOUS, "Previous part") { previous() })
-        transport.addView(icon(PlayerControlIcon.REWIND, "Back 10 seconds") { jump(-SEEK_SECONDS * 1_000L) })
-        playButton = icon(PlayerControlIcon.PLAY, "Play audiobook") { toggle() }
+        transport.addView(icon(PlayerControlIcon.PREVIOUS, "Previous part") { act { ReadingAudio.part(-1) } })
+        rewindButton = icon(PlayerControlIcon.REWIND, "Back") { act { ReadingAudio.seekBy(-seekSeconds * 1_000L) } }
+        transport.addView(rewindButton)
+        playButton = icon(PlayerControlIcon.PLAY, "Play audiobook") { act { ReadingAudio.toggle() } }
         transport.addView(playButton)
-        transport.addView(icon(PlayerControlIcon.FORWARD, "Forward 10 seconds") { jump(SEEK_SECONDS * 1_000L) })
-        transport.addView(icon(PlayerControlIcon.NEXT, "Next part") { next() })
+        forwardButton = icon(PlayerControlIcon.FORWARD, "Forward") { act { ReadingAudio.seekBy(seekSeconds * 1_000L) } }
+        transport.addView(forwardButton)
+        transport.addView(icon(PlayerControlIcon.NEXT, "Next part") { act { ReadingAudio.part(1) } })
         val actions = LinearLayout(host.viewContext).apply { gravity = Gravity.CENTER; orientation = LinearLayout.HORIZONTAL }
-        content.addView(actions, LinearLayout.LayoutParams(MATCH, dp(58)))
+        content.addView(actions, LinearLayout.LayoutParams(MATCH, dp(54)))
         if (ebook != null || narrations.size > 1) actions.addView(action("Reading & listening") { showReadingModes() })
+        actions.addView(action("Parts") { act { showParts() } })
+        speedButton = action("Speed 1×") { act { showSpeeds() } }
+        actions.addView(speedButton)
+        sleepButton = action("Sleep") { act { showSleep() } }
+        actions.addView(sleepButton)
         actions.addView(action("Comfort") { showComfort() })
         actions.addView(action("Keys") { showKeys() })
-        actions.addView(action("Close") { host.back() })
+        actions.addView(action("Stop") { stopListening() })
         // What the keys do: the app's own hint bar is hidden while a reader is open.
-        val keys = ReaderKeys.row(host.viewContext, colors) { onPad(it) }
-        keys.setHints(ReaderPadMap.hints(padState()))
+        keys = ReaderKeys.row(host.viewContext, colors) { onPad(it) }
         root.addView(keys, FrameLayout.LayoutParams(MATCH, Styler.dpInt(host.viewContext, ReaderKeys.ROW_DP.toFloat()),
             Gravity.BOTTOM))
         (content.layoutParams as FrameLayout.LayoutParams).bottomMargin = Styler.dpInt(host.viewContext, ReaderKeys.ROW_DP.toFloat())
@@ -162,11 +176,12 @@ class AudiobookScreen(
         comfortLayer = com.pocketds.hub.ui.ComfortLayerView(host.viewContext)
         root.addView(comfortLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         comfortLayer.apply(com.pocketds.hub.settings.ComfortSettings.load(host.viewContext))
+        refreshSeekLabels()
         return root
     }
 
     private fun padState() = ReaderPadState(ReaderKind.AUDIOBOOK, controlsVisible = true,
-        loading = !initialized, seekSeconds = SEEK_SECONDS)
+        loading = !mine, seekSeconds = seekSeconds)
 
     private fun showKeys() = ReaderKeys.show(overlay, padState())
 
@@ -175,31 +190,32 @@ class AudiobookScreen(
     override fun onShow() {
         comfortLayer.apply(com.pocketds.hub.settings.ComfortSettings.load(host.viewContext))
         ReadingEntryPreferences.put(host.viewContext, workId, ReadingEntryMode.LISTEN, edition.sourceItemId)
-        if (!initialized && loadJob?.isActive != true) load()
-        else startUpdates()
+        refreshSeekLabels()
+        watch()
+        val playing = ReadingAudio.state.value.book
+        if (playing?.workId == workId && playing.sourceItemId == edition.sourceItemId) return
+        if (loadJob?.isActive != true) load()
     }
 
     override fun onHide() {
-        player?.pause()
-        savePosition()
-        updateJob?.cancel()
-        loadJob?.cancel()
+        // The book plays on (A1): only this screen stops watching it.
+        watchJob?.cancel()
         if (::overlay.isInitialized) overlay.dismiss()
+        onProgressChanged()
     }
 
     override fun onDestroyView() {
-        savePosition()
-        player?.release(); player = null
         scope.cancel()
         controls.clear()
     }
 
-    override fun onAppBackgrounded() { player?.pause(); savePosition() }
     override fun onSystemBack(): Boolean = if (overlay.isOpen) { overlay.dismiss(); true } else false
     override fun hints(): List<ButtonHint> = ReaderPadMap.hints(padState())
     override fun requestInitialFocus(): Boolean = playButton.requestFocus()
 
     override fun onPad(action: PadAction): Boolean {
+        // Any button while the sleep timer fades keeps you listening (A2).
+        ReadingAudio.touched()
         if (overlay.onPad(action)) return true
         when (val command = ReaderPadMap.command(padState(), action)) {
             ReaderCommand.Leave -> host.back()
@@ -209,16 +225,22 @@ class AudiobookScreen(
                 focusedControl = (focusedControl + step).coerceIn(0, controls.lastIndex.coerceAtLeast(0))
                 controls.getOrNull(focusedControl)?.requestFocus()
             }
-            ReaderCommand.PlayPause -> toggle()
-            is ReaderCommand.Chapter -> if (command.delta > 0) next() else previous()
-            is ReaderCommand.Seek -> jump(command.seconds * 1_000L)
+            ReaderCommand.PlayPause -> ReadingAudio.toggle()
+            is ReaderCommand.Chapter -> ReadingAudio.part(command.delta)
+            is ReaderCommand.Seek -> ReadingAudio.seekBy(command.seconds * 1_000L)
             ReaderCommand.Formats -> if (ebook != null || narrations.size > 1) showReadingModes()
             ReaderCommand.Keys -> showKeys()
-            ReaderCommand.Retry -> if (loadJob?.isActive != true) load()
+            ReaderCommand.Retry -> if (loadJob?.isActive != true && !mine) load()
             // Taken here: nothing reaches the app, whose shoulders and triggers would switch tabs.
             else -> Unit
         }
         return true
+    }
+
+    /** A control pressed by touch counts as a button too. */
+    private inline fun act(block: () -> Unit) {
+        ReadingAudio.touched()
+        block()
     }
 
     private fun load() {
@@ -238,7 +260,7 @@ class AudiobookScreen(
                 }
             }
             status.text = "Preparing audio parts…"
-            parts = try { withContext(Dispatchers.IO) {
+            val parts = try { withContext(Dispatchers.IO) {
                 AudiobookArchive.extract(archive, File(directory, "parts")) { coroutineContext.ensureActive() }
             } } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -246,75 +268,87 @@ class AudiobookScreen(
                 status.text = error.message ?: "Could not open audiobook"
                 return@launch
             }
-            val context = host.viewContext
-            val audio = ExoPlayer.Builder(context.applicationContext).build()
-            audio.setAudioAttributes(AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(), true)
-            audio.setHandleAudioBecomingNoisy(true)
-            audio.addListener(object : Player.Listener {
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    playButton.setIcon(if (isPlaying) PlayerControlIcon.PAUSE else PlayerControlIcon.PLAY)
-                    playButton.contentDescription = if (isPlaying) "Pause audiobook" else "Play audiobook"
-                    if (!isPlaying) savePosition()
-                }
-                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) { refresh() ; savePosition() }
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == Player.STATE_READY) refresh()
-                    if (playbackState == Player.STATE_ENDED) savePosition(completed = true)
-                }
-            })
-            audio.setMediaItems(parts.map { MediaItem.fromUri(Uri.fromFile(it.file)) })
-            player = audio
-            val saved = context.getSharedPreferences("audiobook_positions", 0)
-            val key = positionKey(identity)
-            val index = saved.getInt("$key:part", 0).coerceIn(0, parts.lastIndex)
-            val offset = saved.getLong("$key:ms", 0).coerceAtLeast(0)
-            audio.seekTo(index, offset)
-            audio.prepare()
-            initialized = true
+            val again = { AudiobookScreen(api, workId, edition, title, ringVisible, narrations, ebook, alignedOptions) }
+            ReadingAudio.open(host.viewContext, ReadingAudioBook(workId, edition.sourceItemId, title, parts,
+                ReadingCheckpointKey.digest("$identity:$workId:${edition.sourceItemId}"), again))
             status.text = ""
-            refresh()
-            startUpdates()
         }
     }
 
-    private fun startUpdates() {
-        updateJob?.cancel()
-        updateJob = scope.launch { while (true) { refresh(); delay(500) } }
+    /** The player's state, while this screen shows. */
+    private fun watch() {
+        watchJob?.cancel()
+        watchJob = scope.launch { ReadingAudio.state.collect(::render) }
     }
 
-    private fun refresh() {
-        val audio = player ?: return
-        val index = audio.currentMediaItemIndex.coerceIn(0, parts.lastIndex.coerceAtLeast(0))
-        partTitle.text = "Part ${index + 1} of ${parts.size} · ${parts.getOrNull(index)?.title.orEmpty()}"
-        val duration = audio.duration.coerceAtLeast(0)
-        position.text = "${Fmt.clock(audio.currentPosition)} / ${Fmt.clock(duration)}"
-        if (!timeline.isPressed && duration > 0) timeline.progress = (audio.currentPosition * 1000 / duration).toInt().coerceIn(0, 1000)
+    private fun render(value: ListeningState) {
+        val before = mine
+        listening = value
+        if (!mine) {
+            if (before) status.text = "Stopped"
+            return
+        }
+        status.text = ""
+        val parts = value.book?.parts.orEmpty()
+        partTitle.text = "Part ${value.part + 1} of ${parts.size} · ${parts.getOrNull(value.part)?.title.orEmpty()}"
+        position.text = "${Fmt.clock(value.positionMs)} / ${Fmt.clock(value.partMs)}"
+        left.text = if (value.partMs > 0) PlayerLabels.timeLeft(value.partLeftMs, value.bookLeftMs) else ""
+        if (!timeline.isPressed && value.partMs > 0) timeline.progress = (value.positionMs * 1000 / value.partMs).toInt().coerceIn(0, 1000)
+        playButton.setIcon(if (value.playing) PlayerControlIcon.PAUSE else PlayerControlIcon.PLAY)
+        playButton.contentDescription = if (value.playing) "Pause audiobook" else "Play audiobook"
+        speedButton.text = "Speed ${PlayerLabels.rate(value.speed)}"
+        sleepButton.text = PlayerLabels.sleep(value.sleep)
+        if (::keys.isInitialized && before != mine) keys.setHints(ReaderPadMap.hints(padState()))
     }
 
-    private fun toggle() { player?.let { if (it.isPlaying) it.pause() else it.play() } }
-    private fun jump(delta: Long) { player?.let { it.seekTo((it.currentPosition + delta).coerceIn(0, it.duration.coerceAtLeast(0))); savePosition() } }
-    private fun previous() { player?.let { if (it.currentPosition > 3000) it.seekTo(0) else it.seekToPreviousMediaItem(); savePosition() } }
-    private fun next() { player?.let { it.seekToNextMediaItem(); savePosition() } }
-
-    private fun savePosition(completed: Boolean = false) {
-        val audio = player ?: return
-        if (!initialized) return
-        val identity = ReadingProgress.get(host.viewContext).session().identity
-        val key = positionKey(identity)
-        host.viewContext.getSharedPreferences("audiobook_positions", 0).edit()
-            .putInt("$key:part", if (completed) 0 else audio.currentMediaItemIndex.coerceAtLeast(0))
-            .putLong("$key:ms", if (completed) 0 else audio.currentPosition.coerceAtLeast(0))
-            .apply()
-        onProgressChanged()
+    private fun refreshSeekLabels() {
+        val seconds = seekSeconds
+        rewindButton.contentDescription = "Back $seconds seconds"
+        forwardButton.contentDescription = "Forward $seconds seconds"
+        if (::keys.isInitialized) keys.setHints(ReaderPadMap.hints(padState()))
     }
 
-    private fun positionKey(identity: String) = ReadingCheckpointKey.digest("$identity:$workId:${edition.sourceItemId}")
+    /** The parts, each with its length once read, the one playing ticked: choose one to jump to. */
+    private fun showParts() {
+        val book = listening.book ?: return
+        val choices = book.parts.mapIndexed { index, part ->
+            ChoiceOverlay.Choice(index.toString(), "${index + 1}. ${part.title}",
+                listening.partsMs.getOrNull(index)?.let { Fmt.clock(it) }.orEmpty(), selected = index == listening.part)
+        }
+        overlay.show("Parts", "${book.title} · ${book.parts.size} parts", choices, startIndex = listening.part) { id ->
+            id.toIntOrNull()?.let { ReadingAudio.seekTo(it, 0) }
+        }
+    }
+
+    private fun showSpeeds() {
+        if (!mine) return
+        overlay.pickValue("Speed", "Kept for this book", Listening.SPEEDS, Listening.SPEEDS.minByOrNull { kotlin.math.abs(it - listening.speed) } ?: 1f,
+            label = PlayerLabels::rate) { ReadingAudio.setSpeed(it) }
+    }
+
+    /** Off, minutes of listening, or the end of the part; it fades over its last half minute. */
+    private fun showSleep() {
+        if (!mine) return
+        val choices = listOf(ChoiceOverlay.Choice("off", "Off", selected = listening.sleep == null)) +
+            SleepChoice.ALL.mapIndexed { index, choice ->
+                ChoiceOverlay.Choice(index.toString(), PlayerLabels.sleepChoice(choice), selected = listening.sleep?.choice == choice)
+            }
+        overlay.show("Sleep timer", "Fades over its last half minute, then steps back so you hear that again", choices) { id ->
+            ReadingAudio.setSleep(id.toIntOrNull()?.let(SleepChoice.ALL::getOrNull))
+        }
+    }
+
+    /** Stop: the book comes off the player, its place kept, and the screen closes. */
+    private fun stopListening() {
+        if (mine) ReadingAudio.stop()
+        host.back()
+    }
 
     private fun openReader(readAlong: Boolean) {
         val target = if (readAlong) aligned else ebook
         if (target == null) return
-        savePosition()
+        // Reading takes over from listening: the book stops, its place kept.
+        if (mine) ReadingAudio.stop()
         host.back()
         host.push(EpubReaderScreen(api, workId, target.sourceItemId, title, ringVisible,
             onProgressChanged, readAlong = readAlong, readAlongAvailable = aligned != null,
@@ -344,7 +378,7 @@ class AudiobookScreen(
         }) { selected ->
             val next = narrations.getOrNull(selected.toIntOrNull() ?: -1) ?: return@show
             if (next.sourceItemId == edition.sourceItemId) return@show
-            savePosition()
+            if (mine) ReadingAudio.stop()
             host.back()
             host.push(AudiobookScreen(api, workId, next, title, ringVisible, narrations, ebook,
                 alignedOptions, onProgressChanged))
@@ -366,8 +400,8 @@ class AudiobookScreen(
 
     private fun action(label: String, click: () -> Unit): TextView = TextView(host.viewContext).apply {
         text = label; textSize = 13f; setTextColor(colors.primaryText)
-        gravity = Gravity.CENTER; minimumHeight = dp(48)
-        setPadding(dp(14), 0, dp(14), 0)
+        gravity = Gravity.CENTER; minimumHeight = dp(46)
+        setPadding(dp(13), 0, dp(13), 0)
         background = Styler.cardBackground(context, colors, 10f)
         Styler.makeFocusable(this)
         FocusDecorator.attach(this, ringVisible, scale = false)
@@ -375,6 +409,9 @@ class AudiobookScreen(
             if (focused) focusedControl = controls.indexOf(view).coerceAtLeast(0)
         }
         activateOnTap(click)
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            marginStart = dp(3); marginEnd = dp(3)
+        }
         controls += this
     }
 
@@ -382,7 +419,5 @@ class AudiobookScreen(
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
-        /** The jump of the transport's buttons and of L2 and R2 (the player's own setting comes in #16's run B). */
-        const val SEEK_SECONDS = 10
     }
 }

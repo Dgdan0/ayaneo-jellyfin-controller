@@ -32,8 +32,8 @@ class ConsolidationGuardTest {
             "Artwork.bind: it clears a blank path and cancels the view's previous request",
             // Seek and page previews keep their Disposable to cancel a stale scrub;
             // the detail header's backdrop falls back to the poster when it fails.
-            setOf("ui/Artwork.kt", "playback/PlayerScreen.kt", "reader/PagedImageReaderScreen.kt",
-                "ui/DetailComponents.kt")),
+            // (The comic reader's scrubber now shows the hub's thumbnail through Artwork.bind, #16.)
+            setOf("ui/Artwork.kt", "playback/PlayerScreen.kt", "ui/DetailComponents.kt")),
         Rule(Regex("""progressBarStyleHorizontal"""),
             "ProgressLine.create (or a stateful download row's own tint)",
             setOf("ui/ProgressLine.kt", "screens/downloads/DownloadRowView.kt",
@@ -93,6 +93,10 @@ class ConsolidationGuardTest {
         Rule(Regex("""PorterDuff\.Mode\.MULTIPLY"""),
             "ComfortLayerView with ScreenComfort: one warmth and one dim over a reader (#16, X3)",
             setOf("ui/ComfortLayerView.kt")),
+        Rule(Regex("""PlaybackService(\.|::)pause\b"""),
+            "AudioHandoff: one sound at a time; each player reports started and stopped, and the others pause (#16, A1)",
+            // The video player's own screen pausing its video, and the arbiter's hands.
+            setOf("playback/PlayerScreen.kt", "reader/AudioHandoff.kt")),
     )
 
     @Test

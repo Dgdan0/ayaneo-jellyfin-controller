@@ -40,6 +40,12 @@ class PlayerLabelsTest {
     fun `normal speed reads as a word`() {
         assertEquals("Normal", PlayerLabels.speed(1f))
         assertEquals("1.5×", PlayerLabels.speed(1.5f))
+        // Whole speeds without a nought (#16): "2×", never "2.0×".
+        assertEquals("2×", PlayerLabels.speed(2f))
+        assertEquals("1×", PlayerLabels.rate(1f))
+        assertEquals("1.25×", PlayerLabels.rate(1.25f))
+        assertEquals("0.75×", PlayerLabels.rate(.75f))
+        assertEquals("1.1×", PlayerLabels.rate(1.1f))
     }
 
     @Test

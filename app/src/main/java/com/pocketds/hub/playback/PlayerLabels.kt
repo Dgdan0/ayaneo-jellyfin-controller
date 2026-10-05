@@ -58,7 +58,38 @@ object PlayerLabels {
 
     fun subtitleLook(look: SubtitleLook): String = "${subtitleStyle(look.style)} · ${subtitleSize(look.size)}"
 
-    fun speed(value: Float): String = if (value == 1f) "Normal" else "${value}×"
+    fun speed(value: Float): String = if (value == 1f) "Normal" else rate(value)
+
+    /** A speed in a pill or beside a time: "1×", "1.25×", "2×" (never "2.0×"). */
+    fun rate(value: Float): String {
+        val text = if (value == value.toInt().toFloat()) value.toInt().toString()
+            else String.format(Locale.US, "%.2f", value).trimEnd('0').trimEnd('.')
+        return "$text×"
+    }
+
+    /**
+     * Listening (#16, A2): what is left as heard at the speed playing, "12 min
+     * left in part · 4h 10m in book"; the book's part drops while the lengths
+     * of its parts are still being read.
+     */
+    fun timeLeft(partLeftMs: Long, bookLeftMs: Long?): String = listOfNotNull(
+        "${Fmt.runtime((partLeftMs / 1_000).coerceAtLeast(60))} left in part",
+        bookLeftMs?.let { "${Fmt.runtime((it / 1_000).coerceAtLeast(60))} in book" }
+    ).joinToString(" · ")
+
+    /** The sleep timer on its button: "Sleep", "Sleep · 14:32", "Sleep · end of part", fading. */
+    fun sleep(timer: com.pocketds.hub.reader.SleepTimer?): String = when {
+        timer == null -> "Sleep"
+        timer.fading -> "Sleep · fading"
+        timer.choice == com.pocketds.hub.reader.SleepChoice.EndOfPart && timer.skipParts == 0 -> "Sleep · end of part"
+        else -> "Sleep · ${Fmt.clock(timer.remainingMs)}"
+    }
+
+    /** A sleep timer to choose: "15 minutes", "End of this part". */
+    fun sleepChoice(choice: com.pocketds.hub.reader.SleepChoice): String = when (choice) {
+        is com.pocketds.hub.reader.SleepChoice.Minutes -> if (choice.minutes == 60) "1 hour" else "${choice.minutes} minutes"
+        com.pocketds.hub.reader.SleepChoice.EndOfPart -> "End of this part"
+    }
 
     fun aspect(value: PlaybackAspect): String = when (value) {
         PlaybackAspect.FIT -> "Fit"

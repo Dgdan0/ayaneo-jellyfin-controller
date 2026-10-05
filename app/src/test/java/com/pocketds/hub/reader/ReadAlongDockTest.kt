@@ -23,13 +23,6 @@ class ReadAlongDockTest {
         assertEquals(0.0, ReadAlongDockText.fraction(ReadAlongPosition(3, 0), timeline(60)), 0.001)
     }
 
-    @Test fun `the speed without a trailing nought`() {
-        assertEquals("1×", ReadAlongDockText.speed(1f))
-        assertEquals("1.25×", ReadAlongDockText.speed(1.25f))
-        assertEquals("1.5×", ReadAlongDockText.speed(1.5f))
-        assertEquals("0.75×", ReadAlongDockText.speed(.75f))
-    }
-
     @Test fun `the sentence glows in the accent it is given`() {
         val gold = 0xFFE3B341.toInt()
         assertEquals("rgba(227, 179, 65, 0.28)", ReadAlongGlow.rgba(gold, ReadAlongGlow.WASH))

@@ -353,6 +353,10 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         }
         stage.addView(topBar, FrameLayout.LayoutParams(MATCH, Styler.dpInt(this, TopBarView.HEIGHT_DP), android.view.Gravity.TOP))
         com.pocketds.hub.ui.TopChrome.register(topBar)
+        // The audiobook playing while you browse (#16, A1): the reading-audio player's state, in the bar.
+        topBar.miniPlayer.onOpen = ::openListening
+        topBar.miniPlayer.onToggle = { com.pocketds.hub.reader.ReadingAudio.touched(); com.pocketds.hub.reader.ReadingAudio.toggle() }
+        chromeScope.launch { com.pocketds.hub.reader.ReadingAudio.state.collect { showListening() } }
 
         pageTitle = android.widget.TextView(this).apply {
             com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 19f)
@@ -553,6 +557,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         topBar.setCurrent(sections.current)
         topBar.setMode(if (top is ContentModeScreen) ContentModeSettings.get(this) else null)
         topBar.setOverArtwork(top.drawsUnderTopBar)
+        showListening()
         hintBar.setHints(top.hints())
         showArtwork()
         view?.post {
@@ -565,6 +570,28 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             // selected transfer could plainly be stopped.
             hintBar.setHints(top.hints())
         }
+    }
+
+    /**
+     * The mini player (#16, A1) shows while an audiobook is on the reading-audio
+     * player, except on an audiobook's own screen, which has the whole of it.
+     */
+    private fun showListening() {
+        if (!::topBar.isInitialized) return
+        val listening = com.pocketds.hub.reader.ReadingAudio.state.value
+        val book = listening.book?.takeIf { (sections.stack().peek() as? Screen) !is com.pocketds.hub.reader.AudiobookScreen }
+        val left = listening.bookLeftMs ?: listening.partLeftMs.takeIf { listening.partMs > 0 }
+        val wasShown = topBar.miniPlayer.visibility == View.VISIBLE
+        topBar.miniPlayer.show(book?.title, left?.let { "${com.pocketds.hub.state.Fmt.runtime((it / 1_000).coerceAtLeast(60))} left" }.orEmpty(),
+            listening.playing)
+        if (topBar.miniPlayer.hasFocus() || wasShown != (book != null)) refreshHints()
+    }
+
+    /** Ⓐ on the mini player: the audiobook's own screen, on top of wherever you are. */
+    private fun openListening() {
+        val screen = com.pocketds.hub.reader.ReadingAudio.state.value.book?.reopen?.invoke() ?: return
+        returnFocusFromUtilities()
+        push(screen)
     }
 
     /** Below the tabs, and below "‹ Title" for a pushed page with no heading of its own. */
@@ -725,6 +752,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
                 is PadAction.Step -> { moveFocus(action.direction); return }
                 PadAction.Activate -> { currentFocus?.performClick(); return }
                 PadAction.Back -> { returnFocusFromUtilities(); return }
+                PadAction.Primary -> if (topBar.miniPlayer.hasFocus()) { topBar.miniPlayer.onToggle(); refreshHints(); return }
                 is PadAction.Section -> {
                     if (sections.switchWithin(action.delta, CONTENT_SECTION_COUNT)) showCurrent()
                     return
@@ -1122,6 +1150,11 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             return
         }
         if (topBar.hasFocus()) {
+            if (topBar.miniPlayer.hasFocus()) {
+                hintBar.setHints(listOf(ButtonHint.activate("Open"), ButtonHint.primary(topBar.miniPlayer.toggleLabel),
+                    ButtonHint.back("Return to content")))
+                return
+            }
             val action = currentFocus?.contentDescription?.toString().orEmpty().removeSuffix(", selected")
             hintBar.setHints(listOf(ButtonHint.activate(action.ifBlank { "Open" }),
                 ButtonHint.back("Return to content")))

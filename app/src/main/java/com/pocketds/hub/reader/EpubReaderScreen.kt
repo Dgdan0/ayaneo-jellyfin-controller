@@ -51,7 +51,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
-import com.pocketds.hub.playback.PlaybackService
 import com.pocketds.hub.playback.PlayerControlIcon
 import com.pocketds.hub.playback.PlayerIconButton
 import org.readium.r2.navigator.Decoration
@@ -171,6 +170,10 @@ class EpubReaderScreen(
     private var selectedNarrationTarget: ReadAlongPosition? = null
     private var selectionGeneration = 0
     private var matchNarrationToPage = false
+    /** Read along (A5): the page turns with the voice, until you turn it yourself. */
+    private var following = true
+    /** Narration playing with the menu hidden: "Following · 1.25×" in a corner. */
+    private lateinit var narrationPill: TextView
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
@@ -356,7 +359,12 @@ class EpubReaderScreen(
             ReaderCommand.Retry -> openBook()
             is ReaderCommand.Scroll -> scrollPage(if (command.direction == Direction.UP) -SCROLL_STEP else SCROLL_STEP)
             is ReaderCommand.Glide -> scrollPage(command.dy * GLIDE)
-            ReaderCommand.FollowNarration -> narration?.let { highlightNarration(it.timeline.active(it.position.track, it.position.offsetMs)) }
+            ReaderCommand.FollowNarration -> follow()
+            is ReaderCommand.Sentence -> narration?.let { audio ->
+                following = true
+                if (!audio.stepSentence(command.delta)) host.notify(if (command.delta > 0) "The last sentence" else "The first sentence")
+                updateDock()
+            }
             ReaderCommand.Keys -> showKeys()
             else -> Unit
         }
@@ -554,7 +562,11 @@ class EpubReaderScreen(
     }
 
     private fun turn(delta: Int) {
-        switchToReading()
+        val audio = narration
+        if (audio != null && audio.isOn) {
+            following = false
+            updateDock()
+        } else switchToReading()
         val didMove = if (delta >= 0) navigator?.goForward(animated = true) else navigator?.goBackward(animated = true)
         if (didMove == false) host.notify(if (delta >= 0) "End of book" else "Start of book")
     }
@@ -676,25 +688,30 @@ class EpubReaderScreen(
     }
 
     private fun buildNarrationDock() {
-        narrationDock = ReadAlongDock(host.viewContext, colors).apply {
-            onBack = { narration?.jump(-10_000) }
-            onPlay = {
-                if (PlaybackService.currentPlan() != null) PlaybackService.pause(host.viewContext)
-                if (matchNarrationToPage) seekNarrationToPage(play = true) else narration?.toggle()
-            }
-            onForward = { narration?.jump(10_000) }
-            onSpeed = {
-                narration?.let { audio ->
-                    val speeds = listOf(.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
-                    audio.speed = speeds[(speeds.indexOf(audio.speed).coerceAtLeast(0) + 1) % speeds.size]
-                    updateDock()
-                }
-            }
-            onFollow = { narration?.let { highlightNarration(it.timeline.active(it.position.track, it.position.offsetMs)) } }
+        val seek = com.pocketds.hub.settings.PlaybackSettings.seekSeconds(host.viewContext)
+        narrationDock = ReadAlongDock(host.viewContext, colors, seek).apply {
+            onBack = { narration?.jump(-seek * 1_000L) }
+            // Video or an audiobook playing pauses as narration starts (AudioHandoff).
+            onPlay = { if (matchNarrationToPage) seekNarrationToPage(play = true) else narration?.toggle() }
+            onForward = { narration?.jump(seek * 1_000L) }
+            onSpeed = { narration?.let { setNarrationSpeed(Listening.nextSpeed(it.speed)) } }
+            onFollow = { follow() }
         }
         root.addView(narrationDock, FrameLayout.LayoutParams(MATCH, dp(ReadAlongDock.HEIGHT_DP), Gravity.BOTTOM).apply {
             leftMargin = dp(ReaderBars.INSET_DP); rightMargin = dp(ReaderBars.INSET_DP)
             bottomMargin = bars.dockMargin
+        })
+        narrationPill = TextView(host.viewContext).apply {
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setPadding(dp(12), dp(6), dp(14), dp(6))
+            visibility = View.GONE
+            if (!com.pocketds.hub.ui.OverlayButtons.panel(this, 999f)) setBackgroundColor(0xCC141518.toInt())
+            // A tap on it opens the menu, with the dock.
+            setOnClickListener { setControlsVisible(true) }
+        }
+        root.addView(narrationPill, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.END).apply {
+            rightMargin = dp(14); bottomMargin = dp(12)
         })
         narrationDock.focusableControls.forEach { view ->
             FocusDecorator.attach(view, ringVisible, scale = false)
@@ -747,6 +764,8 @@ class EpubReaderScreen(
             onSave = { point, completed -> narrationCheckpoint.record(point); narrationCompleted = completed; saveCurrent(immediate = true) },
             onError = { host.notify("Narration playback failed. Your position is saved; reading is still available.") }
         )
+        narration?.speed = com.pocketds.hub.settings.ListeningSettings.speed(host.viewContext, workId)
+        following = true
         narrationCheckpoint.ready(resume)
         bars.showBottomRow(false)
         narrationDock.visibility = if (controlsVisible) View.VISIBLE else View.GONE
@@ -765,7 +784,7 @@ class EpubReaderScreen(
             val locator = Locator.fromJSON(JSONObject().put("href", segment.textHref).put("type", "application/xhtml+xml")
                 .put("locations", JSONObject().put("fragments", org.json.JSONArray().put(segment.fragment)))) ?: return@launch
             val visible = reader.evaluateJavascript("(function(){var e=document.getElementById(${JSONObject.quote(segment.fragment)});if(!e)return false;var r=e.getBoundingClientRect();return r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;})()") == "true"
-            if (reader.currentLocator.value.href.toString() != segment.textHref || !visible) reader.go(locator, animated = false)
+            if (following && (reader.currentLocator.value.href.toString() != segment.textHref || !visible)) reader.go(locator, animated = false)
             reader.applyDecorations(listOf(Decoration("narration", locator, Decoration.Style.Highlight(colors.accent, isActive = true))), "readalong")
         }
     }
@@ -782,8 +801,32 @@ class EpubReaderScreen(
 
     private fun updateDock() {
         if (!::narrationDock.isInitialized) return
+        val audio = narration ?: run { narrationPill.visibility = View.GONE; return }
+        val label = followLabel(audio)
+        narrationDock.update(audio.isOn, audio.position, audio.timeline, audio.speed, if (audio.isOn) label else "")
+        // The pill: narration playing with the menu hidden says so, and where the page stands (A5).
+        narrationPill.visibility = if (audio.isOn && !controlsVisible) View.VISIBLE else View.GONE
+        narrationPill.text = "▶  $label · ${com.pocketds.hub.playback.PlayerLabels.rate(audio.speed)}"
+    }
+
+    /** "Following", "Reading", or "Alignment unavailable" on a page the narration never reaches. */
+    private fun followLabel(audio: ReadAlongPlayback): String =
+        ReadAlongFollow.label(following, latestLocator?.href?.toString()?.let(audio.timeline::narrates) ?: true)
+
+    /** L3, the dock's follow and "Return to narration": the page back to the voice. */
+    private fun follow() {
         val audio = narration ?: return
-        narrationDock.update(audio.isPlaying, audio.position, audio.timeline, audio.speed)
+        following = true
+        highlightNarration(audio.timeline.active(audio.position.track, audio.position.offsetMs))
+        updateDock()
+    }
+
+    /** A speed for this book's narration, kept for the book whichever way it is opened next (A5). */
+    private fun setNarrationSpeed(speed: Float) {
+        val audio = narration ?: return
+        audio.speed = speed
+        com.pocketds.hub.settings.ListeningSettings.setSpeed(host.viewContext, workId, audio.speed)
+        updateDock()
     }
 
     private fun inspectSelection(onNoSelection: (() -> Unit)? = null) {
@@ -856,6 +899,7 @@ class EpubReaderScreen(
         }
         matchNarrationToPage = false
         narrationCompleted = false
+        following = true
         audio.seek(target)
         narrationCheckpoint.record(target)
         highlightNarration(audio.timeline.active(target.track, target.offsetMs))
@@ -868,10 +912,10 @@ class EpubReaderScreen(
         overlay.show("Narration", "Recorded audiobook · synchronized text", listOf(
             ChoiceOverlay.Choice("here", "Listen from this page", "Moves the narration to the first visible aligned sentence"),
             ChoiceOverlay.Choice("follow", "Return to narration", "Show the sentence currently being read")
-        ) + listOf(.75f, 1f, 1.25f, 1.5f, 1.75f, 2f).map { ChoiceOverlay.Choice("speed:$it", "${it}× speed", selected = audio.speed == it) }) { id ->
+        ) + Listening.SPEEDS.map { ChoiceOverlay.Choice("speed:$it", "${com.pocketds.hub.playback.PlayerLabels.rate(it)} speed", selected = kotlin.math.abs(audio.speed - it) < 0.01f) }) { id ->
             when {
-                id.startsWith("speed:") -> audio.speed = id.removePrefix("speed:").toFloat()
-                id == "follow" -> highlightNarration(audio.timeline.active(audio.position.track, audio.position.offsetMs))
+                id.startsWith("speed:") -> setNarrationSpeed(id.removePrefix("speed:").toFloat())
+                id == "follow" -> follow()
                 id == "here" -> seekNarrationToPage(play = false)
             }
         }
@@ -890,6 +934,7 @@ class EpubReaderScreen(
             else {
                 matchNarrationToPage = false
                 narrationCompleted = false
+                following = true
                 audio.seek(target)
                 highlightNarration(audio.timeline.active(target.track, target.offsetMs))
                 narrationCheckpoint.record(target)
@@ -1240,6 +1285,7 @@ class EpubReaderScreen(
         pagePreview.setControlsVisible(visible)
         if (::narrationDock.isInitialized) {
             narrationDock.visibility = if (visible && narration != null) View.VISIBLE else View.GONE
+            updateDock()
         }
         pagePreview.refresh()
         refreshKeys()
