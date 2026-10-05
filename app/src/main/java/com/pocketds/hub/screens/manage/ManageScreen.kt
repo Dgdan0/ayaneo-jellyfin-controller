@@ -279,7 +279,7 @@ class ManageScreen(
 
     private fun ServiceHealth.toRow(): ServiceRow {
         val details = buildList {
-            if (version.isNotEmpty()) add("v$version")
+            if (version.isNotEmpty()) add(Fmt.version(version))
             if (latencyMs > 0) add("${latencyMs} ms")
             if (lastError.isNotEmpty()) add(lastError)
             addAll(notes.filter { it.isNotBlank() })
@@ -517,7 +517,7 @@ class ManageScreen(
         detail = buildList {
             add(HubSettings.baseUrl(host.viewContext).ifEmpty { "No address configured" })
             health?.let {
-                if (it.version.isNotEmpty()) add("v${it.version}")
+                if (it.version.isNotEmpty()) add(Fmt.version(it.version))
                 add("up ${Fmt.uptime(it.uptimeSeconds)}")
                 add("${it.tokenCount} access token${if (it.tokenCount == 1) "" else "s"}")
             }

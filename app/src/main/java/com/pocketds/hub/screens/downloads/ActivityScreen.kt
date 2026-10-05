@@ -547,8 +547,9 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
                     .minWithOrNull(compareBy({ kotlin.math.abs(centreY(it) - cy) }, { kotlin.math.abs(centreX(it) - cx) }))
                 when {
                     next != null -> next.requestFocus()
-                    // Up from the top of a column is the app's: it goes to the tabs.
-                    direction == Direction.UP -> false
+                    // Up from the top of a column goes to the tabs. Left to the app's own search,
+                    // it found "See all" in the next column, higher than Normal speed.
+                    direction == Direction.UP -> host?.focusTabs() ?: false
                     else -> true
                 }
             }

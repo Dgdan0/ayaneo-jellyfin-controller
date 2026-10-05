@@ -145,4 +145,13 @@ class FmtTest {
         assertEquals(0, Fmt.readingPercent(0.0))
         assertEquals(0, Fmt.readingPercent(Double.NaN))
     }
+
+    @Test
+    fun `a version has one v however the service writes it`() {
+        // qBittorrent answers "v5.0.4"; Services read "vv5.0.4" on the Pocket.
+        assertEquals("v5.0.4", Fmt.version("v5.0.4"))
+        assertEquals("v4.0.20.3014", Fmt.version("4.0.20.3014"))
+        assertEquals("v1.2", Fmt.version(" V1.2 "))
+        assertEquals("", Fmt.version(""))
+    }
 }

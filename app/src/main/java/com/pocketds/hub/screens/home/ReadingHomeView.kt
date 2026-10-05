@@ -102,6 +102,14 @@ class ReadingHomeView(
     /** The front cover of the series in focus under Your series, where no single book is selected. */
     private var focusedSeriesCover: String? = null
     /**
+     * The series under Your series that had focus, and each fan by its series:
+     * Back from a series page landed on Resume reading, a press from opening
+     * the book, rather than on the series you had opened.
+     */
+    private var focusedSeries: String? = null
+    private var resumeSeries: String? = null
+    private val seriesFans = mutableMapOf<String, View>()
+    /**
      * Where focus was when the screen went (row, book, list button). Opening a
      * book clears this screen's focus while it is still showing, which hands
      * focus to the first card the scroller finds -- and its listener then
@@ -152,7 +160,7 @@ class ReadingHomeView(
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
             FocusDecorator.listen(this, ringVisible) { view, focused ->
-                if (focused) focusedListHeader = null
+                if (focused) { focusedListHeader = null; focusedSeries = null }
             }
             activateOnTap { promptName("New reading list", "") { name ->
                 ReadingListsRepository.update(context) { it.create(name) }
@@ -211,7 +219,10 @@ class ReadingHomeView(
     }
 
     fun onHide() {
-        if (hasFocus()) resumeAt = Triple(selectedRow, selectedWork, focusedListHeader)
+        if (hasFocus()) {
+            resumeAt = Triple(selectedRow, selectedWork, focusedListHeader)
+            resumeSeries = focusedSeries
+        }
         generation++
         job?.cancel()
         job = null
@@ -265,6 +276,12 @@ class ReadingHomeView(
     }
 
     fun requestInitialFocus(): Boolean {
+        (resumeSeries ?: focusedSeries)?.let { id -> seriesFans[id]?.takeIf { it.isAttachedToWindow }?.let { fan ->
+            resumeSeries = null; resumeAt = null
+            fan.post { fan.requestFocus() }
+            return true
+        } }
+        resumeSeries = null
         resumeAt?.let { (row, work, header) -> selectedRow = row; selectedWork = work; focusedListHeader = header }
         resumeAt = null
         focusedListHeader?.let { id -> headerActions[id]?.let { button ->
@@ -454,7 +471,7 @@ class ReadingHomeView(
                 FocusDecorator.attach(this, ringVisible, scale = false)
                 activateOnTap { showListManagement(row) }
                 FocusDecorator.listen(this, ringVisible) { view, focused ->
-                    if (focused) { focusedListHeader = row.id; host.refreshHints() }
+                    if (focused) { focusedListHeader = row.id; focusedSeries = null; host.refreshHints() }
                 }
             }
             headerActions[row.id] = manage
@@ -498,6 +515,7 @@ class ReadingHomeView(
                 FocusDecorator.listen(this, ringVisible) { view, focused ->
                     if (focused) {
                         focusedListHeader = null
+                        focusedSeries = null
                         selectedRow = row.id
                         selectedWork = work.id
                         host.refreshHints()
@@ -533,7 +551,7 @@ class ReadingHomeView(
             details.activateOnTap { host.push(ReadingWorkScreen(api, hero.id, hero.title, ringVisible)) }
             listOf(resume, details).forEach { button ->
                 FocusDecorator.listen(button, ringVisible) { _, focused ->
-                    if (focused) { focusedListHeader = null; selectedRow = row.id; selectedWork = hero.id; host.refreshHints() }
+                    if (focused) { focusedListHeader = null; focusedSeries = null; selectedRow = row.id; selectedWork = hero.id; host.refreshHints() }
                 }
             }
         }
@@ -625,7 +643,7 @@ class ReadingHomeView(
         Styler.makeFocusable(this)
         FocusDecorator.attach(this, ringVisible, scale = false)
         FocusDecorator.listen(this, ringVisible) { _, focused ->
-            if (focused) { focusedListHeader = null; selectedRow = row.id; selectedWork = work.id; host.refreshHints() }
+            if (focused) { focusedListHeader = null; focusedSeries = null; selectedRow = row.id; selectedWork = work.id; host.refreshHints() }
         }
         activateOnTap { host.push(ReadingWorkScreen(api, work.id, work.title, ringVisible)) }
         cards[row.id to work.id] = this
@@ -692,7 +710,7 @@ class ReadingHomeView(
         Styler.makeFocusable(this)
         FocusDecorator.attach(this, ringVisible, scale = false)
         FocusDecorator.listen(this, ringVisible) { _, focused ->
-            if (focused) { focusedListHeader = null; selectedRow = row.id; selectedWork = work.id; host.refreshHints() }
+            if (focused) { focusedListHeader = null; focusedSeries = null; selectedRow = row.id; selectedWork = work.id; host.refreshHints() }
         }
         activateOnTap { host.push(ReadingWorkScreen(api, work.id, work.title, ringVisible)) }
         cards[row.id to work.id] = this
@@ -726,13 +744,15 @@ class ReadingHomeView(
                 orientation = LinearLayout.HORIZONTAL
                 clipChildren = false
             }
+            seriesFans.clear()
             seriesShelf.forEach { item ->
-                line.addView(SeriesStackView(context, colors, ringVisible).apply {
+                line.addView(SeriesStackView(context, colors, ringVisible).also { seriesFans[item.id] = it }.apply {
                     bind(item, loader, api::imageUrl)
                     activateOnTap { host.push(ReadingWorkScreen(api, item.id, item.title, ringVisible)) }
                     // A series is not a book on a list: Y has nothing to act on here.
                     onFocused = {
                         focusedListHeader = null; selectedRow = ""; selectedWork = ""
+                        focusedSeries = item.id
                         focusedSeriesCover = item.covers.firstOrNull()
                         host.refreshHints()
                     }

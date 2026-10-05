@@ -337,6 +337,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
                 ContentModeSettings.set(this@HubActivity, mode)
                 refreshAppearance()
                 (sections.stack().peek() as? ContentModeScreen)?.selectContentMode(mode)
+                leaveOtherSide(mode)
                 setMode(mode)
                 post { focusMode(mode) }
                 refreshHints()
@@ -869,6 +870,28 @@ class HubActivity : AppCompatActivity(), ScreenHost {
             // "Stop" after the cursor moves onto an item that is already stopped.
             refreshHints()
         }
+    }
+
+    /**
+     * Switching between Media and Books takes the other side's pages off the
+     * other tabs, so each opens on the side you chose. A film's page stayed on
+     * Library under a lit Books, and Back from it went to the Anime library.
+     */
+    private fun leaveOtherSide(mode: com.pocketds.hub.state.ContentMode) {
+        for (index in 0 until CONTENT_SECTION_COUNT) {
+            if (index == sections.current) continue
+            val stack = sections.stack(index)
+            while (true) {
+                val side = (stack.peek() as? Screen)?.contentDomain ?: break
+                if (side == mode) break
+                (stack.dropHidden() as? Screen)?.let(::detach) ?: break
+            }
+        }
+    }
+
+    override fun focusTabs(): Boolean {
+        utilityReturnFocus = currentFocus?.takeIf { it.isShown }
+        return topBar.focusFirst().also { if (it) refreshHints() }
     }
 
     private fun returnFocusFromUtilities() {

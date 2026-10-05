@@ -703,11 +703,13 @@ class DiscoverScreen(
         val hit = focusedHit()
         // Ⓧ opens the request *form* on the card you are looking at. It used to
         // open the detail screen, so requesting took two presses and a second
-        // menu -- which is not what "request" reads as.
-        if (hit != null && !hit.canRequest) {
-            hints.add(ButtonHint.primary(if (hit.canPlay) "In library" else "—").copy(enabled = false))
-        } else {
-            hints.add(ButtonHint.primary(if (flow.busy) "Requesting…" else "Request"))
+        // menu -- which is not what "request" reads as. With no card in focus
+        // (the search field) it does nothing, so it is not offered: the search
+        // field once said "Ⓧ Request" on the Pocket.
+        when {
+            hit == null -> if (flow.busy) hints.add(ButtonHint.primary("Requesting…").copy(enabled = false))
+            !hit.canRequest -> hints.add(ButtonHint.primary(if (hit.canPlay) "In library" else "—").copy(enabled = false))
+            else -> hints.add(ButtonHint.primary(if (flow.busy) "Requesting…" else "Request"))
         }
         // Ⓨ is PadAction.Secondary. It was wired to Refresh, which is the Select
         // button -- so the chip said Ⓨ and the Y button did nothing.
@@ -909,11 +911,12 @@ class DiscoverScreen(
                 is HubResult.Ok -> {
                     if (requestedType != readingType) return@launch
                     val body = result.value
-                    readingRowsByType[requestedType] = body.rows
-                    readingRowsAdapter.submit(body.rows)
+                    val shown = ReadingDiscoverRows.shown(body.rows, requestedType)
+                    readingRowsByType[requestedType] = shown
+                    readingRowsAdapter.submit(shown)
                     if (mode == ContentMode.BOOKS && !searching) {
                         statusLine.showStatus(
-                            StatusText.loaded("${body.rows.size} rows", body.cache, body.partial.map { it.service }),
+                            StatusText.loaded("${shown.size} rows", body.cache, body.partial.map { it.service }),
                             colors
                         )
                         host?.refreshHints()

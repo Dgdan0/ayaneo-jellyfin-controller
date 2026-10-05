@@ -58,6 +58,18 @@ class ScreenStack {
         return true
     }
 
+    /**
+     * Takes the top off a stack that is not showing, without showing the one
+     * under it: that one shows when its section is chosen again. Null at the
+     * root, which stays.
+     */
+    fun dropHidden(): StackScreen? {
+        if (entries.size <= 1) return null
+        val removed = entries.removeAt(entries.lastIndex)
+        removed.onDestroyView()
+        return removed
+    }
+
     /** Hide the top without tearing anything down. For switching away. */
     fun hideTop() {
         entries.lastOrNull()?.onHide()

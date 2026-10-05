@@ -165,6 +165,11 @@ interface ScreenHost {
     /** Re-read [Screen.pageArtwork], after it changed without focus moving. */
     fun pageArtworkChanged() = Unit
     /**
+     * Up from the top of a screen that walks its own columns: the tabs, as Up
+     * from the top of any page reaches them, whatever another column has higher.
+     */
+    fun focusTabs(): Boolean = false
+    /**
      * Artwork a screen is about to show, such as the cards a row binds, so its
      * colours are known before focus reaches it and the page re-tints at once.
      * Nothing in Classic.

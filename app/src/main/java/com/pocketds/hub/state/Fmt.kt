@@ -105,6 +105,9 @@ object Fmt {
      * How long a machine has been up: "1 day 4 hours", "3 hours 12 min",
      * "8 min". The server monitor wrote "1 days 0 hours".
      */
+    /** A service's version with one "v" before it: qBittorrent writes "v5.0.4", Sonarr "4.0.20" (Services read "vv5.0.4"). */
+    fun version(raw: String): String = raw.trim().removePrefix("v").removePrefix("V").let { if (it.isEmpty()) "" else "v$it" }
+
     fun uptime(seconds: Long): String {
         if (seconds <= 0) return ""
         val days = seconds / 86_400

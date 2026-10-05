@@ -232,10 +232,10 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
     private var leading: View? = null
 
     /** Something in the poster's place: a series page shows a fan of its covers. */
-    fun replacePoster(view: View, widthDp: Int, heightDp: Int) {
+    fun replacePoster(view: View, widthDp: Int, heightDp: Int, startDp: Int = 0) {
         leading?.let(row::removeView)
         leading = view
-        row.addView(view, 0, LinearLayout.LayoutParams(dp(widthDp), dp(heightDp)).apply { marginEnd = dp(20) })
+        row.addView(view, 0, LinearLayout.LayoutParams(dp(widthDp), dp(heightDp)).apply { marginEnd = dp(20); marginStart = dp(startDp) })
         requestLayout()
     }
 

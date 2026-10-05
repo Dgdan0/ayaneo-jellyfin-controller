@@ -26,8 +26,6 @@ import com.pocketds.hub.net.HubResult
 import com.pocketds.hub.settings.NotificationReadStore
 import com.pocketds.hub.settings.NotificationSettings
 import com.pocketds.hub.state.ContentMode
-import com.pocketds.hub.ui.AppIcon
-import com.pocketds.hub.ui.AppIconDrawable
 import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.ui.DashboardParts
 import com.pocketds.hub.ui.FocusDecorator
@@ -228,6 +226,7 @@ class NotificationsScreen(
         }
 
     private fun render(response: NotificationsResponse) {
+        val first = !hasContent
         hasContent = true
         latestResponse = response
         val byService = response.sections.associateBy { it.service }
@@ -245,7 +244,10 @@ class NotificationsScreen(
         onUnreadChanged(unreadIds.size + com.pocketds.hub.settings.LocalAlerts.unread(host.viewContext))
         updateStatus(response)
         if (visibleColumns().none { it.contains(selectedID) }) selectedID = ""
-        requestInitialFocus()
+        // The first answer puts focus on the notes; a later poll only puts it back
+        // when a rebound card lost it. A poll every few seconds pulled focus back
+        // from the top bar on the Pocket, between Right and A.
+        if (first || deviceAlerts.rootView.findFocus()?.isShown != true) requestInitialFocus()
         host.refreshHints()
     }
 
@@ -326,8 +328,8 @@ class NotificationsScreen(
                 orientation = HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 addView(ImageView(context).apply {
-                    if (service in BOOK_SERVICES) setImageDrawable(AppIconDrawable(if (service == "kavita") AppIcon.COMIC else AppIcon.BOOK, colors.primaryText))
-                    else com.pocketds.hub.ui.ServiceLogo.bind(this,serviceLogo(service))
+                    // Every service its own logo, the reading ones too (#8).
+                    com.pocketds.hub.ui.ServiceLogo.bind(this, serviceLogo(service))
                     scaleType = ImageView.ScaleType.CENTER_INSIDE
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 }, LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(9) })

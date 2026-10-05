@@ -127,5 +127,7 @@ class CoverFanView(context: Context, colors: PocketColors, coverWidthDp: Int, pr
 
         /** A Glass fan's covers: the prototype's 64dp on the Pocket. */
         const val GLASS_COVER = 64
+        /** How far past its box the outer cover of a Glass fan leans: room to leave at a page's edge. */
+        const val GLASS_LEAN_DP = 8
     }
 }

@@ -611,7 +611,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | One request at a time, busy flag that cannot stick | `state/JobSlot` |
 | Asking again on a timer | `state/Poller` + `PollCadence` (backoff, settle window, hidden stops) |
 | Status line wording and tone | `state/StatusText` + `TextView.showStatus`. On Glass a line shows only with news (`StatusText.shows`: data a minute or more old, partial, degraded or failed, or a `StatusText.notice` such as why a list is empty), as a quiet glass chip round its words; Home's sits in the hero's top corner, clear of its words. A page's own line under its heading ("94 unread notifications", "All 12 running") is `TextView.showSummary`: always shown, plain words |
-| Numbers, times, sizes | `state/Fmt` |
+| Numbers, times, sizes | `state/Fmt` (`Fmt.version`: one "v" before a service's version, however it writes it) |
 | How far through a book, as a percent | `Fmt.readingPercent` / `readingPercentLabel`: the floor, 1 to 99 while under way and 100 only when finished, so a book's facts, its Resume button, its card and the reader agree (#16; the facts once said 1% where Resume said 2%) |
 | Resume point / finished / not started | `playback/ResumeRules` (mirrors the hub's `decideWatchPosition`) |
 | Watched tick vs progress bar | `ResumeRules.showsWatched` / `watchLabel`: a saved position wins, because watched + position is a rewatch |
@@ -642,7 +642,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Books Library's view: Series, Authors, or every book on its own | `ReadingLibraryGridScreen` (`view`; Books asks the hub for `view=works`); each view's order in `DomainPreferences` (`sort`, `bookSort`, `readingView`) |
 | A person as a round portrait, the ring round it | `DetailArtworkCardView.portrait` (an author, a title's cast row in `CastRowView`) |
 | Books Home's top: the book being read, the series being read | `screens/home/ContinueReadingView` (Resume reading opens `ReadingWorkScreen(openReader = true)`; on Glass no card, the cover at full size with the words beside its foot, Resume reading gold), `SeriesStackView` fed by `ReadingShelves.yourSeries` |
-| A series as a fan of covers (Books Home, the series page) | `ui/CoverFanView`; which covers from `ReadingShelves.fanCovers` (up to four), the book being read from `onNumber`; "On #6 · 1 of 6 finished" from `ReadingBookFacts.seriesProgress`. `glass = true` is the prototype's fan: 64dp covers leaning about their feet, the book being read on top at the right, the outer two leaning further with focus (`spread`) |
+| A series as a fan of covers (Books Home, the series page) | `ui/CoverFanView`; which covers from `ReadingShelves.fanCovers` (up to four), the book being read from `onNumber`; "On #6 · 1 of 6 finished" from `ReadingBookFacts.seriesProgress`. `glass = true` is the prototype's fan: 64dp covers leaning about their feet, the book being read on top at the right, the outer two leaning further with focus (`spread`); at a page's edge it stands in by `GLASS_LEAN_DP`, how far its outer cover leans, or the screen cuts it |
 | Books Home rows | `ReadingShelves`: `onePerSeries`, `nextInSeries`, `BUILT_IN` (rows the app fills; list actions only on the person's own) |
 | Reading times from the hub | `ReadingShelves.timestamp` (Storyteller writes `2026-09-27 03:16:47`, UTC with no zone) |
 | Hub: an author page id | `readingAuthorRef` (Authors view and a book's author link) |
@@ -667,6 +667,9 @@ Most of these exist because several screens had drifted copies of the same thing
 | The calendar: weeks and their labels, releases grouped per title and day, whether one has arrived (Soon, Aired, Missing, In library) | `screens/discover/UpcomingPresentation` (Upcoming and the Activity dashboard) |
 | Hub: intro/credits segments | Jellyfin's own, else `segmentsOrChapters` from whole chapter names ("OP", "Ending", "Credits") |
 | Paging with L2/R2 | `HubActivity.page` (moves focus with the scroll) |
+| Up from the top of a screen that walks its own columns | `ScreenHost.focusTabs()`: the tabs, as Up from the top of any page reaches them (Activity's left column reached "See all" in the next) |
+| Switching between Media and Books | `HubActivity.leaveOtherSide`: the other side's pages come off the other tabs (`ScreenStack.dropHidden`, by each page's `contentDomain`), so each tab opens on the side chosen; a film's page stayed on Library under a lit Books |
+| Books Discover's rows | `screens/discover/ReadingDiscoverRows.shown`: an empty row is left out, and under All a row whose name does not say what it holds says it ("Trending now · Manga"), since BookKeeprr names each kind's rows alike |
 | Loading the next page of a list or row | `state/PagedLoadState`; one per row via `state/RowPaging` |
 | A scrolling container | `ui/FocusScrollView` / `FocusHorizontalScrollView` (never a focus stop; `revealAbove` keeps a heading over the focused row visible). On Glass a scrolled page's words fade out at its top edge under the bar (`ui/glass/TopFade`) |
 | A list of rows whose focused row rests at the top, heading and all (Home, Discover) | `ui/PinnedRows` (`RecyclerView.pinFocusedRows`; leaves room under the last row; put the list in a clipping frame; a row with two parts implements `PinnedRowsLayoutManager.Anchor`) |

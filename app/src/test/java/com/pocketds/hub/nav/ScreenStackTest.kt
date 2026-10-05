@@ -94,6 +94,20 @@ class ScreenStackTest {
     }
 
     @Test
+    fun `a hidden stack drops its top without showing the next, and keeps its root`() {
+        val stack = ScreenStack()
+        stack.push(screen("a"))
+        stack.push(screen("b"))
+        stack.hideTop()
+        log.clear()
+        assertEquals("b", (stack.dropHidden() as FakeScreen).name)
+        // Shown when its section is chosen again, not now.
+        assertEquals(listOf("b.destroy"), log)
+        assertEquals(null, stack.dropHidden())
+        assertEquals(1, stack.depth)
+    }
+
+    @Test
     fun `clear tears everything down from the top down`() {
         val stack = ScreenStack()
         stack.push(screen("a"))

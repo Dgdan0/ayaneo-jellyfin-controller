@@ -843,9 +843,10 @@ class ReadingWorkScreen(
         if (work.entityType == "collection") {
             val coverDp = if (glass) CoverFanView.GLASS_COVER else FAN_COVER_DP
             val (width, height) = CoverFanView.sizeDp(coverDp, glass)
+            // Glass: in from the page's edge by how far its outer cover leans, or the screen cuts it.
             replacePoster(CoverFanView(context, colors, coverDp, glass).apply {
                 bind(com.pocketds.hub.screens.home.ReadingShelves.fanCovers(work), Artwork.loader(api, context), api::imageUrl)
-            }, width, height)
+            }, width, height, startDp = if (glass) CoverFanView.GLASS_LEAN_DP else 0)
         }
         bindArtwork("book", null, work.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
             Artwork.loader(api, context))
