@@ -24,6 +24,18 @@ class ReadingBookFactsTest {
         assertEquals("Book 2 of Mistborn · 29h 50m · read by Michael Kramer", ReadingBookFacts.line(well, null))
     }
 
+    @Test fun `an audiobook while you listen says what it is, its place, its author and its reader`() {
+        val well = ReadingWork(title = "Well of Ascension", authorRefs = listOf(ReadingAuthorRef("ra_2", "Brandon Sanderson")),
+            series = "Mistborn", seriesIndex = 2.0)
+        assertEquals("Audiobook · Book 2 · Mistborn", ReadingBookFacts.listeningEyebrow(well))
+        assertEquals("Brandon Sanderson · read by Michael Kramer", ReadingBookFacts.listeningLine(well, " Michael Kramer "))
+        // Before the book's details arrive, and outside a series.
+        assertEquals("Audiobook", ReadingBookFacts.listeningEyebrow(null))
+        assertEquals("Audiobook", ReadingBookFacts.listeningEyebrow(ReadingWork(title = "Dark Matter")))
+        assertEquals("read by Jon Lindstrom", ReadingBookFacts.listeningLine(null, "Jon Lindstrom"))
+        assertEquals("Blake Crouch", ReadingBookFacts.listeningLine(ReadingWork(authors = listOf("Blake Crouch")), ""))
+    }
+
     @Test fun `without author links the author is named in the line`() {
         val darkMatter = ReadingWork(title = "Dark Matter", authors = listOf("Blake Crouch"), year = 2016)
         assertEquals("Blake Crouch · 2016", ReadingBookFacts.line(darkMatter, null))

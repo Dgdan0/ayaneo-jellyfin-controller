@@ -1312,7 +1312,8 @@ class ReadingWorkScreen(
             narrations = ReadingWorkPresentation.audiobooks(work),
             ebook = work.editions.firstOrNull { it.kind == "ebook" && it.availability == "available" },
             alignedOptions = ReadingWorkPresentation.readAlongEditions(work),
-            onProgressChanged = ::requestRefreshAfterReading
+            onProgressChanged = ::requestRefreshAfterReading,
+            work = work
         ))
     }
 

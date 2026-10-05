@@ -6,7 +6,7 @@ import android.graphics.drawable.Drawable
 import android.view.Gravity
 import android.widget.TextView
 
-enum class AppIcon { CLOSE, CONTENTS, APPEARANCE, PREVIOUS, NEXT, PREVIOUS_ITEM, NEXT_ITEM, THIRDS, FIT, DIRECTION, ZOOM_IN, ZOOM_OUT, SEARCH, OPEN, REFRESH, BOOK, HEADPHONES, READ_ALONG, BOOKMARK, BOOKMARK_FILLED, COMIC, MOVIE, TV, SETTINGS, CHECK, MEDIA, SORT, PANEL, PLAY, INFO, PERSON, SERIES, ADD, STAR, HOME, SUBTITLES, DOWNLOAD, MORE, ARRANGE, GRIP, PAD, COMFORT, PAGES }
+enum class AppIcon { CLOSE, CONTENTS, APPEARANCE, PREVIOUS, NEXT, PREVIOUS_ITEM, NEXT_ITEM, THIRDS, FIT, DIRECTION, ZOOM_IN, ZOOM_OUT, SEARCH, OPEN, REFRESH, BOOK, HEADPHONES, READ_ALONG, BOOKMARK, BOOKMARK_FILLED, COMIC, MOVIE, TV, SETTINGS, CHECK, MEDIA, SORT, PANEL, PLAY, INFO, PERSON, SERIES, ADD, STAR, HOME, SUBTITLES, DOWNLOAD, MORE, ARRANGE, GRIP, PAD, COMFORT, PAGES, SPEED, SLEEP, STOP }
 
 /** Original vector geometry; controls do not depend on the vendor's symbol font. */
 class AppIconDrawable(private val icon: AppIcon, color: Int) : Drawable() {
@@ -61,6 +61,12 @@ class AppIconDrawable(private val icon: AppIcon, color: Int) : Drawable() {
             AppIcon.PAGES->{canvas.drawRoundRect(4f,3f,11f,11f,1.6f,1.6f,paint);canvas.drawRoundRect(13f,3f,20f,11f,1.6f,1.6f,paint);canvas.drawRoundRect(4f,13f,11f,21f,1.6f,1.6f,paint);canvas.drawRoundRect(13f,13f,20f,21f,1.6f,1.6f,paint)}
             // A sun: how bright and how warm a reader draws its page (#16, X3).
             AppIcon.COMFORT->{canvas.drawCircle(12f,12f,4f,paint);for(i in 0 until 8){val a=Math.toRadians(i*45.0);val c=Math.cos(a).toFloat();val d=Math.sin(a).toFloat();line(12f+c*7f,12f+d*7f,12f+c*9.5f,12f+d*9.5f)}}
+            // A dial and its needle: how fast a book is read to you (#16, A2).
+            AppIcon.SPEED->{path("M4.2 17.5a9 9 0 1 1 15.6 0");line(12f,14f,16.5f,8.5f);paint.style=Paint.Style.FILL;canvas.drawCircle(12f,14f,1.4f,paint);paint.style=Paint.Style.STROKE}
+            // A crescent moon: the sleep timer (#16, A2).
+            AppIcon.SLEEP->path("M20 14.5A8.5 8.5 0 1 1 9.5 4a6.6 6.6 0 0 0 10.5 10.5Z")
+            // A square: stop listening, the book off the player (#16, A1).
+            AppIcon.STOP->canvas.drawRoundRect(6.5f,6.5f,17.5f,17.5f,2.2f,2.2f,paint)
             // Two columns of three dots: something that can be held and moved (#15).
             AppIcon.GRIP->{paint.style=Paint.Style.FILL;for(x in listOf(8.5f,15.5f))for(y in listOf(5f,12f,19f))canvas.drawCircle(x,y,2.1f,paint);paint.style=Paint.Style.STROKE}
         }

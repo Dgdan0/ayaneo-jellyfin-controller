@@ -124,6 +124,21 @@ object ReadingBookFacts {
     }
 
     /**
+     * Glass: over an audiobook's title while you listen (#16): "Audiobook · Book
+     * 2 · Mistborn", or just "Audiobook" outside a series or before the book's
+     * details have arrived.
+     */
+    fun listeningEyebrow(work: ReadingWork?): String =
+        listOfNotNull("Audiobook", work?.let { eyebrow(it) }?.takeUnless { it == "Book" || it == "Audiobook" }).joinToString(" · ")
+
+    /** Under it: who wrote the book and who reads this narration, "Brandon Sanderson · read by Michael Kramer". */
+    fun listeningLine(work: ReadingWork?, narrator: String): String = listOfNotNull(
+        work?.let { book -> book.authors.ifEmpty { book.authorRefs.map { it.name } }.filter(String::isNotBlank).joinToString(", ") }
+            ?.takeIf(String::isNotBlank),
+        narrator.trim().takeIf(String::isNotBlank)?.let { "read by $it" }
+    ).joinToString(" · ")
+
+    /**
      * Under a book you are also reading, on Glass's Books home: "Blake Crouch ·
      * 3%", "Mistborn Original Trilogy #1 · 1%". Started is never 0%.
      */

@@ -25,6 +25,14 @@ class AudiobookArchiveTest {
         } finally { root.deleteRecursively() }
     }
 
+    @Test fun `a part is shown without its audio extension`() {
+        assertEquals("01 Opening", AudiobookArchive.partLabel("01 Opening.wav"))
+        assertEquals("Chapter 1. Intro", AudiobookArchive.partLabel("Chapter 1. Intro.MP3"))
+        // Only an audio extension goes: a name with a dot of its own keeps it.
+        assertEquals("Vol. 2", AudiobookArchive.partLabel("Vol. 2"))
+        assertEquals(".mp3", AudiobookArchive.partLabel(".mp3"))
+    }
+
     @Test fun `empty or non audio archives cannot open as a book`() {
         val root = createTempDir(prefix = "audiobook-empty-")
         try {

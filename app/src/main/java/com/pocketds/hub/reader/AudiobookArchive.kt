@@ -11,6 +11,12 @@ object AudiobookArchive {
     private const val MAX_PART_BYTES = 4L * 1024 * 1024 * 1024
     private const val MAX_BOOK_BYTES = 12L * 1024 * 1024 * 1024
 
+    /** A part's name to show: its file name without the audio extension ("01 Opening.wav" is "01 Opening"). */
+    fun partLabel(title: String): String {
+        val suffix = title.substringAfterLast('.', "").lowercase()
+        return if (suffix in audioExtensions && title.length > suffix.length + 1) title.substringBeforeLast('.') else title
+    }
+
     fun hasPlayableAudio(file: File): Boolean = runCatching {
         ZipFile(file).use { zip -> zip.entries().asSequence().any(::isAudio) }
     }.getOrDefault(false)

@@ -36,6 +36,25 @@ object ReaderFixtures {
         return ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray().also { bitmap.recycle() }
     }
 
+    /** A generated square cover: a night sky with a low sun and the title, never a real book's. */
+    fun cover(size: Int, title: String): ByteArray {
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.rgb(28, 44, 86))
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = Color.rgb(233, 150, 64)
+        canvas.drawCircle(size * .68f, size * .62f, size * .2f, paint)
+        paint.color = Color.rgb(14, 22, 44)
+        canvas.drawRect(0f, size * .7f, size.toFloat(), size.toFloat(), paint)
+        paint.color = Color.WHITE
+        paint.textSize = size / 11f
+        paint.textAlign = Paint.Align.CENTER
+        title.split(' ').chunked(2).forEachIndexed { line, words ->
+            canvas.drawText(words.joinToString(" "), size / 2f, size * (.18f + line * .11f), paint)
+        }
+        return ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 88, it) }.toByteArray().also { bitmap.recycle() }
+    }
+
     /**
      * A short generated book; [aligned] adds a media overlay narrating its
      * first eight sentences, [sentenceSeconds] each, over generated silence.

@@ -293,12 +293,39 @@ class ReaderListeningTest {
         val edition = ReadingEdition(id = "audio-1", workId = work, source = "storyteller", sourceItemId = "audio-1",
             kind = "audiobook", format = "Audiobook", narrator = "A generated voice")
         val other = edition.copy(id = "audio-2", sourceItemId = "audio-2", narrator = "Another generated voice")
-        // Three parts of generated silence, a minute each.
+        // Three parts of generated silence, a minute each, and a generated cover.
         val parts = listOf("01 Opening.wav" to 60, "02 The ridge.wav" to 60, "03 The observatory.wav" to 60)
-        val server = ReaderFixtures.fileServer(ReaderFixtures.audiobook(parts), "application/zip")
+        val archive = ReaderFixtures.audiobook(parts)
+        val coverImage = ReaderFixtures.cover(600, "The Last Observatory")
+        val book = com.pocketds.hub.model.ReadingWork(id = work, title = "The Last Observatory", authors = listOf("A. Fixture"),
+            series = "Observatory", seriesIndex = 2.0, artwork = "/v1/img/reading/fixture-cover/$work", editions = listOf(edition, other))
+        val downloads = java.util.concurrent.atomic.AtomicInteger()
+        val server = MockWebServer().apply {
+            dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val path = request.path.orEmpty().substringBefore('?')
+                    return when {
+                        path.endsWith("/file") -> {
+                            downloads.incrementAndGet()
+                            MockResponse().setHeader("Content-Type", "application/zip").setBody(Buffer().write(archive))
+                        }
+                        path.startsWith("/v1/img/reading/fixture-cover/") ->
+                            MockResponse().setHeader("Content-Type", "image/jpeg").setBody(Buffer().write(coverImage))
+                        path == "/v1/reading/works/$work" -> MockResponse().setHeader("Content-Type", "application/json")
+                            .setBody(JSONObject().put("id", work).put("title", book.title).put("authors", JSONArray(book.authors))
+                                .put("series", book.series).put("seriesIndex", book.seriesIndex).put("artwork", book.artwork).toString())
+                        request.method == "POST" -> MockResponse().setHeader("Content-Type", "application/json").setBody("{\"ok\":true}")
+                        else -> MockResponse().setHeader("Content-Type", "application/json").setBody("{\"locator\":null}")
+                    }
+                }
+            }
+            start()
+        }
         HubSettings.save(activity, server.url("/").toString(), "fixture")
-        fun screen(of: ReadingEdition = edition): AudiobookScreen = AudiobookScreen(HubClient(activity), work, of,
-            "The Last Observatory", { true }, listOf(edition, other).filter { it == of }, null, emptyList())
+        // From the book's page the screen is given the book; from a reader it reads it (the first screen here).
+        fun screen(of: ReadingEdition = edition, given: Boolean = true): AudiobookScreen = AudiobookScreen(HubClient(activity), work, of,
+            "The Last Observatory", { true }, listOf(edition, other).filter { it == of }, null, emptyList(),
+            work = book.takeIf { given })
         var current: AudiobookScreen? = null
         lateinit var root: View
         suspend fun show(next: AudiobookScreen) = withContext(Main) {
@@ -314,14 +341,28 @@ class ReaderListeningTest {
             PlaybackSettings.setSeekSeconds(activity, 15)
             // What the app shows behind a full-screen reader on Glass: its frame's dark.
             withContext(Main) { activity.window.decorView.setBackgroundColor(com.pocketds.hub.ui.glass.ArtworkPalette.NEUTRAL.dark) }
-            show(screen())
+            show(screen(given = false))
             until("the book on the reading-audio player") { state().book?.workId == work && state().ready }
             until("each part's length") { state().partsMs.size == 3 && state().partsMs.all { (it ?: 0) > 55_000 } }
             val positionKey = state().book!!.positionKey.also(keys::add)
+            // Glass (#11): the cover beside its words, read from the hub when the screen was not given the book.
+            until("the cover") { current!!.field<android.widget.ImageView?>("cover")?.drawable.let { it != null && it.intrinsicWidth > 0 } }
             withContext(Main) {
-                // The transport's jump is the player's seek step: 15 seconds here.
-                assertNotNull(all(root).firstOrNull { it.contentDescription == "Back 15 seconds" })
-                assertNotNull(all(root).firstOrNull { it.contentDescription == "Forward 15 seconds" })
+                assertEquals("Audiobook · Book 2 · Observatory", current!!.field<TextView?>("eyebrow")!!.text.toString())
+                assertEquals("A. Fixture · read by A generated voice", current!!.field<TextView?>("facts")!!.text.toString())
+                assertEquals("The page is the cover's", book.artwork, current!!.pageArtwork)
+                // The transport's jump is the player's seek step: 15 seconds here, written on the discs.
+                assertNotNull(all(root).firstOrNull { it.contentDescription == "Back 15 seconds" && (it as TextView).text == "−15" })
+                assertNotNull(all(root).firstOrNull { it.contentDescription == "Forward 15 seconds" && (it as TextView).text == "+15" })
+                // Every control on screen, clear of the keys' row.
+                val keysTop = root.height - Styler.dpInt(activity, com.pocketds.hub.reader.ReaderKeys.ROW_DP.toFloat())
+                current!!.field<List<View>>("controls").forEach { control ->
+                    val at = IntArray(2).also(control::getLocationInWindow)
+                    val rootAt = IntArray(2).also(root::getLocationInWindow)
+                    assertTrue("${control.contentDescription} is shown", control.isShown)
+                    assertTrue("${control.contentDescription} sits above the keys", at[1] - rootAt[1] + control.height <= keysTop)
+                    assertTrue("${control.contentDescription} sits inside the screen", at[0] >= rootAt[0] && at[0] + control.width <= rootAt[0] + root.width)
+                }
                 assertFalse("Opening a book does not start it", state().playing)
                 all(root).first { it.contentDescription == "Play audiobook" }.performClick()
             }
@@ -367,19 +408,20 @@ class ReaderListeningTest {
             untilShell("the player's wake lock", "dumpsys power", "ExoPlayer:WakeLockManager")
 
             // A second screen for the book finds it playing: nothing is fetched again.
-            val fetched = server.requestCount
+            val fetched = downloads.get()
             show(screen())
             until("the second screen on the player") { current!!.field<TextView>("partTitle").text.startsWith("Part ${state().part + 1} of 3 · ") }
             withContext(Main) {
-                assertEquals("Nothing downloaded again", fetched, server.requestCount)
+                assertEquals("Nothing downloaded again", fetched, downloads.get())
+                assertFalse("A part's name is shown without its file's extension", current!!.field<TextView>("partTitle").text.endsWith(".wav"))
                 assertNotNull(all(root).firstOrNull { it.contentDescription == "Pause audiobook" })
             }
 
             // A2: the parts, each with its length; the third opens at its start.
             withContext(Main) { all(root).first { it is TextView && it.text == "Parts" }.performClick() }
-            until("the parts") { row(root, "3. 03 The observatory.wav") != null }
+            until("the parts") { row(root, "3. 03 The observatory") != null }
             shot(activity, "13-audiobook-parts")
-            withContext(Main) { row(root, "3. 03 The observatory.wav")!!.performClick() }
+            withContext(Main) { row(root, "3. 03 The observatory")!!.performClick() }
             until("part 3") { state().part == 2 && player().currentMediaItemIndex == 2 }
 
             // A2: the sleep timer fades the last of it, pauses, and steps back over what faded.
@@ -454,6 +496,35 @@ class ReaderListeningTest {
             ComfortSettings.save(activity, oldComfort)
             HubSettings.save(activity, oldUrl, oldToken)
             server.shutdown()
+        }
+    }
+
+    /** Classic keeps the B2 layout: the same controls in the same order, no cover and no glass. */
+    @Test fun classicAudiobookKeepsItsLayoutAndControls(): Unit = runBlocking {
+        val context = ins.targetContext
+        val oldLook = com.pocketds.hub.settings.LookSettings.get(context)
+        com.pocketds.hub.settings.LookSettings.set(context, com.pocketds.hub.settings.Look.CLASSIC)
+        val activity = start()
+        var screen: AudiobookScreen? = null
+        try {
+            withContext(Main) {
+                val edition = ReadingEdition(sourceItemId = "classic-audio", kind = "audiobook", narrator = "A generated voice")
+                screen = AudiobookScreen(HubClient(activity), "classic-${System.nanoTime()}", edition, "The Last Observatory", { true },
+                    listOf(edition), null, emptyList())
+                // Built only: nothing is downloaded or played.
+                val root = screen!!.onCreateView(host(activity), FrameLayout(activity))
+                activity.setContentView(root)
+                val controls = screen!!.field<List<View>>("controls")
+                assertEquals(listOf("Previous part", "Back 10 seconds", "Play audiobook", "Forward 10 seconds", "Next part"),
+                    controls.take(5).map { it.contentDescription?.toString() }.map { it?.replace(Regex("\\d+ seconds"), "10 seconds") })
+                assertEquals(listOf("Parts", "Speed 1×", "Sleep", "Comfort", "Keys", "Stop"), controls.drop(5).map { (it as TextView).text.toString() })
+                assertEquals(null, screen!!.field<android.widget.ImageView?>("cover"))
+                assertTrue(all(root).any { it is TextView && it.text == "The Last Observatory" })
+            }
+            shot(activity, "18-audiobook-classic")
+        } finally {
+            withContext(Main) { screen?.onDestroyView(); activity.finish() }
+            com.pocketds.hub.settings.LookSettings.set(context, oldLook)
         }
     }
 
