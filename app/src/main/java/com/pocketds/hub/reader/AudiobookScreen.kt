@@ -69,11 +69,10 @@ import kotlin.coroutines.coroutineContext
  * kept per book, a sleep timer that fades and steps back when it fires, the
  * time left in the part and the book, and the parts to jump between.
  *
- * On Glass (#11) it is the book page and the read-along dock together: the
- * cover large beside the eyebrow and the title, on a page tinted by the
- * cover, then the dock's glass player (the line and its times, the white
- * Play between the jumps) and the tools as glass pills. The keys and what the
- * controls do are the same in both looks.
+ * It is the book page and the read-along dock together (#11): the cover
+ * large beside the eyebrow and the title, on a page tinted by the cover, then
+ * the dock's glass player (the line and its times, the white Play between the
+ * jumps) and the tools as glass pills.
  */
 class AudiobookScreen(
     private val api: HubApi,
@@ -85,18 +84,17 @@ class AudiobookScreen(
     private val ebook: ReadingEdition?,
     private val alignedOptions: List<ReadingEdition>,
     private val onProgressChanged: () -> Unit = {},
-    /** The book, when the caller has it: its cover and its place in a series on Glass. Read from the hub otherwise. */
+    /** The book, when the caller has it: its cover and its place in a series. Read from the hub otherwise. */
     work: ReadingWork? = null
 ) : Screen {
     override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val immersive = true
-    /** Glass: the page takes the cover's colours, as the player and the other readers take theirs. */
+    /** The page takes the cover's colours, as the player and the other readers take theirs. */
     override val pageArtwork: String? get() = book?.artwork?.takeIf(String::isNotBlank)
     private var book: ReadingWork? = work
     private lateinit var host: ScreenHost
     private lateinit var root: FrameLayout
     private lateinit var colors: PocketColors
-    private var glass = false
     private lateinit var status: TextView
     private lateinit var position: TextView
     private lateinit var left: TextView
@@ -105,18 +103,18 @@ class AudiobookScreen(
     private lateinit var playButton: PlayerIconButton
     private lateinit var speedButton: TextView
     private lateinit var sleepButton: TextView
-    /** A transport button on Classic, a "−15" jump disc on Glass. */
-    private lateinit var rewindButton: View
-    private lateinit var forwardButton: View
+    /** The jumps, "−15" and "+15" written on their discs. */
+    private lateinit var rewindButton: TextView
+    private lateinit var forwardButton: TextView
     private lateinit var keys: com.pocketds.hub.nav.HintBarView
     private lateinit var overlay: ChoiceOverlay
     private lateinit var comfortLayer: com.pocketds.hub.ui.ComfortLayerView
-    // Glass only: the page, the cover and the words beside it, and what is left of the part.
-    private var ambient: AmbientLayerView? = null
-    private var cover: ImageView? = null
-    private var eyebrow: TextView? = null
-    private var facts: TextView? = null
-    private var remaining: TextView? = null
+    // The page, the cover and the words beside it, and what is left of the part.
+    private lateinit var ambient: AmbientLayerView
+    private lateinit var cover: ImageView
+    private lateinit var eyebrow: TextView
+    private lateinit var facts: TextView
+    private lateinit var remaining: TextView
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var loadJob: Job? = null
     private var watchJob: Job? = null
@@ -136,7 +134,6 @@ class AudiobookScreen(
         this.host = host
         val context = host.viewContext
         colors = Theme.colors(context)
-        glass = Theme.isGlass(context)
         root = FrameLayout(context).apply { setBackgroundColor(colors.background) }
         partTitle = TextView(context).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         status = TextView(context).apply { text = "Preparing audiobook…" }
@@ -155,7 +152,7 @@ class AudiobookScreen(
         }
         position = TextView(context).apply { text = "0:00 / 0:00" }
         left = TextView(context)
-        if (glass) buildGlass(context) else buildClassic(context)
+        build(context)
         // What the keys do: the app's own hint bar is hidden while a reader is open.
         keys = ReaderKeys.row(context, colors) { onPad(it) }
         root.addView(keys, FrameLayout.LayoutParams(MATCH, Styler.dpInt(context, ReaderKeys.ROW_DP.toFloat()), Gravity.BOTTOM))
@@ -170,61 +167,14 @@ class AudiobookScreen(
         return root
     }
 
-    /** The B2 layout, kept for Classic: the title, the part, the line, the transport and the tools, centred. */
-    private fun buildClassic(context: Context) {
-        val content = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(22), dp(12), dp(22), dp(10))
-        }
-        root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH).apply { bottomMargin = dp(ReaderKeys.ROW_DP) })
-        content.addView(TextView(context).apply {
-            text = title
-            textSize = 25f
-            setTextColor(colors.primaryText)
-            gravity = Gravity.CENTER
-            maxLines = 2
-        }, LinearLayout.LayoutParams(MATCH, 0, 1f))
-        partTitle.apply { textSize = 14f; setTextColor(colors.mutedText); gravity = Gravity.CENTER }
-        content.addView(partTitle, LinearLayout.LayoutParams(MATCH, dp(26)))
-        status.apply { textSize = 13f; setTextColor(colors.mutedText); gravity = Gravity.CENTER }
-        content.addView(status, LinearLayout.LayoutParams(MATCH, dp(24)))
-        content.addView(timeline, LinearLayout.LayoutParams(MATCH, dp(44)))
-        position.apply { textSize = 13f; setTextColor(colors.primaryText); gravity = Gravity.CENTER }
-        content.addView(position, LinearLayout.LayoutParams(MATCH, dp(22)))
-        left.apply { textSize = 12f; setTextColor(colors.mutedText); gravity = Gravity.CENTER }
-        content.addView(left, LinearLayout.LayoutParams(MATCH, dp(20)))
-        val transport = LinearLayout(context).apply { gravity = Gravity.CENTER }
-        content.addView(transport, LinearLayout.LayoutParams(MATCH, dp(58)))
-        transport.addView(icon(PlayerControlIcon.PREVIOUS, "Previous part") { act { ReadingAudio.part(-1) } })
-        rewindButton = icon(PlayerControlIcon.REWIND, "Back") { act { ReadingAudio.seekBy(-seekSeconds * 1_000L) } }
-        transport.addView(rewindButton)
-        playButton = icon(PlayerControlIcon.PLAY, "Play audiobook") { act { ReadingAudio.toggle() } }
-        transport.addView(playButton)
-        forwardButton = icon(PlayerControlIcon.FORWARD, "Forward") { act { ReadingAudio.seekBy(seekSeconds * 1_000L) } }
-        transport.addView(forwardButton)
-        transport.addView(icon(PlayerControlIcon.NEXT, "Next part") { act { ReadingAudio.part(1) } })
-        val actions = LinearLayout(context).apply { gravity = Gravity.CENTER; orientation = LinearLayout.HORIZONTAL }
-        content.addView(actions, LinearLayout.LayoutParams(MATCH, dp(54)))
-        if (ebook != null || narrations.size > 1) actions.addView(action("Reading & listening") { showReadingModes() })
-        actions.addView(action("Parts") { act { showParts() } })
-        speedButton = action("Speed 1×") { act { showSpeeds() } }
-        actions.addView(speedButton)
-        sleepButton = action("Sleep") { act { showSleep() } }
-        actions.addView(sleepButton)
-        actions.addView(action("Comfort") { showComfort() })
-        actions.addView(action("Keys") { showKeys() })
-        actions.addView(action("Stop") { stopListening() })
-    }
-
     /**
-     * Glass: the cover large beside its words, over the cover's own page (the
-     * app hides its page behind a full-screen reader, so this one draws it: the
+     * The cover large beside its words, over the cover's own page (the app
+     * hides its page behind a full-screen reader, so this one draws it: the
      * cover small and blurred, in its colours); under them the read-along
      * dock's glass player, its line and times, the parts' steps either side of
      * the jumps and the white Play; then the tools as glass pills.
      */
-    private fun buildGlass(context: Context) {
+    private fun build(context: Context) {
         val ring = colors.focusRing
         ambient = AmbientLayerView(context, api).also { page ->
             root.addView(page, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -433,9 +383,9 @@ class AudiobookScreen(
         }
     }
 
-    /** Glass shows the book's cover and its place in a series: read it once when the caller had no copy. */
+    /** The screen shows the book's cover and its place in a series: read it once when the caller had no copy. */
     private fun readBook() {
-        if (!glass || book != null || bookJob?.isActive == true) return
+        if (book != null || bookJob?.isActive == true) return
         bookJob = scope.launch {
             val found = (api.readingWork(workId) as? HubResult.Ok)?.value ?: return@launch
             book = found
@@ -444,16 +394,15 @@ class AudiobookScreen(
         }
     }
 
-    /** Glass: the cover, the page behind it, and the words over and under the title. */
+    /** The cover, the page behind it, and the words over and under the title. */
     private fun showBook() {
-        if (!glass) return
         val context = host.viewContext
-        eyebrow?.text = ReadingBookFacts.listeningEyebrow(book)
-        facts?.text = ReadingBookFacts.listeningLine(book, edition.narrator)
-        facts?.visibility = if (facts?.text.isNullOrBlank()) View.GONE else View.VISIBLE
+        eyebrow.text = ReadingBookFacts.listeningEyebrow(book)
+        facts.text = ReadingBookFacts.listeningLine(book, edition.narrator)
+        facts.visibility = if (facts.text.isNullOrBlank()) View.GONE else View.VISIBLE
         val path = pageArtwork
-        cover?.let { Artwork.bind(it, Artwork.loader(api, context), path?.let(api::imageUrl)) }
-        ambient?.show(path, GlassPage.palette(context))
+        Artwork.bind(cover, Artwork.loader(api, context), path?.let(api::imageUrl))
+        ambient.show(path, GlassPage.palette(context))
     }
 
     /** The player's state, while this screen shows. */
@@ -473,7 +422,7 @@ class AudiobookScreen(
         val parts = value.book?.parts.orEmpty()
         partTitle.text = "Part ${value.part + 1} of ${parts.size} · ${parts.getOrNull(value.part)?.title?.let(AudiobookArchive::partLabel).orEmpty()}"
         position.text = "${Fmt.clock(value.positionMs)} / ${Fmt.clock(value.partMs)}"
-        remaining?.text = if (value.partMs > 0) "−" + Fmt.clock((value.partMs - value.positionMs).coerceAtLeast(0)) else ""
+        remaining.text = if (value.partMs > 0) "−" + Fmt.clock((value.partMs - value.positionMs).coerceAtLeast(0)) else ""
         left.text = if (value.partMs > 0) PlayerLabels.timeLeft(value.partLeftMs, value.bookLeftMs) else ""
         if (!timeline.isPressed && value.partMs > 0) timeline.progress = (value.positionMs * 1000 / value.partMs).toInt().coerceIn(0, 1000)
         playButton.setIcon(if (value.playing) PlayerControlIcon.PAUSE else PlayerControlIcon.PLAY)
@@ -487,9 +436,9 @@ class AudiobookScreen(
         val seconds = seekSeconds
         rewindButton.contentDescription = "Back $seconds seconds"
         forwardButton.contentDescription = "Forward $seconds seconds"
-        // Glass writes the jump on its disc.
-        (rewindButton as? TextView)?.text = "−$seconds"
-        (forwardButton as? TextView)?.text = "+$seconds"
+        // The jump is written on its disc.
+        rewindButton.text = "−$seconds"
+        forwardButton.text = "+$seconds"
         if (::keys.isInitialized) keys.setHints(ReaderPadMap.hints(padState()))
     }
 
@@ -568,36 +517,6 @@ class AudiobookScreen(
             host.push(AudiobookScreen(api, workId, next, title, ringVisible, narrations, ebook,
                 alignedOptions, onProgressChanged, book))
         }
-    }
-
-    private fun icon(value: PlayerControlIcon, label: String, click: () -> Unit): PlayerIconButton =
-        PlayerIconButton(host.viewContext, value).apply {
-            contentDescription = label
-            layoutParams = LinearLayout.LayoutParams(dp(55), dp(55))
-            Styler.makeFocusable(this)
-            FocusDecorator.attach(this, ringVisible, scale = false)
-            FocusDecorator.listen(this, ringVisible) { view, focused ->
-                if (focused) focusedControl = controls.indexOf(view).coerceAtLeast(0)
-            }
-            activateOnTap(click)
-            controls += this
-        }
-
-    private fun action(label: String, click: () -> Unit): TextView = TextView(host.viewContext).apply {
-        text = label; textSize = 13f; setTextColor(colors.primaryText)
-        gravity = Gravity.CENTER; minimumHeight = dp(46)
-        setPadding(dp(13), 0, dp(13), 0)
-        background = Styler.cardBackground(context, colors, 10f)
-        Styler.makeFocusable(this)
-        FocusDecorator.attach(this, ringVisible, scale = false)
-        FocusDecorator.listen(this, ringVisible) { view, focused ->
-            if (focused) focusedControl = controls.indexOf(view).coerceAtLeast(0)
-        }
-        activateOnTap(click)
-        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            marginStart = dp(3); marginEnd = dp(3)
-        }
-        controls += this
     }
 
     private fun dp(value: Int) = Styler.dpInt(host.viewContext, value.toFloat())

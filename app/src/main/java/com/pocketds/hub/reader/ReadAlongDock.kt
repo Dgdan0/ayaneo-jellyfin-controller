@@ -23,9 +23,8 @@ import com.pocketds.hub.ui.activateOnTap
  * The read-along player (#16, X7), the prototype's glass dock: a line for how
  * far through this part of the narration, "Read along" over the time, −10, a
  * white Play and +10 in the middle, the speed and a way back to the sentence
- * being read at the end. Glass, tinted by the cover, with the player's discs;
- * on Classic a dark card. It takes the lower bar's place while the controls
- * show.
+ * being read at the end. Glass, tinted by the cover, with the player's discs.
+ * It takes the lower bar's place while the controls show.
  */
 class ReadAlongDock(context: Context, colors: PocketColors, seekSeconds: Int = 10) : LinearLayout(context) {
     private val density = resources.displayMetrics.density
@@ -63,11 +62,7 @@ class ReadAlongDock(context: Context, colors: PocketColors, seekSeconds: Int = 1
     init {
         orientation = VERTICAL
         setPadding(dp(14), dp(8), dp(10), dp(6))
-        if (!OverlayButtons.panel(this, 18f)) background = ThemeGradientDrawable().apply {
-            setColor(0xF2212A31.toInt())
-            cornerRadius = dp(18).toFloat()
-            setStroke(dp(1), 0x66FFFFFF)
-        }
+        OverlayButtons.panel(this, 18f)
         line.progress = 0
         addView(line, LayoutParams(LayoutParams.MATCH_PARENT, dp(4)).apply { bottomMargin = dp(4) })
         val row = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }

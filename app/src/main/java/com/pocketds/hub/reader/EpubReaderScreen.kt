@@ -95,7 +95,7 @@ import org.readium.r2.streamer.parser.DefaultPublicationParser
  * read along, L3 goes back to the narrated sentence; R3 lists the keys. The
  * menu carries a row of the keys and a Keys control.
  *
- * In Glass the menu is bars of the cover's glass (#16, X7), and the page makes
+ * The menu is bars of the cover's glass (#16, X7), and the page makes
  * room for them (the owner's choice for books): it shrinks with the menu round
  * it. Read along, the glass narration dock takes the lower bar's place and
  * the sentence being read glows in the accent ([ReadAlongGlow]). Comfort (X3)
@@ -685,7 +685,7 @@ class EpubReaderScreen(
 
     private fun buildTopBar() {
         topBar = bars.topRow.apply {
-            if (bars.glass) setPadding(dp(4), 0, dp(4), 0) else setPadding(dp(14), dp(4), dp(14), dp(4))
+            setPadding(dp(4), 0, dp(4), 0)
         }
         topBar.addView(control("×", "Close reader", click = { host.back() }))
         // The title, and under it the time left (E3), as the comic reader's issue and page.
@@ -695,13 +695,13 @@ class EpubReaderScreen(
             setPadding(dp(10), 0, dp(8), 0)
             addView(TextView(host.viewContext).apply {
                 text = title
-                com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, if (bars.glass) 15f else 17f)
+                com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 15f)
                 setTextColor(Color.WHITE)
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             })
             timeLeftView = TextView(host.viewContext).apply {
-                textSize = if (bars.glass) 11.5f else 12f
+                textSize = 11.5f
                 setTextColor(ReaderBars.SOFT_TEXT)
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
@@ -738,7 +738,7 @@ class EpubReaderScreen(
 
     private fun buildBottomBar() {
         bottomBar = bars.bottomRow.apply {
-            if (bars.glass) setPadding(dp(4), dp(4), dp(10), dp(4)) else setPadding(dp(14), dp(4), dp(14), dp(4))
+            setPadding(dp(4), dp(4), dp(10), dp(4))
         }
         val navigationRow = LinearLayout(host.viewContext).apply { gravity = Gravity.CENTER_VERTICAL }
         bottomBar.addView(navigationRow, LinearLayout.LayoutParams(MATCH, dp(44)))
@@ -762,10 +762,10 @@ class EpubReaderScreen(
         navigationRow.addView(control("›", "Next page", { turn(1) }))
         bookSeek = SeekBar(host.viewContext).apply {
             max = 100; contentDescription = "Browse book percentage"; minimumHeight = dp(34)
-            // Glass: the prototype's white line on a faint track; Classic: the accent.
-            progressTintList = android.content.res.ColorStateList.valueOf(if (bars.glass) Color.WHITE else colors.accent)
+            // The prototype's white line on a faint track.
+            progressTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
             thumbTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
-            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.argb(if (bars.glass) 64 else 90, 255, 255, 255))
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.argb(64, 255, 255, 255))
             Styler.makeFocusable(this); FocusDecorator.attach(this, ringVisible, scale = false)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onStartTrackingTouch(bar: SeekBar) = Unit
@@ -801,7 +801,7 @@ class EpubReaderScreen(
             setTextColor(Color.WHITE)
             setPadding(dp(12), dp(6), dp(14), dp(6))
             visibility = View.GONE
-            if (!com.pocketds.hub.ui.OverlayButtons.panel(this, 999f)) setBackgroundColor(0xCC141518.toInt())
+            com.pocketds.hub.ui.OverlayButtons.panel(this, 999f)
             // A tap on it opens the menu, with the dock.
             setOnClickListener { setControlsVisible(true) }
         }

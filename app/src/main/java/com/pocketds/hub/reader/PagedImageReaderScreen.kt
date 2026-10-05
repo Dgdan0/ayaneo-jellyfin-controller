@@ -66,7 +66,7 @@ import kotlin.math.roundToInt
  * page, two for a spread, with "Part 2 of 3" and a small map of the page. The
  * last page ends on a card naming the next issue (C6).
  *
- * In Glass the controls are bars of the cover's glass floating over the page,
+ * The controls are bars of the cover's glass floating over the page,
  * which keeps its size (X7, the owner's choice). Pages either side stay
  * decoded on surfaces behind the one shown ([PageSurface], C3), so a turn
  * swaps to a page already drawn and a jump keeps the page you were on until
@@ -208,7 +208,7 @@ class PagedImageReaderScreen(
         previewCard = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; visibility = View.GONE
             setPadding(dp(8), dp(8), dp(8), dp(8))
-            if (!OverlayButtons.panel(this, 14f)) setBackgroundColor(0xEE141518.toInt())
+            OverlayButtons.panel(this, 14f)
         }
         previewImage = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
         previewLabel = TextView(context).apply { textSize = 12f; setTextColor(Color.WHITE); gravity = Gravity.CENTER }
@@ -239,7 +239,7 @@ class PagedImageReaderScreen(
         // The owner's choice (X7): the bars float over a comic, whose page keeps its size.
         pagePreview = ReaderPagePreviewController(root, surface, bars.top, bars.bottom, listOf(options), makesRoom = false)
         focusedControl = ReaderControlFocusPolicy.initialIndex(focusables.size) ?: 0
-        OverlayButtons.light(thirdsButton, colors, reading.fit == ComicFit.THIRDS)
+        OverlayButtons.light(thirdsButton, reading.fit == ComicFit.THIRDS)
         thirdsButton.isSelected = reading.fit == ComicFit.THIRDS
         setControlsVisible(false)
         return root
@@ -418,21 +418,21 @@ class PagedImageReaderScreen(
      */
     private fun buildTopBar() {
         val row = bars.topRow
-        // The bar is a row of 44dp controls: Glass's floats with its own corners, Classic's runs edge to edge.
-        if (bars.glass) row.setPadding(dp(4), 0, dp(4), 0) else row.setPadding(dp(14), dp(4), dp(14), dp(4))
+        // The bar is a row of 44dp controls, floating with its own corners.
+        row.setPadding(dp(4), 0, dp(4), 0)
         row.addView(round(AppIcon.CLOSE, "Close reader") { host.back() }, LinearLayout.LayoutParams(dp(44), dp(44)))
         row.addView(LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             titleView = TextView(context).apply {
                 text = title
-                Type.apply(this, Type.Role.HEADING, if (bars.glass) 15f else 17f)
+                Type.apply(this, Type.Role.HEADING, 15f)
                 setTextColor(Color.WHITE)
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
             addView(titleView)
             subtitleView = TextView(context).apply {
-                textSize = if (bars.glass) 11.5f else 12f
+                textSize = 11.5f
                 setTextColor(ReaderBars.SOFT_TEXT)
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
@@ -452,7 +452,7 @@ class PagedImageReaderScreen(
     }
 
     private fun buildBottomBar() {
-        if (bars.glass) bars.bottomRow.setPadding(dp(4), 0, dp(4), 0) else bars.bottomRow.setPadding(dp(14), 0, dp(14), 0)
+        bars.bottomRow.setPadding(dp(4), 0, dp(4), 0)
         val navigation = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -462,10 +462,10 @@ class PagedImageReaderScreen(
         seek = SeekBar(host.viewContext).apply {
             max = 1
             contentDescription = "Publication position"
-            // Glass: the prototype's white line on a faint track; Classic: the accent.
-            progressTintList = android.content.res.ColorStateList.valueOf(if (bars.glass) Color.WHITE else colors.accent)
+            // The prototype's white line on a faint track.
+            progressTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
             thumbTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
-            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.argb(if (bars.glass) 64 else 90, 255, 255, 255))
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.argb(64, 255, 255, 255))
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
             FocusDecorator.listen(this, ringVisible) { view, focused ->
@@ -506,7 +506,7 @@ class PagedImageReaderScreen(
     /** A quiet glass pill over the page: "Part 2 of 3", "Loading page 5". */
     private fun hintPill() = TextView(host.viewContext).apply {
         textSize = 12f; setTextColor(Color.WHITE); setPadding(dp(12), dp(6), dp(12), dp(6)); visibility = View.GONE
-        if (!OverlayButtons.panel(this, 999f)) setBackgroundColor(0xB3141518.toInt())
+        OverlayButtons.panel(this, 999f)
     }
 
     private fun round(icon: AppIcon, label: String, click: () -> Unit): View =
@@ -1178,8 +1178,8 @@ class PagedImageReaderScreen(
         val value = manifest
         val page = state?.pageIndex ?: value?.currentPage ?: 0
         if (value != null) state = PagedImageState(value.pageCount, page, ::stepsFor, 0)
-        // Lit while on, like a filter: the accent on Classic, white on Glass.
-        OverlayButtons.light(thirdsButton, colors, fit == ComicFit.THIRDS)
+        // Lit while on, like a filter: white.
+        OverlayButtons.light(thirdsButton, fit == ComicFit.THIRDS)
         thirdsButton.isSelected = fit == ComicFit.THIRDS
         applyViewport()
         updatePosition()

@@ -53,7 +53,6 @@ class PageGridView(
     /** A thumbnail's width: the grid's width shared by its columns, less their gaps. */
     private var cellPx = 0
     private var thumb: (Int) -> String = { "" }
-    private val glass = Theme.isGlass(context)
     private val title = TextView(context).apply {
         Type.apply(this, Type.Role.HEADING, 19f)
         setTextColor(Color.WHITE)
@@ -76,8 +75,7 @@ class PageGridView(
     init {
         visibility = GONE
         isClickable = true
-        if (glass) background = GlassPanelDrawable(GlassColors.sheet(com.pocketds.hub.ui.glass.GlassPage.palette(context)), 0f)
-        else setBackgroundColor(0xF20F1115.toInt())
+        background = GlassPanelDrawable(GlassColors.sheet(com.pocketds.hub.ui.glass.GlassPage.palette(context)), 0f)
         val column = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(12), dp(16), 0)

@@ -178,11 +178,17 @@ class ReaderGlassTest {
                 assertEquals(0f, page.translationY, 0f)
                 val bars: ReaderBars = screen!!.field("bars")
                 assertTrue(bars.top.isShown && bars.bottom.isShown)
-                if (bars.glass) {
-                    // Floating: in from the edges, over the page rather than beside it.
-                    assertTrue(bars.topRow.left > 0 && bars.topRow.top > 0)
-                    val thirds = all(root).filterIsInstance<TextView>().first { it.contentDescription == "Read each page in thirds" }
-                    assertEquals("Thirds is lit while on", com.pocketds.hub.ui.glass.GlassColors.INK, thirds.currentTextColor)
+                // Floating: in from the edges, over the page rather than beside it.
+                assertTrue(bars.topRow.left > 0 && bars.topRow.top > 0)
+                val thirds = all(root).filterIsInstance<TextView>().first { it.contentDescription == "Read each page in thirds" }
+                assertEquals("Thirds is lit while on", com.pocketds.hub.ui.glass.GlassColors.INK, thirds.currentTextColor)
+                // The controls keep their 44dp, inside their bars.
+                val size = (44 * activity.resources.displayMetrics.density).toInt()
+                listOf(bars.topRow, (bars.bottomRow.getChildAt(0) as ViewGroup)).forEach { row ->
+                    (0 until row.childCount).map(row::getChildAt).filter { it.isShown && it.isFocusable }.forEach { control ->
+                        assertTrue("${control.contentDescription} keeps its height: ${control.height} of $size", control.height >= size - 1)
+                        assertTrue("${control.contentDescription} sits inside its bar", control.top >= 0 && control.bottom <= row.height)
+                    }
                 }
             }
             shot(activity, "02-comic-bars-over-page")
@@ -224,63 +230,6 @@ class ReaderGlassTest {
             ComfortSettings.save(activity, oldComfort)
             DomainPreferences.setComicDefaultFit(activity, oldFit)
             HubSettings.save(activity, oldUrl, oldToken)
-            server.shutdown()
-        }
-    }
-
-    /** Classic keeps flat bars edge to edge; its 44dp controls still fit them whole. */
-    @Test fun classicBarsStillFitTheirControls(): Unit = runBlocking {
-        val context = ins.targetContext
-        val oldLook = com.pocketds.hub.settings.LookSettings.get(context)
-        com.pocketds.hub.settings.LookSettings.set(context, com.pocketds.hub.settings.Look.CLASSIC)
-        val activity = ins.startActivitySync(Intent(context, ReaderFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ReaderFixtureActivity
-        val oldUrl = HubSettings.baseUrl(activity)
-        val oldToken = HubSettings.token(activity)
-        val work = "classic-comics-${System.nanoTime()}"
-        val bytes = ReaderFixtures.page(1000, 1540, "classic")
-        val server = MockWebServer().apply {
-            dispatcher = object : Dispatcher() {
-                override fun dispatch(request: RecordedRequest): MockResponse {
-                    val path = request.path.orEmpty().substringBefore('?')
-                    if (path.contains("/pages/")) return MockResponse().setHeader("Content-Type", "image/jpeg").setBody(Buffer().write(bytes))
-                    if (request.method == "POST") return MockResponse().setHeader("Content-Type", "application/json").setBody("{\"ok\":true}")
-                    val manifest = JSONObject().put("workId", work).put("source", "kavita").put("sourceItemId", "issue-1").put("kind", "comic")
-                        .put("title", "Chapter 1").put("seriesTitle", "Classic Comics").put("number", "1").put("pageCount", 2)
-                        .put("currentPage", 0).put("direction", "ltr")
-                        .put("pages", org.json.JSONArray((0 until 2).map { JSONObject().put("index", it).put("width", 1000).put("height", 1540) }))
-                    return MockResponse().setHeader("Content-Type", "application/json").setBody(manifest.toString())
-                }
-            }
-            start()
-        }
-        HubSettings.save(activity, server.url("/").toString(), "fixture")
-        var screen: PagedImageReaderScreen? = null
-        lateinit var root: View
-        try {
-            withContext(Dispatchers.Main) {
-                screen = PagedImageReaderScreen(HubClient(activity), work, "issue-1", "Classic Comics", { true })
-                root = screen!!.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); screen!!.onShow()
-            }
-            until("the page") { screen!!.field<PageSurface>("surface").front.ready }
-            withContext(Dispatchers.Main) { assertTrue(screen!!.onPad(PadAction.Menu)) }
-            until("the controls") { screen!!.field<Boolean>("controlsVisible") }
-            delay(300)
-            withContext(Dispatchers.Main) {
-                val bars: ReaderBars = screen!!.field("bars")
-                assertFalse(bars.glass)
-                val size = (44 * activity.resources.displayMetrics.density).toInt()
-                listOf(bars.topRow, (bars.bottomRow.getChildAt(0) as ViewGroup)).forEach { row ->
-                    (0 until row.childCount).map(row::getChildAt).filter { it.isShown && it.isFocusable }.forEach { control ->
-                        assertTrue("${control.contentDescription} keeps its height: ${control.height} of $size", control.height >= size - 1)
-                        assertTrue("${control.contentDescription} sits inside its bar", control.top >= 0 && control.bottom <= row.height)
-                    }
-                }
-            }
-            shot(activity, "09-classic-bars")
-        } finally {
-            withContext(Dispatchers.Main) { screen?.onHide(); screen?.onDestroyView(); activity.finish() }
-            HubSettings.save(activity, oldUrl, oldToken)
-            com.pocketds.hub.settings.LookSettings.set(context, oldLook)
             server.shutdown()
         }
     }

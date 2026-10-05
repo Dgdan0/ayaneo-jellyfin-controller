@@ -35,10 +35,9 @@ class FootnoteCard(context: Context, colors: PocketColors, ringVisible: () -> Bo
     var onFollow: () -> Unit = {}
     val isOpen: Boolean get() = visibility == VISIBLE
 
-    private val glass = Theme.onGlass(colors)
     private val words = TextView(context).apply {
         textSize = 15f
-        setTextColor(if (glass) Color.WHITE else colors.primaryText)
+        setTextColor(Color.WHITE)
         setLineSpacing(0f, 1.25f)
     }
     private val scroll = FocusScrollView(context).apply { addView(words) }
@@ -50,9 +49,7 @@ class FootnoteCard(context: Context, colors: PocketColors, ringVisible: () -> Bo
         val pad = dp(18)
         setPadding(pad, dp(14), pad, dp(12))
         // Opaque: a note is read over lines of text, which must not show through it (#20).
-        if (glass) GlassPanelDrawable.attach(this, Styler.dp(context, 16f), GlassColors::card)
-        else background = ThemeGradientDrawable.rounded(Styler.dp(context, 16f), colors.background,
-            dp(1), ColorUtils.setAlphaComponent(colors.primaryText, 0x1A))
+        GlassPanelDrawable.attach(this, Styler.dp(context, 16f), GlassColors::card)
         elevation = Styler.dp(context, 12f)
     }
 
@@ -63,7 +60,7 @@ class FootnoteCard(context: Context, colors: PocketColors, ringVisible: () -> Bo
         panel.addView(TextView(context).apply {
             text = "NOTE"
             typeRole(Type.Role.EYEBROW, 10.5f)
-            setTextColor(if (glass) GlassColors.EYEBROW else colors.mutedText)
+            setTextColor(GlassColors.EYEBROW)
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
         panel.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         val actions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END or Gravity.CENTER_VERTICAL }

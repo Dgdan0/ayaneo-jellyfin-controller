@@ -5,7 +5,6 @@ import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.nav.HintBarView
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.SidePanelView
-import com.pocketds.hub.ui.Theme
 
 /**
  * A reader's keys, shown (#16, X1). The app's hint bar is hidden while a
@@ -20,13 +19,10 @@ object ReaderKeys {
 
     /**
      * The app's hint bar, over a page: its chips are buttons too, handed to
-     * [onAction] as the key would be. Classic draws it in the dark video
-     * palette, since the reader's bars are dark whatever the theme.
+     * [onAction] as the key would be.
      */
-    fun row(context: Context, colors: PocketColors, onAction: (PadAction) -> Unit): HintBarView {
-        val glass = Theme.isGlass(context)
-        return HintBarView(context, if (glass) colors else Theme.onVideo(context), glass).apply { this.onAction = onAction }
-    }
+    fun row(context: Context, colors: PocketColors, onAction: (PadAction) -> Unit): HintBarView =
+        HintBarView(context, colors, true).apply { this.onAction = onAction }
 
     /** The Controls sheet in [panel]: every key that does something while reading, and what. */
     fun show(panel: SidePanelView, state: ReaderPadState) {

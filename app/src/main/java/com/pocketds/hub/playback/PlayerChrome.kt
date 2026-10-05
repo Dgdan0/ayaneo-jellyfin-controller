@@ -33,7 +33,7 @@ import com.pocketds.hub.ui.activateOnTap
  * went; separating it leaves the screen with behaviour, and the views with one
  * place that decides how a control looks.
  *
- * On Glass (GLASS_PLAN.md › Player) every control but Play is dark glass
+ * Every control but Play is dark glass (GLASS_PLAN.md › Player),
  * tinted by what is playing ([com.pocketds.hub.ui.OverlayButtons]), the tools
  * named in words carry their icons, and the timeline with its times sits in a
  * frosted bar: a white line on a faint track, the buffered part lighter, a
@@ -85,7 +85,6 @@ internal class PlayerChrome(
     lateinit var seekPreviewFrame: FrameLayout; private set
     lateinit var seekPreviewTime: TextView; private set
     lateinit var seekPreviewDelta: TextView; private set
-    private val glass = com.pocketds.hub.ui.Theme.isGlass(context)
 
     val top: LinearLayout = buildTop()
     /** Previous, back, play, forward, next: in the middle of the picture. */
@@ -94,9 +93,9 @@ internal class PlayerChrome(
     val seekPreview: LinearLayout = buildSeekPreview()
     val gestureFeedback: TextView = buildGestureFeedback()
 
-    /** Glass: how much is loaded ahead, a lighter part of the line (the prototype's `.buf`). */
+    /** How much is loaded ahead, a lighter part of the line (the prototype's `.buf`). */
     fun showBuffered(fraction: Double) {
-        if (glass) seekBar.secondaryProgress = (fraction.coerceIn(0.0, 1.0) * seekBar.max).toInt()
+        seekBar.secondaryProgress = (fraction.coerceIn(0.0, 1.0) * seekBar.max).toInt()
     }
 
     fun setLocked(locked: Boolean) {
@@ -189,29 +188,29 @@ internal class PlayerChrome(
 
     /**
      * The timeline across the whole width; the time and chapter under its
-     * start, the time left under its end. Glass puts both in a frosted bar
-     * 14dp in from the edges (the prototype's `.pl-bot`).
+     * start, the time left under its end, both in a frosted bar 14dp in from
+     * the edges (the prototype's `.pl-bot`).
      */
     private fun buildController(timeline: SeekBar.OnSeekBarChangeListener): LinearLayout =
         LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            if (glass) setPadding(dp(14), dp(30), dp(14), dp(10)) else setPadding(dp(20), dp(34), dp(20), dp(12))
+            setPadding(dp(14), dp(30), dp(14), dp(10))
             background = ThemeGradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 intArrayOf(Color.TRANSPARENT, Color.argb(215, 0, 0, 0))
             )
-            val bar = if (glass) LinearLayout(context).apply {
+            val bar = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 com.pocketds.hub.ui.OverlayButtons.panel(this, GLASS_BAR_CORNER_DP)
                 setPadding(dp(4), dp(4), dp(4), dp(6))
-            }.also { addView(it, LinearLayout.LayoutParams(MATCH, WRAP)) } else this
+            }.also { addView(it, LinearLayout.LayoutParams(MATCH, WRAP)) }
             seekBar = ChapterSeekBar(context).apply {
                 max = 10_000
                 contentDescription = "Playback position"
                 Styler.makeFocusable(this)
                 setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
                 setOnSeekBarChangeListener(timeline)
-                if (glass) glassLine(this)
+                glassLine(this)
             }
             bar.addView(seekBar, LinearLayout.LayoutParams(MATCH, WRAP))
             bar.addView(LinearLayout(context).apply {
@@ -226,7 +225,7 @@ internal class PlayerChrome(
         }
 
     /**
-     * Glass: the prototype's line (`.pl-line`), 6dp: white on a faint track,
+     * The prototype's line (`.pl-line`), 6dp: white on a faint track,
      * the buffered part a little lighter, and a white thumb in a soft halo.
      */
     private fun glassLine(bar: SeekBar) {
@@ -263,11 +262,7 @@ internal class PlayerChrome(
         gravity = Gravity.CENTER_HORIZONTAL
         visibility = View.GONE
         isClickable = false
-        if (!com.pocketds.hub.ui.OverlayButtons.panel(this, 12f)) background = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 12f)
-            setColor(Color.argb(235, 22, 24, 29))
-            setStroke(dp(1), Color.argb(120, 255, 255, 255))
-        }
+        com.pocketds.hub.ui.OverlayButtons.panel(this, 12f)
         setPadding(dp(10), dp(10), dp(10), dp(9))
         seekPreviewFrame = FrameLayout(context).apply {
             visibility = View.GONE
@@ -299,27 +294,23 @@ internal class PlayerChrome(
         setTextColor(Color.WHITE)
         setTypeface(typeface, Typeface.BOLD)
         setPadding(dp(18), dp(12), dp(18), dp(12))
-        if (!com.pocketds.hub.ui.OverlayButtons.panel(this, 18f)) background = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 18f)
-            setColor(Color.argb(225, 22, 24, 29))
-            setStroke(dp(1), Color.argb(110, 255, 255, 255))
-        }
+        com.pocketds.hub.ui.OverlayButtons.panel(this, 18f)
     }
 
 
-    /** A round button on a soft disc (dark glass on Glass): back, cast, lock, picture in picture, previous and next. */
+    /** A round button on a disc of dark glass: back, cast, lock, picture in picture, previous and next. */
     private fun round(icon: PlayerControlIcon, description: String, action: () -> Unit) =
         PlayerIconButton(context, icon).apply {
             contentDescription = description
             com.pocketds.hub.ui.OverlayButtons.dressDisc(this, colors.focusRing)
             // On dark glass the white symbol needs no halo.
-            if (glass) setIconColor(Color.WHITE, halo = false)
+            setIconColor(Color.WHITE, halo = false)
             Styler.makeFocusable(this)
             activateOnTap(action)
             setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
         }
 
-    /** "Audio & subtitles", "Chapters", "This video": what a tool opens, in words; on Glass with its [icon]. */
+    /** "Audio & subtitles", "Chapters", "This video": what a tool opens, in words, with its [icon]. */
     private fun pill(label: String, description: String, icon: com.pocketds.hub.ui.AppIcon?, action: () -> Unit) =
         com.pocketds.hub.ui.OverlayButtons.pill(context, colors.focusRing, label, description, icon, action).apply {
             setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }

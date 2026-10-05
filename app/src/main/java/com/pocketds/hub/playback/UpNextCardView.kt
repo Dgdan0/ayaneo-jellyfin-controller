@@ -40,8 +40,8 @@ import com.pocketds.hub.ui.typeRole
  * which read as jumpy. The fill stops while the video is paused, so the next
  * episode never starts behind a pause.
  *
- * On Glass the card is the controls' dark glass, Play now the white pill and
- * Watch credits a glass one.
+ * The card is the controls' dark glass, Play now the white pill and Watch
+ * credits a glass one.
  */
 class UpNextCardView(
     context: Context,
@@ -61,20 +61,15 @@ class UpNextCardView(
     }
     private val meta = TextView(context).apply { textSize = 11f; setTextColor(Color.argb(200, 220, 226, 234)); maxLines = 1 }
     private val bar = FillBar(context)
-    private val glass = com.pocketds.hub.ui.Theme.isGlass(context)
-    val playNow: TextView = PillButton.create(context, colors, "Play now", AppIcon.PLAY, primary = true, heightDp = 36f, glass = glass)
-    val watchCredits: TextView = PillButton.create(context, colors, "Watch credits", heightDp = 36f, glass = glass)
+    val playNow: TextView = PillButton.create(context, colors, "Play now", AppIcon.PLAY, primary = true, heightDp = 36f, glass = true)
+    val watchCredits: TextView = PillButton.create(context, colors, "Watch credits", heightDp = 36f, glass = true)
     private var animator: ValueAnimator? = null
 
     init {
         orientation = VERTICAL
         val pad = dp(12)
         setPadding(pad, pad, pad, dp(8))
-        if (!com.pocketds.hub.ui.OverlayButtons.panel(this, 18f)) background = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 18f)
-            setColor(Color.argb(240, 14, 18, 25))
-            setStroke(dp(1), Color.argb(26, 255, 255, 255))
-        }
+        com.pocketds.hub.ui.OverlayButtons.panel(this, 18f)
         elevation = Styler.dp(context, 16f)
         isClickable = true
         val top = LinearLayout(context).apply { orientation = HORIZONTAL }

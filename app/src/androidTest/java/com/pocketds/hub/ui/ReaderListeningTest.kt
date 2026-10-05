@@ -589,35 +589,6 @@ class ReaderListeningTest {
         }
     }
 
-    /** Classic keeps the B2 layout: the same controls in the same order, no cover and no glass. */
-    @Test fun classicAudiobookKeepsItsLayoutAndControls(): Unit = runBlocking {
-        val context = ins.targetContext
-        val oldLook = com.pocketds.hub.settings.LookSettings.get(context)
-        com.pocketds.hub.settings.LookSettings.set(context, com.pocketds.hub.settings.Look.CLASSIC)
-        val activity = start()
-        var screen: AudiobookScreen? = null
-        try {
-            withContext(Main) {
-                val edition = ReadingEdition(sourceItemId = "classic-audio", kind = "audiobook", narrator = "A generated voice")
-                screen = AudiobookScreen(HubClient(activity), "classic-${System.nanoTime()}", edition, "The Last Observatory", { true },
-                    listOf(edition), null, emptyList())
-                // Built only: nothing is downloaded or played.
-                val root = screen!!.onCreateView(host(activity), FrameLayout(activity))
-                activity.setContentView(root)
-                val controls = screen!!.field<List<View>>("controls")
-                assertEquals(listOf("Previous part", "Back 10 seconds", "Play audiobook", "Forward 10 seconds", "Next part"),
-                    controls.take(5).map { it.contentDescription?.toString() }.map { it?.replace(Regex("\\d+ seconds"), "10 seconds") })
-                assertEquals(listOf("Parts", "Speed 1×", "Sleep", "Comfort", "Keys", "Stop"), controls.drop(5).map { (it as TextView).text.toString() })
-                assertEquals(null, screen!!.field<android.widget.ImageView?>("cover"))
-                assertTrue(all(root).any { it is TextView && it.text == "The Last Observatory" })
-            }
-            shot(activity, "18-audiobook-classic")
-        } finally {
-            withContext(Main) { screen?.onDestroyView(); activity.finish() }
-            com.pocketds.hub.settings.LookSettings.set(context, oldLook)
-        }
-    }
-
     // ------------------------------------------------------------------ A5
 
     @Test fun readAlongKeepsItsSpeedStepsBySentenceAndSaysWhetherThePageFollows(): Unit = runBlocking {

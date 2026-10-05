@@ -78,7 +78,7 @@ class PlayerScreen(
     override val immersive = true
     override val focusOnShow = false
     /**
-     * Glass: the page, and so the controls' glass, takes the colours of what
+     * The page, and so the controls' glass, takes the colours of what
      * is playing (GLASS_PLAN.md): an episode its series' backdrop, as Home's
      * hero shows it, a film its own.
      */
@@ -303,10 +303,9 @@ class PlayerScreen(
             }
         )
 
-        // Glass: the panels are the glass side sheet, tinted by the page the player opened from.
+        // The panels are the glass side sheet, tinted by the page the player opened from.
         choiceOverlay = ChoiceOverlay(host.viewContext,
-            if (Theme.isGlass(host.viewContext)) Theme.preview(host.viewContext, com.pocketds.hub.state.ContentMode.MEDIA) else colors,
-            ringVisible, sidePanel = true)
+            Theme.preview(host.viewContext, com.pocketds.hub.state.ContentMode.MEDIA), ringVisible, sidePanel = true)
         root.addView(choiceOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
         subtitleOffsetOverlay = SubtitleOffsetOverlay(host.viewContext, colors, ringVisible)
         root.addView(subtitleOffsetOverlay, FrameLayout.LayoutParams(dp(320), WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(16) })
@@ -318,22 +317,10 @@ class PlayerScreen(
             setPadding(dp(18), 0, dp(18), 0)
             minimumHeight = dp(40)
             visibility = View.GONE
-            val glass = Theme.isGlass(context)
-            // Glass: a pill of the controls' dark glass, ringed on focus.
-            if (glass) {
-                com.pocketds.hub.ui.OverlayButtons.dressPill(this, colors.focusRing)
-                setPadding(dp(22), dp(4), dp(22), dp(4))
-            } else background = android.graphics.drawable.StateListDrawable().apply {
-                fun face(focused: Boolean) = com.pocketds.hub.ui.ThemeGradientDrawable().apply {
-                    cornerRadius = dp(999).toFloat()
-                    setColor(if (focused) Color.WHITE else Color.argb(110, 0, 0, 0))
-                    setStroke(dp(2), Color.WHITE)
-                }
-                addState(intArrayOf(android.R.attr.state_focused), face(true))
-                addState(intArrayOf(), face(false))
-            }
-            setOnFocusChangeListener { view, focused ->
-                if (!glass) (view as TextView).setTextColor(if (focused) Color.BLACK else Color.WHITE)
+            // A pill of the controls' dark glass, ringed on focus.
+            com.pocketds.hub.ui.OverlayButtons.dressPill(this, colors.focusRing)
+            setPadding(dp(22), dp(4), dp(22), dp(4))
+            setOnFocusChangeListener { _, focused ->
                 if (focused && controlsVisible) scheduleHide()
             }
             com.pocketds.hub.ui.Styler.makeFocusable(this)

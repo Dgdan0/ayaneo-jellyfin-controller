@@ -43,7 +43,7 @@ class EndOfIssueCard(context: Context, colors: PocketColors, onAction: (PadActio
         gravity = Gravity.CENTER_HORIZONTAL
         val pad = Styler.dpInt(context, 18f)
         setPadding(pad, Styler.dpInt(context, 16f), pad, Styler.dpInt(context, 6f))
-        if (!OverlayButtons.panel(this, 18f)) background = ThemeGradientDrawable.rounded(Styler.dp(context, 18f), CARD)
+        OverlayButtons.panel(this, 18f)
         addView(heading, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         addView(next, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         addView(keys, LayoutParams(LayoutParams.WRAP_CONTENT, Styler.dpInt(context, 40f)).apply { topMargin = Styler.dpInt(context, 6f) })
@@ -77,7 +77,6 @@ class EndOfIssueCard(context: Context, colors: PocketColors, onAction: (PadActio
     }
 
     private companion object {
-        val CARD = Color.argb(235, 18, 21, 27)
         val SOFT_TEXT = Color.rgb(213, 219, 227)
     }
 }
