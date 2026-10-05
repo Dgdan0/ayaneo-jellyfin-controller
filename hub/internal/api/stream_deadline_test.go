@@ -30,7 +30,7 @@ func TestStreamingResponseOutlivesServerWriteTimeout(t *testing.T) {
 	server.Config.WriteTimeout = 50 * time.Millisecond
 	server.Start()
 	defer server.Close()
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{Timeout: patient}
 	response, err := client.Get(server.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -115,100 +115,123 @@ func TestStreamUntilStalledLeavesAHandlerTestAloneAndKeepsTheControllerReachable
 	}
 }
 
-// Over a real connection, behind the logging wrapper the hub puts on every
-// request: a client that reads slowly but never stops keeps its transfer past
-// the server's own write timeout, and one that stops is let go after the window
-// rather than holding the handler (and the file it has open) for good.
-func TestStalledTransferIsCutAfterItsWindowAndASlowOneIsNot(t *testing.T) {
-	body := make([]byte, 12<<20)
-	finished := make(chan error, 4)
+// What follows runs the deadline over a real connection, behind the logging
+// wrapper the hub puts on every request. The arithmetic is pinned above with an
+// injected clock; these show that it reaches the socket. Real time cannot be
+// avoided, so they assert on outcome and order: what a client that keeps reading
+// receives, and that a client that stopped is let go at some point. A window is
+// either far longer than any pause the test makes (so a busy machine cannot
+// trip it) or the very thing being waited out (so a slow machine only waits
+// longer).
+
+// smallBuffers makes a connection block its writer soon, rather than after the
+// kernel has taken the whole body.
+func smallBuffers(conn net.Conn, state http.ConnState) {
+	if tcp, ok := conn.(*net.TCPConn); ok && state == http.StateNew {
+		_ = tcp.SetWriteBuffer(16 << 10)
+	}
+}
+
+// slowReaderClient is a client whose connection holds little, so what the
+// server writes is not swallowed before the test reads it.
+func slowReaderClient() *http.Client {
+	return &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+		conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
+		if tcp, ok := conn.(*net.TCPConn); ok {
+			_ = tcp.SetReadBuffer(16 << 10)
+		}
+		return conn, err
+	}}}
+}
+
+// stallingServer writes size bytes the way http.ServeContent does, 32 KB at a
+// time (a single huge Write is another thing on Windows: the kernel takes it
+// whole and there is nothing for a deadline to cut), under a stall policy,
+// with a server write timeout far shorter than the transfer.
+func stallingServer(t *testing.T, policy stallPolicy, size int) (*httptest.Server, chan error) {
+	t.Helper()
+	body := make([]byte, size)
+	finished := make(chan error, 2)
 	server := httptest.NewUnstartedServer(withLogging(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		out, err := streamUntilStalled(w, stallPolicy{Window: 400 * time.Millisecond, Step: 64 << 10})
+		out, err := streamUntilStalled(w, policy)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-		// Copied the way http.ServeContent copies, 32 KB at a time. A single huge
-		// Write is another thing on Windows: the kernel takes it whole and the
-		// deadline never has anything to cut.
 		_, writeErr := io.CopyBuffer(out, io.LimitReader(bytes.NewReader(body), int64(len(body))), make([]byte, 32<<10))
 		finished <- writeErr
 	})))
-	server.Config.WriteTimeout = 100 * time.Millisecond
-	server.Config.ConnState = func(conn net.Conn, state http.ConnState) {
-		// Small buffers, so a client that does not read blocks the handler soon
-		// rather than after the kernel has swallowed the lot.
-		if tcp, ok := conn.(*net.TCPConn); ok && state == http.StateNew {
-			_ = tcp.SetWriteBuffer(16 << 10)
-		}
-	}
+	server.Config.WriteTimeout = stallingServerWriteTimeout
+	server.Config.ConnState = smallBuffers
 	server.Start()
-	defer server.Close()
+	t.Cleanup(server.Close)
+	return server, finished
+}
 
-	open := func() (*http.Response, net.Conn) {
-		dialer := &net.Dialer{}
-		var conn net.Conn
-		client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			c, err := dialer.DialContext(ctx, network, address)
-			if tcp, ok := c.(*net.TCPConn); ok {
-				_ = tcp.SetReadBuffer(16 << 10)
-			}
-			conn = c
-			return c, err
-		}}}
-		response, err := client.Get(server.URL)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return response, conn
+const stallingServerWriteTimeout = 100 * time.Millisecond
+
+func TestSlowButMovingTransferOutlivesTheServersWriteTimeout(t *testing.T) {
+	const size = 12 << 20
+	// The window is far longer than the pause between the client's reads.
+	server, finished := stallingServer(t, stallPolicy{Window: patient, Step: 64 << 10}, size)
+	response, err := slowReaderClient().Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer response.Body.Close()
 
-	t.Run("a client that keeps reading, slowly, gets all of it", func(t *testing.T) {
-		response, _ := open()
-		defer response.Body.Close()
-		started := time.Now()
-		buffer := make([]byte, 256<<10)
-		total := 0
-		for total < len(body) {
-			n, err := response.Body.Read(buffer)
-			total += n
-			if err != nil {
-				break
-			}
-			// Far slower than the server's write timeout allows a transfer to take, never still.
-			time.Sleep(15 * time.Millisecond)
+	buffer := make([]byte, 256<<10)
+	total, reads := 0, 0
+	for total < size {
+		n, err := response.Body.Read(buffer)
+		total += n
+		reads++
+		if err != nil {
+			break
 		}
-		if total != len(body) {
-			t.Fatalf("read %d of %d bytes after %v", total, len(body), time.Since(started))
-		}
-		if err := <-finished; err != nil {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if total != size {
+		t.Fatalf("read %d of %d bytes", total, size)
+	}
+	select {
+	case err := <-finished:
+		if err != nil {
 			t.Fatalf("the handler's copy failed: %v", err)
 		}
-		if elapsed := time.Since(started); elapsed < 250*time.Millisecond {
-			t.Fatalf("the whole transfer took %v: it never had to wait for the client, so it proved nothing", elapsed)
-		}
-	})
+	case <-time.After(patient):
+		t.Fatal("the handler never finished")
+	}
+	// The client paced itself, so the transfer lasted at least as long as its
+	// sleeps (a sleep cannot return early, however idle the machine), and that is
+	// longer than the server's own write timeout would have let it. Had the
+	// timeout applied, the server would have given up on the blocked write long
+	// before the last read.
+	if pacing := time.Duration(reads-1) * 5 * time.Millisecond; pacing <= stallingServerWriteTimeout {
+		t.Fatalf("%d reads is too few to outlive the server's %v write timeout: the test proved nothing", reads, stallingServerWriteTimeout)
+	}
+}
 
-	t.Run("a client that stops reading is cut after the window", func(t *testing.T) {
-		response, conn := open()
-		defer response.Body.Close()
-		defer conn.Close()
-		first := make([]byte, 64<<10)
-		if _, err := io.ReadFull(response.Body, first); err != nil {
-			t.Fatal(err)
+func TestTransferToAClientThatStoppedReadingIsCutAtSomePoint(t *testing.T) {
+	// A short window is the thing waited out; the test waits as long as it takes.
+	server, finished := stallingServer(t, stallPolicy{Window: 300 * time.Millisecond, Step: 64 << 10}, 12<<20)
+	response, err := slowReaderClient().Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if _, err := io.ReadFull(response.Body, make([]byte, 64<<10)); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing more is read. The connection stays open and quiet, as a phone that
+	// has gone to sleep leaves it.
+	select {
+	case err := <-finished:
+		if err == nil {
+			t.Fatal("the handler finished without an error although the client had stopped reading")
 		}
-		stopped := time.Now()
-		select {
-		case err := <-finished:
-			if err == nil {
-				t.Fatal("the handler finished without an error although the client had stopped reading")
-			}
-			if waited := time.Since(stopped); waited < 200*time.Millisecond || waited > 3*time.Second {
-				t.Fatalf("the handler let go after %v; the window is 400 ms", waited)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("a client that stopped reading held the handler for five seconds")
-		}
-	})
+	case <-time.After(patient):
+		t.Fatal("a client that stopped reading held the handler for good")
+	}
 }

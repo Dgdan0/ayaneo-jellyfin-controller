@@ -907,6 +907,9 @@ func TestAudioManifestWithTheRealFFprobeOrdersTheGeneratedBookByItsTags(t *testi
 	}
 	env := newTrackedAudioEnv(t)
 	env.server.probeAudio = runFFprobe
+	// Real processes on a machine that may be busy: a probe that timed out would
+	// leave the order to Storyteller's manifest, which is a different test.
+	env.server.probeTimeout = patient
 	manifest := env.manifest()
 	if got := env.namesOf(manifest); !reflect.DeepEqual(got, trackedTagOrder) {
 		t.Fatalf("order = %q\nwant %q", got, trackedTagOrder)

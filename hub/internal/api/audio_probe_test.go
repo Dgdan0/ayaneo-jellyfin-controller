@@ -229,12 +229,21 @@ func TestProbeFileGivesNoInformationRatherThanAnErrorAndDoesNotRememberFailures(
 	}
 }
 
-func TestProbeFileRunsAtMostFourAtOnceEachWithinFiveSeconds(t *testing.T) {
+func TestProbeFileRunsAtMostFourAtOnceEachWithinItsTimeout(t *testing.T) {
 	server := probeServer(t)
+	// Not the default, so the deadline can only have come from this setting.
+	server.probeTimeout = 7 * time.Minute
 	var running, peak atomic.Int32
 	release := make(chan struct{})
-	deadlines := make(chan time.Duration, 32)
-	server.probeAudio = func(ctx context.Context, _ string) (probedAudio, error) {
+	type probeRun struct {
+		asked, started, deadline time.Time
+		hasDeadline              bool
+	}
+	var mu sync.Mutex
+	asked := map[string]time.Time{}
+	runs := map[string]probeRun{}
+	server.probeAudio = func(ctx context.Context, path string) (probedAudio, error) {
+		started := time.Now()
 		now := running.Add(1)
 		for {
 			seen := peak.Load()
@@ -242,11 +251,10 @@ func TestProbeFileRunsAtMostFourAtOnceEachWithinFiveSeconds(t *testing.T) {
 				break
 			}
 		}
-		if deadline, ok := ctx.Deadline(); ok {
-			deadlines <- time.Until(deadline)
-		} else {
-			deadlines <- -1
-		}
+		deadline, ok := ctx.Deadline()
+		mu.Lock()
+		runs[path] = probeRun{asked: asked[path], started: started, deadline: deadline, hasDeadline: ok}
+		mu.Unlock()
 		<-release
 		running.Add(-1)
 		return probedAudio{}, nil
@@ -257,31 +265,41 @@ func TestProbeFileRunsAtMostFourAtOnceEachWithinFiveSeconds(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			server.probeFile(context.Background(), probeKey{path: "/media/" + string(rune('a'+i)) + ".mp3", size: 1, modNano: 1})
+			path := "/media/" + string(rune('a'+i)) + ".mp3"
+			mu.Lock()
+			asked[path] = time.Now()
+			mu.Unlock()
+			server.probeFile(context.Background(), probeKey{path: path, size: 1, modNano: 1})
 		}(i)
 	}
-	// Four start; the other eight wait for a slot.
-	deadline := time.After(5 * time.Second)
-	for running.Load() < 4 {
-		select {
-		case <-deadline:
-			t.Fatalf("only %d started", running.Load())
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
+	// Four start; the other eight wait for a slot. Waiting longer only makes the
+	// check stronger, so it cannot fail a slow machine.
+	eventually(t, "four probes to start", func() bool { return running.Load() >= 4 })
 	time.Sleep(100 * time.Millisecond)
 	if got := running.Load(); got != 4 {
 		t.Fatalf("%d probes ran at once, want 4", got)
 	}
 	close(release)
-	wg.Wait()
+	within(t, "the probes", wg.Wait)
 	if peak.Load() != 4 {
 		t.Fatalf("peak concurrency %d, want 4", peak.Load())
 	}
-	close(deadlines)
-	for left := range deadlines {
-		if left <= 4*time.Second || left > 5*time.Second {
-			t.Errorf("a probe had %v to run, want about 5s", left)
+	if len(runs) != 12 {
+		t.Fatalf("%d probes ran, want 12", len(runs))
+	}
+	for path, run := range runs {
+		// The budget starts once a slot is held: after the caller asked and before
+		// the probe began, whatever else the machine was doing. Both are orderings
+		// of the clock, not durations.
+		if !run.hasDeadline {
+			t.Errorf("%s ran without a deadline", path)
+			continue
+		}
+		if run.deadline.Before(run.asked.Add(server.probeTimeout)) {
+			t.Errorf("%s: the deadline is earlier than its timeout after the request", path)
+		}
+		if run.deadline.After(run.started.Add(server.probeTimeout)) {
+			t.Errorf("%s: the deadline is later than its timeout after the probe began", path)
 		}
 	}
 }
@@ -294,11 +312,17 @@ func TestProbeFileStopsAfterItsTimeoutAndWhenItsCallerGivesUp(t *testing.T) {
 		return probedAudio{DurationMs: 1}, ctx.Err()
 	}
 	started := time.Now()
-	if got := server.probeFile(context.Background(), probeKey{path: "/media/a.mp3", size: 1, modNano: 1}); !reflect.DeepEqual(got, probedAudio{}) {
+	var got probedAudio
+	within(t, "a probe with a timeout", func() {
+		got = server.probeFile(context.Background(), probeKey{path: "/media/a.mp3", size: 1, modNano: 1})
+	})
+	if !reflect.DeepEqual(got, probedAudio{}) {
 		t.Fatalf("a probe that timed out = %+v", got)
 	}
-	if elapsed := time.Since(started); elapsed < 30*time.Millisecond || elapsed > 2*time.Second {
-		t.Fatalf("timed out after %v", elapsed)
+	// A timer never fires early, so the budget is a floor. How much later is the
+	// machine's business.
+	if elapsed := time.Since(started); elapsed < server.probeTimeout {
+		t.Fatalf("gave up after %v, before its %v budget", elapsed, server.probeTimeout)
 	}
 
 	// A caller that has given up does not take a slot or start a process.
@@ -319,7 +343,7 @@ func TestProbeFileStopsAfterItsTimeoutAndWhenItsCallerGivesUp(t *testing.T) {
 	cancel()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(patient):
 		t.Fatal("a cancelled caller kept waiting for a slot")
 	}
 	if calls.Load() != 0 {

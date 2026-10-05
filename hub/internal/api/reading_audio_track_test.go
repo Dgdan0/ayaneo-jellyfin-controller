@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -508,13 +507,13 @@ func TestAudioTrackLetsGoWhenTheClientCancelsOrTheConnectionBreaks(t *testing.T)
 			}()
 			select {
 			case <-client.started:
-			case <-time.After(5 * time.Second):
+			case <-time.After(patient):
 				t.Fatal("the transfer never began")
 			}
 			act(cancel, client)
 			select {
 			case <-done:
-			case <-time.After(5 * time.Second):
+			case <-time.After(patient):
 				t.Fatal("the handler is still holding the file")
 			}
 			if opened.Load() != closed.Load() {
@@ -535,83 +534,81 @@ func TestAudioTrackLetsGoWhenTheClientCancelsOrTheConnectionBreaks(t *testing.T)
 }
 
 // Over a real connection, with the server's own write timeout far shorter than
-// the transfer: a listener that is slow but moving hears it all, and one that has
-// stopped reading is let go after the stall window, with the file.
-func TestAudioTrackOutlivesTheServersWriteTimeoutButNotAStall(t *testing.T) {
-	env := newM4BAudioEnv(t, chapteredLinks)
+// the transfer. The deadline's arithmetic is pinned in stream_deadline_test.go
+// with an injected clock; these show that the route uses it, and assert on
+// outcome rather than on how fast (see timing_test.go).
+
+// stallingTrackEnv is a track of 8 MiB behind a real server whose write timeout
+// is far shorter than the transfer, under the given stall window.
+func stallingTrackEnv(t *testing.T, window time.Duration) (env *audioEnv, manifest ReadingAudioManifest, url string, opened, closed *atomic.Int32) {
+	t.Helper()
+	env = newM4BAudioEnv(t, chapteredLinks)
 	env.append("Fixture Chapters.m4b", strings.Repeat("0123456789abcdef", 512<<10)) // 8 MiB
 	env.forget()
-	opened, closed := env.watchHandles()
-	env.server.audioStall = stallPolicy{Window: 400 * time.Millisecond, Step: 64 << 10}
-	manifest := env.manifest()
+	opened, closed = env.watchHandles()
+	env.server.audioStall = stallPolicy{Window: window, Step: 64 << 10}
+	manifest = env.manifest()
 
 	server := httptest.NewUnstartedServer(env.handler)
-	server.Config.WriteTimeout = 100 * time.Millisecond
-	server.Config.ConnState = func(conn net.Conn, state http.ConnState) {
-		if tcp, ok := conn.(*net.TCPConn); ok && state == http.StateNew {
-			_ = tcp.SetWriteBuffer(16 << 10)
-		}
-	}
+	server.Config.WriteTimeout = stallingServerWriteTimeout
+	server.Config.ConnState = smallBuffers
 	server.Start()
-	defer server.Close()
-	url := server.URL + env.trackPath(env.child, "0", manifest.Revision)
-	open := func() *http.Response {
-		request, err := http.NewRequest(http.MethodGet, url, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		request.Header.Set("Authorization", "Bearer "+libraryTestToken)
-		client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
-			if tcp, ok := conn.(*net.TCPConn); ok {
-				_ = tcp.SetReadBuffer(16 << 10)
-			}
-			return conn, err
-		}}}
-		response, err := client.Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return response
-	}
-	waitClosed := func(t *testing.T) {
-		t.Helper()
-		deadline := time.Now().Add(5 * time.Second)
-		for opened.Load() != closed.Load() {
-			if time.Now().After(deadline) {
-				t.Fatalf("after five seconds %d handles are open", opened.Load()-closed.Load())
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
+	t.Cleanup(server.Close)
+	return env, manifest, server.URL + env.trackPath(env.child, "0", manifest.Revision), opened, closed
+}
 
-	t.Run("slow but moving", func(t *testing.T) {
-		response := open()
-		defer response.Body.Close()
-		if response.StatusCode != http.StatusOK {
-			t.Fatalf("status = %d", response.StatusCode)
+func getTrack(t *testing.T, url string) *http.Response {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+libraryTestToken)
+	response, err := slowReaderClient().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response
+}
+
+func TestAudioTrackToASlowButMovingListenerOutlivesTheServersWriteTimeout(t *testing.T) {
+	// The window is far longer than the pause between this client's reads.
+	_, manifest, url, opened, closed := stallingTrackEnv(t, patient)
+	response := getTrack(t, url)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	buffer := make([]byte, 256<<10)
+	total, reads := int64(0), 0
+	for {
+		n, err := response.Body.Read(buffer)
+		total += int64(n)
+		reads++
+		if err != nil {
+			break
 		}
-		buffer := make([]byte, 256<<10)
-		total := int64(0)
-		for {
-			n, err := response.Body.Read(buffer)
-			total += int64(n)
-			if err != nil {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-		if total != manifest.Tracks[0].Bytes {
-			t.Fatalf("heard %d of %d bytes", total, manifest.Tracks[0].Bytes)
-		}
-		waitClosed(t)
-	})
-	t.Run("stopped reading", func(t *testing.T) {
-		response := open()
-		defer response.Body.Close()
-		if _, err := io.ReadFull(response.Body, make([]byte, 64<<10)); err != nil {
-			t.Fatal(err)
-		}
-		waitClosed(t)
-	})
+		time.Sleep(5 * time.Millisecond)
+	}
+	if total != manifest.Tracks[0].Bytes {
+		t.Fatalf("heard %d of %d bytes", total, manifest.Tracks[0].Bytes)
+	}
+	// The sleeps are a floor that no machine can undercut, and it is longer than
+	// the server's write timeout: a transfer under that timeout would have been cut.
+	if pacing := time.Duration(reads-1) * 5 * time.Millisecond; pacing <= stallingServerWriteTimeout {
+		t.Fatalf("%d reads is too few to outlive the server's %v write timeout", reads, stallingServerWriteTimeout)
+	}
+	eventually(t, "the file to be let go", func() bool { return opened.Load() == closed.Load() })
+}
+
+func TestAudioTrackToAListenerWhoStoppedReadingIsLetGoWithItsFile(t *testing.T) {
+	// A short window is the thing waited out; the test waits as long as it takes.
+	_, _, url, opened, closed := stallingTrackEnv(t, 300*time.Millisecond)
+	response := getTrack(t, url)
+	defer response.Body.Close()
+	if _, err := io.ReadFull(response.Body, make([]byte, 64<<10)); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing more is read, and the connection stays open and quiet.
+	eventually(t, "the file to be let go", func() bool { return opened.Load() == closed.Load() })
 }
