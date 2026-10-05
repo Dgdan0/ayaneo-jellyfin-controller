@@ -289,6 +289,7 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/works/{workId}", s.handleReadingWork)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}", s.handleReadingPublication)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/pages/{page}", s.handleReadingPublicationPage)
+	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/pages/{page}/thumb", s.handleReadingPageThumb)
 	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/progress", s.handleReadingPublicationProgress)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/file", s.handleReadingEpubFile)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/position", s.handleReadingEpubPosition)

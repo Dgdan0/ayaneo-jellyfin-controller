@@ -62,6 +62,11 @@ var (
 	// collapses the rail badge and open-screen poll into one upstream fetch;
 	// stale-if-error keeps the previous timeline visible during a brief outage.
 	Notifications = Spec{Fresh: 15 * time.Second, Stale: 45 * time.Second, IfError: 10 * time.Minute}
+
+	// A reading page scaled to a thumbnail. A chapter's pages do not change
+	// while it is in the library, so it lives as long as any image; an old
+	// copy is still the same page, so stale and if-error match.
+	ReadingThumbs = Spec{Fresh: ImageMaxAge, Stale: ImageMaxAge, IfError: ImageMaxAge}
 )
 
 // Images are handled separately and much more aggressively.
