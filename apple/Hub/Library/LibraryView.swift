@@ -521,7 +521,10 @@ enum GridSource: Hashable {
 struct LibraryGrid: View {
     @Environment(AppModel.self) private var model
     @Environment(\.glassMetrics) private var metrics
+    @Environment(\.openRoute) private var openRoute
     let source: GridSource
+    /// Debug builds: HUB_SHEET=first opens the first grid's first title, once a launch.
+    @MainActor private static var debugOpenedFirst = false
 
     @State private var items: [MediaHit] = []
     @State private var page = 0
@@ -582,6 +585,14 @@ struct LibraryGrid: View {
             totalPages = max(1, next.totalPages)
             total = next.total
             status = StatusMessage(source.summary(loaded: items.count, total: total))
+            #if DEBUG
+            // scripts/mac.sh: HUB_OPEN=Shows HUB_SHEET=first opens Shows' first title.
+            if !Self.debugOpenedFirst, ProcessInfo.processInfo.environment["HUB_SHEET"] == "first",
+               let first = items.first, !first.jellyfinItemId.isEmpty {
+                Self.debugOpenedFirst = true
+                openRoute(.title(TitleRoute(itemId: first.jellyfinItemId, title: first.media.title)))
+            }
+            #endif
         } catch {
             if error.kind == .cancelled { return }
             status = StatusText.failed(error.message, kind: error.kind, hasData: !items.isEmpty)

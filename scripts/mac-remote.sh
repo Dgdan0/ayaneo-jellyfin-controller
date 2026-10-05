@@ -54,18 +54,23 @@ sync() {
   echo "synced $(wc -l < "$MANIFEST" | tr -d ' ') files to $HOST:~/$REMOTE_DIR"
 }
 
+# Only the pictures this run made (newer than the marker `run` leaves): the
+# folder keeps every earlier one too, and copying all of them back each time
+# had grown to a minute a run.
 fetch_shots() {
   if remote "test -d ~/$REMOTE_DIR/shots/apple"; then
     mkdir -p "$ROOT/shots"
     # Without these, macOS tar adds Finder metadata as ._ files beside each PNG.
-    remote "COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs -cf - -C ~/$REMOTE_DIR shots/apple" |
-      (cd "$ROOT" && tar -xf -)
+    remote "cd ~/$REMOTE_DIR && find shots/apple -type f -newer .run-start > .run-files &&
+      if [ -s .run-files ]; then COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs -cf - -T .run-files; fi" |
+      (cd "$ROOT" && tar -xf - 2>/dev/null || true)
     echo "screenshots in $ROOT/shots/apple"
   fi
 }
 
 run() {
   sync
+  remote "touch ~/$REMOTE_DIR/.run-start"
   # A non-interactive SSH shell on the Mac does not read the login profile, so
   # Homebrew's tools (xcodegen) are not on its PATH.
   # HUB_SECTION (home, library, services, …) opens that section in Debug

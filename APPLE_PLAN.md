@@ -138,9 +138,11 @@ The look is `GLASS_PLAN.md`. Its pieces in this app, so each screen uses one own
 
 Debug builds also take `HUB_SIDE=books` and `HUB_SHEET=profiles` (the avatar's sheet) for
 screenshots, beside `HUB_SECTION` and `HUB_OPEN` (a Home row's first title, or with
-`HUB_SECTION=library` a library by name, `HUB_OPEN=Anime`). `scripts/mac.sh uitest` runs the UI
-tests on the iPhone simulator against `-demo`, and `scripts/mac.sh transparency reduce|normal`
-turns the simulators' Reduce transparency on and off.
+`HUB_SECTION=library` a library by name, `HUB_OPEN=Anime`). With a library open,
+`HUB_SHEET=search:the` opens its own search with those words and `HUB_SHEET=first` its first
+title. `scripts/mac.sh uitest` runs the UI tests on the iPhone simulator against `-demo`, and
+`scripts/mac.sh transparency reduce|normal` turns the simulators' Reduce transparency on and off.
+A run of `scripts/mac-remote.sh` copies back only the screenshots it made.
 
 **Every screen works both ways up.** Each one works in portrait and in landscape on the iPad and
 the iPhone, and at any size of Mac window, and none is reported done until it has been checked

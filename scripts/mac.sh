@@ -319,8 +319,15 @@ mac_shot() {
   # A first run has no defaults yet, which pipefail would count as failing.
   { defaults read "$prefs" 2>/dev/null || true; } | sed -n 's/^ *"\(NSWindow Frame [^"]*\)" = .*/\1/p' |
     while IFS= read -r key; do defaults delete "$prefs" "$key"; done
+  # The player only against the demo hub: the app quits itself once it has
+  # drawn the window, and a real session must leave through the player's path.
+  if [[ -n "${HUB_PLAY:-}" && " $* " != *" -demo "* ]]; then
+    echo "mac-shot opens the player only with -demo"
+    exit 2
+  fi
   HUB_URL="${HUB_URL:-}" HUB_TOKEN="${HUB_TOKEN:-}" HUB_SECTION="${HUB_SECTION:-}" HUB_SIDE="${HUB_SIDE:-}" \
     HUB_OPEN="${HUB_OPEN:-}" HUB_SHEET="${HUB_SHEET:-}" HUB_WINDOW="$size" HUB_SNAPSHOT="${SHOT_WAIT:-8}" \
+    HUB_PLAY="${HUB_PLAY:-}" HUB_PLAY_CHROME="${HUB_PLAY_CHROME:-}" \
     nohup "$app" $(launch_args "$@") -ApplePersistenceIgnoreState YES > "$DERIVED/mac-app.log" 2>&1 < /dev/null &
   pid=$!
   for _ in $(seq 1 90); do
