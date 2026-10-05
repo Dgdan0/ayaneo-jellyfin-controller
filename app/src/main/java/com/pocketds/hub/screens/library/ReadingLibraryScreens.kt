@@ -822,12 +822,12 @@ class ReadingWorkScreen(
         progressRow.visibility = if (fraction > 0 || progressLabel.text.isNotEmpty()) View.VISIBLE else View.GONE
         bookLinks(work, links)
         if (work.entityType == "collection") {
-            val coverDp = CoverFanView.GLASS_COVER
-            val (width, height) = CoverFanView.sizeDp(coverDp, glass = true)
+            val coverDp = CoverFanView.COVER_DP
+            val (width, height) = CoverFanView.sizeDp(coverDp)
             // In from the page's edge by how far its outer cover leans, or the screen cuts it.
-            replacePoster(CoverFanView(context, colors, coverDp, glass = true).apply {
+            replacePoster(CoverFanView(context, colors, coverDp).apply {
                 bind(com.pocketds.hub.screens.home.ReadingShelves.fanCovers(work), Artwork.loader(api, context), api::imageUrl)
-            }, width, height, startDp = CoverFanView.GLASS_LEAN_DP)
+            }, width, height, startDp = CoverFanView.LEAN_DP)
         }
         bindArtwork("book", null, work.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
             Artwork.loader(api, context))

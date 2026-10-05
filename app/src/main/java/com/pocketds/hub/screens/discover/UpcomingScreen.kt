@@ -26,7 +26,6 @@ import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.FocusScrollView
 import com.pocketds.hub.ui.PillButton
 import com.pocketds.hub.ui.PocketColors
-import com.pocketds.hub.ui.ScrimDrawable
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.ThemeGradientDrawable
@@ -34,7 +33,6 @@ import com.pocketds.hub.ui.Type
 import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.showStatus
 import com.pocketds.hub.ui.textWeight
-import com.pocketds.hub.ui.typeRole
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -56,9 +54,9 @@ import java.util.Locale
  * own top row, beside Discover | Upcoming; pushed on its own (Activity's "See
  * all"), it heads the page.
  *
- * In Glass it is the prototype's: the week switch a glass capsule, each
- * release a glass row with its state as a chip, the one in the preview lit in
- * the accent, and the preview a glass card whose picture tints the page.
+ * It is the prototype's: the week switch a glass capsule, each release a
+ * glass row with its state as a chip, the one in the preview lit in the
+ * accent, and the preview a glass card whose picture tints the page.
  */
 class UpcomingScreen(
     private val api: HubApi,
@@ -67,17 +65,15 @@ class UpcomingScreen(
 ) : Screen {
     override val title = "Upcoming"
     override val contentDomain = ContentMode.MEDIA
-    /** Glass: the release in the preview. */
+    /** The release in the preview. */
     override val pageArtwork: String? get() = selectedArt
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var job: Job? = null
     private var host: ScreenHost? = null
     private lateinit var colors: PocketColors
-    /** Glass (#11): a styling switch only. */
-    private var glass = false
     private var selectedArt: String? = null
-    /** Glass: each row's panel and the accent ring it wears while it is the one in the preview. */
+    /** Each row's panel and the accent ring it wears while it is the one in the preview. */
     private val rowFaces = HashMap<View, Pair<com.pocketds.hub.ui.glass.GlassPanelDrawable, android.graphics.drawable.Drawable>>()
     private lateinit var agenda: LinearLayout
     private lateinit var details: LinearLayout
@@ -99,12 +95,11 @@ class UpcomingScreen(
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
-        glass = Theme.onGlass(colors)
         val context = host.viewContext
         weekSwitch = BlobSegmentedView(context, colors, ringVisible).apply {
-            heightDp = if (glass) 34f else 38f
+            heightDp = 34f
             textSp = 12f
-            if (glass) useGlassTrack() else trackColor = colors.cardSurface
+            useGlassTrack()
             setOptions((-1..1).map { BlobSegmentedView.Option(it.toString(), UpcomingPresentation.weekLabel(anchor, it)) }, "0")
             onPick = { id -> id.toIntOrNull()?.let(::showWeek) }
             onOptionFocused = { host.refreshHints() }
@@ -133,9 +128,9 @@ class UpcomingScreen(
                 addView(FocusScrollView(context).apply {
                     isVerticalScrollBarEnabled = false
                     clipToPadding = false
-                    if (glass) setPadding(0, dp(2), 0, dp(12))
+                    setPadding(0, dp(2), 0, dp(12))
                     addView(details)
-                }, LinearLayout.LayoutParams(dp(if (glass) GLASS_DETAIL_DP else DETAIL_DP), MATCH).apply { marginStart = dp(14) })
+                }, LinearLayout.LayoutParams(dp(DETAIL_DP), MATCH).apply { marginStart = dp(14) })
             }, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }
     }
@@ -198,7 +193,7 @@ class UpcomingScreen(
                 is HubResult.Ok -> { body = result.value; render(result.value) }
                 is HubResult.Failed -> {
                     status.showStatus(StatusText.failed(result.message, result.kind, hasData = false, canRetry = false), colors)
-                    details.addView(PillButton.create(checkNotNull(host).viewContext, colors, "Try again", AppIcon.REFRESH).apply {
+                    details.addView(PillButton.create(checkNotNull(host).viewContext, colors, "Try again", AppIcon.REFRESH, glass = true).apply {
                         FocusDecorator.attach(this, ringVisible, scale = false)
                         activateOnTap { load() }
                     })
@@ -242,43 +237,38 @@ class UpcomingScreen(
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(2), dp(8), 0, dp(5))
-        addView(label(day.format(DAY), if (glass) 11.5f else 12f, if (day == today) colors.accent else colors.primaryText).apply { textWeight(if (glass) 800 else 700) })
+        addView(label(day.format(DAY), 11.5f, if (day == today) colors.accent else colors.primaryText).apply { textWeight(800) })
         val tag = when (day) { today -> "Today"; today.plusDays(1) -> "Tomorrow"; else -> "" }
         if (tag.isNotEmpty()) addView(label(tag, 10f, colors.accentText).apply {
             textWeight(700)
             setPadding(dp(7), dp(1), dp(7), dp(1))
             background = ThemeGradientDrawable.rounded(Styler.dp(context, 99f), colors.accent)
         }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(8) })
-        if (empty) addView(label("·  Nothing scheduled", 11f, if (glass) GLASS_QUIET else colors.mutedText), LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(8) })
+        if (empty) addView(label("·  Nothing scheduled", 11f, QUIET), LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(8) })
     }
 
     private fun releaseRow(group: UpcomingPresentation.Group, now: Instant): View = LinearLayout(checkNotNull(host).viewContext).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        if (glass) {
-            // The prototype's row: glass, and lit in the accent while it is the one in the preview.
-            setPadding(dp(5), dp(5), dp(8), dp(5))
-            val panel = com.pocketds.hub.ui.glass.GlassPanelDrawable(
-                com.pocketds.hub.ui.glass.GlassColors.panel(com.pocketds.hub.ui.glass.GlassPage.palette(context)), Styler.dp(context, 11f))
-            val ring = ThemeGradientDrawable.rounded(Styler.dp(context, 11f), android.graphics.Color.TRANSPARENT, dp(2), colors.accent).apply { alpha = 0 }
-            background = android.graphics.drawable.LayerDrawable(arrayOf(panel, ring))
-            foreground = Styler.focusOutline(context, colors, 11f)
-            rowFaces[this] = panel to ring
-            com.pocketds.hub.ui.glass.GlassPage.follow(this) { page -> if (ring.alpha == 0) panel.retint(com.pocketds.hub.ui.glass.GlassColors.panel(page)) }
-        } else {
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = Styler.cardBackground(context, colors, cornerDp = 14f)
-        }
+        // The prototype's row: glass, and lit in the accent while it is the one in the preview.
+        setPadding(dp(5), dp(5), dp(8), dp(5))
+        val panel = com.pocketds.hub.ui.glass.GlassPanelDrawable(
+            com.pocketds.hub.ui.glass.GlassColors.panel(com.pocketds.hub.ui.glass.GlassPage.palette(context)), Styler.dp(context, 11f))
+        val ring = ThemeGradientDrawable.rounded(Styler.dp(context, 11f), android.graphics.Color.TRANSPARENT, dp(2), colors.accent).apply { alpha = 0 }
+        background = android.graphics.drawable.LayerDrawable(arrayOf(panel, ring))
+        foreground = Styler.focusOutline(context, colors, 11f)
+        rowFaces[this] = panel to ring
+        com.pocketds.hub.ui.glass.GlassPage.follow(this) { page -> if (ring.alpha == 0) panel.retint(com.pocketds.hub.ui.glass.GlassColors.panel(page)) }
         Styler.makeFocusable(this)
         FocusDecorator.attach(this, ringVisible, scale = false)
-        addView(poster(group.first.media.poster), if (glass) LinearLayout.LayoutParams(dp(26), dp(39)) else LinearLayout.LayoutParams(dp(32), dp(48)))
+        addView(poster(group.first.media.poster), LinearLayout.LayoutParams(dp(26), dp(39)))
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(if (glass) 8 else 12), 0, dp(8), 0)
-            addView(label(group.first.media.title, if (glass) 12f else 13f, colors.primaryText).apply {
-                textWeight(if (glass) 700 else 600); isSingleLine = true; ellipsize = TextUtils.TruncateAt.END
+            setPadding(dp(8), 0, dp(8), 0)
+            addView(label(group.first.media.title, 12f, colors.primaryText).apply {
+                textWeight(700); isSingleLine = true; ellipsize = TextUtils.TruncateAt.END
             })
-            addView(label(listOf(group.label, timeLabel(group)).joinToString(" · "), if (glass) 10.5f else 11f, if (glass) GLASS_QUIET_LINE else colors.mutedText).apply { isSingleLine = true })
+            addView(label(listOf(group.label, timeLabel(group)).joinToString(" · "), 10.5f, QUIET_LINE).apply { isSingleLine = true })
         }, LinearLayout.LayoutParams(0, WRAP, 1f))
         addView(badge(UpcomingPresentation.state(group, now, zone)))
         FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) { select(group); host?.refreshHints() } }
@@ -287,56 +277,23 @@ class UpcomingScreen(
             UpcomingPresentation.state(group, now, zone).label).joinToString(", ")
     }
 
-    /** The release in focus: its artwork fading into the page, what it is, when, and Open title. */
+    /** The release in focus shown in the preview ([preview]). */
     private fun select(group: UpcomingPresentation.Group) {
         selectedId = group.id
         details.removeAllViews()
-        val context = checkNotNull(host).viewContext
-        val first = group.first
-        val art = first.media.backdrop.ifBlank { first.media.poster }
+        val art = group.first.media.backdrop.ifBlank { group.first.media.poster }
         selectedArt = art.takeIf(String::isNotBlank)
-        if (glass) return selectGlass(group, art)
-        details.addView(FrameLayout(context).apply {
-            addView(ImageView(context).apply {
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                background = ThemeGradientDrawable.rounded(Styler.dp(context, 18f), colors.posterPlaceholder)
-                clipToOutline = true
-                Artwork.bind(this, imageLoader, api.imageUrl(art).takeIf { art.isNotBlank() }, opaque = true)
-                artwork.add(this)
-            }, FrameLayout.LayoutParams(MATCH, MATCH))
-            addView(View(context).apply {
-                background = ScrimDrawable(colors, ScrimDrawable.Edge.BOTTOM, listOf(0f to 1f, .55f to 0f))
-            }, FrameLayout.LayoutParams(MATCH, MATCH))
-        }, LinearLayout.LayoutParams(MATCH, dp(118)))
-        val now = Instant.now()
-        details.addView(badge(UpcomingPresentation.state(group, now, zone)), LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = -dp(14); marginStart = dp(4) })
-        details.addView(label(first.media.title, 20f, colors.primaryText).apply {
-            typeRole(Type.Role.HEADING, 20f); maxLines = 2; ellipsize = TextUtils.TruncateAt.END; setPadding(dp(4), dp(8), 0, 0)
-        })
-        details.addView(label(listOf(group.label, first.episodeTitle).filter(String::isNotBlank).joinToString(" · "), 12f, colors.primaryText)
-            .apply { setPadding(dp(4), dp(5), 0, 0) })
-        details.addView(label(LocalDate.parse(first.date).format(LONG_DAY) + " · " + timeLabel(group), 12f, colors.mutedText)
-            .apply { setPadding(dp(4), dp(3), 0, 0) })
-        details.addView(label(first.overview.ifBlank { "No description available" }, 12f, colors.mutedText).apply {
-            maxLines = 4; ellipsize = TextUtils.TruncateAt.END; setLineSpacing(0f, 1.2f); setPadding(dp(4), dp(8), 0, 0)
-        })
-        detailAction = PillButton.create(context, colors, "Open title", AppIcon.INFO, primary = true, heightDp = 34f).apply {
-            isEnabled = first.media.key.isNotBlank()
-            FocusDecorator.attach(this, ringVisible, scale = false)
-            activateOnTap { open(group) }
-        }
-        details.addView(detailAction, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = dp(8) })
-        if (first.media.key.isBlank()) details.addView(label("Title details unavailable: missing metadata ID", 11f, colors.mutedText))
+        preview(group, art)
     }
 
     /**
-     * Glass: the preview as the prototype's card -- the picture across its top
-     * with the state on it, then the title in the display face, what it is,
-     * when, and Open title in white -- and the row in the preview lit. No
-     * overview, as the prototype has none: with one, Open title fell below the
-     * hint bar on the Pocket.
+     * The preview as the prototype's card -- the picture across its top with
+     * the state on it, then the title in the display face, what it is, when,
+     * and Open title in white -- and the row in the preview lit. No overview,
+     * as the prototype has none: with one, Open title fell below the hint bar
+     * on the Pocket.
      */
-    private fun selectGlass(group: UpcomingPresentation.Group, art: String) {
+    private fun preview(group: UpcomingPresentation.Group, art: String) {
         val context = checkNotNull(host).viewContext
         val first = group.first
         val now = Instant.now()
@@ -377,7 +334,7 @@ class UpcomingScreen(
         })
         words.addView(label(listOf(group.label, first.episodeTitle).filter(String::isNotBlank).joinToString(" · "), 12f, colors.primaryText)
             .apply { setPadding(0, dp(4), 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-        words.addView(label(LocalDate.parse(first.date).format(LONG_DAY) + " · " + timeLabel(group), 12f, GLASS_QUIET_LINE)
+        words.addView(label(LocalDate.parse(first.date).format(LONG_DAY) + " · " + timeLabel(group), 12f, QUIET_LINE)
             .apply { setPadding(0, dp(2), 0, 0) })
         detailAction = PillButton.create(context, colors, "Open title", AppIcon.INFO, primary = true, heightDp = 31f, glass = true).apply {
             isEnabled = first.media.key.isNotBlank()
@@ -385,7 +342,7 @@ class UpcomingScreen(
             activateOnTap { open(group) }
         }
         words.addView(detailAction, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = dp(6); marginStart = -dp(PillButton.RING_DP.toInt()) })
-        if (first.media.key.isBlank()) words.addView(label("Title details unavailable: missing metadata ID", 11f, GLASS_QUIET_LINE))
+        if (first.media.key.isBlank()) words.addView(label("Title details unavailable: missing metadata ID", 11f, QUIET_LINE))
         card.addView(words, LinearLayout.LayoutParams(MATCH, WRAP))
         details.addView(card, LinearLayout.LayoutParams(MATCH, WRAP))
     }
@@ -427,12 +384,11 @@ class UpcomingScreen(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-        const val DETAIL_DP = 290
-        /** Glass: the preview card a little wider, as the prototype's. */
-        const val GLASS_DETAIL_DP = 320
-        /** Glass: "Nothing scheduled" white at 50%, a row's second line and the preview's quiet lines at 62%. */
-        const val GLASS_QUIET = 0x80FFFFFF.toInt()
-        const val GLASS_QUIET_LINE = 0x9EFFFFFF.toInt()
+        /** The preview card, as wide as the prototype's. */
+        const val DETAIL_DP = 320
+        /** "Nothing scheduled" white at 50%, a row's second line and the preview's quiet lines at 62%. */
+        const val QUIET = 0x80FFFFFF.toInt()
+        const val QUIET_LINE = 0x9EFFFFFF.toInt()
         val DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ENGLISH)
         val LONG_DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.ENGLISH)
         val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH)

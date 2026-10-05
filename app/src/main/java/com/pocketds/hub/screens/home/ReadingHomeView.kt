@@ -34,7 +34,6 @@ import com.pocketds.hub.ui.PillButton
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.PosterCardView
 import com.pocketds.hub.ui.Styler
-import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.showStatus
 import com.pocketds.hub.ui.glass.GlassColors
@@ -43,12 +42,8 @@ import com.pocketds.hub.ui.glass.GlassProgressBar
 import com.pocketds.hub.state.StatusMessage
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.state.StatusTone
-import com.pocketds.hub.ui.ProgressLine
-import com.pocketds.hub.ui.ProgressLine.showFraction
 import com.pocketds.hub.ui.ThemeGradientDrawable
-import com.pocketds.hub.ui.Type
 import com.pocketds.hub.ui.textWeight
-import com.pocketds.hub.ui.typeRole
 import com.pocketds.hub.screens.library.ReadingBookFacts
 import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
@@ -64,10 +59,10 @@ import kotlinx.coroutines.launch
  * the next book of a series you finished, comics apart, Want to Read, your own
  * lists and what was added lately.
  *
- * On Glass it is the prototype's (`.pg-bhome`): the book you are reading at
- * full cover size on the page, the others under it as glass rows with their
- * formats, the fans, and rows of glass covers with their captions; the page
- * takes the colours of the cover in focus.
+ * It is the prototype's (`.pg-bhome`): the book you are reading at full cover
+ * size on the page, the others under it as glass rows with their formats, the
+ * fans, and rows of glass covers with their captions; the page takes the
+ * colours of the cover in focus.
  */
 class ReadingHomeView(
     context: Context,
@@ -82,7 +77,6 @@ class ReadingHomeView(
     private val scroll: ScrollView
     private val overlay = ChoiceOverlay(context, colors, ringVisible, sidePanel = true)
     private val loader = Artwork.loader(api, context)
-    private val glass = Theme.onGlass(colors)
     private var continueView: ContinueReadingView? = null
     /** Buttons that act themselves on A, rather than opening the selected book's details. */
     private val selfActing = mutableSetOf<View>()
@@ -114,7 +108,7 @@ class ReadingHomeView(
      * book clears this screen's focus while it is still showing, which hands
      * focus to the first card the scroller finds -- and its listener then
      * remembered that one: Back from Recursion landed on Mistborn, the row's
-     * first card, in Glass and Classic alike.
+     * first card.
      */
     private var resumeAt: Triple<String, String, String?>? = null
     private val cards = mutableMapOf<Pair<String, String>, View>()
@@ -130,32 +124,15 @@ class ReadingHomeView(
         addView(column, LayoutParams(MATCH, MATCH))
         profileButton = TextView(context).apply {
             text = "Choose profile"
-            if (glass) PillButton.control(this, colors, AppIcon.PERSON) else {
-                textSize = 12f
-                gravity = Gravity.CENTER
-                setTextColor(colors.accent)
-                minimumHeight = dp(48)
-                setPadding(dp(10), 0, dp(10), 0)
-                background = Styler.chipBackground(context, colors)
-            }
+            PillButton.control(this, colors, AppIcon.PERSON)
             visibility = if (com.pocketds.hub.settings.HubSettings.userId(context).isBlank()) View.VISIBLE else View.GONE
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
             activateOnTap { onChooseProfile?.invoke() }
         }
         createButton = TextView(context).apply {
-            if (glass) {
-                text = "New list"
-                PillButton.control(this, colors, AppIcon.ADD)
-            } else {
-                text = "＋  New list"
-                textSize = 13f
-                gravity = Gravity.CENTER
-                setTextColor(colors.primaryText)
-                background = Styler.chipBackground(context, colors)
-                minimumHeight = dp(48)
-                setPadding(dp(14), 0, dp(14), 0)
-            }
+            text = "New list"
+            PillButton.control(this, colors, AppIcon.ADD)
             contentDescription = "New list"
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
@@ -170,14 +147,11 @@ class ReadingHomeView(
         status = TextView(context).apply {
             textSize = 11f
             setTextColor(colors.mutedText)
-            // Glass: a chip at the top right, clear of the words beside the cover.
-            if (glass) {
-                gravity = Gravity.END
-                maxWidth = dp(GLASS_STATUS_MAX_DP); maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
-                visibility = View.GONE
-            } else setPadding(dp(24), 0, dp(24), 0)
+            // A chip at the top right, clear of the words beside the cover.
+            gravity = Gravity.END
+            maxWidth = dp(STATUS_MAX_DP); maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
+            visibility = View.GONE
         }
-        if (!glass) column.addView(status)
         // Room for a row's title above its focused cards; "Currently reading"
         // scrolled out of sight when its first card took focus.
         scroll = FocusScrollView(context, revealAbove = dp(36)).apply {
@@ -186,13 +160,13 @@ class ReadingHomeView(
             content = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 clipChildren = false
-                setPadding(0, dp(if (glass) GLASS_TOP_DP else 4), 0, dp(28))
+                setPadding(0, dp(TOP_DP), 0, dp(28))
             }
             addView(content)
         }
         column.addView(scroll, LinearLayout.LayoutParams(MATCH, 0, 1f))
-        if (glass) addView(status, LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
-            topMargin = dp(GLASS_TOP_DP); rightMargin = dp(GLASS_EDGE_DP)
+        addView(status, LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
+            topMargin = dp(TOP_DP); rightMargin = dp(EDGE_DP)
         })
         addView(overlay, LayoutParams(MATCH, MATCH))
         render(ReadingShelves.rows(emptyList(), ReadingListsRepository.get(context), emptyMap()))
@@ -391,10 +365,9 @@ class ReadingHomeView(
         }
     }
 
-    /** The status line: on Glass only with news, as the chip; Classic shows every line with words. */
+    /** The status line: only with news, as the chip. */
     private fun showLine(message: StatusMessage) {
         status.showStatus(message, colors)
-        if (!glass) status.visibility = if (message.text.isBlank()) View.GONE else View.VISIBLE
     }
 
     private fun render(next: List<ReadingShelfRow>) {
@@ -422,12 +395,11 @@ class ReadingHomeView(
         content.addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             clipChildren = false
-            // Glass: the buttons' own ring room lies outside them, so the pill
-            // lines up with the headings above.
-            if (glass) setPadding(dp(GLASS_EDGE_DP) - ring(), dp(10), dp(GLASS_EDGE_DP), 0)
-            else setPadding(dp(24), dp(14), dp(24), 0)
+            // The buttons' own ring room lies outside them, so the pill lines
+            // up with the headings above.
+            setPadding(dp(EDGE_DP) - ring(), dp(10), dp(EDGE_DP), 0)
             addView(createButton)
-            addView(profileButton, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(if (glass) 2 else 8) })
+            addView(profileButton, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(2) })
         })
         scroll.post {
             scroll.scrollTo(0, scrollY)
@@ -442,31 +414,14 @@ class ReadingHomeView(
         val header = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            if (glass) setPadding(dp(GLASS_EDGE_DP), dp(4), dp(GLASS_EDGE_DP) - ring(), 0)
-            else setPadding(dp(24), dp(5), dp(24), 0)
+            setPadding(dp(EDGE_DP), dp(4), dp(EDGE_DP) - ring(), 0)
         }
-        val title = if (glass) heading(row.title, if (row.id in ReadingShelves.BUILT_IN) null else "${row.readCount}/${row.items.size} read")
-        else TextView(context).apply {
-            text = when {
-                row.id in ReadingShelves.BUILT_IN -> row.title
-                else -> "${row.title}   ·   ${row.readCount}/${row.items.size} read"
-            }
-            typeRole(Type.Role.HEADING, 16f)
-            setTextColor(colors.primaryText)
-            setPadding(0, dp(10), 0, dp(2))
-        }
+        val title = heading(row.title, if (row.id in ReadingShelves.BUILT_IN) null else "${row.readCount}/${row.items.size} read")
         header.addView(title, LinearLayout.LayoutParams(0, WRAP, 1f))
         if (row.id !in ReadingShelves.BUILT_IN) {
             val manage = TextView(context).apply {
                 contentDescription = "Manage ${row.title}"
-                if (glass) PillButton.control(this, colors, AppIcon.MORE, round = true) else {
-                    text = "⋯"
-                    textSize = 22f
-                    gravity = Gravity.CENTER
-                    background = Styler.chipBackground(context, colors)
-                    minimumWidth = dp(48)
-                    minimumHeight = dp(48)
-                }
+                PillButton.control(this, colors, AppIcon.MORE, round = true)
                 Styler.makeFocusable(this)
                 FocusDecorator.attach(this, ringVisible, scale = false)
                 activateOnTap { showListManagement(row) }
@@ -475,7 +430,7 @@ class ReadingHomeView(
                 }
             }
             headerActions[row.id] = manage
-            header.addView(manage, if (glass) LinearLayout.LayoutParams(WRAP, WRAP) else LinearLayout.LayoutParams(dp(48), dp(48)))
+            header.addView(manage, LinearLayout.LayoutParams(WRAP, WRAP))
         }
         addView(header)
         if (row.items.isEmpty()) {
@@ -483,9 +438,8 @@ class ReadingHomeView(
                 text = if (row.id == ReadingListsState.WANT_TO_READ) "Add a book from its details to keep it here."
                     else "Add a book from its details to start this list."
                 textSize = 12f
-                setTextColor(if (glass) GlassColors.QUIET else colors.mutedText)
-                if (glass) setPadding(dp(GLASS_EDGE_DP), dp(6), dp(GLASS_EDGE_DP), dp(12))
-                else setPadding(dp(24), dp(8), dp(24), dp(14))
+                setTextColor(GlassColors.QUIET)
+                setPadding(dp(EDGE_DP), dp(6), dp(EDGE_DP), dp(12))
             })
             return@apply
         }
@@ -493,9 +447,8 @@ class ReadingHomeView(
             isHorizontalScrollBarEnabled = false
             clipToPadding = false
             clipChildren = false
-            // Glass: the first cover lines up with the heading, 12dp between covers.
-            if (glass) setPadding(dp(GLASS_EDGE_DP - GLASS_CARD_GAP_DP / 2), dp(4), dp(GLASS_EDGE_DP - GLASS_CARD_GAP_DP / 2), dp(6))
-            else setPadding(dp(16), dp(6), dp(16), dp(6))
+            // The first cover lines up with the heading, 12dp between covers.
+            setPadding(dp(EDGE_DP - CARD_GAP_DP / 2), dp(4), dp(EDGE_DP - CARD_GAP_DP / 2), dp(6))
         }
         val line = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -503,11 +456,9 @@ class ReadingHomeView(
         }
         strip.addView(line)
         row.items.forEach { work ->
-            val card = PosterCardView(context, colors, if (glass) GLASS_POSTER_DP else 150f, glass = glass).apply {
-                layoutParams = if (glass) LinearLayout.LayoutParams(dp(GLASS_POSTER_CARD_DP), WRAP).apply {
-                    setMargins(dp(GLASS_CARD_GAP_DP / 2), dp(4), dp(GLASS_CARD_GAP_DP / 2), dp(4))
-                } else LinearLayout.LayoutParams(dp(105), WRAP).apply {
-                    setMargins(dp(8), dp(5), dp(8), dp(5))
+            val card = PosterCardView(context, colors, POSTER_DP, glass = true).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(POSTER_CARD_DP), WRAP).apply {
+                    setMargins(dp(CARD_GAP_DP / 2), dp(4), dp(CARD_GAP_DP / 2), dp(4))
                 }
                 bindReadingWork(work, loader, api::imageUrl, showKind = true)
                 FocusDecorator.attach(this, ringVisible)
@@ -536,14 +487,13 @@ class ReadingHomeView(
 
     /**
      * The book read last as the Continue reading card, and every other book in
-     * progress as a short list beside it, which scrolls when there are many.
+     * progress under it as glass rows, two to a line.
      */
     private fun buildCurrent(row: ReadingShelfRow): View = LinearLayout(context).apply {
-        orientation = if (glass) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        orientation = LinearLayout.VERTICAL
         clipChildren = false
         clipToPadding = false
-        if (glass) setPadding(dp(GLASS_EDGE_DP), 0, dp(GLASS_EDGE_DP), dp(2))
-        else setPadding(dp(24), dp(10), dp(24), dp(4))
+        setPadding(dp(EDGE_DP), 0, dp(EDGE_DP), dp(2))
         val hero = row.items.first()
         val card = ContinueReadingView(context, colors, ringVisible).apply {
             bind(heroDetails[hero.id]?.let { it.copy(progress = hero.progress ?: it.progress) } ?: hero, loader, api::imageUrl)
@@ -558,109 +508,38 @@ class ReadingHomeView(
         continueView = card
         selfActing += listOf(card.resume, card.details)
         cards[row.id to hero.id] = card.resume
-        addView(card, if (glass) LinearLayout.LayoutParams(MATCH, WRAP) else LinearLayout.LayoutParams(0, WRAP, 1f))
+        addView(card, LinearLayout.LayoutParams(MATCH, WRAP))
         if (hero.id !in heroDetails) loadHeroDetail(hero)
         val others = row.items.drop(1)
         if (others.isEmpty()) return@apply
-        if (glass) {
-            // "Also reading 2", then the others two to a line as glass rows.
-            addView(heading("Also reading", others.size.toString()), LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(10) })
-            others.chunked(2).forEachIndexed { line, pair ->
-                addView(LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    clipChildren = false
-                    pair.forEachIndexed { i, work ->
-                        addView(alsoReading(row, work), LinearLayout.LayoutParams(0, WRAP, 1f).apply {
-                            if (i > 0) marginStart = dp(GLASS_ALSO_GAP_DP)
-                        })
-                    }
-                    // An odd one out keeps a column's width rather than the whole line.
-                    if (pair.size == 1) addView(View(context), LinearLayout.LayoutParams(0, 0, 1f).apply { marginStart = dp(GLASS_ALSO_GAP_DP) })
-                }, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(if (line == 0) 6 else GLASS_ALSO_GAP_DP) })
-            }
-            return@apply
-        }
-        addView(LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            clipChildren = false
-            addView(TextView(context).apply {
-                text = "Also reading · ${others.size}"
-                isAllCaps = true
-                typeRole(Type.Role.EYEBROW)
-                setTextColor(colors.mutedText)
-                setPadding(dp(4), dp(4), 0, dp(8))
-            })
-            val list = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
+        // "Also reading 2", then the others two to a line as glass rows.
+        addView(heading("Also reading", others.size.toString()), LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(10) })
+        others.chunked(2).forEachIndexed { line, pair ->
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
                 clipChildren = false
-                setPadding(dp(4), dp(2), dp(4), dp(4))
-            }
-            others.forEach { work -> list.addView(alsoReading(row, work)) }
-            addView(FocusScrollView(context).apply {
-                isVerticalScrollBarEnabled = false
-                clipToPadding = false
-                clipChildren = false
-                addView(list)
-            }, LinearLayout.LayoutParams(MATCH, if (others.size > 3) dp(204) else WRAP))
-        }, LinearLayout.LayoutParams(dp(228), WRAP).apply { marginStart = dp(12) })
-    }
-
-    private fun alsoReading(row: ReadingShelfRow, work: ReadingWork): View = if (glass) glassAlsoReading(row, work) else LinearLayout(context).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(8), dp(8), dp(10), dp(8))
-        background = Styler.cardBackground(context, colors, cornerDp = 14f)
-        contentDescription = listOfNotNull(work.title, work.cardSubtitle, ReadingBookFacts.progress(work)).joinToString(", ")
-        addView(android.widget.ImageView(context).apply {
-            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-            background = ThemeGradientDrawable.rounded(Styler.dp(context, 5f), colors.posterPlaceholder)
-            clipToOutline = true
-            Artwork.bind(this, loader, work.artwork.takeIf(String::isNotBlank)?.let(api::imageUrl), opaque = true)
-        }, LinearLayout.LayoutParams(dp(40), dp(60)))
-        addView(LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), 0, 0, 0)
-            addView(TextView(context).apply {
-                text = work.title
-                textSize = 12f
-                textWeight(600)
-                setTextColor(colors.primaryText)
-                isSingleLine = true
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            })
-            addView(TextView(context).apply {
-                text = work.cardSubtitle
-                textSize = 11f
-                setTextColor(colors.mutedText)
-                isSingleLine = true
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            })
-            addView(ProgressLine.create(context, colors).apply {
-                showFraction(work.progress?.percentage ?: 0.0)
-                visibility = View.VISIBLE
-            }, LinearLayout.LayoutParams(MATCH, dp(4)).apply { topMargin = dp(6) })
-        }, LinearLayout.LayoutParams(0, WRAP, 1f))
-        Styler.makeFocusable(this)
-        FocusDecorator.attach(this, ringVisible, scale = false)
-        FocusDecorator.listen(this, ringVisible) { _, focused ->
-            if (focused) { focusedListHeader = null; focusedSeries = null; selectedRow = row.id; selectedWork = work.id; host.refreshHints() }
+                pair.forEachIndexed { i, work ->
+                    addView(alsoReading(row, work), LinearLayout.LayoutParams(0, WRAP, 1f).apply {
+                        if (i > 0) marginStart = dp(ALSO_GAP_DP)
+                    })
+                }
+                // An odd one out keeps a column's width rather than the whole line.
+                if (pair.size == 1) addView(View(context), LinearLayout.LayoutParams(0, 0, 1f).apply { marginStart = dp(ALSO_GAP_DP) })
+            }, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(if (line == 0) 6 else ALSO_GAP_DP) })
         }
-        activateOnTap { host.push(ReadingWorkScreen(api, work.id, work.title, ringVisible)) }
-        cards[row.id to work.id] = this
-        layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(8) }
     }
 
     /**
-     * Glass "Also reading": the prototype's `.mini`, a glass row with the cover,
-     * the title, "Blake Crouch · 3%" over a bar in the accent, and the book's
+     * "Also reading": the prototype's `.mini`, a glass row with the cover, the
+     * title, "Blake Crouch · 3%" over a bar in the accent, and the book's
      * formats as glass chips when it has more than one.
      */
-    private fun glassAlsoReading(row: ReadingShelfRow, work: ReadingWork): View = LinearLayout(context).apply {
+    private fun alsoReading(row: ReadingShelfRow, work: ReadingWork): View = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        GlassPanelDrawable.attach(this, Styler.dp(context, GLASS_MINI_CORNER_DP))
+        GlassPanelDrawable.attach(this, Styler.dp(context, MINI_CORNER_DP))
         // The prototype's ring hugs the row (`.mini.pf`).
-        foreground = Styler.focusOutline(context, colors, GLASS_MINI_CORNER_DP, 3f)
+        foreground = Styler.focusOutline(context, colors, MINI_CORNER_DP, 3f)
         setPadding(dp(6), dp(6), dp(10), dp(6))
         val line = ReadingBookFacts.miniLine(work)
         contentDescription = listOf(work.title, line).filter(String::isNotBlank).joinToString(", ")
@@ -670,7 +549,7 @@ class ReadingHomeView(
             clipToOutline = true
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             Artwork.bind(this, loader, work.artwork.takeIf(String::isNotBlank)?.let(api::imageUrl), opaque = true)
-        }, LinearLayout.LayoutParams(dp(GLASS_MINI_THUMB_DP), dp(GLASS_MINI_THUMB_DP * 3 / 2)))
+        }, LinearLayout.LayoutParams(dp(MINI_THUMB_DP), dp(MINI_THUMB_DP * 3 / 2)))
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(context).apply {
@@ -690,7 +569,7 @@ class ReadingHomeView(
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(2) })
-            addView(GlassProgressBar(context, colors.accent, GLASS_MINI_TRACK).apply {
+            addView(GlassProgressBar(context, colors.accent, MINI_TRACK).apply {
                 fraction = work.progress?.let { if (it.completed) 1.0 else it.percentage } ?: 0.0
             }, LinearLayout.LayoutParams(MATCH, dp(GlassProgressBar.HEIGHT_DP.toInt())).apply { topMargin = dp(5) })
         }, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = dp(10) })
@@ -704,7 +583,7 @@ class ReadingHomeView(
                     addView(android.widget.ImageView(context).apply {
                         setImageDrawable(AppIconDrawable(formatIcon(format), android.graphics.Color.WHITE))
                     }, android.widget.FrameLayout.LayoutParams(dp(13), dp(13), Gravity.CENTER))
-                }, LinearLayout.LayoutParams(dp(GLASS_FORMAT_W_DP), dp(GLASS_FORMAT_H_DP)).apply { if (i > 0) marginStart = dp(5) })
+                }, LinearLayout.LayoutParams(dp(FORMAT_W_DP), dp(FORMAT_H_DP)).apply { if (i > 0) marginStart = dp(5) })
             }
         }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(8) })
         Styler.makeFocusable(this)
@@ -722,7 +601,7 @@ class ReadingHomeView(
         else -> AppIcon.BOOK
     }
 
-    /** Glass: a row's heading with a quiet count after it ("Also reading 2"). */
+    /** A row's heading with a quiet count after it ("Also reading 2"). */
     private fun heading(title: String, count: String?): TextView =
         com.pocketds.hub.ui.glass.GlassHeading.create(context, title, count).apply { setPadding(0, dp(4), 0, dp(2)) }
 
@@ -732,13 +611,8 @@ class ReadingHomeView(
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = false
-            addView(if (glass) heading("Your series", null).apply {
-                setPadding(dp(GLASS_EDGE_DP), dp(10), dp(GLASS_EDGE_DP), dp(2))
-            } else TextView(context).apply {
-                text = "Your series"
-                typeRole(Type.Role.HEADING, 16f)
-                setTextColor(colors.primaryText)
-                setPadding(dp(24), dp(14), dp(24), dp(2))
+            addView(heading("Your series", null).apply {
+                setPadding(dp(EDGE_DP), dp(10), dp(EDGE_DP), dp(2))
             })
             val line = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -757,16 +631,15 @@ class ReadingHomeView(
                         host.refreshHints()
                     }
                     selfActing += this
-                }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(if (glass) GLASS_FAN_GAP_DP else 22) })
+                }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(FAN_GAP_DP) })
             }
             addView(FocusHorizontalScrollView(context).apply {
                 isHorizontalScrollBarEnabled = false
                 clipToPadding = false
                 clipChildren = false
-                // Glass: the first fan stands in from the edge by how far its
-                // outer cover leans with focus, so the screen does not cut it.
-                if (glass) setPadding(dp(GLASS_FAN_EDGE_DP), dp(8), dp(GLASS_EDGE_DP), dp(6))
-                else setPadding(dp(24), dp(10), dp(24), dp(6))
+                // The first fan stands in from the edge by how far its outer
+                // cover leans with focus, so the screen does not cut it.
+                setPadding(dp(FAN_EDGE_DP), dp(8), dp(EDGE_DP), dp(6))
                 addView(line)
             })
         }
@@ -787,7 +660,7 @@ class ReadingHomeView(
     private fun focusedWork(): ReadingWork? = rows.firstOrNull { it.id == selectedRow }
         ?.items?.firstOrNull { it.id == selectedWork }
 
-    /** The cover in focus, for the Glass page (Screen.pageArtwork); a list's own buttons keep the last one. */
+    /** The cover in focus, for the page's colours (Screen.pageArtwork); a list's own buttons keep the last one. */
     val pageArtwork: String?
         get() = focusedWork()?.artwork?.takeIf(String::isNotBlank) ?: focusedSeriesCover
 
@@ -872,25 +745,24 @@ class ReadingHomeView(
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val RECENT_LIMIT = 12
         /**
-         * Glass, from the prototype's Pocket Books home: 8dp under the bar,
-         * 22dp edges, 82 x 123dp covers 12dp apart, the "Also reading" rows two
-         * to a line 8dp apart with 34dp covers and 13dp corners, and the fans
-         * 20dp apart.
+         * The prototype's Pocket Books home: 8dp under the bar, 22dp edges,
+         * 82 x 123dp covers 12dp apart, the "Also reading" rows two to a line
+         * 8dp apart with 34dp covers and 13dp corners, and the fans 20dp apart.
          */
-        const val GLASS_TOP_DP = 8
-        const val GLASS_EDGE_DP = 22
-        const val GLASS_POSTER_CARD_DP = 82
-        const val GLASS_POSTER_DP = 123f
-        const val GLASS_CARD_GAP_DP = 12
-        const val GLASS_ALSO_GAP_DP = 8
-        const val GLASS_MINI_CORNER_DP = 13f
-        const val GLASS_MINI_THUMB_DP = 34
-        const val GLASS_FORMAT_W_DP = 28
-        const val GLASS_FORMAT_H_DP = 22
-        const val GLASS_FAN_GAP_DP = 20
-        const val GLASS_FAN_EDGE_DP = 30
-        const val GLASS_STATUS_MAX_DP = 260
+        const val TOP_DP = 8
+        const val EDGE_DP = 22
+        const val POSTER_CARD_DP = 82
+        const val POSTER_DP = 123f
+        const val CARD_GAP_DP = 12
+        const val ALSO_GAP_DP = 8
+        const val MINI_CORNER_DP = 13f
+        const val MINI_THUMB_DP = 34
+        const val FORMAT_W_DP = 28
+        const val FORMAT_H_DP = 22
+        const val FAN_GAP_DP = 20
+        const val FAN_EDGE_DP = 30
+        const val STATUS_MAX_DP = 260
         /** The track under an "Also reading" bar: white at 18%. */
-        const val GLASS_MINI_TRACK = 0x2EFFFFFF
+        const val MINI_TRACK = 0x2EFFFFFF
     }
 }

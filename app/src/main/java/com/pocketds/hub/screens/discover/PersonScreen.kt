@@ -189,7 +189,7 @@ class PersonScreen(
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder {
-            val card = PosterCardView(parent.context, colors).apply {
+            val card = PosterCardView(parent.context, colors, glass = true).apply {
                 layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
                     val m = Styler.dpInt(parent.context, 8f)
                     setMargins(m, m, m, m)

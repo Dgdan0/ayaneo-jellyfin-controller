@@ -187,7 +187,7 @@ object ReadingShelves {
 
     /**
      * A series' covers for a fan: the book being read in front, then its first
-     * books in order. Up to four, as Glass's fan holds; Classic's shows three.
+     * books in order. Up to four, as the fan holds.
      */
     fun fanCovers(series: ReadingWork): List<String> {
         val books = series.sections.flatMap { it.items }

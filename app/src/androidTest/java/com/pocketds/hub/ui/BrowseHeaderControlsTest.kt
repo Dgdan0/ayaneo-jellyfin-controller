@@ -50,17 +50,4 @@ class BrowseHeaderControlsTest {
         assertTrue(toggle.getChildAt(1).minimumHeight >= Styler.dpInt(context, 48f))
         assertTrue(toggle.getChildAt(1).isSelected)
     }
-
-    @Test fun formatTabIsQuietUntilSelectedAndFocusesWithoutChangingSelection() = instrumentation.runOnMainSync {
-        val context = instrumentation.targetContext
-        val tab = ReadingCategoryTabView(context, Theme.colors(context), "Ebooks")
-        tab.select(false)
-        assertFalse(tab.isSelected)
-        assertTrue(tab.isFocusableInTouchMode)
-        assertTrue(tab.minimumHeight >= Styler.dpInt(context, 48f))
-        tab.requestFocus()
-        assertFalse(tab.isSelected)
-        tab.select(true)
-        assertTrue(tab.isSelected)
-    }
 }

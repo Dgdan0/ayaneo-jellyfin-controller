@@ -21,15 +21,14 @@ data class HeroContent(
     val meta: List<String>,
     val progress: Double,
     val progressLabel: String,
-    val playLabel: String,
+    /** The words on the white Play pill: "Resume", "Play S2E1" on Next up, "Play". */
+    val playAction: String,
     /** Hub-relative; empty when there is no artwork at all. */
     val backdrop: String,
     /** Coming-up titles are not in the library yet: Details only. */
     val canPlay: Boolean = true,
-    /** The end of [eyebrow] that Glass draws in the accent: the episode code, or the day on Coming up. */
-    val eyebrowMark: String = "",
-    /** The words on Glass's white Play pill: "Resume", "Play S2E1" on Next up, "Play". Classic keeps [playLabel]. */
-    val playAction: String = playLabel
+    /** The end of [eyebrow] drawn in the accent: the episode code, or the day on Coming up. */
+    val eyebrowMark: String = ""
 )
 
 object HomeHero {
@@ -78,7 +77,6 @@ object HomeHero {
             meta = meta,
             progress = if (watching) hit.progress else 0.0,
             progressLabel = left,
-            playLabel = if (watching) "Resume" else "Play",
             // The next episode by name, as the prototype's pill says it: you are
             // about to start something new, and which one is worth seeing.
             playAction = when {

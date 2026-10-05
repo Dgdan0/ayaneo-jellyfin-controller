@@ -8,7 +8,8 @@ import com.pocketds.hub.input.Direction
 data class ShelfFocusLane(val id: String, val row: Int, val featured: Boolean, val keys: List<String>)
 
 interface ShelfFocusRow {
-    val featureFocusView: View
+    /** The row's featured card, where it has one. */
+    val featureFocusView: View?
     val posterFocusList: RecyclerView
     val shelfHeadingView: View
 }

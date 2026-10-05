@@ -62,8 +62,6 @@ class ReleasesScreen(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private lateinit var colors: PocketColors
-    /** Glass (#11): the releases on glass rows under a display heading, as the request sheet is drawn. */
-    private var glass = false
     private lateinit var heading: TextView
     private lateinit var status: TextView
     private lateinit var list: RecyclerView
@@ -81,15 +79,14 @@ class ReleasesScreen(
         this.host = host
         val context = host.viewContext
         colors = Theme.colors(context)
-        glass = Theme.onGlass(colors)
 
         val root = FrameLayout(context).apply { setBackgroundColor(colors.background) }
         val content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
 
+        // The releases on glass rows under a display heading, as the request sheet is drawn (#11).
         heading = TextView(context).apply {
-            if (glass) { typeface = com.pocketds.hub.ui.Type.display(context, 800); textSize = 21f }
-            else com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 18f)
+            typeface = com.pocketds.hub.ui.Type.display(context, 800); textSize = 21f
             setTextColor(colors.primaryText)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -109,7 +106,7 @@ class ReleasesScreen(
                 Styler.dpInt(context, 24f), Styler.dpInt(context, 8f)
             )
         }
-        content.addView(status, LinearLayout.LayoutParams(if (glass) WRAP else MATCH, WRAP))
+        content.addView(status, LinearLayout.LayoutParams(WRAP, WRAP))
 
         list = RecyclerView(context).apply {
             layoutManager = LinearLayoutManager(context)
@@ -289,7 +286,6 @@ class ReleasesScreen(
                 is HubResult.Ok -> {
                     DebugLog.log("net", "grabbed ${release.id}")
                     status.showStatus(StatusText.notice("Grabbed — ${result.value.title.ifEmpty { release.title }}"), colors)
-                    if (!glass) status.setTextColor(colors.badgeAvailable)
                     host?.notify("Grabbed ${release.quality} — check Downloads")
                 }
                 is HubResult.Failed -> {
@@ -312,7 +308,7 @@ class ReleasesScreen(
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RowHolder {
-            val row = ReleaseRowView(parent.context, colors, glass).apply {
+            val row = ReleaseRowView(parent.context, colors).apply {
                 layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
                     val m = Styler.dpInt(parent.context, 4f)
                     setMargins(m, m, m, m)
@@ -341,15 +337,14 @@ class ReleasesScreen(
 
 /** One candidate release. */
 /**
- * One release, as a transfer row looks: a tile with its resolution (green
- * when Sonarr or Radarr would take it, grey when rejected), the release name,
- * one line of figures, and the rejection reasons in their own words.
+ * One release, as a transfer row looks: a row of the page's glass with its
+ * resolution as a chip (green when Sonarr or Radarr would take it, quiet when
+ * rejected), the release name, one line of figures, and the rejection reasons
+ * in their own words, as the request sheet's rows are.
  */
 private class ReleaseRowView(
     context: android.content.Context,
-    private val colors: PocketColors,
-    /** Glass: a row of the page's glass, its resolution a chip, as the request sheet's rows are. */
-    private val glass: Boolean = false
+    private val colors: PocketColors
 ) : LinearLayout(context) {
 
     private val tile: TextView
@@ -360,10 +355,8 @@ private class ReleaseRowView(
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        if (glass) {
-            com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, dp(14).toFloat())
-            foreground = Styler.focusOutline(context, colors, 14f)
-        } else background = Styler.cardBackground(context, colors, cornerDp = 16f)
+        com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, dp(14).toFloat())
+        foreground = Styler.focusOutline(context, colors, 14f)
         setPadding(dp(12), dp(10), dp(14), dp(10))
         Styler.makeFocusable(this)
 
@@ -392,7 +385,7 @@ private class ReleaseRowView(
 
         statsView = TextView(context).apply {
             textSize = 11.5f
-            setTextColor(if (glass) GLASS_STATS else colors.mutedText)
+            setTextColor(STATS)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(0, dp(4), 0, 0)
@@ -413,19 +406,12 @@ private class ReleaseRowView(
     fun bind(release: Release) {
         titleView.text = release.title
 
-        val tint = if (release.rejected) colors.mutedText else colors.badgeAvailable
         tile.text = RESOLUTION.find(release.quality)?.value?.lowercase() ?: release.quality.substringAfterLast('-').ifEmpty { "?" }
-        if (glass) {
-            // The prototype's status chips: green with white for one Sonarr or
-            // Radarr would take, a faint white for a refused one.
-            val tone = if (release.rejected) com.pocketds.hub.ui.DashboardParts.Tone.QUIET else com.pocketds.hub.ui.DashboardParts.Tone.GOOD
-            tile.setTextColor(com.pocketds.hub.ui.DashboardParts.glassInk(tone))
-            tile.background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(11).toFloat(), com.pocketds.hub.ui.DashboardParts.glassFill(tone))
-        } else {
-            tile.setTextColor(tint)
-            tile.background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(12).toFloat(),
-                androidx.core.graphics.ColorUtils.setAlphaComponent(tint, 0x2E))
-        }
+        // The prototype's status chips: green with white for one Sonarr or
+        // Radarr would take, a faint white for a refused one.
+        val tone = if (release.rejected) com.pocketds.hub.ui.DashboardParts.Tone.QUIET else com.pocketds.hub.ui.DashboardParts.Tone.GOOD
+        tile.setTextColor(com.pocketds.hub.ui.DashboardParts.glassInk(tone))
+        tile.background = com.pocketds.hub.ui.ThemeGradientDrawable.rounded(dp(11).toFloat(), com.pocketds.hub.ui.DashboardParts.glassFill(tone))
 
         statsView.text = buildList {
             if (release.quality.isNotEmpty()) add(release.quality)
@@ -452,7 +438,7 @@ private class ReleaseRowView(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         val RESOLUTION = Regex("""(?i)\d{3,4}p""")
-        /** Glass: the figures white at 62%; an accepted release's tile is a good chip's green, a refused one's quiet. */
-        const val GLASS_STATS = 0x9EFFFFFF.toInt()
+        /** The figures white at 62%; an accepted release's tile is a good chip's green, a refused one's quiet. */
+        const val STATS = 0x9EFFFFFF.toInt()
     }
 }

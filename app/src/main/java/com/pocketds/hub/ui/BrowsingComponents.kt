@@ -4,7 +4,6 @@ import com.pocketds.hub.playback.ResumeRules
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -43,44 +42,33 @@ class ArtworkFrame(context: Context, ratio: Float, cornerDp: Float = CORNER_DP) 
  * A 16:9 card with the title and "S1E4 · Title" under it: Home's Continue
  * watching and Next up.
  *
- * [glass] is the Glass tile (GLASS_PLAN.md): 11dp corners, the progress as a
- * white bar inside the still's lower edge on a faint track, a tick in the
- * accent, and a play disc of the page's glass on the focused tile, as the
- * prototype draws them.
+ * It is the Glass tile (GLASS_PLAN.md): 11dp corners, the progress as a white
+ * bar inside the still's lower edge on a faint track, a tick in the accent,
+ * and a play disc of the page's glass on the focused tile, as the prototype
+ * draws them.
  */
-class LandscapeCardView(context: Context, private val colors: PocketColors, private val glass: Boolean = false) : LinearLayout(context) {
+class LandscapeCardView(context: Context, private val colors: PocketColors) : LinearLayout(context) {
     private val image=ImageView(context).apply { scaleType=ImageView.ScaleType.CENTER_CROP }
-    private val progress=ArtworkProgressView(context,colors.accent)
-    private val badge=TextView(context).apply {
-        text="✓";textSize=12f;gravity=Gravity.CENTER
-        setTextColor(SemanticColor.foreground(colors.badgeAvailable))
-        background=ThemeGradientDrawable.rounded(dp(12).toFloat(),this@LandscapeCardView.colors.badgeAvailable)
-        importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO
-    }
-    /** Glass: the progress inside the still, the play disc on focus, the accent tick. */
-    private var marks:GlassStillMarks?=null
-    private val titleView=caption(if(glass) 12f else 12.5f,colors.primaryText).apply { textWeight(if(glass) 700 else 600) }
-    private val subtitle=caption(11f,if(glass) GLASS_SUBTITLE else colors.mutedText)
+    /** The progress inside the still, the play disc on focus, the accent tick. */
+    private val marks:GlassStillMarks
+    private val titleView=caption(12f,colors.primaryText).apply { textWeight(700) }
+    private val subtitle=caption(11f,SUBTITLE)
     init {
         // Focus is a ring around the frame, as on a poster, with the words
         // under it left alone rather than boxed in a tinted card.
         orientation=VERTICAL; minimumHeight=dp(48)
         background=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
         Styler.makeFocusable(this); isClickable=true;descendantFocusability=FOCUS_BLOCK_DESCENDANTS
-        val corner=if(glass) ArtworkFrame.GLASS_CORNER_DP else ArtworkFrame.CORNER_DP
+        val corner=ArtworkFrame.GLASS_CORNER_DP
         val art=ArtworkFrame(context,16f/9f,corner).apply {
             isDuplicateParentStateEnabled=true
-            foreground=Styler.focusOutline(context,colors,corner,if(glass) 3f else 2f)
+            foreground=Styler.focusOutline(context,colors,corner,3f)
         }
         art.addView(image,FrameLayout.LayoutParams(-1,-1))
-        if(glass) marks=GlassStillMarks(context,colors,art)
-        else {
-            art.addView(progress,FrameLayout.LayoutParams(-1,dp(3),Gravity.BOTTOM))
-            art.addView(badge,FrameLayout.LayoutParams(dp(22),dp(22),Gravity.TOP or Gravity.END).apply {setMargins(dp(6),dp(6),dp(6),dp(6))})
-        }
+        marks=GlassStillMarks(context,colors,art)
         addView(art,LayoutParams(-1,-2))
         addView(titleView,LayoutParams(-1,-2).apply {topMargin=dp(6)})
-        addView(subtitle,LayoutParams(-1,-2).apply {topMargin=dp(if(glass) 1 else 2);bottomMargin=dp(2)})
+        addView(subtitle,LayoutParams(-1,-2).apply {topMargin=dp(1);bottomMargin=dp(2)})
     }
     private fun caption(size: Float,color: Int)=TextView(context).apply {
         textSize=size;setTextColor(color);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
@@ -90,14 +78,11 @@ class LandscapeCardView(context: Context, private val colors: PocketColors, priv
     }
     override fun onFocusChanged(gainFocus: Boolean, direction: Int, previouslyFocusedRect: android.graphics.Rect?) {
         super.onFocusChanged(gainFocus,direction,previouslyFocusedRect)
-        marks?.focus(gainFocus)
+        marks.focus(gainFocus)
     }
     fun bind(hit: SearchHit,loader: ImageLoader,url: (String)->String) {
         titleView.text=hit.media.title;subtitle.text=hit.subtitle
-        val watched=ResumeRules.showsWatched(hit.played,hit.progress)
-        marks?.bind(hit.progress,watched)
-        progress.fraction=hit.progress
-        badge.visibility=if(watched) VISIBLE else GONE
+        marks.bind(hit.progress,ResumeRules.showsWatched(hit.played,hit.progress))
         contentDescription=listOf(hit.media.title,hit.subtitle,ResumeRules.watchLabel(hit.played,hit.progress).orEmpty()).filter(String::isNotBlank).joinToString(", ")
         DetailStyler.image(image,url(hit.media.backdrop.ifBlank {hit.media.poster}).takeIf(String::isNotBlank),loader)
     }
@@ -105,7 +90,7 @@ class LandscapeCardView(context: Context, private val colors: PocketColors, priv
 
     private companion object {
         /** The prototype's second caption line: white at 64%. */
-        const val GLASS_SUBTITLE = com.pocketds.hub.ui.glass.GlassColors.QUIET
+        const val SUBTITLE = com.pocketds.hub.ui.glass.GlassColors.QUIET
     }
 }
 

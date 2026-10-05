@@ -13,8 +13,6 @@ import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.*
 import com.pocketds.hub.screens.discover.DiscoverScreen
 import com.pocketds.hub.settings.ContentModeSettings
-import com.pocketds.hub.settings.Look
-import com.pocketds.hub.settings.LookSettings
 import com.pocketds.hub.state.ContentMode
 import java.lang.reflect.Proxy
 import org.junit.Assert.*
@@ -23,18 +21,9 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class DiscoverNavigationTest {
-    /** In each look (#11): Glass's rows are posters without captions, Classic's carry their titles. */
+    /** The rows are posters without captions (#11). */
     @Test fun featureAndShelvesAreSeparateReversibleStopsIncludingRecycledRows() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val oldLook = LookSettings.get(context)
-        try {
-            for (look in listOf(Look.GLASS, Look.CLASSIC)) walk(look)
-        } finally { LookSettings.set(context, oldLook) }
-    }
-
-    private fun walk(look: Look) {
         val ins = InstrumentationRegistry.getInstrumentation()
-        LookSettings.set(ins.targetContext, look)
         val activity = ins.startActivitySync(Intent(ins.targetContext, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         ContentModeSettings.set(activity, ContentMode.MEDIA)
         val response = DiscoverResponse(rows = (0..5).map { row -> DiscoverRow(id="row$row", title="Shelf $row", items=(0..8).map { index ->
@@ -63,11 +52,10 @@ class DiscoverNavigationTest {
                     val visible=android.graphics.Rect()
                     assertTrue("Shelf heading must stay visible",heading.getGlobalVisibleRect(visible))
                     assertEquals("Shelf heading must not be clipped",heading.height,visible.height())
-                    // Classic shows the title under the poster; Glass's rows are the posters alone.
-                    val shown=if(look==Look.GLASS) focused.getChildAt(0) else focused.getChildAt(1)
-                    val part=if(look==Look.GLASS) "Poster" else "Title"
-                    assertTrue("$part must be visible in $look",shown.getGlobalVisibleRect(visible))
-                    assertTrue("$part must not be clipped in $look",visible.height() >= (shown.height * focused.scaleY).toInt())
+                    // The rows are the posters alone.
+                    val shown=focused.getChildAt(0)
+                    assertTrue("Poster must be visible",shown.getGlobalVisibleRect(visible))
+                    assertTrue("Poster must not be clipped",visible.height() >= (shown.height * focused.scaleY).toInt())
                 }
             }
         }

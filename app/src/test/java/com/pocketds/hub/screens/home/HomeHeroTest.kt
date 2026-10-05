@@ -22,7 +22,7 @@ class HomeHeroTest {
         assertEquals("CONTINUE WATCHING · S3E4", hero.eyebrow)
         assertEquals("Drake & Josh", hero.title)
         assertEquals(listOf("Mindy's Back", "2005", "★ 8.0"), hero.meta)
-        assertEquals("Resume", hero.playLabel)
+        assertEquals("Resume", hero.playAction)
         // The series' backdrop at once, from the series poster's id: no still first.
         assertEquals("/v1/img/jf/$seriesId/Backdrop", hero.backdrop)
     }
@@ -49,7 +49,7 @@ class HomeHeroTest {
         val movie = SearchHit(media = MediaRef(type = "movie", title = "Iron Man 3", year = 2013, backdrop = "/b"), jellyfinItemId = "m")
         val hero = HomeHero.from("library:abc", "Marvel Movies", movie)
         assertEquals("MARVEL MOVIES", hero.eyebrow)
-        assertEquals("Play", hero.playLabel)
+        assertEquals("Play", hero.playAction)
         assertEquals(0.0, hero.progress, 0.0)
         assertEquals("/b", hero.backdrop)
     }
@@ -79,11 +79,10 @@ class HomeHeroTest {
     }
 
     @Test
-    fun `next up plays its episode by name while classic keeps the short label`() {
+    fun `next up plays its episode by name`() {
         val next = episode.copy(progress = 0.0, subtitle = "S2E1 · Pilot")
         val hero = HomeHero.from("nextup", "Next up", next)
         assertEquals("Play S2E1", hero.playAction)
-        assertEquals("Play", hero.playLabel)
         // A part-watched one resumes, on any row; a film just plays.
         assertEquals("Resume", HomeHero.from("continue", "Continue watching", episode).playAction)
         val movie = SearchHit(media = MediaRef(type = "movie", title = "Iron Man 3", backdrop = "/b"), jellyfinItemId = "m")
@@ -100,7 +99,7 @@ class HomeHeroTest {
     @Test
     fun `a finished episode is not offered as a resume`() {
         val watched = episode.copy(played = true, progress = 0.0)
-        assertEquals("Play", HomeHero.from("nextup", "Next up", watched).playLabel)
+        assertEquals("Play S3E4", HomeHero.from("nextup", "Next up", watched).playAction)
         assertEquals("NEXT UP · S3E4", HomeHero.from("nextup", "Next up", watched).eyebrow)
     }
 }

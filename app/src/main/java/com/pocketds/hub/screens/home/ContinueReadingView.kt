@@ -13,7 +13,6 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.graphics.ColorUtils
 import coil.ImageLoader
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.screens.library.ReadingBookFacts
@@ -22,10 +21,7 @@ import com.pocketds.hub.ui.Artwork
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PillButton
 import com.pocketds.hub.ui.PocketColors
-import com.pocketds.hub.ui.ProgressLine
-import com.pocketds.hub.ui.ProgressLine.showFraction
 import com.pocketds.hub.ui.Styler
-import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.ThemeGradientDrawable
 import com.pocketds.hub.ui.Type
 import com.pocketds.hub.ui.glass.GlassColors
@@ -37,10 +33,9 @@ import com.pocketds.hub.ui.typeRole
  * in its series ("Red Rising #6 · Pierce Brown"), how far through, and Resume
  * reading beside Details. The screen owns what the buttons do.
  *
- * On Glass it is the prototype's (`.reading`): no card, the cover at full
- * size with the words beside its foot, the title in the display face, the
- * series number and the bar in the accent, Resume reading gold and Details
- * glass.
+ * It is the prototype's (`.reading`): no card, the cover at full size with
+ * the words beside its foot, the title in the display face, the series
+ * number and the bar in the accent, Resume reading gold and Details glass.
  */
 class ContinueReadingView(
     context: Context,
@@ -48,96 +43,87 @@ class ContinueReadingView(
     ringVisible: () -> Boolean
 ) : LinearLayout(context) {
 
-    private val glass = Theme.onGlass(colors)
-    /** Glass: gold, as the Books side's main action is (PillButton.mainFace). */
+    /** Gold, as the Books side's main action is (PillButton.mainFace). */
     val resume: TextView = PillButton.create(context, colors, "Resume reading", AppIcon.BOOK, primary = true,
-        heightDp = if (glass) GLASS_BUTTON_DP else 36f, glass = glass, side = com.pocketds.hub.state.ContentMode.BOOKS)
+        heightDp = BUTTON_DP, glass = true, side = com.pocketds.hub.state.ContentMode.BOOKS)
     val details: TextView = PillButton.create(context, colors, "Details", AppIcon.INFO,
-        heightDp = if (glass) GLASS_BUTTON_DP else 36f, glass = glass)
+        heightDp = BUTTON_DP, glass = true)
     private val cover = ImageView(context)
     private val title = TextView(context)
     private val place = TextView(context)
-    private val bar = ProgressLine.create(context, colors)
-    private val glassBar = GlassProgressBar(context, colors.accent, GlassColors.TRACK)
+    private val bar = GlassProgressBar(context, colors.accent, GlassColors.TRACK)
     private val progress = TextView(context)
     var work: ReadingWork? = null
         private set
 
     init {
         orientation = HORIZONTAL
-        gravity = if (glass) Gravity.BOTTOM else Gravity.CENTER_VERTICAL
+        gravity = Gravity.BOTTOM
         clipChildren = false
-        if (glass) {
-            clipToPadding = false
-        } else {
-            setPadding(dp(16), dp(16), dp(16), dp(16))
-            background = ThemeGradientDrawable.rounded(Styler.dp(context, 18f), colors.cardSurface, dp(1),
-                ColorUtils.setAlphaComponent(colors.accent, 90))
-        }
+        clipToPadding = false
         cover.apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            background = ThemeGradientDrawable.rounded(Styler.dp(context, if (glass) GLASS_COVER_CORNER_DP else 8f), colors.posterPlaceholder)
+            background = ThemeGradientDrawable.rounded(Styler.dp(context, COVER_CORNER_DP), colors.posterPlaceholder)
             clipToOutline = true
-            elevation = Styler.dp(context, if (glass) 14f else 10f)
+            elevation = Styler.dp(context, 14f)
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        // Glass: its foot level with the pills' (their ring's room lies below them).
-        addView(cover, if (glass) LayoutParams(dp(GLASS_COVER_DP), dp(GLASS_COVER_DP * 3 / 2)).apply {
+        // Its foot level with the pills' (their ring's room lies below them).
+        addView(cover, LayoutParams(dp(COVER_DP), dp(COVER_DP * 3 / 2)).apply {
             bottomMargin = dp(PillButton.RING_DP.toInt())
-        } else LayoutParams(dp(104), dp(156)))
+        })
         val column = LinearLayout(context).apply {
             orientation = VERTICAL
-            setPadding(dp(if (glass) GLASS_GAP_DP else 18), 0, 0, 0)
+            setPadding(dp(GAP_DP), 0, 0, 0)
             clipChildren = false
             clipToPadding = false
         }
         column.addView(TextView(context).apply {
             text = "Continue reading"
             isAllCaps = true
-            typeRole(Type.Role.EYEBROW, if (glass) 10.5f else Type.Role.EYEBROW.sizeSp)
-            setTextColor(if (glass) GlassColors.EYEBROW else colors.accent)
+            typeRole(Type.Role.EYEBROW, 10.5f)
+            setTextColor(GlassColors.EYEBROW)
         })
         column.addView(title.apply {
-            typeRole(Type.Role.HERO, if (glass) GLASS_TITLE_SP else 26f)
+            typeRole(Type.Role.HERO, TITLE_SP)
             // The prototype's title is Bricolage at its heaviest, set close.
-            if (glass) { typeface = Type.display(context, 800); setLineSpacing(0f, .95f) }
+            typeface = Type.display(context, 800); setLineSpacing(0f, .95f)
             setTextColor(colors.primaryText)
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
-            setPadding(0, dp(if (glass) GLASS_LINE_GAP_DP else 7), 0, 0)
+            setPadding(0, dp(LINE_GAP_DP), 0, 0)
             textAlignment = View.TEXT_ALIGNMENT_VIEW_START
         })
         column.addView(place.apply {
             textSize = 12f
-            setTextColor(if (glass) GlassColors.FACTS else colors.mutedText)
+            setTextColor(GlassColors.FACTS)
             isSingleLine = true
             ellipsize = TextUtils.TruncateAt.END
-            setPadding(0, dp(if (glass) GLASS_LINE_GAP_DP else 7), 0, 0)
+            setPadding(0, dp(LINE_GAP_DP), 0, 0)
         })
         column.addView(LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(if (glass) GLASS_LINE_GAP_DP + 2 else 9), 0, 0)
-            if (glass) addView(glassBar, LayoutParams(dp(GLASS_BAR_DP), dp(GlassProgressBar.HEIGHT_DP.toInt())))
-            else addView(bar, LayoutParams(0, dp(6), 1f))
+            setPadding(0, dp(LINE_GAP_DP + 2), 0, 0)
+            addView(bar, LayoutParams(dp(BAR_DP), dp(GlassProgressBar.HEIGHT_DP.toInt())))
             addView(progress.apply {
-                textSize = if (glass) 12f else 11f
-                setTextColor(if (glass) GlassColors.FACTS else colors.mutedText)
-                setPadding(dp(if (glass) 12 else 10), 0, 0, 0)
+                textSize = 12f
+                setTextColor(GlassColors.FACTS)
+                setPadding(dp(12), 0, 0, 0)
             })
         }, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         val ring = dp(PillButton.RING_DP.toInt())
         column.addView(LinearLayout(context).apply {
             orientation = HORIZONTAL
             clipChildren = false
-            setPadding(0, dp(if (glass) GLASS_BUTTONS_GAP_DP else 10), 0, 0)
+            setPadding(0, dp(BUTTONS_GAP_DP), 0, 0)
             addView(resume)
             addView(details, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                marginStart = if (glass) dp(GLASS_BUTTON_GAP_DP) - 2 * ring else dp(6)
+                marginStart = dp(BUTTON_GAP_DP) - 2 * ring
             })
         }, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             // The pill itself lines up with the words; its ring has room to the left.
-            if (glass) marginStart = -ring
+            marginStart = -ring
         })
         addView(column, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         listOf(resume, details).forEach { FocusDecorator.attach(it, ringVisible, scale = false) }
@@ -164,8 +150,7 @@ class ContinueReadingView(
         }
         place.visibility = if (place.text.isNullOrBlank()) GONE else VISIBLE
         val fraction = next.progress?.let { if (it.completed) 1.0 else it.percentage } ?: 0.0
-        bar.showFraction(fraction)
-        glassBar.fraction = fraction
+        bar.fraction = fraction
         progress.text = ReadingBookFacts.progress(next).orEmpty()
         resume.contentDescription = "Resume reading ${next.title}"
         details.contentDescription = "Details for ${next.title}"
@@ -180,14 +165,14 @@ class ContinueReadingView(
          * beside it and 6dp apart, the 30sp title, a long accent bar, and the
          * 31dp pills 10dp apart, as on Home's hero.
          */
-        const val GLASS_COVER_DP = 112
-        const val GLASS_COVER_CORNER_DP = 9f
-        const val GLASS_GAP_DP = 18
-        const val GLASS_LINE_GAP_DP = 6
-        const val GLASS_TITLE_SP = 30f
-        const val GLASS_BAR_DP = 260
-        const val GLASS_BUTTONS_GAP_DP = 8
-        const val GLASS_BUTTON_DP = 31f
-        const val GLASS_BUTTON_GAP_DP = 10
+        const val COVER_DP = 112
+        const val COVER_CORNER_DP = 9f
+        const val GAP_DP = 18
+        const val LINE_GAP_DP = 6
+        const val TITLE_SP = 30f
+        const val BAR_DP = 260
+        const val BUTTONS_GAP_DP = 8
+        const val BUTTON_DP = 31f
+        const val BUTTON_GAP_DP = 10
     }
 }

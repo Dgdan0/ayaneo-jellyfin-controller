@@ -2,9 +2,7 @@ package com.pocketds.hub.screens.discover
 
 import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.ui.Artwork
-import com.pocketds.hub.ui.ThemeGradientDrawable
 import android.view.Gravity
-import android.graphics.drawable.InsetDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -33,9 +31,6 @@ import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.state.ContentModeMemory
 import com.pocketds.hub.ui.DiscoverFeatureCardView
-import com.pocketds.hub.ui.ReadingCategoryTabView
-import com.pocketds.hub.ui.AppIcon
-import com.pocketds.hub.ui.AppIconDrawable
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.ShelfFocusNavigator
 import com.pocketds.hub.ui.ShelfFocusLane
@@ -100,8 +95,6 @@ class DiscoverScreen(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private lateinit var colors: PocketColors
-    /** Glass (#11): the prototype's Discover; a styling switch only. */
-    private var glass = false
     private lateinit var searchBox: EditText
     private lateinit var readingFilters: HorizontalScrollView
     /** Discover | Upcoming, at the start of the search row. */
@@ -112,9 +105,8 @@ class DiscoverScreen(
     private lateinit var topRow: LinearLayout
     private lateinit var searchStatus: View
     private var tab = TAB_DISCOVER
-    private val readingFilterButtons = mutableMapOf<String, ReadingCategoryTabView>()
-    /** Glass: the book filters as a glass capsule beside the search, as the prototype's Books Discover. */
-    private var readingCapsule: com.pocketds.hub.ui.BlobSegmentedView? = null
+    /** The book filters as a glass capsule beside the search, as the prototype's Books Discover. */
+    private lateinit var readingCapsule: com.pocketds.hub.ui.BlobSegmentedView
     private lateinit var statusLine: TextView
     private lateinit var broaderSearchButton: TextView
     private lateinit var rowsList: RecyclerView
@@ -185,7 +177,7 @@ class DiscoverScreen(
         this.host = host
         val context = host.viewContext
         colors = Theme.colors(context)
-        glass = Theme.onGlass(colors)
+        // The prototype's Discover (#11).
         mode = ContentModeSettings.get(context)
 
         val frame = android.widget.FrameLayout(context)
@@ -198,16 +190,14 @@ class DiscoverScreen(
         readingFilters = FocusHorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             visibility = if (mode == ContentMode.BOOKS) View.VISIBLE else View.GONE
-            // Glass: the filters are a capsule in the row with the search, built there.
-            if (!glass) addView(buildReadingFilters())
+            // The filters are a capsule in the row with the search, built there.
         }
-        if (!glass) root.addView(readingFilters, LinearLayout.LayoutParams(MATCH, WRAP))
 
         tabs = com.pocketds.hub.ui.BlobSegmentedView(context, colors, ringVisible).apply {
-            heightDp = if (glass) 34f else 38f
-            textSp = if (glass) 12f else 12.5f
-            // Glass: a capsule of the page's glass, as the prototype's is.
-            if (glass) useGlassTrack() else trackColor = colors.cardSurface
+            heightDp = 34f
+            textSp = 12f
+            // A capsule of the page's glass, as the prototype's is.
+            useGlassTrack()
             // A picks: the tabs sit beside the search box, and passing through
             // them on the way there should not swap the page.
             setOptions(listOf(com.pocketds.hub.ui.BlobSegmentedView.Option(TAB_DISCOVER, "Discover"),
@@ -218,26 +208,8 @@ class DiscoverScreen(
 
         searchBox = EditText(context).apply {
             hint = if (mode == ContentMode.BOOKS) "Search books, comics and audio" else "Search films and series"
-            // Glass: the prototype's search, a pill of the page's glass 34dp of the 48dp target.
-            if (glass) com.pocketds.hub.ui.glass.GlassSearchField.style(this, colors, pillDp = 34f, targetDp = 48f) else {
-                textSize = 14f
-                setTextColor(colors.primaryText)
-                setHintTextColor(colors.mutedText)
-                background = InsetDrawable(ThemeGradientDrawable().apply {
-                    cornerRadius = Styler.dp(context, 12f)
-                    setColor(this@DiscoverScreen.colors.cardSurface)
-                    setStroke(Styler.dpInt(context, 1f), this@DiscoverScreen.colors.stripBackground)
-                }, 0, Styler.dpInt(context, 4f), 0, Styler.dpInt(context, 4f))
-                setCompoundDrawablesRelative(AppIconDrawable(AppIcon.SEARCH, colors.mutedText).apply {
-                    val size = Styler.dpInt(context, 18f)
-                    setBounds(0, 0, size, size)
-                }, null, null, null)
-                compoundDrawablePadding = Styler.dpInt(context, 9f)
-                setSingleLine()
-                val h = Styler.dpInt(context, 12f)
-                val v = Styler.dpInt(context, 6f)
-                setPadding(h, v, h, v)
-            }
+            // The prototype's search, a pill of the page's glass 34dp of the 48dp target.
+            com.pocketds.hub.ui.glass.GlassSearchField.style(this, colors, pillDp = 34f, targetDp = 48f)
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             // Focusing this opens the IME, which on this device is the sibling
             // keyboard project's panel on the bottom screen.
@@ -280,26 +252,24 @@ class DiscoverScreen(
                 marginStart = Styler.dpInt(context, 8f)
                 marginEnd = Styler.dpInt(context, 2f)
             })
-            if (glass) {
-                // Books: All, Ebooks, Audiobooks... as one glass capsule, in the
-                // filters' own scroller so a narrow screen can still reach them all.
-                readingCapsule = com.pocketds.hub.ui.BlobSegmentedView(context, colors, ringVisible).apply {
-                    heightDp = 34f
-                    textSp = 12f
-                    useGlassTrack()
-                    setOptions(ReadingType.filters.map { (wire, label) ->
-                        com.pocketds.hub.ui.BlobSegmentedView.Option(wire, label, "Show $label")
-                    }, readingType)
-                    onPick = ::selectReadingType
-                    onOptionFocused = { host.refreshHints() }
-                }
-                readingFilters.addView(readingCapsule)
-                readingFilters.clipToPadding = false
-                addView(readingFilters, LinearLayout.LayoutParams(WRAP, WRAP).apply {
-                    marginStart = Styler.dpInt(context, 8f)
-                    marginEnd = Styler.dpInt(context, 2f)
-                })
+            // Books: All, Ebooks, Audiobooks... as one glass capsule, in the
+            // filters' own scroller so a narrow screen can still reach them all.
+            readingCapsule = com.pocketds.hub.ui.BlobSegmentedView(context, colors, ringVisible).apply {
+                heightDp = 34f
+                textSp = 12f
+                useGlassTrack()
+                setOptions(ReadingType.filters.map { (wire, label) ->
+                    com.pocketds.hub.ui.BlobSegmentedView.Option(wire, label, "Show $label")
+                }, readingType)
+                onPick = ::selectReadingType
+                onOptionFocused = { host.refreshHints() }
             }
+            readingFilters.addView(readingCapsule)
+            readingFilters.clipToPadding = false
+            addView(readingFilters, LinearLayout.LayoutParams(WRAP, WRAP).apply {
+                marginStart = Styler.dpInt(context, 8f)
+                marginEnd = Styler.dpInt(context, 2f)
+            })
             addView(searchBox, LinearLayout.LayoutParams(0, WRAP, 1f))
         }, LinearLayout.LayoutParams(MATCH, WRAP))
 
@@ -318,13 +288,7 @@ class DiscoverScreen(
         }
         searchStatusRow.addView(statusLine, LinearLayout.LayoutParams(0, WRAP, 1f))
         broaderSearchButton = TextView(context).apply {
-            if (glass) com.pocketds.hub.ui.PillButton.control(this, colors) else {
-                textSize = 11f
-                setTextColor(colors.primaryText)
-                setPadding(Styler.dpInt(context, 9f), Styler.dpInt(context, 5f),
-                    Styler.dpInt(context, 9f), Styler.dpInt(context, 5f))
-                background = Styler.chipBackground(context, colors)
-            }
+            com.pocketds.hub.ui.PillButton.control(this, colors)
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
             activateOnTap { toggleBroaderReadingResults() }
@@ -347,7 +311,7 @@ class DiscoverScreen(
             adapter = rowsAdapter
             // The focused row rests at the top, as on Home, so each row comes
             // to the same place rather than wherever its cards first fit.
-            pinFocusedRows(if (glass) GLASS_SHORTEST_ROW_DP else SHORTEST_ROW_DP)
+            pinFocusedRows(SHORTEST_ROW_DP)
             // A row's focused card is scaled up and its ring must not be clipped
             // by the row above.
             clipChildren = false
@@ -421,7 +385,7 @@ class DiscoverScreen(
         }
         root.addView(readingResultsGrid)
 
-        form = FormOverlay(context, colors, ringVisible, glass = Theme.onGlass(colors))
+        form = FormOverlay(context, colors, ringVisible, glass = true)
         frame.addView(form, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
 
         flow = RequestFlow(
@@ -441,33 +405,8 @@ class DiscoverScreen(
         return frame
     }
 
-    private fun buildReadingFilters(): View {
-        val bar = LinearLayout(host?.viewContext ?: throw IllegalStateException("host missing")).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(
-                Styler.dpInt(context, 10f), Styler.dpInt(context, 4f),
-                Styler.dpInt(context, 10f), 0
-            )
-        }
-        ReadingType.filters.forEach { (wire, label) ->
-            val chip = ReadingCategoryTabView(bar.context, colors, label).apply {
-                activateOnTap { selectReadingType(wire) }
-            }
-            readingFilterButtons[wire] = chip
-            bar.addView(chip, LinearLayout.LayoutParams(WRAP, WRAP).apply {
-                marginEnd = Styler.dpInt(bar.context, 5f)
-            })
-        }
-        updateReadingFilterStyles()
-        return bar
-    }
-
     private fun updateReadingFilterStyles() {
-        readingFilterButtons.forEach { (wire, button) ->
-            val selected = wire == readingType
-            button.select(selected)
-        }
-        readingCapsule?.select(readingType)
+        if (::readingCapsule.isInitialized) readingCapsule.select(readingType)
     }
 
     private fun selectReadingType(type: String) {
@@ -556,7 +495,7 @@ class DiscoverScreen(
 
     private fun focusLanes(): List<ShelfFocusLane> {
         val width = (host!!.viewContext.resources.configuration.screenWidthDp - 180).coerceAtLeast(0)
-        return if (mode == ContentMode.MEDIA) rowsAdapter.focusLanes(width) else readingRowsAdapter.focusLanes(width)
+        return if (mode == ContentMode.MEDIA) rowsAdapter.focusLanes(width) else readingRowsAdapter.focusLanes()
     }
 
     private fun restoreContentFocus(): Boolean {
@@ -1082,20 +1021,17 @@ class DiscoverScreen(
 
     // ---- adapters ----------------------------------------------------------
 
-    /**
-     * [glassCard]: Glass posters (media only; Books keep theirs until their
-     * milestone), caption-less in a row as the prototype's are.
-     */
-    private fun newCard(parent: ViewGroup, posterHeight: Float, width: Int, glassCard: Boolean = false, captions: Boolean = true): PosterCardView =
-        PosterCardView(parent.context, colors, posterHeight, captions = captions, glass = glassCard).apply {
+    /** A poster; a film row's are caption-less, as the prototype's are. */
+    private fun newCard(parent: ViewGroup, posterHeight: Float, width: Int, captions: Boolean = true): PosterCardView =
+        PosterCardView(parent.context, colors, posterHeight, captions = captions, glass = true).apply {
             layoutParams = RecyclerView.LayoutParams(width, WRAP).apply {
-                val m = Styler.dpInt(parent.context, if (glassCard) (if (captions) 5f else 6f) else 8f)
+                val m = Styler.dpInt(parent.context, if (captions) 5f else 6f)
                 setMargins(m, m, m, m)
             }
             FocusDecorator.attach(this, ringVisible)
         }
 
-    /** The picture a hit gives the Glass page: its backdrop, else its poster. */
+    /** The picture a hit gives the page: its backdrop, else its poster. */
     private fun artworkOf(hit: SearchHit): String = hit.media.backdrop.ifBlank { hit.media.poster }
 
     private fun bindCard(card: PosterCardView, fromHub: SearchHit) {
@@ -1132,15 +1068,10 @@ class DiscoverScreen(
     private inner class ReadingRowsAdapter : RecyclerView.Adapter<ReadingRowHolder>() {
         private val rows = mutableListOf<ReadingDiscoverRow>()
 
-        fun focusLanes(width: Int): List<ShelfFocusLane> = rows.flatMapIndexed { index, row ->
-            // Glass's Books Discover has no featured card: a cover cropped wide read badly.
-            val feature = if (index == 0 && !glass) DiscoverFeaturePolicy.readingFeature(row, width) else null
-            val id = "books:${row.contentType}:${row.id}"
-            buildList {
-                if (feature != null) add(ShelfFocusLane("$id:feature", index, true, listOf(feature.key)))
-                val items = if (feature != null) row.items.drop(1) else row.items
-                if (items.isNotEmpty()) add(ShelfFocusLane(id, index, false, items.map { it.key }))
-            }
+        /** Books Discover has no featured card: a cover cropped wide read badly. */
+        fun focusLanes(): List<ShelfFocusLane> = rows.mapIndexedNotNull { index, row ->
+            ShelfFocusLane("books:${row.contentType}:${row.id}", index, false, row.items.map { it.key })
+                .takeIf { row.items.isNotEmpty() }
         }
 
         fun submit(next: List<ReadingDiscoverRow>) {
@@ -1169,7 +1100,7 @@ class DiscoverScreen(
             ReadingRowHolder(ReadingPosterRowView(parent.context, colors))
 
         override fun onBindViewHolder(holder: ReadingRowHolder, position: Int) {
-            (holder.itemView as ReadingPosterRowView).bind(rows[position], position == 0)
+            (holder.itemView as ReadingPosterRowView).bind(rows[position])
         }
 
         override fun onBindViewHolder(
@@ -1193,36 +1124,25 @@ class DiscoverScreen(
         context: android.content.Context,
         colors: PocketColors
     ) : LinearLayout(context), ShelfFocusRow, com.pocketds.hub.ui.PinnedRowsLayoutManager.Anchor {
-        private val feature = DiscoverFeatureCardView(context, colors, ringVisible, glass)
         private val label: TextView
         private val strip: RecyclerView
-        override val featureFocusView: View get() = feature
+        /** No featured card on a row of books. */
+        override val featureFocusView: View? get() = null
         override val posterFocusList: RecyclerView get() = strip
         override val shelfHeadingView: View get() = label
-        /** On the featured card the row's top rests at the top; in the posters, the label does. */
-        override fun pinOffset(focused: android.graphics.Rect): Int =
-            if (feature.visibility == View.VISIBLE && focused.top < label.top) 0 else label.top
+        override fun pinOffset(focused: android.graphics.Rect): Int = label.top
         private val stripAdapter = ReadingStripAdapter()
         private var current: ReadingDiscoverRow? = null
-        private var featuredRow = false
-        private val featureWidthDp get() = (resources.configuration.screenWidthDp - 180).coerceAtLeast(0)
 
         init {
             orientation = VERTICAL
             clipChildren = false
-            feature.visibility = View.GONE
-            addView(feature, LayoutParams(MATCH, WRAP).apply {
-                if (glass) setMargins(Styler.dpInt(context, 22f), Styler.dpInt(context, 8f), Styler.dpInt(context, 22f), Styler.dpInt(context, 6f))
-                else setMargins(Styler.dpInt(context, 18f), Styler.dpInt(context, 5f),
-                    Styler.dpInt(context, 18f), Styler.dpInt(context, 9f))
-            })
             label = TextView(context).apply {
-                // Glass: a row title as Home's are, bold Figtree.
-                if (glass) { textSize = 14f; textWeight(700) }
-                else com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 15f)
+                // A row title as Home's are, bold Figtree.
+                textSize = 14f; textWeight(700)
                 setTextColor(colors.primaryText)
                 setPadding(
-                    Styler.dpInt(context, if (glass) 22f else 24f), Styler.dpInt(context, 8f),
+                    Styler.dpInt(context, 22f), Styler.dpInt(context, 8f),
                     Styler.dpInt(context, 12f), Styler.dpInt(context, 2f)
                 )
             }
@@ -1234,8 +1154,8 @@ class DiscoverScreen(
                 clipToPadding = false
                 clipChildren = false
                 setItemViewCacheSize(8)
-                // Glass: the first cover lines up with the label, its 5dp margin inside the 22dp edge.
-                val edge = Styler.dpInt(context, if (glass) 17f else 16f)
+                // The first cover lines up with the label, its 5dp margin inside the 22dp edge.
+                val edge = Styler.dpInt(context, 17f)
                 setPadding(edge, 0, edge, 0)
                 addOnScrollListener(object : RecyclerView.OnScrollListener() {
                     override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
@@ -1248,28 +1168,16 @@ class DiscoverScreen(
             addView(strip, LayoutParams(MATCH, WRAP))
         }
 
-        fun bind(row: ReadingDiscoverRow, first: Boolean) {
+        fun bind(row: ReadingDiscoverRow) {
             current = row
-            featuredRow = first
-            val selected = if (first && !glass) DiscoverFeaturePolicy.readingFeature(row, featureWidthDp) else null
-            feature.visibility = if (selected == null) View.GONE else View.VISIBLE
-            selected?.let { item ->
-                feature.bind(item.title, item.subtitle, item.description, api.imageUrl(item.cover),
-                    landscape = false, loader = Artwork.loader(api, context))
-                feature.setTag(TAG_READING_ITEM, item)
-                feature.activateOnTap { openReadingDetail(item) }
-                FocusDecorator.listen(feature, ringVisible) { _, focused ->
-                    if (focused) { modeStates.recall(ContentMode.BOOKS)?.focusedKey = item.key; host?.refreshHints() }
-                }
-            }
             label.text = row.title
-            stripAdapter.submit(if (selected == null) row.items else row.items.drop(1))
+            stripAdapter.submit(row.items)
             strip.scrollToPosition(0)
         }
 
         fun appendOnly(row: ReadingDiscoverRow) {
             current = row
-            stripAdapter.submit(if (featuredRow && !glass) DiscoverFeaturePolicy.readingShelf(row, featureWidthDp) else row.items)
+            stripAdapter.submit(row.items)
         }
 
         private inner class ReadingStripAdapter : RecyclerView.Adapter<CardHolder>() {
@@ -1289,9 +1197,8 @@ class DiscoverScreen(
             }
 
             override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
-                // Glass: the prototype's book cards, 82dp covers with their captions under them.
-                CardHolder(if (glass) newCard(parent, GLASS_ROW_POSTER_DP, Styler.dpInt(parent.context, GLASS_ROW_CARD_DP), glassCard = true)
-                    else newCard(parent, ROW_POSTER_DP, Styler.dpInt(parent.context, ROW_CARD_DP)))
+                // The prototype's book cards, 82dp covers with their captions under them.
+                CardHolder(newCard(parent, ROW_POSTER_DP, Styler.dpInt(parent.context, ROW_CARD_DP)))
 
             override fun onBindViewHolder(holder: CardHolder, position: Int) {
                 bindReadingCard(holder.itemView as PosterCardView, items[position])
@@ -1311,7 +1218,7 @@ class DiscoverScreen(
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
-            CardHolder(newCard(parent, GRID_POSTER_DP, MATCH, glassCard = glass))
+            CardHolder(newCard(parent, GRID_POSTER_DP, MATCH))
 
         override fun onBindViewHolder(holder: CardHolder, position: Int) {
             bindReadingCard(holder.itemView as PosterCardView, items[position])
@@ -1395,7 +1302,7 @@ class DiscoverScreen(
         context: android.content.Context,
         colors: PocketColors
     ) : LinearLayout(context), ShelfFocusRow, com.pocketds.hub.ui.PinnedRowsLayoutManager.Anchor {
-        private val feature = DiscoverFeatureCardView(context, colors, ringVisible, glass)
+        private val feature = DiscoverFeatureCardView(context, colors, ringVisible)
 
         private val label: TextView
         private val strip: RecyclerView
@@ -1414,17 +1321,14 @@ class DiscoverScreen(
             clipChildren = false
             feature.visibility = View.GONE
             addView(feature, LayoutParams(MATCH, WRAP).apply {
-                if (glass) setMargins(Styler.dpInt(context, 22f), Styler.dpInt(context, 8f), Styler.dpInt(context, 22f), Styler.dpInt(context, 6f))
-                else setMargins(Styler.dpInt(context, 18f), Styler.dpInt(context, 5f),
-                    Styler.dpInt(context, 18f), Styler.dpInt(context, 9f))
+                setMargins(Styler.dpInt(context, 22f), Styler.dpInt(context, 8f), Styler.dpInt(context, 22f), Styler.dpInt(context, 6f))
             })
             label = TextView(context).apply {
-                // Glass: a row title as Home's are, bold Figtree.
-                if (glass) { textSize = 14f; textWeight(700) }
-                else com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 15f)
+                // A row title as Home's are, bold Figtree.
+                textSize = 14f; textWeight(700)
                 setTextColor(colors.primaryText)
                 setPadding(
-                    Styler.dpInt(context, if (glass) 22f else 24f), Styler.dpInt(context, 8f),
+                    Styler.dpInt(context, 22f), Styler.dpInt(context, 8f),
                     Styler.dpInt(context, 12f), Styler.dpInt(context, 2f)
                 )
             }
@@ -1462,7 +1366,7 @@ class DiscoverScreen(
             selected?.let { hit ->
                 val image = hit.media.backdrop.ifBlank { hit.media.poster }
                 feature.bind(hit.media.title, hit.subtitle.ifBlank { hit.media.year.takeIf { it > 0 }?.toString().orEmpty() },
-                    hit.overview, api.imageUrl(image), hit.media.backdrop.isNotBlank(),
+                    hit.overview, api.imageUrl(image),
                     Artwork.loader(api, context),
                     mark = com.pocketds.hub.model.Availability.fromWire(RequestedTitles.apply(hit).availability).label.ifEmpty { "Not in your library" })
                 feature.setTag(TAG_HIT, hit)
@@ -1507,10 +1411,7 @@ class DiscoverScreen(
             }
 
             override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
-                CardHolder(
-                    if (glass) newCard(parent, GLASS_ROW_POSTER_DP, Styler.dpInt(parent.context, GLASS_ROW_CARD_DP), glassCard = true, captions = false)
-                    else newCard(parent, ROW_POSTER_DP, Styler.dpInt(parent.context, ROW_CARD_DP))
-                )
+                CardHolder(newCard(parent, ROW_POSTER_DP, Styler.dpInt(parent.context, ROW_CARD_DP), captions = false))
 
             override fun onBindViewHolder(holder: CardHolder, position: Int) {
                 bindCard(holder.itemView as PosterCardView, items[position])
@@ -1540,7 +1441,7 @@ class DiscoverScreen(
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
-            CardHolder(newCard(parent, GRID_POSTER_DP, MATCH, glassCard = glass))
+            CardHolder(newCard(parent, GRID_POSTER_DP, MATCH))
 
         override fun onBindViewHolder(holder: CardHolder, position: Int) {
             bindCard(holder.itemView as PosterCardView, items[position])
@@ -1556,30 +1457,23 @@ class DiscoverScreen(
         const val TAB_UPCOMING = "upcoming"
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-        /** A poster row: its label and a 118dp poster with two lines under it. */
-        const val SHORTEST_ROW_DP = 170f
-
         /**
-         * Card geometry, measured against this hardware.
+         * Card geometry, measured against this hardware: the prototype's
+         * caption-less 82 x 123dp posters, and a row's shortest.
          *
          * The usable area is 853 x 456 dp (1920x1026 at density 2.25). After the
          * tab bar, hint bar, search field and status line there are roughly
          * 340dp of vertical space, so a row has to fit inside ~170dp for two to
          * be visible at once -- which is the Findroid look and was the point of
-         * shrinking these. A 2:3 poster at 108dp tall is 72dp wide, plus a title
-         * line and margins.
+         * shrinking these.
          */
-        const val ROW_POSTER_DP = 150f
-        const val ROW_CARD_DP = 104f
+        const val ROW_POSTER_DP = 123f
+        const val ROW_CARD_DP = 82f
+        const val SHORTEST_ROW_DP = 160f
 
         /** Search results get a little more room, since there is no row label. */
         const val GRID_POSTER_DP = 150f
         const val SEARCH_COLUMNS = 7
-
-        /** Glass: the prototype's caption-less 82 x 123dp posters, and a row's shortest. */
-        const val GLASS_ROW_POSTER_DP = 123f
-        const val GLASS_ROW_CARD_DP = 82f
-        const val GLASS_SHORTEST_ROW_DP = 160f
         /** How many cards of each row to ask the page colours for when the rows arrive. */
         const val PREFETCH_COLOURS = 12
 
