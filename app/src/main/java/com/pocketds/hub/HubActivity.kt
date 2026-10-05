@@ -36,6 +36,8 @@ import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ContentModeScreen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.nav.SectionStacks
+import com.pocketds.hub.nav.SidePages
+import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.nav.StatusStripView
 import com.pocketds.hub.nav.TopBarView
 import com.pocketds.hub.ui.Styler
@@ -103,6 +105,10 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private lateinit var router: PadEventRouter
     private lateinit var ticker: PadTicker
     private lateinit var sections: SectionStacks
+    /** Media and Books keep their own pages on each content tab (#18). */
+    private lateinit var sidePages: SidePages<ContentMode>
+    /** The side each page on a content tab was opened on, for a page that does not say its own. */
+    private val openedOn = HashMap<Screen, ContentMode>()
 
     private lateinit var hintBar: HintBarView
     private lateinit var overlay: FrameLayout
@@ -194,6 +200,10 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         }, emit = ::onPadAction)
         ticker = PadTicker(router)
         sections = SectionStacks(sectionTitles.size)
+        sidePages = SidePages(sections, CONTENT_SECTION_COUNT) { page ->
+            // A page says its side; one that follows the side itself (a root, the transfers) is on both.
+            (page as? Screen)?.let { it.contentDomain ?: if (it is ContentModeScreen) null else openedOn[it] }
+        }
 
         setContentView(buildChrome())
         // hints() reads the focused item, so every path that moves focus had to
@@ -337,9 +347,11 @@ class HubActivity : AppCompatActivity(), ScreenHost {
                 ContentModeSettings.set(this@HubActivity, mode)
                 refreshAppearance()
                 (sections.stack().peek() as? ContentModeScreen)?.selectContentMode(mode)
-                leaveOtherSide(mode)
-                setMode(mode)
-                post { focusMode(mode) }
+                if (switchSides(mode)) showCurrent()
+                else {
+                    setMode(mode)
+                    post { focusMode(mode) }
+                }
                 refreshHints()
             }
             onSelect = { index ->
@@ -503,6 +515,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     }
 
     private fun detach(screen: Screen) {
+        openedOn.remove(screen)
         views.remove(screen)?.let { content.removeView(it) }
     }
 
@@ -873,20 +886,15 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     }
 
     /**
-     * Switching between Media and Books takes the other side's pages off the
-     * other tabs, so each opens on the side you chose. A film's page stayed on
-     * Library under a lit Books, and Back from it went to the Anime library.
+     * Media and Books keep their own pages (#18): the side chosen gets back
+     * the pages it left on each content tab, and the other side's are kept as
+     * they are for the way back. A page let go of (its tab moved on) loses its
+     * view. True when the tab on screen now shows another page.
      */
-    private fun leaveOtherSide(mode: com.pocketds.hub.state.ContentMode) {
-        for (index in 0 until CONTENT_SECTION_COUNT) {
-            if (index == sections.current) continue
-            val stack = sections.stack(index)
-            while (true) {
-                val side = (stack.peek() as? Screen)?.contentDomain ?: break
-                if (side == mode) break
-                (stack.dropHidden() as? Screen)?.let(::detach) ?: break
-            }
-        }
+    private fun switchSides(mode: ContentMode): Boolean {
+        val before = sections.stack().peek()
+        sidePages.show(mode).forEach { page -> (page as? Screen)?.let(::detach) }
+        return sections.stack().peek() !== before
     }
 
     override fun focusTabs(): Boolean {
@@ -968,6 +976,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
 
     override fun push(screen: Screen) {
         attach(screen)
+        // On a content tab a page belongs to the side it is opened on (#18), unless it says its own.
+        if (sections.current < CONTENT_SECTION_COUNT) openedOn[screen] = ContentModeSettings.get(this)
         sections.push(screen)
         showCurrent()
     }

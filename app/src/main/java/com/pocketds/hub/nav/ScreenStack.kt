@@ -59,15 +59,19 @@ class ScreenStack {
     }
 
     /**
-     * Takes the top off a stack that is not showing, without showing the one
-     * under it: that one shows when its section is chosen again. Null at the
-     * root, which stays.
+     * Takes the top off and keeps it as it is, for [restore] later: nothing
+     * is hidden, destroyed or shown, so the caller says what shows (#18, the
+     * other side's pages while Media or Books is chosen). Null at the root,
+     * which stays.
      */
-    fun dropHidden(): StackScreen? {
+    fun park(): StackScreen? {
         if (entries.size <= 1) return null
-        val removed = entries.removeAt(entries.lastIndex)
-        removed.onDestroyView()
-        return removed
+        return entries.removeAt(entries.lastIndex)
+    }
+
+    /** Puts a page [park] took back on top, as it was: nothing is shown or hidden. */
+    fun restore(screen: StackScreen) {
+        entries.add(screen)
     }
 
     /** Hide the top without tearing anything down. For switching away. */
