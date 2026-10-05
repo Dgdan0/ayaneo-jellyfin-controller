@@ -7,7 +7,14 @@ import android.view.animation.DecelerateInterpolator
 import com.pocketds.hub.ui.SidePanelView
 import com.pocketds.hub.ui.Styler
 
-/** View transforms preserve EPUB pagination and the comic reader's current pan/zoom. */
+/**
+ * Shows and hides a reader's bars, and fits its page round them. View
+ * transforms preserve EPUB pagination and the reader's measured viewport.
+ *
+ * The owner chose (#16, X7, 2026-10-05): a book's page [makesRoom], shrinking
+ * with the menu round it, while a comic's page keeps its size and the bars
+ * float over it ([makesRoom] false), its zoom and its step untouched.
+ */
 class ReaderPagePreviewController(
     private val root: View,
     private val page: View,
@@ -15,6 +22,7 @@ class ReaderPagePreviewController(
     private val bottomBar: View,
     private val panels: List<SidePanelView>,
     private val animate: Boolean = true,
+    private val makesRoom: Boolean = true,
     private val extraBottom: () -> Int = { 0 }
 ) {
     private var controlsVisible = false
@@ -45,7 +53,7 @@ class ReaderPagePreviewController(
         topBar.visibility = if (showBars) View.VISIBLE else View.GONE
         bottomBar.visibility = if (showBars) View.VISIBLE else View.GONE
         val margin = if (controlsVisible || active.isNotEmpty()) Styler.dpInt(root.context, 12f) else 0
-        val result = ReaderPagePreview.fit(
+        val result = if (!makesRoom) ReaderPageTransform(1f, 0f, 0f) else ReaderPagePreview.fit(
             root.width, root.height,
             top = if (showBars) topBar.layoutParams.height.coerceAtLeast(0) else 0,
             bottom = maxOf(if (showBars) bottomBar.layoutParams.height.coerceAtLeast(0) else 0,

@@ -74,15 +74,43 @@ object OverlayButtons {
      */
     fun light(view: TextView, colors: PocketColors, on: Boolean) {
         val glass = view.background as? GlassButtonBackground
+        val ink = if (glass != null) { if (on) GlassColors.INK else Color.WHITE } else { if (on) colors.accentText else Color.WHITE }
+        // The icon before the words goes dark with them, or it vanishes on the white face.
+        view.compoundDrawablesRelative.forEach { (it as? AppIconDrawable)?.tint(ink) }
+        view.compoundDrawables.forEach { (it as? AppIconDrawable)?.tint(ink) }
         if (glass != null) {
             glass.lit = on
-            view.setTextColor(if (on) GlassColors.INK else Color.WHITE)
+            view.setTextColor(ink)
             return
         }
+        // A new face brings its insets as the view's padding; the words keep their own.
+        val padding = intArrayOf(view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom)
         view.background = if (on) ringed(view.context, colors.focusRing, GradientDrawable.RECTANGLE, colors.accent)
             else pillFace(view.context, colors.focusRing)
-        view.setTextColor(if (on) colors.accentText else Color.WHITE)
+        view.setPadding(padding[0], padding[1], padding[2], padding[3])
+        view.setTextColor(ink)
     }
+
+    /** Play's face: a white disc whatever the look, its symbol dark ([PLAY_INK]). */
+    fun playFace(context: Context, ring: Int): StateListDrawable =
+        ringed(context, ring, GradientDrawable.OVAL, Color.WHITE, pressed = Color.argb(255, 214, 219, 226))
+
+    /** The dark symbol on [playFace]. */
+    val PLAY_INK: Int = Color.argb(255, 10, 13, 18)
+
+    /** "−10", "+10": a jump, written on a disc (the player's and the read-along dock's). */
+    fun jump(context: Context, ring: Int, label: String, description: String, onTap: () -> Unit): TextView =
+        TextView(context).apply {
+            text = label
+            contentDescription = description
+            textSize = 13f
+            typeface = Type.text(context, 700)
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            dressDisc(this, ring)
+            Styler.makeFocusable(this)
+            activateOnTap(onTap)
+        }
 
     fun ringed(context: Context, ring: Int, shape: Int, fill: Int, pressed: Int = PRESSED): StateListDrawable {
         val gap = Styler.dpInt(context, RING_GAP_DP)
@@ -113,13 +141,13 @@ object OverlayButtons {
             typeface = Type.text(context, 600)
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
-            setPadding(Styler.dpInt(context, 16f), 0, Styler.dpInt(context, 16f), 0)
             dressPill(this, ring)
+            // The face's insets replaced the padding: the ring's room, then the words' own
+            // (Classic's soft pill squeezed "Display" to its edges without this).
+            val gap = Styler.dpInt(context, RING_GAP_DP)
+            val side = Styler.dpInt(context, if (Theme.isGlass(context)) 12f else 14f)
+            setPadding(gap + side, gap, gap + side, gap)
             if (Theme.isGlass(context)) {
-                // The face's insets replaced the padding: the ring's room, then the words' own.
-                val gap = Styler.dpInt(context, RING_GAP_DP)
-                val side = Styler.dpInt(context, 12f)
-                setPadding(gap + side, gap, gap + side, gap)
                 if (icon != null) {
                     val size = Styler.dpInt(context, 14f)
                     compoundDrawablePadding = Styler.dpInt(context, 7f)

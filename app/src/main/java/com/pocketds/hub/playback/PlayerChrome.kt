@@ -174,7 +174,7 @@ internal class PlayerChrome(
         addView(rewindButton, LinearLayout.LayoutParams(dp(58), dp(58)))
         playButton = PlayerIconButton(context, PlayerControlIcon.PLAY).apply {
             contentDescription = "Play"
-            setIconColor(Color.argb(255, 10, 13, 18), halo = false)
+            setIconColor(com.pocketds.hub.ui.OverlayButtons.PLAY_INK, halo = false)
             background = discBackground()
             Styler.makeFocusable(this)
             activateOnTap(actions::togglePlay)
@@ -327,22 +327,13 @@ internal class PlayerChrome(
         }
 
     /** −10 and +10: the jump, written on the disc. */
-    private fun seekCircle(label: String, description: String, action: () -> Unit) = TextView(context).apply {
-        text = label
-        contentDescription = description
-        textSize = 13f
-        typeface = com.pocketds.hub.ui.Type.text(context, 700)
-        setTextColor(Color.WHITE)
-        gravity = Gravity.CENTER
-        com.pocketds.hub.ui.OverlayButtons.dressDisc(this, colors.focusRing)
-        Styler.makeFocusable(this)
-        activateOnTap(action)
-        setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
-    }
+    private fun seekCircle(label: String, description: String, action: () -> Unit) =
+        com.pocketds.hub.ui.OverlayButtons.jump(context, colors.focusRing, label, description, action).apply {
+            setOnFocusChangeListener { _, focused -> if (focused) actions.controlFocused() }
+        }
 
     /** Play: a white disc. */
-    private fun discBackground(): StateListDrawable = com.pocketds.hub.ui.OverlayButtons.ringed(
-        context, colors.focusRing, GradientDrawable.OVAL, Color.WHITE, pressed = Color.argb(255, 214, 219, 226))
+    private fun discBackground(): StateListDrawable = com.pocketds.hub.ui.OverlayButtons.playFace(context, colors.focusRing)
 
     private fun timeText(value: String) = TextView(context).apply {
         text = value

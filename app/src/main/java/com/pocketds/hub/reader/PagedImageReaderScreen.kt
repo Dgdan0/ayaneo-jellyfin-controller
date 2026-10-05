@@ -1,5 +1,6 @@
 package com.pocketds.hub.reader
 
+import android.content.Context
 import android.graphics.Color
 import android.graphics.PointF
 import android.view.Gravity
@@ -11,25 +12,26 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import coil.request.ImageRequest
-import com.davemorrissey.labs.subscaleview.ImageSource
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.input.Stick
 import com.pocketds.hub.model.ReadingPublicationManifest
 import com.pocketds.hub.nav.ButtonHint
-import com.pocketds.hub.nav.HintBarView
 import com.pocketds.hub.nav.Screen
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
 import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.net.HubResult
+import com.pocketds.hub.settings.ComfortSettings
 import com.pocketds.hub.settings.DomainPreferences
 import com.pocketds.hub.ui.AppIcon
 import com.pocketds.hub.ui.ChoiceOverlay
+import com.pocketds.hub.ui.ComfortLayerView
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.OverlayButtons
 import com.pocketds.hub.ui.PocketColors
+import com.pocketds.hub.ui.ScreenComfort
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.Type
@@ -58,6 +60,12 @@ import kotlin.math.max
  * top. Thirds are worked out from the page's shape (C2): three for a comic
  * page, two for a spread, with "Part 2 of 3" and a small map of the page. The
  * last page ends on a card naming the next issue (C6).
+ *
+ * In Glass the controls are bars of the cover's glass floating over the page,
+ * which keeps its size (X7, the owner's choice). Pages either side stay
+ * decoded on surfaces behind the one shown ([PageSurface], C3), so a turn
+ * swaps to a page already drawn and a jump keeps the page you were on until
+ * the next is ready. Comfort (X3) dims and warms the whole reader.
  */
 class PagedImageReaderScreen(
     private val api: HubApi,
@@ -77,12 +85,16 @@ class PagedImageReaderScreen(
     override val immersive: Boolean = true
     override val focusOnShow: Boolean = false
 
+    /** Glass: the bars take the colours of the issue's own cover. */
+    override val pageArtwork: String? get() = IssueCover.path(currentSourceItemId)
+
     private lateinit var host: ScreenHost
     private lateinit var root: FrameLayout
-    private lateinit var image: SubsamplingScaleImageView
+    /** The surfaces the page is drawn on; [image] is the one in front. */
+    private lateinit var surface: PageSurface
+    private val image: SubsamplingScaleImageView get() = surface.front.view
     private lateinit var loading: TextView
-    private lateinit var topBar: LinearLayout
-    private lateinit var bottomBar: LinearLayout
+    private lateinit var bars: ReaderBars
     private lateinit var titleView: TextView
     /** Under the title: "Issue 51 · Page 2 of 24". */
     private lateinit var subtitleView: TextView
@@ -97,9 +109,11 @@ class PagedImageReaderScreen(
     private lateinit var previewLabel: TextView
     private lateinit var previewCard: LinearLayout
     private lateinit var regionHint: TextView
+    /** "Loading page 5": shown over the page you were on while the next decodes, if that takes a moment. */
+    private lateinit var waitPill: TextView
     private lateinit var pageMap: PageMapView
     private lateinit var endCard: EndOfIssueCard
-    private lateinit var keyRow: HintBarView
+    private lateinit var comfortLayer: ComfortLayerView
     private var previewJob: Job? = null
     private var previewRequest: coil.request.Disposable? = null
     private var repository: ReaderPageRepository? = null
@@ -111,7 +125,6 @@ class PagedImageReaderScreen(
     private var visibleCheckpoint: Pair<ReadingCheckpointKey, ReadingLocation>? = null
     private var checkpointErrorShown = false
     private var manifestJob: Job? = null
-    private var pageJob: Job? = null
     private var endJob: Job? = null
     private var generation = 0L
     private var manifest: ReadingPublicationManifest? = null
@@ -124,13 +137,17 @@ class PagedImageReaderScreen(
     private var focusedControl = 0
 
     /** This series' fit and direction (C1), read when the screen is made. */
-    private lateinit var view: ComicView
+    private lateinit var reading: ComicView
     /** A zoom past the fit, kept from page to page and issue to issue. */
     private var zoom = carriedZoom
     /** Pages as they decoded, which outrank the manifest's sizes for the steps. */
     private val measured = HashMap<Int, Pair<Int, Int>>()
-    /** Where the next page to load opens: going back, at its end. */
+    /** Where the next page to show opens: going back, at its end. */
     private var arriveAtEnd = false
+    /** The page asked for and not yet shown; it shows the moment its surface is ready. */
+    private var pending: PageKey? = null
+    /** Which way you are reading: the neighbour decoded first. */
+    private var forward = true
     /** L3 held: the view to go back to when it is let go. */
     private var magnified: Pair<Float, PointF>? = null
     /** The end card has somewhere to go on to. */
@@ -138,66 +155,18 @@ class PagedImageReaderScreen(
 
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
-        progress = ReadingProgress.get(host.viewContext)
+        val context = host.viewContext
+        progress = ReadingProgress.get(context)
         readingSession = progress.session()
-        manifestCache = ReadingManifestCache(java.io.File(host.viewContext.cacheDir, "reading-manifests"))
-        colors = Theme.colors(host.viewContext)
-        view = DomainPreferences.comicView(host.viewContext, workId)
-        repository = (api as? HubClient)?.let { ReaderPageRepository(host.viewContext, readingSession.api, readingSession.identity) }
-        root = FrameLayout(host.viewContext).apply { setBackgroundColor(Color.BLACK) }
-        image = SubsamplingScaleImageView(host.viewContext).apply {
-            setBackgroundColor(Color.BLACK)
-            setMinimumScaleType(SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE)
-            setPanLimit(SubsamplingScaleImageView.PAN_LIMIT_INSIDE)
-            setMaxScale(6f)
-            setDoubleTapZoomDpi(240)
-            setDoubleTapZoomDuration(180)
-            setOnClickListener { toggleControls() }
-            setOnImageEventListener(object : SubsamplingScaleImageView.DefaultOnImageEventListener() {
-                override fun onReady() {
-                    loading.visibility = View.GONE
-                    refreshKeys()
-                    val position = this@PagedImageReaderScreen.state
-                    if (position != null) {
-                        // The decoded size outranks the manifest's: the steps may change, and
-                        // a page reached going back still opens on its last one.
-                        measured[position.pageIndex] = image.sWidth to image.sHeight
-                        if (arriveAtEnd) position.jump(position.pageIndex, Int.MAX_VALUE) else position.refit()
-                    }
-                    applyViewport()
-                    updatePosition()
-                    val publication = manifest ?: return
-                    val page = position?.pageIndex ?: return
-                    visibleCheckpoint = readingSession.key(workId, publication.sourceItemId, "pages") to ReadingLocation(pageIndex = page)
-                    saveCurrent(immediate = false)
-                }
-
-                override fun onImageLoadError(e: Exception) {
-                    showPageError("This page could not be decoded")
-                }
-
-                override fun onTileLoadError(e: Exception) {
-                    showPageError("Part of this page could not be decoded")
-                }
-            })
-            // A pinch or a double tap is a zoom of your own, kept from page to page.
-            setOnStateChangedListener(object : SubsamplingScaleImageView.OnStateChangedListener {
-                override fun onScaleChanged(newScale: Float, origin: Int) {
-                    if (origin != SubsamplingScaleImageView.ORIGIN_TOUCH && origin != SubsamplingScaleImageView.ORIGIN_DOUBLE_TAP_ZOOM) return
-                    if (magnified != null || !image.isReady) return
-                    val center = image.center ?: return
-                    setZoom(ComicZoom.of(newScale, baseScale(), center.x, image.sWidth.toFloat()), snap = false)
-                }
-
-                override fun onCenterChanged(newCenter: PointF, origin: Int) {
-                    if (!zoom.active || magnified != null || image.sWidth <= 0) return
-                    if (origin == SubsamplingScaleImageView.ORIGIN_TOUCH || origin == SubsamplingScaleImageView.ORIGIN_FLING)
-                        zoom = zoom.copy(anchorX = (newCenter.x / image.sWidth).coerceIn(0f, 1f))
-                }
-            })
-        }
-        root.addView(image, FrameLayout.LayoutParams(MATCH, MATCH))
-        loading = TextView(host.viewContext).apply {
+        manifestCache = ReadingManifestCache(java.io.File(context.cacheDir, "reading-manifests"))
+        colors = Theme.colors(context)
+        reading = DomainPreferences.comicView(context, workId)
+        repository = (api as? HubClient)?.let { ReaderPageRepository(context, readingSession.api, readingSession.identity) }
+        root = FrameLayout(context).apply { setBackgroundColor(Color.BLACK) }
+        surface = PageSurface(context, PageSlots.COUNT, ::pageView)
+        surface.slots.forEach(::listen)
+        root.addView(surface, FrameLayout.LayoutParams(MATCH, MATCH))
+        loading = TextView(context).apply {
             text = "Opening publication…"
             textSize = 14f
             gravity = Gravity.CENTER
@@ -205,7 +174,7 @@ class PagedImageReaderScreen(
             setBackgroundColor(0x55000000)
         }
         root.addView(loading, FrameLayout.LayoutParams(MATCH, MATCH))
-        pageMap = PageMapView(host.viewContext).apply {
+        pageMap = PageMapView(context).apply {
             onStep = { step ->
                 state?.let { position ->
                     position.jump(position.pageIndex, step)
@@ -217,50 +186,104 @@ class PagedImageReaderScreen(
         root.addView(pageMap, FrameLayout.LayoutParams(dp(60), dp(96), Gravity.TOP or Gravity.END).apply {
             topMargin = dp(16); marginEnd = dp(16)
         })
+        bars = ReaderBars(context, colors, ReaderBars.ROW_DP, ReaderBars.ROW_DP) { onPad(it) }
         buildTopBar()
         buildBottomBar()
-        previewCard = LinearLayout(host.viewContext).apply {
+        root.addView(bars.top, bars.topParams())
+        root.addView(bars.bottom, bars.bottomParams())
+        previewCard = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; visibility = View.GONE
-            setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(0xEE141518.toInt())
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            if (!OverlayButtons.panel(this, 14f)) setBackgroundColor(0xEE141518.toInt())
         }
-        previewImage = ImageView(host.viewContext).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
-        previewLabel = TextView(host.viewContext).apply { textSize = 12f; setTextColor(Color.WHITE); gravity = Gravity.CENTER }
+        previewImage = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+        previewLabel = TextView(context).apply { textSize = 12f; setTextColor(Color.WHITE); gravity = Gravity.CENTER }
         previewCard.addView(previewImage, LinearLayout.LayoutParams(dp(88), dp(112)))
         previewCard.addView(previewLabel)
-        root.addView(previewCard, FrameLayout.LayoutParams(dp(104), WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(108) })
-        regionHint = TextView(host.viewContext).apply {
-            textSize = 12f; setTextColor(Color.WHITE); setPadding(dp(12), dp(6), dp(12), dp(6)); visibility = View.GONE
-            if (!OverlayButtons.panel(this, 999f)) setBackgroundColor(0xB3141518.toInt())
-        }
+        root.addView(previewCard, FrameLayout.LayoutParams(dp(104), WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+            bottomMargin = bars.bottomHeight + dp(8)
+        })
+        regionHint = hintPill()
         root.addView(regionHint, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(24) })
-        endCard = EndOfIssueCard(host.viewContext, colors) { onPad(it) }
+        waitPill = hintPill()
+        root.addView(waitPill, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER_HORIZONTAL or Gravity.TOP).apply { topMargin = dp(24) })
+        endCard = EndOfIssueCard(context, colors) { onPad(it) }
         root.addView(endCard, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(28) })
-        options = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
+        options = ChoiceOverlay(context, colors, ringVisible, sidePanel = true)
         root.addView(options, FrameLayout.LayoutParams(MATCH, MATCH))
-        pagePreview = ReaderPagePreviewController(root, image, topBar, bottomBar, listOf(options))
+        // Over everything the reader draws, controls and sheets too, as a backlight would dim.
+        comfortLayer = ComfortLayerView(context)
+        root.addView(comfortLayer, FrameLayout.LayoutParams(MATCH, MATCH))
+        comfortLayer.apply(ComfortSettings.load(context))
+        // The owner's choice (X7): the bars float over a comic, whose page keeps its size.
+        pagePreview = ReaderPagePreviewController(root, surface, bars.top, bars.bottom, listOf(options), makesRoom = false)
         focusedControl = ReaderControlFocusPolicy.initialIndex(focusables.size) ?: 0
-        OverlayButtons.light(thirdsButton, colors, view.fit == ComicFit.THIRDS)
-        thirdsButton.isSelected = view.fit == ComicFit.THIRDS
+        OverlayButtons.light(thirdsButton, colors, reading.fit == ComicFit.THIRDS)
+        thirdsButton.isSelected = reading.fit == ComicFit.THIRDS
         setControlsVisible(false)
         return root
     }
 
+    /** One surface's view: the same tiled image view for each, told apart by [listen]. */
+    private fun pageView(context: Context) = SubsamplingScaleImageView(context).apply {
+        setBackgroundColor(Color.BLACK)
+        setMinimumScaleType(SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE)
+        setPanLimit(SubsamplingScaleImageView.PAN_LIMIT_INSIDE)
+        setMaxScale(6f)
+        setDoubleTapZoomDpi(240)
+        setDoubleTapZoomDuration(180)
+        setOnClickListener { toggleControls() }
+    }
+
+    private fun listen(slot: PageSurface.Slot) {
+        slot.view.setOnImageEventListener(object : SubsamplingScaleImageView.DefaultOnImageEventListener() {
+            override fun onReady() = onSlotReady(slot)
+
+            override fun onImageLoadError(e: Exception) = onSlotFailed(slot, "This page could not be decoded")
+
+            override fun onTileLoadError(e: Exception) {
+                if (slot === surface.front) showPageError("Part of this page could not be decoded")
+            }
+        })
+        // A pinch or a double tap on the page shown is a zoom of your own, kept from page to page.
+        slot.view.setOnStateChangedListener(object : SubsamplingScaleImageView.OnStateChangedListener {
+            override fun onScaleChanged(newScale: Float, origin: Int) {
+                if (slot !== surface.front) return
+                if (origin != SubsamplingScaleImageView.ORIGIN_TOUCH && origin != SubsamplingScaleImageView.ORIGIN_DOUBLE_TAP_ZOOM) return
+                if (magnified != null || !image.isReady) return
+                val center = image.center ?: return
+                setZoom(ComicZoom.of(newScale, baseScale(), center.x, image.sWidth.toFloat()), snap = false)
+            }
+
+            override fun onCenterChanged(newCenter: PointF, origin: Int) {
+                if (slot !== surface.front || !zoom.active || magnified != null || image.sWidth <= 0) return
+                if (origin == SubsamplingScaleImageView.ORIGIN_TOUCH || origin == SubsamplingScaleImageView.ORIGIN_FLING)
+                    zoom = zoom.copy(anchorX = (newCenter.x / image.sWidth).coerceIn(0f, 1f))
+            }
+        })
+    }
+
     override fun onShow() {
+        comfortLayer.apply(ComfortSettings.load(host.viewContext))
         if (manifest == null && manifestJob?.isActive != true) {
             loadManifest(currentSourceItemId, startAtEnd = openAtEnd)
-        } else if (manifest != null && !image.isReady && pageJob?.isActive != true) {
+        } else if (manifest != null && !showsCurrentPage()) {
             loadPage()
+        } else if (manifest != null) {
+            planNeighbours()
         }
     }
 
     override fun onHide() {
         saveCurrent(immediate = true)
         manifestJob?.cancel()
-        pageJob?.cancel()
+        // Pages still on their way stop; the ones decoded stay for when the reader comes back.
+        surface.slots.filter { it !== surface.front && !it.ready }.forEach { it.clear() }
         previewJob?.cancel()
         endJob?.cancel()
         previewRequest?.dispose()
         regionHint.removeCallbacks(hideRegionHint)
+        waitPill.removeCallbacks(showWait)
         pageMap.dismiss()
         magnify(false)
         options.dismiss()
@@ -270,7 +293,7 @@ class PagedImageReaderScreen(
     override fun onDestroyView() {
         pagePreview.dispose()
         saveCurrent(immediate = true)
-        image.recycle()
+        surface.recycleAll()
         uiScope.cancel()
         repository = null
         focusables.clear()
@@ -323,65 +346,58 @@ class PagedImageReaderScreen(
     /**
      * The player's look over the page: a round Close, the series with the
      * issue and page under it, round steps between issues and zoom, and the
-     * tools that open something named in words.
+     * tools that open something named in words; Thirds lit white while on.
      */
     private fun buildTopBar() {
-        topBar = LinearLayout(host.viewContext).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(6), dp(14), dp(6))
-            setBackgroundColor(BAR)
-        }
-        root.addView(topBar, FrameLayout.LayoutParams(MATCH, dp(60), Gravity.TOP))
-        topBar.addView(round(AppIcon.CLOSE, "Close reader") { host.back() }, LinearLayout.LayoutParams(dp(44), dp(44)))
-        topBar.addView(LinearLayout(host.viewContext).apply {
+        val row = bars.topRow
+        // The bar is a row of 44dp controls: Glass's floats with its own corners, Classic's runs edge to edge.
+        if (bars.glass) row.setPadding(dp(4), 0, dp(4), 0) else row.setPadding(dp(14), dp(4), dp(14), dp(4))
+        row.addView(round(AppIcon.CLOSE, "Close reader") { host.back() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        row.addView(LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             titleView = TextView(context).apply {
                 text = title
-                Type.apply(this, Type.Role.HEADING, 17f)
+                Type.apply(this, Type.Role.HEADING, if (bars.glass) 15f else 17f)
                 setTextColor(Color.WHITE)
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
             addView(titleView)
             subtitleView = TextView(context).apply {
-                textSize = 12f
-                setTextColor(SOFT_TEXT)
+                textSize = if (bars.glass) 11.5f else 12f
+                setTextColor(ReaderBars.SOFT_TEXT)
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
-                setPadding(0, dp(2), 0, 0)
+                setPadding(0, dp(1), 0, 0)
             }
             addView(subtitleView)
-        }, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = dp(10); marginEnd = dp(8) })
-        topBar.addView(round(AppIcon.PREVIOUS_ITEM, "Previous issue") { movePublication(-1) }, LinearLayout.LayoutParams(dp(44), dp(44)))
-        thirdsButton = pill("Thirds", "Read each page in thirds", ::toggleThirds)
-        topBar.addView(thirdsButton, LinearLayout.LayoutParams(WRAP, dp(44)).apply { marginStart = dp(2) })
-        topBar.addView(round(AppIcon.ZOOM_OUT, "Zoom out") { zoom(.8f) }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
-        topBar.addView(round(AppIcon.ZOOM_IN, "Zoom in") { zoom(1.25f) }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
-        topBar.addView(pill("Display", "Reading options") { showReadingOptions() }, LinearLayout.LayoutParams(WRAP, dp(44)).apply { marginStart = dp(2) })
-        topBar.addView(round(AppIcon.PAD, "Keys") { showKeys() }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
-        topBar.addView(round(AppIcon.NEXT_ITEM, "Next issue") { movePublication(1) }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
+        }, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = dp(8); marginEnd = dp(8) })
+        row.addView(round(AppIcon.PREVIOUS_ITEM, "Previous issue") { movePublication(-1) }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        thirdsButton = pill("Thirds", "Read each page in thirds", AppIcon.THIRDS, ::toggleThirds)
+        row.addView(thirdsButton, LinearLayout.LayoutParams(WRAP, dp(44)).apply { marginStart = dp(2) })
+        row.addView(round(AppIcon.ZOOM_OUT, "Zoom out") { zoom(.8f) }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
+        row.addView(round(AppIcon.ZOOM_IN, "Zoom in") { zoom(1.25f) }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
+        row.addView(pill("Display", "Reading options", AppIcon.APPEARANCE) { showReadingOptions() }, LinearLayout.LayoutParams(WRAP, dp(44)).apply { marginStart = dp(2) })
+        row.addView(round(AppIcon.COMFORT, "Comfort") { showComfort() }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
+        row.addView(round(AppIcon.PAD, "Keys") { showKeys() }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
+        row.addView(round(AppIcon.NEXT_ITEM, "Next issue") { movePublication(1) }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(2) })
     }
 
     private fun buildBottomBar() {
-        bottomBar = LinearLayout(host.viewContext).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(4), dp(14), dp(2))
-            setBackgroundColor(BAR)
-        }
-        root.addView(bottomBar, FrameLayout.LayoutParams(MATCH, dp(BOTTOM_DP), Gravity.BOTTOM))
+        if (bars.glass) bars.bottomRow.setPadding(dp(4), 0, dp(4), 0) else bars.bottomRow.setPadding(dp(14), 0, dp(14), 0)
         val navigation = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        bottomBar.addView(navigation, LinearLayout.LayoutParams(MATCH, dp(52)))
-        navigation.addView(round(AppIcon.PREVIOUS, "Previous page") { turnWholePage(-1) }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        bars.bottomRow.addView(navigation, LinearLayout.LayoutParams(MATCH, MATCH))
+        navigation.addView(round(AppIcon.PREVIOUS, "Previous page") { turnWholePage(-1) }, LinearLayout.LayoutParams(dp(44), dp(44)))
         seek = SeekBar(host.viewContext).apply {
             max = 1
             contentDescription = "Publication position"
-            progressTintList = android.content.res.ColorStateList.valueOf(colors.accent)
+            // Glass: the prototype's white line on a faint track; Classic: the accent.
+            progressTintList = android.content.res.ColorStateList.valueOf(if (bars.glass) Color.WHITE else colors.accent)
             thumbTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
-            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.argb(90, 255, 255, 255))
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.argb(if (bars.glass) 64 else 90, 255, 255, 255))
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
             FocusDecorator.listen(this, ringVisible) { view, focused ->
@@ -398,33 +414,37 @@ class PagedImageReaderScreen(
                     previewJob?.cancel(); previewRequest?.dispose(); previewCard.visibility = View.GONE
                     state?.seek(seekBar.progress)
                     arriveAtEnd = false
+                    forward = true
                     loadPage()
                 }
             })
         }
         focusables += seek
-        navigation.addView(seek, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
-            marginStart = dp(8)
-            marginEnd = dp(8)
+        navigation.addView(seek, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+            marginStart = dp(6)
+            marginEnd = dp(6)
         })
         positionView = TextView(host.viewContext).apply {
             textSize = 12f
             gravity = Gravity.CENTER_VERTICAL or Gravity.END
-            setTextColor(SOFT_TEXT)
+            setTextColor(ReaderBars.SOFT_TEXT)
         }
-        navigation.addView(positionView, LinearLayout.LayoutParams(WRAP, MATCH).apply { marginEnd = dp(10) })
+        navigation.addView(positionView, LinearLayout.LayoutParams(WRAP, MATCH).apply { marginEnd = dp(8) })
         // The last control registered is the forward page (ReaderControlFocusPolicy).
-        navigation.addView(round(AppIcon.NEXT, "Next page") { turnWholePage(1) }, LinearLayout.LayoutParams(dp(48), dp(48)))
-        // What the keys do, inside the controls: the app's own hint bar is hidden here.
-        keyRow = ReaderKeys.row(host.viewContext, colors) { onPad(it) }
-        bottomBar.addView(keyRow, LinearLayout.LayoutParams(MATCH, dp(ReaderKeys.ROW_DP)))
+        navigation.addView(round(AppIcon.NEXT, "Next page") { turnWholePage(1) }, LinearLayout.LayoutParams(dp(44), dp(44)))
+    }
+
+    /** A quiet glass pill over the page: "Part 2 of 3", "Loading page 5". */
+    private fun hintPill() = TextView(host.viewContext).apply {
+        textSize = 12f; setTextColor(Color.WHITE); setPadding(dp(12), dp(6), dp(12), dp(6)); visibility = View.GONE
+        if (!OverlayButtons.panel(this, 999f)) setBackgroundColor(0xB3141518.toInt())
     }
 
     private fun round(icon: AppIcon, label: String, click: () -> Unit): View =
         register(OverlayButtons.round(host.viewContext, colors.focusRing, icon, label, click))
 
-    private fun pill(label: String, description: String, click: () -> Unit): TextView =
-        register(OverlayButtons.pill(host.viewContext, colors.focusRing, label, description, onTap = click))
+    private fun pill(label: String, description: String, icon: AppIcon? = null, click: () -> Unit): TextView =
+        register(OverlayButtons.pill(host.viewContext, colors.focusRing, label, description, icon, onTap = click))
 
     /** In the pad's order through the controls, remembering which one had focus. */
     private fun <T : View> register(view: T): T = view.apply {
@@ -436,18 +456,26 @@ class PagedImageReaderScreen(
     }
 
     private fun refreshKeys() {
-        if (::keyRow.isInitialized) keyRow.setHints(ReaderPadMap.hints(padState().copy(controlsVisible = true)))
+        if (::bars.isInitialized) bars.keys.setHints(ReaderPadMap.hints(padState().copy(controlsVisible = true)))
     }
 
     private fun showKeys() = ReaderKeys.show(options, padState().copy(controlsVisible = false))
 
+    private fun showComfort() = ComfortSheet.show(options, colors, ReaderKind.COMIC, ::applyComfort)
+
+    private fun applyComfort(value: ScreenComfort) = comfortLayer.apply(value)
+
     private fun loadManifest(sourceItemId: String, startAtEnd: Boolean = false) {
         manifestJob?.cancel()
-        pageJob?.cancel()
         generation++
         val requestGeneration = generation
+        val changed = sourceItemId != currentSourceItemId
         currentSourceItemId = sourceItemId
+        if (changed) host.pageArtworkChanged()
         pendingStartAtEnd = startAtEnd
+        pending = null
+        waitPill.removeCallbacks(showWait)
+        waitPill.visibility = View.GONE
         loading.text = "Opening publication…"
         loading.visibility = View.VISIBLE
         refreshKeys()
@@ -506,56 +534,169 @@ class PagedImageReaderScreen(
         val step = if (startAtEnd) Int.MAX_VALUE
             else DomainPreferences.comicPlace(host.viewContext, workId)?.stepFor(value.sourceItemId, start, stepsFor(start)) ?: 0
         arriveAtEnd = startAtEnd
+        forward = !startAtEnd
         state = PagedImageState(value.pageCount, start, ::stepsFor, step)
         seek.max = max(1, value.pageCount - 1)
         loadPage()
         host.refreshHints()
     }
 
+    // ------------------------------------------------------- the surfaces
+
+    /** The page the state is on is the one showing, decoded. */
+    private fun showsCurrentPage(): Boolean {
+        val key = currentKey() ?: return false
+        return surface.front.key == key && surface.front.ready
+    }
+
+    private fun currentKey(): PageKey? {
+        val value = manifest ?: return null
+        val position = state ?: return null
+        return PageKey(value.sourceItemId, position.pageIndex.coerceIn(0, value.pageCount - 1))
+    }
+
+    /**
+     * Shows the state's page: at once when a surface behind holds it decoded,
+     * else as soon as it decodes, the page before staying on screen until then
+     * rather than going to black (C3).
+     */
     private fun loadPage() {
-        val value = manifest ?: return
-        val position = state ?: return
-        val page = position.pageIndex.coerceIn(0, value.pageCount - 1)
-        val pageUrl = readingSession.api.readingPublicationPageUrl(workId, value.sourceItemId, page)
-        val pageRepository = repository
-        if (pageRepository == null) {
+        val key = currentKey() ?: return
+        if (repository == null) {
             loading.text = "The real reader requires a configured Hub connection"
             loading.visibility = View.VISIBLE
             return
         }
-        pageJob?.cancel()
-        generation++
-        val pageGeneration = generation
-        magnified = null
-        image.recycle()
-        loading.text = "Loading page ${page + 1}…"
-        loading.visibility = View.VISIBLE
+        magnify(false)
         updatePosition()
-        pageJob = uiScope.launch {
+        pending = key
+        val slot = surface.slotFor(key)
+        if (slot != null && slot.ready) {
+            reveal(slot)
+            return
+        }
+        if (slot == null) {
+            val wanted = PageSlots.wanted(key.page, manifest?.pageCount ?: 0, forward).map { PageKey(key.publication, it) }
+            surface.spare(wanted)?.let { decodeInto(it, key) }
+        }
+        waitFor(key.page)
+    }
+
+    /** A page on its way: nothing on screen yet says so at once; a page on screen stays, and says so if it takes a while. */
+    private fun waitFor(page: Int) {
+        waitPill.removeCallbacks(showWait)
+        if (!surface.front.ready) {
+            loading.text = "Loading page ${page + 1}…"
+            loading.visibility = View.VISIBLE
+            refreshKeys()
+            return
+        }
+        waitPill.text = "Loading page ${page + 1}…"
+        waitPill.postDelayed(showWait, WAIT_MS)
+    }
+
+    private val showWait = Runnable { if (::waitPill.isInitialized && pending != null) waitPill.visibility = View.VISIBLE }
+
+    private fun decodeInto(slot: PageSurface.Slot, key: PageKey) {
+        val pages = repository ?: return
+        slot.clear()
+        slot.key = key
+        slot.job = uiScope.launch {
             try {
-                val file = pageRepository.obtain(pageUrl)
-                if (pageGeneration != generation) return@launch
-                image.setImage(ImageSource.uri(file.absolutePath))
-                prefetchAround(page)
-            } catch (e: Exception) {
-                if (pageGeneration == generation) showPageError("Page ${page + 1} could not be loaded")
+                val file = pages.obtain(readingSession.api.readingPublicationPageUrl(workId, key.publication, key.page))
+                if (slot.key != key) return@launch
+                surface.load(slot, key, file.absolutePath)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                if (slot.key != key) return@launch
+                slot.key = null
+                if (key == pending) showPageError("Page ${key.page + 1} could not be loaded")
             }
         }
     }
 
-    private fun prefetchAround(page: Int) {
+    private fun onSlotReady(slot: PageSurface.Slot) {
+        val key = slot.key ?: return
+        // A page of an issue already left behind: its surface goes to the next page wanted.
+        if (key.publication != manifest?.sourceItemId) return
+        slot.ready = true
+        measured[key.page] = slot.view.sWidth to slot.view.sHeight
+        if (key == pending) reveal(slot) else preposition(slot)
+    }
+
+    private fun onSlotFailed(slot: PageSurface.Slot, message: String) {
+        val key = slot.key
+        slot.ready = false
+        slot.key = null
+        if (key != null && key == pending) showPageError(message)
+        else if (slot === surface.front) showPageError(message)
+    }
+
+    /** The page asked for, decoded: to the front, placed as it opens, its place saved. */
+    private fun reveal(slot: PageSurface.Slot) {
+        val position = state ?: return
+        val key = slot.key ?: return
+        pending = null
+        magnified = null
+        waitPill.removeCallbacks(showWait)
+        waitPill.visibility = View.GONE
+        surface.show(slot)
+        loading.visibility = View.GONE
+        refreshKeys()
+        // The decoded size outranks the manifest's: the steps may change, and
+        // a page reached going back still opens on its last one.
+        if (arriveAtEnd) position.jump(key.page, Int.MAX_VALUE) else position.refit()
+        applyViewport()
+        updatePosition()
+        visibleCheckpoint = readingSession.key(workId, key.publication, "pages") to ReadingLocation(pageIndex = key.page)
+        saveCurrent(immediate = false)
+        planNeighbours()
+    }
+
+    /**
+     * The pages either side, decoded behind the one shown ([PageSlots]): the
+     * next the way you are reading first. A surface already holding one keeps
+     * it; one holding nothing wanted is given back.
+     */
+    private fun planNeighbours() {
+        val value = manifest ?: return
+        val page = state?.pageIndex ?: return
+        val wanted = PageSlots.wanted(page, value.pageCount, forward).map { PageKey(value.sourceItemId, it) }
+        val plan = PageSlots.assign(surface.slots.map { it.key }, wanted)
+        surface.slots.forEachIndexed { index, slot ->
+            val target = plan[index]
+            if (slot === surface.front || slot.key == target) return@forEachIndexed
+            if (target == null) slot.clear() else decodeInto(slot, target)
+        }
+        prefetchBeyond(page)
+    }
+
+    /** The page after the next, as bytes only, so its decode starts from the disk. */
+    private fun prefetchBeyond(page: Int) {
         val value = manifest ?: return
         val pageRepository = repository ?: return
-        listOf(page + 1, page - 1).filter { it in 0 until value.pageCount }.forEach { candidate ->
-            uiScope.launch(Dispatchers.IO) {
-                runCatching {
-                    pageRepository.obtain(readingSession.api.readingPublicationPageUrl(workId, value.sourceItemId, candidate))
-                }
-            }
+        val candidate = if (forward) page + 2 else page - 2
+        if (candidate !in 0 until value.pageCount) return
+        uiScope.launch(Dispatchers.IO) {
+            runCatching { pageRepository.obtain(readingSession.api.readingPublicationPageUrl(workId, value.sourceItemId, candidate)) }
         }
     }
 
+    /** A page either side, decoded behind: placed now as it will open, so the swap shows it exactly so. */
+    private fun preposition(slot: PageSurface.Slot) {
+        val key = slot.key ?: return
+        if (!slot.ready || slot === surface.front) return
+        val current = state?.pageIndex ?: return
+        val (scale, center) = placement(slot.view, step = 0, atEnd = key.page < current) ?: return
+        slot.view.setScaleAndCenter(scale, center)
+    }
+
+    private fun prepositionAll() = surface.slots.forEach(::preposition)
+
     private fun showPageError(message: String) {
+        waitPill.removeCallbacks(showWait)
+        waitPill.visibility = View.GONE
         loading.text = "$message\nSelect retries"
         loading.visibility = View.VISIBLE
         refreshKeys()
@@ -565,7 +706,7 @@ class PagedImageReaderScreen(
 
     /** How many steps a page takes: thirds from its shape (C2), one while zoomed or not in thirds. */
     private fun stepsFor(page: Int): Int {
-        if (view.fit != ComicFit.THIRDS || zoom.active) return 1
+        if (reading.fit != ComicFit.THIRDS || zoom.active) return 1
         val (width, height) = pageSize(page) ?: return DEFAULT_STEPS
         return ViewportStepPlanner.count(width, height, viewWidth(), viewHeight())
     }
@@ -577,55 +718,72 @@ class PagedImageReaderScreen(
     private fun viewHeight(): Int = image.height.takeIf { it > 0 } ?: root.height.takeIf { it > 0 } ?: root.resources.displayMetrics.heightPixels
 
     /** The scale the fit itself reads at: the whole page, or its width. */
-    private fun baseScale(): Float = if (view.fit == ComicFit.WHOLE) image.minScale else fitWidthScale()
+    private fun baseScale(view: SubsamplingScaleImageView = image): Float =
+        if (reading.fit == ComicFit.WHOLE) view.minScale else fitWidthScale(view)
 
-    private fun fitWidthScale(): Float =
-        if (image.sWidth <= 0) image.minScale else (image.width.toFloat() / image.sWidth).coerceIn(image.minScale, image.maxScale)
+    private fun fitWidthScale(view: SubsamplingScaleImageView = image): Float =
+        if (view.sWidth <= 0) view.minScale else (view.width.toFloat() / view.sWidth).coerceIn(view.minScale, view.maxScale)
 
-    private fun rtl(): Boolean = (view.direction ?: manifest?.direction) == "rtl"
+    private fun rtl(): Boolean = (reading.direction ?: manifest?.direction) == "rtl"
 
-    /** Places the page as the fit, the zoom and the step say. */
-    private fun applyViewport(animated: Boolean = false) {
-        if (!image.isReady) return
-        val position = state ?: return
-        val width = image.sWidth.toFloat()
-        val height = image.sHeight.toFloat()
-        val atEnd = arriveAtEnd
-        arriveAtEnd = false
+    /**
+     * Where [view] puts its page, by the zoom kept, else the fit and [step]:
+     * at the top, or [atEnd] at the bottom (the last step) for a page reached
+     * going back.
+     */
+    private fun placement(view: SubsamplingScaleImageView, step: Int, atEnd: Boolean): Pair<Float, PointF>? {
+        if (!view.isReady || view.sWidth <= 0 || view.sHeight <= 0) return null
+        val width = view.sWidth.toFloat()
+        val height = view.sHeight.toFloat()
         if (zoom.active) {
-            val scale = zoom.scaleFor(baseScale(), image.minScale, image.maxScale)
-            val (x, y) = zoom.center(width, height, image.width / scale, image.height / scale, atEnd)
-            place(scale, PointF(x, y), animated)
-            showFreeMap(scale, PointF(x, y))
-            return
+            val scale = zoom.scaleFor(baseScale(view), view.minScale, view.maxScale)
+            val (x, y) = zoom.center(width, height, view.width / scale, view.height / scale, atEnd)
+            return scale to PointF(x, y)
         }
-        when (view.fit) {
-            ComicFit.WHOLE -> place(image.minScale, PointF(width / 2f, height / 2f), animated)
+        return when (reading.fit) {
+            ComicFit.WHOLE -> view.minScale to PointF(width / 2f, height / 2f)
             ComicFit.WIDTH -> {
-                val scale = fitWidthScale()
-                val visible = image.height / scale
+                val scale = fitWidthScale(view)
+                val visible = view.height / scale
                 val y = when {
                     visible >= height -> height / 2f
                     atEnd -> height - visible / 2f
                     else -> visible / 2f
                 }
-                place(scale, PointF(width / 2f, y), animated)
+                scale to PointF(width / 2f, y)
             }
             ComicFit.THIRDS -> {
-                val steps = ViewportStepPlanner.fitWidth(image.sWidth, image.sHeight, image.width, image.height)
-                val index = position.viewportIndex.coerceIn(0, steps.lastIndex)
-                val step = steps[index]
-                place(fitWidthScale(), PointF(width / 2f, ((step.top + step.bottom) / 2 * height).toFloat()), animated)
-                if (steps.size > 1) {
-                    regionHint.text = ReaderTitleFormatter.part(index + 1, steps.size)
-                    regionHint.visibility = View.VISIBLE
-                    regionHint.removeCallbacks(hideRegionHint)
-                    regionHint.postDelayed(hideRegionHint, PageMapView.SHOW_MS)
-                    if (!controlsVisible) pageMap.showStep(image.sWidth, image.sHeight, steps, index)
-                }
-                manifest?.let { DomainPreferences.setComicPlace(host.viewContext, workId, ComicPlace(it.sourceItemId, position.pageIndex, index)) }
+                val steps = ViewportStepPlanner.fitWidth(view.sWidth, view.sHeight, view.width, view.height)
+                val index = if (atEnd) steps.lastIndex else step.coerceIn(0, steps.lastIndex)
+                fitWidthScale(view) to PointF(width / 2f, ((steps[index].top + steps[index].bottom) / 2 * height).toFloat())
             }
         }
+    }
+
+    /** Places the page shown as the fit, the zoom and the step say, and says where it is. */
+    private fun applyViewport(animated: Boolean = false) {
+        if (!image.isReady) return
+        val position = state ?: return
+        val atEnd = arriveAtEnd
+        arriveAtEnd = false
+        val (scale, center) = placement(image, position.viewportIndex, atEnd) ?: return
+        place(scale, center, animated)
+        if (zoom.active) {
+            showFreeMap(scale, center)
+            return
+        }
+        if (reading.fit != ComicFit.THIRDS) return
+        val steps = ViewportStepPlanner.fitWidth(image.sWidth, image.sHeight, image.width, image.height)
+        val index = position.viewportIndex.coerceIn(0, steps.lastIndex)
+        // With the controls open the bar says which part; the pill and the map would sit under it.
+        if (steps.size > 1 && !controlsVisible) {
+            regionHint.text = ReaderTitleFormatter.part(index + 1, steps.size)
+            regionHint.visibility = View.VISIBLE
+            regionHint.removeCallbacks(hideRegionHint)
+            regionHint.postDelayed(hideRegionHint, PageMapView.SHOW_MS)
+            pageMap.showStep(image.sWidth, image.sHeight, steps, index)
+        }
+        manifest?.let { DomainPreferences.setComicPlace(host.viewContext, workId, ComicPlace(it.sourceItemId, position.pageIndex, index)) }
     }
 
     private fun place(scale: Float, center: PointF, animated: Boolean) {
@@ -644,7 +802,7 @@ class PagedImageReaderScreen(
     }
 
     private fun moveReadingFlow(forward: Boolean) {
-        if (view.fit == ComicFit.THIRDS && !zoom.active) {
+        if (reading.fit == ComicFit.THIRDS && !zoom.active) {
             if (forward) advance() else retreat()
             return
         }
@@ -724,7 +882,7 @@ class PagedImageReaderScreen(
 
     /** L3 held: twice as close round the middle of the view; let go, back to where it was. */
     private fun magnify(on: Boolean) {
-        if (!::image.isInitialized) return
+        if (!::surface.isInitialized) return
         if (on) {
             if (!image.isReady || magnified != null) return
             val center = image.center ?: return
@@ -742,6 +900,7 @@ class PagedImageReaderScreen(
         val position = state ?: return
         if (position.turnPage(delta)) {
             arriveAtEnd = delta < 0
+            forward = delta > 0
             loadPage()
         } else if (delta > 0) {
             showEndCard()
@@ -756,6 +915,7 @@ class PagedImageReaderScreen(
         if (position.advance()) {
             if (position.pageIndex != page) {
                 arriveAtEnd = false
+                forward = true
                 loadPage()
             } else {
                 applyViewport(animated = true)
@@ -772,6 +932,7 @@ class PagedImageReaderScreen(
         if (position.retreat()) {
             if (position.pageIndex != page) {
                 arriveAtEnd = true
+                forward = false
                 loadPage()
             } else {
                 applyViewport(animated = true)
@@ -851,12 +1012,12 @@ class PagedImageReaderScreen(
 
     // ---------------------------------------------------------- the choices
 
-    private fun toggleThirds() = setFit(if (view.fit == ComicFit.THIRDS) ComicFit.WHOLE else ComicFit.THIRDS)
+    private fun toggleThirds() = setFit(if (reading.fit == ComicFit.THIRDS) ComicFit.WHOLE else ComicFit.THIRDS)
 
     /** A fit chosen for this series: kept for it, the zoom let go, the page placed again. */
     private fun setFit(fit: ComicFit) {
-        view = view.copy(fit = fit)
-        DomainPreferences.setComicView(host.viewContext, workId, view)
+        reading = reading.copy(fit = fit)
+        DomainPreferences.setComicView(host.viewContext, workId, reading)
         zoom = ComicZoom()
         val value = manifest
         val page = state?.pageIndex ?: value?.currentPage ?: 0
@@ -866,13 +1027,15 @@ class PagedImageReaderScreen(
         thirdsButton.isSelected = fit == ComicFit.THIRDS
         applyViewport()
         updatePosition()
+        prepositionAll()
         host.refreshHints()
     }
 
     private fun setDirection(direction: String?) {
-        view = view.copy(direction = direction)
-        DomainPreferences.setComicView(host.viewContext, workId, view)
+        reading = reading.copy(direction = direction)
+        DomainPreferences.setComicView(host.viewContext, workId, reading)
         applyViewport()
+        prepositionAll()
     }
 
     /**
@@ -884,7 +1047,7 @@ class PagedImageReaderScreen(
         zoom = next
         if (was == next.active) return
         val position = state ?: return
-        if (!next.active && view.fit == ComicFit.THIRDS && image.isReady) {
+        if (!next.active && reading.fit == ComicFit.THIRDS && image.isReady) {
             val steps = ViewportStepPlanner.fitWidth(image.sWidth, image.sHeight, image.width, image.height)
             val y = (image.center?.y ?: 0f) / image.sHeight.coerceAtLeast(1)
             val nearest = steps.indices.minByOrNull { abs((steps[it].top + steps[it].bottom) / 2 - y) } ?: 0
@@ -892,6 +1055,7 @@ class PagedImageReaderScreen(
             if (snap) applyViewport(animated = true)
         } else position.refit()
         updatePosition()
+        prepositionAll()
     }
 
     private fun showReadingOptions(tab: String = "display") {
@@ -903,20 +1067,20 @@ class PagedImageReaderScreen(
         if (tab == "display") {
             options.section("This series")
             ComicFit.entries.forEach { fit ->
-                options.choice(fit.label, selected = view.fit == fit) { setFit(fit); showReadingOptions(tab) }
+                options.choice(fit.label, selected = reading.fit == fit) { setFit(fit); showReadingOptions(tab) }
             }
             options.section("Every series")
             options.choice("Open every series this way", "New series open as ${everySeries.label.lowercase()}",
-                selected = everySeries == view.fit) {
-                DomainPreferences.setComicDefaultFit(context, view.fit)
+                selected = everySeries == reading.fit) {
+                DomainPreferences.setComicDefaultFit(context, reading.fit)
                 showReadingOptions(tab)
             }
         } else {
             val library = manifest?.direction ?: "ltr"
             options.choice("As the library reads", if (library == "rtl") "Right to left" else "Left to right",
-                selected = view.direction == null) { setDirection(null); showReadingOptions(tab) }
-            options.choice("Left to right", selected = view.direction == "ltr") { setDirection("ltr"); showReadingOptions(tab) }
-            options.choice("Right to left", selected = view.direction == "rtl") { setDirection("rtl"); showReadingOptions(tab) }
+                selected = reading.direction == null) { setDirection(null); showReadingOptions(tab) }
+            options.choice("Left to right", selected = reading.direction == "ltr") { setDirection("ltr"); showReadingOptions(tab) }
+            options.choice("Right to left", selected = reading.direction == "rtl") { setDirection("rtl"); showReadingOptions(tab) }
         }
         options.focusBody()
     }
@@ -979,7 +1143,11 @@ class PagedImageReaderScreen(
     private fun setControlsVisible(visible: Boolean) {
         controlsVisible = visible
         pagePreview.setControlsVisible(visible)
-        if (visible) pageMap.dismiss()
+        if (visible) {
+            pageMap.dismiss()
+            regionHint.removeCallbacks(hideRegionHint)
+            regionHint.visibility = View.GONE
+        }
         refreshKeys()
         if (!visible) {
             root.findFocus()?.clearFocus()
@@ -1003,16 +1171,13 @@ class PagedImageReaderScreen(
     private companion object {
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
-        /** The navigation row, and the keys' row under it. */
-        val BOTTOM_DP = 52 + ReaderKeys.ROW_DP + 6
         /** Before a page's size is known, a comic page's three. */
         const val DEFAULT_STEPS = 3
         /** The right stick at full push: screens a second. */
         const val GLIDE = 1.2f
         /** L3 held: how much closer. */
         const val MAGNIFY = 2f
-        /** The bars over the page: the app's ground, nearly opaque. */
-        val BAR = Color.argb(235, 10, 13, 18)
-        val SOFT_TEXT = Color.rgb(213, 219, 227)
+        /** How long a page may take before "Loading page 5" says so over the page you were on. */
+        const val WAIT_MS = 300L
     }
 }

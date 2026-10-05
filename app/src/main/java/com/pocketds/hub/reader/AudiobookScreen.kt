@@ -76,6 +76,7 @@ class AudiobookScreen(
     private lateinit var timeline: SeekBar
     private lateinit var playButton: PlayerIconButton
     private lateinit var overlay: ChoiceOverlay
+    private lateinit var comfortLayer: com.pocketds.hub.ui.ComfortLayerView
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var loadJob: Job? = null
     private var updateJob: Job? = null
@@ -146,6 +147,7 @@ class AudiobookScreen(
         val actions = LinearLayout(host.viewContext).apply { gravity = Gravity.CENTER; orientation = LinearLayout.HORIZONTAL }
         content.addView(actions, LinearLayout.LayoutParams(MATCH, dp(58)))
         if (ebook != null || narrations.size > 1) actions.addView(action("Reading & listening") { showReadingModes() })
+        actions.addView(action("Comfort") { showComfort() })
         actions.addView(action("Keys") { showKeys() })
         actions.addView(action("Close") { host.back() })
         // What the keys do: the app's own hint bar is hidden while a reader is open.
@@ -156,6 +158,10 @@ class AudiobookScreen(
         (content.layoutParams as FrameLayout.LayoutParams).bottomMargin = Styler.dpInt(host.viewContext, ReaderKeys.ROW_DP.toFloat())
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
+        // Comfort (#16, X3): the same dim and warmth as every reader, over the whole screen.
+        comfortLayer = com.pocketds.hub.ui.ComfortLayerView(host.viewContext)
+        root.addView(comfortLayer, FrameLayout.LayoutParams(MATCH, MATCH))
+        comfortLayer.apply(com.pocketds.hub.settings.ComfortSettings.load(host.viewContext))
         return root
     }
 
@@ -164,7 +170,10 @@ class AudiobookScreen(
 
     private fun showKeys() = ReaderKeys.show(overlay, padState())
 
+    private fun showComfort() = ComfortSheet.show(overlay, colors, ReaderKind.AUDIOBOOK, comfortLayer::apply)
+
     override fun onShow() {
+        comfortLayer.apply(com.pocketds.hub.settings.ComfortSettings.load(host.viewContext))
         ReadingEntryPreferences.put(host.viewContext, workId, ReadingEntryMode.LISTEN, edition.sourceItemId)
         if (!initialized && loadJob?.isActive != true) load()
         else startUpdates()

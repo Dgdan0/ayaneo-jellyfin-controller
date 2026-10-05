@@ -55,6 +55,11 @@ import com.pocketds.hub.playback.PlaybackService
 import com.pocketds.hub.playback.PlayerControlIcon
 import com.pocketds.hub.playback.PlayerIconButton
 import org.readium.r2.navigator.Decoration
+import org.readium.r2.navigator.html.HtmlDecorationTemplate
+import org.readium.r2.navigator.html.HtmlDecorationTemplates
+import com.pocketds.hub.settings.ComfortSettings
+import com.pocketds.hub.ui.ComfortLayerView
+import com.pocketds.hub.ui.ScreenComfort
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.json.JSONObject
@@ -84,6 +89,13 @@ import org.readium.r2.streamer.parser.DefaultPublicationParser
  * stays here; in continuous scrolling the D-pad and the right stick scroll;
  * read along, L3 goes back to the narrated sentence; R3 lists the keys. The
  * menu carries a row of the keys and a Keys control.
+ *
+ * In Glass the menu is bars of the cover's glass (#16, X7), and the page makes
+ * room for them (the owner's choice for books): it shrinks with the menu round
+ * it. Read along, the glass narration dock takes the lower bar's place and
+ * the sentence being read glows in the accent ([ReadAlongGlow]). Comfort (X3)
+ * dims and warms the reader, can make the page black, and keeps the screen on
+ * while narration plays.
  */
 @OptIn(ExperimentalReadiumApi::class)
 class EpubReaderScreen(
@@ -107,11 +119,13 @@ class EpubReaderScreen(
     private lateinit var root: FrameLayout
     private lateinit var navigatorContainer: FrameLayout
     private lateinit var loading: TextView
+    private lateinit var bars: ReaderBars
     private lateinit var topBar: LinearLayout
     private lateinit var bottomBar: LinearLayout
+    private lateinit var comfortLayer: ComfortLayerView
+    private var comfort = ScreenComfort()
     private lateinit var position: TextView
     private lateinit var bookSeek: SeekBar
-    private lateinit var keyRow: com.pocketds.hub.nav.HintBarView
     private lateinit var returnButton: TextView
     private var bookPositions: List<Locator> = emptyList()
     private var bookSections: List<Locator> = emptyList()
@@ -198,8 +212,11 @@ class EpubReaderScreen(
             setBackgroundColor(0xDD101116.toInt())
         }
         root.addView(loading, FrameLayout.LayoutParams(MATCH, MATCH))
+        bars = ReaderBars(host.viewContext, colors, ReaderBars.ROW_DP, BOTTOM_ROW_DP) { onPad(it) }
         buildTopBar()
         buildBottomBar()
+        root.addView(bars.top, bars.topParams())
+        root.addView(bars.bottom, bars.bottomParams())
         buildNarrationDock()
         preferences = loadPreferences()
         preferenceState = EpubPreferenceState(preferences)
@@ -213,9 +230,14 @@ class EpubReaderScreen(
             onPlay = { playFromSelection() }
         }
         root.addView(dictionaryCard, FrameLayout.LayoutParams(MATCH, MATCH))
-        pagePreview = ReaderPagePreviewController(root, navigatorContainer, topBar, bottomBar, listOf(overlay, appearance),
+        // Over everything the reader draws, the menu and its sheets too, as a backlight would dim.
+        comfort = ComfortSettings.load(host.viewContext)
+        comfortLayer = ComfortLayerView(host.viewContext).apply { apply(comfort) }
+        root.addView(comfortLayer, FrameLayout.LayoutParams(MATCH, MATCH))
+        // The owner's choice for books (X7): the page makes room, shrinking with the menu round it.
+        pagePreview = ReaderPagePreviewController(root, navigatorContainer, bars.top, bars.bottom, listOf(overlay, appearance),
             extraBottom = {
-                if (narrationDock.visibility == View.VISIBLE) narrationDock.height +
+                if (narrationDock.visibility == View.VISIBLE) narrationDock.layoutParams.height +
                     (narrationDock.layoutParams as FrameLayout.LayoutParams).bottomMargin else 0
             })
         narrationDock.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> pagePreview.refresh() }
@@ -226,7 +248,9 @@ class EpubReaderScreen(
 
     override fun onShow() {
         val shared = loadPreferences()
-        if (shared != preferences) {
+        val kept = ComfortSettings.load(host.viewContext)
+        if (shared != preferences || kept != comfort) {
+            comfort = kept; comfortLayer.apply(kept)
             preferences = shared; preferenceState = EpubPreferenceState(shared); applyPreferences()
         }
         val previousAudio = ReadingEntryPreferences.get(host.viewContext, workId)?.audioSourceItemId.orEmpty()
@@ -241,6 +265,7 @@ class EpubReaderScreen(
         cancelSearch()
         closeDictionary(resumeNarration = false)
         narration?.pause()
+        root.keepScreenOn = false
         dockJob?.cancel()
         if (::appearance.isInitialized && appearance.isOpen) appearance.cancel()
         if (::overlay.isInitialized) overlay.dismiss()
@@ -344,8 +369,41 @@ class EpubReaderScreen(
         ReaderKeys.show(overlay, padState().copy(controlsVisible = false))
     }
 
+    /** Comfort (X3): the same glass sheet as every reader's, with the black page and the screen kept on. */
+    private fun showComfort() {
+        setControlsVisible(true)
+        ComfortSheet.show(overlay, colors, ReaderKind.BOOK, ::applyComfort)
+    }
+
+    private fun applyComfort(value: ScreenComfort) {
+        val pageChanged = value.blackPage != comfort.blackPage
+        comfort = value
+        comfortLayer.apply(value)
+        if (pageChanged) applyPreferences()
+        updateAwake()
+    }
+
+    /** The screen stays on while narration plays, if Comfort says so. */
+    private fun updateAwake() {
+        if (::root.isInitialized) root.keepScreenOn = comfort.keepsScreenOn(narration?.isPlaying == true)
+    }
+
+    /** The page's colours: the theme's, or black while Comfort asks for a black page. */
+    private fun pagePalette(value: EpubReaderPreferences): Pair<Int, Int>? =
+        if (comfort.blackPage) ScreenComfort.BLACK_PAGE to ScreenComfort.BLACK_PAGE_TEXT else EpubPagePalette.of(value.theme)
+
+    /** Readium's highlight, as the read-along's glow ([ReadAlongGlow]): narration is its only highlight. */
+    private fun narrationTemplates(): HtmlDecorationTemplates = HtmlDecorationTemplates.defaultTemplates().copy().apply {
+        set(Decoration.Style.Highlight::class, HtmlDecorationTemplate(
+            layout = HtmlDecorationTemplate.Layout.BOXES,
+            width = HtmlDecorationTemplate.Width.WRAP,
+            element = { decoration -> ReadAlongGlow.element((decoration.style as? Decoration.Style.Highlight)?.tint ?: colors.accent) },
+            stylesheet = ReadAlongGlow.STYLESHEET
+        ))
+    }
+
     private fun refreshKeys() {
-        if (::keyRow.isInitialized) keyRow.setHints(ReaderPadMap.hints(padState().copy(controlsVisible = true)))
+        if (::bars.isInitialized) bars.keys.setHints(ReaderPadMap.hints(padState().copy(controlsVisible = true)))
     }
 
     /**
@@ -440,6 +498,7 @@ class EpubReaderScreen(
         val factory = EpubNavigatorFactory(opened).createFragmentFactory(
             initialLocator = initialLocator,
             initialPreferences = readiumPreferences(preferences),
+            configuration = EpubNavigatorFragment.Configuration(decorationTemplates = narrationTemplates()),
             paginationListener = object : EpubNavigatorFragment.PaginationListener {
                 override fun onPageChanged(pageIndex: Int, totalPages: Int, locator: Locator) {
                     this@EpubReaderScreen.pageIndex = pageIndex
@@ -532,17 +591,13 @@ class EpubReaderScreen(
     }
 
     private fun buildTopBar() {
-        topBar = LinearLayout(host.viewContext).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(5), dp(14), dp(5))
-            setBackgroundColor(BAR)
+        topBar = bars.topRow.apply {
+            if (bars.glass) setPadding(dp(4), 0, dp(4), 0) else setPadding(dp(14), dp(4), dp(14), dp(4))
         }
-        root.addView(topBar, FrameLayout.LayoutParams(MATCH, dp(58), Gravity.TOP))
         topBar.addView(control("×", "Close reader", click = { host.back() }))
         topBar.addView(TextView(host.viewContext).apply {
             text = title
-            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, 17f)
+            com.pocketds.hub.ui.Type.apply(this, com.pocketds.hub.ui.Type.Role.HEADING, if (bars.glass) 15f else 17f)
             setTextColor(Color.WHITE)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -570,24 +625,21 @@ class EpubReaderScreen(
         bookmarkButton = control("☆", "Add bookmark", click = { toggleBookmark() })
         topBar.addView(bookmarkButton)
         topBar.addView(control("Aa", "Reading appearance", { showAppearance() }))
+        topBar.addView(control("comfort", "Comfort", { showComfort() }))
         topBar.addView(control("pad", "Keys", { showKeys() }))
     }
 
     private fun buildBottomBar() {
-        bottomBar = LinearLayout(host.viewContext).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(5), dp(14), dp(5))
-            setBackgroundColor(BAR)
+        bottomBar = bars.bottomRow.apply {
+            if (bars.glass) setPadding(dp(4), dp(4), dp(10), dp(4)) else setPadding(dp(14), dp(4), dp(14), dp(4))
         }
-        root.addView(bottomBar, FrameLayout.LayoutParams(MATCH, dp(88 + ReaderKeys.ROW_DP), Gravity.BOTTOM))
         val navigationRow = LinearLayout(host.viewContext).apply { gravity = Gravity.CENTER_VERTICAL }
         bottomBar.addView(navigationRow, LinearLayout.LayoutParams(MATCH, dp(44)))
         navigationRow.addView(control("‹", "Previous page", { turn(-1) }))
         position = TextView(host.viewContext).apply {
             text = "Opening…"
             textSize = 12f
-            setTextColor(SOFT_TEXT)
+            setTextColor(ReaderBars.SOFT_TEXT)
             gravity = Gravity.CENTER
             contentDescription = "Reading position and navigation"
             Styler.makeFocusable(this); FocusDecorator.attach(this, ringVisible, scale = false)
@@ -603,9 +655,10 @@ class EpubReaderScreen(
         navigationRow.addView(control("›", "Next page", { turn(1) }))
         bookSeek = SeekBar(host.viewContext).apply {
             max = 100; contentDescription = "Browse book percentage"; minimumHeight = dp(34)
-            progressTintList = android.content.res.ColorStateList.valueOf(colors.accent)
+            // Glass: the prototype's white line on a faint track; Classic: the accent.
+            progressTintList = android.content.res.ColorStateList.valueOf(if (bars.glass) Color.WHITE else colors.accent)
             thumbTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
-            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.argb(90, 255, 255, 255))
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.argb(if (bars.glass) 64 else 90, 255, 255, 255))
             Styler.makeFocusable(this); FocusDecorator.attach(this, ringVisible, scale = false)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onStartTrackingTouch(bar: SeekBar) = Unit
@@ -619,14 +672,11 @@ class EpubReaderScreen(
             }
         }
         controls += bookSeek
-        bottomBar.addView(bookSeek, LinearLayout.LayoutParams(MATCH, dp(34)))
-        // What the keys do, inside the menu: the app's own hint bar is hidden here.
-        keyRow = ReaderKeys.row(host.viewContext, colors) { onPad(it) }
-        bottomBar.addView(keyRow, LinearLayout.LayoutParams(MATCH, dp(ReaderKeys.ROW_DP)))
+        bottomBar.addView(bookSeek, LinearLayout.LayoutParams(MATCH, dp(30)))
     }
 
     private fun buildNarrationDock() {
-        narrationDock = ReadAlongDock(host.viewContext).apply {
+        narrationDock = ReadAlongDock(host.viewContext, colors).apply {
             onBack = { narration?.jump(-10_000) }
             onPlay = {
                 if (PlaybackService.currentPlan() != null) PlaybackService.pause(host.viewContext)
@@ -642,8 +692,9 @@ class EpubReaderScreen(
             }
             onFollow = { narration?.let { highlightNarration(it.timeline.active(it.position.track, it.position.offsetMs)) } }
         }
-        root.addView(narrationDock, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-            bottomMargin = dp(12)
+        root.addView(narrationDock, FrameLayout.LayoutParams(MATCH, dp(ReadAlongDock.HEIGHT_DP), Gravity.BOTTOM).apply {
+            leftMargin = dp(ReaderBars.INSET_DP); rightMargin = dp(ReaderBars.INSET_DP)
+            bottomMargin = bars.dockMargin
         })
         narrationDock.focusableControls.forEach { view ->
             FocusDecorator.attach(view, ringVisible, scale = false)
@@ -656,7 +707,7 @@ class EpubReaderScreen(
 
     private fun control(glyph: String, label: String, click: () -> Unit): TextView =
         TextView(host.viewContext).apply {
-            val icon = when (glyph) { "×" -> AppIcon.CLOSE; "☷" -> AppIcon.CONTENTS; "search" -> AppIcon.SEARCH; "return" -> AppIcon.PREVIOUS_ITEM; "☆" -> AppIcon.BOOKMARK; "Aa" -> AppIcon.APPEARANCE; "‹" -> AppIcon.PREVIOUS; "▣" -> AppIcon.BOOK; "pad" -> AppIcon.PAD; else -> AppIcon.NEXT }
+            val icon = when (glyph) { "×" -> AppIcon.CLOSE; "☷" -> AppIcon.CONTENTS; "search" -> AppIcon.SEARCH; "return" -> AppIcon.PREVIOUS_ITEM; "☆" -> AppIcon.BOOKMARK; "Aa" -> AppIcon.APPEARANCE; "‹" -> AppIcon.PREVIOUS; "▣" -> AppIcon.BOOK; "pad" -> AppIcon.PAD; "comfort" -> AppIcon.COMFORT; else -> AppIcon.NEXT }
             setCompoundDrawables(AppIconDrawable(icon, Color.WHITE).apply { setBounds(0,0,dp(20),dp(20)) },null,null,null)
             // A 44dp disc with the 20dp icon in its middle.
             setPadding(dp(12),0,0,0)
@@ -691,11 +742,13 @@ class EpubReaderScreen(
             onState = { playing ->
                 if (playing) narrationCompleted = false
                 updateDock()
+                updateAwake()
             },
             onSave = { point, completed -> narrationCheckpoint.record(point); narrationCompleted = completed; saveCurrent(immediate = true) },
             onError = { host.notify("Narration playback failed. Your position is saved; reading is still available.") }
         )
         narrationCheckpoint.ready(resume)
+        bars.showBottomRow(false)
         narrationDock.visibility = if (controlsVisible) View.VISIBLE else View.GONE
         pagePreview.refresh()
         startDockUpdates()
@@ -713,7 +766,7 @@ class EpubReaderScreen(
                 .put("locations", JSONObject().put("fragments", org.json.JSONArray().put(segment.fragment)))) ?: return@launch
             val visible = reader.evaluateJavascript("(function(){var e=document.getElementById(${JSONObject.quote(segment.fragment)});if(!e)return false;var r=e.getBoundingClientRect();return r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;})()") == "true"
             if (reader.currentLocator.value.href.toString() != segment.textHref || !visible) reader.go(locator, animated = false)
-            reader.applyDecorations(listOf(Decoration("narration", locator, Decoration.Style.Highlight(0xFFFFC857.toInt(), isActive = true))), "readalong")
+            reader.applyDecorations(listOf(Decoration("narration", locator, Decoration.Style.Highlight(colors.accent, isActive = true))), "readalong")
         }
     }
 
@@ -1151,14 +1204,14 @@ class EpubReaderScreen(
     private fun persistPreferences(value: EpubReaderPreferences) = EpubAppearanceStore.save(host.viewContext, value)
 
     private fun readiumPreferences(value: EpubReaderPreferences) = EpubPreferences(
-        theme = when (value.theme) {
+        theme = if (comfort.blackPage) ReadiumTheme.DARK else when (value.theme) {
             EpubTheme.SYSTEM -> null
             EpubTheme.LIGHT -> ReadiumTheme.LIGHT
             EpubTheme.SEPIA -> ReadiumTheme.SEPIA
             EpubTheme.DARK, EpubTheme.BLUE -> ReadiumTheme.DARK
         },
-        backgroundColor = EpubPagePalette.of(value.theme)?.first?.let { org.readium.r2.navigator.preferences.Color(it) },
-        textColor = EpubPagePalette.of(value.theme)?.second?.let { org.readium.r2.navigator.preferences.Color(it) },
+        backgroundColor = pagePalette(value)?.first?.let { org.readium.r2.navigator.preferences.Color(it) },
+        textColor = pagePalette(value)?.second?.let { org.readium.r2.navigator.preferences.Color(it) },
         columnCount = when (if (value.onePagePerScreen) EpubColumns.ONE else value.columns) {
             EpubColumns.AUTO -> ColumnCount.AUTO
             EpubColumns.ONE -> ColumnCount.ONE
@@ -1186,9 +1239,6 @@ class EpubReaderScreen(
         controlsVisible = visible
         pagePreview.setControlsVisible(visible)
         if (::narrationDock.isInitialized) {
-            val params = narrationDock.layoutParams as FrameLayout.LayoutParams
-            params.bottomMargin = dp(if (visible) 96 + ReaderKeys.ROW_DP else 12)
-            narrationDock.layoutParams = params
             narrationDock.visibility = if (visible && narration != null) View.VISIBLE else View.GONE
         }
         pagePreview.refresh()
@@ -1234,8 +1284,7 @@ class EpubReaderScreen(
         /** Continuous scrolling: the D-pad moves a third of a screen, the right stick at full push 1.5 screens a second. */
         const val SCROLL_STEP = 1f / 3f
         const val GLIDE = 1.5f
-        /** The bars over the page: the app's ground, nearly opaque. */
-        val BAR = Color.argb(235, 10, 13, 18)
-        val SOFT_TEXT = Color.rgb(213, 219, 227)
+        /** The lower bar: the position row over the book's line, with their padding. */
+        const val BOTTOM_ROW_DP = 44 + 30 + 8
     }
 }

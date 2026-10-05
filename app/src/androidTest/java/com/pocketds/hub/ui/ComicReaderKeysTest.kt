@@ -143,10 +143,13 @@ class ComicReaderKeysTest {
         }
         suspend fun pad(vararg actions: PadAction) = withContext(Dispatchers.Main) { actions.forEach { assertTrue(screen!!.onPad(it)) } }
         fun state(): PagedImageState = screen!!.field("state")
-        fun image(): SubsamplingScaleImageView = screen!!.field("image")
+        // The page in front (#16, C3: the pages either side wait decoded behind it).
+        fun surface(): com.pocketds.hub.reader.PageSurface = screen!!.field("surface")
+        fun image(): SubsamplingScaleImageView = surface().front.view
         fun zoom(): ComicZoom = screen!!.field("zoom")
         suspend fun ready(page: Int) = until("page ${page + 1}") {
-            screen!!.field<PagedImageState?>("state")?.pageIndex == page && image().isReady
+            screen!!.field<PagedImageState?>("state")?.pageIndex == page && surface().front.key?.page == page &&
+                surface().front.ready && image().isReady
         }
         suspend fun open(issue: String) {
             withContext(Dispatchers.Main) {
@@ -162,7 +165,7 @@ class ComicReaderKeysTest {
             // The steps come from the page's shape and the view's (three on the Pocket's full
             // screen; this fixture's window keeps the system bars, so a little shorter).
             val portrait = withContext(Dispatchers.Main) {
-                assertEquals(ComicFit.THIRDS, screen!!.field<ComicView>("view").fit)
+                assertEquals(ComicFit.THIRDS, screen!!.field<ComicView>("reading").fit)
                 assertEquals(com.pocketds.hub.reader.ViewportStepPlanner.count(1000, 1540, image().width, image().height), state().viewportSteps)
                 assertEquals(0, state().viewportIndex)
                 state().viewportSteps
@@ -251,7 +254,7 @@ class ComicReaderKeysTest {
             pad(PadAction.Activate)
             until("the end card again") { screen!!.field<EndOfIssueCard>("endCard").isOpen }
             pad(PadAction.Activate)
-            until("issue 52") { screen!!.field<String>("currentSourceItemId") == "issue-52" && image().isReady }
+            until("issue 52") { screen!!.field<String>("currentSourceItemId") == "issue-52" && surface().front.key?.publication == "issue-52" && surface().front.ready }
             shot("12-next-issue")
             // The third comes back: leave on page 1, part 2, and open the issue again.
             pad(PadAction.Activate)
@@ -272,7 +275,7 @@ class ComicReaderKeysTest {
             // Another issue of the series, never opened, so no saved place asks which to keep.
             open("issue-53")
             ready(0)
-            withContext(Dispatchers.Main) { assertEquals(ComicFit.WIDTH, screen!!.field<ComicView>("view").fit) }
+            withContext(Dispatchers.Main) { assertEquals(ComicFit.WIDTH, screen!!.field<ComicView>("reading").fit) }
             shot("14-series-keeps-width")
         } catch (failure: Throwable) {
             File(activity.getExternalFilesDir(null), "comic-keys-failure.png").outputStream().use {

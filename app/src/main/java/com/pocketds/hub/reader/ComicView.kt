@@ -99,3 +99,17 @@ data class ComicZoom(val factor: Float = 1f, val anchorX: Float = 0.5f) {
         }
     }
 }
+
+/**
+ * An issue's cover, for the reader's glass to take its colours (#16, X7):
+ * Kavita's cover of the chapter, as the hub serves it on a run's page
+ * (`/v1/img/reading/kavita-chapter/{id}`). Null for a publication that is not
+ * a Kavita chapter, which keeps the colours the page already has.
+ */
+object IssueCover {
+    private const val PREFIX = "kavita-chapter:"
+
+    fun path(sourceItemId: String): String? =
+        sourceItemId.removePrefix(PREFIX).takeIf { sourceItemId.startsWith(PREFIX) && it.isNotEmpty() && it.all(Char::isDigit) }
+            ?.let { "/v1/img/reading/kavita-chapter/$it" }
+}

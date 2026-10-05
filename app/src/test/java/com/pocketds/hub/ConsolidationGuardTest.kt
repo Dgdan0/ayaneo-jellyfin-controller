@@ -87,6 +87,12 @@ class ConsolidationGuardTest {
         Rule(Regex("""(percentage|progression)\b[^\n]*\*\s*100\b"""),
             "Fmt.readingPercent / readingPercentLabel: one rounding for how far through a book, so its facts and its Resume button agree",
             setOf("state/Fmt.kt")),
+        Rule(Regex("""ringed\([^\n]*OVAL[^\n]*Color\.WHITE"""),
+            "OverlayButtons.playFace: Play's white disc, the player's and the read-along dock's (#16)",
+            setOf("ui/OverlayButtons.kt")),
+        Rule(Regex("""PorterDuff\.Mode\.MULTIPLY"""),
+            "ComfortLayerView with ScreenComfort: one warmth and one dim over a reader (#16, X3)",
+            setOf("ui/ComfortLayerView.kt")),
     )
 
     @Test

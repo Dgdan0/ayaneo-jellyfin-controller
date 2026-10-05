@@ -246,4 +246,12 @@ class PagedImageStateTest {
         // A page read whole has no parts.
         assertEquals("Page 2 of 24", ReaderTitleFormatter.subtitle("", 2, 24, part = 1, parts = 1))
     }
+
+    @Test fun `an issue's cover is Kavita's chapter cover, and nothing else is guessed`() {
+        assertEquals("/v1/img/reading/kavita-chapter/34", IssueCover.path("kavita-chapter:34"))
+        assertEquals(null, IssueCover.path("storyteller:abc"))
+        assertEquals(null, IssueCover.path("kavita-chapter:"))
+        assertEquals(null, IssueCover.path("kavita-chapter:12/../x"))
+        assertEquals(null, IssueCover.path("issue-51"))
+    }
 }
