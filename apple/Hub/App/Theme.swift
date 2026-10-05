@@ -28,9 +28,12 @@ extension Color {
         }
     }
 
+    /// A status line's colour. An ordinary one is Glass's secondary white, as
+    /// every other second line is: the Classic grey went lilac or green over
+    /// the page's artwork, and hard to read on a bright one.
     static func status(_ tone: StatusTone) -> Color {
         switch tone {
-        case .normal: .muted
+        case .normal: .white.opacity(0.66)
         case .warning: .pending
         case .error: .dangerText
         }

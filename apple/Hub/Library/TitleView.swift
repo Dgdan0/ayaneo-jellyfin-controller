@@ -20,6 +20,9 @@ struct TitleView: View {
     @State private var saving = false
     @State private var expanded = false
     @State private var tab: TitleTab = .episodes
+    /// Whether the person has picked a tab: until then the first one shows,
+    /// even when More like this arrives after Cast.
+    @State private var tabChosen = false
 
     @State private var target: SeriesPlayTarget?
     @State private var targetFailed = false
@@ -68,7 +71,7 @@ struct TitleView: View {
                             .padding(.horizontal, metrics.margin)
                             .padding(.top, 8)
                         if item != nil, !tabs.isEmpty {
-                            UnderlineTabs(tabs: tabs, selection: $tab)
+                            UnderlineTabs(tabs: tabs, selection: Binding(get: { tab }, set: { tab = $0; tabChosen = true }))
                                 .padding(.horizontal, metrics.margin)
                                 .padding(.top, 14)
                             tabContent
@@ -84,7 +87,7 @@ struct TitleView: View {
         .task(id: model.userId) { await load() }
         .onChange(of: playbackClosed) { _, _ in Task { await refreshAfterPlayback() } }
         .onChange(of: tabs.map(\.id)) { _, ids in
-            if !ids.contains(tab), let first = ids.first { tab = first }
+            if let first = ids.first, !tabChosen || !ids.contains(tab) { tab = first }
         }
     }
 
@@ -284,14 +287,16 @@ struct TitleView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, metrics.margin)
                     .padding(.top, 12)
                     .padding(.bottom, 16)
                 }
+                // Margins rather than padding, so the episode scrolled to below
+                // stops at the page's margin, not against the screen's edge.
+                .contentMargins(.horizontal, metrics.margin, for: .scrollContent)
                 // The strip opens at the episode Play starts, as Android's does,
                 // rather than at episode 1 of a half-watched season.
                 .onChange(of: episodes.map(\.id)) { _, ids in
-                    guard let id = target?.item.id, ids.contains(id), revealedTarget != id else { return }
+                    guard let id = target?.item.id, ids.contains(id), revealedTarget != id, ids.first != id else { return }
                     revealedTarget = id
                     reader.scrollTo(id, anchor: .leading)
                 }
