@@ -82,6 +82,16 @@ struct EndpointTests {
             == "/v1/library/abc/items?sort=added&order=desc&page=2")
     }
 
+    /// Android's `HubEndpointsTest` cases for #14: a library's own search
+    /// names the library; the root's does not.
+    @Test func aLibrarysOwnSearchNamesItsLibrary() {
+        #expect(HubEndpoints.librarySearch("star wars", page: 2).path == "/v1/library/search?q=star%20wars&page=2")
+        let view = "0123456789abcdef0123456789abcdef"
+        #expect(HubEndpoints.librarySearch("dark", viewId: view).path == "/v1/library/search?q=dark&viewId=\(view)")
+        #expect(HubEndpoints.librarySearch("dark", page: 3, viewId: view).path
+            == "/v1/library/search?q=dark&page=3&viewId=\(view)")
+    }
+
     @Test func episodesNameTheirSeason() {
         #expect(HubEndpoints.libraryEpisodes(seriesId: "s", seasonId: "t").path == "/v1/library/series/s/episodes?seasonId=t")
         #expect(HubEndpoints.libraryEpisodes(seriesId: "s", seasonId: "t", page: 3).path

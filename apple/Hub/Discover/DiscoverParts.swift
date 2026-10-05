@@ -98,11 +98,14 @@ struct DiscoverPoster: View {
 }
 
 /// A glass search field (the prototype's `.search`): the shell hides the
-/// system bar that `.searchable` lives in.
+/// system bar that `.searchable` lives in. One opened by a button takes the
+/// keyboard at once (`autofocus`).
 struct GlassSearchField: View {
     let placeholder: String
     @Binding var query: String
+    var autofocus = false
     var onSubmit: () -> Void = {}
+    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -113,6 +116,8 @@ struct GlassSearchField: View {
                 .textFieldStyle(.plain)
                 .font(HubType.body(15))
                 .autocorrectionDisabled()
+                .focused($focused)
+                .onAppear { if autofocus { focused = true } }
                 .onSubmit(onSubmit)
                 #if os(iOS)
                 .textInputAutocapitalization(.never)

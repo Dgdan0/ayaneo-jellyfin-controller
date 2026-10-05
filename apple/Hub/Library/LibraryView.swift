@@ -323,9 +323,13 @@ struct LibraryTile: View {
 }
 
 /// One library's titles (the prototype's `pgFolder`): the libraries in a glass
-/// capsule with Favourites, Sort and its direction, then the poster grid with
-/// unwatched counts or a tick. Another library from the capsule takes this
-/// page's place, so Back still returns to the Library page.
+/// capsule with Favourites, the round search, Sort and its direction, then the
+/// poster grid with unwatched counts or a tick. Another library from the
+/// capsule takes this page's place, so Back still returns to the Library page.
+///
+/// The search looks inside the library on show (#14): two letters turn the
+/// grid into its matches. Favourites is not a library, so its search, like the
+/// Library page's, looks through everything.
 struct FolderView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openRoute) private var navigation
@@ -335,9 +339,24 @@ struct FolderView: View {
     @State private var folders: [LibraryFolder] = []
     @State private var sort = SortPreference.forField("name")
     @State private var refreshes = 0
+    @State private var searching = false
+    @State private var query = ""
+    /// Debug builds: HUB_SHEET=search:<words> opens the search with them, once.
+    @State private var debugSearched = false
 
     private var source: GridSource {
         route == .favourites ? .favourites : .folder(id: route.id, name: route.name, sort: sort)
+    }
+
+    private var searchText: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// The library the search looks in: none on Favourites.
+    private var searchSource: GridSource {
+        route == .favourites ? .search(searchText) : .search(searchText, viewId: route.id, library: route.name)
+    }
+
+    private var searchPlaceholder: String {
+        route == .favourites ? "Search your Jellyfin library" : "Search \(route.name)"
     }
 
     var body: some View {
@@ -346,14 +365,51 @@ struct FolderView: View {
                 controls
                     .padding(.horizontal, metrics.margin)
                     .padding(.top, 4)
-                LibraryGrid(source: source)
-                    .id("\(refreshes)·\(String(describing: source))")
+                if searching {
+                    GlassSearchField(placeholder: searchPlaceholder, query: $query, autofocus: !debugSearched)
+                        .padding(.horizontal, metrics.margin)
+                        .padding(.top, 12)
+                }
+                if searching && searchText.count >= 2 {
+                    LibraryGrid(source: searchSource)
+                        .id("\(refreshes)·\(String(describing: searchSource))")
+                } else if searching && !searchText.isEmpty {
+                    Text("Type at least two characters")
+                        .font(HubType.body(15, relativeTo: .subheadline))
+                        .foregroundStyle(.white.opacity(0.66))
+                        .padding(.horizontal, metrics.margin)
+                        .padding(.top, 20)
+                } else {
+                    LibraryGrid(source: source)
+                        .id("\(refreshes)·\(String(describing: source))")
+                }
             }
         }
         .refreshable { refreshes += 1 }
-        .onAppear { sort = LibrarySorts.sort(for: route.id) }
+        .onAppear {
+            sort = LibrarySorts.sort(for: route.id)
+            #if DEBUG
+            // scripts/mac.sh: HUB_SHEET=search:the opens this page's search with "the".
+            if !debugSearched, let sheet = ProcessInfo.processInfo.environment["HUB_SHEET"], sheet.hasPrefix("search:") {
+                debugSearched = true
+                searching = true
+                query = String(sheet.dropFirst("search:".count))
+            }
+            #endif
+        }
         // The capsule follows the libraries' order, as the Library page does (#15).
         .task(id: "\(model.userId)·\(model.libraryOrderChanges)") { await loadFolders() }
+    }
+
+    /// The round search: open, it takes the keyboard; pressed again, it closes
+    /// and the library's titles come back.
+    private var searchButton: some View {
+        GlassRoundButton(systemImage: "magnifyingglass", label: searchPlaceholder, on: searching, size: 42) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                searching.toggle()
+                if !searching { query = "" }
+            }
+        }
     }
 
     @ViewBuilder private var controls: some View {
@@ -368,11 +424,15 @@ struct FolderView: View {
             HStack(spacing: 10) {
                 capsule
                 Spacer(minLength: 0)
+                searchButton
                 if route != .favourites { sortControls }
             }
             VStack(alignment: .leading, spacing: 10) {
                 ScrollView(.horizontal, showsIndicators: false) { capsule }
-                if route != .favourites { sortControls }
+                HStack(spacing: 10) {
+                    searchButton
+                    if route != .favourites { sortControls }
+                }
             }
         }
     }
@@ -418,17 +478,20 @@ struct FolderView: View {
 enum GridSource: Hashable {
     case folder(id: String, name: String, sort: SortPreference)
     case favourites
-    case search(String)
+    /// Everything, or with a `viewId` only that library (#14), which the
+    /// count line names.
+    case search(String, viewId: String = "", library: String = "")
 
     func request(page: Int) -> HubRequest {
         switch self {
         case .folder(let id, _, let sort): HubEndpoints.libraryItems(viewId: id, page: page, sort: sort.field, order: sort.order)
         case .favourites: HubEndpoints.libraryFavorites(page: page)
-        case .search(let query): HubEndpoints.librarySearch(query, page: page)
+        case .search(let query, let viewId, _): HubEndpoints.librarySearch(query, page: page, viewId: viewId)
         }
     }
 
-    /// Android's grid status lines: "179 titles", "12 of 40 matches".
+    /// Android's grid status lines: "179 titles", "12 of 40 matches",
+    /// "2 matches in Anime".
     func summary(loaded: Int, total: Int) -> String {
         switch self {
         case .folder:
@@ -436,9 +499,10 @@ enum GridSource: Hashable {
         case .favourites:
             if total == 0 { return "No favourites yet. Star a title on its page." }
             return loaded < total ? "\(loaded) of \(total) favourites" : "\(total) favourites"
-        case .search:
-            if total == 0 { return "No Jellyfin matches." }
-            return loaded < total ? "\(loaded) of \(total) matches" : "\(total) matches"
+        case .search(_, _, let library):
+            if total == 0 { return library.isEmpty ? "No Jellyfin matches." : "No matches in \(library)." }
+            let count = loaded < total ? "\(loaded) of \(total) matches" : (total == 1 ? "1 match" : "\(total) matches")
+            return library.isEmpty ? count : count + " in " + library
         }
     }
 

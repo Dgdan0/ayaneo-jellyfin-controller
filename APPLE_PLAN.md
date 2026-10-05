@@ -133,6 +133,8 @@ The look is `GLASS_PLAN.md`. Its pieces in this app, so each screen uses one own
 | A profile's avatar and colour | HubKit `Profiles` (Android's `ProfileAvatar`, held to its test cases) |
 | A library tile's three fanned posters | HubKit `LibraryFan.posters` (one function, so the choice can move into a hub field) |
 | The libraries' order (#15): moving one, saving, sliding back on a refusal | HubKit `LibraryOrder` and `LibraryOrderQueue`; the app's `Library/LibraryOrderEditor` (one per side), drawn by `Library/LibraryArrange` (`GripMark`, `.jiggle`, `.arrangeable`) on the Library page and in Settings › Libraries |
+| A library's own search (#14), and the Library page's | `GridSource.search(_:viewId:library:)` in `Library/LibraryView` (`HubEndpoints.librarySearch(viewId:)`): the round search on a library's page keeps to it and its count line names it ("2 matches in Anime"); on Favourites and on the Library page it looks everywhere |
+| The demo hub (`-demo`) for UI tests and previews | HubKit `Demo/`: `DemoLibrary` answers the library as the hub does (a search kept to one library, Favourites, title pages, watched and favourite that stay for the run, a change that is not exactly one of the two refused) |
 
 Debug builds also take `HUB_SIDE=books` and `HUB_SHEET=profiles` (the avatar's sheet) for
 screenshots, beside `HUB_SECTION` and `HUB_OPEN` (a Home row's first title, or with

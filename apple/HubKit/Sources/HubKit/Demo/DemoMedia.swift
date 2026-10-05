@@ -52,7 +52,8 @@ enum DemoMedia {
             let quoted = ids.map { #""\#($0)""# }.joined(separator: ",")
             return DemoTransport.Answer(200, #"{"side":"\#(side)","ids":[\#(quoted)],"order":"\#(ids.isEmpty ? "name" : "custom")"}"#)
         default:
-            return DemoDiscover.answer(method: method, path: path, query: query)
+            return DemoLibrary.answer(method: method, path: path, query: query, body: body)
+                ?? DemoDiscover.answer(method: method, path: path, query: query)
         }
     }
 

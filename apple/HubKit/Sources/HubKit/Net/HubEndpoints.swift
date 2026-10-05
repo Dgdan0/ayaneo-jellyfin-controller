@@ -78,8 +78,11 @@ public enum HubEndpoints {
         HubRequest("/v1/library/series/" + encode(seriesId) + "/play-target")
     }
 
-    public static func librarySearch(_ query: String, page: Int = 1) -> HubRequest {
-        HubRequest("/v1/library/search?q=" + encode(query) + (page > 1 ? "&page=\(page)" : ""))
+    /// `viewId`, when set, keeps the search inside that library (#14); a hub
+    /// from before it ignores it and searches everything.
+    public static func librarySearch(_ query: String, page: Int = 1, viewId: String = "") -> HubRequest {
+        HubRequest("/v1/library/search?q=" + encode(query) + (page > 1 ? "&page=\(page)" : "")
+            + (viewId.isEmpty ? "" : "&viewId=" + encode(viewId)))
     }
 
     public static func libraryFavorites(page: Int = 1) -> HubRequest {
