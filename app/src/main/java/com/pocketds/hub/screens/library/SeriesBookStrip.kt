@@ -17,7 +17,6 @@ import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.model.ReadingType
-import kotlin.math.roundToInt
 
 /** What a book in a series row says under its cover. Pure, so it is tested. */
 object SeriesBookLabels {
@@ -43,7 +42,7 @@ object SeriesBookLabels {
             when {
                 !available -> add("Missing")
                 progress?.completed == true -> add("Completed")
-                (progress?.percentage ?: 0.0) > 0 -> add("${((progress?.percentage ?: 0.0) * 100).roundToInt()}%")
+                (progress?.percentage ?: 0.0) > 0 -> add(com.pocketds.hub.state.Fmt.readingPercentLabel(progress?.percentage ?: 0.0))
             }
             if (available) formats(formats)?.let(::add)
         }.joinToString(" · ")

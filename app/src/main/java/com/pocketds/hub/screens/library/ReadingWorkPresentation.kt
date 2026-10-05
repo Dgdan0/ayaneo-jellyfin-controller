@@ -3,7 +3,6 @@ package com.pocketds.hub.screens.library
 import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.model.ReadingEdition
 import com.pocketds.hub.model.ReadingWork
-import kotlin.math.roundToInt
 
 /** Pure detail-screen decisions kept independently testable from Android Views. */
 data class ReadingWorkPresentation private constructor(
@@ -69,7 +68,7 @@ data class ReadingWorkPresentation private constructor(
                 progress?.completed == true -> "Read again"
                 issue != null && (progress?.percentage ?: 0.0) > 0 -> "Continue · $issue"
                 issue != null -> "Start · $issue"
-                progress != null && progress.percentage > 0 -> "Resume · ${(progress.percentage * 100).roundToInt()}%"
+                progress != null && progress.percentage > 0 -> "Resume · ${com.pocketds.hub.state.Fmt.readingPercentLabel(progress.percentage)}"
                 else -> "Read book"
             }
             return PrimaryRead(id, source.ifBlank { "kavita" }, label)

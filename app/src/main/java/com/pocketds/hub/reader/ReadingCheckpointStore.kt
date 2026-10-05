@@ -33,7 +33,7 @@ data class ReadingLocation(val locator: JsonObject? = null, val pageIndex: Int? 
         val percent = (locations?.get("totalProgression") as? JsonPrimitive)?.doubleOrNull
         val chapter = (locator?.get("title") as? JsonPrimitive)?.contentOrNull
             ?: (locator?.get("href") as? JsonPrimitive)?.contentOrNull.orEmpty()
-        return listOfNotNull(chapter.takeIf(String::isNotBlank), percent?.let { "${(it * 100).toInt()}%" }).joinToString(" · ")
+        return listOfNotNull(chapter.takeIf(String::isNotBlank), percent?.let { com.pocketds.hub.state.Fmt.readingPercentLabel(it) }).joinToString(" · ")
     }
 }
 

@@ -62,7 +62,8 @@ class ReadingBookFactsTest {
         assertEquals("Not started", ReadingBookFacts.comicLine(null))
         // One page of a 4,437-page run is still "started".
         assertEquals("1% read", ReadingBookFacts.comicLine(com.pocketds.hub.model.ReadingProgress(percentage = 0.000225)))
-        assertEquals("35% read", ReadingBookFacts.comicLine(com.pocketds.hub.model.ReadingProgress(percentage = 0.347)))
+        // Rounded down, as every reading percent is (Fmt.readingPercent).
+        assertEquals("34% read", ReadingBookFacts.comicLine(com.pocketds.hub.model.ReadingProgress(percentage = 0.347)))
         assertEquals("Finished", ReadingBookFacts.comicLine(com.pocketds.hub.model.ReadingProgress(percentage = 1.0, completed = true)))
     }
 

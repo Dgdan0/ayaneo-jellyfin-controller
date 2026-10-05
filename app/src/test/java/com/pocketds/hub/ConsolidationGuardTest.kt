@@ -84,6 +84,9 @@ class ConsolidationGuardTest {
             setOf("net/HubEndpoints.kt")),
         Rule(Regex("""\b(views|libraries|readingLibraries|libraryViews)\b[^\n]*\.(sorted|sortedBy|sortedWith|sortedByDescending|sortBy|sortWith|sortDescending)\b"""),
             "the hub's order (#15): libraries come arranged, or A to Z; move one with LibraryOrder.move and save it with LibraryOrderEditor"),
+        Rule(Regex("""(percentage|progression)\b[^\n]*\*\s*100\b"""),
+            "Fmt.readingPercent / readingPercentLabel: one rounding for how far through a book, so its facts and its Resume button agree",
+            setOf("state/Fmt.kt")),
     )
 
     @Test

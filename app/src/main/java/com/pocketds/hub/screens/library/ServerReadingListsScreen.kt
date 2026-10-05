@@ -69,7 +69,7 @@ class ServerReadingListsScreen(private val api: HubApi, private val ring: () -> 
                     status.text="${entries.size} issues · Kavita reading order"
                     entries.forEachIndexed { index,entry ->
                         row(entry.id.toString(),"${index+1}. ${entry.seriesTitle} · ${entry.title}",
-                            listOfNotNull(entry.volume.takeIf { it.isNotBlank() },"${entry.pageCount} pages",entry.progress?.let { if(it.completed) "Read" else "${(it.percentage * 100).toInt()}% read" }).joinToString(" · ")) {
+                            listOfNotNull(entry.volume.takeIf { it.isNotBlank() },"${entry.pageCount} pages",entry.progress?.let { if(it.completed) "Read" else "${com.pocketds.hub.state.Fmt.readingPercentLabel(it.percentage)} read" }).joinToString(" · ")) {
                             host.push(PagedImageReaderScreen(api,entry.workId,entry.sourceItemId,"${entry.seriesTitle} · ${entry.title}",ring, readingList = entries, readingListIndex = index))
                         }
                     }

@@ -315,7 +315,7 @@ class PosterCardView(
                 append(", ").append(work.bookCount).append(if (work.bookCount == 1) " book" else " books")
             }
             if (work.subtitle.isNotBlank()) append(", ").append(work.subtitle)
-            work.progress?.let { append(", ").append((it.percentage * 100).toInt()).append(" percent read") }
+            work.progress?.let { append(", ").append(com.pocketds.hub.state.Fmt.readingPercent(it.percentage, it.completed)).append(" percent read") }
         }
     }
 

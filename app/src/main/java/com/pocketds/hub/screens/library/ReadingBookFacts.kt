@@ -40,7 +40,7 @@ object ReadingBookFacts {
             work.continueAt?.number?.takeIf(String::isNotBlank)?.let { if (work.kind == "manga") "On chapter $it" else "On issue $it" },
             comicLine(p)
         ).joinToString(" · ")
-        val percent = "${(p.percentage * 100).toInt()}%"
+        val percent = Fmt.readingPercentLabel(p.percentage)
         val pages = work.editions.filter { it.kind != "audiobook" }.maxOfOrNull { it.pageCount } ?: 0
         return if (pages > 0) "$percent · page ${(p.percentage * pages).toInt().coerceIn(1, pages)} of $pages" else "$percent read"
     }
@@ -86,11 +86,11 @@ object ReadingBookFacts {
     /**
      * Under a comic or manga's cover: "Not started", "1% read", "Finished".
      * Its library name said nothing the row heading did not, and a run of
-     * hundreds of issues read one page shows as 0% unless rounded up.
+     * hundreds of issues read one page is "1% read", never 0% ([Fmt.readingPercent]).
      */
     fun comicLine(progress: com.pocketds.hub.model.ReadingProgress?): String = when {
         progress?.completed == true -> "Finished"
-        (progress?.percentage ?: 0.0) > 0 -> "${kotlin.math.ceil(progress!!.percentage * 100).toInt().coerceIn(1, 99)}% read"
+        (progress?.percentage ?: 0.0) > 0 -> "${Fmt.readingPercentLabel(progress!!.percentage)} read"
         else -> "Not started"
     }
 
@@ -132,7 +132,7 @@ object ReadingBookFacts {
         work.progress?.let { p ->
             when {
                 p.completed -> "Finished"
-                p.percentage > 0 -> "${(p.percentage * 100).toInt().coerceAtLeast(1)}%"
+                p.percentage > 0 -> Fmt.readingPercentLabel(p.percentage)
                 else -> null
             }
         }
@@ -145,7 +145,7 @@ object ReadingBookFacts {
      */
     fun continueLine(point: com.pocketds.hub.model.ReadingContinue, kind: String, pages: Int): String = listOfNotNull(
         point.number.takeIf(String::isNotBlank)?.let { (when (kind) { "comic" -> "Issue "; "manga" -> "Chapter "; else -> "Book " }) + it },
-        point.percentage.takeIf { it > 0 }?.let { "${(it * 100).toInt().coerceAtLeast(1)}%" },
+        point.percentage.takeIf { it > 0 }?.let { Fmt.readingPercentLabel(it) },
         pages.takeIf { it > 0 && point.percentage > 0 }?.let { "page ${(point.percentage * it).toInt().coerceIn(1, it)} of $it" }
     ).joinToString(" · ")
 

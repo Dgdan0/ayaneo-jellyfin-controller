@@ -79,7 +79,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 import com.pocketds.hub.state.Fmt
 import com.pocketds.hub.state.StatusText
 import com.pocketds.hub.ui.showStatus
@@ -1446,7 +1445,7 @@ class ReadingWorkScreen(
     private fun progressText(progress: ReadingProgress?): String? = progress?.let {
         when {
             it.completed -> "Completed"
-            it.percentage > 0 -> "${(it.percentage * 100).roundToInt()}% read"
+            it.percentage > 0 -> "${Fmt.readingPercentLabel(it.percentage)} read"
             else -> null
         }
     }
