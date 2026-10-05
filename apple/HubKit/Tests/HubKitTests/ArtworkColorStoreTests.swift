@@ -136,24 +136,56 @@ struct ArtworkColorStoreTests {
         #expect(await updates.next() == ["/v1/img/a": gold])
     }
 
-    @Test func coloursOutliveARestartInAndroidsFileShape() async throws {
+    @Test func coloursOutliveARestartInAndroidsFileShapeByPicture() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("hubkit-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }
         let file = folder.appendingPathComponent(ArtworkColorStore.fileName)
 
         let first = store(ColorsHub.knowing(gold), file: file)
-        await first.request(["/v1/img/jf/abc/Backdrop?tag=t"])
+        await first.request(["/v1/img/jf/abc/Backdrop?tag=t&w=1280"])
         await first.flush()
         await first.save()
         #expect(try String(contentsOf: file, encoding: .utf8)
-            == ##"[["/v1/img/jf/abc/Backdrop?tag=t","#d0b366","#1d1500","#d0b366","#f2e4bf"]]"##)
+            == ##"[["jf/abc/Backdrop/t","#d0b366","#1d1500","#d0b366","#f2e4bf"]]"##)
 
         let hub = ColorsHub.knowing(gold)
         let second = store(hub, file: file)
-        #expect(await second.restore() == ["/v1/img/jf/abc/Backdrop?tag=t": gold])
-        await second.request(["/v1/img/jf/abc/Backdrop?tag=t"])
+        #expect(await second.restore() == ["jf/abc/Backdrop/t": gold])
+        // The same picture at another width is known already.
+        await second.request(["/v1/img/jf/abc/Backdrop?tag=t&w=360"])
         await second.flush()
         #expect(await hub.asked.isEmpty)
+        #expect(await second.palette("/v1/img/jf/abc/Backdrop?tag=t") == gold)
+    }
+
+    @Test func aFileFromBeforeKeysByPictureStillCounts() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("hubkit-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent(ArtworkColorStore.fileName)
+        try Data(##"[["/v1/img/tmdb/w342/x.jpg","#d0b366","#1d1500","#d0b366","#f2e4bf"]]"##.utf8).write(to: file)
+
+        let hub = ColorsHub.knowing(gold)
+        let colors = store(hub, file: file)
+        #expect(await colors.restore() == ["tmdb/x.jpg": gold])
+        await colors.request(["/v1/img/tmdb/w780/x.jpg"])
+        await colors.flush()
+        #expect(await hub.asked.isEmpty)
+    }
+
+    @Test func onePictureAtTwoWidthsIsAskedForOnceAndArrivesByPicture() async {
+        let hub = ColorsHub.knowing(gold)
+        let colors = store(hub)
+        var updates = colors.updates.makeAsyncIterator()
+        await colors.request(["/v1/img/tmdb/w342/x.jpg", "/v1/img/tmdb/w1280/x.jpg"])
+        await colors.request(["/v1/img/jf/i/Primary?tag=t&w=360", "/v1/img/jf/i/Primary?w=540&tag=t"])
+        await colors.flush()
+        #expect(await hub.asked == [["/v1/img/tmdb/w342/x.jpg", "/v1/img/jf/i/Primary?tag=t&w=360"]])
+        #expect(await updates.next() == ["tmdb/x.jpg": gold, "jf/i/Primary/t": gold])
+        #expect(await colors.palette("/v1/img/tmdb/w1280/x.jpg") == gold)
+        #expect(await colors.palette("/v1/img/jf/i/Primary?w=540&tag=t") == gold)
+        // Another tag is another picture.
+        #expect(await colors.palette("/v1/img/jf/i/Primary?tag=u&w=360") == nil)
     }
 
     @Test func aDamagedFileCostsOneRoundOfAskingAgain() async throws {

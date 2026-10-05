@@ -110,6 +110,31 @@ struct GlassTests {
         #expect(book.nextDueAt == nil)
     }
 
+    /// The hub's `artworkColorKey` cases: the width never changes a picture.
+    @Test func aPictureIsKeyedWithoutItsWidthAsTheHubKeysIt() {
+        #expect(ArtworkColorKey.of("/v1/img/jf/abc/Backdrop?tag=c677&w=1280") == "jf/abc/Backdrop/c677")
+        #expect(ArtworkColorKey.of("/v1/img/jf/abc/Backdrop?w=360&tag=c677") == "jf/abc/Backdrop/c677")
+        #expect(ArtworkColorKey.of("/v1/img/jf/abc/Backdrop") == "jf/abc/Backdrop/")
+        #expect(ArtworkColorKey.of("/v1/img/tmdb/w342/kaMis.jpg") == "tmdb/kaMis.jpg")
+        #expect(ArtworkColorKey.of("/v1/img/tmdb/original/kaMis.jpg") == "tmdb/kaMis.jpg")
+        #expect(ArtworkColorKey.of("/v1/img/reading/kavita/12?w=300") == "reading/kavita/12")
+        #expect(ArtworkColorKey.of("/v1/img/arr/radarr/7/poster") == "arr/radarr/7/poster")
+        // Not a hub image path the hub would key: it stands for itself.
+        #expect(ArtworkColorKey.of("https://image.tmdb.org/t/p/w342/x.jpg") == "https://image.tmdb.org/t/p/w342/x.jpg")
+        #expect(ArtworkColorKey.of("/v1/img/jf/abc") == "/v1/img/jf/abc")
+        #expect(ArtworkColorKey.of("/a") == "/a")
+    }
+
+    @Test func onePictureAtTwoWidthsIsAskedOnceAndKnownAtBoth() {
+        var book = ArtworkColorBook()
+        let small = "/v1/img/tmdb/w342/x.jpg", large = "/v1/img/tmdb/w1280/x.jpg"
+        #expect(book.toAsk([small, large], now: 0) == [small])
+        #expect(book.toAsk([large], now: 0).isEmpty)
+        #expect(book.answered([small], colors: [small: red], missing: [], now: 0) == [small])
+        #expect(book.palette(large) == red)
+        #expect(book.snapshot.map(\.0) == ["tmdb/x.jpg"])
+    }
+
     @Test func theLeastRecentlyUsedColoursAreDroppedFirst() {
         var book = ArtworkColorBook(capacity: 2)
         book.restore([("/old", red), ("/kept", blue)])

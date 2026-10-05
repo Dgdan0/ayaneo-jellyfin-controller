@@ -110,21 +110,51 @@ public enum GlassColors {
     }
 }
 
+/// The picture behind a hub image path, as the hub keys an artwork's colours
+/// (`artworkColorKey` in `hub/internal/api/artwork_colors.go`): a Jellyfin
+/// image by its item, type and tag, a TMDB image by its file, the others by
+/// their path. So one picture asked for at two widths ("w=360", "w342") is
+/// one entry. Anything that is not a hub image path stands for itself.
+public enum ArtworkColorKey {
+    public static func of(_ src: String) -> String {
+        guard let parts = URLComponents(string: src), parts.scheme == nil, parts.host == nil,
+              parts.path.hasPrefix("/v1/img/") else { return src }
+        let rest = String(parts.path.dropFirst("/v1/img/".count))
+        let pieces = rest.split(separator: "/", omittingEmptySubsequences: false)
+        switch pieces.first.map(String.init) ?? "" {
+        case "jf" where pieces.count == 3:
+            // The tag names the picture; the width does not.
+            return rest + "/" + (parts.queryItems?.first { $0.name == "tag" }?.value ?? "")
+        case "tmdb" where pieces.count == 3:
+            // The file names the picture; the size does not.
+            return "tmdb/" + pieces[2]
+        case "arr" where pieces.count >= 2, "reading" where pieces.count >= 2:
+            return rest
+        default:
+            return src
+        }
+    }
+}
+
 /// What the app knows about each artwork's colours, and what to ask the hub
 /// next. A port of Android's `ui/glass/ArtworkColorBook`, held to the same
 /// rules by the tests: sixty per request, pending asked again after 3, 10 and
 /// 30 seconds and then left, missing never asked again, the least recently
-/// used dropped first.
+/// used dropped first. Unlike Android's, it keeps a picture once whatever
+/// width it is shown at (`ArtworkColorKey`), as the hub does, so a poster's
+/// colours also tint its larger copy without asking again.
 public struct ArtworkColorBook: Sendable {
     public static let maxPerRequest = 60
 
     private let capacity: Int
     private let retryAfter: [TimeInterval]
+    /// By picture (`ArtworkColorKey`).
     private var known: [String: ArtworkPalette] = [:]
     /// Least recently used first.
     private var order: [String] = []
     private var missing: Set<String> = []
-    private var waiting: [String: (attempts: Int, dueAt: TimeInterval)] = [:]
+    /// By picture, with the path to ask the hub with.
+    private var waiting: [String: (attempts: Int, dueAt: TimeInterval, src: String)] = [:]
     private var asking: Set<String> = []
 
     public init(capacity: Int = 2000, retryAfter: [TimeInterval] = [3, 10, 30]) {
@@ -132,49 +162,56 @@ public struct ArtworkColorBook: Sendable {
         self.retryAfter = retryAfter
     }
 
-    /// Known colours for `src`; using them makes them recent.
+    /// Known colours for `src`, at any width; using them makes them recent.
     public mutating func palette(_ src: String) -> ArtworkPalette? {
-        guard let p = known[src] else { return nil }
-        touch(src)
+        let key = ArtworkColorKey.of(src)
+        guard let p = known[key] else { return nil }
+        touch(key)
         return p
     }
 
-    public func isMissing(_ src: String) -> Bool { missing.contains(src) }
+    public func isMissing(_ src: String) -> Bool { missing.contains(ArtworkColorKey.of(src)) }
 
     /// Whether `src` has colours, without making them recent.
-    public func knows(_ src: String) -> Bool { known[src] != nil }
+    public func knows(_ src: String) -> Bool { known[ArtworkColorKey.of(src)] != nil }
 
-    /// Which of `sources` to ask for now, at most `limit`. They count as being
-    /// asked until `answered` or `failed`.
+    /// Which of `sources` to ask for now, at most `limit`, one path per
+    /// picture. They count as being asked until `answered` or `failed`.
     public mutating func toAsk(_ sources: [String], now: TimeInterval, limit: Int = maxPerRequest) -> [String] {
         var out: [String] = []
+        var outKeys: Set<String> = []
         for src in sources {
             if out.count >= limit { break }
-            if src.isEmpty || known[src] != nil || missing.contains(src) || asking.contains(src) || out.contains(src) { continue }
-            if let retry = waiting[src], retry.dueAt > now { continue }
+            guard !src.isEmpty else { continue }
+            let key = ArtworkColorKey.of(src)
+            if known[key] != nil || missing.contains(key) || asking.contains(key) || outKeys.contains(key) { continue }
+            if let retry = waiting[key], retry.dueAt > now { continue }
             out.append(src)
+            outKeys.insert(key)
         }
-        asking.formUnion(out)
+        asking.formUnion(outKeys)
         return out
     }
 
-    /// Records the hub's answer to `asked` and returns the sources that now
-    /// have colours. Anything in neither list is treated as pending.
+    /// Records the hub's answer to `asked`, whose keys it echoes exactly, and
+    /// returns the sources that now have colours. Anything in neither list is
+    /// treated as pending.
     @discardableResult
     public mutating func answered(_ asked: [String], colors: [String: ArtworkPalette], missing missingNow: [String], now: TimeInterval) -> [String] {
         var got: [String] = []
         let gone = Set(missingNow)
         for src in asked {
-            asking.remove(src)
+            let key = ArtworkColorKey.of(src)
+            asking.remove(key)
             if let palette = colors[src] {
-                remember(src, palette)
-                waiting[src] = nil
+                remember(key, palette)
+                waiting[key] = nil
                 got.append(src)
             } else if gone.contains(src) {
-                missing.insert(src)
-                waiting[src] = nil
+                missing.insert(key)
+                waiting[key] = nil
             } else {
-                later(src, now: now)
+                later(key, src: src, now: now)
             }
         }
         return got
@@ -183,51 +220,57 @@ public struct ArtworkColorBook: Sendable {
     /// The request itself failed: everything in it waits and is asked again.
     public mutating func failed(_ asked: [String], now: TimeInterval) {
         for src in asked {
-            asking.remove(src)
-            later(src, now: now)
+            let key = ArtworkColorKey.of(src)
+            asking.remove(key)
+            later(key, src: src, now: now)
         }
     }
 
-    /// Sources whose wait is over and are not being asked.
+    /// Paths whose wait is over and are not being asked, one per picture.
     public func due(now: TimeInterval) -> [String] {
-        waiting.filter { $0.value.dueAt <= now && !asking.contains($0.key) }.keys.sorted()
+        waiting.filter { $0.value.dueAt <= now && !asking.contains($0.key) }.map(\.value.src).sorted()
     }
 
     /// When the next waiting source falls due, or nil when nothing waits.
     public var nextDueAt: TimeInterval? { waiting.values.map(\.dueAt).min() }
 
-    /// Least recently used first, for the device's file.
-    public var snapshot: [(String, ArtworkPalette)] { order.compactMap { src in known[src].map { (src, $0) } } }
+    /// Each picture's key and colours, least recently used first, for the
+    /// device's file.
+    public var snapshot: [(String, ArtworkPalette)] { order.compactMap { key in known[key].map { (key, $0) } } }
 
-    /// Colours kept from an earlier run; anything learnt since wins.
+    /// Colours kept from an earlier run, by picture or (from an older file) by
+    /// path; anything learnt since wins.
     public mutating func restore(_ entries: [(String, ArtworkPalette)]) {
-        for (src, palette) in entries where !src.isEmpty && known[src] == nil { remember(src, palette) }
+        for (src, palette) in entries where !src.isEmpty {
+            let key = ArtworkColorKey.of(src)
+            if known[key] == nil { remember(key, palette) }
+        }
     }
 
-    private mutating func remember(_ src: String, _ palette: ArtworkPalette) {
-        if known[src] == nil { order.append(src) } else { touch(src) }
-        known[src] = palette
-        missing.remove(src)
+    private mutating func remember(_ key: String, _ palette: ArtworkPalette) {
+        if known[key] == nil { order.append(key) } else { touch(key) }
+        known[key] = palette
+        missing.remove(key)
         while order.count > capacity {
             known[order.removeFirst()] = nil
         }
     }
 
-    private mutating func touch(_ src: String) {
-        if let i = order.firstIndex(of: src) {
+    private mutating func touch(_ key: String) {
+        if let i = order.firstIndex(of: key) {
             order.remove(at: i)
-            order.append(src)
+            order.append(key)
         }
     }
 
-    private mutating func later(_ src: String, now: TimeInterval) {
-        let retry = waiting[src] ?? (attempts: 0, dueAt: now)
+    private mutating func later(_ key: String, src: String, now: TimeInterval) {
+        let retry = waiting[key] ?? (attempts: 0, dueAt: now, src: src)
         if retry.attempts >= retryAfter.count {
             // Pending through every wait: stop asking this session, as for missing.
-            waiting[src] = nil
-            missing.insert(src)
+            waiting[key] = nil
+            missing.insert(key)
             return
         }
-        waiting[src] = (attempts: retry.attempts + 1, dueAt: now + retryAfter[retry.attempts])
+        waiting[key] = (attempts: retry.attempts + 1, dueAt: now + retryAfter[retry.attempts], src: src)
     }
 }

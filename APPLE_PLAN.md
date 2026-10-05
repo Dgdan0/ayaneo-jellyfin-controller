@@ -120,7 +120,7 @@ The look is `GLASS_PLAN.md`. Its pieces in this app, so each screen uses one own
 
 | Behaviour | Owner |
 |---|---|
-| An artwork's colours: batched asks, the 3/10/30 s retries, the file | HubKit `ArtworkColorStore` (rules in `ArtworkColorBook`); the app's copy is `Glass/ArtworkColors` (`palette(for:)`, `want`) |
+| An artwork's colours: batched asks, the 3/10/30 s retries, the file | HubKit `ArtworkColorStore` (rules in `ArtworkColorBook`); the app's copy is `Glass/ArtworkColors` (`palette(for:)`, `want`). All three keep a picture once whatever width it is shown at: `ArtworkColorKey`, the hub's own `artworkColorKey` (a Jellyfin image by item, type and tag, a TMDB image by its file) |
 | The page behind everything | `Glass/AmbientBackground` (the hub's `HubEndpoints.smallest` picture, decoded at 64 px); pages report their picture with `.ambientArtwork(path)`; which one shows is HubKit `AmbientStack` |
 | A panel, the white and glass pills, a round toggle | `.glassPanel(shape)`, `PrimaryPillStyle`, `GlassPillStyle`, `GlassRoundButton` in `Glass/GlassStyle` |
 | A card's ring and lift, its marks | `Glass/GlassCards`: put the card in a `GlassCardStyle` button and give its artwork `.litArtwork(corner:)` (`.litRing` for a row card); `ArtworkProgress`, `WatchBadge`, `UpNextTag`, `PlayDisc`, `CardCaption` |

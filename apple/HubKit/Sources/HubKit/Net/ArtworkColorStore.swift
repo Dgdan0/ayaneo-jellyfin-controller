@@ -6,8 +6,9 @@ import Foundation
 /// Screens `request` the artwork they show. Asks made within a few frames of
 /// each other go to the hub as one request of at most sixty. What to ask, and
 /// when to ask again, is `ArtworkColorBook`'s rule: pending after 3, 10 and
-/// 30 seconds, missing never. Known colours are kept in a file, so after a
-/// restart a page is in colour before the network answers.
+/// 30 seconds, missing never. Colours are kept per picture, whatever width it
+/// is asked at (`ArtworkColorKey`, the hub's own key), and in a file, so after
+/// a restart a page is in colour before the network answers.
 public actor ArtworkColorStore {
     public typealias Fetch = @Sendable ([String]) async throws -> ArtworkColorsResponse
 
@@ -20,11 +21,13 @@ public actor ArtworkColorStore {
     /// The name Android gives its file too.
     public static let fileName = "artwork-colors.json"
 
-    /// Each answer's new colours, for the app's copy that views read.
+    /// Each answer's new colours by picture (`ArtworkColorKey`), for the
+    /// app's copy that views read.
     public nonisolated let updates: AsyncStream<[String: ArtworkPalette]>
 
     private var book: ArtworkColorBook
     private var queued: [String] = []
+    /// The pictures queued (`ArtworkColorKey`), so two widths wait as one.
     private var queuedSet: Set<String> = []
     private let fetch: Fetch
     private let file: URL?
@@ -60,10 +63,10 @@ public actor ArtworkColorStore {
     /// waiting for them. Each answer arrives on `updates`.
     public func request(_ sources: [String]) {
         var added = false
-        for src in sources where !src.isEmpty && !queuedSet.contains(src) {
+        for src in sources where !src.isEmpty && !queuedSet.contains(ArtworkColorKey.of(src)) {
             if book.knows(src) || book.isMissing(src) { continue }
             queued.append(src)
-            queuedSet.insert(src)
+            queuedSet.insert(ArtworkColorKey.of(src))
             added = true
         }
         if added { schedule(after: Self.batchDelay) }
@@ -72,22 +75,22 @@ public actor ArtworkColorStore {
     /// Sends everything waiting, sixty to a request, together with anything
     /// whose wait after a pending answer is over. What the timers run.
     public func flush() async {
-        for src in book.due(now: now()) where !queuedSet.contains(src) {
+        for src in book.due(now: now()) where !queuedSet.contains(ArtworkColorKey.of(src)) {
             queued.append(src)
-            queuedSet.insert(src)
+            queuedSet.insert(ArtworkColorKey.of(src))
         }
         while !queued.isEmpty {
             let asked = book.toAsk(queued, now: now())
-            let leaving = Set(asked)
-            queued.removeAll { leaving.contains($0) || book.knows($0) || book.isMissing($0) }
-            queuedSet = Set(queued)
+            let leaving = Set(asked.map(ArtworkColorKey.of))
+            queued.removeAll { leaving.contains(ArtworkColorKey.of($0)) || book.knows($0) || book.isMissing($0) }
+            queuedSet = Set(queued.map(ArtworkColorKey.of))
             if asked.isEmpty { break }
             await send(asked)
         }
     }
 
-    /// Reads the colours an earlier run kept, and returns everything now known.
-    /// A damaged file costs one round of asking again, never a crash.
+    /// Reads the colours an earlier run kept, and returns everything now known,
+    /// by picture. A damaged file costs one round of asking again, never a crash.
     @discardableResult
     public func restore() -> [String: ArtworkPalette] {
         if let file, let data = try? Data(contentsOf: file),
@@ -102,8 +105,8 @@ public actor ArtworkColorStore {
         return Dictionary(book.snapshot, uniquingKeysWith: { _, latest in latest })
     }
 
-    /// Writes the known colours, least recently used first, as Android does:
-    /// `[[src, dominant, dark, vivid, light], …]`.
+    /// Writes the known colours, least recently used first, in Android's shape
+    /// with the picture's key first: `[[key, dominant, dark, vivid, light], …]`.
     public func save() {
         guard let file else { return }
         let rows = book.snapshot.suffix(Self.keepOnDevice).map { [$0.0] + $0.1.hexes }
@@ -126,7 +129,7 @@ public actor ArtworkColorStore {
             }
             let got = book.answered(asked, colors: colors, missing: response.missing, now: now())
             if !got.isEmpty {
-                continuation.yield(Dictionary(got.compactMap { src in colors[src].map { (src, $0) } },
+                continuation.yield(Dictionary(got.compactMap { src in colors[src].map { (ArtworkColorKey.of(src), $0) } },
                                               uniquingKeysWith: { _, latest in latest }))
                 scheduleSave()
             }
