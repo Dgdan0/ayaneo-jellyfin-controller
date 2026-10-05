@@ -169,7 +169,11 @@ class ReaderListeningTest {
         HubSettings.save(activity, server.url("/").toString(), "fixture")
         var screen: PagedImageReaderScreen? = null
         lateinit var root: View
-        fun isThumb(path: String) = path.substringBefore('?').endsWith("/thumb")
+        // The scrubber's and the grid's thumbnails, at the grid's width; the reader also asks for small
+        // ones to find the margins on (#18, C5), which are not what these checks count.
+        fun isThumb(path: String) = path.substringBefore('?').endsWith("/thumb") && path.endsWith("w=${PageGrid.THUMB_WIDTH}")
+        fun isMarginThumb(path: String) = path.substringBefore('?').endsWith("/thumb") && path.endsWith("w=${com.pocketds.hub.reader.PageBounds.THUMB_WIDTH}")
+        fun isFull(path: String) = !path.substringBefore('?').endsWith("/thumb")
         fun pageOf(path: String) = path.substringBefore('?').removeSuffix("/thumb").substringAfterLast('/').toInt()
         try {
             DomainPreferences.setComicDefaultFit(activity, ComicFit.WHOLE)
@@ -208,7 +212,7 @@ class ReaderListeningTest {
             }
             withContext(Dispatchers.Main) {
                 assertEquals("Only the page the thumb rested on", listOf(17), requests.filter(::isThumb).map(::pageOf))
-                assertFalse("No full page for a preview", requests.filterNot(::isThumb).map(::pageOf).contains(17))
+                assertFalse("No full page for a preview", requests.filter(::isFull).map(::pageOf).contains(17))
             }
             shot(activity, "10-scrubber-thumbnail")
             // Let go: the page opens, now in full.
@@ -231,7 +235,7 @@ class ReaderListeningTest {
                 assertEquals(17, grid.selected)
                 assertTrue("The cell of the page you are on says so", all(grid).any { it is TextView && it.isShown && it.text == "18 · Reading" })
                 assertTrue("The grid's keys at its foot", all(grid).any { it is TextView && it.isShown && it.text == "Open page" })
-                assertTrue("The grid asks only for thumbnails", requests.drop(before).all { isThumb(it) && it.endsWith("?w=${PageGrid.THUMB_WIDTH}") })
+                assertTrue("The grid asks only for thumbnails", requests.drop(before).filterNot(::isMarginThumb).all { isThumb(it) && it.endsWith("?w=${PageGrid.THUMB_WIDTH}") })
                 val density = activity.resources.displayMetrics.density
                 assertEquals("Seven across the Pocket's width", PageGrid.columns(((root.width / density) - 36).toInt()),
                     grid.field<GridLayoutManager>("layout").spanCount)
@@ -495,6 +499,92 @@ class ReaderListeningTest {
             PlaybackSettings.setSeekSeconds(activity, oldSeek)
             ComfortSettings.save(activity, oldComfort)
             HubSettings.save(activity, oldUrl, oldToken)
+            server.shutdown()
+        }
+    }
+
+    /**
+     * The cover fills its square whatever its shape (#18): a portrait cover
+     * and a landscape one, each in three bands, are cut from the middle, so
+     * the square shows the middle of each and no page colour under or beside
+     * it. Built only: nothing is downloaded or played.
+     */
+    @Test fun anAudiobookCoverFillsItsSquareWhateverItsShape(): Unit = runBlocking {
+        val context = ins.targetContext
+        val oldLook = com.pocketds.hub.settings.LookSettings.get(context)
+        com.pocketds.hub.settings.LookSettings.set(context, com.pocketds.hub.settings.Look.GLASS)
+        val activity = start()
+        val oldUrl = HubSettings.baseUrl(activity)
+        val oldToken = HubSettings.token(activity)
+        val red = android.graphics.Color.rgb(220, 40, 40)
+        val blue = android.graphics.Color.rgb(40, 60, 200)
+        val green = android.graphics.Color.rgb(40, 180, 70)
+        /** Three bands down a portrait cover, or across a landscape one. */
+        fun banded(width: Int, height: Int): ByteArray {
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bitmap)
+            val paint = android.graphics.Paint()
+            listOf(red, blue, green).forEachIndexed { i, colour ->
+                paint.color = colour
+                if (height > width) canvas.drawRect(0f, height * i / 3f, width.toFloat(), height * (i + 1) / 3f, paint)
+                else canvas.drawRect(width * i / 3f, 0f, width * (i + 1) / 3f, height.toFloat(), paint)
+            }
+            return java.io.ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        }
+        val covers = mapOf("portrait" to banded(400, 600), "landscape" to banded(600, 400))
+        val server = MockWebServer().apply {
+            dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val name = request.path.orEmpty().substringBefore('?').substringAfterLast('/')
+                    return covers[name]?.let { MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(it)) }
+                        ?: MockResponse().setResponseCode(404)
+                }
+            }
+            start()
+        }
+        HubSettings.save(activity, server.url("/").toString(), "fixture")
+        var screen: AudiobookScreen? = null
+        fun near(pixel: Int, colour: Int) = abs(android.graphics.Color.red(pixel) - android.graphics.Color.red(colour)) < 40 &&
+            abs(android.graphics.Color.green(pixel) - android.graphics.Color.green(colour)) < 40 &&
+            abs(android.graphics.Color.blue(pixel) - android.graphics.Color.blue(colour)) < 40
+        try {
+            for ((shape, edges) in listOf("portrait" to listOf(red, green, blue, blue), "landscape" to listOf(blue, blue, red, green))) {
+                val work = "cover-$shape-${System.nanoTime()}"
+                val edition = ReadingEdition(id = "audio", workId = work, source = "storyteller", sourceItemId = "audio", kind = "audiobook")
+                val book = com.pocketds.hub.model.ReadingWork(id = work, title = "The Last Observatory", authors = listOf("A. Fixture"),
+                    artwork = "/v1/img/reading/fixture-cover/$shape", editions = listOf(edition))
+                withContext(Main) {
+                    screen?.onDestroyView()
+                    screen = AudiobookScreen(HubClient(activity), work, edition, "The Last Observatory", { true }, listOf(edition), null, emptyList(), work = book)
+                    activity.setContentView(screen!!.onCreateView(host(activity), FrameLayout(activity)))
+                }
+                until("the $shape cover") { screen!!.field<android.widget.ImageView?>("cover")?.drawable.let { it != null && it.intrinsicWidth > 0 } }
+                // The cross-fade done.
+                delay(700)
+                shot(activity, "19-cover-$shape")
+                // Where the cover is on screen, read off a screenshot (its bitmap lives on the GPU).
+                val (x, y, size) = withContext(Main) {
+                    val cover = screen!!.field<android.widget.ImageView?>("cover")!!
+                    assertEquals("The cover is square", cover.width, cover.height)
+                    val at = IntArray(2).also(cover::getLocationOnScreen)
+                    Triple(at[0], at[1], cover.width)
+                }
+                val screenshot = ins.uiAutomation.takeScreenshot()
+                val (top, bottom, left, right) = edges
+                val inset = 6
+                fun at(dx: Int, dy: Int) = screenshot.getPixel(x + dx, y + dy)
+                // Cut from the middle: the top and the foot (or the sides) show the outer bands, the middle the centre.
+                assertTrue("$shape: top edge", near(at(size / 2, inset), top))
+                assertTrue("$shape: foot, no band under the cover", near(at(size / 2, size - 1 - inset), bottom))
+                assertTrue("$shape: left edge", near(at(inset, size / 2), left))
+                assertTrue("$shape: right edge", near(at(size - 1 - inset, size / 2), right))
+                assertTrue("$shape: the middle", near(at(size / 2, size / 2), blue))
+                screenshot.recycle()
+            }
+        } finally {
+            withContext(Main) { screen?.onDestroyView(); activity.finish() }
+            HubSettings.save(activity, oldUrl, oldToken)
+            com.pocketds.hub.settings.LookSettings.set(context, oldLook)
             server.shutdown()
         }
     }

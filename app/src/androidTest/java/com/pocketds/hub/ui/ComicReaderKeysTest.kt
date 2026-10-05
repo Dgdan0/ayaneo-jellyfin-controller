@@ -100,10 +100,13 @@ class ComicReaderKeysTest {
                 val issueId = path.substringAfter("/publications/", "").substringBefore('/')
                 val issue = issues[issueId] ?: return MockResponse().setResponseCode(404)
                 if (path.contains("/pages/")) {
-                    val index = path.substringAfterLast('/').toInt()
+                    // A page, or its thumbnail as the hub makes one (#18: the reader looks for its margins on it).
+                    val thumb = path.endsWith("/thumb")
+                    val index = path.removeSuffix("/thumb").substringAfterLast('/').toInt()
                     val (w, h) = issue.pages[index]
-                    val bytes = images.getOrPut("$issueId/$index") { page(w, h, "#${issue.number} p${index + 1}") }
-                    return MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(bytes))
+                    val full = images.getOrPut("$issueId/$index") { page(w, h, "#${issue.number} p${index + 1}") }
+                    val bytes = if (!thumb) full else images.getOrPut("$issueId/$index/thumb") { ReaderFixtures.thumbnail(full, request.requestUrl?.queryParameter("w")?.toIntOrNull() ?: 160) }
+                    return MockResponse().setHeader("Content-Type", if (thumb) "image/jpeg" else "image/png").setBody(Buffer().write(bytes))
                 }
                 if (request.method == "POST") {
                     saved[issueId] = JSONObject(request.body.readUtf8()).optInt("pageIndex")

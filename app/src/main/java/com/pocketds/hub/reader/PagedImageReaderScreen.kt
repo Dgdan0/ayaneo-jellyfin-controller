@@ -1,6 +1,10 @@
 package com.pocketds.hub.reader
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.graphics.Color
 import android.graphics.PointF
 import android.view.Gravity
@@ -43,6 +47,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * The comic and manga reader (Kavita, through the hub's page routes).
@@ -65,6 +71,12 @@ import kotlin.math.max
  * decoded on surfaces behind the one shown ([PageSurface], C3), so a turn
  * swaps to a page already drawn and a jump keeps the page you were on until
  * the next is ready. Comfort (X3) dims and warms the whole reader.
+ *
+ * The paper border round a page is found on the hub's small thumbnail of it
+ * ([PageBounds]) and left out of the fit and the steps, unless the series
+ * turns Trim margins off (#18, C5). A finger does what the keys do (C7): a tap
+ * in the outer third reads on or back, in the middle it shows the controls,
+ * and a swipe across turns the page while it is not zoomed ([ComicTouch]).
  */
 class PagedImageReaderScreen(
     private val api: HubApi,
@@ -141,6 +153,9 @@ class PagedImageReaderScreen(
     private var zoom = carriedZoom
     /** Pages as they decoded, which outrank the manifest's sizes for the steps. */
     private val measured = HashMap<Int, Pair<Int, Int>>()
+    /** Each page's content inside its paper (C5), as its thumbnail showed it, and the ones being looked at. */
+    private val contents = HashMap<PageKey, PageContent>()
+    private val measuring = HashMap<PageKey, Job>()
     /** Where the next page to show opens: going back, at its end. */
     private var arriveAtEnd = false
     /** The page asked for and not yet shown; it shows the moment its surface is ready. */
@@ -238,7 +253,49 @@ class PagedImageReaderScreen(
         setMaxScale(6f)
         setDoubleTapZoomDpi(240)
         setDoubleTapZoomDuration(180)
-        setOnClickListener { toggleControls() }
+        // C7: taps and swipes as the keys; the view keeps its own drag, pinch and double tap.
+        val gestures = PageGestures(this)
+        setOnTouchListener { _, event -> gestures.onTouch(event); false }
+    }
+
+    /**
+     * A finger on the page in front (C7, [ComicTouch]): a tap, once it is
+     * sure not to be the first of a double tap, and a fling across. A gesture
+     * with a second finger, or one in which the page's scale changed (a pinch,
+     * a double tap and drag), turns nothing.
+     */
+    private inner class PageGestures(private val view: SubsamplingScaleImageView) : GestureDetector.SimpleOnGestureListener() {
+        private val detector = GestureDetector(view.context, this)
+        private var pinched = false
+        private var startScale = 0f
+
+        fun onTouch(event: MotionEvent) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { pinched = false; startScale = view.scale }
+                MotionEvent.ACTION_POINTER_DOWN -> pinched = true
+            }
+            detector.onTouchEvent(event)
+        }
+
+        override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
+            if (view !== image || pinched) return false
+            when (ComicTouch.tap(event.x, view.width, rtl(), controlsVisible)) {
+                ComicTouch.Tap.BACK -> moveReadingFlow(false)
+                ComicTouch.Tap.FORWARD -> moveReadingFlow(true)
+                ComicTouch.Tap.CONTROLS -> toggleControls()
+            }
+            return true
+        }
+
+        override fun onFling(start: MotionEvent?, end: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+            val from = start ?: return false
+            if (view !== image || !view.isReady || endCard.isOpen) return false
+            val zoomed = zoom.active || view.scale > baseScale(view) * (1f + ComicZoom.CLOSE)
+            val scaled = startScale > 0f && abs(view.scale - startScale) > startScale * 0.01f
+            val turn = ComicTouch.swipe(end.x - from.x, end.y - from.y, view.width, rtl(), zoomed, pinched || scaled)
+            if (turn != 0) turnWholePage(turn)
+            return turn != 0
+        }
     }
 
     private fun listen(slot: PageSurface.Slot) {
@@ -287,6 +344,9 @@ class PagedImageReaderScreen(
         surface.slots.filter { it !== surface.front && !it.ready }.forEach { it.clear() }
         previewJob?.cancel()
         endJob?.cancel()
+        // A copy: a cancelled look may finish (and leave the map) inside cancel() itself.
+        measuring.values.toList().forEach { it.cancel() }
+        measuring.clear()
         com.pocketds.hub.ui.Artwork.bind(previewImage, com.pocketds.hub.ui.Artwork.loader(api, host.viewContext), null)
         regionHint.removeCallbacks(hideRegionHint)
         waitPill.removeCallbacks(showWait)
@@ -536,6 +596,7 @@ class PagedImageReaderScreen(
         }
         manifest = value
         measured.clear()
+        contents.keys.removeAll { it.publication != value.sourceItemId }
         titleView.text = ReaderTitleFormatter.heading(value.seriesTitle, value.title, title)
         issueName = ReaderTitleFormatter.issue(value.kind, value.seriesTitle, value.title, value.number)
         val start = if (startAtEnd) value.pageCount - 1 else value.currentPage
@@ -579,6 +640,7 @@ class PagedImageReaderScreen(
         magnify(false)
         updatePosition()
         pending = key
+        measureContent(key)
         val slot = surface.slotFor(key)
         if (slot != null && slot.ready) {
             reveal(slot)
@@ -672,6 +734,7 @@ class PagedImageReaderScreen(
         val value = manifest ?: return
         val page = state?.pageIndex ?: return
         val wanted = PageSlots.wanted(page, value.pageCount, forward).map { PageKey(value.sourceItemId, it) }
+        wanted.forEach(::measureContent)
         val plan = PageSlots.assign(surface.slots.map { it.key }, wanted)
         surface.slots.forEachIndexed { index, slot ->
             val target = plan[index]
@@ -713,11 +776,74 @@ class PagedImageReaderScreen(
 
     // ------------------------------------------------------------ the page
 
-    /** How many steps a page takes: thirds from its shape (C2), one while zoomed or not in thirds. */
+    /** How many steps a page takes: thirds from its content's shape (C2, C5), one while zoomed or not in thirds. */
     private fun stepsFor(page: Int): Int {
         if (reading.fit != ComicFit.THIRDS || zoom.active) return 1
         val (width, height) = pageSize(page) ?: return DEFAULT_STEPS
-        return ViewportStepPlanner.count(width, height, viewWidth(), viewHeight())
+        val content = contentFor(manifest?.sourceItemId?.let { PageKey(it, page) })
+        return ViewportStepPlanner.count((width * content.width).roundToInt(), (height * content.height).roundToInt(), viewWidth(), viewHeight())
+    }
+
+    // ------------------------------------------------- the content (C5)
+
+    /** A page's content inside its paper, while Trim margins is on and its thumbnail has been looked at; else all of it. */
+    private fun contentFor(key: PageKey?): PageContent =
+        if (!reading.trim || key == null) PageContent.WHOLE else contents[key] ?: PageContent.WHOLE
+
+    private fun contentOf(view: SubsamplingScaleImageView): PageContent = contentFor(surface.slotOf(view)?.key)
+
+    /**
+     * Looks at [key]'s page on the hub's thumbnail, [PageBounds.THUMB_WIDTH]
+     * across (a few kilobytes, never the scan), for the paper round it. A page
+     * on screen is placed again once its content is known, unless it was moved
+     * or zoomed meanwhile.
+     */
+    private fun measureContent(key: PageKey) {
+        if (!reading.trim || key in contents || measuring[key]?.isActive == true) return
+        val pages = repository ?: return
+        measuring[key] = uiScope.launch {
+            val found = try {
+                val file = pages.obtain(readingSession.api.readingPublicationThumbUrl(workId, key.publication, key.page, PageBounds.THUMB_WIDTH))
+                kotlinx.coroutines.withContext(Dispatchers.Default) { contentOfThumbnail(file.path) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            } finally {
+                measuring.remove(key)
+            }
+            contents[key] = found ?: PageContent.WHOLE
+            if (found == null || !found.trimmed || key.publication != manifest?.sourceItemId) return@launch
+            val slot = surface.slotFor(key) ?: return@launch
+            if (slot === surface.front) {
+                if (slot.ready && !zoom.active && magnified == null && key == currentKey()) {
+                    state?.refit()
+                    applyViewport(animated = true)
+                    updatePosition()
+                }
+            } else preposition(slot)
+        }
+    }
+
+    /** The content of the thumbnail at [path], decoded small whatever size the hub sent. */
+    private fun contentOfThumbnail(path: String): PageContent? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= PageBounds.THUMB_WIDTH) sample *= 2
+        val decoded = BitmapFactory.decodeFile(path, BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }) ?: return null
+        val width = PageBounds.THUMB_WIDTH.coerceAtMost(decoded.width)
+        val height = (decoded.height.toLong() * width / decoded.width).toInt().coerceAtLeast(1)
+        val small = if (decoded.width == width) decoded else Bitmap.createScaledBitmap(decoded, width, height, true)
+        val pixels = IntArray(width * height)
+        small.getPixels(pixels, 0, width, 0, 0, width, height)
+        if (small !== decoded) small.recycle()
+        decoded.recycle()
+        return PageBounds.detect(IntArray(pixels.size) { PageBounds.luma(pixels[it]) }, width, height)
     }
 
     private fun pageSize(page: Int): Pair<Int, Int>? = measured[page]
@@ -726,12 +852,20 @@ class PagedImageReaderScreen(
     private fun viewWidth(): Int = image.width.takeIf { it > 0 } ?: root.width.takeIf { it > 0 } ?: root.resources.displayMetrics.widthPixels
     private fun viewHeight(): Int = image.height.takeIf { it > 0 } ?: root.height.takeIf { it > 0 } ?: root.resources.displayMetrics.heightPixels
 
-    /** The scale the fit itself reads at: the whole page, or its width. */
+    /** The scale the fit itself reads at: the whole page, or its width; its content's, while trimmed (C5). */
     private fun baseScale(view: SubsamplingScaleImageView = image): Float =
-        if (reading.fit == ComicFit.WHOLE) view.minScale else fitWidthScale(view)
+        if (reading.fit == ComicFit.WHOLE) wholeScale(view) else fitWidthScale(view)
+
+    private fun wholeScale(view: SubsamplingScaleImageView = image): Float {
+        val content = contentOf(view)
+        if (view.sWidth <= 0 || view.sHeight <= 0 || !content.trimmed) return view.minScale
+        return min(view.width / (view.sWidth * content.width), view.height / (view.sHeight * content.height)).toFloat()
+            .coerceIn(view.minScale, view.maxScale)
+    }
 
     private fun fitWidthScale(view: SubsamplingScaleImageView = image): Float =
-        if (view.sWidth <= 0) view.minScale else (view.width.toFloat() / view.sWidth).coerceIn(view.minScale, view.maxScale)
+        if (view.sWidth <= 0) view.minScale
+        else (view.width / (view.sWidth * contentOf(view).width)).toFloat().coerceIn(view.minScale, view.maxScale)
 
     private fun rtl(): Boolean = (reading.direction ?: manifest?.direction) == "rtl"
 
@@ -749,22 +883,29 @@ class PagedImageReaderScreen(
             val (x, y) = zoom.center(width, height, view.width / scale, view.height / scale, atEnd)
             return scale to PointF(x, y)
         }
+        // The content is the page (C5): its own box inside the paper, the whole page when untrimmed.
+        val content = contentOf(view)
+        val left = (content.left * width).toFloat()
+        val top = (content.top * height).toFloat()
+        val contentWidth = (content.width * width).toFloat()
+        val contentHeight = (content.height * height).toFloat()
+        val middleX = left + contentWidth / 2f
         return when (reading.fit) {
-            ComicFit.WHOLE -> view.minScale to PointF(width / 2f, height / 2f)
+            ComicFit.WHOLE -> wholeScale(view) to PointF(middleX, top + contentHeight / 2f)
             ComicFit.WIDTH -> {
                 val scale = fitWidthScale(view)
                 val visible = view.height / scale
                 val y = when {
-                    visible >= height -> height / 2f
-                    atEnd -> height - visible / 2f
-                    else -> visible / 2f
+                    visible >= contentHeight -> top + contentHeight / 2f
+                    atEnd -> top + contentHeight - visible / 2f
+                    else -> top + visible / 2f
                 }
-                scale to PointF(width / 2f, y)
+                scale to PointF(middleX, y)
             }
             ComicFit.THIRDS -> {
-                val steps = ViewportStepPlanner.fitWidth(view.sWidth, view.sHeight, view.width, view.height)
+                val steps = ViewportStepPlanner.fitWidth(contentWidth.roundToInt(), contentHeight.roundToInt(), view.width, view.height)
                 val index = if (atEnd) steps.lastIndex else step.coerceIn(0, steps.lastIndex)
-                fitWidthScale(view) to PointF(width / 2f, ((steps[index].top + steps[index].bottom) / 2 * height).toFloat())
+                fitWidthScale(view) to PointF(middleX, top + ((steps[index].top + steps[index].bottom) / 2 * contentHeight).toFloat())
             }
         }
     }
@@ -782,7 +923,9 @@ class PagedImageReaderScreen(
             return
         }
         if (reading.fit != ComicFit.THIRDS) return
-        val steps = ViewportStepPlanner.fitWidth(image.sWidth, image.sHeight, image.width, image.height)
+        val content = contentOf(image)
+        val steps = ViewportStepPlanner.fitWidth((image.sWidth * content.width).roundToInt(), (image.sHeight * content.height).roundToInt(),
+            image.width, image.height)
         val index = position.viewportIndex.coerceIn(0, steps.lastIndex)
         // With the controls open the bar says which part; the pill and the map would sit under it.
         if (steps.size > 1 && !controlsVisible) {
@@ -790,7 +933,7 @@ class PagedImageReaderScreen(
             regionHint.visibility = View.VISIBLE
             regionHint.removeCallbacks(hideRegionHint)
             regionHint.postDelayed(hideRegionHint, PageMapView.SHOW_MS)
-            pageMap.showStep(image.sWidth, image.sHeight, steps, index)
+            pageMap.showStep(image.sWidth, image.sHeight, steps.map(content::onPage), index)
         }
         manifest?.let { DomainPreferences.setComicPlace(host.viewContext, workId, ComicPlace(it.sourceItemId, position.pageIndex, index)) }
     }
@@ -845,10 +988,14 @@ class PagedImageReaderScreen(
         val center = image.center ?: PointF(image.sWidth / 2f, image.sHeight / 2f)
         val horizontal = direction == Direction.LEFT || direction == Direction.RIGHT
         val sign = if (direction == Direction.LEFT || direction == Direction.UP) -1 else 1
+        // At the fit, over the content (C5); zoomed in, over the whole page.
+        val content = if (zoom.active) PageContent.WHOLE else contentOf(image)
         val target = if (horizontal) {
-            ComicPanPolicy.step(center.x, image.sWidth, image.width / image.scale, sign)?.let { PointF(it, center.y) }
+            ComicPanPolicy.step(center.x, (image.sWidth * content.width).roundToInt(), image.width / image.scale, sign,
+                from = (image.sWidth * content.left).toFloat())?.let { PointF(it, center.y) }
         } else {
-            ComicPanPolicy.step(center.y, image.sHeight, image.height / image.scale, sign)?.let { PointF(center.x, it) }
+            ComicPanPolicy.step(center.y, (image.sHeight * content.height).roundToInt(), image.height / image.scale, sign,
+                from = (image.sHeight * content.top).toFloat())?.let { PointF(center.x, it) }
         } ?: return false
         image.animateCenter(target)?.withDuration(180)?.withInterruptible(true)?.start()
         if (zoom.active) zoom = zoom.copy(anchorX = (target.x / image.sWidth).coerceIn(0f, 1f))
@@ -1040,6 +1187,20 @@ class PagedImageReaderScreen(
         host.refreshHints()
     }
 
+    /** Trim margins for this series (C5), kept for it; the page placed again, by its content or all of it. */
+    private fun setTrim(on: Boolean) {
+        reading = reading.copy(trim = on)
+        DomainPreferences.setComicView(host.viewContext, workId, reading)
+        val value = manifest
+        val page = state?.pageIndex ?: value?.currentPage ?: 0
+        if (value != null) state = PagedImageState(value.pageCount, page, ::stepsFor, 0)
+        if (on) currentKey()?.let(::measureContent)
+        applyViewport()
+        updatePosition()
+        prepositionAll()
+        planNeighbours()
+    }
+
     private fun setDirection(direction: String?) {
         reading = reading.copy(direction = direction)
         DomainPreferences.setComicView(host.viewContext, workId, reading)
@@ -1057,8 +1218,10 @@ class PagedImageReaderScreen(
         if (was == next.active) return
         val position = state ?: return
         if (!next.active && reading.fit == ComicFit.THIRDS && image.isReady) {
-            val steps = ViewportStepPlanner.fitWidth(image.sWidth, image.sHeight, image.width, image.height)
-            val y = (image.center?.y ?: 0f) / image.sHeight.coerceAtLeast(1)
+            val content = contentOf(image)
+            val steps = ViewportStepPlanner.fitWidth((image.sWidth * content.width).roundToInt(), (image.sHeight * content.height).roundToInt(),
+                image.width, image.height)
+            val y = (((image.center?.y ?: 0f) / image.sHeight.coerceAtLeast(1)) - content.top) / content.height
             val nearest = steps.indices.minByOrNull { abs((steps[it].top + steps[it].bottom) / 2 - y) } ?: 0
             position.jump(position.pageIndex, nearest)
             if (snap) applyViewport(animated = true)
@@ -1078,6 +1241,9 @@ class PagedImageReaderScreen(
             ComicFit.entries.forEach { fit ->
                 options.choice(fit.label, selected = reading.fit == fit) { setFit(fit); showReadingOptions(tab) }
             }
+            options.startGroup()
+            options.choice("Trim margins", "Leave the paper round each page out, so the page reads larger",
+                selected = reading.trim) { setTrim(!reading.trim); showReadingOptions(tab) }
             options.section("Every series")
             options.choice("Open every series this way", "New series open as ${everySeries.label.lowercase()}",
                 selected = everySeries == reading.fit) {

@@ -161,19 +161,23 @@ object ViewportStepPlanner {
     }
 }
 
-/** Source-pixel movement for controller navigation within a zoomed comic page. */
+/**
+ * Source-pixel movement for controller navigation within a comic page. The
+ * range moved over is [sourceSize] long from [from]: the whole page, or its
+ * content inside the paper border while that is trimmed (#18, C5).
+ */
 object ComicPanPolicy {
-    fun edge(sourceSize: Int, visibleSize: Float, high: Boolean): Float {
+    fun edge(sourceSize: Int, visibleSize: Float, high: Boolean, from: Float = 0f): Float {
         val halfVisible = visibleSize / 2f
-        return if (sourceSize <= visibleSize) sourceSize / 2f
+        return from + if (sourceSize <= visibleSize) sourceSize / 2f
         else if (high) sourceSize - halfVisible else halfVisible
     }
 
-    fun step(center: Float, sourceSize: Int, visibleSize: Float, direction: Int, distance: Float = 0.82f): Float? {
+    fun step(center: Float, sourceSize: Int, visibleSize: Float, direction: Int, distance: Float = 0.82f, from: Float = 0f): Float? {
         require(direction == -1 || direction == 1)
         val halfVisible = visibleSize / 2f
-        val lower = halfVisible
-        val upper = sourceSize - halfVisible
+        val lower = from + halfVisible
+        val upper = from + sourceSize - halfVisible
         if (upper <= lower + 1f) return null
         val next = (center + direction * visibleSize * distance).coerceIn(lower, upper)
         return next.takeIf { kotlin.math.abs(it - center) > 1f }

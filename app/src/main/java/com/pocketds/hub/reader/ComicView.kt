@@ -18,9 +18,11 @@ enum class ComicFit(val stored: String, val label: String) {
  * How a series is read (#16, C1): its fit, and a direction chosen over the
  * library's (null keeps the library's, "rtl" for Manga). Kept per series, so
  * the next issue, or a reading list passing through, opens the same way.
+ * [trim]: the paper border round each page is left out of the fit and the
+ * steps (#18, C5); on unless turned off for the series.
  */
-data class ComicView(val fit: ComicFit, val direction: String? = null) {
-    fun encode(): String = fit.stored + "|" + direction.orEmpty()
+data class ComicView(val fit: ComicFit, val direction: String? = null, val trim: Boolean = true) {
+    fun encode(): String = fit.stored + "|" + direction.orEmpty() + if (trim) "" else "|untrimmed"
 
     companion object {
         /** Thirds unless the person chose otherwise: a portrait page at fit width is about 92% of print. */
@@ -28,9 +30,10 @@ data class ComicView(val fit: ComicFit, val direction: String? = null) {
 
         fun decode(raw: String?, fallback: ComicFit): ComicView {
             if (raw.isNullOrBlank()) return ComicView(fallback)
-            val fit = ComicFit.fromStored(raw.substringBefore('|'), fallback)
-            val direction = raw.substringAfter('|', "").takeIf { it == "ltr" || it == "rtl" }
-            return ComicView(fit, direction)
+            val parts = raw.split('|')
+            val fit = ComicFit.fromStored(parts[0], fallback)
+            val direction = parts.getOrNull(1)?.takeIf { it == "ltr" || it == "rtl" }
+            return ComicView(fit, direction, trim = parts.getOrNull(2) != "untrimmed")
         }
     }
 }

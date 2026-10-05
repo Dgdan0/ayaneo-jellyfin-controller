@@ -116,6 +116,19 @@ class PagedImageStateTest {
     }
 
     @Test
+    fun `trimming the margins is on unless a series turns it off, and older settings keep it on`() {
+        assertTrue(ComicView.decode(null, ComicFit.THIRDS).trim)
+        // As #16 stored them.
+        assertTrue(ComicView.decode("width|rtl", ComicFit.THIRDS).trim)
+        assertTrue(ComicView.decode("thirds|", ComicFit.THIRDS).trim)
+        val off = ComicView(ComicFit.THIRDS, "rtl", trim = false)
+        assertEquals(off, ComicView.decode(off.encode(), ComicFit.WHOLE))
+        assertEquals(ComicView(ComicFit.WHOLE, null, trim = false), ComicView.decode(ComicView(ComicFit.WHOLE, trim = false).encode(), ComicFit.THIRDS))
+        // On is written as #16 wrote it.
+        assertEquals("width|rtl", ComicView(ComicFit.WIDTH, "rtl").encode())
+    }
+
+    @Test
     fun `the third you were on comes back only on the same page of the same issue`() {
         val place = ComicPlace("kavita:51", page = 4, step = 2)
         assertEquals(place, ComicPlace.decode(place.encode()))
@@ -203,6 +216,10 @@ class PagedImageStateTest {
         assertEquals(1500f, ComicPanPolicy.step(1400f, 2000, 1000f, 1)!!, 0.01f)
         assertEquals(null, ComicPanPolicy.step(1500f, 2000, 1000f, 1))
         assertEquals(500f, ComicPanPolicy.step(900f, 2000, 1000f, -1)!!, 0.01f)
+        // Within the content of a trimmed page: 1800 long from 100.
+        assertEquals(1400f, ComicPanPolicy.step(1300f, 1800, 1000f, 1, from = 100f)!!, 0.01f)
+        assertEquals(600f, ComicPanPolicy.edge(1800, 1000f, high = false, from = 100f), 0.01f)
+        assertEquals(1400f, ComicPanPolicy.edge(1800, 1000f, high = true, from = 100f), 0.01f)
         assertEquals(null, ComicPanPolicy.step(500f, 2000, 1000f, -1))
         assertEquals(null, ComicPanPolicy.step(500f, 1000, 1200f, 1))
         assertEquals(500f, ComicPanPolicy.edge(2000, 1000f, high = false), 0.01f)

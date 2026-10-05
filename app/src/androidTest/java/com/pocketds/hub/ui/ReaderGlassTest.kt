@@ -96,8 +96,11 @@ class ReaderGlassTest {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.path.orEmpty().substringBefore('?')
                 if (path.contains("/pages/")) {
-                    val index = path.substringAfterLast('/').toInt()
-                    val bytes = images.getOrPut(index) { ReaderFixtures.page(1988, 3056, "p${index + 1}") }
+                    // A page, or its thumbnail (#18: the reader looks for its margins on it).
+                    val thumb = path.endsWith("/thumb")
+                    val index = path.removeSuffix("/thumb").substringAfterLast('/').toInt()
+                    val full = images.getOrPut(index) { ReaderFixtures.page(1988, 3056, "p${index + 1}") }
+                    val bytes = if (thumb) ReaderFixtures.thumbnail(full, request.requestUrl?.queryParameter("w")?.toIntOrNull() ?: 160) else full
                     return MockResponse().setHeader("Content-Type", "image/jpeg").setBody(Buffer().write(bytes))
                 }
                 if (request.method == "POST") return MockResponse().setHeader("Content-Type", "application/json").setBody("{\"ok\":true}")
