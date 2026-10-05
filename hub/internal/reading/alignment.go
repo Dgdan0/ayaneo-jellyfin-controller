@@ -530,7 +530,9 @@ func (a *Alignment) Sources() ([]AlignedSource, error) {
 	}
 	bySource := map[int][]int{}
 	for index, file := range a.Files {
-		if file.Source <= 0 || file.Chunk <= 0 {
+		// A name that is not Storyteller's leaves both zero. The chunks count from
+		// one; the files may count from zero, as the chapters of an M4B do.
+		if file.Chunk <= 0 {
 			return nil, badf("an audio file is not named as the book's files are")
 		}
 		bySource[file.Source] = append(bySource[file.Source], index)

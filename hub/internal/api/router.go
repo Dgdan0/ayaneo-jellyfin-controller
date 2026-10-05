@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -92,6 +93,12 @@ type Server struct {
 	// openMedia opens an audiobook's file read-only through the media mapping
 	// (reading.ResolveMediaFile), and is the seam a test wraps to watch handles.
 	openMedia func([]config.MediaRemovalRoot, string, string) (readingdomain.MediaFile, error)
+	// openEPUB is the same for a read-along edition, and readAlignment reads what
+	// it narrates (reading.ReadAlignment); both are seams a test wraps to count.
+	openEPUB      func([]config.MediaRemovalRoot, string, string) (readingdomain.MediaFile, error)
+	readAlignment func(io.ReaderAt, int64) (*readingdomain.Alignment, error)
+	// now is the clock the hub stamps a listening place with.
+	now func() time.Time
 	// How long a track's transfer may stall before it is cut (stream_deadline.go).
 	audioStall       stallPolicy
 	libraryScanMu    sync.Mutex
@@ -141,6 +148,9 @@ func NewServer(cfg *config.Config) *Server {
 		probeSlots:            make(chan struct{}, audioProbeSlots),
 		probeCache:            map[probeKey]probedAudio{},
 		openMedia:             readingdomain.ResolveMediaFile,
+		openEPUB:              readingdomain.ResolveEPUBFile,
+		readAlignment:         readingdomain.ReadAlignment,
+		now:                   time.Now,
 		audioStall:            defaultStallPolicy,
 		startedAt:             time.Now(),
 	}

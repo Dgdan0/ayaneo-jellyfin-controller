@@ -218,6 +218,16 @@ func TestAlignmentSourcesGroupTheChunksOfOneNarratedFile(t *testing.T) {
 	if err != nil || len(got) != 2 || got[0].Number != 1 || !reflect.DeepEqual(got[0].Files, []int{2, 1}) || !reflect.DeepEqual(got[0].ChunkStartMs, []int64{0, 5}) || got[0].LengthMs != 11 {
 		t.Fatalf("shuffled = %+v, %v", got, err)
 	}
+	// Storyteller names the chapters of a lone M4B from zero ("00000-00001.mp3" in
+	// its manifest), and a narration of them may number its files the same way.
+	// Which file is which is the lengths' business, not the number's.
+	fromZero := &Alignment{Files: []AlignedFile{
+		{Entry: "a/00000-00001.mp3", Source: 0, Chunk: 1, LengthMs: 5},
+		{Entry: "a/00001-00001.mp3", Source: 1, Chunk: 1, LengthMs: 7},
+	}}
+	if got, err := fromZero.Sources(); err != nil || len(got) != 2 || got[0].Number != 0 || got[1].Number != 1 || got[0].LengthMs != 5 || got[1].LengthMs != 7 {
+		t.Fatalf("a narration numbered from zero = %+v, %v", got, err)
+	}
 }
 
 func TestMatchSourcesPairsNarrationWithFilesByLengthNotByNumber(t *testing.T) {

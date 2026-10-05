@@ -58,6 +58,10 @@ type audioBuild struct {
 	json  string
 	book  readingdomain.AudiobookFixture
 	links []audioLink
+	// readaloud is the raw JSON Storyteller reports for the book's aligned
+	// edition, and epub what was generated for it.
+	readaloud string
+	epub      readingdomain.AlignedEPUBFixture
 }
 
 // audioEnv is a hub whose Storyteller reports one audiobook, book 12, whose
@@ -102,7 +106,7 @@ func newAudioEnv(t *testing.T, options audioEnvOptions, build func(root string) 
 	root := t.TempDir()
 	env := &audioEnv{t: t, root: root, tags: map[string]int{}, chapters: map[string][]probedChapter{}}
 	env.build = build(root)
-	env.state = &epubUpstreamState{audio: env.build.json, noFiles: true, narrators: `[{"name":"Jon Lindstrom"}]`}
+	env.state = &epubUpstreamState{audio: env.build.json, noFiles: true, narrators: `[{"name":"Jon Lindstrom"}]`, readaloudJSON: env.build.readaloud}
 	env.upstream = newEpubUpstream(t, env.state)
 	t.Cleanup(env.upstream.Close)
 	cfg := readingCatalogConfig(env.upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), options.scopes)
@@ -539,7 +543,7 @@ func TestAudioManifestSaysNothingOfTheHostAnywhere(t *testing.T) {
 			everything.WriteString(name + ": " + strings.Join(values, ",") + "\n")
 		}
 		text := everything.String()
-		forbidden := []string{env.root, filepath.Base(env.root), "/library", `\\`, "Fixture", ".mp3", ".MP3", ".m4b", "Ünï", "פרק", "cover", "notes"}
+		forbidden := []string{env.root, filepath.Base(filepath.Dir(env.root)), "/library", `\\`, "Fixture", ".mp3", ".MP3", ".m4b", "Ünï", "פרק", "cover", "notes"}
 		for _, file := range env.build.book.Files {
 			forbidden = append(forbidden, file.Name)
 		}

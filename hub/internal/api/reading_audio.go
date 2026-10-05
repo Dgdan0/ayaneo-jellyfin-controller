@@ -55,10 +55,13 @@ const (
 // and the chapters inside them. `revision` names this list of files; a track
 // request carries it back (`?rev=`) and is refused with 412 audio_changed if
 // the files have changed since, so a rescan cannot play another file under an
-// old index.
+// old index. A book with a read-along edition folds that edition into its
+// revision too, since its alignment is part of what the manifest says.
 //
-// aligned and alignment (the read-along timeline) arrive with the position
-// routes, which are what need them.
+// aligned says the book's read-along edition has been read and each of its audio
+// files matched to a track (reading_audio_alignment.go); alignment lists them. An
+// edition that is there and cannot be used says why in alignmentReason instead,
+// and a book with no edition says nothing.
 type ReadingAudioManifest struct {
 	WorkID       string `json:"workId"`
 	SourceItemID string `json:"sourceItemId"`
@@ -66,11 +69,13 @@ type ReadingAudioManifest struct {
 	Narrator     string `json:"narrator"`
 	// TotalMs is the tracks' lengths summed, as Storyteller's own apps work out
 	// how far through a book a place is.
-	TotalMs  int64                 `json:"totalMs"`
-	Aligned  bool                  `json:"aligned"`
-	Tracks   []ReadingAudioTrack   `json:"tracks"`
-	Chapters []ReadingAudioChapter `json:"chapters"`
-	Cache    CacheInfo             `json:"cache"`
+	TotalMs         int64                  `json:"totalMs"`
+	Aligned         bool                   `json:"aligned"`
+	Tracks          []ReadingAudioTrack    `json:"tracks"`
+	Chapters        []ReadingAudioChapter  `json:"chapters"`
+	Alignment       *ReadingAudioAlignment `json:"alignment,omitempty"`
+	AlignmentReason string                 `json:"alignmentReason,omitempty"`
+	Cache           CacheInfo              `json:"cache"`
 }
 
 type ReadingAudioTrack struct {
@@ -106,6 +111,29 @@ type audioPlan struct {
 	revision string
 	tracks   []audioTrack
 	chapters []ReadingAudioChapter
+	// entries are Storyteller's manifest as it was read, in its order: what a
+	// place is written against and read back from (reading_audio_position.go).
+	entries []manifestEntry
+	// alignment is the read-along edition mapped onto the tracks, or nil, in which
+	// case alignmentReason says why when there is an edition (and is empty when
+	// there is none).
+	alignment       *audioAlignment
+	alignmentReason string
+}
+
+// manifestEntry is one link of Storyteller's audiobook manifest and where it
+// lies in the hub's tracks. For a folder of files it is a file: one track, from
+// its start. For a lone M4B it is a chapter, a name that exists nowhere on disk
+// (Storyteller's virtual "00000-00001.mp3"), and where it lies is the chapter's
+// stretch of the one track.
+type manifestEntry struct {
+	// href, mime and title are as Storyteller wrote them.
+	href, mime, title string
+	// durationMs is Storyteller's length for it (the probe's when it gave none).
+	durationMs int64
+	// track is the hub's track it lies in, startMs where in that track it begins.
+	track   int
+	startMs int64
 }
 
 type audioTrack struct {
@@ -130,10 +158,14 @@ func (p *audioPlan) manifest(workID, sourceItemID string, info CacheInfo) Readin
 	if chapters == nil {
 		chapters = []ReadingAudioChapter{}
 	}
-	return ReadingAudioManifest{
+	manifest := ReadingAudioManifest{
 		WorkID: workID, SourceItemID: sourceItemID, Revision: p.revision, Narrator: p.narrator,
-		TotalMs: p.totalMs, Tracks: tracks, Chapters: chapters, Cache: info,
+		TotalMs: p.totalMs, Tracks: tracks, Chapters: chapters, AlignmentReason: p.alignmentReason, Cache: info,
 	}
+	if p.alignment != nil {
+		manifest.Aligned, manifest.Alignment = true, p.alignment.manifest()
+	}
+	return manifest
 }
 
 // audioFailure is a book that cannot be streamed, and why.
@@ -257,6 +289,19 @@ func (s *Server) buildAudioPlan(ctx context.Context, book storyteller.Book) (*au
 	if !strings.HasPrefix(folder, "/") || len(links) == 0 {
 		return nil, &audioFailure{audioReasonLayout}
 	}
+	plan, err := s.planFiles(ctx, book, folder, links)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.alignPlan(ctx, book, plan); err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+// planFiles is the plan of the book's own audio: its files, or the one file
+// that stands for a manifest of chapters.
+func (s *Server) planFiles(ctx context.Context, book storyteller.Book, folder string, links []storyteller.AudiobookLink) (*audioPlan, error) {
 	roots := s.cfg.Server.MediaRemovalRoots
 	files, failedAt, err := s.resolveAudioFiles(roots, folder, links)
 	if err != nil {
@@ -380,22 +425,22 @@ func (s *Server) planLoneM4B(roots []config.MediaRemovalRoot, folder string, boo
 
 	var total int64
 	complete := true
-	for _, link := range links {
+	entries := make([]manifestEntry, len(links))
+	for i, link := range links {
 		ms := durationMillis(link.Duration)
 		complete = complete && ms > 0
+		entries[i] = manifestEntry{href: link.Href, mime: link.Type, title: strings.TrimSpace(link.Title), durationMs: ms, track: 0, startMs: total}
 		total += ms
 	}
 	// Chapters need every length; the whole needs only some.
 	var chapters []ReadingAudioChapter
 	if complete && len(links) >= 2 {
-		var start int64
-		for i, link := range links {
-			title := strings.TrimSpace(link.Title)
+		for i, entry := range entries {
+			title := entry.title
 			if title == "" {
 				title = fmt.Sprintf("Chapter %d", i+1)
 			}
-			chapters = append(chapters, ReadingAudioChapter{Title: title, StartMs: start, Track: 0})
-			start += durationMillis(link.Duration)
+			chapters = append(chapters, ReadingAudioChapter{Title: title, StartMs: entry.startMs, Track: 0})
 		}
 	}
 	title := strings.TrimSpace(book.Title)
@@ -409,7 +454,9 @@ func (s *Server) planLoneM4B(roots []config.MediaRemovalRoot, folder string, boo
 		},
 		remote: remote, href: m4bs[0], manifestIndex: 0, modNano: file.ModTime.UnixNano(),
 	}
-	return newAudioPlan(book, []audioTrack{track}, chapters), nil
+	plan := newAudioPlan(book, []audioTrack{track}, chapters)
+	plan.entries = entries
+	return plan, nil
 }
 
 // planTracks orders the files, takes their lengths and finds their chapters.
@@ -431,6 +478,7 @@ func (s *Server) planTracks(ctx context.Context, book storyteller.Book, files []
 	}
 
 	tracks := make([]audioTrack, len(files))
+	entries := make([]manifestEntry, len(files))
 	var chapters []ReadingAudioChapter
 	for place, index := range tagOrder(probes) {
 		file, probe := files[index], probes[index]
@@ -449,6 +497,11 @@ func (s *Server) planTracks(ctx context.Context, book storyteller.Book, files []
 			},
 			remote: file.remote, href: file.href, manifestIndex: index, modNano: file.modNano,
 		}
+		mime := strings.TrimSpace(file.link.Type)
+		if mime == "" {
+			mime = file.kind.MIME
+		}
+		entries[index] = manifestEntry{href: file.link.Href, mime: mime, title: strings.TrimSpace(file.link.Title), durationMs: duration, track: place}
 		// Chapters only where a file really has them: two marks or more. One mark
 		// is a file that spans itself. Never from file names.
 		if marks := chapterMarks(probe.Chapters, duration); len(marks) >= 2 {
@@ -461,18 +514,33 @@ func (s *Server) planTracks(ctx context.Context, book storyteller.Book, files []
 			}
 		}
 	}
-	return newAudioPlan(book, tracks, chapters), nil
+	plan := newAudioPlan(book, tracks, chapters)
+	plan.entries = entries
+	return plan, nil
 }
 
 func newAudioPlan(book storyteller.Book, tracks []audioTrack, chapters []ReadingAudioChapter) *audioPlan {
 	plan := &audioPlan{narrator: strings.Join(creatorNames(book.Narrators), ", "), tracks: tracks, chapters: chapters}
-	hash := sha256.New()
 	for _, track := range tracks {
 		plan.totalMs += track.DurationMs
+	}
+	plan.revision = audioRevision(tracks, "")
+	return plan
+}
+
+// audioRevision names a list of files: their names, sizes, times and lengths in
+// the order they are played, and the read-along edition they are mapped to when
+// there is one (its size and time), since a change to that is a change to what
+// the manifest says.
+func audioRevision(tracks []audioTrack, edition string) string {
+	hash := sha256.New()
+	for _, track := range tracks {
 		fmt.Fprintf(hash, "%s\x00%d\x00%d\x00%d\n", track.href, track.Bytes, track.modNano, track.DurationMs)
 	}
-	plan.revision = hex.EncodeToString(hash.Sum(nil))[:12]
-	return plan
+	if edition != "" {
+		fmt.Fprintf(hash, "edition\x00%s\n", edition)
+	}
+	return hex.EncodeToString(hash.Sum(nil))[:12]
 }
 
 // tagOrder is the order to play the files in, as indexes into Storyteller's

@@ -72,6 +72,12 @@ var (
 	// file against it, so a change inside the minute is caught there.
 	ReadingAudio = Spec{Fresh: time.Minute, Stale: 0, IfError: 0}
 
+	// What a read-along edition says about its narration, read from the edition's
+	// zip directory and its SMIL. The key already holds the file's size and
+	// modified time, so a changed file is a different key and this only bounds
+	// how long an unused reading is kept. Never stale.
+	ReadingAlignment = Spec{Fresh: 6 * time.Hour, Stale: 0, IfError: 0}
+
 	// A reading page scaled to a thumbnail. A chapter's pages do not change
 	// while it is in the library, so it lives as long as any image; an old
 	// copy is still the same page, so stale and if-error match.

@@ -354,7 +354,7 @@ func TestAudioTrackKeepsPlayingWhileStorytellerIsDown(t *testing.T) {
 func TestAudioTrackSaysNothingOfTheHostInAnyHeaderOrBody(t *testing.T) {
 	env := newTrackedAudioEnv(t)
 	manifest := env.manifest()
-	forbidden := []string{env.root, filepath.Base(env.root), "/library", `\\`, "Fixture", ".mp3", ".MP3", "Ünï", "פרק"}
+	forbidden := []string{env.root, filepath.Base(filepath.Dir(env.root)), "/library", `\\`, "Fixture", ".mp3", ".MP3", "Ünï", "פרק"}
 	for _, file := range env.build.book.Files {
 		forbidden = append(forbidden, file.Name)
 	}
