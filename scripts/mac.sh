@@ -150,7 +150,7 @@ launch_sim() {
     SIMCTL_CHILD_HUB_PLAY="${HUB_PLAY:-}" SIMCTL_CHILD_HUB_PLAY_EXIT="${HUB_PLAY_EXIT:-}" \
     SIMCTL_CHILD_HUB_PLAY_CHROME="${HUB_PLAY_CHROME:-}" SIMCTL_CHILD_HUB_PLAY_FROM_END="${HUB_PLAY_FROM_END:-}" \
     SIMCTL_CHILD_HUB_PLAY_TOUR="${HUB_PLAY_TOUR:-}" SIMCTL_CHILD_HUB_PLAY_SUBTITLE="${HUB_PLAY_SUBTITLE:-}" \
-    SIMCTL_CHILD_HUB_WIDTH="${HUB_WIDTH:-}" \
+    SIMCTL_CHILD_HUB_WIDTH="${HUB_WIDTH:-}" SIMCTL_CHILD_HUB_ORIENT="$(cat "$SHOTS/.turned-$udid" 2>/dev/null)" \
     xcrun simctl launch "$udid" "$BUNDLE_ID" $(launch_args "$@") >/dev/null
 }
 
@@ -236,9 +236,12 @@ uitest() {
 }
 
 # Turns the simulators themselves, through a UI test (HubUITests/DeviceTurn):
-# an iPad app that shares the screen with others cannot turn itself, and the
-# simulator stays turned afterwards. The way each is turned is kept in
-# shots/apple/.turned-<udid>, which shot reads to name its pictures.
+# an iPad app that shares the screen with others cannot turn itself, and an
+# iPad simulator stays turned afterwards. The way each is turned is kept in
+# shots/apple/.turned-<udid>, which shot reads to name its pictures. With
+# Xcode 27 the iPhone simulator comes back upright when the test ends, so
+# launch_sim also hands that file's word to the app as HUB_ORIENT, and a
+# Debug build on a phone turns its own window (HubApp's DebugOrientation).
 turn() {
   local orientation="${1:-}"
   case "$orientation" in

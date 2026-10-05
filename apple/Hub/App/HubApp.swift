@@ -2,6 +2,8 @@ import HubKit
 import SwiftUI
 #if os(macOS)
 import AppKit
+#elseif os(iOS)
+import UIKit
 #endif
 
 @main
@@ -54,6 +56,7 @@ struct RootView: View {
         }
         #if DEBUG && os(iOS)
         .modifier(DebugWidth())
+        .task { DebugOrientation.apply() }
         #elseif DEBUG && os(macOS)
         .task { await DebugWindow.apply() }
         #endif
@@ -80,6 +83,24 @@ struct DebugWidth: ViewModifier {
         } else {
             content
         }
+    }
+}
+#endif
+
+#if DEBUG && os(iOS)
+/// HUB_ORIENT=landscape turns a phone's app sideways for screenshots
+/// (`scripts/mac.sh turn landscape`). With Xcode 27 the iPhone simulator
+/// comes back upright once the test that turned it ends, while an iPad stays
+/// turned; an app may still turn its own window on a phone, so it asks to.
+@MainActor
+enum DebugOrientation {
+    static func apply() {
+        guard ProcessInfo.processInfo.environment["HUB_ORIENT"] == "landscape",
+              UIDevice.current.userInterfaceIdiom == .phone,
+              let scene = UIApplication.shared.connectedScenes.first(where: { $0 is UIWindowScene }) as? UIWindowScene
+        else { return }
+        // Interface right is the device turned left, as `DeviceTurn` turns it.
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight)) { _ in }
     }
 }
 #endif
