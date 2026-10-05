@@ -48,6 +48,47 @@ class TopBarViewTest {
         }} finally { instrumentation.runOnMainSync { activity.finish() } }
     }
 
+    /** #16, A1: the audiobook playing sits after the tabs; A opens it, its symbol plays and pauses. */
+    @Test fun the_mini_player_names_the_book_playing_and_is_walked_after_the_tabs() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, DetailFixtureActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try { instrumentation.runOnMainSync {
+            val bar = TopBarView(activity, Theme.colors(activity), { true }, tabs)
+            activity.setContentView(bar)
+            bar.setMode(ContentMode.BOOKS)
+            bar.setCurrent(4)
+            val mini = bar.miniPlayer
+            assertEquals("Nothing on the player: no mini player", View.GONE, mini.visibility)
+            var opened = 0
+            var toggled = 0
+            mini.onOpen = { opened++ }
+            mini.onToggle = { toggled++ }
+            mini.show("The Last Observatory", "4h 10m left", isPlaying = true)
+            assertEquals(View.VISIBLE, mini.visibility)
+            assertEquals("Pause", mini.toggleLabel)
+            assertEquals("Open The Last Observatory, playing", mini.contentDescription)
+            // After the last tab, before Media and Books.
+            assertTrue(bar.focusFirst())
+            assertTrue(bar.moveHorizontal(1))
+            assertTrue(mini.isFocused)
+            assertTrue(bar.moveHorizontal(1))
+            assertTrue(bar.modeButton(ContentMode.MEDIA).isFocused)
+            mini.performClick()
+            assertEquals(1, opened)
+            mini.getChildAt(0).performClick()
+            assertEquals(1, toggled)
+            mini.show("The Last Observatory", "4h 10m left", isPlaying = false)
+            assertEquals("Play", mini.toggleLabel)
+            // Stopped: gone, and out of the walk.
+            mini.show(null, "", isPlaying = false)
+            assertEquals(View.GONE, mini.visibility)
+            assertTrue(bar.focusFirst())
+            assertTrue(bar.moveHorizontal(1))
+            assertTrue(bar.modeButton(ContentMode.MEDIA).isFocused)
+        }} finally { instrumentation.runOnMainSync { activity.finish() } }
+    }
+
     @Test fun utility_icons_open_their_sections_and_a_utility_page_leaves_no_tab_selected() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         InstrumentationRegistry.getInstrumentation().runOnMainSync {
