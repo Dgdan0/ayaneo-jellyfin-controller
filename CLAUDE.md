@@ -1367,6 +1367,14 @@ Design consequences:
 - **Clearing focus hands it to the first focusable in the window.** The top bar is added after
   the content for exactly this reason, so a clear cannot strand the selection in the tabs.
   Expect focus to be *somewhere* after a clear, not nowhere.
+- **Focus passes through a page while it is pushed away and while it comes back** (#22). Leaving,
+  `showCurrent` clears focus before hiding the page, so the view nearest the scroll position takes it
+  for a moment; coming back, the page's first layout restores the window's default focus before the
+  page's own `requestInitialFocus` runs, and takes that same nearest view. A page whose focus
+  listeners remember "where you were" recorded those, and Back landed on the continue card or the
+  tabs. The offline pages remember the place only while they are in front (a `shown` flag set after
+  `onShow`'s rebuild, cleared in `onHide`) and mark it `isFocusedByDefault`, so Android's own restore
+  lands there.
 - **Neither form of `requestFocus` gives traversal order inside a ScrollView.** It overrides
   `onRequestFocusInDescendants` to prefer whatever is nearest the current scroll position. A
   screen that cares must say where focus starts: `Screen.requestInitialFocus()`.

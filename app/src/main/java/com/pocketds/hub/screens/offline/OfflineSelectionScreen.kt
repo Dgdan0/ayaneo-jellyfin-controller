@@ -92,10 +92,13 @@ class OfflineSelectionScreen(
         root = FrameLayout(host.viewContext)
         val page = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(6), dp(22), dp(6))
+            // The words on the page's 22dp edge; the rows keep 10dp of it inside
+            // themselves, so the first tile's ring and lift are not cut off.
+            setPadding(dp(12), dp(6), dp(12), dp(6))
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), 0, dp(10), 0)
                 // The series, as the release picker names its title under its page's name.
                 addView(TextView(context).apply {
                     text = fallbackTitle
@@ -117,7 +120,7 @@ class OfflineSelectionScreen(
                     activateOnTap { confirmSelection() }
                 }, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = -dp(PillButton.RING_DP.toInt()) })
             })
-            status = TextView(context).apply { textSize = 12f; setPadding(0, dp(4), 0, dp(4)) }
+            status = TextView(context).apply { textSize = 12f; setPadding(dp(10), dp(4), dp(10), dp(4)) }
             addView(status)
             content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
             addView(FocusScrollView(context).apply {
@@ -201,11 +204,12 @@ class OfflineSelectionScreen(
             content.addView(GlassHeading.create(host.viewContext,
                 season.season.title.ifBlank { EpisodeLabel.season(season.season.seasonNumber) },
                 "$available episode${if (available == 1) "" else "s"}").apply {
-                setPadding(0, dp(10), 0, dp(2))
+                setPadding(dp(10), dp(10), dp(10), dp(2))
             })
             val recycler = RecyclerView(host.viewContext).apply {
                 layoutManager = LinearLayoutManager(context, RecyclerView.HORIZONTAL, false)
                 clipChildren = false; clipToPadding = false
+                setPadding(dp(10), 0, dp(10), 0)
                 adapter = EpisodeAdapter(season.season.id, season.episodes)
                 layoutParams = LinearLayout.LayoutParams(MATCH, dp(190))
             }

@@ -93,6 +93,78 @@ class OfflineGlassTest {
         }
     }
 
+    /**
+     * Opening a season and coming back lands on that season. Leaving, the host
+     * clears focus before it hides the page, and Android hands focus to the view
+     * nearest the scroll position: the continue card, which then took over. And
+     * coming back, the page's first layout restores its default focus before the
+     * page asks for its own, which took the same card.
+     */
+    @Test fun backFromASeasonLandsOnTheSeasonYouOpened() {
+        val activity = ins.startActivitySync(Intent(ins.targetContext, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val series = "glass-return-${System.nanoTime()}"
+        val repository = OfflineRepository.get(activity)
+        val ids = listOf(1 to 1, 2 to 1).map { (season, episode) -> episode(repository, series, season, episode) }
+        val page = OfflineSeriesScreen(noHub(), series, "Example series") { true }
+        try {
+            lateinit var root: View
+            ins.runOnMainSync { root = page.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); page.onShow() }
+            ins.waitForIdleSync()
+            lateinit var season: View
+            ins.runOnMainSync {
+                season = all(root).filterIsInstance<DetailArtworkCardView>().first()
+                assertTrue(season.requestFocus())
+                page.onHide()
+                // What the host's clearFocus does to a page it is about to hide.
+                assertTrue(all(root).filterIsInstance<ContinuationCardView>().single().requestFocus())
+                page.onShow()
+                // What the page's first layout does when it is shown again.
+                assertTrue(root.restoreDefaultFocus())
+                assertTrue("the page's default focus is the season that was opened", season.isFocused)
+            }
+            ins.waitForIdleSync()
+            ins.runOnMainSync {
+                assertTrue(page.requestInitialFocus())
+                assertTrue("Back lands on the season that was opened", season.isFocused)
+            }
+        } finally {
+            ins.runOnMainSync { page.onHide(); page.onDestroyView(); activity.finish() }
+            ids.forEach { id -> repository.forItem(id)?.let { repository.remove(it.id) } }
+        }
+    }
+
+    /** The same for the catalogue: Back from a series lands on its poster, not on the tabs. */
+    @Test fun backFromASeriesLandsOnItsPosterInTheCatalogue() {
+        val activity = ins.startActivitySync(Intent(ins.targetContext, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val stamp = System.nanoTime()
+        val repository = OfflineRepository.get(activity)
+        val ids = listOf(episode(repository, "glass-cat-a-$stamp", 1, 1, "Example A $stamp"),
+            episode(repository, "glass-cat-b-$stamp", 1, 1, "Example B $stamp"))
+        val screen = OfflineScreen(noHub(), { true })
+        try {
+            lateinit var root: View
+            ins.runOnMainSync { root = screen.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); screen.onShow() }
+            ins.waitForIdleSync()
+            fun poster(title: String) = all(root).filterIsInstance<PosterCardView>().first { it.contentDescription?.startsWith(title) == true }
+            ins.runOnMainSync {
+                assertTrue(poster("Example B $stamp").requestFocus())
+                screen.onHide()
+                // What the host's clearFocus does to a page it is about to hide.
+                assertTrue(poster("Example A $stamp").requestFocus())
+                screen.onShow()
+            }
+            ins.waitForIdleSync()
+            ins.runOnMainSync {
+                // What the page's first layout does when it is shown again.
+                assertTrue(root.restoreDefaultFocus())
+                assertTrue("Back lands on the series that was opened", poster("Example B $stamp").isFocused)
+            }
+        } finally {
+            ins.runOnMainSync { screen.onHide(); screen.onDestroyView(); activity.finish() }
+            ids.forEach { id -> repository.forItem(id)?.let { repository.remove(it.id) } }
+        }
+    }
+
     @Test fun theDownloadPickerIsAGlassPageAndItsChoicesASideSheet() {
         val activity = ins.startActivitySync(Intent(ins.targetContext, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         val series = "glass-picker-${System.nanoTime()}"
@@ -168,11 +240,14 @@ class OfflineGlassTest {
     }
 
     /** A downloaded episode on this device: a tiny file, its row finished, nothing fetched. */
-    private fun episode(repository: OfflineRepository, series: String, season: Int, number: Int): String {
+    private fun episode(repository: OfflineRepository, series: String, season: Int, number: Int,
+                        title: String = "Example series"): String {
         val id = "$series-s${season}e$number"
-        repository.enqueue("Example series", series, listOf(OfflineManifest(batchKey = "$series-batch", clientItemKey = id,
-            item = LibraryItem(id = id, type = "episode", title = "Episode $number", seriesId = series, seriesTitle = "Example series",
-                seasonId = "$series-season$season", seasonNumber = season, indexNumber = number, runtimeSeconds = 2_400),
+        repository.enqueue(title, series, listOf(OfflineManifest(batchKey = "$series-batch", clientItemKey = id,
+            item = LibraryItem(id = id, type = "episode", title = "Episode $number", seriesId = series, seriesTitle = title,
+                seasonId = "$series-season$season", seasonNumber = season, indexNumber = number, runtimeSeconds = 2_400,
+                // Named, so the catalogue never asks the hub which library it is in.
+                library = com.pocketds.hub.model.LibraryRef("fixture-library", "Fixtures")),
             source = OfflineSource(id = "source", container = "mp4", sizeBytes = 4))))
         val row = checkNotNull(repository.forItem(id))
         repository.mediaFile(row).writeText("film")

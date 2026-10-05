@@ -61,6 +61,8 @@ class OfflineSeasonScreen(
     private lateinit var empty: TextView
     private lateinit var overlay: ChoiceOverlay
     private var selectedId = ""
+    /** Whether the page is in front: focus the host moves while hiding it is not the person's (see OfflineSeriesScreen). */
+    private var shown = false
     private var renderedSignature = ""
     private val offlineChanges = OfflineChanges { render() }
 
@@ -104,10 +106,14 @@ class OfflineSeasonScreen(
 
     override fun onShow() {
         offlineChanges.start(host.viewContext)
+        // Before it is in front again: what has focus now is not where the person was here.
         render(force = true)
+        shown = true
     }
 
     override fun onHide() {
+        focusedEpisode()?.let { selectedId = it.id }
+        shown = false
         unregister()
         if (::overlay.isInitialized) overlay.dismiss()
     }
@@ -148,7 +154,7 @@ class OfflineSeasonScreen(
         }
         if (!force && signature == renderedSignature) return
         renderedSignature = signature
-        ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedEpisode)?.row?.id?.let { selectedId = it }
+        if (shown) ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedEpisode)?.row?.id?.let { selectedId = it }
         row.removeAllViews()
         summary.showSummary(StatusText.loaded(listOf(seriesTitle,
             "${currentRows.size} downloaded episode${if (currentRows.size == 1) "" else "s"}", "available offline")
@@ -165,7 +171,9 @@ class OfflineSeasonScreen(
             tag = TaggedEpisode(download)
             layoutParams = LinearLayout.LayoutParams(dp(EpisodeCardView.WIDTH_DP), ViewGroup.LayoutParams.WRAP_CONTENT)
                 .apply { marginEnd = dp(9) }
-            onFocused = { selectedId = download.id; host.refreshHints() }
+            onFocused = { if (shown) selectedId = download.id; host.refreshHints() }
+            // The page's first layout after coming back restores its default focus: this episode.
+            isFocusedByDefault = download.id == selectedId
             onActivate = { host.playItem(item.id) }
             // More actions stay on Y and its hint chip, as everywhere else.
             val watched = progress?.takeUnless { it.isComplete() }?.takeIf { it.durationMillis > 0 }
