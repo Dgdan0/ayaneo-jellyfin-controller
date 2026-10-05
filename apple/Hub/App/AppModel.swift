@@ -14,6 +14,12 @@ final class AppModel {
     private(set) var userName: String
     /// Running against fixtures (`-demo`), not a real hub.
     let isDemo: Bool
+    /// Counts the library orders saved from this device (#15): a page that drew
+    /// the libraries reads them again when it changes.
+    private(set) var libraryOrderChanges = 0
+    /// Titles requested on this device this session: cards show it at once,
+    /// before the hub's next read does (Android's `RequestedTitles`).
+    private(set) var requested = RequestedTitles()
 
     let hub: HubClient
     /// Each artwork's Glass colours, asked of the hub and kept on the device.
@@ -90,6 +96,14 @@ final class AppModel {
 
     func storedToken() -> String {
         isDemo ? DemoTransport.token : (Keychain.token ?? "")
+    }
+
+    func libraryOrderChanged() {
+        libraryOrderChanges += 1
+    }
+
+    func recordRequest(key: String, availability: String, requestId: Int) {
+        requested.record(key: key, availability: availability, requestId: requestId)
     }
 
     /// The Jellyfin profile this device watches as (`X-Jellyfin-User`).

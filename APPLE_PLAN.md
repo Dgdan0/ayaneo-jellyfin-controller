@@ -132,6 +132,7 @@ The look is `GLASS_PLAN.md`. Its pieces in this app, so each screen uses one own
 | Pushing a page, or swapping the top one | `NavigationLink(value: AppRoute…)` or `@Environment(\.openRoute)` (`push`, `replace`); the shell owns every stack and its back pill |
 | A profile's avatar and colour | HubKit `Profiles` (Android's `ProfileAvatar`, held to its test cases) |
 | A library tile's three fanned posters | HubKit `LibraryFan.posters` (one function, so the choice can move into a hub field) |
+| The libraries' order (#15): moving one, saving, sliding back on a refusal | HubKit `LibraryOrder` and `LibraryOrderQueue`; the app's `Library/LibraryOrderEditor` (one per side), drawn by `Library/LibraryArrange` (`GripMark`, `.jiggle`, `.arrangeable`) on the Library page and in Settings › Libraries |
 
 Debug builds also take `HUB_SIDE=books` and `HUB_SHEET=profiles` (the avatar's sheet) for
 screenshots, beside `HUB_SECTION` and `HUB_OPEN` (a Home row's first title, or with
@@ -151,6 +152,39 @@ upright), `678` (half sideways) and `981` (two thirds sideways): debug builds la
 window that wide, compact below 660 as Apple's table has it. The Mac's windows are checked with
 `scripts/mac.sh mac-shot 760x560` and `1440x860`: the app opens a fresh window of that size, draws
 it into its container (a screenshot over SSH needs Screen Recording, which stays off) and quits.
+
+## Discover, search and requests (#17)
+
+Discover is the Media side's second section: Discover and Upcoming in a glass capsule, the search
+beside it (Upcoming puts its weeks there instead), then a featured title and Jellyseerr's rows.
+
+| Behaviour | Owner |
+|---|---|
+| Where a card leads | `MediaHit.route`: a title in the library (`jellyfinItemId`) opens its library page, with Play, as the prototype's cards do; one you do not have opens `MediaTitleView` on its pipeline. Android opens the request side for both |
+| The availability chip's words and colours | HubKit `Availability` (the Pocket's Glass chip colours); the view is `Discover/DiscoverParts` `AvailabilityChip` on `DiscoverPoster` |
+| The featured title, the facts, the pipeline's chips and summary, polling | HubKit `DiscoverFeature`, `TitleFacts`, `PipelineTone` / `PipelineLines` (`nextPoll`: 4 s while a stage moves, 5/15/30 s after failures) |
+| Paging a row or the search grid | HubKit `PagedLoadState` / `RowPaging`, held to Android's tests |
+| Titles requested this session | HubKit `RequestedTitles`, kept in `AppModel.requested` |
+| The request form's defaults and body | HubKit `RequestDraft` (the server's default profile and folder; every season until some are ticked) in `Discover/RequestSheet` |
+| A release search's lines, Grab and Grab anyway | HubKit `ReleaseLines` and `ReleaseTargetLines`, in `Discover/ReleasesView` |
+| The calendar: weeks, days, groups, states, times | HubKit `UpcomingPresentation` and `ReleaseState`, in `Discover/UpcomingView` |
+
+Differences from Android, on purpose:
+
+- The featured card shows on every width; on a phone its words go under the picture.
+- Search runs once typing pauses for 0.4 s, from two characters, instead of on Enter.
+- The request form is a glass sheet with menus for the profile and the folder. If the options
+  cannot be read, it says so and Request still works with the server's defaults; Android sends
+  that request at once without asking.
+- A series' Find release opens one page with its seasons as pills, the whole season and each
+  aired episode; Android has a season chooser before it. A series always names its season to the
+  hub, Specials included (Android leaves `season=0` out, which the hub reads as Specials anyway).
+- The trailer opens in YouTube or the browser.
+- Upcoming's preview sits beside the days on an iPad and a Mac; a phone opens the title instead.
+
+Testing against the real hub never sends a request or grabs a release: the form is opened and
+closed, and a release search (which asks every indexer) runs at most once per change. The demo
+hub (`-demo`) answers every one of these calls, for the UI tests.
 
 ## Playback on Apple (#2)
 

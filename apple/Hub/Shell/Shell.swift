@@ -40,6 +40,11 @@ enum AppRoute: Hashable {
     case title(TitleRoute)
     case folder(FolderRoute)
     case monitor
+    /// A title Jellyseerr knows that is not in the library (#17).
+    case media(MediaRoute)
+    case person(PersonRoute)
+    case releaseTargets(ReleaseTargetsRoute)
+    case releases(ReleasesRoute)
 
     /// What the back pill calls this page from the one above it.
     var name: String {
@@ -47,6 +52,10 @@ enum AppRoute: Hashable {
         case .title(let route): route.title
         case .folder(let route): route.name
         case .monitor: "Server monitor"
+        case .media(let route): route.title
+        case .person(let route): route.name
+        case .releaseTargets: "Find releases"
+        case .releases: "Releases"
         }
     }
 }
@@ -316,8 +325,10 @@ struct MainView: View {
     @ViewBuilder private func root(_ stackKey: StackKey) -> some View {
         switch (stackKey.side, stackKey.section) {
         case (.media?, .home): HomeView()
+        case (.media?, .discover): DiscoverView()
         case (.media?, .library): LibraryView()
         case (_, .services): ServicesView()
+        case (_, .settings): SettingsView()
         default: ComingNextView(side: stackKey.side, section: stackKey.section)
         }
     }
@@ -328,6 +339,10 @@ struct MainView: View {
         case .folder(let folder): FolderView(route: folder)
         case .monitor: ComingNextView(title: "Server monitor", systemImage: "cpu",
                                       detail: "CPU, memory, disk space, containers and current playback.")
+        case .media(let media): MediaTitleView(route: media)
+        case .person(let person): PersonView(route: person)
+        case .releaseTargets(let targets): ReleaseTargetsView(route: targets)
+        case .releases(let releases): ReleasesView(route: releases)
         }
     }
 

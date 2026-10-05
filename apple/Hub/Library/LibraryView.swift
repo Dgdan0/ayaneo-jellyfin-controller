@@ -1,5 +1,9 @@
 import HubKit
 import SwiftUI
+import UniformTypeIdentifiers
+#if os(iOS)
+import UIKit
+#endif
 
 /// A library opened from the Library page, or Favourites.
 struct FolderRoute: Hashable {
@@ -26,12 +30,21 @@ enum LibrarySorts {
 /// and Favourites, then a glass tile for each library, its own artwork behind
 /// a fan of three of its posters, which the hub chooses (#13). Typing two letters turns the page into
 /// search results. Android's `screens/library/LibraryScreen`.
+///
+/// The tiles come in the profile's order, which every device shares (#15).
+/// Holding a tile (a secondary click on the Mac) or Arrange starts arranging:
+/// the tiles wiggle, each shows its grip, and one dragged over another takes
+/// its place; Done ends it.
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.glassMetrics) private var metrics
     @Environment(\.openRoute) private var openRoute
 
     @State private var folders: [LibraryFolder] = []
+    @State private var order = "name"
+    @State private var editor = LibraryOrderEditor(side: .media)
+    @State private var arranging = false
+    @State private var dragging: String?
     /// Debug builds: HUB_OPEN=Anime (a library's name) opens that library, once.
     @State private var debugOpened = false
     @State private var status = StatusMessage("")
@@ -46,14 +59,14 @@ struct LibraryView: View {
         let count = "\(folders.count) librar" + (folders.count == 1 ? "y" : "ies")
         // The hub counts each library's films and series (#13); an older hub does not.
         let titles = folders.compactMap(\.total).reduce(0, +)
-        return titles > 0 ? count + " · \(titles) titles" : count
+        return titles > 0 ? count + (titles == 1 ? " · 1 title" : " · \(titles) titles") : count
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 10) {
-                    LibrarySearchField(query: $query)
+                    GlassSearchField(placeholder: "Search your Jellyfin library", query: $query)
                     NavigationLink(value: AppRoute.folder(.favourites)) {
                         Label("Favourites", systemImage: "star")
                     }
@@ -71,13 +84,40 @@ struct LibraryView: View {
                         .padding(.horizontal, metrics.margin)
                         .padding(.top, 20)
                 } else {
-                    PageHeading(title: "Your libraries") {
-                        if status.text.isEmpty {
-                            Text(summary)
-                                .font(HubType.body(14, relativeTo: .subheadline))
-                                .foregroundStyle(.white.opacity(0.66))
-                        } else {
-                            StatusLine(message: status) { Task { await loadFolders() } }
+                    HStack(alignment: .top, spacing: 12) {
+                        PageHeading(title: "Your libraries") {
+                            if !editor.notice.isEmpty {
+                                Text(editor.notice)
+                                    .font(HubType.body(14, weight: .semibold, relativeTo: .subheadline))
+                                    .foregroundStyle(Color.pending)
+                            } else if arranging {
+                                Text("Drag a library to move it. Every device shows this order.")
+                                    .font(HubType.body(14, relativeTo: .subheadline))
+                                    .foregroundStyle(.white.opacity(0.66))
+                            } else if status.text.isEmpty {
+                                Text(summary)
+                                    .font(HubType.body(14, relativeTo: .subheadline))
+                                    .foregroundStyle(.white.opacity(0.66))
+                            } else {
+                                StatusLine(message: status) { Task { await loadFolders() } }
+                            }
+                        }
+                        if folders.count > 1 {
+                            Button {
+                                arranging ? finishArranging() : startArranging()
+                            } label: {
+                                if arranging {
+                                    Label("Done", systemImage: "checkmark")
+                                } else {
+                                    Label {
+                                        Text("Arrange")
+                                    } icon: {
+                                        GripMark(dot: 2.6)
+                                    }
+                                }
+                            }
+                            .buttonStyle(GlassControlStyle())
+                            .accessibilityIdentifier("arrange-libraries")
                         }
                     }
                     .padding(.horizontal, metrics.margin)
@@ -86,23 +126,78 @@ struct LibraryView: View {
                     // across one held upright.
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: metrics.small ? 230 : 300), spacing: metrics.gap)],
                               spacing: metrics.gap) {
-                        ForEach(folders) { folder in
-                            NavigationLink(value: AppRoute.folder(FolderRoute(id: folder.id, name: folder.name))) {
-                                LibraryTile(folder: folder, posters: LibraryFan.posters(folder), background: art(of: folder))
-                            }
-                            .buttonStyle(GlassCardStyle())
-                            .previewsWhenFocused { lit = art(of: folder) }
+                        ForEach(Array(shownFolders.enumerated()), id: \.element.id) { index, folder in
+                            tile(folder, index: index)
                         }
                     }
                     .padding(.horizontal, metrics.margin)
                     .padding(.top, 14)
                     .padding(.bottom, 30)
+                    .onDrop(of: [.text], delegate: LibraryDropFallback(dragging: $dragging, editor: editor, model: model))
                 }
             }
         }
         .ambientArtwork(searchText.count >= 2 ? "" : (lit ?? folders.first.map(art(of:)) ?? ""))
         .refreshable { await loadFolders() }
-        .task(id: model.userId) { await loadFolders() }
+        .task(id: "\(model.userId)·\(model.libraryOrderChanges)") { await loadFolders() }
+        .onDisappear { if arranging { finishArranging() } }
+        .onChange(of: searchText.isEmpty) { _, empty in if !empty && arranging { finishArranging() } }
+    }
+
+    /// While arranging, the order on screen is the editor's: a drag shows
+    /// before the hub has it.
+    private var shownFolders: [LibraryFolder] {
+        guard arranging else { return folders }
+        var byId: [String: LibraryFolder] = [:]
+        for folder in folders where byId[folder.id] == nil { byId[folder.id] = folder }
+        return editor.libraries.compactMap { byId[$0.id] }
+    }
+
+    @ViewBuilder private func tile(_ folder: LibraryFolder, index: Int) -> some View {
+        let tile = LibraryTile(folder: folder, posters: LibraryFan.posters(folder), background: art(of: folder),
+                               arranging: arranging)
+        if arranging {
+            tile
+                .jiggle(dragging != folder.id, index: index)
+                .opacity(dragging == folder.id ? 0.55 : 1)
+                .arrangeable(folder.id, dragging: $dragging, editor: editor, model: model)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Drag to move this library")
+                .accessibilityAction(named: "Move earlier") { editor.step(folder.id, by: -1, model: model) }
+                .accessibilityAction(named: "Move later") { editor.step(folder.id, by: 1, model: model) }
+        } else {
+            NavigationLink(value: AppRoute.folder(FolderRoute(id: folder.id, name: folder.name))) { tile }
+                .buttonStyle(GlassCardStyle())
+                .previewsWhenFocused { lit = art(of: folder) }
+                #if os(iOS)
+                // Holding a tile starts arranging, as holding an app's icon does.
+                .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in startArranging() })
+                #else
+                .contextMenu {
+                    Button("Arrange libraries", action: startArranging)
+                }
+                #endif
+                .accessibilityAction(named: "Arrange libraries", startArranging)
+        }
+    }
+
+    private func startArranging() {
+        guard !arranging, folders.count > 1 else { return }
+        editor.adopt(folders.map { ArrangedLibrary(id: $0.id, title: $0.name, kind: LibraryKind.label($0.kind),
+                                                   art: art(of: $0)) },
+                     custom: LibraryOrder.isCustom(order))
+        #if os(iOS)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        #endif
+        withAnimation(.easeOut(duration: 0.2)) { arranging = true }
+    }
+
+    private func finishArranging() {
+        editor.commit(model: model)
+        dragging = nil
+        withAnimation(.easeOut(duration: 0.2)) { arranging = false }
+        // The hub's own list again, in the order it now keeps.
+        Task { await loadFolders() }
     }
 
     /// A tile's picture: the library's own (its folder art, or a title chosen
@@ -118,8 +213,19 @@ struct LibraryView: View {
         do {
             let response = try await model.hub.fetch(HubEndpoints.library, as: LibraryResponse.self)
             folders = response.views
+            order = response.order
             status = folders.isEmpty ? StatusMessage("No Jellyfin libraries were found") : StatusMessage("")
             #if DEBUG
+            // scripts/mac.sh: HUB_SHEET=arrange starts arranging, once; arrange-move
+            // also drops the last library first and saves, as a drag would.
+            if let sheet = ProcessInfo.processInfo.environment["HUB_SHEET"], sheet.hasPrefix("arrange"), !debugOpened {
+                debugOpened = true
+                startArranging()
+                if sheet == "arrange-move", let last = folders.last, let first = folders.first, last.id != first.id {
+                    editor.preview(last.id, over: first.id)
+                    editor.commit(model: model)
+                }
+            }
             if let name = ProcessInfo.processInfo.environment["HUB_OPEN"], !debugOpened,
                let folder = folders.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
                 debugOpened = true
@@ -140,17 +246,13 @@ struct LibraryTile: View {
     let folder: LibraryFolder
     let posters: [String]
     let background: String
+    /// While the libraries are arranged: the grip in the tile's corner.
+    var arranging = false
     @Environment(\.glassMetrics) private var metrics
 
     private static let corner: CGFloat = 24
 
-    private var kind: String {
-        switch folder.kind {
-        case "movies": "Movie library"
-        case "tvshows": "TV library"
-        default: "Library"
-        }
-    }
+    private var kind: String { LibraryKind.label(folder.kind) }
 
     var body: some View {
         Color.clear
@@ -163,6 +265,15 @@ struct LibraryTile: View {
             }
             .overlay { GeometryReader { fan(in: $0.size) } }
             .overlay(alignment: .bottom) { label }
+            .overlay(alignment: .topLeading) {
+                if arranging {
+                    GripMark()
+                        .frame(width: 38, height: 38)
+                        .glassPanel(Circle())
+                        .padding(12)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
             .clipShape(RoundedRectangle(cornerRadius: Self.corner, style: .continuous))
             .litArtwork(corner: Self.corner)
             .accessibilityElement(children: .ignore)
@@ -241,7 +352,8 @@ struct FolderView: View {
         }
         .refreshable { refreshes += 1 }
         .onAppear { sort = LibrarySorts.sort(for: route.id) }
-        .task(id: model.userId) { await loadFolders() }
+        // The capsule follows the libraries' order, as the Library page does (#15).
+        .task(id: "\(model.userId)·\(model.libraryOrderChanges)") { await loadFolders() }
     }
 
     @ViewBuilder private var controls: some View {
@@ -299,42 +411,6 @@ struct FolderView: View {
     private func loadFolders() async {
         guard let response = try? await model.hub.fetch(HubEndpoints.library, as: LibraryResponse.self) else { return }
         folders = response.views
-    }
-}
-
-/// The glass search field (the prototype's `.search`): the shell hides the
-/// system bar that `.searchable` lives in.
-struct LibrarySearchField: View {
-    @Binding var query: String
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.8))
-            TextField("Search your Jellyfin library", text: $query)
-                .textFieldStyle(.plain)
-                .font(HubType.body(15))
-                .autocorrectionDisabled()
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                .submitLabel(.search)
-                #endif
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.white.opacity(0.6))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear the search")
-            }
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 44)
-        .frame(maxWidth: 460)
-        .glassPanel(Capsule())
     }
 }
 

@@ -11,6 +11,7 @@
 #   scripts/mac.sh transparency reduce|normal
 #                                   turn the simulators' Reduce transparency on or off
 #   scripts/mac.sh uitest           the UI tests on the iPhone simulator, against -demo
+#                                   (UITEST_ONLY=<Class>[/<test>] runs one alone)
 #   scripts/mac.sh turn landscape|portrait
 #                                   turn the simulators themselves (SHOT_SIMS, or all
 #                                   three); shot then names its pictures -landscape
@@ -226,8 +227,11 @@ uitest() {
   local udid
   udid="$(udid_of "iPhone 17 Pro Max")"
   xcrun simctl boot "$udid" >/dev/null 2>&1 || true
+  # UITEST_ONLY=LibraryArrangeTests runs one class (or Class/testMethod) alone.
+  local only=()
+  [[ -n "${UITEST_ONLY:-}" ]] && only=(-only-testing:"HubUITests/$UITEST_ONLY")
   xcodebuild -project "$APPLE/Hub.xcodeproj" -scheme Hub -configuration Debug \
-    -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$DERIVED" test 2>&1 |
+    -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$DERIVED" ${only[@]+"${only[@]}"} test 2>&1 |
     grep -E "Test Case|Test Suite|error:|failed|passed|TEST (SUCCEEDED|FAILED)|\*\*" || true
 }
 

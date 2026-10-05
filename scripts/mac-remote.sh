@@ -94,6 +94,7 @@ run() {
     ${BUILD_NUMBER:+BUILD_NUMBER=$(printf '%q' "$BUILD_NUMBER")} \
     ${TESTFLIGHT_WAIT_MINUTES:+TESTFLIGHT_WAIT_MINUTES=$(printf '%q' "$TESTFLIGHT_WAIT_MINUTES")} \
     ${TESTFLIGHT_PLATFORMS:+TESTFLIGHT_PLATFORMS=$(printf '%q' "$TESTFLIGHT_PLATFORMS")} \
+    ${UITEST_ONLY:+UITEST_ONLY=$(printf '%q' "$UITEST_ONLY")} \
     HUB_DEV_ENV=\$HOME/$DEV_ENV bash scripts/mac.sh $(printf '%q ' "$@")"
   fetch_shots
 }

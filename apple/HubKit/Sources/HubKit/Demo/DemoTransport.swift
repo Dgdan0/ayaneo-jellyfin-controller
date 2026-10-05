@@ -15,7 +15,9 @@ public struct DemoTransport: HubTransport {
         try await Task.sleep(for: .milliseconds(250))
         let path = request.url?.path ?? ""
         let method = request.httpMethod ?? "GET"
-        let answer = DemoPlayback.answer(method: method, path: path, query: request.url?.query ?? "", body: request.httpBody)
+        let query = request.url?.query ?? ""
+        let answer = DemoPlayback.answer(method: method, path: path, query: query, body: request.httpBody)
+            ?? DemoMedia.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? Self.fixture(method: method, path: path)
         let response = HTTPURLResponse(url: request.url!, statusCode: answer.status, httpVersion: "HTTP/1.1",
                                        headerFields: ["Content-Type": answer.type])!

@@ -3,7 +3,7 @@ import Foundation
 /// A request reduced to plain values, so "which path, which query, how is it
 /// encoded" is a pure function pinned by tests. Mirrors Android's `HubRequest`.
 public struct HubRequest: Equatable, Sendable {
-    public enum Method: String, Sendable { case get = "GET", post = "POST", delete = "DELETE" }
+    public enum Method: String, Sendable { case get = "GET", post = "POST", put = "PUT", delete = "DELETE" }
 
     /// The path and query, relative to the hub address ("/v1/health").
     public let path: String
@@ -36,6 +36,8 @@ public enum HubEndpoints {
     public static let users = HubRequest("/v1/users")
     public static let home = HubRequest("/v1/home")
     public static let library = HubRequest("/v1/library")
+    /// The Books side's libraries, Kavita's and Storyteller's, in the profile's order.
+    public static let readingLibraries = HubRequest("/v1/reading/libraries")
     public static let monitor = HubRequest("/v1/manage/monitor")
 
     public static let scanJellyfinLibrary = HubRequest("/v1/manage/jellyfin/scan", method: .post)
@@ -51,6 +53,12 @@ public enum HubEndpoints {
         if order != "asc" { query.append("order=" + encode(order)) }
         if page > 1 { query.append("page=\(page)") }
         return HubRequest("/v1/library/" + encode(viewId) + "/items" + (query.isEmpty ? "" : "?" + query.joined(separator: "&")))
+    }
+
+    /// Keeps a side's libraries in this order for the profile, on every device
+    /// (#15). An empty list goes back to A to Z.
+    public static func saveLibraryOrder(side: LibrarySide, ids: [String]) -> HubRequest {
+        HubRequest("/v1/library/order", method: .put, body: json(LibraryOrderBody(side: side.rawValue, ids: ids)))
     }
 
     public static func libraryItem(_ itemId: String) -> HubRequest {
@@ -84,6 +92,65 @@ public enum HubEndpoints {
 
     public static func libraryState(itemId: String, body: Data) -> HubRequest {
         HubRequest("/v1/library/items/" + encode(itemId) + "/state", method: .post, body: body)
+    }
+
+    // MARK: Discover, search and requests (#17)
+
+    /// Every row's first page in one call.
+    public static let discover = HubRequest("/v1/discover")
+
+    /// The next page of one row; the hub refuses pages past 500.
+    public static func discoverRow(_ rowId: String, page: Int) -> HubRequest {
+        HubRequest("/v1/discover/" + encode(rowId) + "?page=\(max(1, page))")
+    }
+
+    public static func search(_ query: String, page: Int = 1) -> HubRequest {
+        HubRequest("/v1/search?q=" + encode(query) + (page > 1 ? "&page=\(page)" : ""))
+    }
+
+    /// A title by its media key ("tmdb:movie:438631").
+    public static func mediaDetail(key: String) -> HubRequest {
+        HubRequest("/v1/media/" + encode(key))
+    }
+
+    /// A performer's films and series, newest first unless by popularity.
+    public static func person(id: Int, byPopularity: Bool = false) -> HubRequest {
+        HubRequest("/v1/person/\(id)" + (byPopularity ? "?sort=popularity" : ""))
+    }
+
+    public static func requestOptions(key: String) -> HubRequest {
+        HubRequest("/v1/requests/options?key=" + encode(key))
+    }
+
+    /// Never retried: a timeout does not mean it did not happen.
+    public static func createRequest(_ body: CreateRequestBody) -> HubRequest {
+        HubRequest("/v1/requests", method: .post, body: json(body))
+    }
+
+    /// A season's aired episodes, for a release search of one of them.
+    public static func releaseTargets(key: String, season: Int) -> HubRequest {
+        HubRequest("/v1/media/" + encode(key) + "/release-targets?season=\(max(0, season))")
+    }
+
+    /// An interactive search of every indexer: a film, a series' season (0 is
+    /// Specials, so a series always names one) or one of its episodes. Slow.
+    public static func releases(key: String, season: Int? = nil, episode: Int? = nil) -> HubRequest {
+        var query: [String] = []
+        if let season { query.append("season=\(max(0, season))") }
+        if let episode, episode > 0 { query.append("episode=\(episode)") }
+        return HubRequest("/v1/media/" + encode(key) + "/releases" + (query.isEmpty ? "" : "?" + query.joined(separator: "&")),
+                          slow: true)
+    }
+
+    /// Sends a release to the download client, with the season and episode of
+    /// the search that found it. Slow: the hub may search again. Never retried.
+    public static func grab(key: String, _ body: GrabBody) -> HubRequest {
+        HubRequest("/v1/media/" + encode(key) + "/grab", method: .post, body: json(body), slow: true)
+    }
+
+    /// Releases from `start` to `end` (exclusive), "YYYY-MM-DD", in `timezone`.
+    public static func calendar(start: String, end: String, timezone: String) -> HubRequest {
+        HubRequest("/v1/calendar?start=" + encode(start) + "&end=" + encode(end) + "&timezone=" + encode(timezone))
     }
 
     // MARK: Playback. Every call after `preparePlayback` names the profile that

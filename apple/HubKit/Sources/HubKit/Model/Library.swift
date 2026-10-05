@@ -53,14 +53,23 @@ public struct MediaHit: Decodable, Equatable, Sendable, Identifiable {
     public var played: Bool
     public var favorite: Bool
     public var unplayedCount: Int
-    /// 0…1. While a title is in the library this is watch progress.
+    /// 0…1. While a title is in the library this is watch progress; on a
+    /// Discover card it is the download's, and -1 when its size is unknown.
     public var progress: Double
+    /// What the device may do with it: "play", "detail", "request".
+    public var actions: [String]
+    /// A request made this session (`RequestedTitles`).
+    public var requestId: Int
 
     public var id: String { jellyfinItemId.isEmpty ? media.key + media.title : jellyfinItemId }
 
+    /// The hub offers Request only for a title not in the library, to a
+    /// device allowed to request.
+    public var canRequest: Bool { actions.contains("request") }
+
     public init(media: MediaRef, subtitle: String = "", overview: String = "", availability: String = "",
                 rating: Double = 0, jellyfinItemId: String = "", played: Bool = false, favorite: Bool = false,
-                unplayedCount: Int = 0, progress: Double = 0) {
+                unplayedCount: Int = 0, progress: Double = 0, actions: [String] = [], requestId: Int = 0) {
         self.media = media
         self.subtitle = subtitle
         self.overview = overview
@@ -71,10 +80,13 @@ public struct MediaHit: Decodable, Equatable, Sendable, Identifiable {
         self.favorite = favorite
         self.unplayedCount = unplayedCount
         self.progress = progress
+        self.actions = actions
+        self.requestId = requestId
     }
 
     enum CodingKeys: String, CodingKey {
-        case media, subtitle, overview, availability, rating, jellyfinItemId, played, favorite, unplayedCount, progress
+        case media, subtitle, overview, availability, rating, jellyfinItemId, played, favorite, unplayedCount, progress,
+             actions, requestId
     }
 
     public init(from decoder: any Decoder) throws {
@@ -83,7 +95,8 @@ public struct MediaHit: Decodable, Equatable, Sendable, Identifiable {
                   overview: c.value(.overview, ""), availability: c.value(.availability, ""),
                   rating: c.value(.rating, 0), jellyfinItemId: c.value(.jellyfinItemId, ""),
                   played: c.value(.played, false), favorite: c.value(.favorite, false),
-                  unplayedCount: c.value(.unplayedCount, 0), progress: c.value(.progress, 0))
+                  unplayedCount: c.value(.unplayedCount, 0), progress: c.value(.progress, 0),
+                  actions: c.value(.actions, []), requestId: c.value(.requestId, 0))
     }
 }
 
@@ -165,21 +178,104 @@ public struct LibraryFolder: Decodable, Equatable, Sendable, Identifiable {
     }
 }
 
-/// `GET /v1/library`.
+/// `GET /v1/library`: the folders in the profile's order (#15), which the app
+/// shows as it comes and never sorts.
 public struct LibraryResponse: Decodable, Equatable, Sendable {
     public var views: [LibraryFolder]
+    /// "custom" when the profile arranged them, "name" for A to Z.
+    public var order: String
     public var partial: [Partial]
 
-    public init(views: [LibraryFolder], partial: [Partial] = []) {
+    public init(views: [LibraryFolder], order: String = "name", partial: [Partial] = []) {
         self.views = views
+        self.order = order
         self.partial = partial
     }
 
-    enum CodingKeys: String, CodingKey { case views, partial }
+    enum CodingKeys: String, CodingKey { case views, order, partial }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(views: c.value(.views, []), partial: c.value(.partial, []))
+        self.init(views: c.value(.views, []), order: c.value(.order, "name"), partial: c.value(.partial, []))
+    }
+}
+
+/// One of Kavita's or Storyteller's libraries (`ReadingLibrary` in
+/// `reading_catalog.go`): "kavita:2", "storyteller:books".
+public struct ReadingLibrary: Decodable, Equatable, Sendable, Identifiable {
+    public var id: String
+    /// "kavita" or "storyteller".
+    public var source: String
+    public var kind: String
+    public var title: String
+    public var artwork: String
+
+    public init(id: String, source: String = "", kind: String = "", title: String, artwork: String = "") {
+        self.id = id
+        self.source = source
+        self.kind = kind
+        self.title = title
+        self.artwork = artwork
+    }
+
+    enum CodingKeys: String, CodingKey { case id, source, kind, title, artwork }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: c.value(.id, ""), source: c.value(.source, ""), kind: c.value(.kind, ""),
+                  title: c.value(.title, ""), artwork: c.value(.artwork, ""))
+    }
+}
+
+/// `GET /v1/reading/libraries`, in the profile's order.
+public struct ReadingLibrariesResponse: Decodable, Equatable, Sendable {
+    public var libraries: [ReadingLibrary]
+    public var order: String
+    public var partial: [Partial]
+
+    public init(libraries: [ReadingLibrary], order: String = "name", partial: [Partial] = []) {
+        self.libraries = libraries
+        self.order = order
+        self.partial = partial
+    }
+
+    enum CodingKeys: String, CodingKey { case libraries, order, partial }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(libraries: c.value(.libraries, []), order: c.value(.order, "name"), partial: c.value(.partial, []))
+    }
+}
+
+/// Which list of libraries an order is for.
+public enum LibrarySide: String, Sendable, CaseIterable {
+    case media, books
+}
+
+/// `PUT /v1/library/order`'s body.
+struct LibraryOrderBody: Encodable {
+    let side: String
+    let ids: [String]
+}
+
+/// What `PUT /v1/library/order` answers: the order now kept. After going back
+/// to A to Z it is `ids: []`, not the A to Z list, so the list is read again.
+public struct LibraryOrderReply: Decodable, Equatable, Sendable {
+    public var side: String
+    public var ids: [String]
+    public var order: String
+
+    public init(side: String, ids: [String], order: String) {
+        self.side = side
+        self.ids = ids
+        self.order = order
+    }
+
+    enum CodingKeys: String, CodingKey { case side, ids, order }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(side: c.value(.side, ""), ids: c.value(.ids, []), order: c.value(.order, "name"))
     }
 }
 
