@@ -5,7 +5,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AppearancePolicyTest {
-    @Test fun `ten stable presets each have accessible light and dark variants`() {
+    @Test fun `ten stable presets each read on the dark page and carry readable ink`() {
         assertEquals(10, AccentPreset.entries.size)
         assertEquals(10, AccentPreset.entries.map { it.id }.distinct().size)
         fun luminance(rgb: Int): Double = listOf(16,8,0).map { shift ->
@@ -14,14 +14,11 @@ class AppearancePolicyTest {
         }.let { it[0]*.2126 + it[1]*.7152 + it[2]*.0722 }
         fun contrast(a: Int, b: Int): Double = (maxOf(luminance(a), luminance(b))+.05)/(minOf(luminance(a),luminance(b))+.05)
         AccentPreset.entries.forEach {
-            // Dark page and card surfaces, light page and white.
-            assertTrue(it.id, contrast(it.dark, 0xff0a0d12.toInt()) >= 4.5)
-            assertTrue(it.id, contrast(it.dark, 0xff131821.toInt()) >= 4.5)
-            assertTrue(it.id, contrast(it.light, 0xfff5f6f4.toInt()) >= 4.5)
-            assertTrue(it.id, contrast(it.light, -1) >= 4.5)
+            // The dark page and its card surface.
+            assertTrue(it.id, contrast(it.color, 0xff0a0d12.toInt()) >= 4.5)
+            assertTrue(it.id, contrast(it.color, 0xff131821.toInt()) >= 4.5)
             // The label on a Play button filled with the accent.
-            assertTrue(it.id, contrast(it.dark, it.ink(dark = true)) >= 4.5)
-            assertTrue(it.id, contrast(it.light, it.ink(dark = false)) >= 4.5)
+            assertTrue(it.id, contrast(it.color, it.ink) >= 4.5)
         }
         assertEquals(AccentPreset.TEAL, AccentPreset.fromStored("retired"))
     }

@@ -511,8 +511,6 @@ class ReaderListeningTest {
      */
     @Test fun anAudiobookCoverFillsItsSquareWhateverItsShape(): Unit = runBlocking {
         val context = ins.targetContext
-        val oldLook = com.pocketds.hub.settings.LookSettings.get(context)
-        com.pocketds.hub.settings.LookSettings.set(context, com.pocketds.hub.settings.Look.GLASS)
         val activity = start()
         val oldUrl = HubSettings.baseUrl(activity)
         val oldToken = HubSettings.token(activity)
@@ -584,7 +582,6 @@ class ReaderListeningTest {
         } finally {
             withContext(Main) { screen?.onDestroyView(); activity.finish() }
             HubSettings.save(activity, oldUrl, oldToken)
-            com.pocketds.hub.settings.LookSettings.set(context, oldLook)
             server.shutdown()
         }
     }

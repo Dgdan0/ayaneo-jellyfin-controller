@@ -22,7 +22,6 @@ import com.pocketds.hub.ui.PillButton
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.SettingsCard
 import com.pocketds.hub.ui.Styler
-import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.textWeight
 import kotlinx.coroutines.CoroutineScope
@@ -134,7 +133,6 @@ internal class LibraryOrderSection(
         focused = null
         aToZFocused = null
         val context = host.viewContext
-        val glass = Theme.onGlass(colors)
         sides.forEachIndexed { index, side ->
             side.card = null
             side.grid = null
@@ -174,12 +172,7 @@ internal class LibraryOrderSection(
                 text = "Back to A–Z"
                 contentDescription = "Back to A to Z: ${side.title}"
                 tag = "atoz:${side.mode.stored}"
-                if (glass) PillButton.control(this, colors, AppIcon.SORT) else {
-                    textSize = 12f; textWeight(700); setTextColor(colors.primaryText); gravity = Gravity.CENTER
-                    setPadding(Styler.dpInt(context, 14f), 0, Styler.dpInt(context, 14f), 0)
-                    minimumHeight = Styler.dpInt(context, 36f)
-                    background = Styler.chipBackground(context, colors)
-                }
+                PillButton.control(this, colors, AppIcon.SORT)
                 Styler.makeFocusable(this)
                 FocusDecorator.attach(this, ringVisible, scale = false)
                 FocusDecorator.listen(this, ringVisible) { _, has ->
@@ -290,8 +283,8 @@ internal class LibraryOrderSection(
 /**
  * One library in Settings › Libraries: its name over its kind, with room at
  * its end for the grip the grid draws there. Lifted (activated), it stands on
- * a raised panel. On Glass it sits straight on its card and rings while
- * focused, as a switch row does.
+ * a raised panel of glass; at rest it sits straight on its card and rings
+ * while focused, as a switch row does.
  */
 internal class LibraryOrderRowView(
     context: Context,
@@ -300,30 +293,22 @@ internal class LibraryOrderRowView(
     private val name: String,
     private val kind: String
 ) : LinearLayout(context) {
-    private val glass = Theme.onGlass(colors)
-    /** The panel a lifted row stands on: the page's glass, or Classic's card colour. */
-    private val raised = if (glass) com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, 10f)).also { background = null }
-        else com.pocketds.hub.ui.ThemeGradientDrawable.rounded(Styler.dp(context, 16f), colors.cardSurface)
-    private val resting = if (glass) null else Styler.cardBackground(context, colors, cornerDp = 16f, focusStrokeDp = 2f)
+    /** The panel a lifted row stands on: the page's glass. */
+    private val raised = com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, 10f)).also { background = null }
 
     init {
         orientation = VERTICAL
         gravity = Gravity.CENTER_VERTICAL
         val end = dp(LibraryArrangeGrid.ROW_GRIP_ROOM_DP)
-        if (glass) {
-            setPadding(dp(8f), dp(5f), end, dp(5f))
-            foreground = Styler.focusOutline(context, colors, 10f, 2f)
-        } else {
-            setPadding(dp(14f), dp(8f), end, dp(8f))
-            background = resting
-        }
+        setPadding(dp(8f), dp(5f), end, dp(5f))
+        foreground = Styler.focusOutline(context, colors, 10f, 2f)
         minimumHeight = dp(PillButton.CONTROL_DP + 2 * PillButton.RING_DP + 4f)
         Styler.makeFocusable(this)
         descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         contentDescription = "$name, $kind"
-        addView(TextView(context).apply { text = name; textSize = if (glass) 13f else 14f; textWeight(700); setTextColor(colors.primaryText) })
+        addView(TextView(context).apply { text = name; textSize = 13f; textWeight(700); setTextColor(colors.primaryText) })
         addView(TextView(context).apply {
-            text = kind; textSize = 11.5f; setTextColor(if (glass) SettingsCard.GLASS_QUIET else colors.mutedText)
+            text = kind; textSize = 11.5f; setTextColor(SettingsCard.GLASS_QUIET)
         }, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(1f) })
         FocusDecorator.attach(this, ringVisible, scale = false)
         // A tap on the row puts focus on it, so A (or its hint) picks it up.
@@ -337,7 +322,7 @@ internal class LibraryOrderRowView(
 
     override fun setActivated(activated: Boolean) {
         super.setActivated(activated)
-        background = if (activated) raised else resting
+        background = if (activated) raised else null
     }
 
     private fun dp(value: Float) = Styler.dpInt(context, value)

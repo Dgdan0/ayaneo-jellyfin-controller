@@ -1,15 +1,14 @@
 # Third-party visual assets
 
-The service logos shown in Manage and Notifications use 512px PNG light/dark
-variants retrieved on 2026-09-09. Android selects the matching file from
-`drawable-nodpi` or `drawable-night-nodpi` when the app theme changes.
+The service logos shown in Manage and Notifications are 512px PNGs retrieved on
+2026-09-09, one set in `drawable-nodpi`, drawn for the app's dark page. The light-theme
+variants went with the light theme (#20).
 
 | Resource | Source | Licence / note |
 |---|---|---|
 | `logo_sonarr.png` | [Dashboard Icons: Sonarr](https://dashboardicons.com/icons/sonarr) | Dashboard Icons collection; Apache-2.0 repository licence, underlying marks retained by their owners |
 | `logo_bazarr.png` | [Dashboard Icons: Bazarr](https://dashboardicons.com/icons/bazarr) | Dashboard Icons collection; Apache-2.0 repository licence, underlying marks retained by their owners |
-| `logo_radarr.png` (dark app) | [Dashboard Icons: Radarr](https://dashboardicons.com/icons/radarr) | Dashboard Icons collection; Apache-2.0 repository licence |
-| `logo_radarr.png` (light app) | [Dashboard Icons: external Radarr](https://dashboardicons.com/icons/external/radarr) | selfh.st/icons, CC BY 4.0; center recolored to the normal icon's `#FFC230` yellow |
+| `logo_radarr.png` | [Dashboard Icons: Radarr](https://dashboardicons.com/icons/radarr) | Dashboard Icons collection; Apache-2.0 repository licence |
 | `logo_jellyfin.png` | [selfh.st/icons](https://github.com/selfhst/icons) | CC BY 4.0 |
 | `logo_jellyseerr.png` | [selfh.st/icons](https://github.com/selfhst/icons) | CC BY 4.0 |
 | `logo_qbittorrent.png` | [selfh.st/icons](https://github.com/selfhst/icons) | CC BY 4.0 |
@@ -17,9 +16,8 @@ variants retrieved on 2026-09-09. Android selects the matching file from
 | `logo_storyteller.png` | The installed Storyteller web app, `Storyteller_Logo.png` (2048 px, scaled to 512 px, retrieved 2026-10-04) | Storyteller's own logo; mark retained by its owners |
 | `logo_bookkeeprr.png` | The installed BookKeeprr web app, `img/icon-512.png` (512 px, retrieved 2026-10-04) | BookKeeprr's own icon; mark retained by its owners |
 
-The three book services' logos read on both light and dark cards, so each has one file in
-`drawable-nodpi` and none in `drawable-night-nodpi`. The Apple app carries the same files as
-imagesets in `apple/Hub/Resources/Assets.xcassets/Logos`, with no dark appearance.
+The Apple app carries the three book services' files as imagesets in
+`apple/Hub/Resources/Assets.xcassets/Logos`, with no dark appearance.
 
 Product names and trademarks remain the property of their respective owners.
 The Ayaneo Hub mark is this project's own launcher foreground.

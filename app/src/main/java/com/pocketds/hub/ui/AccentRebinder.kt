@@ -71,7 +71,7 @@ object AccentRebinder {
                 view.setTextColor(tint(view.textColors)); view.compoundDrawables.forEach(::drawable)
                 if(view is CenteredIconTextView) view.recolorIcon(replacements)
             }
-            if(view is ImageView) { ServiceLogo.refresh(view); view.imageTintList=tint(view.imageTintList); if(view.drawable is AppIconDrawable) drawable(view.drawable) }
+            if(view is ImageView) { view.imageTintList=tint(view.imageTintList); if(view.drawable is AppIconDrawable) drawable(view.drawable) }
             if(view is ProgressBar) { view.progressTintList=tint(view.progressTintList); view.indeterminateTintList=tint(view.indeterminateTintList) }
             if(view is SeekBar) view.thumbTintList=tint(view.thumbTintList)
             if(view is ViewGroup) (0 until view.childCount).forEach { visit(view.getChildAt(it)) }

@@ -67,9 +67,6 @@ import com.pocketds.hub.settings.ContentModeSettings
 import com.pocketds.hub.settings.HapticSettings
 import com.pocketds.hub.settings.NotificationReadStore
 import com.pocketds.hub.settings.NotificationSettings
-import com.pocketds.hub.settings.Look
-import com.pocketds.hub.settings.LookSettings
-import com.pocketds.hub.settings.ThemeSettings
 import com.pocketds.hub.nav.PageArtwork
 import com.pocketds.hub.ui.KeyHaptics
 import com.pocketds.hub.ui.Theme
@@ -133,8 +130,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
     private lateinit var pageTitle: android.widget.TextView
     private lateinit var content: FrameLayout
     /**
-     * Glass: the page behind everything (GLASS_PLAN.md) -- the artwork the
-     * screen in front reports, blurred, over its dark colour. Null in Classic.
+     * The page behind everything (GLASS_PLAN.md) -- the artwork the screen in
+     * front reports, blurred, over its dark colour. Null until the chrome is built.
      */
     private var ambient: AmbientLayerView? = null
     /** The artwork the page shows, the colours it is tinted with, and the colour request still out. */
@@ -174,18 +171,11 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         // restores state; this Activity intentionally rebuilds its own screen
         // stack after process death.
         supportFragmentManager.fragmentFactory = EpubNavigatorFragment.createDummyFactory()
-        // Glass is always dark, so its night resources (the services' logos)
-        // apply whatever the Theme setting says; that setting is Classic's.
-        val look = LookSettings.get(this)
-        AppCompatDelegate.setDefaultNightMode(
-            if (look == Look.GLASS) AppCompatDelegate.MODE_NIGHT_YES else when (ThemeSettings.getMode(this)) {
-                ThemeSettings.Mode.SYSTEM -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-                ThemeSettings.Mode.LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
-                ThemeSettings.Mode.DARK -> AppCompatDelegate.MODE_NIGHT_YES
-            }
-        )
-        builtLook = look
-        builtDark = Theme.isDark(this)
+        // The look and theme a Classic install stored are not read any more (#20).
+        com.pocketds.hub.settings.RetiredSettings.clear(this)
+        // The app is always dark, whatever the system says: the platform's own
+        // parts (a text field's handles, a dialog) follow the page.
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
         super.onCreate(savedInstanceState)
 
         // Intent extras first: scripts/dev.sh seed pushes the URL and token in
@@ -319,15 +309,13 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         // The chrome sits inside a frame so the floating trailer window can be
         // laid over all of it, hint bar included.
         overlay = FrameLayout(this)
-        if (Theme.isGlass(this)) {
-            // The page itself, under the content, the tabs and the hint bar.
-            // Nothing above it paints a page colour (Theme's Glass palette has
-            // none); the frame's own dark is only what shows while an
-            // immersive screen has the page hidden.
-            overlay.setBackgroundColor(ArtworkPalette.NEUTRAL.dark)
-            ambient = AmbientLayerView(this, api).also {
-                overlay.addView(it, FrameLayout.LayoutParams(MATCH, MATCH))
-            }
+        // The page itself, under the content, the tabs and the hint bar.
+        // Nothing above it paints a page colour (Theme's palette has none);
+        // the frame's own dark is only what shows while an immersive screen
+        // has the page hidden.
+        overlay.setBackgroundColor(ArtworkPalette.NEUTRAL.dark)
+        ambient = AmbientLayerView(this, api).also {
+            overlay.addView(it, FrameLayout.LayoutParams(MATCH, MATCH))
         }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -523,27 +511,10 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         views[top]?.let { layoutScreen(top, it) }
     }
 
-    /**
-     * An accent change repaints the views in place. Dark to light (or back)
-     * rebuilds the Activity, as Android does for night mode: a live repaint
-     * only maps colours it can recognise, so lines drawn in a shade derived
-     * from the old palette (the Home hero's facts, a panel's heading) stayed
-     * pale grey on the new white until the app restarted. The section comes
-     * back from the saved state, so Settings reopens where it was.
-     */
+    /** An accent change repaints the views in place. */
     override fun refreshAppearance() {
-        if ((builtDark != null && builtDark != Theme.isDark(this)) ||
-            (builtLook != null && builtLook != LookSettings.get(this))
-        ) {
-            recreate()
-            return
-        }
         if (::overlay.isInitialized) Theme.refresh(this, overlay, (sections.stack().peek() as? Screen)?.contentDomain ?: ContentModeSettings.get(this))
     }
-
-    /** Whether the views were built dark, and in which look; null until onCreate has run. */
-    private var builtDark: Boolean? = null
-    private var builtLook: Look? = null
 
     private fun showCurrent() {
         refreshAppearance()

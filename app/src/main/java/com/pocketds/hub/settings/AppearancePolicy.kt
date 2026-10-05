@@ -7,28 +7,25 @@ import java.security.MessageDigest
 /**
  * Stable IDs are persisted; names and ordering may change without losing a choice.
  *
- * Pastels on the dark theme, because a colour that fills the Play button and
- * the selected tab has to sit quietly on near-black artwork; each has a deep
- * variant for the light theme that still reads at 4.5:1 on white.
+ * Pastels, because a colour that fills the Play button and the selected tab
+ * has to sit quietly on near-black artwork.
  */
-enum class AccentPreset(val id: String, val label: String, val dark: Int, val light: Int) {
-    TEAL("teal","Teal",0xff3ddbc6.toInt(),0xff08796c.toInt()),
-    MINT("mint","Mint",0xff8ee3cf.toInt(),0xff0f7a64.toInt()),
-    SKY("sky","Sky",0xffa5c8ff.toInt(),0xff2a5fb3.toInt()),
-    LAVENDER("lavender","Lavender",0xffc7b8ff.toInt(),0xff5a45c0.toInt()),
-    LILAC("lilac","Lilac",0xffe3b8f5.toInt(),0xff8a35a6.toInt()),
-    ROSE("rose","Rose",0xffffb4c6.toInt(),0xffad3157.toInt()),
-    PEACH("peach","Peach",0xffffc6a5.toInt(),0xffa84f1f.toInt()),
-    BUTTER("butter","Butter",0xfff6e3a1.toInt(),0xff7d6510.toInt()),
-    GOLD("gold","Gold",0xffe9c46a.toInt(),0xff85600a.toInt()),
-    SAGE("sage","Sage",0xffbfd8b0.toInt(),0xff4a6e36.toInt());
+enum class AccentPreset(val id: String, val label: String, val color: Int) {
+    TEAL("teal","Teal",0xff3ddbc6.toInt()),
+    MINT("mint","Mint",0xff8ee3cf.toInt()),
+    SKY("sky","Sky",0xffa5c8ff.toInt()),
+    LAVENDER("lavender","Lavender",0xffc7b8ff.toInt()),
+    LILAC("lilac","Lilac",0xffe3b8f5.toInt()),
+    ROSE("rose","Rose",0xffffb4c6.toInt()),
+    PEACH("peach","Peach",0xffffc6a5.toInt()),
+    BUTTER("butter","Butter",0xfff6e3a1.toInt()),
+    GOLD("gold","Gold",0xffe9c46a.toInt()),
+    SAGE("sage","Sage",0xffbfd8b0.toInt());
 
-    fun color(dark: Boolean) = if (dark) this.dark else light
-
-    /** Text and icons drawn on the accent: a deep shade of it on a pastel, white on a deep one. */
-    fun ink(dark: Boolean): Int = if (!dark) -1 else {
-        fun channel(shift: Int) = (((this.dark shr shift) and 255) * 0.2f).toInt()
-        (0xff shl 24) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
+    /** Text and icons drawn on the accent: a deep shade of it. */
+    val ink: Int get() {
+        fun channel(shift: Int) = (((color shr shift) and 255) * 0.2f).toInt()
+        return (0xff shl 24) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
     }
 
     companion object {

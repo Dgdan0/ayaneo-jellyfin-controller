@@ -69,8 +69,6 @@ class BlobSegmentedView(
     /** A fill for [Style.ACCENT] other than the screen's accent, e.g. the other media type's colour. */
     var accentOverride: Int? = null
     var inkOverride: Int? = null
-    /** The track's own colour, for a control on a card rather than on the page. */
-    var trackColor: Int? = null
     /**
      * A panel drawn as the track instead of the flat fill and hairline: the
      * Glass capsule behind the top bar's tabs (a GlassPanelDrawable, re-tinted
@@ -279,7 +277,7 @@ class BlobSegmentedView(
             track.draw(canvas)
         } else if (style != Style.UNDERLINE) {
             paint.style = Paint.Style.FILL
-            paint.color = trackColor ?: ColorUtils.setAlphaComponent(colors.stripBackground, 0xE0)
+            paint.color = ColorUtils.setAlphaComponent(colors.stripBackground, 0xE0)
             rect.set(0f, 0f, trackRight, h)
             canvas.drawRoundRect(rect, h / 2, h / 2, paint)
             paint.style = Paint.Style.STROKE

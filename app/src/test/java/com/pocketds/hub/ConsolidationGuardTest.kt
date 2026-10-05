@@ -30,10 +30,9 @@ class ConsolidationGuardTest {
             "EpisodeLabel.of / EpisodeLabel.code", setOf("ui/EpisodeCardView.kt", "model/Playback.kt")),
         Rule(Regex("""\.enqueue\(\s*(ImageRequest|request\b)|^\s*ImageRequest\.Builder\("""),
             "Artwork.bind: it clears a blank path and cancels the view's previous request",
-            // Seek and page previews keep their Disposable to cancel a stale scrub;
-            // the detail header's backdrop falls back to the poster when it fails.
+            // Seek and page previews keep their Disposable to cancel a stale scrub.
             // (The comic reader's scrubber now shows the hub's thumbnail through Artwork.bind, #16.)
-            setOf("ui/Artwork.kt", "playback/PlayerScreen.kt", "ui/DetailComponents.kt")),
+            setOf("ui/Artwork.kt", "playback/PlayerScreen.kt")),
         Rule(Regex("""progressBarStyleHorizontal"""),
             "ProgressLine.create (or a stateful download row's own tint)",
             setOf("ui/ProgressLine.kt", "screens/downloads/DownloadRowView.kt",
@@ -93,6 +92,10 @@ class ConsolidationGuardTest {
         Rule(Regex("""PorterDuff\.Mode\.MULTIPLY"""),
             "ComfortLayerView with ScreenComfort: one warmth and one dim over a reader (#16, X3)",
             setOf("ui/ComfortLayerView.kt")),
+        Rule(Regex("""\bLookSettings\b|\bThemeSettings\b|\bLook\.(GLASS|CLASSIC)\b|Theme\.(isGlass|onGlass|isDark|base)\(|\bglass\s*:\s*Boolean\b|"theme_mode""""),
+            "one look (#20): the app is Glass alone; draw the glass face, with no look to ask, store or branch on",
+            // The stored look and theme, removed once at launch.
+            setOf("settings/RetiredSettings.kt")),
         Rule(Regex("""PlaybackService(\.|::)pause\b"""),
             "AudioHandoff: one sound at a time; each player reports started and stopped, and the others pause (#16, A1)",
             // The video player's own screen pausing its video, and the arbiter's hands.

@@ -76,7 +76,7 @@ brings it onto that branch.
 | **H6 / A9** native playback | **Done.** Session-bound Jellyfin range/HLS/subtitle gateway plus full-screen Media3 playback, resume/start-over, tracks, versions, quality, progress events and next episode; verified on hardware |
 | **A10** Manage health | **Done.** Official project logos, live state/version/latency/uptime, explicit vertical focus, dashboard launching, and Jellyfin library scanning |
 | **H7 / A12** notifications | **Done.** `/v1/notifications` combines Sonarr, Radarr and Bazarr history with current health warnings; stable IDs and local seen state drive per-service and rail unread badges, focus-to-seen, and mark-all-seen |
-| **A13** settings + themes | **Done.** Follow-system/light/dark appearance, theme-specific service assets, notification history limits, playback seek distance and controller test |
+| **A13** settings + themes | **Done.** A colour per side (one dark look since #20), notification history limits, playback seek distance and controller test |
 | **H8 / A14** offline downloads | **Done.** Durable scoped Hub grants, range-resumable original files, series/season picker, persistent foreground queue, grouped manager, local-first playback and per-user deferred progress sync; live device path verified |
 
 The 2026-09-08 Findroid 1.1.0 hardware audit, screenshot index, side-by-side feature matrix,
@@ -327,7 +327,7 @@ than the first cast card, which is below the fold.
 motion it read "Not requested" directly under a strip of five pending chips that already said
 exactly that.
 
-In Glass (#11) a title page is the prototype's: the backdrop across the top of the page, 330dp
+A title page is the prototype's (#11): the backdrop across the top of the page, 330dp
 tall and fading through `FadedImageView.TITLE` under the tabs; the words at the left (the
 Bricolage title, the facts, the watch line in the accent, the overview); a white Play or Resume,
 Start over as a glass pill on a film or episode you can resume, and round glass toggles that
@@ -610,7 +610,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Talking to the hub | `HubClient.shared(context)` -- one per process. `net/CredentialGate` in its interceptor: one 401 stops all traffic, a ban's long `Retry-After` holds it, 403 is a scope (`FailureKind.FORBIDDEN`) |
 | One request at a time, busy flag that cannot stick | `state/JobSlot` |
 | Asking again on a timer | `state/Poller` + `PollCadence` (backoff, settle window, hidden stops) |
-| Status line wording and tone | `state/StatusText` + `TextView.showStatus`. On Glass a line shows only with news (`StatusText.shows`: data a minute or more old, partial, degraded or failed, or a `StatusText.notice` such as why a list is empty), as a quiet glass chip round its words; Home's sits in the hero's top corner, clear of its words. A page's own line under its heading ("94 unread notifications", "All 12 running") is `TextView.showSummary`: always shown, plain words |
+| Status line wording and tone | `state/StatusText` + `TextView.showStatus`. A line shows only with news (`StatusText.shows`: data a minute or more old, partial, degraded or failed, or a `StatusText.notice` such as why a list is empty), as a quiet glass chip round its words; Home's sits in the hero's top corner, clear of its words. A page's own line under its heading ("94 unread notifications", "All 12 running") is `TextView.showSummary`: always shown, plain words |
 | Numbers, times, sizes | `state/Fmt` (`Fmt.version`: one "v" before a service's version, however it writes it) |
 | How far through a book, as a percent | `Fmt.readingPercent` / `readingPercentLabel`: the floor, 1 to 99 while under way and 100 only when finished, so a book's facts, its Resume button, its card and the reader agree (#16; the facts once said 1% where Resume said 2%) |
 | Resume point / finished / not started | `playback/ResumeRules` (mirrors the hub's `decideWatchPosition`) |
@@ -626,23 +626,23 @@ Most of these exist because several screens had drifted copies of the same thing
 | A value menu / a destructive confirm | `ChoiceOverlay.pickValue` / `confirm` (harmless answer first); `ask` for a question with a few answers. On a side sheet a question still opens as the centred card, beside it; `isOpen`, `onPad` and `dismiss` answer for both |
 | A side panel's look and parts | `ui/SidePanelView`: a full-height sheet at the right edge (centred card for `confirm`), heading and small round close; `choice` and `setting` (label, value, chevron) rows share a raised card until a `section`, `startGroup`, `note` or hand-added view starts the next; `choice(leading =)` puts a picture before the words; tabs are a `BlobSegmentedView`. `group()`, `reveal(view)` and `resetBody(keepScroll = true)` for rows a caller draws itself (the Glass request form). On a page that draws under the top bar a side sheet starts below it (`ui/TopChrome.overlap`; HubActivity registers its bar) |
 | Anything drawn over video | `Theme.onVideo` (the dark palette with the media accent, whatever the app theme) |
-| A dashboard's pieces: status dot and its colour, a disk with its bar, a figure card, a focusable row, a state chip | `ui/DashboardParts` (`dot`, `stateColor`, `disk`, `stat`, `row`; `chip(label, Tone)`: Soon, Aired, In library, Downloading, Stuck, and `releaseChip` for the calendar; on Glass the prototype's `.st`, whose colours `glassFill` / `glassInk` give anything else saying the same, such as the release picker's tiles): Activity, Server monitor, Services, Notifications, Upcoming, the transfers |
-| A service's logo | `ServiceLogo.resource(service)` (and `bind`, which follows the theme) |
+| A dashboard's pieces: status dot and its colour, a disk with its bar, a figure card, a focusable row, a state chip | `ui/DashboardParts` (`dot`, `stateColor`, `disk`, `stat`, `row`; `chip(context, label, Tone)`: Soon, Aired, In library, Downloading, Stuck, and `releaseChip` for the calendar; the prototype's `.st`, whose colours `glassFill` / `glassInk` give anything else saying the same, such as the release picker's tiles): Activity, Server monitor, Services, Notifications, Upcoming, the transfers |
+| A service's logo | `ServiceLogo.resource(service)` (and `bind`): one set, drawn for the dark page |
 | A torrent's release name as words ("Dark Matter (2024) · S2E6 · 1080p") | `model/ReleaseNames.readable`; `ActivityItem.headline` uses it when the *arr has no title |
 | How long the PC has been up ("1 day 4 hours") | `Fmt.uptime` |
 | A pill that is a filter, lit while on | `PillButton.setPrimary` (a new background otherwise resets the padding); a Glass pill turns white in place (`GlassButtonBackground.lit`) |
 | A pushed page's header | `HubActivity.pageTitle`: a round back mark and the screen's `title` in the heading face; a page with its own heading sets `showsOwnTitle` |
 | A menu's cursor after a submenu | `SidePanelView` remembers the row last chosen per menu and tab; pass no start row and Back lands where you were |
-| On/off action icons (watched, favourite, downloaded) | `MediaActionIconDrawable.of` (`MediaActionIcon.isOn`): filled accent when on, outline when off; `DOWNLOADING` is a progress ring. On a Glass toggle `onGlass`: dark on its white face while on, white on glass while off |
+| On/off action icons (watched, favourite, downloaded) | `MediaActionIconDrawable.of` (`MediaActionIcon.isOn`): filled accent when on, outline when off; `DOWNLOADING` is a progress ring. On a glass toggle `onGlass`: dark on its white face while on, white on glass while off |
 | Reacting to offline downloads changing | `offline/OfflineChanges` (start in onShow, stop in onHide) |
-| Sorting a library | `ui/LibrarySortControls` (field button + one-press direction; on Glass two control buttons); wording from `SortPreference.directionLabel` |
+| Sorting a library | `ui/LibrarySortControls` (field button + one-press direction, two control buttons); wording from `SortPreference.directionLabel` |
 | A series' books as cards / their labels | `screens/library/SeriesBookStrip` + `SeriesBookLabels` ("#2 · 40% · Audio"); series page, author page and a book's own page |
-| A book's facts line | `ReadingBookFacts.line` ("Book 6 of Red Rising · 2023 · 735 pages"); how far through: `ReadingBookFacts.progress` ("49% · page 363 of 735"). Glass: `eyebrow` over a page's title ("Book 6 · Red Rising", "Series · Pierce Brown", "Comic · My Marvelous Year", the library from `ReadingLibraryNames`), `miniLine` under a book also being read ("Blake Crouch · 3%"), `formats` (ebook, audiobook, read along, always in that order), `continueLine` on a series' continue card ("Book 6 · 49% · page 363 of 735") |
+| A book's facts line | `ReadingBookFacts.line` ("Book 6 of Red Rising · 2023 · 735 pages"); how far through: `ReadingBookFacts.progress` ("49% · page 363 of 735"); `eyebrow` over a page's title ("Book 6 · Red Rising", "Series · Pierce Brown", "Comic · My Marvelous Year", the library from `ReadingLibraryNames`), `miniLine` under a book also being read ("Blake Crouch · 3%"), `formats` (ebook, audiobook, read along, always in that order), `continueLine` on a series' continue card ("Book 6 · 49% · page 363 of 735") |
 | A book's place in its series on a card | `ReadingWork.cardSubtitle` ("Red Rising #6") and `seriesNumber` |
 | Books Library's view: Series, Authors, or every book on its own | `ReadingLibraryGridScreen` (`view`; Books asks the hub for `view=works`); each view's order in `DomainPreferences` (`sort`, `bookSort`, `readingView`) |
 | A person as a round portrait, the ring round it | `DetailArtworkCardView.portrait` (an author, a title's cast row in `CastRowView`) |
-| Books Home's top: the book being read, the series being read | `screens/home/ContinueReadingView` (Resume reading opens `ReadingWorkScreen(openReader = true)`; on Glass no card, the cover at full size with the words beside its foot, Resume reading gold), `SeriesStackView` fed by `ReadingShelves.yourSeries` |
-| A series as a fan of covers (Books Home, the series page) | `ui/CoverFanView`; which covers from `ReadingShelves.fanCovers` (up to four), the book being read from `onNumber`; "On #6 · 1 of 6 finished" from `ReadingBookFacts.seriesProgress`. `glass = true` is the prototype's fan: 64dp covers leaning about their feet, the book being read on top at the right, the outer two leaning further with focus (`spread`); at a page's edge it stands in by `GLASS_LEAN_DP`, how far its outer cover leans, or the screen cuts it |
+| Books Home's top: the book being read, the series being read | `screens/home/ContinueReadingView` (Resume reading opens `ReadingWorkScreen(openReader = true)`; no card, the cover at full size with the words beside its foot, Resume reading gold), `SeriesStackView` fed by `ReadingShelves.yourSeries` |
+| A series as a fan of covers (Books Home, the series page) | `ui/CoverFanView`; which covers from `ReadingShelves.fanCovers` (up to four), the book being read from `onNumber`; "On #6 · 1 of 6 finished" from `ReadingBookFacts.seriesProgress`. It is the prototype's fan: 64dp covers leaning about their feet, the book being read on top at the right, the outer two leaning further with focus (`spread`); at a page's edge it stands in by `LEAN_DP`, how far its outer cover leans, or the screen cuts it |
 | Books Home rows | `ReadingShelves`: `onePerSeries`, `nextInSeries`, `BUILT_IN` (rows the app fills; list actions only on the person's own) |
 | Reading times from the hub | `ReadingShelves.timestamp` (Storyteller writes `2026-09-27 03:16:47`, UTC with no zone) |
 | Hub: an author page id | `readingAuthorRef` (Authors view and a book's author link) |
@@ -651,15 +651,15 @@ Most of these exist because several screens had drifted copies of the same thing
 | Pick one of a few (tabs, seasons, a setting's value, Media/Books) | `ui/BlobSegmentedView` (`PILL`, `ACCENT`, `UNDERLINE`, `CHIPS`: Glass seasons, each its own glass pill with the chosen one white; `useGlassTrack()` for a glass capsule; `followFocus` for tabs that switch on focus); geometry in `SegmentGeometry` (`gap` between pills) |
 | A line mixing a Hebrew title with English facts ("… פרק 6 · 11 min") | `ui/Bidi.join` / `isolateParts` (each part isolated); captions under cards align to the view's start, not the text's |
 | Title and heading type | `ui/Type` (`typeRole(Type.Role.HERO …)`); body text is Figtree from the theme, never set per view |
-| An accent and the ink drawn on it | `AccentPreset.color(dark)` / `ink(dark)` via `Theme.colors`; Books default to gold (`AccentPreset.defaultFor`) |
+| An accent and the ink drawn on it | `AccentPreset.color` / `ink` via `Theme.colors`; Books default to gold (`AccentPreset.defaultFor`) |
 | A controller button drawn in the hint bar | `ui/KeyGlyphDrawable` |
 | A small glass button in a row of controls (Favourites, Sort, Mark all seen, a round search) | `PillButton.control(view, colors, icon, round)`: the prototype's 32dp `.cbtn` |
-| A rounded action (Play, Details, Continue reading) | `ui/PillButton` (primary = accent fill; the ring keeps a gap). As a detail page's first action it takes `marginStart = -RING_DP`; `DetailHeaderView`'s action row leaves that room, so the pill lines up with the title and its ring is not clipped. `glass = true`: the main action takes its side's face (`side`; `mainFace`/`mainInk`): white with dark words on Media, the Books accent (gold) with its ink on Books -- Resume reading, a book's Read or Resume, a series' Continue and its card's disc, Find a download and the request sheet's foot; the others glass that follows the page, 11dp corners |
-| A Glass button's face: glass, or white while lit | `ui/glass/GlassButtonBackground` (`attach(view, colors, corner, ring, lit)`, then `lit`): `PillButton(glass = true)` and `DetailStyler.glassToggle`, a title's round toggles that turn white while on; one GlassPage.follow per view |
+| A rounded action (Play, Details, Continue reading) | `ui/PillButton` (the ring keeps a gap). As a detail page's first action it takes `marginStart = -RING_DP`; `DetailHeaderView`'s action row leaves that room, so the pill lines up with the title and its ring is not clipped. The main action (`primary`) takes its side's face (`side`; `mainFace`/`mainInk`): white with dark words on Media, the Books accent (gold) with its ink on Books -- Resume reading, a book's Read or Resume, a series' Continue and its card's disc, Find a download and the request sheet's foot; the others glass that follows the page, 11dp corners |
+| A Glass button's face: glass, or white while lit | `ui/glass/GlassButtonBackground` (`attach(view, colors, corner, ring, lit)`, then `lit`): `PillButton` and `DetailStyler.glassToggle`, a title's round toggles that turn white while on; one GlassPage.follow per view |
 | A rounded or round drawable from palette colours | `ThemeGradientDrawable.rounded` / `.oval`: inside `ThemeGradientDrawable().apply {}` a bare `colors` is GradientDrawable's own array |
 | Fading the page colour into artwork | `ui/ScrimDrawable` |
-| A vertical list of places with the blob (Settings' sections) | `ui/SideNavView` (on Glass each place has its icon, `Item.icon`, and the chosen one is lit white) |
-| A settings panel, an on/off row, colour swatches | `ui/SettingsCard`, `SwitchRowView`, `SwatchRowView`. On Glass the card is the prototype's (`.scard2`, `.dcard`): page glass with 15dp corners, and `attention(true)` edges it in amber; Activity, Server monitor and Settings take them from here |
+| A vertical list of places with the blob (Settings' sections) | `ui/SideNavView` (each place has its icon, `Item.icon`, and the chosen one is lit white) |
+| A settings panel, an on/off row, colour swatches | `ui/SettingsCard`, `SwitchRowView`, `SwatchRowView`. The card is the prototype's (`.scard2`, `.dcard`): page glass with 15dp corners, and `attention(true)` edges it in amber; Activity, Server monitor and Settings take them from here |
 | How subtitles look | `SubtitleSettings` (style, size, lift) applied by `playback/SubtitleLooks` in the player and the Settings preview |
 | When the up-next card shows, what gets a Skip button | `playback/UpNext` (`cardAt`, `skipLabel`); the card is `UpNextCardView` |
 | A service's name on screen and its place in a list | `model/ServiceNames.display` / `rank` (`rank(id, books = true)`: the reading services first) |
@@ -671,12 +671,12 @@ Most of these exist because several screens had drifted copies of the same thing
 | Switching between Media and Books | `nav/SidePages` (#18): each content tab keeps a stack per side. Choosing a side takes the other side's pages off every tab, kept alive as they were (`ScreenStack.park` / `restore`), and puts back the ones this side left, so switching back returns each tab to where it was. A page's side is its `contentDomain`, else the side it was opened on (`HubActivity.openedOn`); a page that follows the side itself (a root, the transfers) stays on both. A profile change still recreates everything |
 | Books Discover's rows | `screens/discover/ReadingDiscoverRows.shown`: an empty row is left out, and under All a row whose name does not say what it holds says it ("Trending now · Manga"), since BookKeeprr names each kind's rows alike |
 | Loading the next page of a list or row | `state/PagedLoadState`; one per row via `state/RowPaging` |
-| A scrolling container | `ui/FocusScrollView` / `FocusHorizontalScrollView` (never a focus stop; `revealAbove` keeps a heading over the focused row visible). On Glass a scrolled page's words fade out at its top edge under the bar (`ui/glass/TopFade`) |
+| A scrolling container | `ui/FocusScrollView` / `FocusHorizontalScrollView` (never a focus stop; `revealAbove` keeps a heading over the focused row visible). A scrolled page's words fade out at its top edge under the bar (`ui/glass/TopFade`) |
 | A list of rows whose focused row rests at the top, heading and all (Home, Discover) | `ui/PinnedRows` (`RecyclerView.pinFocusedRows`; leaves room under the last row; put the list in a clipping frame; a row with two parts implements `PinnedRowsLayoutManager.Anchor`) |
 | Up/Down through a scrolling page of rows (past an empty row, to rows scrolled away) | `ui/RowStep.move(rows, focused, up)` (Books home) |
 | A comic or manga among books: the pill on its cover and its line | `ReadingBookFacts.kindTag` / `comicLine`; `PosterCardView.bindReadingWork(showKind = true)` on Books home only |
 | A comic run's issues on its page; their names and counts | `screens/library/IssueStrip` (a lazy strip per volume, opening at the issue you are on); `ReadingBookFacts.issueTitle` / `issueLine`, "162 issues" in `length`, "On issue 51 · 1% read" in `progress`; the hub's `/v1/img/reading/kavita-chapter/{id}` cover per issue |
-| Controls drawn over a picture (the player, the comic reader) | `ui/OverlayButtons` (`round`, `pill`, `dressDisc`, `dressPill`, `ringed`: a soft disc or pill, the ring standing outside it; `light` for a pill that is on). On Glass no white discs: dark glass tinted by what is open, nearly solid on the video palette's dark (`GlassButtonBackground.overPicture`, `GlassColors.overPicture`), so it reads over the brightest frame; Play stays the white disc (`playFace`, its symbol `PLAY_INK`), and "−10" / "+10" are `jump` discs (the player's and the read-along dock's). `panel(view, corner)` for a panel of the same glass (the timeline's bar, the seek preview, the up-next card, subtitle timing, a reader's bars) |
+| Controls drawn over a picture (the player, the comic reader) | `ui/OverlayButtons` (`round`, `pill`, `dressDisc`, `dressPill`, `ringed`: a disc or pill of dark glass, the ring standing outside it; `light` for a pill that is on). No white discs: dark glass tinted by what is open, nearly solid on the video palette's dark (`GlassButtonBackground.overPicture`, `GlassColors.overPicture`), so it reads over the brightest frame; Play stays the white disc (`playFace`, its symbol `PLAY_INK`), and "−10" / "+10" are `jump` discs (the player's and the read-along dock's). `panel(view, corner)` for a panel of the same glass (the timeline's bar, the seek preview, the up-next card, subtitle timing, a reader's bars) |
 | The comic reader's heading | `ReaderTitleFormatter.heading` / `issue` / `subtitle` ("Fantastic Four" over "Issue 51 · Page 2 of 24"; Kavita's "Chapter 51" is an issue for a comic); `part` while a page is read in steps ("Part 2 of 3") |
 | What a key does in a reader (a comic, a book, an audiobook) | `reader/ReaderPadMap`, pure: `command(state, action)` turns every pad action into a `ReaderCommand`, so none falls through to the tabs; `hints` is the key row inside the controls and `sheet` the Controls sheet, both drawn by `reader/ReaderKeys` (`row`, `show`; `ROW_DP`, the row's height, is the hint bar's) with `SidePanelView.keys` (a key's caps in a column of their own, then what it does). The owner's keymap (#16): a comic's Ⓐ forward and Ⓑ back a page, Select leaves; a book's Ⓑ opens the menu and Ⓑ again leaves; an audiobook's Ⓑ leaves; read along with the menu closed, L1 and R1 step a sentence and L3 takes the page back to the voice |
 | The right stick and the stick clicks | `input/AnalogPan` (while the right stick is held, one `PadAction.Pan(dx, dy)` a frame: its travel past the 0.12 dead zone, curved, times the frame's time, which a reader scales into screens) and `PadAction.Click(stick, down)`, L3 and R3 pressed and let go, from `PadEventRouter`. The right stick is `AXIS_Z` / `AXIS_RZ` on this handheld |
@@ -687,7 +687,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | A comic page's paper border (#18, C5) | `reader/PageBounds.detect` (pure, on the hub's 96-pixel thumbnail of the page, never the scan: each side's outermost line one colour, then inward while 96% of a line stays within 24 luma of it; one pixel back; at most 12% of an axis) gives a `PageContent`, which the comic reader treats as the page for the fit, the steps (`ViewportStepPlanner` on the content's size), the map (`onPage`) and `ComicPanPolicy`'s range. Measured on generated 1000 x 1540 pages with a 5% border: the page reads 9.1% larger at fit width (11.1% ideal; the pixel held back costs the rest); a full-bleed page, or a flat colour to its edge, is left whole |
 | A finger on a comic's page (#18, C7) | `reader/ComicTouch` (pure): a tap in the outer third reads on or back (sides swapped right to left), in the middle it shows the controls, a swipe across turns the page; not while zoomed, nor in a pinch. The page view keeps its own drag, pinch and double tap |
 | A page read in steps (Thirds) | `ViewportStepPlanner.count` / `fitWidth`: how many steps from the page's shape and the screen's, 12% overlap (three for a comic page on this screen, two for a spread), per page through `PagedImageState(stepsFor)`; the minimap is `reader/PageMapView` |
-| A reader's bars (comics and books) | `reader/ReaderBars` (#16, X7): on Glass a bar of the cover's near-solid glass along the top and the foot, each floating 8dp in with 16dp corners (`OverlayButtons.panel`), the keys' row across the very foot; Classic flat bars edge to edge. `ReaderPagePreviewController(makesRoom)` is the owner's choice: a comic's page keeps its size under the bars (`makesRoom = false`), a book's shrinks with the menu round it. Read along, `showBottomRow(false)` gives the lower bar's place to the dock. A comic reports its issue's cover (`IssueCover.path`) as the page's artwork, so the glass takes its colours |
+| A reader's bars (comics and books) | `reader/ReaderBars` (#16, X7): a bar of the cover's near-solid glass along the top and the foot, each floating 8dp in with 16dp corners (`OverlayButtons.panel`), the keys' row across the very foot. `ReaderPagePreviewController(makesRoom)` is the owner's choice: a comic's page keeps its size under the bars (`makesRoom = false`), a book's shrinks with the menu round it. Read along, `showBottomRow(false)` gives the lower bar's place to the dock. A comic reports its issue's cover (`IssueCover.path`) as the page's artwork, so the glass takes its colours |
 | A comic's page turn without the blank | `reader/PageSurface` (#16, C3): the page on one of three tiled views, the others holding the pages either side decoded and placed, drawn but unseen (alpha 0, since SubsamplingScaleImageView decodes only what it draws); `PageSlots` (pure) says which pages and keeps what is decoded. A turn swaps at once; a jump keeps the page you were on until the new one is ready. Measured on the emulator: about 35 MB for three 1988 x 3056 pages |
 | Comfort in a long session: how bright and warm a reader is drawn, a book's black page, the screen kept on while narrating | `ui/ScreenComfort` (pure; `dimAlpha` is also the player's brightness drag), kept for every reader by `settings/ComfortSettings`, drawn by `ui/ComfortLayerView` over the whole reader (the warmth multiplied in, so black stays black, then the dim) and changed in `reader/ComfortSheet`, the same glass sheet in every reader (#16, X3). Software only: the backlights are never touched |
 | The read-along dock and the sentence it reads | `reader/ReadAlongDock` (the prototype's glass dock: a line, "Read along · Following" over `ReadAlongDockText.time`, the jumps, the white Play, the speed, back to the sentence) and `reader/ReadAlongGlow` (the sentence as Readium's highlight template: a wash of the Books accent with a glow) |
@@ -695,7 +695,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | The seek step of every transport: the player's ±, the audiobook's, the read-along dock's | `PlaybackSettings.seekSeconds` (5, 10, 15 or 30; Settings › Playback) |
 | How fast a book is heard, kept per book | `settings/ListeningSettings` (an audiobook and its read-along edition share it); the speeds `Listening.SPEEDS` (0.75× to 3×, `nextSpeed` for the dock's pill), their words `PlayerLabels.rate` ("1×", "1.25×") |
 | One sound at a time: video, a book's narration, an audiobook | `reader/AudioArbiter` (pure: a start returns what must pause) through `reader/AudioHandoff`: each player reports `started` and `stopped`, the reading players register how they pause, and the video service's only part is reporting from its `onIsPlayingChanged`; it is paused through its own `PlaybackService.pause` |
-| An audiobook that plays on without its screen (#16, A1) | `reader/ReadingAudio` (open, play, seek within and across parts, the parts, speed, sleep; `state` for its screen and the mini player; the place every 10 seconds and on pause in this device's `audiobook_positions`) on `reader/ReadingAudioService` (its own ExoPlayer and media session, id `reading-audio`, apart from the video service; foreground while it plays, a wake lock with the screen off). Its screen is `AudiobookScreen`, which only shows and steers it; Stop takes it off, its place kept. On Glass (#11) the screen is the book page and the read-along dock together: the square cover large beside `ReadingBookFacts.listeningEyebrow` ("Audiobook · Book 2 · Mistborn"), the title and `listeningLine` ("Brandon Sanderson · read by Michael Kramer"), on its own ambient page of the cover (a full-screen screen hides the app's); the dock's glass player under them and the tools as glass pills. A part's name drops its file's extension (`AudiobookArchive.partLabel`) |
+| An audiobook that plays on without its screen (#16, A1) | `reader/ReadingAudio` (open, play, seek within and across parts, the parts, speed, sleep; `state` for its screen and the mini player; the place every 10 seconds and on pause in this device's `audiobook_positions`) on `reader/ReadingAudioService` (its own ExoPlayer and media session, id `reading-audio`, apart from the video service; foreground while it plays, a wake lock with the screen off). Its screen is `AudiobookScreen`, which only shows and steers it; Stop takes it off, its place kept. The screen (#11) is the book page and the read-along dock together: the square cover large beside `ReadingBookFacts.listeningEyebrow` ("Audiobook · Book 2 · Mistborn"), the title and `listeningLine` ("Brandon Sanderson · read by Michael Kramer"), on its own ambient page of the cover (a full-screen screen hides the app's); the dock's glass player under them and the tools as glass pills. A part's name drops its file's extension (`AudiobookArchive.partLabel`) |
 | The audiobook playing, while you browse | `nav/MiniPlayerView` in the top bar after the tabs (Ⓐ or a tap opens its screen, Ⓧ or its symbol plays and pauses; hidden on that screen and when nothing plays), fed by `HubActivity.showListening` |
 | Listening: the time left, the sleep timer | `reader/Listening` (`heard`, `partLeft`, `bookLeft`: as heard at the speed playing); `SleepTimer` (minutes or the end of the part, counting only while it plays, fading over its last `FADE_MS`; a button while it fades carries on) and `SmartRewind.afterSleep` (back over what faded); words from `PlayerLabels.timeLeft` / `sleep` / `sleepChoice` |
 | A comic's pages as pictures: the scrubber's preview, the Pages grid (#16, C4) | The hub's thumbnail, never the scan: `HubApi.readingPublicationThumbUrl` (`HubEndpoints.readingPublicationThumb`, `/pages/{n}/thumb?w=`, 64 to 512) at `PageGrid.THUMB_WIDTH` through `Artwork.bind`, so the preview's thumbnail is the grid's; `reader/PageGrid` (pure: `columns`, `move`, `page`, its own key row `HINTS`) and `reader/PageGridView` (seven across, the cursor drawn on the cell, the page you are on labelled; Ⓐ opens, Ⓑ back to the controls) |
@@ -718,15 +718,14 @@ Most of these exist because several screens had drifted copies of the same thing
 | A library on the Glass Library root | `screens/library/LibraryTileView` (the picture, soft and dimmed, the hub's `fan` of posters, a glass label); where the posters sit, what the label and the root's line say: `LibraryTiles` (`slots`, `fan`, `summary`, `kindLabel`). The root is `LibraryRootView`, on both sides (Movies and TV adds search and Favourites); a tile pushes `LibraryFolderScreen` or the Books library's page |
 | The order libraries are shown in, and changing it (#15) | The hub's, never sorted here. `screens/library/LibraryOrder` (`move`, `step`, `slotAt`, `inOrder` for a list kept beside the tiles, such as the capsule on a library's page), `LibraryArrangeSession` (what is lifted, what the hub has), `LibraryOrderQueue` (one save out, the newest waiting) and `LibraryOrderChanges` (a screen that drew an older order reads it again); `LibraryOrderEditor` shows a move at once, saves it with `PUT /v1/library/order`, puts it back and says why when a save fails, and for A to Z sends `[]` and reads the hub's order again |
 | Libraries that can be put in order: tiles or rows, and the grip that says so | `screens/library/LibraryArrangeGrid` (`Style.TILES` three across, `Style.ROWS` one under another; a new order slides each to its place; the grip, two columns of dots, always at a row's end and in a tile's corner while arranging, lit on the lifted one; tiles wiggle while arranging and a fixed one such as reading lists stays still without a grip; a pointer drags a row by its grip, a tile after a hold or at once while arranging) in `LibraryRootView` (Arrange beside the heading, Done while arranging; Ⓐ picks up and drops, the D-pad moves, Ⓑ puts a lifted tile back and otherwise finishes, Ⓨ A to Z) and Settings › Libraries (`LibraryOrderSection`: Ⓐ picks up and drops, the D-pad moves, Ⓑ puts back). No arrow buttons |
-| Glass or Classic | `settings/LookSettings` (`Look.fromStored`: Glass unless Classic is stored; `Look.dark`: Glass is always dark) and `Theme.isGlass(context)`. A change rebuilds the Activity, as dark and light do. Classic goes once #11 is finished |
 | The Glass page: which artwork it shows | A screen's `pageArtwork` (the focused card, a title's backdrop, the cover in focus, what is playing), re-read on focus changes, `showCurrent` and `ScreenHost.pageArtworkChanged`; `nav/PageArtwork` (`next`: none keeps the last, `title`); `ScreenHost.prefetchArtwork` for the cards a row binds. `HubActivity.showArtwork` feeds `AmbientLayerView`, the bars' `setPalette` and `GlassPage` |
-| The Glass page's colours, for what is drawn over it | `ui/glass/GlassPage`: `palette(context)` for a panel opening now; `follow(view) { palette -> … }` for glass that stays on screen (the bars, a Details pill, a play disc, a day chip), held only while the view is attached. `Theme.onGlass(colors)` decides, so the player's video palette stays solid |
-| Artwork fading into the Glass page | `ui/glass/FadedImageView`: `stops` (opacity down its height) and a `shade` for words over it, both inside its own layer, so neither ends in a line; `HERO` / `HERO_SHADE` for Home's hero, `TITLE` / `TITLE_SHADE` for a title page's backdrop (`DetailHeaderView(glass = true)`) |
-| A Glass tile or poster | `LandscapeCardView(glass = true)` and `EpisodeCardView(glass = true)` (11dp corners, 3dp ring and `ui/glass/GlassStillMarks`: the white progress bar inside the still, the accent tick, the glass play disc on focus; an episode's UP NEXT at its top left) and `PosterCardView(glass = true)` (a white count pill, an accent tick, where a title stands as a glass chip at the top left, `setDayChip`, and with captions the title on one bold line over the year; a book's cover keeps its words on the page, an audiobook's is square, a comic's kind sits on a dark pill); Discover's featured card is `DiscoverFeatureCardView(glass = true)`. Home, title pages and Discover opt in, other screens at their milestone |
-| How far in, drawn inside a picture (a still, a poster, a cover, a book also being read) | `ui/glass/GlassProgressBar`: a 4dp white bar on a faint track with round ends, hidden at nothing; the accent where a book is being read. `GlassStillMarks` and `PosterCardView(glass = true)` carry it |
+| The Glass page's colours, for what is drawn over it | `ui/glass/GlassPage`: `palette(context)` for a panel opening now; `follow(view) { palette -> … }` for glass that stays on screen (the bars, a Details pill, a play disc, a day chip), held only while the view is attached. The player's controls take `Theme.onVideo`, which stays solid |
+| Artwork fading into the Glass page | `ui/glass/FadedImageView`: `stops` (opacity down its height) and a `shade` for words over it, both inside its own layer, so neither ends in a line; `HERO` / `HERO_SHADE` for Home's hero, `TITLE` / `TITLE_SHADE` for a title page's backdrop (`DetailHeaderView`) |
+| A Glass tile or poster | `LandscapeCardView` and `EpisodeCardView` (11dp corners, 3dp ring and `ui/glass/GlassStillMarks`: the white progress bar inside the still, the accent tick, the glass play disc on focus; an episode's UP NEXT at its top left) and `PosterCardView` (a white count pill, an accent tick, where a title stands as a glass chip at the top left, `setDayChip`, and with captions the title on one bold line over the year; a book's cover keeps its words on the page, an audiobook's is square, a comic's kind sits on a dark pill); Discover's featured card is `DiscoverFeatureCardView` |
+| How far in, drawn inside a picture (a still, a poster, a cover, a book also being read) | `ui/glass/GlassProgressBar`: a 4dp white bar on a faint track with round ends, hidden at nothing; the accent where a book is being read. `GlassStillMarks` and `PosterCardView` carry it |
 | A row's heading on Glass, with a quiet count after it ("Also reading 2", "Volume 1961 147 issues") | `ui/glass/GlassHeading` (`create`, `text`); the caller sets the padding that lines it up |
 | A title's pipeline as Glass chips | `screens/discover/PipelineChip` (`Tone.of(state)`: done in the accent, the stage under way amber with its dot pulsing, failed or stuck red, the rest waiting) |
-| The request form | `ui/FormOverlay` over `state/FormModel`; `glass = true` draws it into the shared side sheet, a heading where each part begins (`FormRow.section`), "‹ value ›" on a row that steps with left and right, Request white at the foot |
+| The request form | `ui/FormOverlay` over `state/FormModel`, drawn into the shared side sheet: a heading where each part begins (`FormRow.section`), "‹ value ›" on a row that steps with left and right, Request white at the foot |
 | A Jellyfin profile's tile | `screens/home/ProfileAvatar` (`colors`: the profiles in alphabetical order take the palette, so four profiles get four colours; `initial`); Glass's "Who is watching?" is `ProfilePickerView`, a centred `SidePanelView` (`centredWidthDp`, `wrapsHeight`, `centreHeading`) |
 | Words and icons on a white pill (the selected tab, the status pill, a play mark) | `PocketColors.inverseText`, never `background`: Glass's page colour paints nothing |
 | Hub: an artwork's Glass colours | `internal/artcolor` (`Analyze` → `Palette`) behind `GET /v1/img/colors`; `artworkColorStore` keys a picture without its width and keeps `artwork-colors.json` |
@@ -907,22 +906,21 @@ with it removed via `dev.sh keys off`. **The two runs were identical.**
 
 ### Library, as built
 
-In Glass (#11) the Library (Movies and TV) opens on the prototype's root: a glass search field and
+The Library (Movies and TV, #11) opens on the prototype's root: a glass search field and
 Favourites, "Your libraries" over how many titles they hold, and a 16:10 tile per library, three
 across. Each tile is the library's picture, blurred and dimmed, with up to three of the hub's `fan`
 posters leaning across its top right (the day's pick at the back on the right) and a glass label
 naming it; Marvel TV, a library of one title, is the back poster alone. A tile, or Favourites, pushes
 the library's page: a capsule of every library and Favourites that switches in place, a round
 search, Sort and its direction, and the seven-column grid of glass posters with their counts or
-ticks. Classic keeps the chips and grid below.
+ticks.
 
-`GET /v1/library` supplies the server folders in Jellyfin's order. The selector renders three
-large bounded square cards across, which remain inside the content area even with the rail expanded.
-An explicit collection image wins; otherwise each card uses a title
+`GET /v1/library` supplies the server folders in Jellyfin's order.
+An explicit collection image wins; otherwise each tile uses a title
 poster selected deterministically from that folder for the media PC's current local day. On this Jellyfin
 10.11.8 install, generated view collages live under `metadata/library`, while the explicit Marvel
 images are `folder.jpg` / `folder.webp` under the configured library root; `/Items/{id}/Images`
-provides that distinction. For the Glass tiles each view also carries `fan` and `total` (#13). `fan`
+provides that distinction. For the tiles each view also carries `fan` and `total` (#13). `fan`
 holds up to three posters from places spread through the library (the day's pick first, the others
 kept apart so one franchise cannot fill a fan), skipping any without a poster. `total` counts the library's films and
 series. A banner library fans its contents too. Both apps read these rather than choosing their own.
@@ -930,7 +928,7 @@ Libraries are listed A to Z by default, on both sides. A person can arrange them
 on the hub per Jellyfin profile so every device shows it (#15). The apps show the hub's order and
 send a new one with `PUT /v1/library/order`; they never sort libraries themselves.
 
-On the Pocket both Glass roots arrange in place. Arrange beside "Your libraries" (or "Your reading
+On the Pocket both roots arrange in place. Arrange beside "Your libraries" (or "Your reading
 libraries") starts it, and so does holding a tile; the tiles wiggle, each shows the grip in its top
 corner, and Arrange reads Done. Ⓐ picks up the tile in focus, which stands still and grows with its
 grip lit, the D-pad moves it a place or a row with the others sliding out of its way, Ⓐ puts it down
@@ -946,8 +944,8 @@ capsule on a library's page follows the root. uiautomator cannot dump the screen
 wiggle (it waits for the animations to settle), so a scripted check reads a screenshot there.
 
 Opening a folder uses `GET /v1/library/{viewId}/items?page=&sort=&order=` in 60-item pages. The
-poster grid derives its span count from the measured content width: seven columns with the compact
-rail, six with the expanded rail, and fewer only on a smaller window. Y opens a parameter menu (name, release date, date added,
+poster grid derives its span count from the measured content width: seven columns on the Pocket,
+fewer only on a smaller window. Y opens a parameter menu (name, release date, date added,
 year, parental rating, community/critic rating, runtime, last played) followed by ascending/descending.
 Sorting happens in Jellyfin so every page shares the same order. Library cards suppress the redundant
 Partial/In library badges while retaining watch progress and showing watched, favourite and unwatched-count
@@ -982,13 +980,13 @@ The adapter shapes were checked against Jellyfin 10.11.8 on this machine. In par
 `/Shows/{id}/Episodes` accepts the season ID and needs `isMissing=false` so an API-key caller does
 not receive virtual missing episodes.
 
-### Books in Glass (#11)
+### Books (#11)
 
 Books Home is the prototype's: the book being read at full cover size with the words beside its foot
 (`ContinueReadingView`), Resume reading gold and Details glass; the other books being read under it
 as glass rows two to a line, with their formats as glass chips; Your series as fans (`CoverFanView`);
 then rows of glass covers with their captions, comics with their kind pill. The page takes the colours
-of the cover in focus. A book's page is `DetailHeaderView(glass = true)` with `book` set: no backdrop,
+of the cover in focus. A book's page is `DetailHeaderView` with `book` set: no backdrop,
 the cover at the left (square for an audiobook, a series' fan in its place), the eyebrow
 (`ReadingBookFacts.eyebrow`) over the title, the formats as glass chips (missing ones dimmed), the bar
 in the accent, the main action gold and the toggles glass. A series' page adds its continue card; a
@@ -1007,14 +1005,13 @@ concurrently, measured at 99ms for all four. Trending now / Popular films / Popu
 Coming soon. Each row pages when focus gets within 6 cards of its end, so a row is effectively
 endless (upstream reports 58,798 pages of popular films).
 
-Card geometry is measured, not guessed: the usable area is 853x456dp, and after the navigation rail,
+Card geometry is measured, not guessed: the usable area is 853x456dp, and after the tab bar,
 hint bar, search field and status line there are ~340dp left. A row therefore has to fit inside
-~170dp for two to be visible at once, which is the Findroid look. `ROW_POSTER_DP = 118`,
-`ROW_CARD_DP = 82`; the search grid gets `GRID_POSTER_DP = 138` across 8 columns since it has no
-row labels. `PosterCardView` takes the poster height as a parameter and drops to smaller type
-and tighter padding below 170dp.
+~170dp for two to be visible at once, which is the Findroid look. A row's posters are
+`ROW_CARD_DP = 82` wide (82 x 123dp); search fills seven columns since it has no row labels. A
+poster's width decides its height, at 2:3.
 
-In Glass (#11) Discover is a glass capsule (Discover | Upcoming) beside a glass search pill, the
+Discover (#11) is a glass capsule (Discover | Upcoming) beside a glass search pill, the
 featured card (picture and "FEATURED · NOT IN YOUR LIBRARY"), then rows of caption-less 82 x 123dp
 posters with where each stands as a glass chip (In library, Partial, On the way, Requested, in the
 badge colours above); search is the dense grid with captions. The page takes the colours of the
@@ -1092,7 +1089,7 @@ Since the 2026-10 redesign, Home (media) is a hero for the focused card over row
 hero (`screens/home/HomeHeroView`, content from the pure `HomeHero`) changes the moment focus
 moves, from what the card already carries, and fills in the certification and runtime from
 `/v1/library/items/{id}` once focus rests for 220ms (cached per item). It has no overview, and
-every line keeps its place: the 180dp progress line is held open (empty) for an unstarted title
+every line keeps its place: the 120dp progress line is held open (empty) for an unstarted title
 and the buttons have a fixed position, so nothing moves as focus runs along a row. A two-line
 overview plus a progress line used to push Play under the first row. The focused row always
 rests at the top of the rows (`pinFocusedRows`), so the hero is one size on every row. An episode's hero
@@ -1124,16 +1121,16 @@ and hides rows and can add "From <library>", the newest 20 of one library. Empty
 hidden; a row the hub could not refresh keeps its place. The screen keeps its loaded rows and
 focused item across detail navigation and section switches.
 
-Continue Watching and Next Up use 16:9 cards (176dp) with the series title and
-`SxxEyy · episode title` under them; the other rows are caption-less posters (100 x 150dp),
+Continue Watching and Next Up use 16:9 tiles (186dp) with the series title and
+`SxxEyy · episode title` under them; the other rows are caption-less 82 x 123dp posters,
 since the hero names the focused one. A opens details and X plays or resumes, on any row.
 
-In Glass (#11) Home is the prototype's: a 204dp hero whose art runs under the bar and fades into
+Home is the prototype's (#11): a 204dp hero whose art runs under the bar and fades into
 the page through `FadedImageView` (solid to 40%, gone by 97%, the word shade inside the same
 layer), the eyebrow's code in the accent (`HeroContent.eyebrowMark`), Play as a white pill that
 names Next up's episode (`playAction`: "Play S2E1") beside a glass Details; rows from 204dp with
 Figtree bold titles, 186dp tiles and 82 x 123dp posters, Coming up's day on a glass chip, and no
-fades at the rows' edges. Classic keeps the sizes above.
+fades at the rows' edges.
 
 **Y / Profiles** opens the profile picker; the selection persists on the handheld and is sent as
 `X-Jellyfin-User`. The hub varies and keys Home and Library caches by that id. Changing profile
@@ -1196,7 +1193,7 @@ media version, audio, subtitles and Original/40/20/10/5/2 Mbps quality. The hub 
 streaming, HLS manifest rewriting, external subtitle extraction, ordered Jellyfin events,
 session ownership and 30-minute abandoned-session cleanup.
 
-In Glass (#11, GLASS_PLAN.md › Player) the player reports what is playing as the page's artwork (an
+The player (#11, GLASS_PLAN.md › Player) reports what is playing as the page's artwork (an
 episode its series' backdrop), so its glass takes that title's colours; over video the page keeps the
 colours it has until the new ones arrive. Every control but Play is that dark glass, Audio & subtitles and
 Chapters carry their icons, the timeline and its times sit in a frosted bar 14dp in from the edges
@@ -1269,8 +1266,8 @@ finds a format Media3 plus Jellyfin transcoding cannot handle well.
 
 ### Later custom theme packs
 
-Follow-system, Light and Dark modes are implemented, including Android night
-resource variants for every service logo used by Manage and Notifications.
+The app has one dark look since #20, with no light theme to follow, and the service logos are
+one set, drawn for the dark page.
 The later work here is user-defined palette packs:
 
 Settings picks a **pack of two or three seed colours** rather than a fixed light/dark pair:
@@ -1281,7 +1278,7 @@ This fits the project's conventions almost too neatly: `ThemePack.derive(accent,
 contrast?) -> PocketColors` is a pure function of three ints, so the derivation — surface
 tints, muted text, the focus fill, badge colours, and a *contrast check* that text stays
 readable on every generated surface — is unit-tested on the JVM with no device. `Theme` then
-just picks the stored pack instead of a hardcoded LIGHT/DARK.
+just picks the stored pack instead of the fixed dark palette.
 
 `KeyPressTint.pressed()` and `isDarkSurface()` already do the "move a fraction of the
 remaining distance toward white or black" trick that surface derivation needs, so the maths is

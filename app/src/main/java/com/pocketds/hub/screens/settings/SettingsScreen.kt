@@ -33,12 +33,9 @@ import com.pocketds.hub.settings.AccentPreset
 import com.pocketds.hub.settings.DomainPreferences
 import com.pocketds.hub.settings.HomeRowSettings
 import com.pocketds.hub.settings.HubSettings
-import com.pocketds.hub.settings.Look
-import com.pocketds.hub.settings.LookSettings
 import com.pocketds.hub.settings.NotificationSettings
 import com.pocketds.hub.settings.PlaybackSettings
 import com.pocketds.hub.settings.SubtitleSettings
-import com.pocketds.hub.settings.ThemeSettings
 import com.pocketds.hub.state.ContentMode
 import com.pocketds.hub.ui.AppIcon
 import com.pocketds.hub.ui.BlobSegmentedView
@@ -70,8 +67,7 @@ import kotlinx.coroutines.launch
  * and the chosen section's cards on the right. Moving down the sections shows
  * each one as you pass; Right goes into it.
  *
- * Appearance picks the look (Glass, or Classic with its light and dark
- * themes) and a colour per media type, Home orders its
+ * Appearance picks a colour per media type, Home orders its
  * rows, Libraries orders the libraries on both sides for every device (#15),
  * Playback holds what used to be in the player (skip distance, the next
  * episode, intros), and Subtitles has a live preview drawn by the player's own
@@ -107,27 +103,21 @@ class SettingsScreen(
         this.host = host
         colors = Theme.colors(host.viewContext)
         libraryOrder = api?.let { LibraryOrderSection(host, it, colors, ringVisible, scope, saveScope, ::render) }
-        // Glass (#11): the prototype's Settings, a 150dp list of places with their icons beside glass cards.
-        val glass = Theme.onGlass(colors)
+        // The prototype's Settings (#11): a 150dp list of places with their icons beside glass cards.
         val root = FrameLayout(host.viewContext).apply { setBackgroundColor(colors.background) }
         val columns = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.HORIZONTAL
-            if (glass) setPadding(dp(22), dp(8), dp(22), 0) else setPadding(dp(24), dp(10), dp(24), 0)
+            setPadding(dp(22), dp(8), dp(22), 0)
         }
         val left = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(context).apply {
                 text = "Settings"; setTextColor(colors.primaryText)
-                if (glass) {
-                    textSize = 18f; typeface = Type.display(context, 800); includeFontPadding = false
-                    setPadding(dp(6), dp(4), 0, dp(10))
-                } else {
-                    typeRole(Type.Role.SCREEN)
-                    setPadding(dp(4), dp(2), 0, dp(12))
-                }
+                textSize = 18f; typeface = Type.display(context, 800); includeFontPadding = false
+                setPadding(dp(6), dp(4), 0, dp(10))
             })
             nav = SideNavView(context, colors, ringVisible).apply {
-                setItems(SECTIONS.map { SideNavView.Item(it.first, it.second, if (glass) SECTION_ICONS[it.first] else null) }, section)
+                setItems(SECTIONS.map { SideNavView.Item(it.first, it.second, SECTION_ICONS[it.first]) }, section)
                 onPick = { id ->
                     section = id
                     if (id == SECTION_LIBRARIES) libraryOrder?.load()
@@ -136,7 +126,7 @@ class SettingsScreen(
             }
             addView(nav, LinearLayout.LayoutParams(MATCH, WRAP))
         }
-        columns.addView(left, LinearLayout.LayoutParams(dp(if (glass) 150 else 178), MATCH).apply { marginEnd = dp(if (glass) 12 else 18) })
+        columns.addView(left, LinearLayout.LayoutParams(dp(150), MATCH).apply { marginEnd = dp(12) })
         pane = LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = false
@@ -248,14 +238,14 @@ class SettingsScreen(
 
     private fun card(tag: String? = null) = SettingsCard(host.viewContext, colors).also { card ->
         tag?.let { card.tag = it }
-        pane.addView(card, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(if (Theme.onGlass(colors)) 10 else 12) })
+        pane.addView(card, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(10) })
     }
 
     private fun blob(options: List<Pair<String, String>>, selected: String, tag: String, accent: Boolean = false,
                      onPick: (String) -> Unit) = BlobSegmentedView(host.viewContext, colors, ringVisible,
         if (accent) BlobSegmentedView.Style.ACCENT else BlobSegmentedView.Style.PILL).apply {
         this.tag = tag
-        if (Theme.onGlass(colors)) useGlassTrack() else trackColor = colors.background
+        useGlassTrack()
         setOptions(options.map { BlobSegmentedView.Option(it.first, it.second) }, selected)
         this.onPick = { id -> onPick(id); host.refreshHints() }
         onOptionFocused = { host.refreshHints() }
@@ -263,43 +253,25 @@ class SettingsScreen(
 
     // ---------------------------------------------------------- Appearance
 
+    /** A colour per side; the look is one, and always dark (#20). */
     private fun appearance() {
-        val context = host.viewContext
-        val look = LookSettings.get(context)
-        // A new look rebuilds the app, as dark and light do; Settings reopens here.
-        card().title("Look").hint(if (look == Look.GLASS)
-                "The page takes the colour of the artwork in focus, under panels of tinted glass. Always dark."
-            else "The look before Glass, with its own light and dark themes. It goes once Glass is finished.")
-            .body(blob(Look.entries.map { it.name to it.label }, look.name, "look") { id ->
-                LookSettings.set(context, Look.valueOf(id))
-                host.refreshAppearance()
-                render()
-            })
-        // Glass is always dark, so the theme is Classic's alone.
-        if (look == Look.CLASSIC) card().title("Theme").body(blob(listOf("DARK" to "Dark", "LIGHT" to "Light", "SYSTEM" to "Match the system"),
-            ThemeSettings.getMode(context).name, "theme") { id ->
-            ThemeSettings.setMode(context, ThemeSettings.Mode.valueOf(id))
-            host.refreshAppearance()
-            render()
-        })
         palette(ContentMode.MEDIA, "Movies and TV", "Play buttons, progress and the chosen tab while you watch")
         palette(ContentMode.BOOKS, "Books", "The same places while you read, so books feel like their own space")
     }
 
     private fun palette(mode: ContentMode, name: String, hint: String) {
         val context = host.viewContext
-        val dark = Theme.isDark(context)
         val chosen = DomainPreferences.accent(context, mode)
         val sample = TextView(context).apply {
             text = if (mode == ContentMode.BOOKS) "Continue reading" else "Play"
             textSize = 12f; textWeight(700); gravity = Gravity.CENTER
             setPadding(dp(14), 0, dp(14), 0)
             minimumHeight = dp(30)
-            setTextColor(chosen.ink(dark))
-            background = ThemeGradientDrawable().apply { cornerRadius = dp(15).toFloat(); setColor(chosen.color(dark)) }
+            setTextColor(chosen.ink)
+            background = ThemeGradientDrawable().apply { cornerRadius = dp(15).toFloat(); setColor(chosen.color) }
         }
         val bar = View(context).apply {
-            background = ThemeGradientDrawable().apply { cornerRadius = dp(3).toFloat(); setColor(chosen.color(dark)) }
+            background = ThemeGradientDrawable().apply { cornerRadius = dp(3).toFloat(); setColor(chosen.color) }
         }
         val track = FrameLayout(context).apply {
             background = ThemeGradientDrawable.rounded(dp(3).toFloat(), ColorUtils.setAlphaComponent(colors.primaryText, 0x1F))
@@ -307,7 +279,7 @@ class SettingsScreen(
         }
         val swatches = SwatchRowView(context, colors, ringVisible).apply {
             tag = "palette:${mode.stored}"
-            bind(AccentPreset.entries.map { SwatchRowView.Swatch(it.id, it.label, it.color(dark)) }, chosen.id)
+            bind(AccentPreset.entries.map { SwatchRowView.Swatch(it.id, it.label, it.color) }, chosen.id)
             onPick = { swatch ->
                 val preset = AccentPreset.fromStored(swatch.id)
                 DomainPreferences.setAccent(context, mode, preset)
