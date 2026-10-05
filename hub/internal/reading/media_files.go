@@ -99,11 +99,19 @@ func mediaError(fail walkFail) *MediaError {
 	}
 }
 
-// MediaFile is a verified audio file opened for reading, and nothing more: no
-// write, truncate or chmod is reachable from it, and the handle itself is
-// O_RDONLY.
+// ReadOnlyFile is what a verified media file can do: be read, sought, read at an
+// offset (a zip keeps its directory at the end of its file) and closed. Nothing
+// that changes it.
+type ReadOnlyFile interface {
+	io.ReadSeeker
+	io.ReaderAt
+	io.Closer
+}
+
+// MediaFile is a verified file opened for reading, and nothing more: no write,
+// truncate or chmod is reachable from it, and the handle itself is O_RDONLY.
 type MediaFile struct {
-	io.ReadSeekCloser
+	ReadOnlyFile
 	// Path is where the file is on the media PC, for the hub's own tools (the
 	// ffprobe runner). It never goes into a response, a header or a log line.
 	Path    string
@@ -119,7 +127,23 @@ type MediaFile struct {
 // Only regular audio files are accepted: by extension, before the disk is
 // touched, and as a regular file afterwards.
 func ResolveMediaFile(roots []config.MediaRemovalRoot, service, remote string) (MediaFile, error) {
-	if _, ok := AudioKindOf(remote); !ok {
+	return resolveFile(roots, service, remote, func(name string) bool {
+		_, ok := AudioKindOf(name)
+		return ok
+	})
+}
+
+// ResolveEPUBFile is the same twin for a read-along edition, which is an EPUB:
+// only the list of what may be opened differs. The hub reads its zip directory
+// and its SMIL, and copies its non-audio entries, and never changes it.
+func ResolveEPUBFile(roots []config.MediaRemovalRoot, service, remote string) (MediaFile, error) {
+	return resolveFile(roots, service, remote, func(name string) bool {
+		return strings.EqualFold(path.Ext(name), ".epub")
+	})
+}
+
+func resolveFile(roots []config.MediaRemovalRoot, service, remote string, accepts func(string) bool) (MediaFile, error) {
+	if !accepts(remote) {
 		return MediaFile{}, mediaError(walkWrongKind)
 	}
 	file, fail := walkMediaPath(roots, service, remote, walkRules{strictNames: true})
@@ -143,7 +167,7 @@ func openWalked(checked walked) (MediaFile, error) {
 		_ = file.Close()
 		return MediaFile{}, &MediaError{MediaRefused, "the file changed while it was being opened"}
 	}
-	return MediaFile{ReadSeekCloser: file, Path: checked.path, Size: info.Size(), ModTime: info.ModTime()}, nil
+	return MediaFile{ReadOnlyFile: file, Path: checked.path, Size: info.Size(), ModTime: info.ModTime()}, nil
 }
 
 // ListMediaFolder names the audio files directly inside a mapped folder, in

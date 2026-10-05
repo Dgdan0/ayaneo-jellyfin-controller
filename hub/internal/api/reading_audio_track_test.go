@@ -390,13 +390,13 @@ func TestAudioTrackSaysNothingOfTheHostInAnyHeaderOrBody(t *testing.T) {
 
 // closeCounter is a read-only handle that counts its being let go.
 type closeCounter struct {
-	io.ReadSeekCloser
+	readingdomain.ReadOnlyFile
 	closed *atomic.Int32
 }
 
 func (c *closeCounter) Close() error {
 	c.closed.Add(1)
-	return c.ReadSeekCloser.Close()
+	return c.ReadOnlyFile.Close()
 }
 
 // watchHandles makes every file the hub opens count its opening and its closing.
@@ -408,7 +408,7 @@ func (e *audioEnv) watchHandles() (opened, closed *atomic.Int32) {
 			return file, err
 		}
 		opened.Add(1)
-		file.ReadSeekCloser = &closeCounter{ReadSeekCloser: file.ReadSeekCloser, closed: closed}
+		file.ReadOnlyFile = &closeCounter{ReadOnlyFile: file.ReadOnlyFile, closed: closed}
 		return file, nil
 	}
 	return opened, closed

@@ -95,7 +95,7 @@ func TestResolveMediaFileOpensAVerifiedAudioFileForReadingOnly(t *testing.T) {
 
 	// The handle is O_RDONLY at the operating system, not only hidden behind an
 	// interface: even a caller that digs the file out cannot change it.
-	if writer, ok := file.ReadSeekCloser.(io.Writer); ok {
+	if writer, ok := file.ReadOnlyFile.(io.Writer); ok {
 		if _, err := writer.Write([]byte("XX")); err == nil {
 			t.Fatal("the handle accepted a write")
 		}
@@ -485,6 +485,89 @@ func TestAudioKindOfIsTheOneListOfWhatTheHubServes(t *testing.T) {
 	for _, name := range []string{"", "a", "a.", ".", "a.jpg", "a.mp3.exe", "a.m3u8", "a.zip", "a.txt", "a.cue", "mp3", "dir.mp3/file"} {
 		if kind, ok := AudioKindOf(name); ok {
 			t.Errorf("AudioKindOf(%q) = %+v, want none", name, kind)
+		}
+	}
+}
+
+// A read-along edition is an EPUB, and it is read through the same walk: only
+// the list of what may be opened differs.
+func TestResolveEPUBFileOpensOnlyEPUBsThroughTheSameWalk(t *testing.T) {
+	root := t.TempDir()
+	writeMediaFiles(t, root, map[string]string{
+		"Dark Matter/aligned.epub": "epub", "Dark Matter/UPPER.EPUB": "epub", "Dark Matter/a.mp3": "audio",
+		"Dark Matter/a.epub.exe": "exe", "Dark Matter/notes.txt": "text",
+	})
+	if err := os.MkdirAll(filepath.Join(root, "Dark Matter", "folder.epub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	roots := mediaRoots(root)
+
+	for _, name := range []string{"aligned.epub", "UPPER.EPUB"} {
+		file, err := ResolveEPUBFile(roots, "storyteller", "/library/Dark Matter/"+name)
+		if err != nil {
+			t.Errorf("%s refused: %v", name, err)
+			continue
+		}
+		file.Close()
+	}
+	for _, remote := range []string{
+		"/library/Dark Matter/a.mp3", "/library/Dark Matter/a.epub.exe", "/library/Dark Matter/notes.txt",
+		"/library/Dark Matter/folder.epub", "/library/Dark Matter/aligned.epub:stream", "/library/Dark Matter/../Dark Matter/aligned.epub",
+		"/library/Dark Matter/NUL.epub", "/library/Dark Matter/aligned.epub.",
+	} {
+		file, err := ResolveEPUBFile(roots, "storyteller", remote)
+		if err == nil {
+			file.Close()
+			t.Errorf("%s was accepted", remote)
+			continue
+		}
+		if got := failureOf(t, err); got != MediaRefused {
+			t.Errorf("%s = %v (%v), want a refusal", remote, got, err)
+		}
+	}
+	// And an audio resolver does not take an EPUB.
+	if file, err := ResolveMediaFile(roots, "storyteller", "/library/Dark Matter/aligned.epub"); err == nil {
+		file.Close()
+		t.Error("the audio twin opened an EPUB")
+	}
+	for _, test := range []struct {
+		remote string
+		want   MediaFailure
+	}{{"/library/Dark Matter/gone.epub", MediaMissing}, {"/other/x.epub", MediaUnmapped}} {
+		file, err := ResolveEPUBFile(roots, "storyteller", test.remote)
+		if err == nil {
+			file.Close()
+			t.Fatalf("%s was accepted", test.remote)
+		}
+		if got := failureOf(t, err); got != test.want {
+			t.Errorf("%s = %v, want %v", test.remote, got, test.want)
+		}
+	}
+}
+
+// A zip keeps its directory at the end of the file, so a verified file can be
+// read at an offset: a read-along edition's SMIL is read without reading its
+// audio.
+func TestMediaFileCanBeReadAtAnOffsetAndStillOnlyRead(t *testing.T) {
+	root := t.TempDir()
+	writeMediaFiles(t, root, map[string]string{"Book/a.mp3": "0123456789"})
+	file, err := ResolveMediaFile(mediaRoots(root), "storyteller", "/library/Book/a.mp3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	got := make([]byte, 4)
+	if n, err := file.ReadAt(got, 3); err != nil || n != 4 || string(got) != "3456" {
+		t.Fatalf("ReadAt = %q, %d, %v", got, n, err)
+	}
+	// Reading at an offset leaves the sequential position where it was.
+	rest, err := io.ReadAll(file)
+	if err != nil || string(rest) != "0123456789" {
+		t.Fatalf("sequential read after ReadAt = %q, %v", rest, err)
+	}
+	if writer, ok := file.ReadOnlyFile.(io.Writer); ok {
+		if _, err := writer.Write([]byte("XX")); err == nil {
+			t.Fatal("the handle accepted a write")
 		}
 	}
 }
