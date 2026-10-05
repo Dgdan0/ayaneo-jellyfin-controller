@@ -28,10 +28,14 @@ server:
   # this PC. They serve two things: confirmed reader-file deletion (the Hub
   # service needs write access for that) and streaming an audiobook's files
   # straight from disk, which only reads. Use library folders, never a drive
-  # root, and map every path Storyteller reports for its audiobooks.
+  # root, and map every path Storyteller reports for its audiobooks and for its
+  # read-along editions (its assets folder): the hub reads an edition's text and
+  # timing to say which sentence is spoken where, and to serve it without its
+  # audio, and never opens its audio.
   # Without mappings, reader deletion previews fail closed (Jellyfin continues
   # to use its own native deletion API) and an audiobook is answered 409
-  # audio_not_streamable, unmapped_root, so apps fall back to the ZIP.
+  # audio_not_streamable, unmapped_root, so apps fall back to the ZIP; a
+  # read-along edition is then not aligned (alignmentReason unmapped_root).
   media_removal_roots: []
   # - service: kavita
   #   remote: /reading
