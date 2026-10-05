@@ -363,7 +363,7 @@ class LibraryGridView(
         override fun getItemCount() = values.size
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ItemHolder {
             // The prototype's posters, filling the columns, with a title and year under each (#11).
-            val card = PosterCardView(parent.context, colors, POSTER_DP, glass = true).apply {
+            val card = PosterCardView(parent.context, colors).apply {
                 layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     setMargins(dp(5), dp(6), dp(5), dp(6))
                 }
@@ -396,7 +396,6 @@ class LibraryGridView(
         /** How many of a page's titles to ask the page colours for as it arrives. */
         private const val PREFETCH_COLOURS = 21
         private const val PAYLOAD_STATE = "state"
-        private const val POSTER_DP = 150f
         private const val TAG_HIT = -0x7fffffe2
         val SORT_FIELDS = listOf(
             "name" to "Name",

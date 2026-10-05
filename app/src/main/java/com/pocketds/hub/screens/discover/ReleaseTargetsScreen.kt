@@ -389,7 +389,7 @@ class ReleaseTargetsScreen(
         }
         override fun getItemCount() = values.size
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EpisodeHolder {
-            val card = EpisodeCardView(parent.context, colors, ringVisible, glass = true).apply {
+            val card = EpisodeCardView(parent.context, colors, ringVisible).apply {
                 layoutParams = RecyclerView.LayoutParams(dp(EpisodeCardView.WIDTH_DP), WRAP)
                     .apply { setMargins(dp(8), dp(8), dp(8), dp(8)) }
             }

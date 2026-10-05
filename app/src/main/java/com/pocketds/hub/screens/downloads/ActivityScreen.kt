@@ -376,7 +376,7 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
             attentionRows.addView(text(entry.title, 12f, colors.primaryText, 600).apply { setPadding(0, dp(8), 0, 0) })
             attentionRows.addView(text(entry.detail, 11f, colors.mutedText).apply { setLineSpacing(0f, 1.15f); setPadding(0, dp(2), 0, 0) })
             if (entry.transferId.isNotBlank()) {
-                attentionRows.addView(PillButton.create(checkNotNull(host).viewContext, colors, "Why is this stuck?", heightDp = 30f, glass = true).apply {
+                attentionRows.addView(PillButton.create(checkNotNull(host).viewContext, colors, "Why is this stuck?", heightDp = 30f).apply {
                     tag = "why:${entry.transferId}"
                     FocusDecorator.attach(this, ringVisible, false)
                     activateOnTap { host?.push(DownloadsScreen(api, ringVisible, targetTransferId = entry.transferId)) }

@@ -10,9 +10,6 @@ import kotlin.math.ceil
 object DetailLayout {
     const val POSTER_FOCUS_SCALE = 1.035f
     const val FOCUS_RING_DP = 2
-    /** A full-width backdrop behind the words, for anything with landscape art and the room for it. */
-    fun useHero(type: String, hasLandscapeArt: Boolean, widthDp: Int, fontScale: Float) =
-        type in setOf("movie", "episode", "series") && hasLandscapeArt && widthDp >= 600 && fontScale <= 1.2f
     fun focusClearance(sizeDp: Int) = ceil(sizeDp * (POSTER_FOCUS_SCALE - 1) / 2 + FOCUS_RING_DP + 2).toInt()
     fun posterCardHeight(imageDp: Int, fontScale: Float) = imageDp + ceil(40 * fontScale).toInt() + 12
     fun shelfHeight(cardHeightDp: Int) = cardHeightDp + 2 * focusClearance(cardHeightDp)

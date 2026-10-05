@@ -329,7 +329,6 @@ class HubActivity : AppCompatActivity(), ScreenHost {
                 overlay.addView(it, FrameLayout.LayoutParams(MATCH, MATCH))
             }
         }
-        val glass = ambient != null
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(colors.background)
@@ -342,7 +341,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         content = FrameLayout(this).apply { clipChildren = false }
         stage.addView(content, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        topBar = TopBarView(this, colors, ::ringVisible, sectionTitles.take(CONTENT_SECTION_COUNT), glass).apply {
+        topBar = TopBarView(this, colors, ::ringVisible, sectionTitles.take(CONTENT_SECTION_COUNT)).apply {
             onModeSelected = { mode ->
                 ContentModeSettings.set(this@HubActivity, mode)
                 refreshAppearance()
@@ -397,7 +396,7 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         })
         root.addView(stage, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
-        hintBar = HintBarView(this, colors, glass).apply {
+        hintBar = HintBarView(this, colors).apply {
             // A pointer user reaches every contextual action through the same
             // widget that labels it for a pad user.
             onAction = { action ->
@@ -519,15 +518,9 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         views.remove(screen)?.let { content.removeView(it) }
     }
 
-    override fun setTopBarOverArtwork(over: Boolean) {
-        val top = sections.stack().peek() as? Screen ?: return
-        topBar.setOverArtwork(over && top.drawsUnderTopBar)
-    }
-
     override fun refreshChrome() {
         val top = sections.stack().peek() as? Screen ?: return
         views[top]?.let { layoutScreen(top, it) }
-        topBar.setOverArtwork(top.drawsUnderTopBar)
     }
 
     /**
@@ -570,7 +563,6 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         view?.let { layoutScreen(top, it) }
         topBar.setCurrent(sections.current)
         topBar.setMode(if (top is ContentModeScreen) ContentModeSettings.get(this) else null)
-        topBar.setOverArtwork(top.drawsUnderTopBar)
         showListening()
         hintBar.setHints(top.hints())
         showArtwork()

@@ -45,9 +45,9 @@ class ContinueReadingView(
 
     /** Gold, as the Books side's main action is (PillButton.mainFace). */
     val resume: TextView = PillButton.create(context, colors, "Resume reading", AppIcon.BOOK, primary = true,
-        heightDp = BUTTON_DP, glass = true, side = com.pocketds.hub.state.ContentMode.BOOKS)
+        heightDp = BUTTON_DP, side = com.pocketds.hub.state.ContentMode.BOOKS)
     val details: TextView = PillButton.create(context, colors, "Details", AppIcon.INFO,
-        heightDp = BUTTON_DP, glass = true)
+        heightDp = BUTTON_DP)
     private val cover = ImageView(context)
     private val title = TextView(context)
     private val place = TextView(context)

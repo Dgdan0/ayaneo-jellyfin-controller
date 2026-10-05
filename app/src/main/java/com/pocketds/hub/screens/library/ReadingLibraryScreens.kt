@@ -490,7 +490,7 @@ class ReadingLibraryGridScreen(
         override fun getItemCount() = values.size
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): WorkHolder {
-            val card = PosterCardView(parent.context, colors, POSTER_DP, glass = true).apply {
+            val card = PosterCardView(parent.context, colors).apply {
                 // Seven columns of covers filling their cells, as the media grid's.
                 layoutParams = RecyclerView.LayoutParams(MATCH, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     setMargins(dp(5), dp(6), dp(5), dp(6))
@@ -528,9 +528,8 @@ class ReadingLibraryGridScreen(
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val MAX_COLUMNS = 7
         const val PREFETCH_AHEAD = 6
-        /** The prototype's Pocket grid, 22dp edges and 123dp covers. */
+        /** The prototype's Pocket grid, 22dp edges. */
         const val EDGE_DP = 22
-        const val POSTER_DP = 123f
         const val TAG_WORK = -0x7fffffdf
         const val VIEW_SERIES = "series"
         const val VIEW_AUTHORS = "authors"
@@ -796,9 +795,8 @@ class ReadingWorkScreen(
         host?.pageArtworkChanged()
     }
 
-    private fun hero(work: ReadingWork): View = DetailHeaderView(requireNotNull(host).viewContext, colors, ringVisible, glass = true).apply {
+    private fun hero(work: ReadingWork): View = DetailHeaderView(requireNotNull(host).viewContext, colors, ringVisible).apply {
         detailHeader = this
-        compact = true
         // The prototype's book page: the cover at the left, "BOOK 6 · RED RISING" over the title.
         book = true
         squareCover = work.kind == com.pocketds.hub.model.ReadingType.AUDIOBOOK
@@ -865,7 +863,7 @@ class ReadingWorkScreen(
                 }
                 // The Books side's main action, gold (PillButton.mainFace).
                 val primary: TextView = PillButton.create(context, colors, label, icon, primary = true,
-                    heightDp = PILL_DP, glass = true, side = ContentMode.BOOKS)
+                    heightDp = PILL_DP, side = ContentMode.BOOKS)
                 primary.apply {
                     contentDescription = "$label ${work.title}, $modeName"
                     attachActionFocus(this)
@@ -878,7 +876,7 @@ class ReadingWorkScreen(
                 hasChildLinks = true
             }
             if (formatMenu.options.size > 1) {
-                val changeFormat = PillButton.create(context, colors, "Change format", heightDp = PILL_DP, glass = true)
+                val changeFormat = PillButton.create(context, colors, "Change format", heightDp = PILL_DP)
                 changeFormat.apply {
                     contentDescription = "Change reading format or narration"
                     attachActionFocus(this)
@@ -1176,7 +1174,7 @@ class ReadingWorkScreen(
         if (!canReadPublication(work.kind, point.sourceItemId)) return null
         val label = if (point.number.isBlank()) "Continue reading" else "Continue · Book ${point.number}"
         return PillButton.create(requireNotNull(host).viewContext, colors, label, AppIcon.BOOK, primary = true,
-            heightDp = PILL_DP, glass = true, side = ContentMode.BOOKS).apply {
+            heightDp = PILL_DP, side = ContentMode.BOOKS).apply {
             contentDescription = "Continue reading ${point.title}"
             FocusDecorator.attach(this, ringVisible, scale = false)
             FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) { lastActionKey = point.sourceItemId; host?.refreshHints() } }
@@ -1312,7 +1310,7 @@ class ReadingWorkScreen(
         into.visibility = if (work.authorRefs.isEmpty() && work.seriesId.isBlank()) View.GONE else View.VISIBLE
         val context = requireNotNull(host).viewContext
         fun link(key: String, label: CharSequence, icon: AppIcon, description: String, open: () -> Unit) =
-            PillButton.create(context, colors, description, icon, heightDp = 26f, glass = true).apply {
+            PillButton.create(context, colors, description, icon, heightDp = 26f).apply {
                 text = label
                 textSize = 12f
                 contentDescription = description

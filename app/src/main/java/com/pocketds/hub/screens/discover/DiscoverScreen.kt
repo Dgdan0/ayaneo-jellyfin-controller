@@ -385,7 +385,7 @@ class DiscoverScreen(
         }
         root.addView(readingResultsGrid)
 
-        form = FormOverlay(context, colors, ringVisible, glass = true)
+        form = FormOverlay(context, colors, ringVisible)
         frame.addView(form, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
 
         flow = RequestFlow(
@@ -1022,8 +1022,8 @@ class DiscoverScreen(
     // ---- adapters ----------------------------------------------------------
 
     /** A poster; a film row's are caption-less, as the prototype's are. */
-    private fun newCard(parent: ViewGroup, posterHeight: Float, width: Int, captions: Boolean = true): PosterCardView =
-        PosterCardView(parent.context, colors, posterHeight, captions = captions, glass = true).apply {
+    private fun newCard(parent: ViewGroup, width: Int, captions: Boolean = true): PosterCardView =
+        PosterCardView(parent.context, colors, captions = captions).apply {
             layoutParams = RecyclerView.LayoutParams(width, WRAP).apply {
                 val m = Styler.dpInt(parent.context, if (captions) 5f else 6f)
                 setMargins(m, m, m, m)
@@ -1198,7 +1198,7 @@ class DiscoverScreen(
 
             override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
                 // The prototype's book cards, 82dp covers with their captions under them.
-                CardHolder(newCard(parent, ROW_POSTER_DP, Styler.dpInt(parent.context, ROW_CARD_DP)))
+                CardHolder(newCard(parent, Styler.dpInt(parent.context, ROW_CARD_DP)))
 
             override fun onBindViewHolder(holder: CardHolder, position: Int) {
                 bindReadingCard(holder.itemView as PosterCardView, items[position])
@@ -1218,7 +1218,7 @@ class DiscoverScreen(
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
-            CardHolder(newCard(parent, GRID_POSTER_DP, MATCH))
+            CardHolder(newCard(parent, MATCH))
 
         override fun onBindViewHolder(holder: CardHolder, position: Int) {
             bindReadingCard(holder.itemView as PosterCardView, items[position])
@@ -1411,7 +1411,7 @@ class DiscoverScreen(
             }
 
             override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
-                CardHolder(newCard(parent, ROW_POSTER_DP, Styler.dpInt(parent.context, ROW_CARD_DP), captions = false))
+                CardHolder(newCard(parent, Styler.dpInt(parent.context, ROW_CARD_DP), captions = false))
 
             override fun onBindViewHolder(holder: CardHolder, position: Int) {
                 bindCard(holder.itemView as PosterCardView, items[position])
@@ -1441,7 +1441,7 @@ class DiscoverScreen(
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardHolder =
-            CardHolder(newCard(parent, GRID_POSTER_DP, MATCH))
+            CardHolder(newCard(parent, MATCH))
 
         override fun onBindViewHolder(holder: CardHolder, position: Int) {
             bindCard(holder.itemView as PosterCardView, items[position])
@@ -1467,12 +1467,10 @@ class DiscoverScreen(
          * be visible at once -- which is the Findroid look and was the point of
          * shrinking these.
          */
-        const val ROW_POSTER_DP = 123f
         const val ROW_CARD_DP = 82f
         const val SHORTEST_ROW_DP = 160f
 
-        /** Search results get a little more room, since there is no row label. */
-        const val GRID_POSTER_DP = 150f
+        /** Search results fill their columns, since there is no row label. */
         const val SEARCH_COLUMNS = 7
         /** How many cards of each row to ask the page colours for when the rows arrive. */
         const val PREFETCH_COLOURS = 12

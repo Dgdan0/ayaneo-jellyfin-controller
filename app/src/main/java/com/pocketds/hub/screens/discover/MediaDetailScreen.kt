@@ -129,8 +129,7 @@ class MediaDetailScreen(
             clipChildren = false
             setPadding(0, 0, 0, Styler.dpInt(context, 40f))
         }
-        header = DetailHeaderView(context, colors, ringVisible, glass = true).apply {
-            topInsetDp = TopBarView.HEIGHT_DP.toInt()
+        header = DetailHeaderView(context, colors, ringVisible).apply {
             titleView.text = fallbackTitle
             overview.onChanged = { host.refreshHints() }
         }
@@ -193,8 +192,6 @@ class MediaDetailScreen(
         root.addView(status, LinearLayout.LayoutParams(WRAP, WRAP))
 
         scroller.addView(root)
-        // Once the backdrop has scrolled away, the tabs above need solid ground.
-        scroller.setOnScrollChangeListener { _, _, y, _, _ -> host.setTopBarOverArtwork(y < Styler.dpInt(context, 24f)) }
 
         // The scroller goes inside a frame so the request dialog can sit over
         // it. An AlertDialog would be a second window with its own focus rules
@@ -202,7 +199,7 @@ class MediaDetailScreen(
         val frame = FrameLayout(context)
         rootFrame = frame
         frame.addView(scroller, FrameLayout.LayoutParams(MATCH, MATCH))
-        form = FormOverlay(context, colors, ringVisible, glass = true)
+        form = FormOverlay(context, colors, ringVisible)
         frame.addView(form, FrameLayout.LayoutParams(MATCH, MATCH))
         picker = ChoiceOverlay(context, colors, ringVisible)
         frame.addView(picker, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -226,7 +223,6 @@ class MediaDetailScreen(
 
     override fun onShow() {
         visible = true
-        scroll.post { host?.setTopBarOverArtwork(scroll.scrollY < Styler.dpInt(scroll.context, 24f)) }
         load()
     }
 
@@ -481,7 +477,7 @@ class MediaDetailScreen(
 
     /** A pill like every detail page's; the first lines up with the title, its ring gap pulled back. */
     private fun actionButton(label: String, icon: AppIcon?, primary: Boolean = false, onClick: () -> Unit): View =
-        PillButton.create(actionRow.context, colors, label, icon, primary = primary, heightDp = 31f, glass = true).apply {
+        PillButton.create(actionRow.context, colors, label, icon, primary = primary, heightDp = 31f).apply {
             activateOnTap { onClick() }
             // No scale: these sit in a row and growing one shoves the next along.
             FocusDecorator.attach(this, ringVisible, scale = false)

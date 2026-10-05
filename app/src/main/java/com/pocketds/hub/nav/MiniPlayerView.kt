@@ -26,8 +26,7 @@ import com.pocketds.hub.ui.glass.GlassPanelDrawable
  */
 class MiniPlayerView(
     context: Context,
-    private val colors: PocketColors,
-    private val glass: Boolean
+    private val colors: PocketColors
 ) : LinearLayout(context) {
     var onOpen: () -> Unit = {}
     var onToggle: () -> Unit = {}
@@ -36,7 +35,7 @@ class MiniPlayerView(
     private var title = ""
     private val panel = GlassPanelDrawable(GlassColors.panel(ArtworkPalette.NEUTRAL), Styler.dp(context, 17f))
     private val symbol = PlayerIconButton(context, PlayerControlIcon.PLAY).apply {
-        setIconColor(if (glass) Color.WHITE else colors.primaryText, halo = false)
+        setIconColor(Color.WHITE, halo = false)
         isFocusable = false
         contentDescription = null
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -45,7 +44,7 @@ class MiniPlayerView(
     }
     private val words = TextView(context).apply {
         textSize = 12f
-        setTextColor(if (glass) Color.WHITE else colors.primaryText)
+        setTextColor(Color.WHITE)
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
         maxWidth = Styler.dpInt(context, 210f)
@@ -56,7 +55,7 @@ class MiniPlayerView(
         gravity = Gravity.CENTER_VERTICAL
         setPadding(Styler.dpInt(context, 6f), 0, Styler.dpInt(context, 14f), 0)
         visibility = GONE
-        background = if (glass) panel else ThemeGradientDrawable.rounded(Styler.dp(context, 17f), colors.cardSurface)
+        background = panel
         foreground = StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_focused),
                 ThemeGradientDrawable.rounded(Styler.dp(context, 17f), Color.TRANSPARENT, Styler.dpInt(context, 2f), colors.focusRing))
@@ -87,6 +86,6 @@ class MiniPlayerView(
     val toggleLabel: String get() = if (playing) "Pause" else "Play"
 
     fun setPalette(palette: ArtworkPalette) {
-        if (glass) panel.retint(GlassColors.panel(palette))
+        panel.retint(GlassColors.panel(palette))
     }
 }

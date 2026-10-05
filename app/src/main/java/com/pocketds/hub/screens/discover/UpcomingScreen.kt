@@ -193,7 +193,7 @@ class UpcomingScreen(
                 is HubResult.Ok -> { body = result.value; render(result.value) }
                 is HubResult.Failed -> {
                     status.showStatus(StatusText.failed(result.message, result.kind, hasData = false, canRetry = false), colors)
-                    details.addView(PillButton.create(checkNotNull(host).viewContext, colors, "Try again", AppIcon.REFRESH, glass = true).apply {
+                    details.addView(PillButton.create(checkNotNull(host).viewContext, colors, "Try again", AppIcon.REFRESH).apply {
                         FocusDecorator.attach(this, ringVisible, scale = false)
                         activateOnTap { load() }
                     })
@@ -336,7 +336,7 @@ class UpcomingScreen(
             .apply { setPadding(0, dp(4), 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         words.addView(label(LocalDate.parse(first.date).format(LONG_DAY) + " · " + timeLabel(group), 12f, QUIET_LINE)
             .apply { setPadding(0, dp(2), 0, 0) })
-        detailAction = PillButton.create(context, colors, "Open title", AppIcon.INFO, primary = true, heightDp = 31f, glass = true).apply {
+        detailAction = PillButton.create(context, colors, "Open title", AppIcon.INFO, primary = true, heightDp = 31f).apply {
             isEnabled = first.media.key.isNotBlank()
             FocusDecorator.attach(this, ringVisible, scale = false)
             activateOnTap { open(group) }

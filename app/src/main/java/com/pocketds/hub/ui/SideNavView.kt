@@ -9,7 +9,6 @@ import android.view.Gravity
 import android.view.animation.PathInterpolator
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.graphics.ColorUtils
 
 /**
  * A short vertical list of places, such as Settings' sections, with the same
@@ -35,9 +34,8 @@ class SideNavView(
     private val rect = RectF()
     private var blobTop = -1f
     private var animator: ValueAnimator? = null
-    private val glass = Theme.onGlass(colors)
-    private val rowDp = if (glass) GLASS_ROW_DP else ROW_DP
-    private val cornerDp = if (glass) 10 else 12
+    private val rowDp = ROW_DP
+    private val cornerDp = 10
 
     init {
         orientation = VERTICAL
@@ -51,16 +49,14 @@ class SideNavView(
         next.forEach { item ->
             val row = TextView(context).apply {
                 text = item.label
-                textSize = if (glass) 12f else 13.5f
+                textSize = 12f
                 textWeight(600)
                 gravity = Gravity.CENTER_VERTICAL
-                if (glass) {
-                    setPadding(dp(10), 0, dp(10), 0)
-                    item.icon?.let { icon ->
-                        compoundDrawablePadding = dp(10)
-                        setCompoundDrawables(AppIconDrawable(icon, GLASS_ICON).apply { setBounds(0, 0, dp(15), dp(15)) }, null, null, null)
-                    }
-                } else setPadding(dp(30), 0, dp(12), 0)
+                setPadding(dp(10), 0, dp(10), 0)
+                item.icon?.let { icon ->
+                    compoundDrawablePadding = dp(10)
+                    setCompoundDrawables(AppIconDrawable(icon, ICON).apply { setBounds(0, 0, dp(15), dp(15)) }, null, null, null)
+                }
                 contentDescription = item.label
                 Styler.makeFocusable(this)
                 setOnFocusChangeListener { _, focused ->
@@ -81,11 +77,7 @@ class SideNavView(
         val index = items.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: return
         selected = id
         rows.forEachIndexed { i, row ->
-            row.setTextColor(when {
-                i == index -> colors.primaryText
-                glass -> GLASS_QUIET
-                else -> colors.mutedText
-            })
+            row.setTextColor(if (i == index) colors.primaryText else QUIET)
             row.isSelected = i == index
         }
         val target = index * (dp(rowDp) + dp(GAP_DP)).toFloat()
@@ -112,13 +104,9 @@ class SideNavView(
         if (blobTop >= 0 && rows.isNotEmpty()) {
             val h = dp(rowDp).toFloat()
             paint.style = Paint.Style.FILL
-            paint.color = if (glass) GLASS_LIT else ColorUtils.blendARGB(colors.cardSurface, colors.primaryText, 0.06f)
+            paint.color = LIT
             rect.set(0f, blobTop, width.toFloat(), blobTop + h)
             canvas.drawRoundRect(rect, dp(cornerDp).toFloat(), dp(cornerDp).toFloat(), paint)
-            if (!glass) {
-                paint.color = colors.accent
-                canvas.drawCircle(dp(15).toFloat(), blobTop + h / 2, dp(4).toFloat(), paint)
-            }
         }
         super.dispatchDraw(canvas)
         rows.firstOrNull { it.isFocused && ringVisible() }?.let { row ->
@@ -134,13 +122,12 @@ class SideNavView(
 
     private companion object {
         const val MATCH = LayoutParams.MATCH_PARENT
-        const val ROW_DP = 40
+        /** The prototype's Pocket rows, 12sp in 7dp of padding. */
+        const val ROW_DP = 32
         const val GAP_DP = 4
-        /** Glass: the prototype's Pocket rows, 12sp in 7dp of padding. */
-        const val GLASS_ROW_DP = 32
-        /** Glass: the chosen place white at 14%, the others' words at 74% and icons at 85%. */
-        const val GLASS_LIT = 0x24FFFFFF
-        const val GLASS_QUIET = 0xBDFFFFFF.toInt()
-        const val GLASS_ICON = 0xD9FFFFFF.toInt()
+        /** The chosen place white at 14%, the others' words at 74% and icons at 85%. */
+        const val LIT = 0x24FFFFFF
+        const val QUIET = 0xBDFFFFFF.toInt()
+        const val ICON = 0xD9FFFFFF.toInt()
     }
 }

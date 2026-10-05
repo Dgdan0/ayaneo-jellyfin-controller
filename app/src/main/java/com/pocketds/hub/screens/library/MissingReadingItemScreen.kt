@@ -34,7 +34,7 @@ class MissingReadingItemScreen(private val api:HubApi,private val item:ReadingSe
     override fun onCreateView(host:ScreenHost,container:ViewGroup):View {
         this.host=host;val context=host.viewContext;val colors=Theme.colors(context)
         val root=FrameLayout(context).apply {setBackgroundColor(colors.background)}
-        header=DetailHeaderView(context,colors,ring,glass=true).apply {
+        header=DetailHeaderView(context,colors,ring).apply {
             book = true
             squareCover = item.kind == ReadingType.AUDIOBOOK
             eyebrowView.text = listOfNotNull(item.number.takeIf(String::isNotBlank)?.let { "Book $it" }, "Not in your library").joinToString(" · ")
@@ -45,7 +45,7 @@ class MissingReadingItemScreen(private val api:HubApi,private val item:ReadingSe
             bindArtwork("book",null,item.artwork.takeIf(String::isNotBlank)?.let(api::imageUrl),Artwork.loader(api, context))
         }
         // The Books side's main action, gold (PillButton.mainFace).
-        button=PillButton.create(context,colors,"Find this book",AppIcon.SEARCH,primary=true,heightDp=31f,glass=true,
+        button=PillButton.create(context,colors,"Find this book",AppIcon.SEARCH,primary=true,heightDp=31f,
             side=com.pocketds.hub.state.ContentMode.BOOKS)
             .apply { FocusDecorator.attach(this,ring,scale=false);activateOnTap(::search) }
         header.actions.addView(button, LinearLayout.LayoutParams(-2, -2).apply {

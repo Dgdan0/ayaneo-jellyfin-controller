@@ -642,7 +642,7 @@ class HomeScreen(
                         }
                     }
                 } else {
-                    PosterCardView(parent.context, colors, POSTER_DP, captions = false, glass = true).apply {
+                    PosterCardView(parent.context, colors, captions = false).apply {
                         layoutParams = RecyclerView.LayoutParams(dp(POSTER_CARD_DP), WRAP).apply {
                             setMargins(margin, margin, margin, margin)
                         }
@@ -703,7 +703,6 @@ class HomeScreen(
         const val EDGE_DP = 22
         const val TILE_DP = 186
         const val POSTER_CARD_DP = 82
-        const val POSTER_DP = 123f
         /** A landscape row: its heading, a 16:9 tile and its caption. */
         const val SHORTEST_ROW_DP = 150f
         /**

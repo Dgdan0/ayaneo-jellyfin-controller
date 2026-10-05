@@ -85,11 +85,11 @@ class ReadingDetailScreen(
         requested = requestSeriesId > 0
         colors = Theme.colors(context)
         val loader = Artwork.loader(api, context)
-        header = DetailHeaderView(context, colors, ringVisible, glass = true).apply {
+        header = DetailHeaderView(context, colors, ringVisible).apply {
             book = true
             squareCover = item.contentType == ReadingType.AUDIOBOOK
             eyebrowView.text = eyebrow()
-            compact=true;titleView.text=item.title
+            titleView.text=item.title
             metadataView.text=buildList {
                 if(item.author.isNotBlank())add(item.author)
                 if(item.year>0)add(item.year.toString())
@@ -105,7 +105,7 @@ class ReadingDetailScreen(
             val label = if (requested && releaseTargets.isNotEmpty()) "Choose release" else if (requested) "Open Transfers" else "Find a download"
             // The Books side's main action, gold (PillButton.mainFace).
             requestButton=com.pocketds.hub.ui.PillButton.create(context, colors, label, com.pocketds.hub.ui.AppIcon.DOWNLOAD,
-                primary = true, heightDp = 31f, glass = true, side = com.pocketds.hub.state.ContentMode.BOOKS).apply {
+                primary = true, heightDp = 31f, side = com.pocketds.hub.state.ContentMode.BOOKS).apply {
                 contentDescription=if (requested && releaseTargets.isNotEmpty()) "Choose release for ${item.title}" else if (requested) "Open Transfers for ${item.title}" else "Choose how to download ${item.title}"
                 FocusDecorator.attach(this,ringVisible,scale=false)
                 activateOnTap {
@@ -134,7 +134,7 @@ class ReadingDetailScreen(
             FrameLayout.LayoutParams(MATCH, MATCH)
         )
         // The form is the shared side sheet, as a film's request is.
-        form = FormOverlay(context, colors, ringVisible, glass = true, side = com.pocketds.hub.state.ContentMode.BOOKS)
+        form = FormOverlay(context, colors, ringVisible, side = com.pocketds.hub.state.ContentMode.BOOKS)
         frame.addView(form, FrameLayout.LayoutParams(MATCH, MATCH))
         seriesForm = ReadingSeriesSelectionOverlay(
             context, colors, ringVisible, loader, api::imageUrl

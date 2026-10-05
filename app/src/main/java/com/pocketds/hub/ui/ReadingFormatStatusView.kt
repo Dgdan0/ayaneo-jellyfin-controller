@@ -11,39 +11,19 @@ import com.pocketds.hub.screens.library.FormatReadiness
 import com.pocketds.hub.screens.library.ReadingFormatStatus
 
 /** Information, never actions. Each format is one accessibility group, not a pad stop. */
-class ReadingFormatStatusView(context: Context, private val colors: PocketColors) : LinearLayout(context) {
-    private val glass = Theme.onGlass(colors)
+class ReadingFormatStatusView(context: Context) : LinearLayout(context) {
     init { orientation=HORIZONTAL; isFocusable=false; clipChildren=false }
     fun bind(values: List<ReadingFormatStatus>) {
         removeAllViews()
         visibility=if(values.isEmpty()) GONE else VISIBLE
-        if (glass) return values.forEach(::glassChip)
-        values.forEach { format ->
-            val color=if(format.readiness==FormatReadiness.READY) colors.accent else colors.mutedText
-            val group=LinearLayout(context).apply {
-                orientation=HORIZONTAL; gravity=Gravity.CENTER_VERTICAL; minimumHeight=dp(40)
-                isFocusable=false; isClickable=false; importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_YES
-                contentDescription="${format.label}, ${format.readiness.description}"
-            }
-            group.addView(ImageView(context).apply {
-                setImageDrawable(AppIconDrawable(when(format.kind){"audiobook"->AppIcon.HEADPHONES;"readaloud"->AppIcon.READ_ALONG;else->AppIcon.BOOK},color))
-                importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            },LayoutParams(dp(24),dp(24)))
-            group.addView(TextView(context).apply { text=format.label; textSize=12f; setTextColor(color)
-                importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            },LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart=dp(8) })
-            if(format.readiness==FormatReadiness.PENDING) group.addView(TextView(context).apply {
-                text=" ·"; setTextColor(color); importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            })
-            addView(group,LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd=dp(22) })
-        }
+        values.forEach(::chip)
     }
     /**
-     * Glass: the prototype's format chip (`.fmt`), a pill of the page's glass
-     * with the format's icon and name; one that is not there is dimmed, and
-     * one on its way says so with a dot.
+     * The prototype's format chip (`.fmt`), a pill of the page's glass with the
+     * format's icon and name; one that is not there is dimmed, and one on its
+     * way says so with a dot.
      */
-    private fun glassChip(format: ReadingFormatStatus) {
+    private fun chip(format: ReadingFormatStatus) {
         addView(LinearLayout(context).apply {
             orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, 999f))

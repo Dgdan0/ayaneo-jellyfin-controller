@@ -36,7 +36,7 @@ class PosterBrowsingLayoutTest {
                                 setPadding(dp(12),dp(12),dp(12),dp(12))
                                 adapter=object:androidx.recyclerview.widget.RecyclerView.Adapter<Holder>() {
                                     override fun getItemCount()=5
-                                    override fun onCreateViewHolder(parent:android.view.ViewGroup,type:Int)=Holder(PosterCardView(activity,Theme.colors(activity),150f).apply {
+                                    override fun onCreateViewHolder(parent:android.view.ViewGroup,type:Int)=Holder(PosterCardView(activity,Theme.colors(activity)).apply {
                                         layoutParams=androidx.recyclerview.widget.RecyclerView.LayoutParams(dp(104),-2).apply {setMargins(dp(8),dp(8),dp(8),dp(8))}
                                         (getChildAt(1) as TextView).text="A title with two lines"
                                         FocusDecorator.attach(this,{true})
@@ -84,7 +84,7 @@ class PosterBrowsingLayoutTest {
                     cards.clear()
                     grid=PosterGridLayout(activity).apply { setPadding(dp(8),dp(12),dp(8),dp(16)) }
                     repeat(count) { index ->
-                        val card=PosterCardView(activity,Theme.colors(activity),150f)
+                        val card=PosterCardView(activity,Theme.colors(activity))
                         (card.getChildAt(1) as TextView).text="A long movie title number ${index+1}"
                         FocusDecorator.attach(card,{true})
                         grid.addView(card,GridLayout.LayoutParams().apply {

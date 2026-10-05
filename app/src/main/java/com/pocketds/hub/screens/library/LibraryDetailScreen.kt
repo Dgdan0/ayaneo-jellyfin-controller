@@ -148,12 +148,12 @@ class LibraryDetailScreen(
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL; clipChildren = false
                 // The prototype's title page (#11).
-                header = DetailHeaderView(context, colors, ringVisible, glass = true).apply { topInsetDp = TopBarView.HEIGHT_DP.toInt() }
+                header = DetailHeaderView(context, colors, ringVisible)
                 heading = header.titleView; heading.text = fallbackTitle
                 originalTitle = header.subtitleView; meta = header.metadataView; progress = header.stateView
                 overview = header.overview; actions = header.actions
                 playAction = PillButton.create(context, colors, "Play", AppIcon.PLAY, primary = true,
-                    heightDp = PILL_DP, glass = true).apply {
+                    heightDp = PILL_DP).apply {
                     tag = ACTION_PLAY
                     FocusDecorator.attach(this, ringVisible, scale = false)
                     FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) scroll.smoothScrollTo(0, 0); host.refreshHints() }
@@ -164,7 +164,7 @@ class LibraryDetailScreen(
                 downloadAction = actionButton("Download", ACTION_DOWNLOAD)
                 moreAction = actionButton("More actions", ACTION_MORE)
                 // Start over is a glass pill beside Resume, as the prototype's film page has it.
-                restartAction = PillButton.create(context, colors, "Start over", AppIcon.REFRESH, heightDp = PILL_DP, glass = true).apply {
+                restartAction = PillButton.create(context, colors, "Start over", AppIcon.REFRESH, heightDp = PILL_DP).apply {
                     tag = ACTION_RESTART
                     FocusDecorator.attach(this, ringVisible, scale = false)
                     FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) scroll.smoothScrollTo(0, 0); host.refreshHints() }
@@ -223,7 +223,7 @@ class LibraryDetailScreen(
                     addView(episodes, LinearLayout.LayoutParams(MATCH, WRAP))
                 }
                 addView(episodesPanel, LinearLayout.LayoutParams(MATCH, WRAP))
-                similar = com.pocketds.hub.ui.PosterStripView(context, colors, ringVisible, POSTER_DP, glass = true).apply {
+                similar = com.pocketds.hub.ui.PosterStripView(context, colors, ringVisible, POSTER_DP).apply {
                     visibility = View.GONE
                     onOpen = { hit -> if (hit.jellyfinItemId.isNotEmpty()) host.push(LibraryDetailScreen(api, hit.jellyfinItemId, hit.media.title, hit.media.type, ringVisible)) }
                     onFocused = { lastFocusKey = "similar"; liftToTabs(); host.refreshHints() }
@@ -243,8 +243,6 @@ class LibraryDetailScreen(
             }, ViewGroup.LayoutParams(MATCH, WRAP))
         }
         root.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
-        // Once the backdrop has scrolled away, the tabs above need solid ground.
-        scroll.setOnScrollChangeListener { _, _, y, _, _ -> host.setTopBarOverArtwork(y < dp(24)) }
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         overview.onChanged = { host.refreshHints() }
@@ -253,7 +251,6 @@ class LibraryDetailScreen(
 
     override fun onShow() {
         overview.collapse()
-        scroll.post { host?.setTopBarOverArtwork(scroll.scrollY < dp(24)) }
         host?.viewContext?.let(offlineChanges::start)
         item?.let(::renderDownload)
         val returning = item != null

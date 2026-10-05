@@ -24,7 +24,7 @@ class BrowsingComponentsTest {
     @Test fun posterArtKeepsRatioAtDifferentGridWidthsAndHasNoMat() = i.runOnMainSync {
         val c=i.targetContext
         for (width in listOf(96,112,146)) {
-            val card=PosterCardView(c,Theme.colors(c),150f)
+            val card=PosterCardView(c,Theme.colors(c))
             layout(card,width)
             val image=descendants(card).filterIsInstance<ImageView>().first()
             assertEquals(0,card.paddingLeft)

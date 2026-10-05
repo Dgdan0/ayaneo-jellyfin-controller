@@ -40,9 +40,10 @@ class ArtworkProgressView(context: Context, color: Int) : View(context) {
 }
 
 /**
- * The progress line under a title: accent on the pressed-card track, or a
- * caller's state colour. Two of these were left untinted, so an episode strip
- * drew the platform's default colour next to the app's own everywhere else.
+ * The progress line under a title: the accent, or a caller's state colour, on
+ * the prototype's faint track. Two of these were left untinted, so an episode
+ * strip drew the platform's default colour next to the app's own everywhere
+ * else.
  */
 object ProgressLine {
     const val MAX = 1_000
@@ -52,8 +53,8 @@ object ProgressLine {
         ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = MAX
             progressTintList = ColorStateList.valueOf(color)
-            // Glass: the prototype's track, white at 16%, under any bar.
-            progressBackgroundTintList = ColorStateList.valueOf(if (Theme.onGlass(colors)) GLASS_TRACK else colors.cardSurfacePressed)
+            // The prototype's track, white at 16%, under any bar.
+            progressBackgroundTintList = ColorStateList.valueOf(GLASS_TRACK)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
 

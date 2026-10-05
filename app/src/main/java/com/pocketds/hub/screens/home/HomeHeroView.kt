@@ -95,9 +95,9 @@ class HomeHeroView(
         visibility = INVISIBLE
     }
     val play: TextView = PillButton.create(context, colors, "Play", AppIcon.PLAY, primary = true,
-        heightDp = BUTTON_DP, glass = true)
+        heightDp = BUTTON_DP)
     val details: TextView = PillButton.create(context, colors, "Details", AppIcon.INFO,
-        heightDp = BUTTON_DP, glass = true)
+        heightDp = BUTTON_DP)
     private var shownArt = ""
     var content: HeroContent? = null
         private set

@@ -456,7 +456,7 @@ class ReadingHomeView(
         }
         strip.addView(line)
         row.items.forEach { work ->
-            val card = PosterCardView(context, colors, POSTER_DP, glass = true).apply {
+            val card = PosterCardView(context, colors).apply {
                 layoutParams = LinearLayout.LayoutParams(dp(POSTER_CARD_DP), WRAP).apply {
                     setMargins(dp(CARD_GAP_DP / 2), dp(4), dp(CARD_GAP_DP / 2), dp(4))
                 }
@@ -752,7 +752,6 @@ class ReadingHomeView(
         const val TOP_DP = 8
         const val EDGE_DP = 22
         const val POSTER_CARD_DP = 82
-        const val POSTER_DP = 123f
         const val CARD_GAP_DP = 12
         const val ALSO_GAP_DP = 8
         const val MINI_CORNER_DP = 13f

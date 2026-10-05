@@ -61,8 +61,8 @@ class UpNextCardView(
     }
     private val meta = TextView(context).apply { textSize = 11f; setTextColor(Color.argb(200, 220, 226, 234)); maxLines = 1 }
     private val bar = FillBar(context)
-    val playNow: TextView = PillButton.create(context, colors, "Play now", AppIcon.PLAY, primary = true, heightDp = 36f, glass = true)
-    val watchCredits: TextView = PillButton.create(context, colors, "Watch credits", heightDp = 36f, glass = true)
+    val playNow: TextView = PillButton.create(context, colors, "Play now", AppIcon.PLAY, primary = true, heightDp = 36f)
+    val watchCredits: TextView = PillButton.create(context, colors, "Watch credits", heightDp = 36f)
     private var animator: ValueAnimator? = null
 
     init {

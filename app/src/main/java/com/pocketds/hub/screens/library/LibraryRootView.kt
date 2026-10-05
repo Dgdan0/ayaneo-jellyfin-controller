@@ -217,7 +217,7 @@ class LibraryRootView(
         if (arrange.visibility != View.VISIBLE && arranging) finishArranging()
         arrange.text = if (arranging) "Done" else "Arrange"
         arrange.contentDescription = if (arranging) "Done arranging" else "Arrange libraries"
-        PillButton.setPrimary(arrange, colors, arranging)
+        PillButton.setPrimary(arrange, arranging)
         // The lit face takes the ink; the icon says what the press does.
         val ink = arrange.currentTextColor
         val size = dp(14)

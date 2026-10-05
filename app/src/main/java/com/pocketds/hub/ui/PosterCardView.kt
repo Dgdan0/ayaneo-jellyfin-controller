@@ -26,29 +26,21 @@ import com.pocketds.hub.ui.glass.GlassPanelDrawable
  * progress bars is twenty-five running animators and a screen that reads as
  * broken; a flat fill lets the grid appear instantly as a grid and fill in.
  *
- * [glass] is the Glass poster (GLASS_PLAN.md): 11dp corners and a 3dp ring, a
+ * It is the Glass poster (GLASS_PLAN.md): 11dp corners and a 3dp ring, a
  * count as a white pill and a tick in the accent, how far in as a white bar
  * inside the picture ([GlassProgressBar]), and the day of a coming-up title on
  * a strip of the page's glass ([setDayChip]). A book's cover keeps its words on
  * the page; an audiobook's is square, and a comic's kind sits on a dark pill.
- * Screens opt in as their Glass milestone lands.
  */
 class PosterCardView(
     context: Context,
     private val colors: PocketColors,
     /**
-     * Poster height in dp. The card is sized from this because a poster is
-     * fixed at 2:3, so one number decides the whole card -- and on a 456dp-tall
-     * landscape screen that number is what decides whether you can see one row
-     * of content or two.
-     */
-    posterHeightDp: Float = 190f,
-    /**
      * Title and subtitle under the poster. Home turns them off: its hero names
      * the focused card in large type, and a row without captions fits under it.
+     * The card's width decides the rest, a poster being fixed at 2:3.
      */
-    private val captions: Boolean = true,
-    private val glass: Boolean = false
+    private val captions: Boolean = true
 ) : LinearLayout(context) {
 
     private val posterWrap: ArtworkFrame
@@ -61,12 +53,12 @@ class PosterCardView(
     private val kindTag: TextView
     private val title: TextView
     private val subtitle: TextView
-    private val progressBar: ArtworkProgressView
-    /** Glass: the progress inside the picture, in place of [progressBar] along its foot. */
-    private var glassBar: com.pocketds.hub.ui.glass.GlassProgressBar? = null
-    private val compactCard: Boolean
-    /** Glass: "Tomorrow" on a coming-up title, along the poster's foot. */
-    private var dayChip: TextView? = null
+    /** How far in: a white bar inside the picture. */
+    private val progressBar: com.pocketds.hub.ui.glass.GlassProgressBar
+    /** A card without captions shows no subtitle whatever it is bound to. */
+    private val compactCard = !captions
+    /** "Tomorrow" on a coming-up title, along the poster's foot. */
+    private val dayChip: TextView
 
     init {
         orientation = VERTICAL
@@ -76,15 +68,12 @@ class PosterCardView(
         // The whole card is one focus target. Without this the image, title and
         // badge are three, and focus appears to wander inside a single item.
         descendantFocusability = FOCUS_BLOCK_DESCENDANTS
-        // Padding and type scale with the card. A 6dp inset and 13sp title look
-        // right at 190dp and waste a third of a 140dp card.
-        val compact = posterHeightDp < 170f
         setPadding(0, 0, 0, if (captions) Styler.dpInt(context, 6f) else 0)
 
-        val corner = if (glass) ArtworkFrame.GLASS_CORNER_DP else ArtworkFrame.CORNER_DP
-        posterWrap = ArtworkFrame(context, 2f / 3f, corner).apply {
+        val corner = ArtworkFrame.GLASS_CORNER_DP
+        posterWrap = ArtworkFrame(context, POSTER_RATIO, corner).apply {
             isDuplicateParentStateEnabled = true
-            foreground = Styler.focusOutline(context, colors, corner, if (glass) 3f else 2f)
+            foreground = Styler.focusOutline(context, colors, corner, 3f)
         }
         poster = ImageView(context).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -124,41 +113,32 @@ class PosterCardView(
         }
         posterWrap.addView(badge)
 
+        // The prototype's `.kind`: dark, heavy little capitals on 7dp corners.
         kindTag = TextView(context).apply {
-            textSize = 9f
-            textWeight(700)
+            textSize = 10f
+            textWeight(800)
+            letterSpacing = .04f
+            includeFontPadding = false
             setTextColor(android.graphics.Color.rgb(243, 245, 248))
-            setPadding(Styler.dpInt(context, 6f), Styler.dpInt(context, 1f), Styler.dpInt(context, 6f), Styler.dpInt(context, 1f))
-            background = ThemeGradientDrawable.rounded(Styler.dp(context, 999f), android.graphics.Color.argb(204, 10, 13, 18))
+            setPadding(Styler.dpInt(context, 7f), Styler.dpInt(context, 4f), Styler.dpInt(context, 7f), Styler.dpInt(context, 4f))
+            background = ThemeGradientDrawable.rounded(Styler.dp(context, 7f), KIND_FILL)
             visibility = GONE
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             layoutParams = FrameLayout.LayoutParams(WRAP, WRAP).apply {
                 gravity = Gravity.BOTTOM or Gravity.START
                 marginStart = Styler.dpInt(context, 6f)
-                bottomMargin = Styler.dpInt(context, 8f)
+                bottomMargin = Styler.dpInt(context, KIND_EDGE_DP)
             }
         }
         posterWrap.addView(kindTag)
-        if (glass) kindTag.apply {
-            // The prototype's `.kind`: dark, heavy little capitals on 7dp corners.
-            textSize = 10f
-            textWeight(800)
-            letterSpacing = .04f
-            includeFontPadding = false
-            setPadding(Styler.dpInt(context, 7f), Styler.dpInt(context, 4f), Styler.dpInt(context, 7f), Styler.dpInt(context, 4f))
-            background = ThemeGradientDrawable.rounded(Styler.dp(context, 7f), GLASS_KIND)
-            (layoutParams as FrameLayout.LayoutParams).bottomMargin = Styler.dpInt(context, KIND_EDGE_DP)
-        }
 
-        // A thin bar along the bottom of the poster while something is actually
-        // downloading -- readable at a glance without reading any text.
-        progressBar = ArtworkProgressView(context, colors.accent)
-        if (glass) glassBar = com.pocketds.hub.ui.glass.GlassProgressBar(context).also { bar ->
+        // How far in, readable at a glance without reading any text.
+        progressBar = com.pocketds.hub.ui.glass.GlassProgressBar(context).also { bar ->
             val inset = Styler.dpInt(context, com.pocketds.hub.ui.glass.GlassProgressBar.POSTER_INSET_DP)
             posterWrap.addView(bar, FrameLayout.LayoutParams(MATCH, Styler.dpInt(context, com.pocketds.hub.ui.glass.GlassProgressBar.HEIGHT_DP), Gravity.BOTTOM)
                 .apply { setMargins(inset, 0, inset, inset) })
-        } else posterWrap.addView(progressBar, FrameLayout.LayoutParams(MATCH, Styler.dpInt(context, 4f), Gravity.BOTTOM))
-        if (glass) dayChip = TextView(context).apply {
+        }
+        dayChip = TextView(context).apply {
             textSize = 11f
             textWeight(700)
             setTextColor(android.graphics.Color.WHITE)
@@ -177,43 +157,30 @@ class PosterCardView(
         }
         addView(posterWrap, LayoutParams(MATCH, WRAP))
 
+        // The prototype's captions: the title on one bold line, the year under it.
         title = TextView(context).apply {
             // A Hebrew title starts at the card's left edge like every other, not its right.
             textAlignment = android.view.View.TEXT_ALIGNMENT_VIEW_START
-            textSize = if (compact) 12f else 13f
-            maxLines = 2
-            minLines = 2
+            textSize = 12f
+            textWeight(700)
+            maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             setTextColor(colors.primaryText)
-            setPadding(0, Styler.dpInt(context, if (compact) 3f else 6f), 0, 0)
+            setPadding(0, Styler.dpInt(context, 7f), 0, 0)
+            visibility = if (captions) VISIBLE else GONE
         }
         addView(title)
-        if (!captions) title.visibility = GONE
 
         subtitle = TextView(context).apply {
             textAlignment = android.view.View.TEXT_ALIGNMENT_VIEW_START
-            textSize = 12f
+            textSize = 11f
             maxLines = 1
-            setTextColor(colors.mutedText)
-            // On a compact card the year alone is worth the line; anything
-            // longer just crowds the title it sits under.
-            visibility = if (compact) GONE else VISIBLE
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setTextColor(CAPTION)
+            setPadding(0, Styler.dpInt(context, 1f), 0, 0)
+            visibility = if (captions) VISIBLE else GONE
         }
         addView(subtitle)
-        if (glass && captions) {
-            // The prototype's captions: the title on one bold line, the year under it.
-            title.textSize = 12f
-            title.textWeight(700)
-            title.minLines = 1
-            title.maxLines = 1
-            title.setPadding(0, Styler.dpInt(context, 7f), 0, 0)
-            subtitle.textSize = 11f
-            subtitle.setTextColor(GLASS_CAPTION)
-            subtitle.ellipsize = android.text.TextUtils.TruncateAt.END
-            subtitle.setPadding(0, Styler.dpInt(context, 1f), 0, 0)
-            subtitle.visibility = VISIBLE
-        }
-        compactCard = (compact && !glass) || !captions
     }
 
     fun bind(hit: SearchHit, imageLoader: ImageLoader, imageUrl: (String) -> String) =
@@ -226,9 +193,9 @@ class PosterCardView(
         showAvailability: Boolean
     ) {
         kindTag.visibility = GONE
-        if (glass) posterWrap.ratio = POSTER_RATIO
+        posterWrap.ratio = POSTER_RATIO
         // A recycled card keeps no day from the row it came from.
-        dayChip?.visibility = GONE
+        dayChip.visibility = GONE
         title.text = hit.media.title
         contentDescription = listOf(hit.media.title, hit.subtitle).filter { it.isNotBlank() }.joinToString(", ")
         subtitle.text = hit.subtitle
@@ -242,14 +209,9 @@ class PosterCardView(
             else -> ""
         }
         if (!showAvailability && libraryBadge.isNotEmpty()) {
-            roundBadge(libraryBadge, if (libraryBadge == "✓") colors.badgeAvailable else colors.accent)
+            roundBadge(libraryBadge)
         } else if (showAvailability && availability.label.isNotEmpty()) {
-            if (glass) glassAvailability(availability) else {
-                badge.visibility = VISIBLE
-                badge.text = availability.label
-                badge.setBackgroundColor(badgeColour(availability))
-                badge.setTextColor(SemanticColor.foreground(badgeColour(availability)))
-            }
+            availabilityChip(availability)
         } else {
             badge.visibility = GONE
         }
@@ -266,18 +228,9 @@ class PosterCardView(
         subtitle.text = item.subtitle
         subtitle.visibility = if (compactCard) GONE else VISIBLE
         showProgress(0.0)
-        if (glass) {
-            // An audiobook's cover is square, as the prototype's Discover draws it.
-            posterWrap.ratio = if (item.contentType == com.pocketds.hub.model.ReadingType.AUDIOBOOK) 1f else POSTER_RATIO
-            if (item.inLibrary) glassAvailability(Availability.AVAILABLE) else badge.visibility = GONE
-        } else if (item.inLibrary) {
-            badge.visibility = VISIBLE
-            badge.text = "Tracked"
-            badge.setBackgroundColor(colors.badgeAvailable)
-            badge.setTextColor(SemanticColor.foreground(colors.badgeAvailable))
-        } else {
-            badge.visibility = GONE
-        }
+        // An audiobook's cover is square, as the prototype's Discover draws it.
+        posterWrap.ratio = if (item.contentType == com.pocketds.hub.model.ReadingType.AUDIOBOOK) 1f else POSTER_RATIO
+        if (item.inLibrary) availabilityChip(Availability.AVAILABLE) else badge.visibility = GONE
         loadPoster(item.cover, imageLoader, imageUrl)
     }
 
@@ -289,22 +242,14 @@ class PosterCardView(
         kindTag.visibility = if (kind != null && showKind) VISIBLE else GONE
         subtitle.text = if (kind != null) com.pocketds.hub.screens.library.ReadingBookFacts.comicLine(work.progress) else work.cardSubtitle
         subtitle.visibility = VISIBLE
-        if (glass) {
-            // The words stay on the page under the cover, as every Glass poster's;
-            // an audiobook's cover is square.
-            posterWrap.ratio = if (work.kind == com.pocketds.hub.model.ReadingType.AUDIOBOOK) 1f else POSTER_RATIO
-        } else {
-            title.setBackgroundColor(colors.cardSurface)
-            subtitle.setBackgroundColor(colors.cardSurface)
-            title.setPadding(Styler.dpInt(context,8f),Styler.dpInt(context,8f),Styler.dpInt(context,8f),0)
-            subtitle.setPadding(Styler.dpInt(context,8f),Styler.dpInt(context,3f),Styler.dpInt(context,8f),Styler.dpInt(context,8f))
-        }
+        // The words stay on the page under the cover; an audiobook's cover is square.
+        posterWrap.ratio = if (work.kind == com.pocketds.hub.model.ReadingType.AUDIOBOOK) 1f else POSTER_RATIO
         subtitle.ellipsize=android.text.TextUtils.TruncateAt.END
         showProgress(if (work.progress?.completed == true) 0.0 else work.progress?.percentage ?: 0.0)
         if (work.progress?.completed == true) {
-            roundBadge("✓", colors.badgeAvailable)
+            roundBadge("✓")
         } else if (work.entityType == "collection" && work.bookCount > 0) {
-            roundBadge(work.bookCount.toString(), colors.accent)
+            roundBadge(work.bookCount.toString())
         } else {
             badge.visibility = GONE
         }
@@ -352,13 +297,9 @@ class PosterCardView(
         isFocusableInTouchMode = false
     }
 
-    /**
-     * How far in: the accent bar along the poster's foot, or Glass's white bar
-     * inside it, with a comic's kind pill lifted clear of it.
-     */
+    /** How far in: the white bar inside the picture, with a comic's kind pill lifted clear of it. */
     private fun showProgress(fraction: Double) {
-        progressBar.fraction = fraction
-        val bar = glassBar ?: return
+        val bar = progressBar
         bar.fraction = fraction
         (kindTag.layoutParams as? FrameLayout.LayoutParams)?.let {
             val lift = if (bar.visibility == VISIBLE) com.pocketds.hub.ui.glass.GlassProgressBar.HEIGHT_DP + KIND_EDGE_DP else 0f
@@ -376,48 +317,20 @@ class PosterCardView(
     }
 
     /**
-     * Glass: the day of a coming-up title on a strip of glass along the
-     * poster's foot ("Tomorrow"), as the prototype marks them. Null removes it.
+     * The day of a coming-up title on a strip of glass along the poster's foot
+     * ("Tomorrow"), as the prototype marks them. Null removes it.
      */
     fun setDayChip(text: String?) {
-        val chip = dayChip ?: return setCornerTag(text)
-        chip.text = text.orEmpty()
-        chip.visibility = if (text.isNullOrBlank()) GONE else VISIBLE
-    }
-
-    /** A word in an accent pill at the top corner: "Fri" on a coming-up title. Null removes it. */
-    fun setCornerTag(text: String?) {
-        if (text.isNullOrBlank()) { badge.visibility = GONE; return }
-        badge.visibility = VISIBLE
-        badge.text = text
-        badge.minWidth = 0
-        badge.textSize = 10f
-        badge.background = ThemeGradientDrawable().apply {
-            cornerRadius = Styler.dp(context, 999f)
-            setColor(this@PosterCardView.colors.accent)
-        }
-        badge.setTextColor(colors.accentText)
-    }
-
-    /** A count or ✓ in a coloured circle: watched, unwatched episodes, books in a collection. */
-    private fun roundBadge(text: String, color: Int) {
-        if (glass) return glassBadge(text)
-        badge.visibility = VISIBLE
-        badge.text = text
-        badge.background = ThemeGradientDrawable().apply {
-            shape = android.graphics.drawable.GradientDrawable.OVAL
-            setColor(color)
-        }
-        badge.minWidth = Styler.dpInt(context, 24f)
-        badge.gravity = Gravity.CENTER
-        badge.setTextColor(SemanticColor.foreground(color))
+        dayChip.text = text.orEmpty()
+        dayChip.visibility = if (text.isNullOrBlank()) GONE else VISIBLE
     }
 
     /**
-     * Glass: a count (or a star) in a white pill with dark figures, a tick in
-     * the accent's circle, as the prototype's posters carry them.
+     * A count (or a star) in a white pill with dark figures, a tick in the
+     * accent's circle, as the prototype's posters carry them: watched,
+     * unwatched episodes, books in a collection.
      */
-    private fun glassBadge(text: String) {
+    private fun roundBadge(text: String) {
         val tick = text == "✓"
         badge.visibility = VISIBLE
         badge.text = text
@@ -430,7 +343,7 @@ class PosterCardView(
         badge.minWidth = Styler.dpInt(context, if (tick) 22f else 24f)
         badge.minHeight = Styler.dpInt(context, 22f)
         badge.background = if (tick) ThemeGradientDrawable.oval(colors.accent)
-            else ThemeGradientDrawable.rounded(Styler.dp(context, 11f), GLASS_COUNT)
+            else ThemeGradientDrawable.rounded(Styler.dp(context, 11f), COUNT_FILL)
         badge.setTextColor(if (tick) colors.accentText else GlassColors.INK)
         (badge.layoutParams as? FrameLayout.LayoutParams)?.let {
             val edge = Styler.dpInt(context, 6f)
@@ -443,11 +356,11 @@ class PosterCardView(
     }
 
     /**
-     * Glass: where a title stands as a chip at the poster's top left (the
-     * prototype's `.av`): In library, Partial, On the way, Requested, in the
-     * badge colours of CLAUDE.md, with the glass edge and light.
+     * Where a title stands as a chip at the poster's top left (the prototype's
+     * `.av`): In library, Partial, On the way, Requested, in the badge colours
+     * of CLAUDE.md, with the glass edge and light.
      */
-    private fun glassAvailability(availability: Availability) {
+    private fun availabilityChip(availability: Availability) {
         val fill = badgeColour(availability)
         badge.visibility = VISIBLE
         badge.text = availability.label
@@ -484,12 +397,12 @@ class PosterCardView(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-        /** A Glass poster's second caption line: white at 64%. */
-        const val GLASS_CAPTION = GlassColors.QUIET
-        /** A Glass poster's count pill: white at 90%. */
-        const val GLASS_COUNT = 0xE6FFFFFF.toInt()
-        /** A comic's kind pill on Glass (the prototype's `.kind`): black at 62%, 6dp in from the corner. */
-        const val GLASS_KIND = 0x9E000000.toInt()
+        /** A poster's second caption line: white at 64%. */
+        const val CAPTION = GlassColors.QUIET
+        /** A poster's count pill: white at 90%. */
+        const val COUNT_FILL = 0xE6FFFFFF.toInt()
+        /** A comic's kind pill (the prototype's `.kind`): black at 62%, 6dp in from the corner. */
+        const val KIND_FILL = 0x9E000000.toInt()
         const val KIND_EDGE_DP = 6f
         const val POSTER_RATIO = 2f / 3f
     }

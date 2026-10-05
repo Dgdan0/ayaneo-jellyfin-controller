@@ -96,7 +96,7 @@ class PagedImageReaderScreen(
     override val immersive: Boolean = true
     override val focusOnShow: Boolean = false
 
-    /** Glass: the bars take the colours of the issue's own cover. */
+    /** The bars take the colours of the issue's own cover. */
     override val pageArtwork: String? get() = IssueCover.path(currentSourceItemId)
 
     private lateinit var host: ScreenHost

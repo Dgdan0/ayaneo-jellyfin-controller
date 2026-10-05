@@ -18,7 +18,7 @@ sealed interface FormRow {
         val selected: Int = 0,
         /** Shown under the value, e.g. free space on a root folder. */
         val details: List<String> = emptyList(),
-        /** A heading over the rows from here on, in the Glass side sheet ("Quality"); Classic draws none. */
+        /** A heading over the rows from here on, in the side sheet ("Quality"). */
         val section: String = ""
     ) : FormRow {
         val value: String get() = options.getOrElse(selected) { "" }

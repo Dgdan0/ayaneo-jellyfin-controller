@@ -243,7 +243,7 @@ class ReadingAuthorScreen(
         val label = "${collection.title}$count  ›"
         val context = requireNotNull(host).viewContext
         return com.pocketds.hub.ui.PillButton.create(context, colors, label, com.pocketds.hub.ui.AppIcon.SERIES,
-            heightDp = 30f, glass = true).apply {
+            heightDp = 30f).apply {
             contentDescription = "Open series ${collection.title}"
             remember("series:${collection.id}", this, ring = true)
             activateOnTap { host?.push(ReadingWorkScreen(api, collection.id, collection.title, ringVisible)) }

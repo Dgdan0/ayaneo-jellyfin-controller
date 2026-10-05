@@ -114,7 +114,7 @@ class DownloadsScreen(
         // Pills like every other page's actions; the filter lights up while it is on.
         val ring = Styler.dpInt(context, com.pocketds.hub.ui.PillButton.RING_DP)
         fun pill(label: String, onTap: () -> Unit): TextView =
-            com.pocketds.hub.ui.PillButton.create(context, colors, label, heightDp = 34f, glass = true).apply {
+            com.pocketds.hub.ui.PillButton.create(context, colors, label, heightDp = 34f).apply {
                 FocusDecorator.attach(this, ringVisible, scale = false)
                 activateOnTap { onTap() }
             }
@@ -371,7 +371,7 @@ class DownloadsScreen(
         val attentionCount = related.count { it.isBroken }
         attentionFilter.text = if (attentionOnly) "Showing $attentionCount that need attention" else "Needs attention · $attentionCount"
         attentionFilter.isSelected = attentionOnly
-        com.pocketds.hub.ui.PillButton.setPrimary(attentionFilter, colors, primary = attentionOnly)
+        com.pocketds.hub.ui.PillButton.setPrimary(attentionFilter, primary = attentionOnly)
 
         val s = body.summary
         summaryLine.setTextColor(colors.primaryText)

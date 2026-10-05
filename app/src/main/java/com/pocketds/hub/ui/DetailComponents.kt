@@ -19,7 +19,6 @@ import com.pocketds.hub.ui.ProgressLine.showFraction
 import android.widget.ScrollView
 import android.widget.TextView
 import coil.ImageLoader
-import coil.request.ImageRequest
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
 
@@ -58,7 +57,7 @@ object DetailStyler {
     fun image(view: ImageView, data: Any?, loader: ImageLoader) = Artwork.bind(view, loader, data)
 
     /**
-     * Glass: a round toggle of the page's glass beside Play -- watched,
+     * A round toggle of the page's glass beside Play -- watched,
      * favourite, download, more -- white while it is on (GLASS_PLAN.md). Its
      * face is [GLASS_TOGGLE_DP] across inside room for the focus ring; light
      * it with [com.pocketds.hub.ui.glass.GlassButtonBackground.lit].
@@ -77,59 +76,73 @@ object DetailStyler {
 /**
  * One header for media, books and downloaded items. It grows with text instead of clipping it.
  *
- * [glass] is a title page in Glass (GLASS_PLAN.md): the backdrop across the
- * top of the page, fading into it through a mask rather than into a colour,
- * and running on under the tabs below; the words in the prototype's type at
- * its left. A styling switch only: what the header holds is the same.
+ * It is a title page as the prototype has it (GLASS_PLAN.md): the backdrop
+ * across the top of the page, fading into it through a mask rather than into a
+ * colour, and running on under the tabs below; the words in the prototype's
+ * type at its left.
  *
- * A Glass book page sets [book] (the prototype's `.bhead`): no backdrop, the
- * cover at full size at the left (square for an audiobook, [squareCover]) or a
+ * A book's page sets [book] (the prototype's `.bhead`): no backdrop, the cover
+ * at full size at the left (square for an audiobook, [squareCover]) or a
  * series' fan in its place ([replacePoster]), and the words beside its foot.
  */
-class DetailHeaderView(context: Context, private val colors: PocketColors, ringVisible: () -> Boolean,
-                       private val glass: Boolean = false) : FrameLayout(context) {
-    val landscape: ImageView = (if (glass) com.pocketds.hub.ui.glass.FadedImageView(context).apply {
+class DetailHeaderView(context: Context, private val colors: PocketColors, ringVisible: () -> Boolean) : FrameLayout(context) {
+    val landscape: ImageView = com.pocketds.hub.ui.glass.FadedImageView(context).apply {
         stops = com.pocketds.hub.ui.glass.FadedImageView.TITLE
         shade = com.pocketds.hub.ui.glass.FadedImageView.TITLE_SHADE
-    } else ImageView(context)).apply { scaleType = ImageView.ScaleType.CENTER_CROP; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
-    /** Glass: a line over the title, "NOT IN YOUR LIBRARY" on a title you can request. */
-    val eyebrowView = label(context, 10.5f, GLASS_EYEBROW).apply {
-        typeRole(Type.Role.EYEBROW, 10.5f); isSingleLine = true; ellipsize = TextUtils.TruncateAt.END; visibility = GONE
+        scaleType = ImageView.ScaleType.CENTER_CROP; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     }
-    val poster = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
-    val titleView = label(context, 27f, colors.primaryText).apply { typeRole(Type.Role.HERO); maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
-    val subtitleView = label(context, 12f, colors.mutedText).apply { visibility = GONE }
+    /** A line over the title, "NOT IN YOUR LIBRARY" on a title you can request. */
+    val eyebrowView = label(context, 10.5f, EYEBROW).apply {
+        typeRole(Type.Role.EYEBROW, 10.5f); isSingleLine = true; ellipsize = TextUtils.TruncateAt.END; visibility = GONE
+        // An eyebrow is capitals however a screen writes it ("Book 6 · Red Rising").
+        isAllCaps = true
+    }
+    val poster = ImageView(context).apply {
+        scaleType = ImageView.ScaleType.CENTER_CROP; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        background = ThemeGradientDrawable.rounded(Styler.dp(context, COVER_CORNER_DP), colors.posterPlaceholder)
+        clipToOutline = true
+        elevation = Styler.dp(context, 14f)
+    }
+    val titleView = label(context, TITLE_SP, colors.primaryText).apply {
+        typeRole(Type.Role.HERO); maxLines = 2; ellipsize = TextUtils.TruncateAt.END
+        typeface = Type.display(context, 800)
+        textSize = TITLE_SP
+        setLineSpacing(0f, .95f)
+    }
+    val subtitleView = label(context, 12f, SUBTITLE).apply { visibility = GONE }
     /** Links under the title: a book's author and series. */
     val links = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; clipChildren = false; visibility = GONE }
-    /** How far through, as a bar and words: "49% · page 363 of 735". */
-    val progressBar = ProgressLine.create(context, colors)
-    /** Glass: the prototype's bar (`.prog .b`), 4dp in the accent on a faint track. */
-    private val glassProgress = com.pocketds.hub.ui.glass.GlassProgressBar(context, colors.accent, com.pocketds.hub.ui.glass.GlassColors.TRACK)
-    val progressLabel = label(context, 11f, colors.mutedText)
+    /** The prototype's bar (`.prog .b`), 4dp in the accent on a faint track. */
+    private val progressBar = com.pocketds.hub.ui.glass.GlassProgressBar(context, colors.accent, com.pocketds.hub.ui.glass.GlassColors.TRACK)
+    /** How far through, in words after the bar: "49% · page 363 of 735". */
+    val progressLabel = label(context, 12f, FACTS)
     val progressRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = GONE
-        addView(progressBar, LinearLayout.LayoutParams(Styler.dpInt(context, 220f), Styler.dpInt(context, 6f)))
-        addView(progressLabel, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = Styler.dpInt(context, 10f) })
+        addView(progressBar, LinearLayout.LayoutParams(Styler.dpInt(context, PROGRESS_DP.toFloat()),
+            Styler.dpInt(context, com.pocketds.hub.ui.glass.GlassProgressBar.HEIGHT_DP)))
+        addView(progressLabel, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = Styler.dpInt(context, 12f) })
     }
     /**
      * The facts line. Read left to right part by part, so "11 min" after a
      * Hebrew episode title stays "11 min"; screens join it with [Bidi.join].
      */
-    val metadataView = label(context, 12f, colors.mutedText).apply {
+    val metadataView = label(context, 12f, FACTS).apply {
         maxLines = 3; ellipsize = TextUtils.TruncateAt.END
         textDirection = TEXT_DIRECTION_LTR; textAlignment = TEXT_ALIGNMENT_VIEW_START
     }
-    /** Glass: under the facts line, before the overview: the request page's pipeline. */
+    /** Under the facts line, before the overview: the request page's pipeline. */
     val underFacts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; clipChildren = false; visibility = GONE }
-    val formatStatus = ReadingFormatStatusView(context, colors).apply { visibility=GONE }
-    val stateView = label(context, 11f, colors.accent).apply { visibility = GONE }
+    val formatStatus = ReadingFormatStatusView(context).apply { visibility=GONE }
+    val stateView = label(context, 12f, colors.accent).apply { textWeight(700); visibility = GONE }
     val actions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; clipChildren = false }
-    val overview = DetailOverviewView(context, colors, ringVisible)
+    val overview = DetailOverviewView(context, colors, ringVisible).apply { tone(12.5f, OVERVIEW) }
     val continuation = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-    private val body = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-    // Lets the action row reach a ring's width left of the words (below).
-    private val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.TOP; clipChildren = false }
-    private val masks = FrameLayout(context)
+    private val body = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; clipChildren = false }
+    // Lets the action row reach a ring's width left of the words (below); a
+    // series' fan leans past the row's edge, which must not cut it.
+    private val row = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.TOP; clipChildren = false; clipToPadding = false
+    }
     /**
      * The action row starts a ring's width left of the words, with that much
      * padding, so its buttons still begin under the words. A screen whose first
@@ -143,41 +156,22 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         setPadding(dp(PillButton.RING_DP.toInt()), dp(4), dp(3), dp(4))
         addView(actions, ViewGroup.LayoutParams(WRAP, WRAP))
     }
-    var compact = false
-    /**
-     * Room above the words for a see-through tab bar, on a page that draws
-     * under it ([com.pocketds.hub.nav.Screen.drawsUnderTopBar]).
-     */
-    var topInsetDp = 0
-        set(value) { field = value; layoutKey = ""; requestLayout() }
-    /** Glass: a book's page, its cover beside the words and no backdrop. */
+    /** A book's page, its cover beside the words and no backdrop. */
     var book = false
         set(value) { field = value; layoutKey = ""; requestLayout() }
-    /** Glass book page: an audiobook's cover is square. */
+    /** A book's page: an audiobook's cover is square. */
     var squareCover = false
         set(value) { field = value; layoutKey = ""; requestLayout() }
-    private var type = ""
     private var hasLandscape = false
-    private var hasPoster = false
     private var layoutKey = ""
     private var imageKey: List<Any?> = emptyList()
 
     init {
-        // CENTER_CROP may draw beyond an ImageView when its parent stops clipping.
-        // Header controls do not scale, so keep the hero inside its own bounds.
-        clipChildren = true
+        // The faded backdrop is taller than the words and runs on under the
+        // tabs, as the prototype's does; the scroll view still clips it.
+        clipChildren = false
         setBackgroundColor(colors.background)
         addView(landscape, LayoutParams(MATCH, MATCH))
-        // Glass: the faded backdrop is taller than the words and runs on under
-        // the tabs, as the prototype's does; the scroll view still clips it.
-        if (glass) clipChildren = false
-        // Solid behind the words, the art clear on the right, and the page
-        // colour again at the bottom where the tabs begin.
-        masks.addView(View(context).apply { background = ScrimDrawable(colors, ScrimDrawable.Edge.LEFT,
-            listOf(0f to 1f, .38f to .9f, .75f to .2f, 1f to .05f)) }, LayoutParams(MATCH, MATCH))
-        masks.addView(View(context).apply { background = ScrimDrawable(colors, ScrimDrawable.Edge.BOTTOM,
-            listOf(0f to 1f, .12f to 1f, .5f to 0f)) }, LayoutParams(MATCH, MATCH))
-        addView(masks, LayoutParams(MATCH, MATCH))
         row.addView(poster, LinearLayout.LayoutParams(dp(92), dp(138)).apply { marginEnd = dp(20) })
         body.addView(eyebrowView, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(6) })
         body.addView(titleView, LinearLayout.LayoutParams(MATCH, WRAP))
@@ -194,39 +188,11 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         body.addView(continuation, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(10) })
         row.addView(body, LinearLayout.LayoutParams(0, WRAP, 1f))
         addView(row, LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
-        if (glass) {
-            masks.visibility = GONE
-            titleView.typeface = Type.display(context, 800)
-            titleView.textSize = GLASS_TITLE_SP
-            titleView.setLineSpacing(0f, .95f)
-            metadataView.setTextColor(GLASS_FACTS)
-            subtitleView.setTextColor(GLASS_SUBTITLE)
-            stateView.textSize = 12f
-            stateView.textWeight(700)
-            overview.tone(12.5f, GLASS_OVERVIEW)
-            body.clipChildren = false
-            row.clipChildren = false
-            // A series' fan leans past the row's edge; the row must not cut it.
-            row.clipToPadding = false
-            // An eyebrow is capitals however a screen writes it ("Book 6 · Red Rising").
-            eyebrowView.isAllCaps = true
-            // The bar in the accent and the words after it, as Books home has them.
-            progressRow.removeView(progressBar)
-            progressRow.addView(glassProgress, 0, LinearLayout.LayoutParams(dp(GLASS_PROGRESS_DP), dp(com.pocketds.hub.ui.glass.GlassProgressBar.HEIGHT_DP.toInt())))
-            progressLabel.textSize = 12f
-            progressLabel.setTextColor(GLASS_FACTS)
-            (progressLabel.layoutParams as LinearLayout.LayoutParams).marginStart = dp(12)
-            poster.scaleType = ImageView.ScaleType.CENTER_CROP
-            poster.background = ThemeGradientDrawable.rounded(Styler.dp(context, GLASS_COVER_CORNER_DP), colors.posterPlaceholder)
-            poster.clipToOutline = true
-            poster.elevation = Styler.dp(context, 14f)
-        }
     }
 
-    /** How far through: the bar under the facts, whichever look draws it. */
+    /** How far through: the bar under the facts. */
     fun showProgress(fraction: Double) {
-        progressBar.showFraction(fraction)
-        glassProgress.fraction = fraction
+        progressBar.fraction = fraction
     }
 
     private var leading: View? = null
@@ -239,8 +205,9 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         requestLayout()
     }
 
-    fun setPresentation(type: String, hasLandscape: Boolean, hasPoster: Boolean) {
-        this.type = type; this.hasLandscape = hasLandscape; this.hasPoster = hasPoster
+    /** Whether there is a backdrop to show across the top. */
+    fun setPresentation(hasLandscape: Boolean) {
+        this.hasLandscape = hasLandscape
         requestLayout()
     }
 
@@ -248,71 +215,26 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         val next = listOf(type, landscapeData, posterData)
         if (next == imageKey) return
         imageKey = next
-        if (glass && book) {
+        if (book) {
             // A book's page shows its cover, at the left, and no backdrop.
-            setPresentation(type, false, posterData != null)
+            setPresentation(false)
             DetailStyler.image(poster, posterData, loader)
             return
         }
-        if (glass) {
-            // Glass has no poster beside the words: the backdrop, else the
-            // poster, fills the top of the page and fades into it.
-            setPresentation(type, landscapeData != null || posterData != null, false)
-            Artwork.bind(landscape, loader, landscapeData ?: posterData, opaque = true)
-            return
-        }
-        setPresentation(type, landscapeData != null, posterData != null)
-        DetailStyler.image(poster, posterData, loader)
-        loader.enqueue(ImageRequest.Builder(context).data(landscapeData).target(
-            onStart = { landscape.setImageDrawable(null) },
-            onSuccess = { if (imageKey == next) landscape.setImageDrawable(it) },
-            onError = { if (imageKey == next) setPresentation(type, false, posterData != null) }
-        ).build())
-    }
-
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        if (glass) return measureGlass(widthMeasureSpec, heightMeasureSpec)
-        val widthDp = (MeasureSpec.getSize(widthMeasureSpec) / resources.displayMetrics.density).toInt()
-        val hero = DetailLayout.useHero(type, hasLandscape, widthDp, resources.configuration.fontScale)
-        val next = "$hero:$widthDp:$hasPoster:$compact:${leading != null}"
-        if (layoutKey != next) {
-            layoutKey = next
-            landscape.visibility = if (hero) VISIBLE else GONE
-            masks.visibility = landscape.visibility
-            poster.visibility = if (!hero && hasPoster && leading == null) VISIBLE else GONE
-            leading?.visibility = if (!hero) VISIBLE else GONE
-            row.setPadding(dp(24), dp(topInsetDp + if (hero) 18 else if(compact) 8 else 16), dp(24), dp(if(compact)8 else 12))
-            (metadataView.layoutParams as LinearLayout.LayoutParams).topMargin=dp(if(compact)4 else 7)
-            (overview.layoutParams as LinearLayout.LayoutParams).topMargin=dp(if(compact)2 else 6)
-            (continuation.layoutParams as LinearLayout.LayoutParams).topMargin=dp(if(compact)6 else 10)
-            titleView.textSize = if (hero) 34f else if(compact)24f else 28f
-            overview.previewLines(if(compact)1 else 2)
-            body.layoutParams = LinearLayout.LayoutParams(if (hero) dp(((widthDp - 48) * .6f).toInt()) else 0, WRAP, if (hero) 0f else 1f)
-            minimumHeight = if (hero) dp(topInsetDp + 250) else 0
-        }
-        actionScroll.visibility = if (actions.childCount > 0 && actions.visibility != GONE) VISIBLE else GONE
-        continuation.visibility = if (continuation.childCount > 0) VISIBLE else GONE
-        underFacts.visibility = if (underFacts.childCount > 0) VISIBLE else GONE
-        // Only text/actions determine height. Measuring a MATCH_PARENT background
-        // through FrameLayout first makes its bitmap's intrinsic size grow the page.
-        val width = MeasureSpec.getSize(widthMeasureSpec)
-        row.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-            MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
-        setMeasuredDimension(width, resolveSize(maxOf(minimumHeight, row.measuredHeight), heightMeasureSpec))
-        val exactWidth = MeasureSpec.makeMeasureSpec(measuredWidth, MeasureSpec.EXACTLY)
-        val exactHeight = MeasureSpec.makeMeasureSpec(measuredHeight, MeasureSpec.EXACTLY)
-        landscape.measure(exactWidth, exactHeight)
-        masks.measure(exactWidth, exactHeight)
+        // No poster beside the words: the backdrop, else the poster, fills the
+        // top of the page and fades into it.
+        setPresentation(landscapeData != null || posterData != null)
+        Artwork.bind(landscape, loader, landscapeData ?: posterData, opaque = true)
     }
 
     /**
      * The prototype's title page: the words at the left from 64dp down, no
-     * wider than 560dp, and the backdrop [GLASS_ART_DP] tall however long the
-     * words run, so it reaches under the tabs and fades out there.
+     * wider than 560dp, and the backdrop [ART_DP] tall however long the words
+     * run, so it reaches under the tabs and fades out there.
      */
-    private fun measureGlass(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
-        val next = "glass:$width:$book:$squareCover:${leading != null}"
+        val next = "$width:$book:$squareCover:${leading != null}"
         if (layoutKey != next) {
             layoutKey = next
             if (book) {
@@ -321,21 +243,21 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
                 // (the pills' ring room lies below them).
                 val ring = dp(PillButton.RING_DP.toInt())
                 row.gravity = Gravity.BOTTOM
-                row.setPadding(dp(GLASS_EDGE_DP), dp(GLASS_BOOK_TOP_DP), dp(GLASS_EDGE_DP), dp(4))
+                row.setPadding(dp(EDGE_DP), dp(BOOK_TOP_DP), dp(EDGE_DP), dp(4))
                 poster.visibility = if (leading == null) VISIBLE else GONE
                 leading?.visibility = VISIBLE
-                poster.layoutParams = LinearLayout.LayoutParams(dp(GLASS_COVER_DP),
-                    dp(if (squareCover) GLASS_COVER_DP else GLASS_COVER_DP * 3 / 2)).apply {
-                    marginEnd = dp(GLASS_BOOK_GAP_DP); bottomMargin = ring
+                poster.layoutParams = LinearLayout.LayoutParams(dp(COVER_DP),
+                    dp(if (squareCover) COVER_DP else COVER_DP * 3 / 2)).apply {
+                    marginEnd = dp(BOOK_GAP_DP); bottomMargin = ring
                 }
-                (leading?.layoutParams as? LinearLayout.LayoutParams)?.let { it.marginEnd = dp(GLASS_BOOK_GAP_DP); it.bottomMargin = ring }
+                (leading?.layoutParams as? LinearLayout.LayoutParams)?.let { it.marginEnd = dp(BOOK_GAP_DP); it.bottomMargin = ring }
                 body.layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
             } else {
                 row.gravity = Gravity.TOP
                 poster.visibility = GONE
                 leading?.visibility = GONE
-                row.setPadding(dp(GLASS_EDGE_DP), dp(GLASS_TOP_DP), dp(GLASS_EDGE_DP), dp(4))
-                body.layoutParams = LinearLayout.LayoutParams(minOf(dp(GLASS_WORDS_DP), width - 2 * dp(GLASS_EDGE_DP)), WRAP)
+                row.setPadding(dp(EDGE_DP), dp(TOP_DP), dp(EDGE_DP), dp(4))
+                body.layoutParams = LinearLayout.LayoutParams(minOf(dp(WORDS_DP), width - 2 * dp(EDGE_DP)), WRAP)
             }
             overview.previewLines(2)
         }
@@ -344,30 +266,30 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         underFacts.visibility = if (underFacts.childCount > 0) VISIBLE else GONE
         actionScroll.visibility = if (actions.childCount > 0 && actions.visibility != GONE) VISIBLE else GONE
         continuation.visibility = if (continuation.childCount > 0) VISIBLE else GONE
+        // Only text and actions decide the height; the backdrop is measured to it afterwards.
         row.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
         setMeasuredDimension(width, resolveSize(row.measuredHeight, heightMeasureSpec))
-        landscape.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(GLASS_ART_DP), MeasureSpec.EXACTLY))
-        masks.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(0, MeasureSpec.EXACTLY))
+        landscape.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(ART_DP), MeasureSpec.EXACTLY))
     }
 
     private companion object {
         /** The prototype's Pocket title page (`.dart`, `.dhead`). */
-        const val GLASS_ART_DP = 330
-        const val GLASS_TOP_DP = 64
-        const val GLASS_EDGE_DP = 22
-        const val GLASS_WORDS_DP = 560
-        const val GLASS_TITLE_SP = 30f
+        const val ART_DP = 330
+        const val TOP_DP = 64
+        const val EDGE_DP = 22
+        const val WORDS_DP = 560
+        const val TITLE_SP = 30f
         /** A book's page (`.bhead`): 8dp under the bar, a 112dp cover 18dp from the words, a long bar. */
-        const val GLASS_BOOK_TOP_DP = 8
-        const val GLASS_COVER_DP = 112
-        const val GLASS_COVER_CORNER_DP = 9f
-        const val GLASS_BOOK_GAP_DP = 18
-        const val GLASS_PROGRESS_DP = 220
+        const val BOOK_TOP_DP = 8
+        const val COVER_DP = 112
+        const val COVER_CORNER_DP = 9f
+        const val BOOK_GAP_DP = 18
+        const val PROGRESS_DP = 220
         /** The facts in white at 82%, an original title at 60%, the overview at 86%, an eyebrow at 72%. */
-        const val GLASS_FACTS = com.pocketds.hub.ui.glass.GlassColors.FACTS
-        const val GLASS_SUBTITLE = 0x99FFFFFF.toInt()
-        const val GLASS_OVERVIEW = 0xDBFFFFFF.toInt()
-        const val GLASS_EYEBROW = com.pocketds.hub.ui.glass.GlassColors.EYEBROW
+        const val FACTS = com.pocketds.hub.ui.glass.GlassColors.FACTS
+        const val SUBTITLE = 0x99FFFFFF.toInt()
+        const val OVERVIEW = 0xDBFFFFFF.toInt()
+        const val EYEBROW = com.pocketds.hub.ui.glass.GlassColors.EYEBROW
     }
 }
 
@@ -484,39 +406,30 @@ class ContinuationCardView(context: Context, colors: PocketColors, private val r
 /**
  * Artwork has no inset white frame; captions and focus clearance are measured together.
  *
- * On the Glass page it is the prototype's book card: the cover with 11dp
- * corners and the 3dp ring on it, no box round the card, the title on one bold
- * line over a quiet one, and the marks in Glass's colours (a white bar inside
- * the cover, the tick in the accent).
+ * It is the prototype's book card: the cover with 11dp corners and the 3dp
+ * ring on it, no box round the card, the title on one bold line over a quiet
+ * one, and the marks of a poster (a white bar inside the cover, the tick in
+ * the accent).
  */
 class DetailArtworkCardView(context: Context, private val colors: PocketColors, private val ringVisible: () -> Boolean) : LinearLayout(context) {
     private var portraitRing: android.graphics.drawable.Drawable? = null
-    private val glass = Theme.onGlass(colors)
-    /** Glass: the ring on the cover, which takes the card's focused state. */
-    private val coverRing = if (glass) Styler.focusOutline(context, colors, ArtworkFrame.GLASS_CORNER_DP, 3f) else null
+    /** The ring on the cover, which takes the card's focused state. */
+    private val coverRing = Styler.focusOutline(context, colors, ArtworkFrame.GLASS_CORNER_DP, 3f)
     private var coverMarks: android.graphics.drawable.Drawable? = null
     val image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
-    val titleView = label(context, 13f, colors.primaryText).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
-    val subtitleView = label(context, 11f, colors.mutedText).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
+    val titleView = label(context, 12f, colors.primaryText).apply { textWeight(700); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+    val subtitleView = label(context, 11f, SettingsCard.GLASS_QUIET).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
     init {
         orientation = VERTICAL
-        if (glass) {
-            setPadding(0, 0, 0, dp(6))
-            image.background = ThemeGradientDrawable().apply { cornerRadius = Styler.dp(context, ArtworkFrame.GLASS_CORNER_DP); setColor(this@DetailArtworkCardView.colors.posterPlaceholder) }
-            image.isDuplicateParentStateEnabled = true
-            image.foreground = coverRing
-            titleView.textSize = 12f; titleView.textWeight(700); titleView.maxLines = 1
-            subtitleView.textSize = 11f; subtitleView.setTextColor(SettingsCard.GLASS_QUIET); subtitleView.maxLines = 1
-        } else {
-            setPadding(dp(4), dp(4), dp(4), dp(6))
-            background = Styler.cardBackground(context, colors, 8f, Color.TRANSPARENT, 2f)
-            image.background = ThemeGradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(this@DetailArtworkCardView.colors.posterPlaceholder) }
-        }
+        setPadding(0, 0, 0, dp(6))
+        image.background = ThemeGradientDrawable().apply { cornerRadius = Styler.dp(context, ArtworkFrame.GLASS_CORNER_DP); setColor(this@DetailArtworkCardView.colors.posterPlaceholder) }
+        image.isDuplicateParentStateEnabled = true
+        image.foreground = coverRing
         Styler.makeFocusable(this); descendantFocusability = FOCUS_BLOCK_DESCENDANTS
         image.clipToOutline = true
         addView(image, LayoutParams(MATCH, dp(156)))
         addView(titleView, LayoutParams(MATCH, WRAP).apply { topMargin = dp(7) })
-        addView(subtitleView, LayoutParams(MATCH, WRAP).apply { topMargin = dp(if (glass) 1 else 3) })
+        addView(subtitleView, LayoutParams(MATCH, WRAP).apply { topMargin = dp(1) })
         minimumHeight = dp(DetailLayout.posterCardHeight(156, resources.configuration.fontScale))
         FocusDecorator.attach(this, ringVisible)
     }
@@ -531,12 +444,12 @@ class DetailArtworkCardView(context: Context, private val colors: PocketColors, 
      */
     fun marks(fraction: Double, finished: Boolean) {
         coverMarks = when {
-            finished -> CoverMarks(colors, 0.0, true, resources.displayMetrics.density, glass)
-            fraction > 0 -> CoverMarks(colors, fraction, false, resources.displayMetrics.density, glass)
+            finished -> CoverMarks(colors, 0.0, true, resources.displayMetrics.density)
+            fraction > 0 -> CoverMarks(colors, fraction, false, resources.displayMetrics.density)
             else -> null
         }
-        // Glass: the marks under the ring, in the one foreground the cover has.
-        val ring = coverRing?.takeIf { portraitRing == null }
+        // The marks under the ring, in the one foreground the cover has.
+        val ring = coverRing.takeIf { portraitRing == null }
         image.foreground = if (ring == null) coverMarks
             else coverMarks?.let { android.graphics.drawable.LayerDrawable(arrayOf(it, ring)) } ?: ring
     }
@@ -586,23 +499,22 @@ class DetailArtworkCardView(context: Context, private val colors: PocketColors, 
 }
 
 /**
- * [DetailArtworkCardView.marks]: drawn over the cover, sized from its bounds.
- * [glass]: the prototype's marks, a white bar on a faint track inside the
- * cover and the tick in the accent, as on Glass posters and stills.
+ * [DetailArtworkCardView.marks]: drawn over the cover, sized from its bounds:
+ * the prototype's marks, a white bar on a faint track inside the cover and the
+ * tick in the accent, as on posters and stills.
  */
 private class CoverMarks(
     private val colors: PocketColors,
     private val fraction: Double,
     private val finished: Boolean,
-    private val density: Float,
-    private val glass: Boolean = false
+    private val density: Float
 ) : android.graphics.drawable.Drawable() {
     private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-    private val check = AppIconDrawable(AppIcon.CHECK, if (glass) colors.accentText else SemanticColor.foreground(colors.badgeAvailable))
+    private val check = AppIconDrawable(AppIcon.CHECK, colors.accentText)
 
     override fun draw(canvas: android.graphics.Canvas) {
         val b = bounds
-        if (glass && !finished) {
+        if (!finished) {
             val inset = 6 * density
             val height = 4 * density
             val top = b.bottom - inset - height
@@ -613,23 +525,15 @@ private class CoverMarks(
             canvas.drawRoundRect(b.left + inset, top, end, top + height, height / 2, height / 2, paint)
             return
         }
-        if (finished) {
-            val size = 22 * density
-            val inset = 6 * density
-            val cx = b.right - inset - size / 2
-            val cy = b.top + inset + size / 2
-            paint.color = if (glass) colors.accent else colors.badgeAvailable
-            canvas.drawCircle(cx, cy, size / 2, paint)
-            val pad = (5 * density).toInt()
-            check.setBounds((cx - size / 2).toInt() + pad, (cy - size / 2).toInt() + pad, (cx + size / 2).toInt() - pad, (cy + size / 2).toInt() - pad)
-            check.draw(canvas)
-            return
-        }
-        val height = 3 * density
-        paint.color = android.graphics.Color.argb(115, 0, 0, 0)
-        canvas.drawRect(b.left.toFloat(), b.bottom - height, b.right.toFloat(), b.bottom.toFloat(), paint)
+        val size = 22 * density
+        val inset = 6 * density
+        val cx = b.right - inset - size / 2
+        val cy = b.top + inset + size / 2
         paint.color = colors.accent
-        canvas.drawRect(b.left.toFloat(), b.bottom - height, b.left + (b.width() * fraction.coerceIn(0.0, 1.0)).toFloat(), b.bottom.toFloat(), paint)
+        canvas.drawCircle(cx, cy, size / 2, paint)
+        val pad = (5 * density).toInt()
+        check.setBounds((cx - size / 2).toInt() + pad, (cy - size / 2).toInt() + pad, (cx + size / 2).toInt() - pad, (cy + size / 2).toInt() - pad)
+        check.draw(canvas)
     }
 
     override fun setAlpha(alpha: Int) { paint.alpha = alpha }
@@ -638,7 +542,7 @@ private class CoverMarks(
     override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
 
     private companion object {
-        /** The track under a Glass bar, as on stills. */
+        /** The track under the bar, as on stills. */
         const val GLASS_TRACK = com.pocketds.hub.ui.glass.GlassProgressBar.TRACK
     }
 }

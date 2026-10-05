@@ -433,7 +433,7 @@ class ManageScreen(
                 addView(detail, LayoutParams(MATCH, WRAP))
             }, LayoutParams(0, WRAP, 1f))
 
-            scan = PillButton.create(context, colors, "Scan", AppIcon.REFRESH, heightDp = 32f, glass = true).apply {
+            scan = PillButton.create(context, colors, "Scan", AppIcon.REFRESH, heightDp = 32f).apply {
                 isFocusable = false
                 isFocusableInTouchMode = false
                 contentDescription = "Scan Jellyfin libraries"

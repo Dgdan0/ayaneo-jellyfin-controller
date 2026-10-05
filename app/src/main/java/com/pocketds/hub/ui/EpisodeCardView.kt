@@ -32,18 +32,16 @@ object EpisodeLabel {
  * two -- so the same episode looked different on every screen that showed it.
  * The still carries the watch progress the way Home's landscape cards do.
  *
- * [glass] is a title page's episode in Glass (GLASS_PLAN.md): Home's tile --
- * 11dp corners, the progress as a white bar inside the still, a tick in the
- * accent, a glass play disc on focus ([GlassStillMarks]) -- with UP NEXT at its
- * top left.
+ * It is Home's tile (GLASS_PLAN.md) -- 11dp corners, the progress as a white
+ * bar inside the still, a tick in the accent, a glass play disc on focus
+ * ([GlassStillMarks]) -- with UP NEXT at its top left.
  */
 class EpisodeCardView(
     context: Context,
     private val colors: PocketColors,
     private val ringVisible: () -> Boolean,
     /** For the download picker: no description, and room for a selection mark. */
-    compact: Boolean = false,
-    private val glass: Boolean = false
+    compact: Boolean = false
 ) : LinearLayout(context) {
 
     data class Model(
@@ -67,7 +65,6 @@ class EpisodeCardView(
     var onActivate: (() -> Unit)? = null
 
     private val still = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-    private val progress = ArtworkProgressView(context, colors.accent)
     private val mark = TextView(context).apply {
         gravity = Gravity.CENTER; textSize = 13f
         background = ThemeGradientDrawable().apply {
@@ -77,28 +74,16 @@ class EpisodeCardView(
         visibility = GONE
     }
     private val badge = TextView(context).apply {
-        textSize = if (glass) 10f else 9f; textWeight(if (glass) 800 else 700); letterSpacing = if (glass) .08f else .04f
+        textSize = 10f; textWeight(800); letterSpacing = .08f
         setTextColor(colors.accentText)
-        if (glass) setPadding(dp(8), dp(4), dp(8), dp(4)) else setPadding(dp(7), dp(2), dp(7), dp(2))
+        setPadding(dp(8), dp(4), dp(8), dp(4))
         background = ThemeGradientDrawable().apply { cornerRadius = Styler.dp(context, 999f); setColor(this@EpisodeCardView.colors.accent) }
         visibility = GONE
     }
-    /** The play mark a focused episode shows, where A would start it. */
-    private val playMark = android.widget.ImageView(context).apply {
-        setImageDrawable(AppIconDrawable(AppIcon.PLAY, colors.inverseText))
-        val pad = dp(10)
-        setPadding(pad + dp(1), pad, pad - dp(1), pad)
-        background = ThemeGradientDrawable().apply {
-            shape = android.graphics.drawable.GradientDrawable.OVAL
-            setColor((this@EpisodeCardView.colors.primaryText and 0x00FFFFFF) or 0xEB000000.toInt())
-        }
-        visibility = GONE
-        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-    }
-    private val title = text(if (glass) 12f else 12.5f, colors.primaryText, 1).apply { textWeight(if (glass) 700 else 600) }
-    private val meta = text(11f, if (glass) GLASS_META else colors.mutedText, 1)
-    /** Glass: the progress inside the still, the play disc on focus, the accent tick. */
-    private var marks: com.pocketds.hub.ui.glass.GlassStillMarks? = null
+    private val title = text(12f, colors.primaryText, 1).apply { textWeight(700) }
+    private val meta = text(11f, META, 1)
+    /** The progress inside the still, the play disc on focus, the accent tick. */
+    private val marks: com.pocketds.hub.ui.glass.GlassStillMarks
     private val overview = text(10f, colors.mutedText, 2)
     /** Episode strips that play on A show the play mark on focus; pickers do not. */
     var showsPlayOnFocus = false
@@ -111,30 +96,27 @@ class EpisodeCardView(
         Styler.makeFocusable(this)
         descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         setPadding(0, 0, 0, dp(4))
-        val corner = if (glass) ArtworkFrame.GLASS_CORNER_DP else ArtworkFrame.CORNER_DP
+        val corner = ArtworkFrame.GLASS_CORNER_DP
         val art = ArtworkFrame(context, 16f / 9f, corner).apply {
             isDuplicateParentStateEnabled = true
-            foreground = Styler.focusOutline(context, colors, corner, if (glass) 3f else 2f)
+            foreground = Styler.focusOutline(context, colors, corner, 3f)
         }
         art.addView(still, FrameLayout.LayoutParams(MATCH, MATCH))
-        if (glass) marks = com.pocketds.hub.ui.glass.GlassStillMarks(context, colors, art)
-        else art.addView(progress, FrameLayout.LayoutParams(MATCH, dp(3), Gravity.BOTTOM))
+        marks = com.pocketds.hub.ui.glass.GlassStillMarks(context, colors, art)
         art.addView(mark, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.END).apply {
             topMargin = dp(6); marginEnd = dp(6)
         })
-        // Glass puts UP NEXT at the top left, where the prototype has it, clear of the tick.
-        art.addView(badge, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or if (glass) Gravity.START else Gravity.END).apply {
-            topMargin = dp(if (glass) 8 else 6); marginEnd = dp(6); marginStart = dp(8)
+        // UP NEXT at the top left, where the prototype has it, clear of the tick.
+        art.addView(badge, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.START).apply {
+            topMargin = dp(8); marginEnd = dp(6); marginStart = dp(8)
         })
-        if (!glass) art.addView(playMark, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER))
         addView(art, LayoutParams(MATCH, WRAP))
         addView(title, LayoutParams(MATCH, WRAP).apply { topMargin = dp(7) })
         addView(meta, LayoutParams(MATCH, WRAP).apply { topMargin = dp(2) })
         if (!compact) addView(overview, LayoutParams(MATCH, WRAP).apply { topMargin = dp(3) })
         FocusDecorator.attach(this, ringVisible)
         FocusDecorator.listen(this, ringVisible) { _, focused ->
-            playMark.visibility = if (focused && showsPlayOnFocus) VISIBLE else GONE
-            if (showsPlayOnFocus) marks?.focus(focused)
+            if (showsPlayOnFocus) marks.focus(focused)
             if (focused) onFocused?.invoke()
         }
         activateOnTap { onActivate?.invoke() }
@@ -153,16 +135,12 @@ class EpisodeCardView(
         title.text = model.title
         meta.text = model.meta
         overview.text = model.overview
-        progress.fraction = model.progress
         alpha = if (model.available) 1f else .45f
         badge.text = model.badge
         badge.visibility = if (model.badge.isNotBlank()) VISIBLE else GONE
-        val glassMarks = marks
-        if (glassMarks != null) {
-            // A picker's own mark stays; a watched episode gets the accent tick.
-            glassMarks.bind(model.progress, model.watched && model.marked == null)
-            setMarked(model.marked)
-        } else setMarked(model.marked ?: if (model.watched && model.badge.isBlank()) true else null)
+        // A picker's own mark stays; a watched episode gets the accent tick.
+        marks.bind(model.progress, model.watched && model.marked == null)
+        setMarked(model.marked)
         contentDescription = model.description.ifBlank { listOf(model.title, model.meta).filter(String::isNotBlank).joinToString(", ") }
         Artwork.bind(still, loader, model.still, opaque = true, placeholderColor = colors.posterPlaceholder)
     }
@@ -186,12 +164,10 @@ class EpisodeCardView(
     companion object {
         const val WIDTH_DP = 270
         const val COMPACT_WIDTH_DP = 224
-        /** On a detail page, under the tabs: four and a bit across. */
-        const val STRIP_WIDTH_DP = 180
-        /** Glass: the prototype's Pocket episode, 176dp wide. */
+        /** On a detail page, under the tabs: the prototype's Pocket episode, 176dp wide. */
         const val GLASS_STRIP_WIDTH_DP = 176
-        /** Glass: an episode's second line, white at 64%. */
-        private const val GLASS_META = com.pocketds.hub.ui.glass.GlassColors.QUIET
+        /** An episode's second line, white at 64%. */
+        private const val META = com.pocketds.hub.ui.glass.GlassColors.QUIET
         private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
     }

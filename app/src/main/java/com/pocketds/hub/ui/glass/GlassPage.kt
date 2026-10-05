@@ -14,10 +14,10 @@ import java.util.WeakHashMap
  * sheet or a dialog opening over the page reads them, so it is a tint of the
  * artwork it opened over rather than a neutral panel (GLASS_PLAN.md), and the
  * glass that stays on screen -- the bars, a Details pill, a card's play disc --
- * [follow]s them. Classic never sets them.
+ * [follow]s them.
  *
  * Keyed weakly by the Activity, like Theme's palettes. A follower is held only
- * while its view is attached, so a rebuilt window (a new look, a new profile)
+ * while its view is attached, so a rebuilt window (a new profile)
  * leaves nothing behind holding the old one.
  */
 object GlassPage {

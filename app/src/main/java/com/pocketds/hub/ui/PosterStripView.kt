@@ -16,9 +16,8 @@ class PosterStripView(
     context: Context,
     private val colors: PocketColors,
     private val ringVisible: () -> Boolean,
-    private val posterHeightDp: Float = 141f,
-    /** Glass posters (PosterCardView's), as a title page's More like this has them. */
-    private val glass: Boolean = false
+    /** The posters' height, which decides their width at 2:3. */
+    private val posterHeightDp: Float = 141f
 ) : RecyclerView(context) {
     var onOpen: ((SearchHit) -> Unit)? = null
     var onFocused: ((SearchHit) -> Unit)? = null
@@ -32,7 +31,7 @@ class PosterStripView(
         clipToPadding = false
         clipChildren = false
         setItemViewCacheSize(8)
-        if (glass) setPadding(dp(16), dp(10), dp(16), dp(10)) else setPadding(dp(18), dp(10), dp(18), dp(10))
+        setPadding(dp(16), dp(10), dp(16), dp(10))
         adapter = Cards()
     }
 
@@ -54,7 +53,7 @@ class PosterStripView(
     private inner class Cards : Adapter<ViewHolder>() {
         override fun getItemCount() = hits.size
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            val card = PosterCardView(parent.context, colors, posterHeightDp, glass = glass).apply {
+            val card = PosterCardView(parent.context, colors).apply {
                 layoutParams = LayoutParams(dp((posterHeightDp * 2 / 3).toInt()), ViewGroup.LayoutParams.WRAP_CONTENT)
                     .apply { setMargins(dp(6), dp(4), dp(6), dp(4)) }
                 FocusDecorator.attach(this, ringVisible)

@@ -48,7 +48,7 @@ class BlobSegmentedView(
         /** No track; an accent bar slides under the chosen label: detail-page tabs. */
         UNDERLINE,
         /**
-         * Glass: each option its own pill of the page's glass, a gap between
+         * Each option its own pill of the page's glass, a gap between
          * them, and the white blob on the chosen one: a title's seasons
          * (GLASS_PLAN.md).
          */
@@ -159,7 +159,7 @@ class BlobSegmentedView(
     }
 
     /**
-     * Glass: the track as a capsule of the page's glass that follows the page,
+     * The track as a capsule of the page's glass that follows the page,
      * as the top bar's tabs are (Discover | Upcoming, the week switch). Once per view.
      */
     fun useGlassTrack() {

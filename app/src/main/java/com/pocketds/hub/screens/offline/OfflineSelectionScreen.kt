@@ -390,7 +390,7 @@ class OfflineSelectionScreen(
 
     private inner class EpisodeCard(parent: ViewGroup, val seasonId: String) {
         lateinit var item: OfflineSelectionItem
-        val view = EpisodeCardView(parent.context, colors, ringVisible, compact = true, glass = true).apply {
+        val view = EpisodeCardView(parent.context, colors, ringVisible, compact = true).apply {
             layoutParams = RecyclerView.LayoutParams(dp(EpisodeCardView.COMPACT_WIDTH_DP), WRAP)
                 .apply { marginEnd = dp(9); topMargin = dp(3) }
             onFocused = { host.refreshHints() }

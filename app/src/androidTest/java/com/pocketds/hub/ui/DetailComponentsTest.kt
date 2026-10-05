@@ -40,7 +40,7 @@ class DetailComponentsTest {
             val header = DetailHeaderView(context, Theme.colors(context), { true })
             header.titleView.text = "A very long title with multiple lines — וגם כותרת ארוכה בעברית"
             header.metadataView.text = "2026 · 2h 12m · Drama"
-            header.setPresentation("movie", true, true)
+            header.setPresentation(true)
             val action = TextView(context).apply { text = "Resume"; minimumHeight = Styler.dpInt(context, 48f) }
             header.actions.addView(action)
             layout(header, width)
@@ -144,12 +144,13 @@ class DetailComponentsTest {
         assertTrue("Overflow hints remain reachable by touch", bar.canScrollHorizontally(1))
     }
 
-    @Test fun croppedHeroArtworkCannotPaintOverTheContentBelowIt() = onUi {
+    /** The backdrop runs on under the page below by design; only the words decide the header's height. */
+    @Test fun heroArtworkDoesNotDecideTheHeaderHeight() = onUi {
         val context = instrumentation.targetContext
         val root = FrameLayout(context).apply { setBackgroundColor(Color.MAGENTA); clipChildren = false }
         val header = DetailHeaderView(context, Theme.colors(context), { true })
         header.titleView.text = "A movie title"
-        header.setPresentation("movie", true, false)
+        header.setPresentation(true)
         val art = Bitmap.createBitmap(640, 360, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }
         header.landscape.setImageBitmap(art)
         root.addView(header, FrameLayout.LayoutParams(-1, -2))
@@ -157,10 +158,7 @@ class DetailComponentsTest {
             View.MeasureSpec.makeMeasureSpec(Styler.dpInt(context, 500f), View.MeasureSpec.EXACTLY))
         root.layout(0, 0, root.measuredWidth, root.measuredHeight)
         assertTrue("Decorative artwork must not determine the header height", header.height < root.height)
-        val capture = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
-        root.draw(Canvas(capture))
-        assertEquals(Color.MAGENTA, capture.getPixel(root.width / 2, header.bottom + Styler.dpInt(context, 4f)))
-        capture.recycle(); art.recycle()
+        art.recycle()
     }
 
     @Test fun focusingASeasonScrollsItsWholeFocusRingIntoView() {

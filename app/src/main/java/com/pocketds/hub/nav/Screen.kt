@@ -95,7 +95,7 @@ interface Screen : StackScreen {
      * The hub image path of the artwork this screen is about right now -- the
      * focused card on Home, a title page's backdrop, the cover in focus on
      * Books Home -- or null to leave the page as it is (see [PageArtwork]).
-     * Glass tints the whole page from it; Classic ignores it.
+     * The whole page is tinted from it.
      *
      * The host reads it when the screen comes to the front and after every
      * focus change. When it changes without focus moving (a page's details
@@ -157,11 +157,6 @@ interface ScreenHost {
     fun refreshAppearance() = Unit
     /** Re-read [Screen.drawsUnderTopBar] and [Screen.showsOwnTitle] after they change. */
     fun refreshChrome() = Unit
-    /**
-     * For a page that draws under the tabs: true while artwork is behind them,
-     * false once it has scrolled away and the tabs need their solid ground.
-     */
-    fun setTopBarOverArtwork(over: Boolean) = Unit
     /** Re-read [Screen.pageArtwork], after it changed without focus moving. */
     fun pageArtworkChanged() = Unit
     /**
@@ -172,7 +167,6 @@ interface ScreenHost {
     /**
      * Artwork a screen is about to show, such as the cards a row binds, so its
      * colours are known before focus reaches it and the page re-tints at once.
-     * Nothing in Classic.
      */
     fun prefetchArtwork(paths: Collection<String>) = Unit
 

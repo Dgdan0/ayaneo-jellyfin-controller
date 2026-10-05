@@ -201,7 +201,7 @@ class SeasonEpisodesView(
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EpisodeHolder {
             // EpisodeCardView's glass tile, at the prototype's 176dp.
-            val card = EpisodeCardView(parent.context, colors, ringVisible, compact = true, glass = true).apply {
+            val card = EpisodeCardView(parent.context, colors, ringVisible, compact = true).apply {
                 showsPlayOnFocus = true
                 layoutParams = RecyclerView.LayoutParams(dp(EpisodeCardView.GLASS_STRIP_WIDTH_DP), WRAP)
                     .apply { setMargins(dp(6), dp(6), dp(6), dp(6)) }

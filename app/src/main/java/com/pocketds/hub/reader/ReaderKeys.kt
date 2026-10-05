@@ -22,7 +22,7 @@ object ReaderKeys {
      * [onAction] as the key would be.
      */
     fun row(context: Context, colors: PocketColors, onAction: (PadAction) -> Unit): HintBarView =
-        HintBarView(context, colors, true).apply { this.onAction = onAction }
+        HintBarView(context, colors).apply { this.onAction = onAction }
 
     /** The Controls sheet in [panel]: every key that does something while reading, and what. */
     fun show(panel: SidePanelView, state: ReaderPadState) {

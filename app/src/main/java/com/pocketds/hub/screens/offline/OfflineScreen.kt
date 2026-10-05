@@ -434,7 +434,7 @@ class OfflineScreen(
             } else Fmt.bytes(size),
             jellyfinItemId = value.key
         )
-        val card = PosterCardView(host.viewContext, colors, 158f, glass = true).apply {
+        val card = PosterCardView(host.viewContext, colors).apply {
             tag = TaggedCatalog(value)
             contentDescription = if (value.isSeries) {
                 "${value.title}, ${value.rows.size} downloaded episodes"

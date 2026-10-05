@@ -448,7 +448,7 @@ class LibraryArrangeGrid(
         PillButton.control(this, colors, AppIcon.GRIP, round = true)
     }
 
-    private fun lightGrip(mark: TextView, on: Boolean) = PillButton.setPrimary(mark, colors, on)
+    private fun lightGrip(mark: TextView, on: Boolean) = PillButton.setPrimary(mark, on)
 
     companion object {
         /** A gentle wiggle: a degree either way, each swing a little over a tenth of a second. */
