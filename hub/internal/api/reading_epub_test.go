@@ -20,6 +20,17 @@ type epubUpstreamState struct {
 	readaloud  bool
 	audiobook  bool
 	formatSeen string
+	// audio is the raw JSON of the "audiobook" field Storyteller reports for
+	// book 12 when a test needs its real shape: the folder it lives in, in
+	// Storyteller's own filesystem, and a manifest of its files (see
+	// storytellerAudiobook). Empty keeps the bare edition older tests use.
+	audio string
+	// narrators is the raw JSON array of the book's narrators.
+	narrators string
+	// noFiles makes Storyteller's /files route, the one that builds and sends a
+	// ZIP, fail the test if it is called: audio streamed from the hub's own files
+	// must never go through it.
+	noFiles bool
 }
 
 func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
@@ -31,6 +42,15 @@ func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
 		case "/api/v2/books":
 			_, _ = io.WriteString(w, `[{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":{"uuid":"ebook-12","pageCount":400}}]`)
 		case "/api/v2/books/12":
+			if state.audio != "" {
+				narrators := state.narrators
+				if narrators == "" {
+					narrators = "[]"
+				}
+				_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"narrators":`+narrators+
+					`,"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":{"uuid":"ebook-12","pageCount":400},"audiobook":`+state.audio+`}`)
+				return
+			}
 			if state.readaloud {
 				_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","ebook":{"uuid":"ebook-12"},"audiobook":{"uuid":"audio-12"},"readaloud":{"uuid":"aligned-12"}}`)
 				return
@@ -41,6 +61,11 @@ func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
 			}
 			_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":{"uuid":"ebook-12","pageCount":400}}`)
 		case "/api/v2/books/12/files":
+			if state.noFiles {
+				t.Errorf("Storyteller's /files route was called (%s): streaming must read the files itself", r.URL)
+				http.Error(w, "streaming must not build an archive", http.StatusInternalServerError)
+				return
+			}
 			state.fileCalls++
 			state.rangeSeen = r.Header.Get("Range")
 			state.formatSeen = r.URL.Query().Get("format")

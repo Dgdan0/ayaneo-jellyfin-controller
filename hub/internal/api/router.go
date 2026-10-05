@@ -84,11 +84,14 @@ type Server struct {
 	// ffprobe for the audiobook routes: the seam a test stubs, how long one
 	// probe may take, the slots that bound how many run at once, and what has
 	// been learned about each file as it was (see audio_probe.go).
-	probeAudio       func(context.Context, string) (probedAudio, error)
-	probeTimeout     time.Duration
-	probeSlots       chan struct{}
-	probeMu          sync.Mutex
-	probeCache       map[probeKey]probedAudio
+	probeAudio   func(context.Context, string) (probedAudio, error)
+	probeTimeout time.Duration
+	probeSlots   chan struct{}
+	probeMu      sync.Mutex
+	probeCache   map[probeKey]probedAudio
+	// openMedia opens an audiobook's file read-only through the media mapping
+	// (reading.ResolveMediaFile), and is the seam a test wraps to watch handles.
+	openMedia        func([]config.MediaRemovalRoot, string, string) (readingdomain.MediaFile, error)
 	libraryScanMu    sync.Mutex
 	libraryScanWatch bool
 	readingScanMu    sync.Mutex
@@ -135,6 +138,7 @@ func NewServer(cfg *config.Config) *Server {
 		probeTimeout:          audioProbeTimeout,
 		probeSlots:            make(chan struct{}, audioProbeSlots),
 		probeCache:            map[probeKey]probedAudio{},
+		openMedia:             readingdomain.ResolveMediaFile,
 		startedAt:             time.Now(),
 	}
 	for _, cidr := range cfg.Server.TrustProxyCIDRs {
@@ -304,6 +308,7 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/pages/{page}/thumb", s.handleReadingPageThumb)
 	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/progress", s.handleReadingPublicationProgress)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/file", s.handleReadingEpubFile)
+	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/audio", s.handleReadingAudioManifest)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/position", s.handleReadingEpubPosition)
 	authed.HandleFunc("POST /v1/reading/works/{workId}/publications/{sourceItemId}/position", s.handleReadingEpubPosition)
 	authed.HandleFunc("GET /v1/reading/requests/options", s.handleReadingRequestOptions)

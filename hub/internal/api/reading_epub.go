@@ -168,7 +168,7 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 		writeUpstreamError(w, r, "storyteller", err)
 		return
 	}
-	s.cache.Invalidate("reading:storyteller:work:" + sourceItemID)
+	s.invalidateStorytellerWork(sourceItemID)
 	s.cache.Invalidate("reading:storyteller:books")
 	writeJSON(w, http.StatusOK, struct {
 		OK     bool   `json:"ok"`
@@ -176,21 +176,49 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 	}{OK: true, Action: "save_epub_position"})
 }
 
+// resolveStorytellerEbook is resolveStorytellerBook for the routes that serve an
+// EPUB: the book must have the edition the URL asks for. Which edition that is
+// is read from the URL here (the format, or a /position), and only here; a
+// route that wants another, such as audio, resolves the book and decides itself.
 func (s *Server) resolveStorytellerEbook(w http.ResponseWriter, r *http.Request, ctx context.Context) (int64, bool) {
+	book, _, ok := s.resolveStorytellerBook(w, r, ctx, "EPUB publication")
+	if !ok {
+		return 0, false
+	}
+	available := book.Ebook != nil && !book.Ebook.Missing
+	if r.URL.Query().Get("format") == "readaloud" {
+		available = book.Readaloud.Available()
+	} else if r.URL.Query().Get("format") == "audiobook" {
+		available = book.Audiobook != nil && !book.Audiobook.Missing
+	} else if strings.HasSuffix(r.URL.Path, "/position") {
+		available = available || book.Readaloud.Available()
+	}
+	if !available {
+		writeError(w, r, http.StatusNotFound, Error{Code: CodeNotFound, Message: "this work has no available EPUB edition"})
+		return 0, false
+	}
+	return book.ID, true
+}
+
+// resolveStorytellerBook finds the Storyteller book a publication URL names and
+// checks that it belongs to the work in the URL: directly, through its series,
+// or as another edition of the same title. It answers 400, 404 or 503 itself
+// when it cannot. what names the thing in the 400.
+func (s *Server) resolveStorytellerBook(w http.ResponseWriter, r *http.Request, ctx context.Context, what string) (storyteller.Book, cache.Meta, bool) {
 	workID := strings.TrimSpace(r.PathValue("workId"))
 	bookID, err := strconv.ParseInt(strings.TrimSpace(r.PathValue("sourceItemId")), 10, 64)
 	if !validReadingWorkID(workID) || err != nil || bookID <= 0 {
-		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "invalid EPUB publication"})
-		return 0, false
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "invalid " + what})
+		return storyteller.Book{}, cache.Meta{}, false
 	}
 	if s.storyteller == nil {
 		writeError(w, r, http.StatusServiceUnavailable, Error{Code: CodeUpstreamDown, Service: "storyteller", Message: "Storyteller is unavailable", Retryable: true})
-		return 0, false
+		return storyteller.Book{}, cache.Meta{}, false
 	}
 	binding, found := s.readingCatalog.Resolve(workID)
 	if !found {
 		writeError(w, r, http.StatusNotFound, Error{Code: CodeNotFound, Message: "reading work not found"})
-		return 0, false
+		return storyteller.Book{}, cache.Meta{}, false
 	}
 	direct := false
 	seriesSource := ""
@@ -203,21 +231,21 @@ func (s *Server) resolveStorytellerEbook(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	var book storyteller.Book
+	var meta cache.Meta
 	if direct {
-		loaded, _, loadErr := cache.Fetch(ctx, s.cache, "reading:storyteller:work:"+strconv.FormatInt(bookID, 10), cache.Metadata, func(fetchCtx context.Context) (*storyteller.Book, error) {
-			return s.storyteller.Book(fetchCtx, bookID)
-		})
+		loaded, loadMeta, loadErr := s.storytellerBookRecord(ctx, bookID)
 		if loadErr != nil {
 			writeUpstreamError(w, r, "storyteller", loadErr)
-			return 0, false
+			return storyteller.Book{}, cache.Meta{}, false
 		}
-		book = *loaded
+		book, meta = *loaded, loadMeta
 	} else if seriesSource != "" {
-		books, _, loadErr := cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+		books, listMeta, loadErr := cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
 		if loadErr != nil {
 			writeUpstreamError(w, r, "storyteller", loadErr)
-			return 0, false
+			return storyteller.Book{}, cache.Meta{}, false
 		}
+		meta = listMeta
 		for _, candidate := range books {
 			source, _, grouped := storytellerSeriesSource(s.reconcileStorytellerBook(candidate))
 			if candidate.ID == bookID && grouped && source == seriesSource {
@@ -253,22 +281,30 @@ func (s *Server) resolveStorytellerEbook(w http.ResponseWriter, r *http.Request,
 	}
 	if book.ID != bookID {
 		writeError(w, r, http.StatusNotFound, Error{Code: CodeNotFound, Message: "publication does not belong to this work"})
-		return 0, false
+		return storyteller.Book{}, cache.Meta{}, false
 	}
-	book = s.reconcileStorytellerBook(book)
-	available := book.Ebook != nil && !book.Ebook.Missing
-	if r.URL.Query().Get("format") == "readaloud" {
-		available = book.Readaloud.Available()
-	} else if r.URL.Query().Get("format") == "audiobook" {
-		available = book.Audiobook != nil && !book.Audiobook.Missing
-	} else if strings.HasSuffix(r.URL.Path, "/position") {
-		available = available || book.Readaloud.Available()
-	}
-	if !available {
-		writeError(w, r, http.StatusNotFound, Error{Code: CodeNotFound, Message: "this work has no available EPUB edition"})
-		return 0, false
-	}
-	return bookID, true
+	return s.reconcileStorytellerBook(book), meta, true
+}
+
+// storytellerBookRecord is one Storyteller book from its own endpoint, held a day
+// and cleared with everything else the hub knows of Storyteller. A series or a
+// shelf is built from the list endpoint, which is not the place to read an
+// audiobook's folder and manifest from.
+func (s *Server) storytellerBookRecord(ctx context.Context, id int64) (*storyteller.Book, cache.Meta, error) {
+	return cache.Fetch(ctx, s.cache, storytellerWorkKey(id), cache.Metadata, func(fetchCtx context.Context) (*storyteller.Book, error) {
+		return s.storyteller.Book(fetchCtx, id)
+	})
+}
+
+func storytellerWorkKey(id int64) string {
+	return "reading:storyteller:work:" + strconv.FormatInt(id, 10)
+}
+
+// invalidateStorytellerWork drops what the hub holds of one Storyteller book: its
+// record, and the audiobook track list read from the disk on its account.
+func (s *Server) invalidateStorytellerWork(sourceItemID string) {
+	s.cache.Invalidate("reading:storyteller:work:" + sourceItemID)
+	s.cache.Invalidate(audioPlanKey(sourceItemID))
 }
 
 func validReadiumLocator(raw json.RawMessage) bool {
