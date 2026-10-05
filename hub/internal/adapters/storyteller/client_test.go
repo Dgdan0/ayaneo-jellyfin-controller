@@ -290,3 +290,70 @@ func TestCoverFallsBackToTheAudiobookCover(t *testing.T) {
 		t.Fatalf("Cover() = %q, %q, %v", body, contentType, err)
 	}
 }
+
+// An audiobook is a folder plus a manifest snapshot Storyteller made when it
+// scanned it. Several files: one link per file, named as the file is. One .m4b:
+// one link per chapter, with names that exist nowhere on disk. The hub reads
+// both from the same fields, so both are decoded here, with the fields it does
+// not read left alone.
+func TestBookDecodesAnAudiobookFolderAndItsManifestLinks(t *testing.T) {
+	const files = `{"id":12,"uuid":"book-12","title":"Dark Matter","narrators":[{"name":"Jon Lindstrom"}],
+		"audiobook":{"uuid":"audio-12","filepath":"/library/audiobooks/Dark Matter","duration":36538.68,"missing":false,
+		"manifest":{"metadata":{"title":"Dark Matter"},"links":[{"rel":["self"],"href":"manifest.json"}],
+			"readingOrder":[
+				{"rel":["chapter"],"href":"Dark Matter (1).mp3","type":"audio/mpeg","title":"Track 2/8","duration":4610.652,"size":36942522,"bitrate":64000},
+				{"rel":["chapter"],"href":"Dark Matter.mp3","type":"audio/mpeg","title":"Track 1/8","duration":4012.5,"size":32100000}]}}}`
+	const m4b = `{"id":13,"uuid":"book-13","title":"Mistborn",
+		"audiobook":{"uuid":"audio-13","filepath":"/library/audiobooks/Mistborn","duration":3600,
+		"manifest":{"readingOrder":[
+			{"href":"00000-00001.mp3","type":"audio/mpeg","title":"Prologue","duration":600.5},
+			{"href":"00001-00001.mp3","type":"audio/mpeg","title":"Track 2","duration":2999.5}]}}}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/token":
+			_, _ = io.WriteString(w, `{"access_token":"token","token_type":"Bearer","expires_in":3600}`)
+		case "/api/v2/books/12":
+			_, _ = io.WriteString(w, files)
+		case "/api/v2/books/13":
+			_, _ = io.WriteString(w, m4b)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	client, err := New(config.ServiceConfig{BaseURL: upstream.URL, Username: "reader", Password: config.Secret("secret")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	book, err := client.Book(context.Background(), 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audio := book.Audiobook
+	if audio == nil || audio.Filepath != "/library/audiobooks/Dark Matter" || audio.Missing || audio.Duration != 36538.68 {
+		t.Fatalf("audiobook = %+v", audio)
+	}
+	order := audio.Manifest.ReadingOrder
+	if len(order) != 2 {
+		t.Fatalf("reading order = %+v", order)
+	}
+	if first := order[0]; first.Href != "Dark Matter (1).mp3" || first.Type != "audio/mpeg" || first.Title != "Track 2/8" || first.Duration != 4610.652 || first.Size != 36942522 {
+		t.Fatalf("first link = %+v", first)
+	}
+	if second := order[1]; second.Href != "Dark Matter.mp3" || second.Duration != 4012.5 {
+		t.Fatalf("second link = %+v", second)
+	}
+	if len(book.Narrators) != 1 || book.Narrators[0].Name != "Jon Lindstrom" {
+		t.Fatalf("narrators = %+v", book.Narrators)
+	}
+
+	chapters, err := client.Book(context.Background(), 13)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order = chapters.Audiobook.Manifest.ReadingOrder
+	if len(order) != 2 || order[0].Href != "00000-00001.mp3" || order[0].Title != "Prologue" || order[0].Duration != 600.5 || order[1].Duration != 2999.5 {
+		t.Fatalf("chapter links = %+v", order)
+	}
+}

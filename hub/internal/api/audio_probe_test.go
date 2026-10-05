@@ -441,3 +441,24 @@ func TestRunFFprobeReadsChaptersAndTagsFromRealFiles(t *testing.T) {
 		t.Fatalf("mp3 = %+v, %v", got, err)
 	}
 }
+
+// The generated book's track tags, read back by the real tool: what the hub's
+// ordering rule will see on files like Dark Matter's.
+func TestRunFFprobeReadsTheTrackTagsOfTheGeneratedBook(t *testing.T) {
+	if _, err := findFFprobe(); err != nil {
+		t.Skip("no ffprobe on this machine")
+	}
+	book, err := readingdomain.GenerateTrackedAudiobook(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range book.Files {
+		got, err := runFFprobe(context.Background(), filepath.Join(book.Dir, file.Name))
+		if err != nil {
+			t.Fatalf("%q: %v", file.Name, err)
+		}
+		if got.Track != file.Track {
+			t.Errorf("%q reads as track %d, generated as %d", file.Name, got.Track, file.Track)
+		}
+	}
+}
