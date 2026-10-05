@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"ayaneohub/internal/config"
 	"ayaneohub/internal/httpx"
@@ -94,7 +95,12 @@ func (c *Client) Views(ctx context.Context) ([]Item, error) {
 // ItemsQuery is the one query builder, because /Items takes a dozen parameters
 // and spelling them at each call site is how they drift apart.
 type ItemsQuery struct {
-	ParentID   string
+	ParentID string
+	// IDs asks for these items and no others, whatever they are: a person on a
+	// title is an item too. Jellyfin answers in one call, and the request line is
+	// all of the cost -- Kestrel refuses one over 8 KB, so a caller keeps this to
+	// a hundred or so.
+	IDs        []string
 	Types      string // "Movie,Series"
 	Filters    string // "IsResumable", "IsFavorite"
 	SortBy     string // "SortName", "DateCreated", "DatePlayed"
@@ -119,6 +125,7 @@ func (q ItemsQuery) values(userID string) url.Values {
 		}
 	}
 	set("parentId", q.ParentID)
+	set("ids", strings.Join(q.IDs, ","))
 	set("includeItemTypes", q.Types)
 	set("filters", q.Filters)
 	set("sortBy", q.SortBy)

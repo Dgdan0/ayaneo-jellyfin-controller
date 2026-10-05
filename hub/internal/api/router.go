@@ -66,6 +66,7 @@ type Server struct {
 	colors                *artworkColorStore
 	libraryOrder          *libraryOrderStore
 	colorRequestBudget    time.Duration
+	personLookupBudget    time.Duration
 	artworkMuxOnce        sync.Once
 	artworkMuxHandler     http.Handler
 	offline               *offlineStore

@@ -64,6 +64,10 @@ type LibraryPerson struct {
 	Role  string `json:"role,omitempty"`
 	Type  string `json:"type,omitempty"`
 	Image string `json:"image,omitempty"`
+	// TmdbID is the id GET /v1/person/{id} takes, so a performer on a title's page
+	// opens their filmography. Absent when Jellyfin holds none for them, and set
+	// only where a title is read as a page (see addPersonTMDBIDs).
+	TmdbID int `json:"tmdbId,omitempty"`
 }
 
 type LibraryMediaTrack struct {
@@ -187,8 +191,11 @@ func (s *Server) handleLibraryState(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, "jellyfin", err)
 		return
 	}
+	// The app draws the page again from this answer, so it carries what the page had.
+	value := libraryItemFrom(*item)
+	s.addPersonTMDBIDs(ctx, client, &value)
 	writeJSON(w, http.StatusOK, LibraryItemResponse{
-		Item: libraryItemFrom(*item), Partial: []Partial{}, Cache: CacheInfo{},
+		Item: value, Partial: []Partial{}, Cache: CacheInfo{},
 	})
 }
 
@@ -357,6 +364,7 @@ func (s *Server) handleLibraryItem(w http.ResponseWriter, r *http.Request) {
 	}
 	value := libraryItemFrom(*item)
 	value.Library = s.libraryOf(ctx, jellyfinClient, itemID)
+	s.addPersonTMDBIDs(ctx, jellyfinClient, &value)
 	writeJSON(w, http.StatusOK, LibraryItemResponse{
 		Item: value, Partial: []Partial{}, Cache: cacheInfoFrom(meta),
 	})

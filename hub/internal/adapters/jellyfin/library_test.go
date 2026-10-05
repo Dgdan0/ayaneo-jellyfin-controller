@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"ayaneohub/internal/config"
@@ -81,5 +82,44 @@ func TestSeasonsAndEpisodesUseNativeRoutesAndPaging(t *testing.T) {
 	if _, err := client.Episodes(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 60, 60); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A person on a title is an item of their own, and Jellyfin hands over several
+// items by id in one call: that is how a cast is looked up (#27).
+func TestItemsCanBeAskedForByID(t *testing.T) {
+	const first = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const second = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	var path string
+	var query url.Values
+	client := libraryTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		path, query = r.URL.Path, r.URL.Query()
+		_, _ = w.Write([]byte(`{"Items":[{"Id":"` + first + `","Name":"Daniel Radcliffe","Type":"Person",` +
+			`"ProviderIds":{"Tmdb":"10980","Imdb":"nm0705356"}}],"TotalRecordCount":1}`))
+	})
+	page, err := client.Items(context.Background(), ItemsQuery{IDs: []string{first, second}, Fields: "ProviderIds"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/Items" || query.Get("ids") != first+","+second ||
+		query.Get("fields") != "ProviderIds" || query.Get("userId") != "user-1" {
+		t.Fatalf("asked %s?%v", path, query)
+	}
+	if len(page.Items) != 1 || page.Items[0].ProviderIds == nil || page.Items[0].ProviderIds.Tmdb != "10980" {
+		t.Fatalf("the person came back as %+v", page.Items)
+	}
+}
+
+func TestAQueryThatNamesNoIDsSendsNone(t *testing.T) {
+	var query url.Values
+	client := libraryTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query()
+		_, _ = w.Write([]byte(`{"Items":[],"TotalRecordCount":0}`))
+	})
+	if _, err := client.Items(context.Background(), ItemsQuery{Types: "Movie", Recursive: true}); err != nil {
+		t.Fatal(err)
+	}
+	if query.Has("ids") {
+		t.Fatalf("a query that names no ids sent %q", query.Get("ids"))
 	}
 }
