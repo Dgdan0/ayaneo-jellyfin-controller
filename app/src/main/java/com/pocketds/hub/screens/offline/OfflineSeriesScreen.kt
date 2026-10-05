@@ -144,7 +144,9 @@ class OfflineSeriesScreen(
         ((host.viewContext as? android.app.Activity)?.currentFocus?.tag as? TaggedKey)?.key?.let { selectedKey = it }
         val oldScroll = scroll.scrollY
         content.removeAllViews()
-        val detail = DetailHeaderView(host.viewContext, colors, ringVisible)
+        // The glass header with the series' cover beside the words, as a
+        // series page in Books has it: this page is not drawn under the bar.
+        val detail = DetailHeaderView(host.viewContext, colors, ringVisible, glass = true).apply { book = true }
         header = detail
         detail.overview.onChanged = { host.refreshHints() }
         detail.titleView.text = snapshot?.item?.title?.ifBlank { seriesTitle } ?: seriesTitle

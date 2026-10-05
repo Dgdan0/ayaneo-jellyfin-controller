@@ -104,23 +104,21 @@ class StatusTextTest {
     }
 
     @Test
-    fun `Glass shows a line only when it has news`() {
+    fun `a line shows only when it has news`() {
         // "4 rows · updated moments ago" sat over Home's artwork saying nothing.
         val moments = StatusText.loaded("4 rows", CacheInfo(hit = true, ageSeconds = 20, stale = true))
         assertEquals("4 rows · updated moments ago", moments.text)
-        assertFalse(StatusText.shows(moments, glass = true))
-        assertTrue(StatusText.shows(moments, glass = false))
-        assertFalse(StatusText.shows(StatusText.loaded("24 rows"), glass = true))
-        assertFalse(StatusText.shows(StatusText.loading("Discover", refreshing = false), glass = true))
+        assertFalse(StatusText.shows(moments))
+        assertFalse(StatusText.shows(StatusText.loaded("24 rows")))
+        assertFalse(StatusText.shows(StatusText.loading("Discover", refreshing = false)))
         // Old, partial, degraded or failed data is news; so is a notice.
-        assertTrue(StatusText.shows(StatusText.loaded("4 rows", CacheInfo(ageSeconds = 90, stale = true)), glass = true))
-        assertTrue(StatusText.shows(StatusText.loaded("4 rows", unavailable = listOf("sonarr")), glass = true))
-        assertTrue(StatusText.shows(StatusText.loaded("4 rows", CacheInfo(ageSeconds = 30, stale = true, degraded = true)), glass = true))
-        assertTrue(StatusText.shows(StatusText.failed("Can't reach the hub", FailureKind.NO_NETWORK, hasData = true), glass = true))
-        assertTrue(StatusText.shows(StatusText.notice("This library is empty."), glass = true))
-        // Nothing to say is nothing to show, on either look.
-        assertFalse(StatusText.shows(StatusMessage("", news = true), glass = true))
-        assertFalse(StatusText.shows(StatusMessage(""), glass = false))
+        assertTrue(StatusText.shows(StatusText.loaded("4 rows", CacheInfo(ageSeconds = 90, stale = true))))
+        assertTrue(StatusText.shows(StatusText.loaded("4 rows", unavailable = listOf("sonarr"))))
+        assertTrue(StatusText.shows(StatusText.loaded("4 rows", CacheInfo(ageSeconds = 30, stale = true, degraded = true))))
+        assertTrue(StatusText.shows(StatusText.failed("Can't reach the hub", FailureKind.NO_NETWORK, hasData = true)))
+        assertTrue(StatusText.shows(StatusText.notice("This library is empty.")))
+        // Nothing to say is nothing to show.
+        assertFalse(StatusText.shows(StatusMessage("", news = true)))
     }
 
     @Test

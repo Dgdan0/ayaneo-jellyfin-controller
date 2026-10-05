@@ -35,7 +35,6 @@ import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PillButton
 import com.pocketds.hub.ui.Type
 import com.pocketds.hub.ui.textWeight
-import com.pocketds.hub.ui.typeRole
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
@@ -73,13 +72,10 @@ class ManageScreen(
     private var selectedService = "hub"
     private var pendingFocus = RecyclerView.NO_POSITION
 
-    /** Glass (#11): the prototype's Services, glass cards two across under a heading and its line. */
-    private var glass = false
-
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
-        glass = Theme.onGlass(colors)
+        // The prototype's Services (#11): glass cards two across under a heading and its line.
         return LinearLayout(host.viewContext).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(colors.background)
@@ -87,21 +83,16 @@ class ManageScreen(
             summary = TextView(context).apply {
                 text = "Services"
                 setTextColor(colors.primaryText)
-                if (glass) {
-                    textSize = 21f; typeface = Type.display(context, 800); includeFontPadding = false
-                    setPadding(dp(22), dp(10), dp(22), 0)
-                } else {
-                    typeRole(Type.Role.SCREEN)
-                    setPadding(dp(24), dp(14), dp(24), 0)
-                }
+                textSize = 21f; typeface = Type.display(context, 800); includeFontPadding = false
+                setPadding(dp(22), dp(10), dp(22), 0)
             }
             addView(summary)
 
             status = TextView(context).apply {
                 text = "Checking Ayaneo Hub…"
                 textSize = 12f
-                setTextColor(if (glass) com.pocketds.hub.ui.SettingsCard.GLASS_QUIET else colors.mutedText)
-                if (glass) setPadding(dp(22), dp(6), dp(22), dp(8)) else setPadding(dp(24), dp(4), dp(24), dp(10))
+                setTextColor(com.pocketds.hub.ui.SettingsCard.GLASS_QUIET)
+                setPadding(dp(22), dp(6), dp(22), dp(8))
             }
             addView(status)
 
@@ -111,7 +102,7 @@ class ManageScreen(
                 adapter = this@ManageScreen.adapter
                 itemAnimator = null
                 clipToPadding = false
-                // Glass: the cards' 4dp margins make the prototype's 8dp gaps and 22dp sides.
+                // The cards' 4dp margins make the prototype's 8dp gaps and 22dp sides.
                 setPadding(dp(18), 0, dp(18), dp(16))
                 addOnChildAttachStateChangeListener(
                     object : RecyclerView.OnChildAttachStateChangeListener {
@@ -366,7 +357,7 @@ class ManageScreen(
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ServiceHolder {
             val card = ServiceCardView(parent.context).apply {
                 layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply {
-                    if (glass) setMargins(dp(4), dp(4), dp(4), dp(4)) else setMargins(dp(7), dp(5), dp(7), dp(5))
+                    setMargins(dp(4), dp(4), dp(4), dp(4))
                 }
                 FocusDecorator.attach(this, ringVisible, scale = false)
             }
@@ -395,21 +386,15 @@ class ManageScreen(
         private val icon: ImageView
         private val scan: TextView
 
-        /** Glass: the card's panel, edged in amber while its service is down or needs setting up. */
-        private val panel = if (glass) com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, GLASS_CORNER_DP)) else null
+        /** The card's panel, edged in amber while its service is down or needs setting up. */
+        private val panel = com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, CORNER_DP))
 
         init {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            if (glass) {
-                minimumHeight = dp(62)
-                setPadding(dp(10), dp(8), dp(10), dp(8))
-                foreground = Styler.focusOutline(context, colors, GLASS_CORNER_DP, 3f)
-            } else {
-                minimumHeight = dp(72)
-                setPadding(dp(14), dp(10), dp(12), dp(10))
-                background = Styler.cardBackground(context, colors, cornerDp = 16f)
-            }
+            minimumHeight = dp(62)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            foreground = Styler.focusOutline(context, colors, CORNER_DP, 3f)
             Styler.makeFocusable(this)
             isClickable = true
 
@@ -417,13 +402,13 @@ class ManageScreen(
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            addView(icon, LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(if (glass) 10 else 12) })
+            addView(icon, LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(10) })
 
             addView(LinearLayout(context).apply {
                 orientation = VERTICAL
                 name = TextView(context).apply {
-                    textSize = if (glass) 13f else 14.5f
-                    textWeight(if (glass) 700 else 600)
+                    textSize = 13f
+                    textWeight(700)
                     setTextColor(colors.primaryText)
                     isSingleLine = true
                     ellipsize = TextUtils.TruncateAt.END
@@ -435,12 +420,12 @@ class ManageScreen(
                     setPadding(0, dp(3), 0, 0)
                     dot = DashboardParts.dot(context, colors.mutedText)
                     addView(dot)
-                    state = TextView(context).apply { textSize = if (glass) 10.5f else 11.5f; textWeight(if (glass) 700 else 600) }
+                    state = TextView(context).apply { textSize = 10.5f; textWeight(700) }
                     addView(state)
                 })
                 detail = TextView(context).apply {
-                    textSize = if (glass) 10.5f else 11f
-                    setTextColor(if (glass) com.pocketds.hub.ui.SettingsCard.GLASS_QUIET else colors.mutedText)
+                    textSize = 10.5f
+                    setTextColor(com.pocketds.hub.ui.SettingsCard.GLASS_QUIET)
                     setPadding(0, dp(2), 0, 0)
                     maxLines = 2
                     ellipsize = TextUtils.TruncateAt.END
@@ -448,7 +433,7 @@ class ManageScreen(
                 addView(detail, LayoutParams(MATCH, WRAP))
             }, LayoutParams(0, WRAP, 1f))
 
-            scan = PillButton.create(context, colors, "Scan", AppIcon.REFRESH, heightDp = 32f, glass = glass).apply {
+            scan = PillButton.create(context, colors, "Scan", AppIcon.REFRESH, heightDp = 32f, glass = true).apply {
                 isFocusable = false
                 isFocusableInTouchMode = false
                 contentDescription = "Scan Jellyfin libraries"
@@ -471,7 +456,7 @@ class ManageScreen(
             state.setTextColor(if (row.state == "overview" || row.state == "checking") colors.mutedText else color)
             dot.background = ThemeGradientDrawable.oval(color)
             dot.visibility = if (row.state == "overview") View.GONE else View.VISIBLE
-            panel?.edge(if (row.state == "down" || row.state == "misconfigured") com.pocketds.hub.ui.SettingsCard.ATTENTION_EDGE else null,
+            panel.edge(if (row.state == "down" || row.state == "misconfigured") com.pocketds.hub.ui.SettingsCard.ATTENTION_EDGE else null,
                 Styler.dp(context, 1.5f))
             detail.text = row.detail.ifEmpty { "No additional information" }
             scan.visibility = if (row.id in scannableServices) View.VISIBLE else View.GONE
@@ -542,7 +527,7 @@ class ManageScreen(
         const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         const val COLUMNS = 2
         /** The prototype's Pocket service card corner. */
-        const val GLASS_CORNER_DP = 14f
+        const val CORNER_DP = 14f
 
         val scannableServices = setOf("jellyfin", "kavita", "storyteller")
     }

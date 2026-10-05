@@ -95,7 +95,7 @@ class BandwidthScreen(private val api: HubApi, private val ringVisible: () -> Bo
                     status.text = response.message
                     status.setTextColor(colors.dangerText)
                     body.removeAllViews()
-                    body.addView(PillButton.create(checkNotNull(host).viewContext, colors, "Try again", AppIcon.REFRESH).apply {
+                    body.addView(PillButton.create(checkNotNull(host).viewContext, colors, "Try again", AppIcon.REFRESH, glass = true).apply {
                         FocusDecorator.attach(this, ringVisible, scale = false)
                         activateOnTap { load() }
                     })
@@ -161,7 +161,7 @@ class BandwidthScreen(private val api: HubApi, private val ringVisible: () -> Bo
                 addView(cap("Upload", up), LinearLayout.LayoutParams(0, WRAP, 1f))
             }, 10f, fill = true)
             if (value.canControl) {
-                val editButton = PillButton.create(context, colors, "Edit limits", heightDp = 34f).apply {
+                val editButton = PillButton.create(context, colors, "Edit limits", heightDp = 34f, glass = true).apply {
                     tag = "edit:$mode"
                     FocusDecorator.attach(this, ringVisible, scale = false)
                     activateOnTap { if (!busy) edit(mode, name, down, up) }

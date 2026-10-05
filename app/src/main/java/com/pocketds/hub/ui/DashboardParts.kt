@@ -28,38 +28,24 @@ object DashboardParts {
 
     /**
      * A state as a small pill: Soon, Aired, In library, Downloading, Stuck.
-     * On Glass it is the prototype's `.st`, white words on green, amber or red
-     * and a quiet one faint white; Classic has the tone's words on a faint fill
-     * of it. Upcoming, Activity and the transfers all draw theirs here.
+     * It is the prototype's `.st`, white words on green, amber or red and a
+     * quiet one faint white. Upcoming, Activity and the transfers all draw
+     * theirs here.
      */
-    fun chip(context: Context, colors: PocketColors, label: String, tone: Tone): TextView = TextView(context).apply {
+    fun chip(context: Context, label: String, tone: Tone): TextView = TextView(context).apply {
         text = label
         includeFontPadding = false
         isSingleLine = true
-        if (Theme.onGlass(colors)) {
-            textSize = 10.5f
-            textWeight(800)
-            setTextColor(glassInk(tone))
-            setPadding(Styler.dpInt(context, 8f), Styler.dpInt(context, 4f), Styler.dpInt(context, 8f), Styler.dpInt(context, 4f))
-            background = ThemeGradientDrawable.rounded(Styler.dp(context, 99f), glassFill(tone))
-        } else {
-            textSize = 9.5f
-            textWeight(700)
-            val ink = when (tone) {
-                Tone.GOOD -> colors.badgeAvailable
-                Tone.WAITING -> colors.badgePending
-                Tone.BAD -> colors.dangerText
-                Tone.QUIET -> colors.mutedText
-            }
-            setTextColor(ink)
-            setPadding(Styler.dpInt(context, 8f), Styler.dpInt(context, 2f), Styler.dpInt(context, 8f), Styler.dpInt(context, 2f))
-            background = ThemeGradientDrawable.rounded(Styler.dp(context, 99f), androidx.core.graphics.ColorUtils.setAlphaComponent(ink, 40))
-        }
+        textSize = 10.5f
+        textWeight(800)
+        setTextColor(glassInk(tone))
+        setPadding(Styler.dpInt(context, 8f), Styler.dpInt(context, 4f), Styler.dpInt(context, 8f), Styler.dpInt(context, 4f))
+        background = ThemeGradientDrawable.rounded(Styler.dp(context, 99f), glassFill(tone))
     }
 
     /** A release on the calendar as a [chip]: Soon, Aired, Missing, In library. */
-    fun releaseChip(context: Context, colors: PocketColors, state: UpcomingPresentation.ReleaseState): TextView =
-        chip(context, colors, state.label, when (state) {
+    fun releaseChip(context: Context, state: UpcomingPresentation.ReleaseState): TextView =
+        chip(context, state.label, when (state) {
             UpcomingPresentation.ReleaseState.IN_LIBRARY -> Tone.GOOD
             UpcomingPresentation.ReleaseState.AIRED -> Tone.WAITING
             UpcomingPresentation.ReleaseState.MISSING -> Tone.BAD
@@ -67,7 +53,7 @@ object DashboardParts {
         })
 
     /**
-     * A [Tone] on Glass, for a chip or anything else saying the same thing (the
+     * A [Tone]'s fill, for a chip or anything else saying the same thing (the
      * release picker's resolution tile): the prototype's `.st` fills, green,
      * amber and red nearly solid and a quiet one white at 12%, with white words,
      * or white at 80% on the quiet one.
@@ -117,11 +103,7 @@ object DashboardParts {
             addView(text(context, "${Fmt.bytes(disk.availableBytes)} free of ${Fmt.bytes(disk.totalBytes)}" +
                 if (low) " · nearly full" else "", 11f, if (low) colors.dangerText else colors.mutedText))
         })
-        addView(ProgressLine.create(context, colors, when {
-            low -> colors.dangerText
-            Theme.onGlass(colors) -> colors.accent
-            else -> colors.primaryText
-        }).apply {
+        addView(ProgressLine.create(context, colors, if (low) colors.dangerText else colors.accent).apply {
             showFraction(if (disk.totalBytes > 0) used.toDouble() / disk.totalBytes else 0.0)
         }, LinearLayout.LayoutParams(MATCH, Styler.dpInt(context, 7f)))
         contentDescription = "${disk.name}, ${Fmt.bytes(disk.availableBytes)} free of ${Fmt.bytes(disk.totalBytes)}" +

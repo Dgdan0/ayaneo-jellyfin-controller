@@ -11,7 +11,6 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.graphics.ColorUtils
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.ActivityResponse
@@ -54,7 +53,6 @@ import com.pocketds.hub.ui.ThemeGradientDrawable
 import com.pocketds.hub.ui.Type
 import com.pocketds.hub.ui.activateOnTap
 import com.pocketds.hub.ui.textWeight
-import com.pocketds.hub.ui.typeRole
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -77,7 +75,7 @@ import java.time.ZoneId
  * Books keep their own transfer list: in Books mode this tab shows it in place
  * of the dashboard.
  *
- * Glass (#11): the prototype's dashboard, "Activity" over a line saying how
+ * It is the prototype's dashboard (#11): "Activity" over a line saying how
  * things stand, the cards glass and the one that needs attention edged in
  * amber.
  */
@@ -97,11 +95,10 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
     private lateinit var downloading: SettingsCard
     private lateinit var transferRows: LinearLayout
     private lateinit var speed: BlobSegmentedView
-    private lateinit var attentionCard: LinearLayout
+    private lateinit var attentionCard: SettingsCard
     private lateinit var attentionRows: LinearLayout
-    /** Glass: the line under the heading ([ActivityDashboard.headline]). */
-    private var headline: TextView? = null
-    private var glass = false
+    /** The line under the heading ([ActivityDashboard.headline]). */
+    private lateinit var headline: TextView
     private lateinit var upcoming: SettingsCard
     private lateinit var agendaRows: LinearLayout
     private lateinit var services: SettingsCard
@@ -125,7 +122,6 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
         this.host = host
         val context = host.viewContext
         colors = Theme.colors(context)
-        glass = Theme.onGlass(colors)
         mode = ContentModeSettings.get(context)
         root = FrameLayout(context).apply { setBackgroundColor(colors.background) }
 
@@ -135,7 +131,7 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
         speed = BlobSegmentedView(context, colors, ringVisible).apply {
             heightDp = 30f
             textSp = 11f
-            if (glass) useGlassTrack() else trackColor = colors.background
+            useGlassTrack()
             setOptions(listOf(BlobSegmentedView.Option(NORMAL, "Normal speed"), BlobSegmentedView.Option(QUIET, "Quiet")), NORMAL)
             onPick = ::chooseSpeed
             visibility = View.GONE
@@ -149,23 +145,10 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
         }, 10f, fill = true)
 
         attentionRows = column()
-        attentionCard = if (glass) SettingsCard(context, colors).apply {
+        attentionCard = SettingsCard(context, colors).apply {
             title("Needs attention")
             attention(true)
             body(attentionRows, 2f, fill = true)
-            visibility = View.GONE
-        } else LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(14))
-            background = ThemeGradientDrawable.rounded(Styler.dp(context, 16f),
-                ColorUtils.blendARGB(colors.cardSurface, colors.badgePending, 0.10f), dp(1),
-                ColorUtils.setAlphaComponent(colors.badgePending, 90))
-            addView(TextView(context).apply {
-                text = "Needs attention"
-                typeRole(Type.Role.HEADING, 15f)
-                setTextColor(colors.badgePending)
-            })
-            addView(attentionRows)
             visibility = View.GONE
         }
 
@@ -182,9 +165,8 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
         diskRows = column()
         storage.body(diskRows, 6f, fill = true)
         storage.apply {
-            // The card's own focused state carries the ring; on Glass the ring is drawn over its glass.
-            if (glass) foreground = Styler.focusOutline(context, colors, SettingsCard.GLASS_CORNER_DP, 2f)
-            else background = Styler.cardBackground(context, colors, cornerDp = 16f)
+            // The ring is drawn over the card's glass while it has focus.
+            foreground = Styler.focusOutline(context, colors, SettingsCard.GLASS_CORNER_DP, 2f)
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, false)
             contentDescription = "Storage. Opens the server monitor"
@@ -200,15 +182,15 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
         val grid = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             clipChildren = false
-            // Glass: the prototype's Pocket dashboard, 22dp in from the sides and 10dp between columns.
-            if (glass) setPadding(dp(22), dp(8), dp(22), dp(20)) else setPadding(dp(24), dp(10), dp(24), dp(20))
+            // The prototype's Pocket dashboard, 22dp in from the sides and 10dp between columns.
+            setPadding(dp(22), dp(8), dp(22), dp(20))
             columns.forEachIndexed { i, c ->
-                addView(c, LinearLayout.LayoutParams(0, WRAP, 1f).apply { if (i > 0) marginStart = dp(if (glass) 10 else 12) })
+                addView(c, LinearLayout.LayoutParams(0, WRAP, 1f).apply { if (i > 0) marginStart = dp(10) })
             }
         }
         dashboard = FocusScrollView(context).apply {
             isVerticalScrollBarEnabled = false
-            if (glass) addView(LinearLayout(context).apply {
+            addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 clipChildren = false
                 addView(TextView(context).apply {
@@ -227,7 +209,6 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
                 addView(headline)
                 addView(grid, LinearLayout.LayoutParams(MATCH, WRAP))
             }, FrameLayout.LayoutParams(MATCH, WRAP))
-            else addView(grid, FrameLayout.LayoutParams(MATCH, WRAP))
         }
         root.addView(dashboard, FrameLayout.LayoutParams(MATCH, MATCH))
 
@@ -337,7 +318,7 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
 
     /** Glass: what the cards below say, in one line under the heading. */
     private fun renderHeadline() {
-        headline?.text = ActivityDashboard.headline(activity, ActivityDashboard.attention(activity, health, disks).size, health)
+        headline.text = ActivityDashboard.headline(activity, ActivityDashboard.attention(activity, health, disks).size, health)
     }
 
     private fun renderTransfers() {
@@ -395,7 +376,7 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
             attentionRows.addView(text(entry.title, 12f, colors.primaryText, 600).apply { setPadding(0, dp(8), 0, 0) })
             attentionRows.addView(text(entry.detail, 11f, colors.mutedText).apply { setLineSpacing(0f, 1.15f); setPadding(0, dp(2), 0, 0) })
             if (entry.transferId.isNotBlank()) {
-                attentionRows.addView(PillButton.create(checkNotNull(host).viewContext, colors, "Why is this stuck?", heightDp = 30f).apply {
+                attentionRows.addView(PillButton.create(checkNotNull(host).viewContext, colors, "Why is this stuck?", heightDp = 30f, glass = true).apply {
                     tag = "why:${entry.transferId}"
                     FocusDecorator.attach(this, ringVisible, false)
                     activateOnTap { host?.push(DownloadsScreen(api, ringVisible, targetTransferId = entry.transferId)) }
@@ -594,10 +575,9 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
 
     // ---- building blocks -----------------------------------------------------
 
+    /** A card with its own bold heading, as the prototype's are. */
     private fun card(title: String): SettingsCard = SettingsCard(checkNotNull(host).viewContext, colors).apply {
         title(title)
-        // Glass keeps the card's own bold heading, as the prototype's are.
-        if (!glass) titleView?.apply { typeRole(Type.Role.HEADING, 15f) }
     }
 
     private fun column(vararg children: View): LinearLayout = LinearLayout(checkNotNull(host).viewContext).apply {
@@ -605,7 +585,7 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
         // A focused card draws its ring just outside itself.
         clipChildren = false
         children.forEachIndexed { i, child ->
-            addView(child, LinearLayout.LayoutParams(MATCH, WRAP).apply { if (i > 0) topMargin = dp(if (glass) 10 else 12) })
+            addView(child, LinearLayout.LayoutParams(MATCH, WRAP).apply { if (i > 0) topMargin = dp(10) })
         }
     }
 
@@ -637,7 +617,7 @@ class ActivityScreen(private val api: HubApi, private val ringVisible: () -> Boo
     }
 
     private fun badge(state: UpcomingPresentation.ReleaseState): TextView =
-        com.pocketds.hub.ui.DashboardParts.releaseChip(checkNotNull(host).viewContext, colors, state)
+        com.pocketds.hub.ui.DashboardParts.releaseChip(checkNotNull(host).viewContext, state)
 
     private fun text(value: String, size: Float, color: Int, weight: Int = 400): TextView = TextView(checkNotNull(host).viewContext).apply {
         text = value

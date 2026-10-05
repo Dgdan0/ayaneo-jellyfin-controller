@@ -8,9 +8,9 @@ enum class StatusTone { NORMAL, WARNING, ERROR }
 
 /**
  * @param news whether the line has something to tell the reader, which is what
- *   decides it on Glass ([StatusText.shows]): data that is old, partial or
+ *   decides whether it shows ([StatusText.shows]): data that is old, partial or
  *   failed, or a [StatusText.notice]. A count of rows or "Loading…" is not
- *   news; Classic shows every line regardless.
+ *   news.
  */
 data class StatusMessage(
     val text: String,
@@ -40,16 +40,15 @@ object StatusText {
     const val STALE_NEWS_SECONDS = 60
 
     /**
-     * Whether the line shows. Glass shows only news, as a quiet chip
-     * (`TextView.showStatus`): a status line that always talked sat over the
-     * artwork saying nothing. Classic shows any line with words in it.
+     * Whether the line shows: only with news, as a quiet chip
+     * (`TextView.showStatus`). A status line that always talked sat over the
+     * artwork saying nothing.
      */
-    fun shows(message: StatusMessage, glass: Boolean): Boolean =
-        message.text.isNotBlank() && (!glass || message.news)
+    fun shows(message: StatusMessage): Boolean = message.text.isNotBlank() && message.news
 
     /**
-     * Something the reader must be told even on Glass: why a list is empty,
-     * what to do next ("Choose a profile with Y").
+     * Something the reader must be told: why a list is empty, what to do next
+     * ("Choose a profile with Y").
      */
     fun notice(text: String): StatusMessage = StatusMessage(text, news = true)
 

@@ -19,30 +19,27 @@ import com.pocketds.hub.ui.glass.GlassPanelDrawable
  * Setting both in one call is the point: screens that set only the text left
  * "Refreshing…" in red after an earlier failure.
  *
- * On Glass the line shows only when it has news ([StatusText.shows]), as a
- * quiet chip of the page's glass round its words; otherwise it is gone, so a
- * status line never sits over the artwork saying "4 rows".
+ * The line shows only when it has news ([StatusText.shows]), as a quiet chip
+ * of the page's glass round its words; otherwise it is gone, so a status line
+ * never sits over the artwork saying "4 rows".
  */
 fun TextView.showStatus(message: StatusMessage, colors: PocketColors) {
-    val glass = Theme.onGlass(colors)
-    val shown = StatusText.shows(message, glass)
+    val shown = StatusText.shows(message)
     text = if (shown) message.text else ""
     setTextColor(
         when (message.tone) {
-            StatusTone.NORMAL -> if (glass) StatusChip.TEXT else colors.mutedText
+            StatusTone.NORMAL -> StatusChip.TEXT
             StatusTone.WARNING -> colors.badgePending
             StatusTone.ERROR -> colors.dangerText
         }
     )
-    if (glass) {
-        StatusChip.dress(this)
-        visibility = if (shown) View.VISIBLE else View.GONE
-    }
+    StatusChip.dress(this)
+    visibility = if (shown) View.VISIBLE else View.GONE
 }
 
 /**
  * A page's own line under its heading ("12 unread notifications", "All 13
- * running"): always shown, in plain words rather than the Glass chip, because
+ * running"): always shown, in plain words rather than the status chip, because
  * it says what the page holds rather than how fresh it is. A warning or a
  * failure still takes its colour. Lines that should speak only with news use
  * [showStatus].
@@ -51,7 +48,7 @@ fun TextView.showSummary(message: StatusMessage, colors: PocketColors) {
     text = message.text
     setTextColor(
         when (message.tone) {
-            StatusTone.NORMAL -> if (Theme.onGlass(colors)) SettingsCard.GLASS_QUIET else colors.mutedText
+            StatusTone.NORMAL -> SettingsCard.GLASS_QUIET
             StatusTone.WARNING -> colors.badgePending
             StatusTone.ERROR -> colors.dangerText
         }
@@ -60,7 +57,7 @@ fun TextView.showSummary(message: StatusMessage, colors: PocketColors) {
 }
 
 /**
- * The Glass status chip: drawn round the words wherever the line puts them
+ * The status chip: drawn round the words wherever the line puts them
  * (start, end, one line or two), so every screen's status line becomes a chip
  * without changing its layout. Its tint follows the page.
  */

@@ -353,7 +353,7 @@ class UpcomingScreen(
     }
 
     private fun badge(state: UpcomingPresentation.ReleaseState): TextView =
-        com.pocketds.hub.ui.DashboardParts.releaseChip(checkNotNull(host).viewContext, colors, state)
+        com.pocketds.hub.ui.DashboardParts.releaseChip(checkNotNull(host).viewContext, state)
 
     private fun toneOf(state: UpcomingPresentation.ReleaseState) = when (state) {
         UpcomingPresentation.ReleaseState.MISSING -> colors.dangerText

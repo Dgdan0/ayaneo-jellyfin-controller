@@ -133,7 +133,7 @@ class OfflineSeasonScreen(
     private fun episodeCard(download: OfflineDownload, progress: OfflineCatalogProgress?): View {
         val item = download.manifest.item
         val status = episodeStatus(item.runtimeSeconds, progress)
-        return EpisodeCardView(host.viewContext, colors, ringVisible).apply {
+        return EpisodeCardView(host.viewContext, colors, ringVisible, glass = true).apply {
             tag = TaggedEpisode(download)
             layoutParams = LinearLayout.LayoutParams(dp(EpisodeCardView.WIDTH_DP), ViewGroup.LayoutParams.WRAP_CONTENT)
                 .apply { marginEnd = dp(9) }

@@ -78,13 +78,10 @@ class NotificationsScreen(
     private var unreadIds: Set<String> = emptySet()
     private var latestResponse: NotificationsResponse? = null
 
-    /** Glass (#11): the prototype's columns of glass, each service's notes on darker glass inside. */
-    private var glass = false
-
     override fun onCreateView(host: ScreenHost, container: ViewGroup): View {
         this.host = host
         colors = Theme.colors(host.viewContext)
-        glass = Theme.onGlass(colors)
+        // The prototype's columns of glass (#11), each service's notes on darker glass inside.
         mode = ContentModeSettings.get(host.viewContext)
         readStore = NotificationReadStore(host.viewContext)
         return LinearLayout(host.viewContext).apply {
@@ -96,25 +93,23 @@ class NotificationsScreen(
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 clipChildren = false
-                if (glass) setPadding(dp(22), dp(8), dp(22) - dp(PillButton.RING_DP.toInt()), dp(8))
-                else setPadding(dp(24), dp(10), dp(24) - dp(PillButton.RING_DP.toInt()), dp(10))
+                setPadding(dp(22), dp(8), dp(22) - dp(PillButton.RING_DP.toInt()), dp(8))
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
                     addView(TextView(context).apply {
                         text = "Notifications"
-                        if (glass) { textSize = 21f; typeface = Type.display(context, 800); includeFontPadding = false } else typeRole(Type.Role.SCREEN)
+                        textSize = 21f; typeface = Type.display(context, 800); includeFontPadding = false
                         setTextColor(colors.primaryText)
                     })
                     status = TextView(context).apply {
                         text = "Loading activity…"
                         textSize = 12f
-                        setTextColor(if (glass) com.pocketds.hub.ui.SettingsCard.GLASS_QUIET else colors.mutedText)
-                        setPadding(0, dp(if (glass) 6 else 4), 0, 0)
+                        setTextColor(com.pocketds.hub.ui.SettingsCard.GLASS_QUIET)
+                        setPadding(0, dp(6), 0, 0)
                     }
                     addView(status)
                 }, LinearLayout.LayoutParams(0, WRAP, 1f))
-                deviceAlerts = (if (glass) TextView(context).apply { text = "On this Pocket"; PillButton.control(this, colors); Styler.makeFocusable(this) }
-                    else PillButton.create(context, colors, "On this Pocket", heightDp = 36f)).apply {
+                deviceAlerts = TextView(context).apply { text = "On this Pocket"; PillButton.control(this, colors); Styler.makeFocusable(this) }.apply {
                     FocusDecorator.attach(this, ringVisible, false)
                     activateOnTap { host.push(LocalAlertsScreen(api, ringVisible)) }
                 }
@@ -124,7 +119,7 @@ class NotificationsScreen(
             mediaColumns = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 visibility = if (mode == ContentMode.MEDIA) View.VISIBLE else View.GONE
-                if (glass) setPadding(dp(17), 0, dp(17), dp(12)) else setPadding(dp(18), 0, dp(18), dp(14))
+                setPadding(dp(17), 0, dp(17), dp(12))
                 MEDIA_SERVICES.forEach { service ->
                     val column = ServiceColumnView(service)
                     columns[service] = column
@@ -135,7 +130,7 @@ class NotificationsScreen(
             }
             bookColumns = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
-                if (glass) setPadding(dp(17), 0, dp(17), dp(12)) else setPadding(dp(18), 0, dp(18), dp(14))
+                setPadding(dp(17), 0, dp(17), dp(12))
                 BOOK_SERVICES.forEach { service ->
                     val column = ServiceColumnView(service)
                     columns[service] = column
@@ -316,13 +311,8 @@ class NotificationsScreen(
 
         init {
             orientation = VERTICAL
-            if (glass) {
-                com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, 16f))
-                setPadding(dp(8), dp(9), dp(8), dp(4))
-            } else {
-                background = ThemeGradientDrawable.rounded(Styler.dp(context, 16f), this@NotificationsScreen.colors.cardSurface)
-                setPadding(dp(8), dp(10), dp(8), dp(6))
-            }
+            com.pocketds.hub.ui.glass.GlassPanelDrawable.attach(this, Styler.dp(context, 16f))
+            setPadding(dp(8), dp(9), dp(8), dp(4))
 
             addView(LinearLayout(context).apply {
                 orientation = HORIZONTAL
@@ -421,8 +411,8 @@ class NotificationsScreen(
         fun updateUnreadCount() {
             val unread = adapter.unreadCount()
             count.text = unread.toString()
-            count.background = pill(if (glass) com.pocketds.hub.ui.glass.GlassColors.BADGE else colors.badgeFailed)
-            if (glass) { count.setTextColor(android.graphics.Color.WHITE); count.textWeight(800) }
+            count.background = pill(com.pocketds.hub.ui.glass.GlassColors.BADGE)
+            count.textWeight(800)
             count.setTextColor(SemanticColor.foreground(colors.badgeFailed))
             count.visibility = if (unread > 0) View.VISIBLE else View.GONE
             count.contentDescription = "$unread unread ${displayName(service)} notifications"
@@ -507,23 +497,23 @@ class NotificationsScreen(
             addView(LinearLayout(context).apply {
                 orientation = VERTICAL
                 headline = TextView(context).apply {
-                    textSize = if (glass) 12f else 13f
-                    textWeight(if (glass) 700 else 600)
+                    textSize = 12f
+                    textWeight(700)
                     setTextColor(colors.primaryText)
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 }
                 addView(headline)
                 detail = TextView(context).apply {
-                    textSize = if (glass) 11f else 11.5f
-                    setTextColor(if (glass) com.pocketds.hub.ui.SettingsCard.GLASS_QUIET else colors.mutedText)
+                    textSize = 11f
+                    setTextColor(com.pocketds.hub.ui.SettingsCard.GLASS_QUIET)
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 }
                 addView(detail)
                 meta = TextView(context).apply {
                     textSize = 11f
-                    setTextColor(if (glass) NOTE_TIME else colors.mutedText)
+                    setTextColor(NOTE_TIME)
                     maxLines = 1
                     setPadding(0, dp(3), 0, 0)
                 }
@@ -546,20 +536,11 @@ class NotificationsScreen(
             }
         }
 
-        fun setUnread(unread: Boolean) {
-            if (glass) return setGlassFace(unread)
-            background = Styler.selectionBackground(
-                context, colors, selected = false,
-                baseFill = if (unread) colors.unreadSurface else android.graphics.Color.TRANSPARENT,
-                cornerDp = 10f
-            )
-        }
-
         /**
          * The prototype's note: darker glass inside its column with a faint
          * edge, a brighter one while unread, and the white ring on focus.
          */
-        private fun setGlassFace(unread: Boolean) {
+        fun setUnread(unread: Boolean) {
             val corner = Styler.dp(context, NOTE_CORNER_DP)
             val fill = if (unread) NOTE_UNREAD else NOTE_READ
             background = android.graphics.drawable.StateListDrawable().apply {
