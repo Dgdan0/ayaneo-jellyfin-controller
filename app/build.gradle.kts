@@ -14,8 +14,8 @@ android {
         targetSdk = 34
         // Must always increase: Android/Obtanium correctly rejects a release
         // whose version code is lower than the APK already on the Pocket DS.
-        versionCode = 30
-        versionName = "0.4.2"
+        versionCode = 31
+        versionName = "0.4.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
