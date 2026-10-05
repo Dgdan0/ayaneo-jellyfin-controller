@@ -579,7 +579,7 @@ rather than failing.
 
 A1 ends where it was meant to: six sections, grid and list navigation, focus ring, collapsible side rail,
 hint bar and status strip, all driven by gamepad or trackpad, with **no network code at all**.
-A2 swaps `PlaceholderScreen`'s adapter for real data behind `HubApi`/`FakeHubApi`.
+A2 swapped the placeholder grid's adapter for real data behind `HubApi`/`FakeHubApi` (the grid itself went in #22).
 
 ## Exposure audit (2026-09-07)
 
@@ -754,7 +754,9 @@ Cards measure at their natural height (`EpisodeCardView`, `DetailArtworkCardView
 `ConsolidationGuardTest` (part of `dev.sh test`) fails when a removed copy comes back -- a new
 `HubClient(context)`, a hand-built image loader or image request, a hand-written episode code or "Specials", a
 `"Selected"` detail line, an untinted progress bar, a bare `ScrollView(`, a `delay(POLL…)` loop, words drawn in the page colour, a list of libraries sorted on the device, a reading percentage worked out by hand, a white Play disc of its own, a multiply over a page, a reader pausing the video itself, or an audiobook route built by hand -- and names the owner
-to use instead. Extend its rules when you consolidate something new.
+to use instead. Extend its rules when you consolidate something new. It also fails on a top-level class or
+object that nothing in the app names, only its tests (#22): delete it with its tests, or list it in `keptDormant`
+with the plan that needs it (`SpreadPlanner`, `EpubPackageCachePolicy`).
 
 ---
 

@@ -120,4 +120,42 @@ class ConsolidationGuardTest {
         }.toList()
         assertTrue("Copies of shared behaviour:\n" + violations.joinToString("\n"), violations.isEmpty())
     }
+
+    /**
+     * Kept on purpose although nothing in the app reaches it yet, each with the
+     * plan that keeps it. Anything else nothing reaches is deleted with its tests.
+     */
+    private val keptDormant = mapOf(
+        "SpreadPlanner" to "READER_IMPROVEMENTS.md: facing pages, for a screen wide enough to show two",
+        "EpubPackageCachePolicy" to "READER_IMPROVEMENTS.md X5: the budget for the EPUB cache",
+    )
+
+    /**
+     * A class or object that only its own tests reach (#22). ContentModeToggleView
+     * outlived Classic (#20) that way, and old reader policies, a sort sheet's
+     * state and the A1 placeholder grid had gone the same way before it: tested,
+     * so they looked alive, while nothing in the app used them. A name counts as
+     * reached when anything in main other than its declaration names it, the
+     * manifest and resources included (`this@Name` inside itself does not count).
+     */
+    @Test
+    fun `nothing in the app is reached only by its tests`() {
+        val main = File("src/main").takeIf { it.isDirectory } ?: File("app/src/main")
+        assertTrue("source tree not found from ${File(".").absolutePath}", main.isDirectory)
+        val sources = main.walkTopDown().filter { it.isFile && it.extension in setOf("kt", "xml") }.toList()
+        val uses = HashMap<String, Int>()
+        val word = Regex("""(?<!this@)\b[A-Za-z_]\w*""")
+        sources.forEach { file -> word.findAll(file.readText()).forEach { uses.merge(it.value, 1, Int::plus) } }
+        // Top level only: a nested or private class is its file's business, and the compiler flags an unused private one.
+        val declaration = Regex("""^(?:(?:public|internal|data|sealed|enum|abstract|open|inline|value|annotation|fun)\s+)*(?:class|object|interface)\s+([A-Za-z_]\w*)""",
+            RegexOption.MULTILINE)
+        val unreached = sources.filter { it.extension == "kt" }.flatMap { file ->
+            declaration.findAll(file.readText()).map { it.groupValues[1] }
+                .filter { (uses[it] ?: 0) <= 1 && it !in keptDormant }
+                .map { "${file.relativeTo(main).invariantSeparatorsPath}: $it" }
+                .toList()
+        }
+        assertTrue("Reached only by tests, or by nothing: delete each with its tests, or keep it in keptDormant with " +
+            "the plan that needs it\n" + unreached.joinToString("\n"), unreached.isEmpty())
+    }
 }

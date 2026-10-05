@@ -54,32 +54,6 @@ object EpubChromePolicy {
     fun handlesTap(horizontalFraction: Float, controlsVisible: Boolean) = controlsVisible || horizontalFraction in .3f.. .7f
 }
 
-object EpubPreferenceAdjuster {
-    fun nextTheme(value: EpubReaderPreferences) = value.copy(theme = when (value.theme) {
-        EpubTheme.SYSTEM, EpubTheme.LIGHT -> EpubTheme.SEPIA
-        EpubTheme.SEPIA -> EpubTheme.DARK
-        EpubTheme.DARK -> EpubTheme.BLUE
-        EpubTheme.BLUE -> EpubTheme.LIGHT
-    })
-
-    fun nextColumns(value: EpubReaderPreferences) = value.copy(columns = when (value.columns) {
-        EpubColumns.AUTO -> EpubColumns.ONE
-        EpubColumns.ONE -> EpubColumns.TWO
-        EpubColumns.TWO -> EpubColumns.AUTO
-    })
-
-    fun changeFontSize(value: EpubReaderPreferences, delta: Float) =
-        value.copy(fontScale = rounded((value.fontScale + delta).coerceIn(0.7f, 2.0f)))
-
-    fun changeMargins(value: EpubReaderPreferences, delta: Float) =
-        value.copy(pageMargins = rounded((value.pageMargins + delta).coerceIn(0.5f, 2.0f)))
-
-    fun changeLineHeight(value: EpubReaderPreferences, delta: Float) =
-        value.copy(lineHeight = rounded((value.lineHeight + delta).coerceIn(1.0f, 2.0f)))
-
-    private fun rounded(value: Float): Float = kotlin.math.round(value * 10f) / 10f
-}
-
 /** Appearance is applied live and committed with each change. Closing retains the last setting. */
 class EpubPreferenceState(initial: EpubReaderPreferences) {
     var visible: EpubReaderPreferences = initial

@@ -1,10 +1,7 @@
 package com.pocketds.hub.ui
 
-import android.content.Context
 import android.graphics.*
 import android.graphics.drawable.Drawable
-import android.view.Gravity
-import android.widget.TextView
 
 enum class AppIcon { CLOSE, CONTENTS, APPEARANCE, PREVIOUS, NEXT, PREVIOUS_ITEM, NEXT_ITEM, THIRDS, FIT, DIRECTION, ZOOM_IN, ZOOM_OUT, SEARCH, OPEN, REFRESH, BOOK, HEADPHONES, READ_ALONG, BOOKMARK, BOOKMARK_FILLED, COMIC, MOVIE, TV, SETTINGS, CHECK, MEDIA, SORT, PANEL, PLAY, INFO, PERSON, SERIES, ADD, STAR, HOME, SUBTITLES, DOWNLOAD, MORE, ARRANGE, GRIP, PAD, COMFORT, PAGES, SPEED, SLEEP, STOP }
 
@@ -75,16 +72,4 @@ class AppIconDrawable(private val icon: AppIcon, color: Int) : Drawable() {
     override fun setAlpha(alpha:Int){paint.alpha=alpha;invalidateSelf()}
     override fun setColorFilter(filter:ColorFilter?){paint.colorFilter=filter;invalidateSelf()}
     @Deprecated("Deprecated in Java") override fun getOpacity()=PixelFormat.TRANSLUCENT
-}
-
-object AppIcons {
-    fun button(context:Context, colors:PocketColors, icon:AppIcon,label:String):TextView=TextView(context).apply {
-        minimumWidth=Styler.dpInt(context,48f);minimumHeight=Styler.dpInt(context,48f)
-        gravity=Gravity.CENTER;contentDescription=label
-        val drawable=AppIconDrawable(icon,colors.primaryText).apply {setBounds(0,0,Styler.dpInt(context,22f),Styler.dpInt(context,22f))}
-        setCompoundDrawables(drawable,null,null,null)
-        setPadding(Styler.dpInt(context,13f),0,Styler.dpInt(context,13f),0)
-        Styler.makeFocusable(this)
-        background=Styler.cardBackground(context,colors,8f,Color.TRANSPARENT,2f)
-    }
 }

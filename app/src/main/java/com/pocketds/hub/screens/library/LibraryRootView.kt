@@ -396,7 +396,6 @@ class LibraryRootView(
         resumeAt = selected
     }
 
-    fun tileHasFocus(): Boolean = grid.focusedPlace() >= 0
     fun inFirstRow(): Boolean = grid.focusedPlace() in 0 until grid.columns
 
     /** The search field takes focus, and the keyboard comes up for it. */

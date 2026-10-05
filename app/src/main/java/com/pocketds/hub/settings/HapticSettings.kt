@@ -8,8 +8,4 @@ object HapticSettings {
 
     fun strength(context: Context): HapticStrength =
         HapticStrength.fromStored(Prefs.of(context).getString(KEY_STRENGTH, null))
-
-    fun setStrength(context: Context, strength: HapticStrength) {
-        Prefs.of(context).edit().putString(KEY_STRENGTH, strength.stored).apply()
-    }
 }

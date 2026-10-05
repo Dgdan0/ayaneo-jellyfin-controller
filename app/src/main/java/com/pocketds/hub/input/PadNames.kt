@@ -143,7 +143,4 @@ object PadNames {
     )
 
     fun keyName(keyCode: Int): String = KEY_NAMES[keyCode] ?: "KEYCODE_$keyCode"
-
-    /** True for the codes this app intends to navigate with. */
-    fun isNavigationKey(keyCode: Int): Boolean = keyCode in KEY_NAMES && keyCode !in setOf(3, 24, 25)
 }

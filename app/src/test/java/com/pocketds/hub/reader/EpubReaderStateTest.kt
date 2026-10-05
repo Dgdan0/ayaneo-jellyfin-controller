@@ -88,17 +88,4 @@ class EpubReaderStateTest {
         assertEquals(state.saved, state.visible)
         assertFalse(state.commit())
     }
-
-    @Test
-    fun `appearance adjustments are bounded and deterministic`() {
-        val initial = EpubReaderPreferences(theme = EpubTheme.SEPIA, fontScale = 1f, pageMargins = 1f)
-
-        assertEquals(EpubTheme.DARK, EpubPreferenceAdjuster.nextTheme(initial).theme)
-        assertEquals(EpubColumns.ONE, EpubPreferenceAdjuster.nextColumns(initial).columns)
-        assertEquals(1.1f, EpubPreferenceAdjuster.changeFontSize(initial, 0.1f).fontScale)
-        assertEquals(0.7f, EpubPreferenceAdjuster.changeFontSize(initial.copy(fontScale = 0.7f), -0.1f).fontScale)
-        assertEquals(2.0f, EpubPreferenceAdjuster.changeFontSize(initial.copy(fontScale = 2f), 0.1f).fontScale)
-        assertEquals(0.8f, EpubPreferenceAdjuster.changeMargins(initial, -0.2f).pageMargins)
-        assertEquals(1.4f, EpubPreferenceAdjuster.changeLineHeight(initial.copy(lineHeight = 1.3f), 0.1f).lineHeight)
-    }
 }

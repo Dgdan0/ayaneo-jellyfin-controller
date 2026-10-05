@@ -107,7 +107,6 @@ class SeasonEpisodesView(
         adapter.notifyDataSetChanged()
     }
 
-    val hasEpisodes: Boolean get() = adapter.itemCount > 0
     val focusedEpisode: LibraryItem? get() = list.focusedChild?.let(list::getChildAdapterPosition)?.let { current?.items?.getOrNull(it) }
 
     /** The remembered episode, or the one Play would start, or the first. */

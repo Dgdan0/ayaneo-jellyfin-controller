@@ -74,8 +74,6 @@ class FormModel(rows: List<FormRow>) {
 
     fun rows(): List<FormRow> = rows.toList()
 
-    fun rowAt(position: Int): FormRow? = rows.getOrNull(position)
-
     fun current(): FormRow? = rows.getOrNull(index)
 
     /**

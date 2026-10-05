@@ -63,9 +63,6 @@ object OfflineSettings {
         else locations.firstOrNull { it.key == selected }
     }
 
-    fun selectedStorageKey(context: Context): String =
-        prefs(context).getString(STORAGE_ROOT, "").orEmpty()
-
     fun setSelectedStorage(context: Context, key: String) =
         prefs(context).edit().putString(STORAGE_ROOT, key).apply()
 

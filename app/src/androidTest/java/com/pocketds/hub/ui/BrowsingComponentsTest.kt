@@ -1,14 +1,11 @@
 package com.pocketds.hub.ui
 
 import android.graphics.Color
-import android.os.SystemClock
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.pocketds.hub.state.ContentMode
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,19 +32,5 @@ class BrowsingComponentsTest {
             layout(card,width)
             assertEquals(old,card.measuredHeight)
         }
-    }
-    @Test fun modeSwitchActivatesOnOneTapAndHasFingerSizedTarget() = i.runOnMainSync {
-        val toggle=ContentModeToggleView(i.targetContext,Theme.colors(i.targetContext))
-        toggle.select(ContentMode.MEDIA)
-        var selected: ContentMode?=null
-        toggle.onModeSelected={selected=it}
-        layout(toggle,400)
-        val button=toggle.getChildAt(1)
-        val now=SystemClock.uptimeMillis()
-        for(action in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
-            MotionEvent.obtain(now,now+20,action,20f,20f,0).also {button.dispatchTouchEvent(it);it.recycle()}
-        }
-        assertEquals(ContentMode.BOOKS,selected)
-        assertTrue(button.height>=Styler.dpInt(button.context,48f))
     }
 }
