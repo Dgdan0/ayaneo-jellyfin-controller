@@ -36,12 +36,17 @@ func requireSingleByteRange(w http.ResponseWriter, r *http.Request) (byteRange, 
 	return byteRange, ifRange, true
 }
 
+// ReadingEpubPosition is a book's place as a reader of its text sees it. When the
+// place was written by a listener, on a book with a read-along edition, locator
+// is the sentence being spoken there (an older reader opens it as it opens its
+// own), and audio is the audio place it came from.
 type ReadingEpubPosition struct {
-	WorkID       string          `json:"workId"`
-	SourceItemID string          `json:"sourceItemId"`
-	Locator      json.RawMessage `json:"locator"`
-	Timestamp    int64           `json:"timestamp,omitempty"`
-	UpdatedAt    string          `json:"updatedAt,omitempty"`
+	WorkID       string                `json:"workId"`
+	SourceItemID string                `json:"sourceItemId"`
+	Locator      json.RawMessage       `json:"locator"`
+	Timestamp    int64                 `json:"timestamp,omitempty"`
+	UpdatedAt    string                `json:"updatedAt,omitempty"`
+	Audio        *ReadingAudioPosition `json:"audio,omitempty"`
 }
 
 func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
@@ -129,10 +134,14 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 			writeJSON(w, http.StatusOK, ReadingEpubPosition{WorkID: workID, SourceItemID: sourceItemID, Locator: json.RawMessage("null")})
 			return
 		}
-		writeJSON(w, http.StatusOK, ReadingEpubPosition{
+		shown := ReadingEpubPosition{
 			WorkID: workID, SourceItemID: sourceItemID, Locator: position.Locator,
 			Timestamp: position.Timestamp, UpdatedAt: position.UpdatedAt,
-		})
+		}
+		if sentence, audio := s.textPlaceOfAudio(ctx, bookID, position); sentence != nil {
+			shown.Locator, shown.Audio = sentence, audio
+		}
+		writeJSON(w, http.StatusOK, shown)
 		return
 	}
 
@@ -164,8 +173,13 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 			locator = current.Locator
 		}
 		if !sameReadingLocator(body.ExpectedLocator, locator) {
-			writePositionChanged(w, r)
-			return
+			// A reader of the text was shown the sentence an audio place comes to,
+			// not the locator the table holds: either is the place it last saw.
+			shown, _ := s.textPlaceOfAudio(ctx, bookID, current)
+			if shown == nil || !sameReadingLocator(body.ExpectedLocator, shown) {
+				writePositionChanged(w, r)
+				return
+			}
 		}
 	}
 	if err := s.storyteller.SavePosition(ctx, bookID, body.Locator, body.Timestamp); err != nil {
@@ -335,6 +349,74 @@ func (s *Server) currentStorytellerPosition(ctx context.Context, bookID int64) (
 		return nil, err
 	}
 	return record, nil
+}
+
+// textPlaceOfAudio is what a reader of the text is shown of a place a listener
+// wrote, on a book whose read-along edition has been mapped to its audio: the
+// sentence being spoken there, as a locator the reader opens, and the audio place
+// it is read from. Nothing otherwise (a text place, a book with no edition, an
+// edition that cannot be mapped, a place the hub only guesses at), and then the
+// reader is shown the stored locator, as it always was. It reads and never
+// writes, and it fails quietly: the EPUB route does not depend on the audio.
+func (s *Server) textPlaceOfAudio(ctx context.Context, bookID int64, position *storyteller.PositionRecord) (json.RawMessage, *ReadingAudioPosition) {
+	if position == nil || !looksLikeAudioLocator(position.Locator) {
+		return nil, nil
+	}
+	record, _, err := s.storytellerBookRecord(ctx, bookID)
+	if err != nil {
+		return nil, nil
+	}
+	book := s.reconcileStorytellerBook(*record)
+	if !book.Readaloud.Available() || book.Audiobook == nil || book.Audiobook.Missing {
+		return nil, nil
+	}
+	plan, _, err := s.audioPlanFor(ctx, book)
+	if err != nil || plan.alignment == nil || plan.positionProblem() != "" {
+		return nil, nil
+	}
+	audio := plan.position(position)
+	if audio == nil || !audio.Exact || audio.Form != "audio" || audio.Sentence == nil {
+		return nil, nil
+	}
+	sentence := struct {
+		Href      string `json:"href"`
+		Type      string `json:"type"`
+		Locations struct {
+			Fragments        []string `json:"fragments"`
+			TotalProgression float64  `json:"totalProgression"`
+		} `json:"locations"`
+	}{Href: audio.Sentence.Href, Type: "application/xhtml+xml"}
+	sentence.Locations.Fragments = []string{audio.Sentence.Fragment}
+	// How far through the book, in the order the audio plays it.
+	sentence.Locations.TotalProgression = share(audio.GlobalMs, plan.totalMs)
+	locator, err := json.Marshal(sentence)
+	if err != nil {
+		return nil, nil
+	}
+	return locator, audio
+}
+
+// looksLikeAudioLocator is the cheap look that keeps the audio files unread for
+// a text place: Storyteller's audio apps write a media type and a "t=" fragment.
+func looksLikeAudioLocator(raw json.RawMessage) bool {
+	var locator struct {
+		Type      string `json:"type"`
+		Locations struct {
+			Fragments []string `json:"fragments"`
+		} `json:"locations"`
+	}
+	if json.Unmarshal(raw, &locator) != nil {
+		return false
+	}
+	if strings.HasPrefix(strings.ToLower(locator.Type), "audio/") {
+		return true
+	}
+	for _, fragment := range locator.Locations.Fragments {
+		if strings.HasPrefix(fragment, "t=") {
+			return true
+		}
+	}
+	return false
 }
 
 // invalidateStorytellerPosition drops what carries a book's place: its record and
