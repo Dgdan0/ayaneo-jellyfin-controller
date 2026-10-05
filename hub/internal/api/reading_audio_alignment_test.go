@@ -56,6 +56,8 @@ type alignedOptions struct {
 	readaloud string
 	// epub changes the generated edition (to break it) before the hub sees it.
 	epub func(path string)
+	// audioBytes is the size of each audio entry of the edition (2048 by default).
+	audioBytes int
 }
 
 // newAlignedTrackedEnv is the tracked book with a read-along edition beside it.
@@ -63,6 +65,9 @@ func newAlignedTrackedEnv(t *testing.T, options alignedOptions) *audioEnv {
 	t.Helper()
 	if options.order == nil {
 		options.order = trackedTagOrder
+	}
+	if options.audioBytes == 0 {
+		options.audioBytes = 2048
 	}
 	env := newAudioEnv(t, audioEnvOptions{}, func(root string) audioBuild {
 		book, err := readingdomain.GenerateTrackedAudiobook(root)
@@ -92,7 +97,7 @@ func newAlignedTrackedEnv(t *testing.T, options alignedOptions) *audioEnv {
 			}
 		}
 		epubPath := filepath.Join(book.Dir, "aligned.epub")
-		fixture, err := readingdomain.GenerateAlignedEPUB(epubPath, readingdomain.AlignedEPUBOptions{PackageDir: "OEBPS", AudioBytes: 2048, Narrations: narrations})
+		fixture, err := readingdomain.GenerateAlignedEPUB(epubPath, readingdomain.AlignedEPUBOptions{PackageDir: "OEBPS", AudioBytes: options.audioBytes, Narrations: narrations})
 		if err != nil {
 			t.Fatal(err)
 		}

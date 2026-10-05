@@ -58,14 +58,27 @@ func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "invalid publication format"})
 		return
 	}
+	// audio=omit asks for the read-along edition without its audio, which the hub
+	// builds itself (reading_audio_slim.go); nothing else takes the parameter.
+	omitAudio := false
+	if audio := r.URL.Query().Get("audio"); audio != "" {
+		if audio != "omit" || format != "readaloud" {
+			writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "audio=omit applies to the read-along edition only"})
+			return
+		}
+		omitAudio = true
+	}
 	byteRange, ifRange, ok := requireSingleByteRange(w, r)
 	if !ok {
 		return
 	}
 	ctx, cancel := timeoutFor(r, s.cfg.Server.RequestTimeout.OrDefault(25*time.Second))
 	bookID, ok := s.resolveStorytellerEbook(w, r, ctx)
+	if ok && omitAudio {
+		s.serveSlimReadaloud(w, r, ctx, bookID, byteRange)
+	}
 	cancel()
-	if !ok {
+	if !ok || omitAudio {
 		return
 	}
 	// The file transfer uses the request context rather than the metadata

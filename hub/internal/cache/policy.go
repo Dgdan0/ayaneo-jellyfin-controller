@@ -78,6 +78,11 @@ var (
 	// how long an unused reading is kept. Never stale.
 	ReadingAlignment = Spec{Fresh: 6 * time.Hour, Stale: 0, IfError: 0}
 
+	// A read-along edition without its audio: its text and SMIL, about a
+	// megabyte, kept so that a book opened on several devices, or resumed, is
+	// built once. The key holds the edition's size and modified time. Never stale.
+	ReadingSlimEPUB = Spec{Fresh: 6 * time.Hour, Stale: 0, IfError: 0}
+
 	// A reading page scaled to a thumbnail. A chapter's pages do not change
 	// while it is in the library, so it lives as long as any image; an old
 	// copy is still the same page, so stale and if-error match.

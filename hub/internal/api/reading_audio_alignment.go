@@ -182,20 +182,9 @@ func (s *Server) alignPlan(ctx context.Context, book storyteller.Book, plan *aud
 		slog.Info("read-along edition is not usable", "book", book.ID, "reason", reason)
 		return nil
 	}
-	remote := path.Clean(strings.ReplaceAll(strings.TrimSpace(book.Readaloud.Filepath), "\\", "/"))
-	if !strings.HasPrefix(remote, "/") {
-		return refuse(alignReasonUnreadable)
-	}
-	file, err := s.openEPUB(s.cfg.Server.MediaRemovalRoots, "storyteller", remote)
-	if err != nil {
-		var media *readingdomain.MediaError
-		switch {
-		case errors.As(err, &media) && media.Failure == readingdomain.MediaUnmapped:
-			return refuse(alignReasonUnmapped)
-		case errors.As(err, &media) && media.Failure == readingdomain.MediaMissing:
-			return refuse(alignReasonMissing)
-		}
-		return refuse(alignReasonUnreadable)
+	file, reason := s.openReadaloudEdition(book)
+	if reason != "" {
+		return refuse(reason)
 	}
 	defer file.Close()
 
@@ -220,6 +209,27 @@ func (s *Server) alignPlan(ctx context.Context, book storyteller.Book, plan *aud
 	plan.alignment = mapped
 	plan.revision = audioRevision(plan.tracks, mapped.edition)
 	return nil
+}
+
+// openReadaloudEdition opens the book's read-along edition, read-only, through
+// the media mapping, or says why it cannot be: in the words alignmentReason uses.
+func (s *Server) openReadaloudEdition(book storyteller.Book) (readingdomain.MediaFile, string) {
+	remote := path.Clean(strings.ReplaceAll(strings.TrimSpace(book.Readaloud.Filepath), "\\", "/"))
+	if !strings.HasPrefix(remote, "/") {
+		return readingdomain.MediaFile{}, alignReasonUnreadable
+	}
+	file, err := s.openEPUB(s.cfg.Server.MediaRemovalRoots, "storyteller", remote)
+	if err != nil {
+		var media *readingdomain.MediaError
+		switch {
+		case errors.As(err, &media) && media.Failure == readingdomain.MediaUnmapped:
+			return readingdomain.MediaFile{}, alignReasonUnmapped
+		case errors.As(err, &media) && media.Failure == readingdomain.MediaMissing:
+			return readingdomain.MediaFile{}, alignReasonMissing
+		}
+		return readingdomain.MediaFile{}, alignReasonUnreadable
+	}
+	return file, ""
 }
 
 // alignmentKey names an edition as it was when it was read. It is not under
