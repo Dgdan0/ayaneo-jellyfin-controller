@@ -148,7 +148,9 @@ both ways on the three devices below. `scripts/mac.sh turn landscape` turns the 
 themselves (an iPad app that shares the screen cannot turn itself), `shot` then names its
 pictures `<state>-<device>-landscape.png`, and `turn portrait` turns them back. With Xcode 27 the
 iPhone simulator comes back upright as soon as the turning test ends, so `shot` also hands the
-turn to the app as `HUB_ORIENT` and a Debug build on a phone turns its own window. Look for words
+turn to the app as `HUB_ORIENT` and a Debug build on a phone turns its own window. An iPad once
+turned sideways stays sideways through a later test that turns it upright, so `turn portrait`
+restarts the simulators instead: they boot upright. Look for words
 cut off behind the bars or the notch, anything squeezed to "…", scrolling that stops, a turn
 that loses your place, and heights that suit a phone held sideways (about 400 points tall).
 An iPad's Split View widths are checked with `HUB_WIDTH=375` (a third), `639` (two thirds

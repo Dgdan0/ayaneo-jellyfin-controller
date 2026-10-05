@@ -244,6 +244,8 @@ uitest() {
 # Xcode 27 the iPhone simulator comes back upright when the test ends, so
 # launch_sim also hands that file's word to the app as HUB_ORIENT, and a
 # Debug build on a phone turns its own window (HubApp's DebugOrientation).
+# An iPad once turned sideways stays sideways through a later test that turns
+# it upright, so upright is a restart instead: a simulator boots upright.
 turn() {
   local orientation="${1:-}"
   case "$orientation" in
@@ -255,11 +257,17 @@ turn() {
   while IFS= read -r name; do
     local udid
     udid="$(udid_of "$name")"
-    xcrun simctl boot "$udid" >/dev/null 2>&1 || true
-    xcrun simctl bootstatus "$udid" -b >/dev/null
-    TEST_RUNNER_HUB_TURN="$orientation" xcodebuild -project "$APPLE/Hub.xcodeproj" -scheme Hub -configuration Debug \
-      -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$DERIVED" \
-      -only-testing:HubUITests/DeviceTurn/testTurn test 2>&1 | grep -E "error:|TEST (SUCCEEDED|FAILED)" || true
+    if [[ "$orientation" == "portrait" ]]; then
+      xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+      xcrun simctl boot "$udid" >/dev/null 2>&1 || true
+      xcrun simctl bootstatus "$udid" -b >/dev/null
+    else
+      xcrun simctl boot "$udid" >/dev/null 2>&1 || true
+      xcrun simctl bootstatus "$udid" -b >/dev/null
+      TEST_RUNNER_HUB_TURN="$orientation" xcodebuild -project "$APPLE/Hub.xcodeproj" -scheme Hub -configuration Debug \
+        -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$DERIVED" \
+        -only-testing:HubUITests/DeviceTurn/testTurn test 2>&1 | grep -E "error:|TEST (SUCCEEDED|FAILED)" || true
+    fi
     echo "$orientation" > "$SHOTS/.turned-$udid"
     echo "$name: $orientation"
   done < <(selected_sims)
