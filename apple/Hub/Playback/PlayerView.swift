@@ -19,7 +19,9 @@ import SwiftUI
 /// A tap shows or hides the chrome; it hides itself 3.5 s into playing, as on
 /// Android, and stays while paused or while a panel is open. Space, ← and →
 /// play, pause and step ten seconds from a keyboard; Escape closes a panel,
-/// then leaves.
+/// then leaves. As on the Pocket (#24), a double tap on either half of the
+/// picture steps back or on, and on iOS an up-or-down drag sets the
+/// brightness on the left half and the player's volume on the right.
 struct PlayerView: View {
     let player: PlayerModel
     @Environment(AppModel.self) private var model
@@ -35,12 +37,31 @@ struct PlayerView: View {
     @State private var scrub: Double?
     @State private var hiding: Task<Void, Never>?
     @State private var unlockHiding: Task<Void, Never>?
+    /// The picture's gestures (#24): a double tap's seek and a drag's level,
+    /// shown for a moment.
+    @State private var seekShown: PlayerSeekShown?
+    @State private var levelShown: PlayerLevelShown?
+    @State private var gestureHiding: Task<Void, Never>?
+    /// A drag on the picture, decided once at its first movement: which half
+    /// it sets and from what level, or nothing for a drag across.
+    @State private var levelDrag: (side: PlayerGestures.Side, start: Double)?
+    @State private var dragDecided = false
     @FocusState private var keys: Bool
 
     /// Debug builds: HUB_PLAY_CHROME=pinned keeps the chrome up for screenshots.
     private var pinned: Bool {
         #if DEBUG
         ProcessInfo.processInfo.environment["HUB_PLAY_CHROME"] == "pinned"
+        #else
+        false
+        #endif
+    }
+
+    /// Debug builds: HUB_PLAY_FEEDBACK=hold keeps a gesture's words and level
+    /// up until the next one, for the UI tests that read them.
+    private var holdsFeedback: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["HUB_PLAY_FEEDBACK"] == "hold"
         #else
         false
         #endif
@@ -73,7 +94,11 @@ struct PlayerView: View {
                 }
                 Color.clear
                     .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { location in doubleTapped(at: location, width: screen.width) }
                     .onTapGesture(perform: tapped)
+                    #if os(iOS)
+                    .simultaneousGesture(levelGesture(size: screen))
+                    #endif
                 if showsChrome {
                     chrome(layout).transition(.opacity)
                 }
@@ -82,6 +107,12 @@ struct PlayerView: View {
                 }
                 status(layout)
                 messages(layout)
+                if let seekShown {
+                    PlayerSeekBubble(shown: seekShown, inset: layout.side + 24).transition(.opacity)
+                }
+                if let levelShown {
+                    PlayerLevelBar(shown: levelShown, inset: layout.side + 24).transition(.opacity)
+                }
                 if locked && unlockShown {
                     GlassRoundButton(systemImage: "lock.open.fill", label: "Unlock controls", size: layout.round) { unlock() }
                         .padding(.top, layout.top)
@@ -495,6 +526,72 @@ struct PlayerView: View {
             chromeShown = false
         } else {
             poke()
+        }
+    }
+
+    /// A double tap on the picture: back on the left half, on on the right,
+    /// by the step, and the words say where it lands. Locked, or under a
+    /// panel, it is a tap.
+    private func doubleTapped(at location: CGPoint, width: CGFloat) {
+        guard !locked, panels.isEmpty, player.plan != nil else { return tapped() }
+        let delta = PlayerGestures.doubleTapSeek(x: location.x, width: width)
+        let target = PlaybackRules.clampSeek(player.positionMillis + delta, durationMillis: player.durationMillis)
+        player.seek(by: delta)
+        show(seek: PlayerSeekShown(text: PlayerGestures.seekFeedback(deltaMillis: delta, targetMillis: target),
+                                   side: PlayerGestures.side(x: location.x, width: width)))
+    }
+
+    #if os(iOS)
+    /// An up-or-down drag: the screen's brightness on the left half, the
+    /// player's volume on the right, with the level as a small bar.
+    private func levelGesture(size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .local)
+            .onChanged { value in
+                if !dragDecided {
+                    dragDecided = true
+                    guard !locked, panels.isEmpty, player.plan != nil,
+                          PlayerGestures.isVertical(dx: value.translation.width, dy: value.translation.height)
+                    else { return }
+                    let side = PlayerGestures.side(x: value.startLocation.x, width: size.width)
+                    levelDrag = (side, side == .left ? player.brightness : player.volume)
+                }
+                guard let drag = levelDrag else { return }
+                let left = drag.side == .left
+                let level = PlayerGestures.level(start: drag.start, dy: value.translation.height, height: size.height,
+                                                 floor: left ? PlayerGestures.brightnessFloor : 0)
+                if left { player.setBrightness(level) } else { player.setVolume(level) }
+                show(level: PlayerLevelShown(kind: left ? .brightness : .volume, value: level, side: drag.side))
+            }
+            .onEnded { _ in
+                dragDecided = false
+                levelDrag = nil
+                hideGestureSoon(after: 0.7)
+            }
+    }
+    #endif
+
+    private func show(seek: PlayerSeekShown) {
+        levelShown = nil
+        seekShown = seek
+        hideGestureSoon(after: 0.85)
+    }
+
+    private func show(level: PlayerLevelShown) {
+        gestureHiding?.cancel()
+        seekShown = nil
+        levelShown = level
+    }
+
+    private func hideGestureSoon(after seconds: Double) {
+        gestureHiding?.cancel()
+        guard !holdsFeedback else { return }
+        gestureHiding = Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) {
+                seekShown = nil
+                levelShown = nil
+            }
         }
     }
 
