@@ -100,7 +100,9 @@ data class LibraryPerson(
     val name: String = "",
     val role: String = "",
     val type: String = "",
-    val image: String = ""
+    val image: String = "",
+    /** Who they are on TMDB, when the hub knows: their filmography (#26; the hub's part is #27). 0 when it does not. */
+    val tmdbId: Int = 0
 )
 
 @Serializable

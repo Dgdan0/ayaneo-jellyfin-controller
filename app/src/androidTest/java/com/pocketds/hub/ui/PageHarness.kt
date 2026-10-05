@@ -30,6 +30,8 @@ class PageHarness(private val activity: Activity) : ScreenHost {
     private val views = HashMap<Screen, View>()
     /** What a page asked the host to play, open or download; a Back test asks for none of it. */
     val asked = mutableListOf<String>()
+    /** What a page told the person, in order. */
+    val notices = mutableListOf<String>()
 
     override val viewContext: Context get() = activity
 
@@ -84,7 +86,7 @@ class PageHarness(private val activity: Activity) : ScreenHost {
 
     override fun switchSection(delta: Int) = Unit
     override fun selectJellyfinUser(id: String, name: String) = Unit
-    override fun notify(message: String) = Unit
+    override fun notify(message: String) { notices += message }
     override fun refreshHints() = Unit
     override fun openTrailer(key: String, watchUrl: String, title: String) { asked += "trailer:$key" }
     override fun playItem(itemId: String, startMode: String) { asked += "play:$itemId" }

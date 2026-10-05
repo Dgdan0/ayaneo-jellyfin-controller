@@ -235,6 +235,7 @@ class LibraryDetailScreen(
                 cast = CastRowView(context, colors, ringVisible).apply {
                     visibility = View.GONE
                     onFocused = { lastFocusKey = "cast"; liftToTabs(); host.refreshHints() }
+                    onOpen = { person -> com.pocketds.hub.screens.discover.PersonScreen.open(host, api, person, ringVisible) }
                 }
                 addView(cast, LinearLayout.LayoutParams(MATCH, WRAP))
                 facts = FactsGridView(context, colors, ringVisible).apply {
@@ -343,7 +344,8 @@ class LibraryDetailScreen(
                 if (!value?.mediaKey.isNullOrEmpty()) add(ButtonHint.secondary("Find releases"))
             }
             similar.hasFocus() -> add(ButtonHint.activate("Details"))
-            tabs.hasFocus() || cast.hasFocus() || facts.hasFocus() -> Unit
+            cast.hasFocus() -> add(ButtonHint.activate("Filmography"))
+            tabs.hasFocus() || facts.hasFocus() -> Unit
             else -> {
                 val focusedAction = listOf(playAction, favoriteAction, downloadAction, moreAction, restartAction, optionsAction, watchedAction)
                     .firstOrNull { it.visibility == View.VISIBLE && it.hasFocus() }
@@ -523,7 +525,7 @@ class LibraryDetailScreen(
     /** Episodes for a series; Cast and Details whenever there is something in them. */
     private fun renderTabs(value: LibraryItem) {
         val people = MediaFacts.cast(value)
-        cast.bind(people.map { CastRowView.Person(it.id, it.name, it.role, it.image.takeIf(String::isNotBlank)?.let(api::imageUrl)) }, imageLoader())
+        cast.bind(people.map { CastRowView.Person(it.id, it.name, it.role, it.image.takeIf(String::isNotBlank)?.let(api::imageUrl), it.tmdbId) }, imageLoader())
         facts.bind(MediaFacts.facts(value).map { FactsGridView.Fact(it.label, it.value) })
         if (similarHits.isEmpty() && similarJob?.isActive != true && value.type in setOf("movie", "series")) loadSimilar()
         val options = buildList {

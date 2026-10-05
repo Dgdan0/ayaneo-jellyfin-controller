@@ -27,7 +27,8 @@ class CastRowView(
     private val colors: PocketColors,
     private val ringVisible: () -> Boolean
 ) : FocusHorizontalScrollView(context) {
-    data class Person(val key: String, val name: String, val role: String, val image: Any?)
+    /** [tmdbId]: who they are on TMDB, for their filmography; 0 when not known (#26). */
+    data class Person(val key: String, val name: String, val role: String, val image: Any?, val tmdbId: Int = 0)
 
     var onOpen: ((Person) -> Unit)? = null
     var onFocused: (() -> Unit)? = null

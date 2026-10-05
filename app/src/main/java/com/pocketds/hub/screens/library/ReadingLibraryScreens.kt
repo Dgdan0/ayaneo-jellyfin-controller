@@ -571,6 +571,8 @@ class ReadingWorkScreen(
     private lateinit var listOverlay: ChoiceOverlay
     private var lastActionKey: String? = null
     private val actionViews = linkedMapOf<String, View>()
+    /** A series' continue card, when it shows one. */
+    private var continueView: com.pocketds.hub.ui.ContinuationCardView? = null
     @Volatile private var refreshOnShow = false
     private var lastWork: ReadingWork? = null
     /** A book's series and its books, for the strip under the book. */
@@ -732,6 +734,7 @@ class ReadingWorkScreen(
         val previousScrollY = scroll.scrollY
         content.removeAllViews()
         actionViews.clear()
+        continueView = null
         hasChildLinks = false
         content.addView(hero(work))
         val primaryRead = ReadingWorkPresentation.primaryRead(work)
@@ -743,7 +746,7 @@ class ReadingWorkScreen(
                 })
             }
             // The book being read as a card of its own under the series.
-            continueCard(work, point)?.let(content::addView)
+            continueCard(work, point)?.let { card -> continueView = card; content.addView(card) }
         }
         if (ReadingBookFacts.kindTag(work.kind) != null && work.libraryId.isNotBlank() &&
             ReadingLibraryNames.of(work.libraryId) == null) loadLibraryNames()
@@ -786,6 +789,9 @@ class ReadingWorkScreen(
         }
         // The actions carry their keys, so the place Back returns to finds its new view (#23).
         actionViews.forEach { (key, view) -> view.tag = key }
+        // Down from the continue card is the book being read, else the first in the row (#26).
+        continueView?.downTo(work.continueAt?.let { actionViews["book:${it.workId}"] }
+            ?: actionViews.entries.firstOrNull { it.key.startsWith("book:") || it.key.startsWith("missing:") }?.value)
         val preferredSource = previouslyFocusedSource?.takeIf { it.startsWith("list:") && it in actionViews }
             ?: ReadingWorkPresentation.preferredActionSource(
             continueSourceItemId = work.continueAt?.sourceItemId.orEmpty(),
@@ -1008,7 +1014,7 @@ class ReadingWorkScreen(
      * reading · Light Bringer", where in it, a bar in the accent and a gold
      * play disc. A opens it where it was left, as Continue does.
      */
-    private fun continueCard(work: ReadingWork, point: ReadingContinue): View? {
+    private fun continueCard(work: ReadingWork, point: ReadingContinue): com.pocketds.hub.ui.ContinuationCardView? {
         if (!canReadPublication(work.kind, point.sourceItemId)) return null
         val context = requireNotNull(host).viewContext
         val pages = work.sections.flatMap { it.items }.firstOrNull { it.workId == point.workId && it.workId.isNotBlank() }?.pageCount ?: 0

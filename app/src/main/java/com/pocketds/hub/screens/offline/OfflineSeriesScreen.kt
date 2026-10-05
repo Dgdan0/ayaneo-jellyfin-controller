@@ -183,7 +183,7 @@ class OfflineSeriesScreen(
             return
         }
         val presentation = OfflineDetailPresentation.resolve(rows, progress, snapshot)
-        var continueCard: View? = null
+        var continueCard: ContinuationCardView? = null
         presentation.playable?.let { target ->
             // The white pill names the episode, as a series' Play does online.
             detail.actions.addView(PillButton.create(host.viewContext, colors, targetLabel(target), AppIcon.PLAY,
@@ -231,12 +231,8 @@ class OfflineSeriesScreen(
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL; clipChildren = false
                 seasons.forEach { addView(seasonCard(it)) }
-                // Down from the continue card is the first season: the card spans the
-                // page, and Android's search took the season under its middle (#23).
-                getChildAt(0)?.let { first ->
-                    if (first.id == View.NO_ID) first.id = View.generateViewId()
-                    continueCard?.nextFocusDownId = first.id
-                }
+                // Down from the continue card is the first season (#23).
+                continueCard?.downTo(getChildAt(0))
             })
         }, LinearLayout.LayoutParams(MATCH, WRAP))
         // Rebuilt while away (an episode removed on the season page): the place is the new view.

@@ -178,7 +178,7 @@ class MediaDetailScreen(
         root.addView(castLabel)
         cast = CastRowView(context, colors, ringVisible).apply {
             visibility = View.GONE
-            onOpen = { person -> person.key.toIntOrNull()?.let { host.push(PersonScreen(api, it, person.name, ringVisible)) } }
+            onOpen = { person -> PersonScreen.open(host, api, person, ringVisible) }
             onFocused = { host.refreshHints() }
         }
         root.addView(cast, LinearLayout.LayoutParams(MATCH, WRAP))
@@ -373,7 +373,7 @@ class MediaDetailScreen(
         castLabel.visibility = if (d.cast.isEmpty()) View.GONE else View.VISIBLE
         cast.visibility = castLabel.visibility
         cast.bind(d.cast.map { CastRowView.Person(it.id.toString(), it.name, it.character,
-            it.profile.takeIf(String::isNotBlank)?.let(api::imageUrl)) }, Artwork.loader(api, cast.context))
+            it.profile.takeIf(String::isNotBlank)?.let(api::imageUrl), tmdbId = it.id) }, Artwork.loader(api, cast.context))
 
         val availability = Availability.fromWire(d.availability)
         status.showStatus(

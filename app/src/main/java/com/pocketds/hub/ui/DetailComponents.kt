@@ -421,6 +421,17 @@ class ContinuationCardView(
         FocusDecorator.attach(this, ringVisible, scale = false)
         FocusDecorator.listen(this, ringVisible) { _, focused -> if (focused) onFocused?.invoke() }
     }
+    /**
+     * Down from this card goes to [target]: the card spans the page over a row,
+     * and Android's search took the one under its middle (the middle season of a
+     * downloaded series, #23; book 4 of 6 on a series page, #26).
+     */
+    fun downTo(target: View?) {
+        if (target == null) { nextFocusDownId = View.NO_ID; return }
+        if (target.id == View.NO_ID) target.id = View.generateViewId()
+        nextFocusDownId = target.id
+    }
+
     fun bind(title: String, metadata: String, fraction: Double, completed: Boolean) {
         titleView.text = title; metadataView.text = metadata
         progressView.fraction = if (completed) 0.0 else fraction

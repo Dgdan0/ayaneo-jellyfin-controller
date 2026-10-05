@@ -213,9 +213,20 @@ class PersonScreen(
 
     private class CardHolder(view: View) : RecyclerView.ViewHolder(view)
 
-    private companion object {
-        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
-        const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-        const val COLUMNS = 7
+    companion object {
+        private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+        private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        private const val COLUMNS = 7
+
+        /**
+         * A cast portrait's filmography: TMDB's credits, so only for a person the
+         * hub knows there. Jellyfin's people carry no TMDB id unless the hub adds
+         * one (#27), and A on a portrait then did nothing at all; now it says why (#26).
+         */
+        fun open(host: com.pocketds.hub.nav.ScreenHost, api: HubApi, person: com.pocketds.hub.ui.CastRowView.Person,
+                 ringVisible: () -> Boolean) {
+            if (person.tmdbId > 0) host.push(PersonScreen(api, person.tmdbId, person.name, ringVisible))
+            else host.notify("No filmography for ${person.name} yet: the hub doesn't know who they are on TMDB")
+        }
     }
 }

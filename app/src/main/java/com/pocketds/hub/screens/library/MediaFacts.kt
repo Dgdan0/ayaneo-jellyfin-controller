@@ -13,7 +13,7 @@ import java.util.Locale
  */
 object MediaFacts {
     data class Fact(val label: String, val value: String)
-    data class CastMember(val id: String, val name: String, val role: String, val image: String)
+    data class CastMember(val id: String, val name: String, val role: String, val image: String, val tmdbId: Int = 0)
 
     private val actors = setOf("actor", "gueststar")
 
@@ -21,7 +21,7 @@ object MediaFacts {
         .filter { it.type.lowercase(Locale.ROOT) in actors }
         .distinctBy { it.id.ifBlank { it.name } }
         .take(limit)
-        .map { CastMember(it.id, it.name, it.role, it.image) }
+        .map { CastMember(it.id, it.name, it.role, it.image, it.tmdbId) }
 
     fun facts(item: LibraryItem): List<Fact> = buildList {
         fun people(vararg types: String) = item.people.filter { person -> types.any { it.equals(person.type, ignoreCase = true) } }
