@@ -57,13 +57,16 @@ public struct Partial: Decodable, Equatable, Sendable {
     }
 }
 
-/// The hub's error envelope: `{"error":{"code","service","message","retryable"},"requestId"}`.
+/// The hub's error envelope: `{"error":{"code","service","reason","message","retryable","retryAfterSeconds"},"requestId"}`.
 struct HubErrorBody: Decodable {
     struct Detail: Decodable {
         var code: String?
         var service: String?
+        /// Narrows a code with several causes, for the app to branch on.
+        var reason: String?
         var message: String?
         var retryable: Bool?
+        var retryAfterSeconds: Int64?
     }
     var error: Detail?
 }

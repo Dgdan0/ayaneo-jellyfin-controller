@@ -135,6 +135,57 @@ struct HubClientTests {
         #expect(await transport.sent.count == 2)
     }
 
+    @Test func theHubsCodeReasonAndWaitComeWithItsSentence() async {
+        let transport = ScriptedTransport([.init(
+            status: 409,
+            body: #"{"error":{"code":"offline_preparing","reason":"preparing","message":"the file is being prepared","retryable":true},"requestId":"r1"}"#,
+            headers: ["Retry-After": "5"])])
+        do {
+            _ = try await client(transport).data(HubEndpoints.offlineMedia("/v1/offline/grants/g1/media"))
+            Issue.record("a 409 succeeded")
+        } catch {
+            #expect(error.status == 409)
+            #expect(error.code == "offline_preparing")
+            #expect(error.reason == "preparing")
+            #expect(error.retryable == true)
+            #expect(error.retryAfterSeconds == 5)
+            #expect(error.message == "the file is being prepared")
+        }
+    }
+
+    @Test func aRawAnswerReadsAsTheClientWouldReadIt() {
+        let expired = HubFailure.answer(
+            status: 410, body: Data(#"{"error":{"code":"grant_expired","message":"offline grant expired; renew it and resume"}}"#.utf8))
+        #expect(expired.status == 410 && expired.code == "grant_expired" && expired.reason.isEmpty)
+        #expect(expired.message == "offline grant expired; renew it and resume")
+        #expect(expired.retryable == nil && expired.retryAfterSeconds == nil)
+        // The body's own wait, when no header says one.
+        let waiting = HubFailure.answer(status: 503, body: Data(
+            #"{"error":{"code":"offline_apple_unavailable","reason":"no_ffmpeg","message":"no ffmpeg","retryAfterSeconds":30}}"#.utf8))
+        #expect(waiting.kind == .upstreamDown && waiting.reason == "no_ffmpeg" && waiting.retryAfterSeconds == 30)
+        // Not the hub's envelope: the kind's own words.
+        let bare = HubFailure.answer(status: 502, body: Data("<html>Bad gateway</html>".utf8))
+        #expect(bare.kind == .upstreamDown && bare.code.isEmpty && bare.message == FailureKind.upstreamDown.message)
+    }
+
+    @Test func aTransferAroundTheClientStopsEveryRequestWhenItsTokenIsRejected() async throws {
+        let transport = ScriptedTransport([.init(status: 200, body: healthJSON)])
+        let hub = client(transport)
+        // A background download carrying another token says nothing about this one.
+        await hub.observe(token: String(repeating: "o", count: 43), status: 401, retryAfterSeconds: nil)
+        _ = try await hub.fetch(HubEndpoints.health, as: HealthResponse.self)
+        // Its own token rejected: nothing more leaves, as after the client's own 401.
+        await hub.observe(token: token, status: 401, retryAfterSeconds: nil)
+        do {
+            try await hub.send(HubEndpoints.health)
+            Issue.record("a request went out with a token a download had rejected")
+        } catch {
+            #expect(error.kind == .unauthorized)
+        }
+        #expect(await transport.sent.count == 1)
+        #expect(await hub.block() == .rejected)
+    }
+
     @Test func anUnprovenTokenSendsOneRequestAtATime() async throws {
         // A burst of concurrent poster loads must not reach the ban threshold
         // before the first answer arrives.

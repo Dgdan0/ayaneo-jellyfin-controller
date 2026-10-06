@@ -154,8 +154,8 @@ public enum OfflineCatalog {
 public enum OfflineQueueLabels {
     public enum Tone: Equatable, Sendable { case good, waiting, bad, quiet }
 
-    /// Moving, queued and paused quiet; waiting amber (it will try again by
-    /// itself); failed red; downloaded green.
+    /// Moving, queued, paused and preparing quiet; waiting amber (it will try
+    /// again by itself); failed red; downloaded green.
     public static func chip(_ state: OfflineState) -> (word: String, tone: Tone) {
         switch state {
         case .downloading: ("Downloading", .quiet)
@@ -164,14 +164,20 @@ public enum OfflineQueueLabels {
         case .waiting: ("Waiting", .waiting)
         case .failed: ("Failed", .bad)
         case .complete: ("Downloaded", .good)
+        case .preparing: ("Preparing", .quiet)
         }
     }
 
     /// "90.8 MB of 3.9 GB · 2.1 MB/s · 4m left": how much has arrived and,
-    /// while it moves, how fast and how long. A finished download is its size.
+    /// while it moves, how fast and how long. A finished download is its size;
+    /// an Apple download not ready yet is its estimate, "About 7.9 GB", and
+    /// while the PC makes it, "Preparing on the PC · 40% · About 7.9 GB".
     public static func figures(_ row: OfflineRow) -> String {
         var parts: [String] = []
-        if row.state == .complete || row.bytesDownloaded <= 0 {
+        if row.state == .preparing { parts.append(onThePC(row)) }
+        if row.isApple && row.etag.isEmpty && row.state != .complete {
+            parts.append("About " + Fmt.bytes(row.totalBytes))
+        } else if row.state == .complete || row.bytesDownloaded <= 0 {
             parts.append(Fmt.bytes(row.totalBytes))
         } else {
             parts.append("\(Fmt.bytes(row.bytesDownloaded)) of \(Fmt.bytes(row.totalBytes))")
@@ -181,6 +187,35 @@ public enum OfflineQueueLabels {
             parts.append("\(Fmt.eta(max(row.totalBytes - row.bytesDownloaded, 0) / row.speedBytesPerSecond)) left")
         }
         return parts.joined(separator: " · ")
+    }
+
+    /// Where an Apple download's MP4 is on the PC: "Preparing on the PC · 40%",
+    /// or its place in the PC's line, "Next on the PC", "3rd in line on the PC".
+    public static func onThePC(_ row: OfflineRow) -> String {
+        switch row.hubQueuePosition {
+        case 0: "Preparing on the PC · \(row.hubPercent)%"
+        case 1: "Next on the PC"
+        default: "\(ordinal(row.hubQueuePosition)) in line on the PC"
+        }
+    }
+
+    /// How full its bar is, 0 to 1: the bytes arrived, or while the PC makes
+    /// the MP4, how far the PC is (drawn in a quieter tone).
+    public static func fraction(_ row: OfflineRow) -> Double {
+        row.state == .preparing ? Double(min(max(row.hubPercent, 0), 100)) / 100 : row.progress
+    }
+
+    /// "1st", "2nd", "3rd", "4th", "11th", "22nd".
+    static func ordinal(_ number: Int) -> String {
+        let suffix: String
+        switch (number % 10, number % 100) {
+        case (_, 11...13): suffix = "th"
+        case (1, _): suffix = "st"
+        case (2, _): suffix = "nd"
+        case (3, _): suffix = "rd"
+        default: suffix = "th"
+        }
+        return "\(number)\(suffix)"
     }
 
     /// A batch's line: "3/8 complete · 1.2 GB of 4.8 GB".
@@ -224,8 +259,13 @@ public enum OfflineSelection {
         "Download \(count) episode\(count == 1 ? "" : "s")?"
     }
 
-    /// "1.2 GB selected · 20 GB free" over where and what is downloaded.
-    public static func confirmDetail(bytes: Int64, free: Int64, source: OfflineSource?) -> String {
+    /// "1.2 GB selected · 20 GB free" over where and what is downloaded: the
+    /// original file, or an MP4 the PC makes for this device ("apple").
+    public static func confirmDetail(bytes: Int64, free: Int64, source: OfflineSource?, format: String = "") -> String {
+        if format == OfflineFormat.apple {
+            return "About \(Fmt.bytes(bytes)) selected · \(Fmt.bytes(free)) free\n"
+                + "This device · kept out of backups · An MP4 the PC makes for this device"
+        }
         let quality = source.map { $0.name.isEmpty ? $0.container.uppercased() : $0.name } ?? ""
         return "\(Fmt.bytes(bytes)) selected · \(Fmt.bytes(free)) free\nThis device · kept out of backups · Original"
             + (quality.isEmpty ? "" : " · \(quality)")
@@ -268,16 +308,33 @@ public enum OfflinePlayback {
                                                                durationMillis: duration, played: item.played,
                                                                lastPlayedAt: row.manifest.lastPlayedAt)
         let position = mode == .restart ? 0 : ResumeRules.resumePosition(positionMillis: watch.positionMillis, durationMillis: duration)
-        let audio = source.tracks.filter { $0.type.lowercased() == "audio" }
-        let embedded = source.tracks.filter { $0.type.lowercased() == "subtitle" && !$0.external }
-        let external = row.manifest.subtitles.compactMap { subtitle -> PlaybackTrack? in
-            guard let local = subtitles[subtitle.track.index] else { return nil }
-            var track = subtitle.track
-            track.external = true
-            track.externalUrl = local.absoluteString
-            return track
+        let audio: [PlaybackTrack]
+        let tracks: [PlaybackTrack]
+        var selectedSubtitle: Int?
+        if let apple = row.manifest.apple, row.isApple {
+            // The MP4's own tracks, in its order: the nth audio option is
+            // `apple.audio[n]`, the nth subtitle option the nth kept one; none on.
+            audio = apple.audio.map { track in
+                PlaybackTrack(index: track.sourceIndex, type: "Audio", label: track.label, language: track.language,
+                              codec: track.outputCodec, channels: track.outputChannels, isDefault: track.isDefault)
+            }
+            tracks = apple.keptSubtitles.map { track in
+                PlaybackTrack(index: track.sourceIndex, type: "Subtitle", label: track.label, language: track.language,
+                              codec: track.outputCodec, forced: track.forced, hearingImpaired: track.hearingImpaired)
+            }
+        } else {
+            audio = source.tracks.filter { $0.type.lowercased() == "audio" }
+            let embedded = source.tracks.filter { $0.type.lowercased() == "subtitle" && !$0.external }
+            let external = row.manifest.subtitles.compactMap { subtitle -> PlaybackTrack? in
+                guard let local = subtitles[subtitle.track.index] else { return nil }
+                var track = subtitle.track
+                track.external = true
+                track.externalUrl = local.absoluteString
+                return track
+            }
+            tracks = embedded + external
+            selectedSubtitle = tracks.first(where: \.isDefault)?.index
         }
-        let tracks = embedded + external
         let ordered = siblings.filter { !$0.manifest.item.seriesId.isEmpty && $0.manifest.item.seriesId == item.seriesId }
             .sorted { left, right in
                 let a = left.manifest.item
@@ -287,15 +344,25 @@ public enum OfflinePlayback {
         let index = ordered.firstIndex { $0.itemId == item.id }
         let previous = index.flatMap { $0 > 0 ? ordered[$0 - 1] : nil }
         let next = index.flatMap { $0 + 1 < ordered.count ? ordered[$0 + 1] : nil }
+        let apple = row.isApple ? row.manifest.apple : nil
         return PlaybackPrepareResponse(
             sessionId: sessionPrefix + row.id, item: playbackItem(item), positionMillis: position, durationMillis: duration,
-            mediaUrl: file.absoluteString, mimeType: source.mimeType, playMethod: "Offline", bitrate: source.bitrate,
-            sources: [PlaybackSource(id: source.id, name: source.name, container: source.container,
-                                     sizeBytes: source.sizeBytes, bitrate: source.bitrate)],
+            mediaUrl: file.absoluteString, mimeType: apple?.mimeType ?? source.mimeType, playMethod: "Offline",
+            bitrate: source.bitrate, width: apple?.video.width ?? 0, height: apple?.video.height ?? 0,
+            sources: [PlaybackSource(id: source.id, name: source.name, container: row.manifest.container,
+                                     sizeBytes: row.totalBytes, bitrate: source.bitrate)],
             audioTracks: audio, subtitleTracks: tracks, selectedMediaSourceId: source.id,
             selectedAudioIndex: (audio.first(where: \.isDefault) ?? audio.first)?.index,
-            selectedSubtitleIndex: tracks.first(where: \.isDefault)?.index,
+            selectedSubtitleIndex: selectedSubtitle,
             previousItem: previous.map { playbackItem($0.manifest.item) }, nextItem: next.map { playbackItem($0.manifest.item) })
+    }
+
+    /// Which of the file's own options a track is: its place among the plan's
+    /// tracks of its kind, which an Apple download lists in the MP4's order.
+    /// Nil for no track (subtitles off) or one the plan does not have.
+    public static func optionPosition(_ tracks: [PlaybackTrack], index: Int?) -> Int? {
+        guard let index, index >= 0 else { return nil }
+        return tracks.firstIndex { $0.index == index }
     }
 
     static func playbackItem(_ item: LibraryItem) -> PlaybackItem {

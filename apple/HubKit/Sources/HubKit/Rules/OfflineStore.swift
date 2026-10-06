@@ -9,6 +9,9 @@ import Foundation
 
 public enum OfflineState: String, Codable, CaseIterable, Sendable {
     case queued, downloading, paused, waiting, failed, complete
+    /// An Apple download's MP4 is being made on the PC (or waits its turn
+    /// there): `OfflineRow.hubPercent` and `hubQueuePosition` say how far.
+    case preparing
 }
 
 /// One film or episode being kept on this device: a grant's manifest, where
@@ -37,11 +40,18 @@ public struct OfflineRow: Codable, Equatable, Sendable, Identifiable {
     public var sortOrder: Int
     public var updatedAt: Int64
     public var retryAt: Int64
+    /// How far the PC is with an Apple download's MP4, 0 to 100.
+    public var hubPercent: Int
+    /// Its place in the PC's line: 1 next, 0 when running or done.
+    public var hubQueuePosition: Int
+    /// The ETag of the PC's MP4 being downloaded: a different one is a
+    /// different file, which starts over.
+    public var etag: String
 
     public init(id: String, batchId: String, userId: String, manifest: OfflineManifest, manifestJSON: Data = Data(),
                 state: OfflineState = .queued, bytesDownloaded: Int64 = 0, totalBytes: Int64? = nil, fileName: String = "",
                 error: String = "", attempts: Int = 0, speedBytesPerSecond: Int64 = 0, sortOrder: Int = 0,
-                updatedAt: Int64 = 0, retryAt: Int64 = 0) {
+                updatedAt: Int64 = 0, retryAt: Int64 = 0, hubPercent: Int = 0, hubQueuePosition: Int = 0, etag: String = "") {
         self.id = id
         self.batchId = batchId
         self.userId = userId
@@ -51,7 +61,7 @@ public struct OfflineRow: Codable, Equatable, Sendable, Identifiable {
         self.manifest = manifest
         self.state = state
         self.bytesDownloaded = bytesDownloaded
-        self.totalBytes = totalBytes ?? manifest.source.sizeBytes
+        self.totalBytes = totalBytes ?? manifest.expectedBytes
         self.fileName = fileName
         self.error = error
         self.attempts = attempts
@@ -59,7 +69,13 @@ public struct OfflineRow: Codable, Equatable, Sendable, Identifiable {
         self.sortOrder = sortOrder
         self.updatedAt = updatedAt
         self.retryAt = retryAt
+        self.hubPercent = hubPercent
+        self.hubQueuePosition = hubQueuePosition
+        self.etag = etag
     }
+
+    /// An MP4 the hub repackages, which waits on the PC before it downloads.
+    public var isApple: Bool { manifest.isApple }
 
     /// How much has arrived, 0 to 1.
     public var progress: Double {
@@ -68,7 +84,7 @@ public struct OfflineRow: Codable, Equatable, Sendable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, batchId, userId, itemId, sourceId, manifestJSON, state, bytesDownloaded, totalBytes, fileName, error
-        case attempts, speedBytesPerSecond, sortOrder, updatedAt, retryAt
+        case attempts, speedBytesPerSecond, sortOrder, updatedAt, retryAt, hubPercent, hubQueuePosition, etag
     }
 
     public init(from decoder: any Decoder) throws {
@@ -90,6 +106,9 @@ public struct OfflineRow: Codable, Equatable, Sendable, Identifiable {
         sortOrder = c.value(.sortOrder, 0)
         updatedAt = c.value(.updatedAt, 0)
         retryAt = c.value(.retryAt, 0)
+        hubPercent = c.value(.hubPercent, 0)
+        hubQueuePosition = c.value(.hubQueuePosition, 0)
+        etag = c.value(.etag, "")
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -110,6 +129,9 @@ public struct OfflineRow: Codable, Equatable, Sendable, Identifiable {
         try c.encode(sortOrder, forKey: .sortOrder)
         try c.encode(updatedAt, forKey: .updatedAt)
         try c.encode(retryAt, forKey: .retryAt)
+        try c.encode(hubPercent, forKey: .hubPercent)
+        try c.encode(hubQueuePosition, forKey: .hubQueuePosition)
+        try c.encode(etag, forKey: .etag)
     }
 }
 
@@ -249,9 +271,8 @@ public final class OfflineStore: @unchecked Sendable {
                 $0.userId == userId && $0.itemId == manifest.item.id && $0.sourceId == manifest.source.id
             }
             if duplicate { continue }
-            let container = manifest.source.container.isEmpty ? "media" : manifest.source.container.lowercased()
             let row = OfflineRow(id: id, batchId: batchId, userId: userId, manifest: manifest, manifestJSON: entry.json,
-                                 fileName: Self.safe(id) + "." + Self.safe(container), sortOrder: index, updatedAt: now)
+                                 fileName: Self.safe(id) + "." + Self.safe(manifest.container), sortOrder: index, updatedAt: now)
             rowsById[id] = row
             write(row)
             added += 1
@@ -350,17 +371,59 @@ public final class OfflineStore: @unchecked Sendable {
         if persist { write(row) }
     }
 
-    /// A renewed grant's manifest, in place of the expired one.
+    /// A renewed grant's manifest, in place of the expired one. An Apple
+    /// download keeps the exact size it was told once its MP4 was ready.
     public func updateManifest(_ id: String, manifest: OfflineManifest, json: Data, now: Int64) {
         lock.lock()
         defer { lock.unlock() }
         guard var row = rowsById[id] else { return }
         row.manifest = manifest
         row.manifestJSON = json
-        row.totalBytes = manifest.source.sizeBytes
+        if !(row.isApple && !row.etag.isEmpty) { row.totalBytes = manifest.expectedBytes }
         row.updatedAt = now
         rowsById[id] = row
         write(row)
+    }
+
+    /// An Apple download's MP4 on its way on the PC: how far, or its place in
+    /// line. Written to disk when the state changes, not with each percent.
+    public func setPreparing(_ id: String, percent: Int, queuePosition: Int, now: Int64) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard var row = rowsById[id] else { return }
+        let persist = row.state != .preparing || !row.error.isEmpty
+        row.state = .preparing
+        row.hubPercent = min(max(percent, 0), 100)
+        row.hubQueuePosition = max(queuePosition, 0)
+        row.error = ""
+        row.speedBytesPerSecond = 0
+        row.retryAt = 0
+        row.updatedAt = now
+        rowsById[id] = row
+        if persist { write(row) }
+    }
+
+    /// The PC's MP4 is ready: its exact size, and the ETag that names it. A
+    /// different file from the one partly downloaded starts over, its bytes
+    /// and resume data gone. True when it starts over.
+    @discardableResult
+    public func setReady(_ id: String, sizeBytes: Int64, etag: String, now: Int64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard var row = rowsById[id] else { return false }
+        let startOver = !row.etag.isEmpty && row.etag != etag
+        if startOver {
+            row.bytesDownloaded = 0
+            try? FileManager.default.removeItem(at: resumeFile(row))
+        }
+        row.etag = etag
+        if sizeBytes > 0 { row.totalBytes = sizeBytes }
+        row.hubPercent = 100
+        row.hubQueuePosition = 0
+        row.updatedAt = now
+        rowsById[id] = row
+        write(row)
+        return startOver
     }
 
     /// A state and its reason. The same state again changes nothing, so a
@@ -420,11 +483,14 @@ public final class OfflineStore: @unchecked Sendable {
         write(row)
     }
 
-    /// Downloads still marked as moving that no transfer is carrying (the app
-    /// was stopped with one under way) go back to the head of the queue.
+    /// Downloads still marked as moving, or waiting on the PC, that nothing is
+    /// carrying (the app was stopped with one under way) go back to the head
+    /// of the queue.
     public func requeueInterrupted(keeping active: Set<String>, now: Int64) {
         lock.lock()
-        let stranded = rowsById.values.filter { $0.state == .downloading && !active.contains($0.id) }.map(\.id)
+        let stranded = rowsById.values.filter {
+            ($0.state == .downloading || $0.state == .preparing) && !active.contains($0.id)
+        }.map(\.id)
         lock.unlock()
         for id in stranded { setState(id, .queued, now: now) }
     }
@@ -440,7 +506,7 @@ public final class OfflineStore: @unchecked Sendable {
         batchRecords[batchId] = batch
         writeBatches()
         for var row in rowsById.values where row.batchId == batchId {
-            if paused, row.state == .queued || row.state == .waiting || row.state == .downloading {
+            if paused, row.state == .queued || row.state == .waiting || row.state == .downloading || row.state == .preparing {
                 row.state = .paused
             } else if !paused, row.state == .paused {
                 row.state = .queued

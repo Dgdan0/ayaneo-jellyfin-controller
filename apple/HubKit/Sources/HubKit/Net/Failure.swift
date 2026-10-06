@@ -95,11 +95,37 @@ public struct HubFailure: Error, Equatable, Sendable {
     public let kind: FailureKind
     public let message: String
     public let status: Int?
+    /// The hub's own name for it (`grant_expired`, `offline_preparing`), when it sent one.
+    public let code: String
+    /// What narrows the code (`queued`, `no_ffmpeg`, `source_missing`), for the app to branch on.
+    public let reason: String
+    /// Whether the hub said trying again can help; nil when it did not say.
+    public let retryable: Bool?
+    /// How long the hub asked to wait (`Retry-After`, or the body's `retryAfterSeconds`).
+    public let retryAfterSeconds: Int64?
 
-    public init(_ kind: FailureKind, message: String? = nil, status: Int? = nil) {
+    public init(_ kind: FailureKind, message: String? = nil, status: Int? = nil, code: String = "", reason: String = "",
+                retryable: Bool? = nil, retryAfterSeconds: Int64? = nil) {
         self.kind = kind
         let trimmed = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         self.message = trimmed.isEmpty ? kind.message : trimmed
         self.status = status
+        self.code = code
+        self.reason = reason
+        self.retryable = retryable
+        self.retryAfterSeconds = retryAfterSeconds
+    }
+
+    /// A hub answer that was not a success, read the way the client reads its
+    /// own: the kind from the status, and the hub's sentence, code and reason
+    /// from its error body (`{"error":{"code","reason","message","retryable"}}`).
+    /// For a transfer that went around the client, such as a download in the
+    /// background session, which is handed the body as a file.
+    public static func answer(status: Int, body: Data, retryAfter: String? = nil) -> HubFailure {
+        let detail = (try? JSONDecoder().decode(HubErrorBody.self, from: body))?.error
+        let header = retryAfter.flatMap { Int64($0.trimmingCharacters(in: .whitespaces)) }
+        return HubFailure(.of(status: status), message: detail?.message, status: status, code: detail?.code ?? "",
+                          reason: detail?.reason ?? "", retryable: detail?.retryable,
+                          retryAfterSeconds: header ?? detail?.retryAfterSeconds)
     }
 }

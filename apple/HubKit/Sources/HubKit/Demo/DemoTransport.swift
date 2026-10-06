@@ -26,15 +26,17 @@ public struct DemoTransport: HubTransport {
             ?? DemoReading.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? Self.fixture(method: method, path: path)
         let response = HTTPURLResponse(url: request.url!, statusCode: answer.status, httpVersion: "HTTP/1.1",
-                                       headerFields: ["Content-Type": answer.type])!
+                                       headerFields: answer.headers.merging(["Content-Type": answer.type]) { _, type in type })!
         return (answer.body, response)
     }
 
-    /// A demo answer: its status, bytes and their type.
+    /// A demo answer: its status, bytes and their type, and any other headers
+    /// (an offline file's ETag, a Retry-After).
     struct Answer {
         let status: Int
         let body: Data
         var type = "application/json"
+        var headers: [String: String] = [:]
 
         init(_ status: Int, _ text: String, type: String = "application/json") {
             self.status = status

@@ -173,8 +173,8 @@ public actor HubClient {
             do {
                 let (data, response) = try await sendThroughGate(urlRequest, token: creds.token, transport: transport)
                 if (200...299).contains(response.statusCode) { return data }
-                failure = HubFailure(.of(status: response.statusCode), message: Self.hubMessage(data),
-                                     status: response.statusCode)
+                failure = HubFailure.answer(status: response.statusCode, body: data,
+                                            retryAfter: response.value(forHTTPHeaderField: "Retry-After"))
             } catch let blocked as HubFailure {
                 throw blocked
             } catch {
@@ -235,8 +235,11 @@ public actor HubClient {
         }
     }
 
-    static func hubMessage(_ data: Data) -> String? {
-        guard let body = try? JSONDecoder().decode(HubErrorBody.self, from: data) else { return nil }
-        return body.error?.message
+    /// What the hub answered a transfer that went around the client (a
+    /// download in the background session), carrying `token`: a rejected
+    /// token or a ban then stops every request, downloads included, as if the
+    /// client had sent it.
+    public func observe(token: String, status: Int, retryAfterSeconds: Int64?) {
+        gate.observe(token: token, status: status, retryAfterSeconds: retryAfterSeconds, nowMillis: now())
     }
 }
