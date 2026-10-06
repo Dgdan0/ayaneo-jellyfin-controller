@@ -165,67 +165,78 @@ struct BookRoutesTests {
         #expect(edition == epub)
     }
 
-    // MARK: The keepers
+    // MARK: The keeper, through the reading outbox
 
-    @Test func theDemoKeeperOpensAtTheHubsPlaceAndSendsThePlaceReached() async throws {
+    private func makeKeeper(_ workId: String, _ sourceItemId: String, store: ReadingCheckpointStore) -> CheckpointBookPlaces {
+        CheckpointBookPlaces(hub: hub, store: store,
+                             key: CheckpointBookPlaces.key(address: DemoTransport.address, userId: "", workId: workId,
+                                                           sourceItemId: sourceItemId),
+                             now: { 1_000 })
+    }
+
+    @Test func theKeeperOpensAtTheHubsPlaceAndSendsThePlaceReachedWithTheOneItHad() async throws {
+        let root = Self.folder()
+        defer { try? FileManager.default.removeItem(at: root) }
         let workId = "rw_demo_recursion", sourceItemId = "demo-rw_demo_recursion"
-        let keeper = DemoBookPlaces(hub: hub, workId: workId, sourceItemId: sourceItemId, now: { 1_000 })
-        let opening = await keeper.opening()
-        #expect(opening == .at(nil))
-        let place = #"{"href":"OEBPS/chapter-01.xhtml","locations":{"progression":0.3,"totalProgression":0.05}}"#
+        let keeper = makeKeeper(workId, sourceItemId, store: ReadingCheckpointStore(root: root))
+        #expect(await keeper.opening() == .at(nil))
+        let place = #"{"href":"OEBPS/chapter-01.xhtml","locations":{"progression":0.3,"totalProgression":0.05},"type":"application/xhtml+xml"}"#
         await keeper.reached(place)
-        // Kept until a pause, then sent.
+        // Kept here until the reading pauses, then sent.
         #expect(DemoBooks.place(workId: workId, sourceItemId: sourceItemId) == nil)
         await keeper.flush()
         #expect(BookLocator.same(DemoBooks.place(workId: workId, sourceItemId: sourceItemId), place))
-        // The next place goes on from that one.
-        let later = #"{"href":"OEBPS/chapter-02.xhtml","locations":{"progression":0.1,"totalProgression":0.12}}"#
+        // The next goes on from that one: the hub had it, so it is no question.
+        let later = #"{"href":"OEBPS/chapter-02.xhtml","locations":{"progression":0.1,"totalProgression":0.12},"type":"application/xhtml+xml"}"#
         await keeper.reached(later)
         await keeper.flush()
         #expect(BookLocator.same(DemoBooks.place(workId: workId, sourceItemId: sourceItemId), later))
         #expect(await keeper.conflicted() == false)
     }
 
-    @Test func aPlaceAnotherDeviceMovedIsNeverOverwritten() async throws {
+    @Test func aPlaceAnotherDeviceMovedIsNeverOverwrittenAndOpensAsAQuestion() async throws {
+        let root = Self.folder()
+        defer { try? FileManager.default.removeItem(at: root) }
         let workId = "rw_demo_rr6", sourceItemId = "rr6"
-        let keeper = DemoBookPlaces(hub: hub, workId: workId, sourceItemId: sourceItemId)
+        let store = ReadingCheckpointStore(root: root)
+        let keeper = makeKeeper(workId, sourceItemId, store: store)
         guard case .at(let start?) = await keeper.opening() else {
             Issue.record("Light Bringer is half read in the Books demo")
             return
         }
-        let elsewhere = #"{"href":"OEBPS/chapter-07.xhtml","locations":{"progression":0.9,"totalProgression":0.83}}"#
+        let elsewhere = #"{"href":"OEBPS/chapter-07.xhtml","locations":{"progression":0.9,"totalProgression":0.83},"type":"application/xhtml+xml"}"#
         DemoBooks.moveElsewhere(workId: workId, sourceItemId: sourceItemId, locator: elsewhere)
-        await keeper.reached(#"{"href":"OEBPS/chapter-05.xhtml","locations":{"progression":0.2,"totalProgression":0.55}}"#)
+        let mine = #"{"href":"OEBPS/chapter-05.xhtml","locations":{"progression":0.2,"totalProgression":0.55},"type":"application/xhtml+xml"}"#
+        await keeper.reached(mine)
         await keeper.flush()
         #expect(await keeper.conflicted())
         #expect(BookLocator.same(DemoBooks.place(workId: workId, sourceItemId: sourceItemId), elsewhere))
         #expect(!BookLocator.same(start, elsewhere))
-    }
-
-    @Test func theDemoKeeperWritesNothingToAnyOtherHub() async {
-        let elsewhere = HubClient(credentials: HubCredentials(baseURL: "https://hub.example", token: DemoTransport.token),
-                                  screens: DemoTransport(), sleep: { _ in })
-        let keeper = DemoBookPlaces(hub: elsewhere, workId: "rw_demo_lic1", sourceItemId: "lic1")
-        guard case .unavailable = await keeper.opening() else {
-            Issue.record("The demo keeper opened a book on another hub")
+        // Opened again: both places offered, and the hub's taken when chosen.
+        let again = makeKeeper(workId, sourceItemId, store: store)
+        guard case .question(let prompt) = await again.opening() else {
+            Issue.record("A place another device moved opened without asking")
             return
         }
-        await keeper.reached(#"{"href":"OEBPS/chapter-03.xhtml","locations":{"progression":0.5}}"#)
-        await keeper.flush()
-        #expect(DemoBooks.place(workId: "rw_demo_lic1", sourceItemId: "lic1") == nil)
-    }
-
-    @Test func aRealBooksPlaceIsReadAndNeverWritten() async {
-        let keeper = ReadOnlyBookPlaces(hub: hub, workId: "rw_demo_mb2", sourceItemId: "mb2")
-        #expect(await keeper.opening() == .at(nil))
-        await keeper.reached(#"{"href":"OEBPS/chapter-03.xhtml","locations":{"progression":0.5}}"#)
-        await keeper.flush()
-        #expect(DemoBooks.place(workId: "rw_demo_mb2", sourceItemId: "mb2") == nil)
-        let gone = ReadOnlyBookPlaces(hub: hub, workId: "rw_demo_nothing", sourceItemId: "x")
-        guard case .unavailable = await gone.opening() else {
-            Issue.record("A book the hub does not have opened")
+        #expect(prompt.choices.map(\.id) == ["local", "server"])
+        let server = await again.answer("server")
+        guard case .at(let chosen?) = server else {
+            Issue.record("Use server position opened nowhere")
             return
         }
+        #expect(BookLocator.same(chosen, elsewhere))
+    }
+
+    @Test func aHubThatCannotBeAskedIsAQuestionAndTheBeginningWritesNothing() async throws {
+        let root = Self.folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let keeper = makeKeeper("rw_demo_nothing", "x", store: ReadingCheckpointStore(root: root))
+        guard case .question(let prompt) = await keeper.opening() else {
+            Issue.record("A place that could not be checked opened without asking")
+            return
+        }
+        #expect(prompt.choices.map(\.id) == ["start"])
+        #expect(await keeper.answer("start") == .at(nil))
     }
 
     // MARK: Books kept on the device (EpubPackageCacheTest)

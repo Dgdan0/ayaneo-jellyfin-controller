@@ -56,9 +56,6 @@ struct BookReaderSheetView: View {
         } else {
             contents(proxy)
         }
-        if !reader.keepsPlace {
-            SheetNote(text: "Your place in this book is not saved yet. It will be once reading places sync.")
-        }
     }
 
     @ViewBuilder private func contents(_ proxy: ScrollViewProxy) -> some View {

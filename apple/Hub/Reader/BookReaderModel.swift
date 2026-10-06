@@ -54,8 +54,8 @@ final class BookReaderModel {
         case opening(String)
         case reading
         case failed(String)
-        /// The place could not be read: the beginning, or another try.
-        case placeUnknown(String)
+        /// Another device moved the place, or the hub could not be asked: which place.
+        case choosing(ReadingResumePrompt)
     }
 
     enum Sheet: Equatable {
@@ -70,8 +70,6 @@ final class BookReaderModel {
     let sourceItemId: String
     let title: String
     let cover: String
-    /// False while a real book's place is read and never written: until the outbox arrives.
-    let keepsPlace: Bool
 
     private(set) var phase: Phase = .opening("Opening the book…")
     /// Readium's navigator, shown by the screen once the book is open.
@@ -151,10 +149,11 @@ final class BookReaderModel {
         self.sourceItemId = sourceItemId
         title = work.title
         cover = work.artwork
-        keepsPlace = app.isDemo
-        places = app.isDemo
-            ? DemoBookPlaces(hub: app.hub, workId: work.id, sourceItemId: sourceItemId)
-            : ReadOnlyBookPlaces(hub: app.hub, workId: work.id, sourceItemId: sourceItemId)
+        // The place goes through the reading outbox, as the listening place
+        // does: the demo's in a folder of its own (`ListeningStore`).
+        places = CheckpointBookPlaces(hub: app.hub, store: ListeningStore.shared,
+                                      key: CheckpointBookPlaces.key(address: app.address, userId: app.userId,
+                                                                    workId: work.id, sourceItemId: sourceItemId))
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("reading-epub", isDirectory: true)
         cache = EpubPackageCache(root: EpubPackageCache.folder(base: caches, address: app.address, userId: app.userId))
@@ -203,11 +202,29 @@ final class BookReaderModel {
         if case .failed = phase { start(force: true) } else { start() }
     }
 
-    /// The place could not be read: open at the beginning, which writes nothing.
-    func startFromBeginning() {
+    /// The answer to which place: "local", "server" or "start".
+    func choose(_ choice: String) {
         guard let loaded = pending else { return }
         pending = nil
-        show(loaded, at: nil)
+        let places = places
+        phase = .opening("Opening \(title)…")
+        loadTask = Task { [weak self] in
+            let opening = await places.answer(choice)
+            self?.opened(loaded, opening)
+        }
+    }
+
+    /// Where the keeper says to open, or what it asks first.
+    private func opened(_ loaded: BookNavigator.Loaded, _ opening: BookOpening) {
+        switch opening {
+        case .at(let locator):
+            show(loaded, at: locator)
+        case .question(let prompt):
+            pending = loaded
+            phase = .choosing(prompt)
+        case .unavailable(let message):
+            phase = .failed(message)
+        }
     }
 
     private func open(force: Bool) async {
@@ -234,13 +251,9 @@ final class BookReaderModel {
             return
         }
         guard !Task.isCancelled else { return }
-        switch await places.opening() {
-        case .at(let locator):
-            show(loaded, at: locator)
-        case .unavailable(let message):
-            pending = loaded
-            phase = .placeUnknown(message)
-        }
+        let opening = await places.opening()
+        guard !Task.isCancelled else { return }
+        opened(loaded, opening)
     }
 
     private func bookFile(force: Bool) async throws -> URL {
@@ -270,7 +283,6 @@ final class BookReaderModel {
         }
         refreshBookmarks()
         phase = .reading
-        if !keepsPlace { say("Your place in this book is not saved yet") }
     }
 
     // MARK: Leaving
@@ -365,9 +377,10 @@ final class BookReaderModel {
         switch phase {
         case .reading:
             perform(ReaderPadMap.command(padState, action))
-        case .placeUnknown:
+        case .choosing(let prompt):
             switch action {
-            case .activate: startFromBeginning()
+            case .activate: if let first = prompt.choices.first { choose(first.id) }
+            case .secondary: if prompt.choices.count > 1 { choose(prompt.choices[1].id) }
             case .refresh: retry()
             case .back: leaving = true
             default: break

@@ -25,12 +25,26 @@ struct BookReaderStatus: View {
                 Button("Back", action: leave).buttonStyle(GlassPillStyle())
                 Button("Try again") { reader.retry() }.buttonStyle(GlassPillStyle())
             }
-        case .placeUnknown(let message):
-            card(heading: "Your place could not be read", message: message) {
+        case .choosing(let prompt):
+            // Another device moved the place, or the hub could not say where it is.
+            card(heading: prompt.title, message: prompt.message) {
                 Button("Back", action: leave).buttonStyle(GlassPillStyle())
-                Button("Try again") { reader.retry() }.buttonStyle(GlassPillStyle())
-                Button("From the beginning") { reader.startFromBeginning() }
-                    .buttonStyle(PrimaryPillStyle(accent: .gold))
+                ForEach(Array(prompt.choices.enumerated()), id: \.element.id) { index, choice in
+                    Button {
+                        reader.choose(choice.id)
+                    } label: {
+                        VStack(spacing: 2) {
+                            Text(choice.label)
+                            if !choice.detail.isEmpty {
+                                Text(choice.detail)
+                                    .font(HubType.body(12, relativeTo: .caption))
+                                    .opacity(0.75)
+                            }
+                        }
+                    }
+                    .buttonStyle(PrimaryPillStyle(accent: index == 0 ? .gold : nil))
+                    .accessibilityIdentifier("book-choice-" + choice.id)
+                }
             }
         case .reading:
             EmptyView()

@@ -485,7 +485,7 @@ are not walked with the D-pad (Ⓑ closes them); no reading lists.
 what a book's EPUB opens, over the whole window: the view for `ReadRequest.ebook(work:sourceItemId:
 readAlong:)`. It leaves through `@Environment(\.closeReader)`, as the comic reader does. Read along
 comes after phase 2 (below). `ReaderHost`'s `.ebook` case still shows the stand-in: wiring it is one
-line, done in the reader's simulator pass, and for a real hub only once the outbox keeps the place.
+line, done after the reader's simulator pass, so a reader bug cannot move a real book's place.
 
 **Readium**: the Swift toolkit 3.11.0, pinned exactly in `project.yml` (`ReadiumShared`,
 `ReadiumStreamer`, `ReadiumNavigator`), linked on iOS only through `destinationFilters`. Its
@@ -508,7 +508,7 @@ speaks Readium (`@preconcurrency` imports; the EPUB opened off the main actor an
 | The EPUB kept on the device, a partial download never opened | HubKit `EpubPackageCache` |
 | Bookmarks per hub, profile and edition | HubKit `EpubBookmarks` (named as phase 2's `ReadingCheckpointKey` names records) |
 | The routes: the EPUB, the place read and sent | HubKit `HubEndpoints.readingEpubFile`, `readingEpubPosition`, `saveReadingEpubPosition`, `EpubPosition`, `EpubPositionBody` (`Net/BookEndpoints`) |
-| Where a book opens and where it was left | HubKit `BookPlaceKeeper`: `ReadOnlyBookPlaces` for a real hub (reads, never writes) and `DemoBookPlaces` (the demo hub only); phase 2's outbox fills it for a real hub |
+| Where a book opens and where it was left | HubKit `BookPlaceKeeper`, kept by `CheckpointBookPlaces` through phase 2's reading outbox (`ListeningStore.shared`, `ReadingCheckpointKey` kind `epub`) |
 | The reader on screen | `BookReaderModel` (opening, the place, the pace, keys and pad, scrolling, bookmarks, appearance), `BookNavigator`, `BookReaderScreen`, `BookReaderBars`, `BookReaderSheetView` with `BookAppearanceSheet`, `FootnoteCard`, `BookReaderStatus` |
 | A reader's sheet and its rows of keys, the keys' hint row | `ReaderSheetFrame`, `ReaderKeyLines`, `ReaderHintRow`: both readers |
 
@@ -531,9 +531,11 @@ a swipe turns the page; Readium's own gestures otherwise.
 
 The place: the reader asks its `BookPlaceKeeper` where to open and hands it the place reached once
 the reading has moved (opening a book writes nothing), two seconds after the reading pauses, and on
-leaving or going to the background. Until phase 2's outbox reaches this branch, a real book opens at
-the hub's place and keeps nothing ("Your place in this book is not saved yet"), and only the demo
-hub's books keep theirs, refused with 409 when another device moved it, as the hub does.
+leaving or going to the background. `CheckpointBookPlaces` keeps it as the listening place is kept:
+on this device first, in the reading outbox under kind `epub`, then sent through `…/position` with
+`checkBase` and the place last read (`expectedLocator`). A place another device moved since is a
+question when the book opens (Continue on this device, or Use server position), never an overwrite;
+a hub that cannot be asked offers the beginning, which writes nothing until the reading moves.
 
 **Read along (after phase 2, as on the Pocket, #21)**: the slim edition (`readingEpubFile(format:
 "readaloud", omitAudio: true)`) with its narration streamed from the audiobook's tracks; the

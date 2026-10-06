@@ -1,19 +1,20 @@
 import Foundation
 
 // Where an ebook opens and where it was left (#25, phase 4). The reader
-// speaks only to a `BookPlaceKeeper`. Phase 2's reading outbox
-// (`ReadingCheckpointStore` and `ReadingCheckpointSync`: the place kept on
-// this device first, sent with the place it was based on, a place another
-// device moved asked about, never overwritten) fills it for a real hub once
-// it reaches this branch. Until then a real book's place is read and never
-// written (`ReadOnlyBookPlaces`), and only the demo hub's books keep theirs
-// (`DemoBookPlaces`).
+// speaks only to a `BookPlaceKeeper`, and `CheckpointBookPlaces` keeps a
+// book's place through the reading outbox phase 2 brought
+// (`ReadingCheckpointStore`, `ReadingCheckpointSync`), as the listening place
+// goes: kept on this device first, sent with the place it was based on, and a
+// place another device moved since is a question, never an overwrite.
 
 /// Where a book opens.
 public enum BookOpening: Equatable, Sendable {
     /// At this Readium locator (its JSON), or at the beginning (nil).
     case at(String?)
-    /// The place could not be read. The reader says so and offers the beginning or another try.
+    /// Another device moved the place, or the hub could not be asked: the
+    /// reader asks which, and hands the answer to `answer(_:)`.
+    case question(ReadingResumePrompt)
+    /// The place could not be read on this device. The reader says so.
     case unavailable(String)
 }
 
@@ -21,6 +22,8 @@ public enum BookOpening: Equatable, Sendable {
 public protocol BookPlaceKeeper: Sendable {
     /// Where to open.
     func opening() async -> BookOpening
+    /// The answer to `opening()`'s question: a choice's id ("local", "server" or "start").
+    func answer(_ choice: String) async -> BookOpening
     /// A place on the page (a Readium locator as JSON): kept, and sent when it can be.
     func reached(_ locator: String) async
     /// Leaving the book or the app, or a pause in the reading: send what is waiting now.
@@ -29,100 +32,110 @@ public protocol BookPlaceKeeper: Sendable {
     func conflicted() async -> Bool
 }
 
-/// A real hub's book until the outbox arrives: it opens where the hub says,
-/// and its place is never written.
-public actor ReadOnlyBookPlaces: BookPlaceKeeper {
+/// A book's place through the reading outbox, under `kind` "epub": the
+/// hub's place read through `…/position`, sent back with `checkBase` and the
+/// place this device last read (`expectedLocator`).
+public actor CheckpointBookPlaces: BookPlaceKeeper {
+    public static let kind = "epub"
+
     private let hub: HubClient
-    private let workId: String
-    private let sourceItemId: String
-
-    public init(hub: HubClient, workId: String, sourceItemId: String) {
-        self.hub = hub
-        self.workId = workId
-        self.sourceItemId = sourceItemId
-    }
-
-    public func opening() async -> BookOpening {
-        await Self.read(hub: hub, workId: workId, sourceItemId: sourceItemId).opening
-    }
-
-    public func reached(_ locator: String) async {}
-    public func flush() async {}
-    public func conflicted() async -> Bool { false }
-
-    /// The hub's place, as an opening, and the locator itself.
-    static func read(hub: HubClient, workId: String, sourceItemId: String) async -> (opening: BookOpening, locator: String?, read: Bool) {
-        do throws(HubFailure) {
-            let data = try await hub.data(HubEndpoints.readingEpubPosition(workId: workId, sourceItemId: sourceItemId))
-            guard let position = EpubPosition.decode(data) else {
-                return (.unavailable(FailureKind.badResponse.message), nil, false)
-            }
-            return (.at(position.locator), position.locator, true)
-        } catch {
-            return (.unavailable(error.message), nil, false)
-        }
-    }
-}
-
-/// The demo hub's books (`-demo`): the place goes to the demo hub through the
-/// same route a real book's will take, with the place it was based on, one
-/// send at a time; a 409 (another device moved it, `DemoBooks.moveElsewhere`)
-/// stops the sending. It refuses any other hub, so it can never write a real
-/// book's place.
-public actor DemoBookPlaces: BookPlaceKeeper {
-    private let hub: HubClient
-    private let workId: String
-    private let sourceItemId: String
+    private let store: ReadingCheckpointStore
+    private let key: ReadingCheckpointKey
     private let now: @Sendable () -> Int64
-    /// The hub's place when this device last read or wrote it: what `expectedLocator` names.
-    private var base: String?
-    private var baseKnown = false
-    /// The newest place reached that the hub has not taken.
-    private var wanted: String?
-    private var sending = false
     private var refused = false
 
-    public init(hub: HubClient, workId: String, sourceItemId: String,
+    public init(hub: HubClient, store: ReadingCheckpointStore, key: ReadingCheckpointKey,
                 now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) }) {
         self.hub = hub
-        self.workId = workId
-        self.sourceItemId = sourceItemId
+        self.store = store
+        self.key = key
         self.now = now
     }
 
+    /// The key for a book's EPUB place, for one hub and profile.
+    public static func key(address: String, userId: String, workId: String, sourceItemId: String) -> ReadingCheckpointKey {
+        ReadingCheckpointKey(scope: ReadingCheckpointKey.scope(address: address, userId: userId), workId: workId,
+                             sourceItemId: sourceItemId, kind: kind)
+    }
+
     public func opening() async -> BookOpening {
-        guard await isDemo() else { return .unavailable("This book's place is kept only on the demo hub") }
-        let read = await ReadOnlyBookPlaces.read(hub: hub, workId: workId, sourceItemId: sourceItemId)
-        if read.read {
-            base = read.locator
-            baseKnown = true
+        let remote = await Self.remote(hub, key)
+        let resume: ReadingResume
+        do {
+            resume = try store.reconcile(key, remote)
+        } catch {
+            return .unavailable("Your place in this book could not be read on this device. It has been kept.")
         }
-        return read.opening
+        if let prompt = ReadingResumePrompt.make(resume, checkpoint: try? store.read(key),
+                                                 describe: { Self.json($0.locator).map(BookLocator.label) ?? $0.label() }) {
+            return .question(prompt)
+        }
+        return .at(Self.json(resume.location?.locator))
+    }
+
+    public func answer(_ choice: String) async -> BookOpening {
+        switch choice {
+        case "local":
+            guard let chosen = try? store.chooseLocal(key, now: now()) else { return .at(nil) }
+            return .at(Self.json(chosen.local?.locator))
+        case "server":
+            guard let chosen = try? store.chooseRemote(key) else { return .at(nil) }
+            return .at(Self.json(chosen.local?.locator))
+        default:
+            // From the beginning, which writes nothing until the reading moves.
+            return .at(nil)
+        }
     }
 
     public func reached(_ locator: String) async {
-        guard BookLocator.valid(locator), !BookLocator.same(locator, wanted ?? base) else { return }
-        wanted = locator
+        guard BookLocator.valid(locator), let location = Self.location(locator) else { return }
+        _ = try? store.save(key, location, now: now())
     }
 
     public func flush() async {
-        guard !sending, !refused, baseKnown, let place = wanted, await isDemo() else { return }
-        sending = true
-        defer { sending = false }
-        let body = EpubPositionBody(locator: place, timestamp: now(), expectedLocator: base)
-        do throws(HubFailure) {
-            try await hub.send(HubEndpoints.saveReadingEpubPosition(workId: workId, sourceItemId: sourceItemId, body))
-            base = place
-            if BookLocator.same(wanted, place) { wanted = nil }
-        } catch {
-            // Another device moved the place: never overwritten. Anything else waits for the next flush.
-            if error.status == 409 { refused = true }
-        }
+        guard !refused else { return }
+        let hub = hub
+        let sync = ReadingCheckpointSync(store: store, fetch: { key in await Self.remote(hub, key) }, send: { checkpoint in
+            guard let locator = Self.json(checkpoint.local?.locator) else { return false }
+            let body = EpubPositionBody(locator: locator, timestamp: Int64(Date().timeIntervalSince1970 * 1_000),
+                                        checkBase: checkpoint.baseKnown, expectedLocator: Self.json(checkpoint.base?.locator))
+            do throws(HubFailure) {
+                try await hub.send(HubEndpoints.saveReadingEpubPosition(workId: checkpoint.key.workId,
+                                                                        sourceItemId: checkpoint.key.sourceItemId, body))
+                return true
+            } catch {
+                return false
+            }
+        })
+        if (try? await sync.sync(key)) == .conflict { refused = true }
     }
 
     public func conflicted() async -> Bool { refused }
 
-    private func isDemo() async -> Bool {
-        await hub.current.baseURL == DemoTransport.address
+    // MARK: Plumbing
+
+    /// The hub's place for the book, or that it could not be asked.
+    static func remote(_ hub: HubClient, _ key: ReadingCheckpointKey) async -> RemoteReadingPosition {
+        do throws(HubFailure) {
+            let data = try await hub.data(HubEndpoints.readingEpubPosition(workId: key.workId, sourceItemId: key.sourceItemId))
+            guard let position = EpubPosition.decode(data) else { return .unavailable }
+            return .available(position.locator.flatMap(location))
+        } catch {
+            return .unavailable
+        }
+    }
+
+    /// A locator's JSON as the outbox keeps it.
+    static func location(_ json: String) -> ReadingLocation? {
+        guard let fields = try? JSONDecoder().decode([String: JSONValue].self, from: Data(json.utf8)) else { return nil }
+        return ReadingLocation(locator: fields)
+    }
+
+    /// The outbox's locator as JSON, keys in order.
+    static func json(_ locator: [String: JSONValue]?) -> String? {
+        guard let locator else { return nil }
+        let data = JSONValue.object(locator).encoded()
+        guard let value = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        return BookLocator.canonical(value)
     }
 }
