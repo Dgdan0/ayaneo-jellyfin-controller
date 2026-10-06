@@ -395,8 +395,10 @@ struct BooksHomeView: View {
     #if DEBUG
     /// scripts/mac.sh opens a Books page for screenshots, once a launch:
     /// HUB_OPEN=book:<work id>, entry:<work id> (as Resume reading does),
-    /// author:<library id>|<author id>|<name>, or missing:<work id> (that
-    /// series' first book the library lacks).
+    /// author:<library id>|<author id>|<name>, missing:<work id> (that
+    /// series' first book the library lacks), listen:<work id>|<audiobook id>
+    /// (its page), or player:<work id>|<audiobook id> (on the player, paused,
+    /// with only the mini player showing it). The demo hub's places only.
     @MainActor private static var debugOpened = false
 
     private func applyDebugOpen() {
@@ -417,6 +419,18 @@ struct BooksHomeView: View {
             let fields = value.split(separator: "|").map(String.init)
             guard fields.count == 3 else { return }
             openRoute(.author(AuthorRoute(libraryId: fields[0], id: fields[1], name: fields[2])))
+        case "listen", "player":
+            let fields = value.split(separator: "|").map(String.init)
+            guard fields.count == 2, model.isDemo else { return }
+            let page = parts[0] == "listen"
+            Task {
+                guard let work = try? await model.hub.fetch(HubEndpoints.readingWork(fields[0]), as: ReadingWork.self) else { return }
+                if page {
+                    openRoute(.listen(ListenRoute(workId: work.id, sourceItemId: fields[1], title: work.title)))
+                } else if let opening = try? await ListeningModel.shared.prepare(work: work, sourceItemId: fields[1], app: model) {
+                    ListeningModel.shared.start(opening, play: false)
+                }
+            }
         case "missing":
             Task {
                 guard let series = try? await model.hub.fetch(HubEndpoints.readingWork(value), as: ReadingWork.self),
