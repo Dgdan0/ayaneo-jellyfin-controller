@@ -10,11 +10,11 @@ struct SettingsView: View {
     @Environment(\.glassMetrics) private var metrics
 
     enum Pane: String, CaseIterable, Identifiable {
-        case libraries
+        case libraries, playback
 
         var id: String { rawValue }
-        var title: String { "Libraries" }
-        var systemImage: String { "books.vertical" }
+        var title: String { self == .playback ? "Playback" : "Libraries" }
+        var systemImage: String { self == .playback ? "play.circle" : "books.vertical" }
     }
 
     @SceneStorage("settings.pane") private var pane: Pane = .libraries
@@ -82,6 +82,7 @@ struct SettingsView: View {
     @ViewBuilder private var content: some View {
         switch pane {
         case .libraries: LibrariesSettings()
+        case .playback: PlaybackSettingsPane()
         }
     }
 }

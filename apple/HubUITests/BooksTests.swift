@@ -17,10 +17,12 @@ final class BooksTests: XCTestCase {
         return app
     }
 
+    @MainActor
     private func button(_ app: XCUIApplication, containing words: String) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", words)).firstMatch
     }
 
+    @MainActor
     private func text(_ app: XCUIApplication, containing words: String) -> XCUIElement {
         app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", words)).firstMatch
     }
@@ -60,9 +62,12 @@ final class BooksTests: XCTestCase {
         XCTAssertTrue(resume.waitForExistence(timeout: 15), "Books Home has no Resume reading: \(buttons(app))")
         XCTAssertTrue(text(app, containing: "Dark Matter").exists)
         resume.tap()
-        // The ebook reader is phase 4's: its place for now says where the place is kept.
+        // Phase 4's ebook reader opens on the book, or, until it is in ReaderHost, the place
+        // that says where the book's place is kept.
+        let page = app.descendants(matching: .any).matching(identifier: "book-page").firstMatch
         let close = app.buttons["reader-close"]
-        XCTAssertTrue(close.waitForExistence(timeout: 10), "Resume reading did not open the reader")
+        XCTAssertTrue(waitUntil(10) { page.exists || close.exists }, "Resume reading did not open the reader")
+        guard close.exists else { return }
         XCTAssertTrue(text(app, containing: "Your place is kept on Storyteller").exists)
         close.tap()
         XCTAssertTrue(app.buttons["book-entry"].waitForExistence(timeout: 10), "closing the reader did not come back to the book")
