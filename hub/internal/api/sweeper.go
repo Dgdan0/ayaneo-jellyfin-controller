@@ -24,9 +24,23 @@ const readingAlignmentInterval = time.Minute
 // StartBackground kicks off the work that runs on a timer rather than on a
 // request. Cancelled with the context when the hub shuts down.
 func (s *Server) StartBackground(ctx context.Context) {
+	s.startRepackager(ctx)
 	s.startIndexSweeper(ctx)
 	s.startReadingImportSweeper(ctx)
 	s.startReadingAlignmentSweeper(ctx)
+}
+
+// startRepackager opens the cache of Apple downloads' MP4s at start, so that the
+// finished files a restart left are found and aged out even before an Apple
+// device asks, and stops its worker with the hub.
+func (s *Server) startRepackager(ctx context.Context) {
+	if s.repackager() == nil {
+		return
+	}
+	go func() {
+		<-ctx.Done()
+		s.closeRepackager()
+	}()
 }
 
 func (s *Server) startReadingAlignmentSweeper(ctx context.Context) {

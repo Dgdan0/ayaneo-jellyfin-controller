@@ -123,3 +123,32 @@ func TestAQueryThatNamesNoIDsSendsNone(t *testing.T) {
 		t.Fatalf("a query that names no ids sent %q", query.Get("ids"))
 	}
 }
+
+// An item read without a user is the server's own view of it, which is where a
+// media file's path is dependably given (#5).
+func TestItemAsServerAsksForTheItemWithNoUser(t *testing.T) {
+	var query url.Values
+	client := libraryTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query()
+		_, _ = w.Write([]byte(`{"Items":[{"Id":"0123456789abcdef0123456789abcdef","Type":"Movie","MediaSources":[{"Id":"s1","Path":"E:/Films/a.mkv"}]}],"TotalRecordCount":1}`))
+	})
+	item, err := client.ItemAsServer(context.Background(), "0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query.Has("userId") || query.Get("ids") != "0123456789abcdef0123456789abcdef" || query.Get("fields") != "MediaSources,Path" {
+		t.Fatalf("query = %v", query)
+	}
+	if len(item.MediaSources) != 1 || item.MediaSources[0].Path != "E:/Films/a.mkv" {
+		t.Fatalf("item = %+v", item)
+	}
+}
+
+func TestItemAsServerOfAnItemThatIsNotThereIsAnError(t *testing.T) {
+	client := libraryTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"Items":[],"TotalRecordCount":0}`))
+	})
+	if _, err := client.ItemAsServer(context.Background(), "0123456789abcdef0123456789abcdef"); err == nil {
+		t.Fatal("an empty answer was taken for an item")
+	}
+}

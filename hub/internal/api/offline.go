@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -37,6 +38,9 @@ type OfflineSelectionItem struct {
 	Sources            []OfflineSource `json:"sources"`
 	EstimatedSizeBytes int64           `json:"estimatedSizeBytes"`
 	Available          bool            `json:"available"`
+	// Apple is what an Apple device's MP4 of this item will be, asked for with
+	// ?format=apple; the size above is then the MP4's estimate (#5).
+	Apple *OfflineAppleSummary `json:"apple,omitempty"`
 }
 
 type OfflineSelectionSeason struct {
@@ -53,9 +57,12 @@ type OfflineSelectionResponse struct {
 }
 
 type OfflinePrepareBody struct {
-	BatchKey string               `json:"batchKey"`
-	SeriesID string               `json:"seriesId,omitempty"`
-	Items    []OfflinePrepareItem `json:"items"`
+	BatchKey string `json:"batchKey"`
+	SeriesID string `json:"seriesId,omitempty"`
+	// Format is "original" (the default) or "apple": the hub repackages each
+	// item into an MP4 that AVPlayer plays (#5).
+	Format string               `json:"format,omitempty"`
+	Items  []OfflinePrepareItem `json:"items"`
 }
 
 type OfflinePrepareItem struct {
@@ -78,6 +85,9 @@ type OfflineManifest struct {
 	Source        OfflineSource     `json:"source"`
 	MediaURL      string            `json:"mediaUrl"`
 	Subtitles     []OfflineSubtitle `json:"subtitles"`
+	// Format and Apple appear only on an Apple grant: what its MP4 will hold.
+	Format string        `json:"format,omitempty"`
+	Apple  *OfflineApple `json:"apple,omitempty"`
 }
 
 type OfflinePrepareResponse struct {
@@ -130,6 +140,11 @@ func (s *Server) handleOfflineSelection(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "bad series id"})
 		return
 	}
+	format, formatOK := parseOfflineFormat(r.URL.Query().Get("format"))
+	if !formatOK {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "format must be original or apple"})
+		return
+	}
 	ctx, cancel := timeoutFor(r, 30*time.Second)
 	defer cancel()
 	series, err := client.Item(ctx, seriesID)
@@ -158,6 +173,9 @@ func (s *Server) handleOfflineSelection(w http.ResponseWriter, r *http.Request) 
 	}
 	for _, episode := range episodes.Items {
 		selection := offlineSelectionItem(episode)
+		if format == offlineFormatApple {
+			selection = appleSelectionItem(selection, episode)
+		}
 		bySeason[episode.SeasonID] = append(bySeason[episode.SeasonID], selection)
 		if selection.Available {
 			response.EpisodeCount++
@@ -197,6 +215,28 @@ func offlineSelectionItem(item jellyfin.Item) OfflineSelectionItem {
 		Item: libraryItemFrom(item), Sources: sources,
 		EstimatedSizeBytes: size, Available: len(sources) > 0 && size > 0,
 	}
+}
+
+// appleSelectionItem is an episode as an Apple device would get it: the MP4's
+// estimate in place of the original's size, and unavailable when it has no
+// picture or no file the media PC can read.
+func appleSelectionItem(selection OfflineSelectionItem, episode jellyfin.Item) OfflineSelectionItem {
+	if !selection.Available || len(selection.Sources) == 0 {
+		return selection
+	}
+	source, found := mediaSourceOf(episode, selection.Sources[0].ID)
+	if !found {
+		selection.Available = false
+		return selection
+	}
+	plan, err := planOfflineStreams(source, episode)
+	if err != nil {
+		selection.Available, selection.EstimatedSizeBytes = false, 0
+		return selection
+	}
+	selection.EstimatedSizeBytes = plan.EstimatedBytes
+	selection.Apple = appleSummaryOf(plan)
+	return selection
 }
 
 func offlineSources(item jellyfin.Item) []OfflineSource {
@@ -241,22 +281,39 @@ func (s *Server) handleOfflinePrepare(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "bad series id"})
 		return
 	}
+	format, formatOK := parseOfflineFormat(body.Format)
+	if !formatOK {
+		writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "format must be original or apple"})
+		return
+	}
+	if format == offlineFormatApple {
+		if unavailable := s.appleUnavailable(true); unavailable != nil {
+			writeError(w, r, http.StatusServiceUnavailable, *unavailable)
+			return
+		}
+	}
 	seen := make(map[string]bool)
 	owner := TokenFrom(r.Context()).Label
 	ctx, cancel := timeoutFor(r, 45*time.Second)
 	defer cancel()
 	response := OfflinePrepareResponse{BatchKey: body.BatchKey, Items: []OfflineManifest{}}
 	created := []offlineGrant{}
+	// The Apple grants of this batch, in the order asked, which is the order the
+	// hub repackages them in.
+	toQueue := []offlineGrant{}
 	for _, request := range body.Items {
 		if !isHex32(request.ItemID) || !offlineClientKey.MatchString(request.ClientItemKey) || seen[request.ItemID] {
 			writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "offline item id or key is invalid"})
 			return
 		}
 		seen[request.ItemID] = true
-		if existing, found := s.offline.find(owner, client.UserID(), request.ClientItemKey); found &&
+		if existing, found := s.offline.find(owner, client.UserID(), request.ClientItemKey, format); found &&
 			existing.ItemID == request.ItemID &&
 			(request.MediaSourceID == "" || existing.MediaSourceID == request.MediaSourceID) {
 			response.Items = append(response.Items, existing.Manifest)
+			if format == offlineFormatApple {
+				toQueue = append(toQueue, existing)
+			}
 			continue
 		}
 		item, err := client.Item(ctx, request.ItemID)
@@ -268,22 +325,36 @@ func (s *Server) handleOfflinePrepare(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "offline items must be movies or episodes"})
 			return
 		}
+		if format == offlineFormatApple {
+			s.withSourcePaths(ctx, item)
+		}
 		if body.SeriesID != "" && item.SeriesID != body.SeriesID {
 			writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "episode is outside the selected series"})
 			return
 		}
-		grant, err := makeOfflineGrant(owner, client.UserID(), body.BatchKey, request.ClientItemKey, *item, request.MediaSourceID)
+		grant, err := makeGrant(format, owner, client.UserID(), body.BatchKey, request.ClientItemKey, *item, request.MediaSourceID)
 		if err != nil {
-			writeError(w, r, http.StatusConflict, Error{Code: CodeInvalidRequest, Message: err.Error()})
+			refusal := Error{Code: CodeInvalidRequest, Message: err.Error()}
+			var cannot *appleGrantError
+			if errors.As(err, &cannot) {
+				refusal.Reason = cannot.reason
+			}
+			writeError(w, r, http.StatusConflict, refusal)
 			return
 		}
 		grant.Manifest.Item.Library = s.libraryOf(ctx, client, request.ItemID)
 		created = append(created, grant)
+		if format == offlineFormatApple {
+			toQueue = append(toQueue, grant)
+		}
 		response.Items = append(response.Items, grant.Manifest)
 	}
 	if err := s.offline.putMany(created); err != nil {
 		writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "could not persist offline grants"})
 		return
+	}
+	for _, grant := range toQueue {
+		s.ensureApple(grant)
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -394,6 +465,10 @@ func (s *Server) handleOfflineMedia(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if grant.Format == offlineFormatApple {
+		s.serveAppleMedia(w, r, grant)
+		return
+	}
 	if !validPlaybackResource(grant.Resource, grant.ItemID) {
 		writeError(w, r, http.StatusBadGateway, Error{Code: CodeUpstreamDown, Message: "stored offline resource is invalid"})
 		return
@@ -410,7 +485,7 @@ func (s *Server) handleOfflineSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resource := grant.Subtitles[r.PathValue("trackId")]
-	if resource == "" || !validPlaybackResource(resource, grant.ItemID) {
+	if grant.Format == offlineFormatApple || resource == "" || !validPlaybackResource(resource, grant.ItemID) {
 		writeError(w, r, http.StatusNotFound, Error{Code: CodeNotFound, Message: "no such offline subtitle"})
 		return
 	}
@@ -432,9 +507,13 @@ func (s *Server) handleOfflineRenew(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, "jellyfin", err)
 		return
 	}
-	renewed, err := makeOfflineGrant(previous.Owner, previous.UserID, previous.BatchKey,
+	if previous.Format == offlineFormatApple {
+		s.withSourcePaths(ctx, item)
+	}
+	renewed, err := makeGrant(previous.Format, previous.Owner, previous.UserID, previous.BatchKey,
 		previous.ClientItemKey, *item, previous.MediaSourceID)
-	if err != nil || renewed.Manifest.Source.SizeBytes != previous.Manifest.Source.SizeBytes {
+	if err != nil || renewed.Manifest.Source.SizeBytes != previous.Manifest.Source.SizeBytes ||
+		renewed.PlanSignature != previous.PlanSignature {
 		writeError(w, r, http.StatusConflict, Error{Code: "source_changed", Message: "the Jellyfin media source changed; restart this item"})
 		return
 	}
@@ -443,6 +522,9 @@ func (s *Server) handleOfflineRenew(w http.ResponseWriter, r *http.Request) {
 	renewed.CreatedAt = previous.CreatedAt
 	renewed.Manifest.GrantID = previous.ID
 	renewed.Manifest.MediaURL = "/v1/offline/grants/" + previous.ID + "/media"
+	if renewed.Manifest.Apple != nil {
+		renewed.Manifest.Apple.StatusURL = fmt.Sprintf(appleStatusURLPattern, previous.ID)
+	}
 	for index := range renewed.Manifest.Subtitles {
 		trackID := renewed.Manifest.Subtitles[index].Track.Index
 		renewed.Manifest.Subtitles[index].URL = fmt.Sprintf("/v1/offline/grants/%s/subtitles/%d", previous.ID, trackID)

@@ -24,6 +24,7 @@ import (
 	"ayaneohub/internal/config"
 	"ayaneohub/internal/index"
 	readingdomain "ayaneohub/internal/reading"
+	"ayaneohub/internal/repackage"
 )
 
 // Version is stamped at build time with -ldflags.
@@ -77,6 +78,17 @@ type Server struct {
 	readingSeriesPreviews *readingSeriesPreviewStore
 	readingAcquisitions   *readingAcquisitionStore
 	readingAlignments     *readingAlignmentStore
+
+	// The MP4s an Apple download is repackaged into (#5): the queue and cache
+	// (made on first use), the encoder conversions use (found once), and three
+	// seams a test replaces: where ffmpeg is, how an MP4 is built, which encoder.
+	appleOnce          sync.Once
+	appleManager       *repackage.Manager
+	appleEncoderOnce   sync.Once
+	appleEncoderChoice repackage.Encoder
+	ffmpegPath         func() (string, error)
+	buildMP4           func(context.Context, repackage.BuildSpec, func(int)) error
+	pickEncoder        func(context.Context, string) repackage.Encoder
 
 	playbackMu       sync.Mutex
 	playbackSessions map[string]*playbackSession
@@ -152,6 +164,9 @@ func NewServer(cfg *config.Config) *Server {
 		openEPUB:              readingdomain.ResolveEPUBFile,
 		readAlignment:         readingdomain.ReadAlignment,
 		now:                   time.Now,
+		ffmpegPath:            findFFmpeg,
+		buildMP4:              repackage.Build,
+		pickEncoder:           repackage.DetectEncoder,
 		audioStall:            defaultStallPolicy,
 		startedAt:             time.Now(),
 	}
@@ -301,6 +316,9 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/offline/series/{seriesId}/selection", s.handleOfflineSelection)
 	authed.HandleFunc("POST /v1/offline/prepare", s.handleOfflinePrepare)
 	authed.HandleFunc("GET /v1/offline/grants/{grantId}/media", s.handleOfflineMedia)
+	authed.HandleFunc("DELETE /v1/offline/grants/{grantId}/media", s.handleOfflineRelease)
+	authed.HandleFunc("GET /v1/offline/grants/{grantId}/status", s.handleOfflineStatus)
+	authed.HandleFunc("POST /v1/offline/grants/{grantId}/retry", s.handleOfflineRetry)
 	authed.HandleFunc("GET /v1/offline/grants/{grantId}/subtitles/{trackId}", s.handleOfflineSubtitle)
 	authed.HandleFunc("POST /v1/offline/grants/{grantId}/renew", s.handleOfflineRenew)
 	authed.HandleFunc("POST /v1/offline/progress/sync", s.handleOfflineProgressSync)

@@ -23,9 +23,15 @@ type offlineGrant struct {
 	MediaSourceID string            `json:"mediaSourceId"`
 	Resource      string            `json:"resource"`
 	Subtitles     map[string]string `json:"subtitles,omitempty"`
-	Manifest      OfflineManifest   `json:"manifest"`
-	CreatedAt     int64             `json:"createdAt"`
-	ExpiresAt     int64             `json:"expiresAt"`
+	// Format is "apple" for a grant whose file the hub repackages into an MP4
+	// (#5), and empty, which means the original, for every grant made before.
+	Format string `json:"format,omitempty"`
+	// PlanSignature names what that MP4 was promised to hold; a file built for
+	// another plan is never served for this grant.
+	PlanSignature string          `json:"planSignature,omitempty"`
+	Manifest      OfflineManifest `json:"manifest"`
+	CreatedAt     int64           `json:"createdAt"`
+	ExpiresAt     int64           `json:"expiresAt"`
 }
 
 type offlineRegistryFile struct {
@@ -76,11 +82,14 @@ func (s *offlineStore) get(id string) (offlineGrant, bool) {
 	return value, ok
 }
 
-func (s *offlineStore) find(owner, userID, clientItemKey string) (offlineGrant, bool) {
+// find is the grant already made for a client's item key. The key belongs to one
+// format: the same key asked for in another format is another grant.
+func (s *offlineStore) find(owner, userID, clientItemKey, format string) (offlineGrant, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, value := range s.grants {
-		if value.Owner == owner && value.UserID == userID && value.ClientItemKey == clientItemKey {
+		if value.Owner == owner && value.UserID == userID && value.ClientItemKey == clientItemKey &&
+			value.Format == format {
 			return value, true
 		}
 	}

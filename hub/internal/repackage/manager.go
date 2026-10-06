@@ -536,7 +536,7 @@ func (m *Manager) run(job *running) {
 		return
 	}
 	_ = os.Remove(m.path(e.id, ".mp4"))
-	if err := os.Rename(out, m.path(e.id, ".mp4")); err != nil {
+	if err := renameWithRetries(out, m.path(e.id, ".mp4")); err != nil {
 		_ = os.Remove(out)
 		e.state, e.err = StateFailed, &JobError{Code: "internal", Message: "The file could not be saved on the media PC.", Retryable: true}
 		slog.Warn("a repackaged file could not be moved into place", "grant", e.id, "error", err)
@@ -550,6 +550,21 @@ func (m *Manager) run(job *running) {
 	e.etag = `"` + hex.EncodeToString(sum[:16]) + `"`
 	m.saveLocked(e)
 	m.roomAfterBuildLocked()
+}
+
+// renameWithRetries moves a finished file into place. On Windows a virus scanner
+// or an indexer can hold a file that was only just written for a moment, and a
+// move that fails then works a moment later; a download that is hours old is
+// worth a second's patience.
+func renameWithRetries(from, to string) error {
+	var err error
+	for attempt := 0; attempt < 10; attempt++ {
+		if err = os.Rename(from, to); err == nil {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return err
 }
 
 // roomAfterBuildLocked spends fetched, idle files while the cache is over its cap.

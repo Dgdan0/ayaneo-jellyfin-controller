@@ -205,6 +205,21 @@ func (c *Client) Item(ctx context.Context, itemID string) (*Item, error) {
 	return out, nil
 }
 
+// ItemAsServer reads one item as the server itself, with no user: its media
+// sources with the paths of their files. A profile that is not an administrator's
+// may be shown an item without them, and an offline repackage needs the file.
+func (c *Client) ItemAsServer(ctx context.Context, itemID string) (*Item, error) {
+	page := &ItemsPage{}
+	query := url.Values{"ids": {itemID}, "fields": {"MediaSources,Path"}, "limit": {"1"}}
+	if err := c.base.GetJSON(ctx, "/Items", query, page); err != nil {
+		return nil, err
+	}
+	if len(page.Items) == 0 {
+		return nil, fmt.Errorf("jellyfin: no such item")
+	}
+	return &page.Items[0], nil
+}
+
 func (c *Client) DeleteItem(ctx context.Context, itemID string) error {
 	return c.base.Delete(ctx, "/Items/"+itemID, nil)
 }

@@ -242,7 +242,11 @@ func TestProgressIsReportedWhileItRunsAndNeverReachesOneHundredBeforeTheFileIsRe
 	r.m.Ensure(id, spec("p", unit, func(ctx context.Context, job Job) error {
 		job.Progress(10)
 		job.Progress(250) // more than the whole: the last of it is not reported
-		<-gate
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		return os.WriteFile(job.Out, make([]byte, unit), 0o600)
 	}))
 	eventually(t, "progress arrives", func() bool { return r.status(id).Percent > 0 })
@@ -373,6 +377,8 @@ func TestARestartKeepsFinishedFilesAndThrowsAwayHalfWrittenOnes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	write(kept+".mp4.part", "a rebuild that was running at the crash")
+	write(kept+".json.tmp", "a record half written")
 	write(half+".mp4.part", "half a film")
 	write(orphanFile+".mp4", "a film with no record")
 	write(orphanRecord+".json", `{"version":1}`)
@@ -393,7 +399,7 @@ func TestARestartKeepsFinishedFilesAndThrowsAwayHalfWrittenOnes(t *testing.T) {
 		t.Fatal("the kept file cannot be opened")
 	}
 	artifact.Close()
-	for _, gone := range []string{half + ".mp4.part", orphanFile + ".mp4", orphanRecord + ".json", work + ".work"} {
+	for _, gone := range []string{half + ".mp4.part", kept + ".mp4.part", kept + ".json.tmp", orphanFile + ".mp4", orphanRecord + ".json", work + ".work"} {
 		if _, err := os.Stat(filepath.Join(r.dir, gone)); err == nil {
 			t.Errorf("%s survived the restart", gone)
 		}
@@ -520,8 +526,12 @@ func TestAFileInTheMiddleOfBeingServedIsNeverSpentForRoom(t *testing.T) {
 	a, b := newID(), newID()
 	r.m.Ensure(a, spec("p", 2*unit, fileOf(2*unit, 'a', nil, nil)))
 	r.waitFor(a, StateReady)
-	artifact, _ := r.m.Open(a)
-	readAll(t, artifact) // fetched in full, but still open
+	// Fetched in full once already...
+	first, _ := r.m.Open(a)
+	readAll(t, first)
+	first.Close()
+	// ...and now being fetched again, as a second device or a repeat would.
+	again, _ := r.m.Open(a)
 	started := make(chan string, 1)
 	r.m.Ensure(b, spec("p", 2*unit, fileOf(2*unit, 'b', nil, started)))
 	select {
@@ -529,7 +539,7 @@ func TestAFileInTheMiddleOfBeingServedIsNeverSpentForRoom(t *testing.T) {
 		t.Fatal("a file that is being served was spent for room")
 	case <-time.After(80 * time.Millisecond):
 	}
-	artifact.Close()
+	again.Close()
 	r.waitFor(b, StateReady)
 }
 

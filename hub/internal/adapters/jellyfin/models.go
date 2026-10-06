@@ -196,6 +196,8 @@ type MediaStream struct {
 	Width                  int     `json:"Width"`
 	Height                 int     `json:"Height"`
 	AverageFrameRate       float64 `json:"AverageFrameRate"`
+	BitDepth               int     `json:"BitDepth"`
+	PixelFormat            string  `json:"PixelFormat"`
 	VideoRange             string  `json:"VideoRange"`
 	VideoRangeType         string  `json:"VideoRangeType"`
 	IsDefault              bool    `json:"IsDefault"`
