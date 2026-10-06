@@ -274,6 +274,160 @@ video, Chapters), and `HUB_PLAY_SUBTITLE=eng` turns those subtitles on as the ti
 seconds after launch. With `-demo` the stream has two audio tracks, subtitles in SRT, WebVTT and
 ASS, two versions, chapters with frames, an intro to skip and the credits.
 
+## Books (#25)
+
+The Books side of the app: Kavita's comics and manga, Storyteller's ebooks, audiobooks and
+read-along editions, and BookKeeprr's requests. Every route it needs is on the hub already (the
+ones the Pocket uses, plus #19's streamed audio and listening place), so no hub change is planned;
+one that turns out to be needed gets its own ticket first. Android is the reference for behaviour,
+wording and which route a screen asks (`screens/home/ReadingHomeView`, `screens/library/
+ReadingLibraryScreens`, `ReadingAuthorScreen`, `screens/discover/ReadingDetailScreen`,
+`reader/AudiobookScreen`, `ReadingAudio`). The look is `GLASS_PLAN.md`'s Books screens.
+
+It comes in four phases, each checked both ways up on the three simulators and on the Mac at two
+window sizes before it is called done: 1 browse, 2 listen, 3 comics and manga, 4 ebooks and read
+along. Nothing in a test opens a real book or writes a place to the real hub: reading writes the
+owner's Kavita and Storyteller progress. Tests and screenshots of anything that writes use the
+demo hub (`-demo`) and generated fixtures; the real hub is only read.
+
+### The screens and the routes they ask
+
+| Screen | What it shows | Hub routes |
+|---|---|---|
+| Media \| Books | The side picker in the bars (already built for #12). On Books the five sections are Home, Discover, Library, Downloads (offline books, later, with #5) and Activity | none |
+| Books Home | The book read last at full cover size with Resume reading (gold) and Details; "Also reading" as glass rows with format icons; "Your series" as fans of covers; then Next in series, Comics and manga, Want to Read, the person's own lists and Recently added | `GET /v1/reading/libraries`; per library `…/libraries/{id}/items?sort=last_read&direction=desc` (Storyteller's with `view=collections`) and `sort=added` where the library has `sort:added`; `GET /v1/reading/works/{id}` for a series being read and for list entries |
+| Library | "Your reading libraries" as tiles in the hub's order (#15), arranged as the media side's are | `GET /v1/reading/libraries`, `PUT /v1/library/order` |
+| A library | Its name, Series \| Authors \| Books where it can sort by author, Sort and its direction, the count line, a grid of covers (round portraits for Authors), 60 a page | `…/libraries/{id}/items?page=&sort=&direction=&view=`, `…/libraries/{id}/authors?page=&direction=` |
+| A book | The cover (square for an audiobook), the eyebrow ("Book 6 · Red Rising"), the facts, the formats as glass chips with missing ones dimmed, how far through, the overview, Read, Listen or Read along (gold) with Change format, the author and series as links, Want to Read, and "More in" its series | `GET /v1/reading/works/{id}`, the series' own work for its strip |
+| A series | Its fan, "Series · Pierce Brown", Continue · Book 6, the continue card, its books in reading order | `GET /v1/reading/works/{id}` |
+| A comic run | Its cover, "Comic · My Marvelous Year", Continue · Issue 51, volume chips and each volume's issues | `GET /v1/reading/works/{id}`, `/v1/img/reading/kavita-chapter/{id}` covers |
+| An author | A round portrait in a white ring, the shelf ("2 series · 6 books"), each series as a glass pill over its books, then the books outside a series | `…/libraries/{id}/authors?authorId=` (every page) |
+| A missing book | The dimmed cover and Find this book, which searches editions to request | `GET /v1/reading/search?type=ebook` |
+| Books Discover | The kinds as a glass capsule (All, Ebooks, Audiobooks, Comics, Manga, Light novels) beside the search, BookKeeprr's rows (`ReadingDiscoverRows.shown`), each paging on; search shows close matches first and broader ones on request | `GET /v1/reading/discover?type=`, `…/discover/{row}?type=&page=`, `GET /v1/reading/search?q=&type=` |
+| A book to request | "EBOOK · NOT IN YOUR LIBRARY", Find a download (gold) opening the request sheet (what to download and the quality), the series' books to tick when the mode asks for them, then the release picker; the transfer's state while it runs. A title the library already has opens its book page instead | `GET /v1/reading/resolve`, `…/requests/options`, `…/requests/series-preview`, `POST /v1/reading/requests`, `…/requests/{seriesId}/releases` and `/search`, `POST …/grab`, `GET /v1/reading/downloads` |
+| Activity (Books) | BookKeeprr's transfers grouped by kind, the state as a chip, the bar while it moves, Retry and Cancel with a confirmation | `GET /v1/reading/downloads`, `POST …/downloads/{id}/retry`, `DELETE …/downloads/{id}` |
+| The audiobook (phase 2) | The square cover large beside the eyebrow, title and time left; the glass dock with the line, the part steps, the jumps (the seek step from Settings) and the white Play; Parts, Speed, Sleep and Stop as glass pills. A mini player in the shell brings it back while you browse | `…/publications/{id}/audio`, `…/audio/tracks/{n}?rev=`, `GET`/`POST …/audio/position` |
+| The readers (phases 3 and 4) | Shown over the whole window by `ReaderHost` (below). Until they are built, Read, Read along and an issue open a "coming next" page there that says where your place is kept | none |
+
+### HubKit: the models and rules to port, with Android's test cases
+
+| HubKit owner | Android original | What it decides |
+|---|---|---|
+| `Model/Reading.swift` | `model/Reading.kt` | Every reading response, field for field, every field defaulted |
+| `Net/ReadingEndpoints.swift` | `net/HubEndpoints` (reading part) | Each `/v1/reading/…` path and query, as Android builds it (Storyteller's library asks for `view=collections` unless a view is named) |
+| `Rules/ReadingFacts.swift` | `ReadingBookFacts`, `SeriesBookLabels`, `AuthorLabels`, `Fmt.readingPercent`, `ReadingWork.cardSubtitle` | Every line a book, series, issue or author says ("Book 6 of Red Rising · 2023 · 735 pages", "49% · page 363 of 735", "On #6 · 1 of 6 finished", "#2 · 40% · Audio") |
+| `Rules/ReadingShelves.swift` | `ReadingShelves`, `ReadingListsState` | Books Home's rows: the books being read one per series and newest first (Storyteller's zone-less times), the series being read, the next book after one finished, Want to Read and the person's own lists (kept on the device per hub and profile, as on Android) |
+| `Rules/ReadingPresentation.swift` | `ReadingWorkPresentation`, `ReadingEntryChoice`, `ReadingFormatMenu`, `ReadingFormatStatus`, `ReadingSortFields`, `ReadingDiscoverRows`, `ReadingSearchPresentation`, `ReadingRequestForm`, `ReadingSeriesSelectionModel`, `ReadingAcquisitionState`, `ReadingReleasePickerPolicy`, `ReadingTransferSummary` | What a book opens as and what the button says, the formats, the sort fields a library offers, Discover's row names, the request form, a request's state, a transfer's words |
+| `Rules/Listening.swift` (phase 2) | `Listening`, `SleepTimer`, `SmartRewind`, `SyncThrottle`, `AudiobookContents`, `AudiobookStream`, `AudioPlace`, `AudioArbiter`, `PlayerLabels.rate` / `timeLeft` / `sleep` / `sleepChoice` | Speeds, time left at the speed playing, the sleep timer's fade and the step back after it, chapters or parts and the steps through them, a manifest as parts, the place as the hub keeps it, one sound at a time |
+| `Rules/ReadingCheckpoints.swift` (phase 2) | `ReadingCheckpointStore`, `ReadingCheckpointSync` | The place kept on the device first and sent through a durable outbox, based on the place last read (`expected`); another device's move becomes a question, never an overwrite |
+| `Demo/DemoReading.swift` | the Pocket's stand-in hub in its instrumentation tests | The demo hub's Books: libraries, works, authors, Discover, requests and transfers, an audiobook's manifest and a listening place that refuses a stale `expected` with 409 |
+
+### Listening on Apple (phase 2)
+
+- **Streaming.** The manifest is read through `HubClient`, so the credential gate decides first. Its
+  tracks go to an `AVQueuePlayer` as `AVURLAsset`s with the bearer in
+  `AVURLAssetHTTPHeaderFieldsKey` (the hub takes no token in a URL); the hub serves each track with
+  `Content-Length`, Range and its real `Content-Type`. The current track and the next are queued,
+  so a change of part plays on. A 412 (`audio_changed`) reads the manifest again and plays on at the
+  same place, at most twice in a row. A 409 (`audio_not_streamable`) says the book cannot be
+  streamed: Apple has no whole-ZIP fallback, which Android keeps for that case.
+- **The place.** `ReadingCheckpointStore` keeps one file per book under Application Support, per hub
+  and profile. The player keeps the place every 15 seconds while it plays and on every pause, seek
+  and change of part, and sends it no faster than every 15 seconds (the last always goes); finishing
+  writes `completed: true`. Each write names the place last read as `expected`; the hub stamps the
+  time itself, so no timestamp is sent or compared. A place another device moved is a choice
+  ("Continue on this device" or "Use server position"), and a place the hub only worked out from a
+  reader's page (`exact: false`) is asked about before the player goes there.
+- **The device.** Background audio (`UIBackgroundModes` already has `audio`) with the audio session
+  in `.playback` and `.spokenAudio`; Now Playing with the cover, the book, the author and the part;
+  the lock screen's play, pause, the jumps (the seek step), the part steps and the scrubber. An
+  interruption pauses it. On the Mac the same centre answers the media keys.
+- **One sound at a time.** HubKit `AudioArbiter`: the shell pauses the audiobook when a video starts
+  and pauses the video when the audiobook starts.
+- **Settings.** The speed is kept per book. The seek step (5, 10, 15 or 30 seconds, 10 by default,
+  Android's `PlaybackSettings.seekSeconds`) is Settings › Playback, so the video player can take it
+  too. The sleep timer offers 5 to 60 minutes or the end of the part, fades over its last 30
+  seconds, and steps back over what faded; any control while it fades carries on.
+- **The demo hub** plays generated tones from files the app writes on the device, so the UI tests
+  and screenshots need no network and never touch a real book.
+
+### The readers (phases 3 and 4)
+
+**Where a book page meets a reader.** Phase 3 is built by the other Apple session on
+`apple/client`; this is the seam between the two. No book page pushes a reader: it asks
+`@Environment(\.read)` with a `ReadRequest` (`Hub/Books/ReaderEntry.swift`), and the shell shows
+`ReaderHost` over the whole window and its bars, as it shows the video player.
+
+- `ReadRequest.pages(work:publication:)` is a comic issue or a manga volume: the `ReadingWork` the
+  page loaded (its volumes and their issues, so the reader goes on to the next issue without asking
+  the hub again) and the issue as a `ReadingSectionItem` (`sourceItemId`, `title`, `number`, `kind`,
+  `pageCount`, `progress`). Phase 3's entry point is **`ComicReaderView(work: ReadingWork,
+  publication: ReadingSectionItem)`**. It takes the place of the coming-next page in `ReaderHost`'s
+  `.pages` case, a one-line change.
+- `ReadRequest.ebook(work:sourceItemId:readAlong:)` is phase 4's: an EPUB alone, or read along.
+- Which one Read opens is HubKit's `ReadingWorkPresentation.opensPages(_:source:)` (Android's
+  `openPublication`: a Storyteller edition, a book or an ebook opens the ebook reader; a Kavita comic
+  or manga opens the pages), and the issue for an id is `ReadingWorkPresentation.publication(_:sourceItemId:)`.
+- A reader closes with `read.close()`. The shell then changes `\.readerClosed`, and the book, series
+  and comic pages and Books Home read their progress again, as `\.playbackClosed` does for video.
+- HubKit's reading models and endpoints are on `apple/books` from 9dd3a39. Phase 3 merges that
+  branch first and puts its own routes, models and rules in new files (`Net/ReaderEndpoints.swift`,
+  `Model/ReadingPages.swift`, `Rules/Comic*.swift`), so the two branches never edit the same file.
+  Phase 2 brings `Rules/ReadingCheckpoints.swift`, the place kept on the device and its outbox; a
+  comic's page goes through it once both branches are merged.
+
+- **Comics and manga (phase 3).** The hub's pages (`…/pages/{n}`) and thumbnails (`…/thumb?w=`),
+  Android's `ComicView` rules kept per series (fit, Thirds, the zoom and its anchor, trimmed
+  margins), `ViewportStepPlanner` for the steps, the next page ready before the turn, the Pages
+  grid, two pages side by side on an iPad held sideways (`SpreadPlanner`), and the page sent to
+  Kavita through `POST …/progress` with `expectedPage`, through the same outbox.
+- **Ebooks and read along (phase 4).** The EPUB through the hub's `…/file`, the place through
+  `GET`/`POST …/position` with `checkBase` and `expectedLocator` and the same choose-which sheet;
+  read along opens the slim edition (`file?format=readaloud&audio=omit`) and plays its narration
+  from the audiobook's tracks through `alignment`, its sentence lit in the accent.
+
+**Readium's Swift toolkit for phase 4: recommended for iPad and iPhone, with a decision needed for
+the Mac.** Checked on 2026-10-05 (github.com/readium/swift-toolkit):
+
+- Licence BSD-3-Clause. Added with Swift Package Manager (`https://github.com/readium/
+  swift-toolkit.git`; CocoaPods also works), and only the products used: `ReadiumShared`,
+  `ReadiumStreamer`, `ReadiumNavigator`. `ReadiumLCP` and its SQLite adapter are for DRM and are
+  not needed.
+- The 3.x line needs iOS 15, Swift 6.0 and Xcode 16.4; the `develop` line (4.0, in alpha) needs Swift
+  6.2 and Xcode 26.4. The Mac now has Xcode 27.0 and Swift 6.4, and the app targets iOS 18, so
+  either builds. Pin the newest 3.x release exactly and move to 4.0 once it is stable.
+- Its `Package.swift` declares iOS only, and the navigator is UIKit, so it does not build for the
+  native Mac app. Choose at phase 4: the Mac gets its own small WKWebView reader on the same Readium
+  locators (whether `ReadiumShared` and `ReadiumStreamer` build for macOS is the first thing to
+  try), or ebooks reach the Mac after the iPad and the iPhone.
+- Media overlays are only planned in Readium, so read along needs our own SMIL timeline (the hub's
+  `alignment` already maps each narrated file onto a track) with Readium's decorations for the
+  sentence.
+- Readium is also what the Pocket reads with (Kotlin), so a locator written on one device is read
+  as the same place on the other and by Storyteller's own apps.
+- Its dependencies need their licences recorded in `THIRD_PARTY_SOFTWARE.md` before it is added:
+  CryptoSwift, Zip, DifferenceKit, Fuzi, GCDWebServer, ZIPFoundation, SwiftSoup (and SQLite.swift
+  only with LCP).
+
+### Order
+
+1. This plan.
+2. HubKit: the models and endpoints, then the facts, shelves and presentation rules, test first
+   from Android's cases, against real responses saved from the hub (read only).
+3. The demo hub's Books.
+4. Phase 1's screens: the side's roots, Home, Library, the book, series, comic, author and missing
+   book pages, Discover and requests, Activity.
+5. Phase 2: the listening rules and the outbox in HubKit with tests, then the player, its screen,
+   the mini player, Now Playing and Settings › Playback.
+6. UI tests against `-demo`, then both ways up on the three simulators and the Mac at two sizes,
+   once the simulators are free.
+7. Phase 3 (comics and manga), by the other session on `apple/client`, through `ReaderHost`; then
+   phase 4.
+
+Differences from Android, on purpose, for now: no whole-ZIP audiobook, no Kavita server reading
+lists, no mark-read or offline copy on a book's page, and list actions on a card's context menu
+rather than Ⓨ.
+
 ## Working on the Mac
 
 ### From the PC
@@ -394,7 +548,7 @@ token (`hubctl.exe token new --label ipad-pro`, `ipad-mini`, `iphone`).
 4. **Search, Discover and requests**: the request form and the release picker.
 5. **Downloads and notifications.**
 6. **Offline**, after hub change 3.
-7. **Books** (Kavita / Storyteller reading).
+7. **Books** (Kavita / Storyteller reading): "Books (#25)" above.
 
 ## Conventions carried over
 
