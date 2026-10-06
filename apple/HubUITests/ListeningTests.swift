@@ -8,11 +8,12 @@ final class ListeningTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// `HUB_PLAY_CHROME=pinned` holds a video's controls up, so Back can be pressed.
     @MainActor
     private func launch(open: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo"]
-        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_OPEN": open]
+        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_OPEN": open, "HUB_PLAY_CHROME": "pinned"]
         app.launch()
         return app
     }
@@ -86,27 +87,32 @@ final class ListeningTests: XCTestCase {
         let app = launch(open: "book:rw_demo_alloy")
         _ = listening(app)
 
-        // A film on the Media side, the book playing on under the mini player.
-        app.buttons["Movies and TV"].tap()
+        // Out to the side's root, where Media is, the book playing on under the mini player.
+        app.buttons["Back to The Alloy of Law"].tap()
+        let root = app.buttons["Back to Home"]
+        XCTAssertTrue(root.waitForExistence(timeout: 5), "the book's page has no way back: \(buttons(app))")
+        root.tap()
+        let media = app.buttons["Movies and TV"]
+        XCTAssertTrue(media.waitForExistence(timeout: 5), "no Media side picker: \(buttons(app))")
+        media.tap()
         app.buttons["Library"].firstMatch.tap()
-        let movies = button(app, containing: "Movies, Movie library")
+        let movies = app.buttons["Movies, Movie library"]
         XCTAssertTrue(movies.waitForExistence(timeout: 10), "the media libraries did not load: \(buttons(app))")
         movies.tap()
         let film = button(app, containing: "Gran Torino")
         XCTAssertTrue(film.waitForExistence(timeout: 10), "Movies did not load: \(buttons(app))")
         film.tap()
-        let watch = app.buttons.matching(NSPredicate(format: "(label == 'Play' OR label == 'Resume') AND identifier != 'mini-play'"))
+        // "Play", or "Resume · 1:02" (not Books Home's "Resume reading", still there out of sight).
+        let watch = app.buttons.matching(NSPredicate(format: "(label == 'Play' OR label BEGINSWITH 'Resume ·') AND identifier != 'mini-play'"))
             .firstMatch
         XCTAssertTrue(watch.waitForExistence(timeout: 10), "the film's page has no Play: \(buttons(app))")
         XCTAssertEqual(app.buttons["mini-play"].label, "Pause", "the book stopped before the film began")
 
         watch.tap()
+        // The player covers the pages, and the mini player with them.
         XCTAssertTrue(app.buttons["mini-play"].waitForNonExistence(timeout: 10), "the player did not open over the pages")
-        let back = app.buttons["Back"].firstMatch
-        XCTAssertTrue(back.waitForExistence(timeout: 10), "the player has no Back")
-        // Its controls hide by themselves: a tap brings them back.
-        if !back.isHittable { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
-        back.tap()
+        XCTAssertTrue(app.buttons["Lock controls"].waitForExistence(timeout: 15), "the player has no controls")
+        app.buttons["Back"].firstMatch.tap()
 
         let mini = app.buttons["mini-play"]
         XCTAssertTrue(mini.waitForExistence(timeout: 10), "the mini player did not come back after the film")
