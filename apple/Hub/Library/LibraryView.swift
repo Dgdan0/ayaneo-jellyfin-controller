@@ -248,11 +248,13 @@ struct LibraryTile: View {
     let background: String
     /// While the libraries are arranged: the grip in the tile's corner.
     var arranging = false
+    /// What kind of library it is, when not Jellyfin's: a reading library's (#25).
+    var kindLabel: String?
     @Environment(\.glassMetrics) private var metrics
 
     private static let corner: CGFloat = 24
 
-    private var kind: String { LibraryKind.label(folder.kind) }
+    private var kind: String { kindLabel ?? LibraryKind.label(folder.kind) }
 
     var body: some View {
         Color.clear
