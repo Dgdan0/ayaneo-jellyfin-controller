@@ -108,11 +108,15 @@ data class ComicZoom(val factor: Float = 1f, val anchorX: Float = 0.5f) {
  * Kavita's cover of the chapter, as the hub serves it on a run's page
  * (`/v1/img/reading/kavita-chapter/{id}`). Null for a publication that is not
  * a Kavita chapter, which keeps the colours the page already has.
+ *
+ * The hub names a Kavita issue by its bare chapter id ("8358" on the live hub,
+ * 2026-10-06); the prefixed form is kept for ids written that way. Only the
+ * paged-image reader asks, and it reads Kavita only, so bare digits are a chapter.
  */
 object IssueCover {
     private const val PREFIX = "kavita-chapter:"
 
     fun path(sourceItemId: String): String? =
-        sourceItemId.removePrefix(PREFIX).takeIf { sourceItemId.startsWith(PREFIX) && it.isNotEmpty() && it.all(Char::isDigit) }
+        sourceItemId.removePrefix(PREFIX).takeIf { it.isNotEmpty() && it.all(Char::isDigit) }
             ?.let { "/v1/img/reading/kavita-chapter/$it" }
 }

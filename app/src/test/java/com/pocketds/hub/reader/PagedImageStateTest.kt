@@ -266,6 +266,8 @@ class PagedImageStateTest {
 
     @Test fun `an issue's cover is Kavita's chapter cover, and nothing else is guessed`() {
         assertEquals("/v1/img/reading/kavita-chapter/34", IssueCover.path("kavita-chapter:34"))
+        // The hub names a Kavita issue by its bare chapter id.
+        assertEquals("/v1/img/reading/kavita-chapter/8358", IssueCover.path("8358"))
         assertEquals(null, IssueCover.path("storyteller:abc"))
         assertEquals(null, IssueCover.path("kavita-chapter:"))
         assertEquals(null, IssueCover.path("kavita-chapter:12/../x"))
