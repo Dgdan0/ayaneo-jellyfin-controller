@@ -54,16 +54,14 @@ extension EnvironmentValues {
 /// The reader on show over the whole window.
 struct ReaderHost: View {
     let request: ReadRequest
+    @Environment(\.read) private var read
 
     var body: some View {
         switch request {
         case .pages(let work, let publication):
-            // Phase 3: ComicReaderView(work: work, publication: publication)
-            ReaderComingView(work: work, artwork: publication.artwork.isEmpty ? work.artwork : publication.artwork,
-                             what: work.kind == "manga" ? "Manga" : "Comics",
-                             place: [ReadingBookFacts.issueTitle(publication, kind: work.kind),
-                                     ReadingBookFacts.comicLine(publication.progress)].joined(separator: " · "),
-                             keeper: "Kavita")
+            // Phase 3: the comic and manga reader, which leaves through `closeReader`.
+            ComicReaderView(work: work, publication: publication)
+                .environment(\.closeReader, CloseReaderAction { read.close() })
         case .ebook(let work, _, let readAlong):
             ReaderComingView(work: work, artwork: work.artwork, what: readAlong ? "Read along" : "Ebooks",
                              place: ReadingBookFacts.progress(work) ?? "Not started",

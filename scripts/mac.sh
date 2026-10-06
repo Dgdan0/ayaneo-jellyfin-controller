@@ -12,7 +12,8 @@
 #                                   turn the simulators' Reduce transparency on or off
 #   scripts/mac.sh build-tests      compile the UI tests for the iOS Simulator, running none
 #   scripts/mac.sh uitest           the UI tests on the iPhone simulator, against -demo
-#                                   (UITEST_ONLY=<Class>[/<test>] runs one alone)
+#                                   (UITEST_ONLY=<Class>[/<test>] runs one alone,
+#                                   UITEST_SIM=<simulator> runs them on another)
 #   scripts/mac.sh quit             end JellyHub on the simulators (SHOT_SIMS, or all three)
 #                                   and the Mac's Debug build, and nothing else
 #   scripts/mac.sh shots-prune [minutes]
@@ -239,12 +240,13 @@ shot() {
   shoot
 }
 
-# The UI tests (apple/HubUITests) on the iPhone simulator. They launch the app
-# with -demo, so they never touch the real hub.
+# The UI tests (apple/HubUITests) on the iPhone simulator, or the one
+# UITEST_SIM names. They launch the app with -demo, so they never touch the
+# real hub.
 uitest() {
   project
   local udid
-  udid="$(udid_of "iPhone 17 Pro Max")"
+  udid="$(udid_of "${UITEST_SIM:-iPhone 17 Pro Max}")"
   xcrun simctl boot "$udid" >/dev/null 2>&1 || true
   # UITEST_ONLY=LibraryArrangeTests runs one class (or Class/testMethod) alone.
   local only=()
@@ -592,5 +594,5 @@ case "${1:-build}" in
   mac-shot) shift; mac_shot "$@" ;;
   testflight) testflight ;;
   logs) xcrun simctl spawn booted log stream --level debug --predicate "subsystem == '$BUNDLE_ID' OR process == 'Hub'" ;;
-  *) sed -n '2,51p' "$0"; exit 2 ;;
+  *) sed -n '2,52p' "$0"; exit 2 ;;
 esac
