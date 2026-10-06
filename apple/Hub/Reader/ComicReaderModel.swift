@@ -141,6 +141,13 @@ final class ComicReaderModel {
     /// Which way the reading goes: the neighbour decoded first.
     @ObservationIgnored var readingForward = true
     @ObservationIgnored private var outbox = ComicProgressOutbox(saved: 0)
+    /// An issue that would not open, for Try again.
+    @ObservationIgnored private var failedOpen: FailedOpen?
+    private struct FailedOpen {
+        let sourceItemId: String
+        let atEnd: Bool
+        let moving: Bool
+    }
     /// The reading has moved since the issue opened: only then is a place
     /// sent, so opening an issue, even on a spread, writes nothing.
     @ObservationIgnored var moved = false
@@ -219,14 +226,21 @@ final class ComicReaderModel {
         open(issue.sourceItemId, atEnd: false)
     }
 
+    /// Try again: the issue that would not open, else the page that would not load.
     func retry() {
-        if manifest == nil || phase != .reading { open(issue.sourceItemId, atEnd: arriveAtEnd) } else { loadUnit() }
+        if let failed = failedOpen {
+            open(failed.sourceItemId, atEnd: failed.atEnd, moving: failed.moving)
+        } else {
+            phase = .reading
+            loadUnit()
+        }
     }
 
     /// The issue `sourceItemId`, at its place or, reached going back, at its
     /// end; `moving` when the reading went on into it, whose place is then sent.
     func open(_ sourceItemId: String, atEnd: Bool, moving: Bool = false) {
         opening?.cancel()
+        failedOpen = nil
         endLookup?.cancel()
         endCard = nil
         if sourceItemId != issue.sourceItemId {
@@ -242,6 +256,7 @@ final class ComicReaderModel {
                 self?.apply(manifest, atEnd: atEnd, moving: moving)
             } catch {
                 guard !Task.isCancelled, error.kind != .cancelled else { return }
+                self?.failedOpen = FailedOpen(sourceItemId: sourceItemId, atEnd: atEnd, moving: moving)
                 self?.phase = .failed(error.message)
             }
             self?.opening = nil
@@ -250,6 +265,7 @@ final class ComicReaderModel {
 
     private func apply(_ manifest: ReadingPublicationManifest, atEnd: Bool, moving: Bool) {
         guard manifest.pageCount > 0 else {
+            failedOpen = FailedOpen(sourceItemId: manifest.sourceItemId, atEnd: atEnd, moving: moving)
             phase = .failed("This issue has no pages to read")
             return
         }
@@ -761,8 +777,17 @@ final class ComicReaderModel {
             self.outbox.answered(ok: ok, conflict: conflict)
             if conflict {
                 self.say("This issue was read on another device since, so your page here was not saved")
-            } else if self.outbox.pending {
+            } else if ok, self.outbox.pending {
+                // Read on while that one was on its way: the newer page now.
                 self.sendPlace()
+            } else if !ok {
+                // Not reached: again in a while, never in a loop.
+                self.saving?.cancel()
+                self.saving = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(15))
+                    guard !Task.isCancelled else { return }
+                    self?.sendPlace()
+                }
             }
         }
     }

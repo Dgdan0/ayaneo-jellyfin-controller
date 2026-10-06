@@ -65,7 +65,8 @@ struct ComicReaderScreen: View {
                 ComicPageCanvas(reader: reader)
                 ComicReaderStatus(reader: reader, leave: leave)
                 hints(layout)
-                if reader.controlsVisible && reader.phase == .reading {
+                // Up while an issue opens too, so Close is always there to touch.
+                if reader.controlsVisible {
                     ComicReaderBars(reader: reader, layout: layout, leave: leave, scrubbing: $scrubbing,
                                     scrubTrack: $scrubTrack)
                         .transition(.opacity)
