@@ -16,7 +16,10 @@ public struct DemoTransport: HubTransport {
         let path = request.url?.path ?? ""
         let method = request.httpMethod ?? "GET"
         let query = request.url?.query ?? ""
-        let answer = DemoPlayback.answer(method: method, path: path, query: query, body: request.httpBody)
+        // Offline downloads first: their video is written once per run, which takes a moment (#5).
+        let offline = await DemoOffline.answer(method: method, path: path, query: query, body: request.httpBody)
+        let answer = offline
+            ?? DemoPlayback.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoMedia.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoComics.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoBooks.answer(method: method, path: path, query: query, body: request.httpBody)
