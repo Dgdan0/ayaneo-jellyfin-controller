@@ -39,6 +39,19 @@ public enum Listening {
         return heard(rest.reduce(0) { $0 + ($1 ?? 0) } - max(0, positionMs), speed: speed)
     }
 
+    /// How far through the book `positionMs` into `part` is, 0 to 1: the parts
+    /// before it and the moment in it, over every part (#30). Of the
+    /// recording, not of the time it takes to hear, so a speed does not move
+    /// it (Storyteller's `totalProgression` is the same sum). Nil while any
+    /// part's length is unknown or there is no such part: a share nobody
+    /// could count is not 0.
+    public static func bookProgress(part: Int, positionMs: Int64, partsMs: [Int64?]) -> Double? {
+        guard partsMs.indices.contains(part), partsMs.allSatisfy({ ($0 ?? 0) > 0 }) else { return nil }
+        let lengths = partsMs.map { $0 ?? 0 }
+        let heard = lengths.prefix(part).reduce(0, +) + min(max(positionMs, 0), lengths[part])
+        return min(max(Double(heard) / Double(lengths.reduce(0, +)), 0), 1)
+    }
+
     /// A jump by `deltaMs` of recording from `positionMs` of `part`, across
     /// parts (Android's `ReadingAudio.seekBy`): back into the part before, on
     /// into the next, and no further than a length that is not yet known.

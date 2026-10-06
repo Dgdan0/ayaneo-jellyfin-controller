@@ -118,6 +118,29 @@ struct ListeningTests {
         #expect(PlayerLabels.rate(2) == "2×")
     }
 
+    /// Within a billionth: how far through a book is a ratio of whole numbers.
+    private func near(_ value: Double?, _ expected: Double) -> Bool {
+        guard let value else { return false }
+        return abs(value - expected) < 1e-9
+    }
+
+    @Test func howFarThroughTheBookIsOfTheRecordingWhateverTheSpeed() {
+        let parts: [Int64?] = [600_000, 1_200_000, 300_000]
+        #expect(Listening.bookProgress(part: 0, positionMs: 0, partsMs: parts) == 0)
+        // The first part and five minutes of the second, of thirty-five minutes in all.
+        #expect(near(Listening.bookProgress(part: 1, positionMs: 300_000, partsMs: parts), 900_000.0 / 2_100_000))
+        #expect(Listening.bookProgress(part: 2, positionMs: 300_000, partsMs: parts) == 1)
+        // A player runs a little past a part's length, and may report a moment before its start.
+        #expect(Listening.bookProgress(part: 2, positionMs: 999_999, partsMs: parts) == 1)
+        #expect(near(Listening.bookProgress(part: 1, positionMs: -5, partsMs: parts), 600_000.0 / 2_100_000))
+        // A length still being read, or a part the book does not have: nothing to say, which is not 0.
+        #expect(Listening.bookProgress(part: 0, positionMs: 0, partsMs: [600_000, nil]) == nil)
+        #expect(Listening.bookProgress(part: 0, positionMs: 0, partsMs: [600_000, 0]) == nil)
+        #expect(Listening.bookProgress(part: 3, positionMs: 0, partsMs: parts) == nil)
+        #expect(Listening.bookProgress(part: -1, positionMs: 0, partsMs: parts) == nil)
+        #expect(Listening.bookProgress(part: 0, positionMs: 0, partsMs: []) == nil)
+    }
+
     @Test func aJumpCrossesPartsAndStopsAtALengthNotYetKnown() {
         let parts: [Int64?] = [60_000, 120_000, 30_000]
         func at(_ place: (part: Int, offsetMs: Int64)) -> String { "\(place.part)@\(place.offsetMs)" }

@@ -286,9 +286,16 @@ struct ReadingCheckpointTests {
         })
     }
 
+    /// A stretch of listening as the player keeps it: the place, and how far
+    /// through the book it is beside it (#30).
     private func listen(_ store: ReadingCheckpointStore, part: Int, offsetMs: Int64, completed: Bool = false) throws {
-        let place = try #require(AudioPlace.canonical(tracks, part: part, offsetMs: offsetMs, completed: completed))
-        try store.save(audioKey, place.location(), now: 100)
+        let kept = try #require(AudioPlace.kept(tracks, part: part, offsetMs: offsetMs, completed: completed))
+        try store.save(audioKey, kept, now: 100)
+    }
+
+    private func near(_ value: Double?, _ expected: Double) -> Bool {
+        guard let value else { return false }
+        return abs(value - expected) < 1e-9
     }
 
     @Test func aPlaceMovesOnFromTheOneReadCheckedAgainstIt() async throws {
@@ -386,6 +393,100 @@ struct ReadingCheckpointTests {
         let asked = try store.reconcile(second, other.get())
         #expect(asked.conflict, "The hub has a place of its own: the person chooses")
         #expect(other.held == AudioPlace("t_aaaaaaaaaaaa", 42_000))
+    }
+
+    // MARK: The fraction kept beside a listening place (#30)
+
+    @Test func aPlaceWaitingToBeSentSaysHowFarThroughTheBookItIsAndThatSurvivesARestart() throws {
+        let folder = Folder()
+        let store = folder.store()
+        let hub = Hub(tracks)
+        try store.reconcile(audioKey, hub.get())
+        try listen(store, part: 1, offsetMs: 300_000)
+        // The whole of the first track and five minutes of the second, of thirty minutes.
+        let waiting = try #require(folder.store().pending(scope: audioKey.scope).first)
+        #expect(AudioPlace.progressOf(waiting.local) == 0.5)
+        #expect(AudioPlace.of(waiting.local) == AudioPlace("t_bbbbbbbbbbbb", 300_000))
+        // What will go out says nothing of it.
+        let body = try #require(AudioPlace.body(waiting))
+        #expect(Set(body.objectValue.map { Array($0.keys) } ?? []) == ["trackId", "offsetMs", "completed", "expected"])
+    }
+
+    @Test func theFractionKeptBesideAPlaceNeverMakesTheHubsOwnReadingLookLikeAnotherDevice() async throws {
+        let store = Folder().store()
+        let hub = Hub(tracks, held: AudioPlace("t_aaaaaaaaaaaa", 10_000))
+        try store.reconcile(audioKey, hub.get())
+        // Stretch after stretch, each kept with its fraction and read back from the hub without one.
+        for offset: Int64 in [50_000, 90_000, 150_000, 400_000] {
+            try listen(store, part: 0, offsetMs: offset)
+            #expect(try await sync(store, hub).sync(audioKey) == .synced)
+            #expect(hub.held == AudioPlace("t_aaaaaaaaaaaa", offset))
+            #expect(try store.read(audioKey)?.pending == false)
+        }
+        // Each was based on the one before.
+        let bases = hub.writes.map { $0["expected"]?["offsetMs"]?.int64Value }
+        #expect(bases == [10_000, 50_000, 90_000, 150_000])
+    }
+
+    @Test func aWriteThatLandedButWasNeverAcknowledgedIsThisDevicesOwnNotAnothers() throws {
+        let store = Folder().store()
+        let hub = Hub(tracks, held: AudioPlace("t_aaaaaaaaaaaa", 10_000))
+        try store.reconcile(audioKey, hub.get())
+        try listen(store, part: 0, offsetMs: 50_000)
+        // The hub took it and the answer never got back: nothing was acknowledged here.
+        let waiting = try #require(try store.read(audioKey))
+        let body = try #require(AudioPlace.body(waiting))
+        #expect(hub.post(body))
+        #expect(try store.read(audioKey)?.pending == true)
+        // The next look finds the same place the hub was sent: no question, and nothing left to send.
+        #expect(try !store.reconcile(audioKey, hub.get()).conflict)
+        #expect(try store.read(audioKey)?.pending == false)
+        #expect(hub.writes.count == 1)
+    }
+
+    @Test func aPlaceAnOlderBuildLeftWaitingGoesOutAsItDidAndTheNextStretchCarriesOnFromIt() async throws {
+        let store = Folder().store()
+        let hub = Hub(tracks, held: AudioPlace("t_aaaaaaaaaaaa", 10_000))
+        try store.reconcile(audioKey, hub.get())
+        // Kept by a build that wrote no fraction: it says nothing of how far through the book it is.
+        try store.save(audioKey, AudioPlace("t_aaaaaaaaaaaa", 50_000).location(), now: 100)
+        #expect(AudioPlace.progressOf(try store.read(audioKey)?.local) == nil)
+        #expect(try await sync(store, hub).sync(audioKey) == .synced)
+        #expect(hub.held == AudioPlace("t_aaaaaaaaaaaa", 50_000))
+        // This build's next stretch, with a fraction, is based on it and is not a conflict.
+        try listen(store, part: 0, offsetMs: 80_000)
+        #expect(near(AudioPlace.progressOf(try store.read(audioKey)?.local), 80_000.0 / 1_800_000))
+        #expect(try await sync(store, hub).sync(audioKey) == .synced)
+        #expect(hub.held == AudioPlace("t_aaaaaaaaaaaa", 80_000))
+        #expect(hub.writes.last?["expected"]?["offsetMs"]?.int64Value == 50_000)
+    }
+
+    @Test func listeningOnToTheVeryPlaceTheHubHoldsIsNoNewWrite() throws {
+        let store = Folder().store()
+        let hub = Hub(tracks, held: AudioPlace("t_aaaaaaaaaaaa", 10_000))
+        try store.reconcile(audioKey, hub.get())
+        let before = try store.read(audioKey)
+        // The same place again, kept with a fraction the hub's reading does not have.
+        try listen(store, part: 0, offsetMs: 10_000)
+        #expect(try store.read(audioKey) == before)
+        #expect(store.pending(scope: audioKey.scope).isEmpty)
+    }
+
+    @Test func choosingThisDevicesPlaceComparesItWithTheHubsAsPlaces() async throws {
+        let store = Folder().store()
+        let hub = Hub(tracks, held: AudioPlace("t_aaaaaaaaaaaa", 10_000))
+        try store.reconcile(audioKey, hub.get())
+        try listen(store, part: 0, offsetMs: 50_000)
+        // Another device moves the book on: a question.
+        hub.held = AudioPlace("t_aaaaaaaaaaaa", 60_000)
+        #expect(try await sync(store, hub).sync(audioKey) == .conflict)
+        // Listening on here reaches the very place the other device left.
+        try listen(store, part: 0, offsetMs: 60_000)
+        // Kept here with its fraction, it is still the hub's place: nothing to send.
+        try store.chooseLocal(audioKey, now: 300)
+        #expect(try store.read(audioKey)?.pending == false)
+        #expect(try await sync(store, hub).sync(audioKey) == .synced)
+        #expect(hub.writes.isEmpty)
     }
 
     // MARK: The demo hub keeps the same rules

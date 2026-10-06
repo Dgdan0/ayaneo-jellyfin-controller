@@ -217,6 +217,117 @@ struct AudiobookTests {
         #expect(ask.choices.first?.detail == "Part 2 of 3 · 1:01")
     }
 
+    // MARK: How far through the book, kept beside a place (#30)
+
+    private func keys(_ location: ReadingLocation?) -> Set<String> {
+        Set(location?.locator.map { Array($0.keys) } ?? [])
+    }
+
+    private func near(_ value: Double?, _ expected: Double) -> Bool {
+        guard let value else { return false }
+        return abs(value - expected) < 1e-9
+    }
+
+    @Test func aPlaceKeptOnThisDeviceSaysHowFarThroughTheBookItIsBesideItsTrackAndMoment() throws {
+        let kept = try #require(AudioPlace.kept(tracks, part: 1, offsetMs: 300_000))
+        // The first track and five minutes of the second, of thirty-five minutes in all.
+        #expect(near(AudioPlace.progressOf(kept), 900_000.0 / 2_100_000))
+        #expect(keys(kept) == ["trackId", "offsetMs", "completed", "progress"])
+        // It is still the same place: the fraction is a note beside it, not part of it.
+        #expect(AudioPlace.of(kept) == AudioPlace("t_000000000002", 300_000))
+        // Through a file and back, as the store keeps it.
+        let stored = try JSONDecoder().decode(ReadingLocation.self, from: JSONEncoder().encode(kept))
+        #expect(stored == kept)
+        // The fraction is of the recording: a part past its length is its end, and the book's start is 0.
+        #expect(near(AudioPlace.progressOf(AudioPlace.kept(tracks, part: 0, offsetMs: 600_640)), 600_000.0 / 2_100_000))
+        #expect(AudioPlace.progressOf(AudioPlace.kept(tracks, part: 0, offsetMs: 0)) == 0)
+        #expect(AudioPlace.kept(tracks, part: 7, offsetMs: 0) == nil, "No such part, no place to keep")
+        #expect(AudioPlace.kept([], part: 0, offsetMs: 0) == nil)
+    }
+
+    @Test func aPlaceWhoseLengthsAreNotKnownKeepsNoFractionRatherThanAWrongOne() throws {
+        var unknown = tracks
+        unknown[1].durationMs = 0
+        let kept = try #require(AudioPlace.kept(unknown, part: 0, offsetMs: 5_000))
+        #expect(AudioPlace.of(kept) == AudioPlace("t_000000000001", 5_000))
+        #expect(keys(kept) == ["trackId", "offsetMs", "completed"])
+        #expect(AudioPlace.progressOf(kept) == nil)
+        // A track the list no longer has: the same.
+        #expect(AudioPlace("t_00000000dead", 5_000).progress(tracks) == nil)
+        // And a fraction that is not one is never written.
+        let place = AudioPlace("t_000000000002", 1)
+        #expect(keys(place.location(progress: .nan)) == ["trackId", "offsetMs", "completed"])
+        #expect(keys(place.location(progress: .infinity)) == ["trackId", "offsetMs", "completed"])
+        #expect(AudioPlace.progressOf(place.location(progress: 7)) == 1)
+        #expect(AudioPlace.progressOf(place.location(progress: -1)) == 0)
+    }
+
+    @Test func aFinishedBookIsTheWholeOfItWithOrWithoutAFractionBesideIt() throws {
+        // The last two seconds of the last track are the book finished, written as 100%.
+        let kept = try #require(AudioPlace.kept(tracks, part: 2, offsetMs: 298_500))
+        #expect(AudioPlace.of(kept)?.completed == true)
+        #expect(AudioPlace.progressOf(kept) == 1)
+        #expect(AudioPlace.progressOf(AudioPlace.kept(tracks, part: 0, offsetMs: 5_000, completed: true)) == 1)
+        // A finished place an older build kept has no fraction, and is finished all the same.
+        #expect(AudioPlace.progressOf(AudioPlace("t_000000000003", 300_000, completed: true).location()) == 1)
+        // Even when lengths are unknown the book is done.
+        #expect(AudioPlace("t_000000000003", 300_000, completed: true).progress([]) == 1)
+    }
+
+    @Test func aPlaceKeptByAnOlderBuildStillReadsAndSaysNothingOfHowFarThroughTheBookItIs() {
+        let old = AudioPlace("t_000000000002", 61_250).location()
+        #expect(keys(old) == ["trackId", "offsetMs", "completed"])
+        #expect(AudioPlace.of(old) == AudioPlace("t_000000000002", 61_250))
+        // Not 0%: it was never counted, which is not the same as the start of the book.
+        #expect(AudioPlace.progressOf(old) == nil)
+        #expect(AudioPlace.progressOf(ReadingLocation(pageIndex: 4)) == nil)
+        #expect(AudioPlace.progressOf(nil) == nil)
+        // A location of this kind with something else where the fraction goes is not a fraction either.
+        let odd = ReadingLocation(locator: ["trackId": .string("t_000000000002"), "offsetMs": .int(1), "completed": .bool(false),
+                                            "progress": .string("soon")])
+        #expect(AudioPlace.of(odd) == AudioPlace("t_000000000002", 1))
+        #expect(AudioPlace.progressOf(odd) == nil)
+    }
+
+    @Test func theWriteIsThePlaceAndItsBaseWhateverIsKeptBesideThem() throws {
+        let local = AudioPlace("t_000000000002", 90_000)
+        let base = AudioPlace("t_000000000002", 61_250)
+        let plain = AudioPlace.body(local, base: base, baseKnown: true)
+        let key = ReadingCheckpointKey(scope: "profile", workId: "rw_1", sourceItemId: "3726292328809367", kind: AudioPlace.kind)
+        let noted = ReadingCheckpoint(key: key, local: local.location(progress: 0.4), base: base.location(progress: 0.3),
+                                      baseKnown: true, pending: true)
+        let sent = try #require(AudioPlace.body(noted))
+        #expect(sent == plain)
+        #expect(Set(sent.objectValue.map { Array($0.keys) } ?? []) == ["trackId", "offsetMs", "completed", "expected"])
+        #expect(Set(sent["expected"]?.objectValue.map { Array($0.keys) } ?? []) == ["trackId", "offsetMs"])
+        let wire = String(decoding: sent.encoded(), as: UTF8.self)
+        #expect(!wire.contains("progress"), "The fraction is this device's: the hub is never told")
+        // Nothing read yet: still no expectation, with the fraction there or not.
+        var unread = noted
+        unread.base = nil
+        unread.baseKnown = false
+        #expect(AudioPlace.body(unread) == AudioPlace.body(local, base: nil, baseKnown: false))
+    }
+
+    @Test func twoLocationsAreTheSamePlaceWhateverIsKeptBesideThePlace() {
+        let place = AudioPlace("t_000000000002", 61_250)
+        #expect(AudioPlace.samePlace(place.location(), place.location()))
+        // Kept with a fraction and read back from the hub without one: the hub's own reading of the same place.
+        #expect(AudioPlace.samePlace(place.location(progress: 0.4), place.location()))
+        #expect(AudioPlace.samePlace(place.location(), place.location(progress: 0.4)))
+        #expect(AudioPlace.samePlace(place.location(progress: 0.4), place.location(progress: 0.5)))
+        // A different moment, track or finish is another place.
+        #expect(!AudioPlace.samePlace(place.location(progress: 0.4), AudioPlace("t_000000000002", 61_251).location(progress: 0.4)))
+        #expect(!AudioPlace.samePlace(place.location(), AudioPlace("t_000000000001", 61_250).location()))
+        #expect(!AudioPlace.samePlace(place.location(), AudioPlace("t_000000000002", 61_250, completed: true).location()))
+        // Nothing, or a location that is not a place of this kind, is not a place.
+        #expect(AudioPlace.samePlace(nil, nil))
+        #expect(!AudioPlace.samePlace(place.location(), nil))
+        #expect(!AudioPlace.samePlace(nil, place.location()))
+        #expect(!AudioPlace.samePlace(place.location(), ReadingLocation(pageIndex: 4)))
+        #expect(AudioPlace.samePlace(ReadingLocation(pageIndex: 4), ReadingLocation(pageIndex: 4)))
+    }
+
     @Test func aNumberIsTheSameNumberHoweverItWasWritten() throws {
         let whole = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"a":1,"b":1.0,"c":0.5,"d":[true,null,"x"]}"#.utf8))
         #expect(whole["a"] == whole["b"])

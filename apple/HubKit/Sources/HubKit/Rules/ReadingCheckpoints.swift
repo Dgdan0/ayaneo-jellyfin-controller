@@ -183,7 +183,7 @@ public final class ReadingCheckpointStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         var next = try load(key) ?? ReadingCheckpoint(key: key)
-        if next.local == location { return next }
+        if Self.same(key, next.local, location) { return next }
         next.local = location
         next.revision += 1
         next.updatedAt = now
@@ -225,11 +225,11 @@ public final class ReadingCheckpointStore: @unchecked Sendable {
             try write(settled)
             return ReadingResume(remote)
         }
-        if previous.local == remote {
+        if Self.same(key, previous.local, remote) {
             try settle(key, revision: previous.revision, sent: remote)
             return ReadingResume(remote)
         }
-        let conflict = !previous.baseKnown || previous.base != remote
+        let conflict = !previous.baseKnown || !Self.same(key, previous.base, remote)
         var asked = previous
         asked.remote = remote
         asked.conflicted = conflict
@@ -257,7 +257,7 @@ public final class ReadingCheckpointStore: @unchecked Sendable {
         current.conflicted = false
         current.revision += 1
         current.updatedAt = now
-        current.pending = current.local != current.remote
+        current.pending = !Self.same(key, current.local, current.remote)
         return try write(current)
     }
 
@@ -275,6 +275,15 @@ public final class ReadingCheckpointStore: @unchecked Sendable {
         current.pending = false
         current.conflicted = false
         return try write(current)
+    }
+
+    /// Whether two locations of `key`'s book are the same place. An
+    /// audiobook's place is its track and moment: this device keeps how far
+    /// through the book it is beside them (#30), which the hub never reads
+    /// back, so the whole location would take the hub's own reading of the
+    /// place just sent for another device's. Every other kind compares whole.
+    static func same(_ key: ReadingCheckpointKey, _ one: ReadingLocation?, _ other: ReadingLocation?) -> Bool {
+        key.kind == AudioPlace.kind ? AudioPlace.samePlace(one, other) : one == other
     }
 
     // MARK: Plumbing (under the lock)
