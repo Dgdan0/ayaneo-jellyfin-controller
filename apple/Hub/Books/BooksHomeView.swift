@@ -143,13 +143,15 @@ struct BooksHomeView: View {
             RowHeading(title: "Your series")
                 .padding(.horizontal, metrics.margin)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: metrics.small ? 22 : 34) {
+                LazyHStack(alignment: .top, spacing: metrics.small ? 4 : 10) {
                     ForEach(series) { item in
+                        let width: CGFloat = metrics.small ? 80 : 96
                         NavigationLink(value: AppRoute.book(BookRoute(workId: item.id, title: item.title))) {
                             VStack(alignment: .leading, spacing: 10) {
-                                CoverFan(covers: item.covers, coverWidth: metrics.small ? 80 : 96)
+                                CoverFan(covers: item.covers, coverWidth: width)
                                 CardCaption(title: item.title, detail: item.line)
-                                    .frame(width: CoverFan.size(coverWidth: metrics.small ? 80 : 96).width, alignment: .leading)
+                                    .padding(.leading, CoverFan.inset(coverWidth: width))
+                                    .frame(width: CoverFan.size(coverWidth: width).width, alignment: .leading)
                             }
                             .contentShape(Rectangle())
                         }
@@ -158,7 +160,7 @@ struct BooksHomeView: View {
                         .accessibilityLabel("\(item.title), \(item.line)")
                     }
                 }
-                .padding(.horizontal, metrics.margin)
+                .padding(.horizontal, max(0, metrics.margin - CoverFan.inset(coverWidth: metrics.small ? 80 : 96)))
                 .padding(.top, 18)
                 .padding(.bottom, 18)
             }
@@ -346,6 +348,9 @@ struct BooksHomeView: View {
             .sorted { ReadingShelves.timestamp($0.addedAt) > ReadingShelves.timestamp($1.addedAt) }
             .prefix(Self.recentLimit))
         model.colors.want(rows.flatMap { $0.items.map(\.artwork) } + series.compactMap(\.covers.first))
+        #if DEBUG
+        applyDebugOpen()
+        #endif
         if failures > 0 {
             status = StatusMessage("Some reading progress is unavailable · showing saved items where possible", tone: .warning)
         } else if ReadingShelves.current(found).isEmpty && books.lists.wantToRead.isEmpty && books.lists.lists.isEmpty {
@@ -354,6 +359,38 @@ struct BooksHomeView: View {
             status = StatusMessage("")
         }
     }
+
+    #if DEBUG
+    /// scripts/mac.sh opens a Books page for screenshots, once a launch:
+    /// HUB_OPEN=book:<work id>, entry:<work id> (as Resume reading does),
+    /// author:<library id>|<author id>|<name>, or missing:<work id> (that
+    /// series' first book the library lacks).
+    @MainActor private static var debugOpened = false
+
+    private func applyDebugOpen() {
+        guard !Self.debugOpened, let open = ProcessInfo.processInfo.environment["HUB_OPEN"], !open.isEmpty else { return }
+        let parts = open.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return }
+        Self.debugOpened = true
+        let value = parts[1]
+        switch parts[0] {
+        case "book": openRoute(.book(BookRoute(workId: value, title: "")))
+        case "entry": openRoute(.book(BookRoute(workId: value, title: "", openEntry: true)))
+        case "author":
+            let fields = value.split(separator: "|").map(String.init)
+            guard fields.count == 3 else { return }
+            openRoute(.author(AuthorRoute(libraryId: fields[0], id: fields[1], name: fields[2])))
+        case "missing":
+            Task {
+                guard let series = try? await model.hub.fetch(HubEndpoints.readingWork(value), as: ReadingWork.self),
+                      let item = series.sections.flatMap(\.items).first(where: { !$0.isAvailable }) else { return }
+                openRoute(.missingBook(MissingBookRoute(item: item)))
+            }
+        default:
+            Self.debugOpened = false
+        }
+    }
+    #endif
 
     /// The hero's own page, once per book, for its length.
     private func loadHeroDetail(_ hero: ReadingWork) async {

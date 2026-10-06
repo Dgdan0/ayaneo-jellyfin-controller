@@ -66,10 +66,13 @@ struct BooksDiscoverView: View {
                 search
             }
         } else {
+            // The field's own width follows its words, so typing could tip the
+            // row over and move the field (and its keyboard) mid-word: it is
+            // measured at a set width instead.
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) {
                     kinds.fixedSize()
-                    search
+                    search.frame(minWidth: 220, idealWidth: 260, maxWidth: 460)
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     kinds
@@ -177,6 +180,14 @@ struct BooksDiscoverView: View {
             query = String(open.dropFirst("search:".count))
             return
         }
+        if open.hasPrefix("releases:") {
+            let fields = open.dropFirst("releases:".count).split(separator: "|").map(String.init)
+            if let seriesId = fields.first.flatMap(Int.init) {
+                openRoute(.readingReleases(ReadingReleasesRoute(targets: [ReadingRequestTarget(seriesId: seriesId,
+                                                                                              title: fields.last ?? "")])))
+            }
+            return
+        }
         let all = rows.flatMap(\.items)
         let item = open == "request" ? all.first(where: \.canRequest) : all.first { $0.key == open }
         if let item { openRoute(.bookRequest(BookRequestRoute(item: item))) }
@@ -219,7 +230,7 @@ struct ReadingFeatureCard: View {
                 .frame(width: metrics.centred ? 120 : 150)
                 .shadow(color: .black.opacity(0.45), radius: 18, y: 14)
             VStack(alignment: .leading, spacing: 8) {
-                Text("FEATURED · \(ReadingType.label(item.contentType).uppercased())")
+                Text("FEATURED · \(ReadingType.one(item.contentType).uppercased())")
                     .font(HubType.body(12, weight: .bold, relativeTo: .caption))
                     .tracking(1.6)
                     .foregroundStyle(.white.opacity(0.72))
@@ -393,7 +404,7 @@ struct BookRequestView: View {
                 .frame(maxWidth: metrics.centred ? .infinity : nil)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 10) {
-                Text("\(ReadingType.label(item.contentType)) · \(item.inLibrary ? "Tracked in BookKeeprr" : "Not in your library")"
+                Text("\(ReadingType.one(item.contentType)) · \(item.inLibrary ? "Tracked in BookKeeprr" : "Not in your library")"
                     .uppercased())
                     .font(HubType.body(12.5, weight: .bold, relativeTo: .caption))
                     .tracking(1.75)
@@ -405,7 +416,7 @@ struct BookRequestView: View {
                     .lineLimit(3)
                     .minimumScaleFactor(0.55)
                 let facts = ([item.author.isEmpty ? nil : item.author, item.year > 0 ? String(item.year) : nil,
-                              ReadingType.label(item.contentType)] as [String?]).compactMap { $0 }
+                              ReadingType.one(item.contentType)] as [String?]).compactMap { $0 }
                 Text(facts.joined(separator: " · "))
                     .font(HubType.body(15, relativeTo: .subheadline))
                     .foregroundStyle(.white.opacity(0.82))
@@ -435,7 +446,7 @@ struct BookRequestView: View {
                     .accessibilityIdentifier("book-request")
                 }
                 StatusLine(message: shownStatus) { follow += 1 }
-                let source = ([item.source.isEmpty ? nil : ServiceNames.display(item.source),
+                let source = ([item.source.isEmpty ? nil : ReadingType.source(item.source),
                                item.isbn.isEmpty ? nil : "ISBN \(item.isbn)"] as [String?]).compactMap { $0 }
                 if !source.isEmpty {
                     Text(source.joined(separator: " · "))
@@ -479,7 +490,15 @@ struct BookRequestView: View {
     /// An ebook or audiobook the library already has is its book page.
     private func resolve() async {
         record = books.requestRecord(item.key)
-        defer { resolving = false }
+        defer {
+            resolving = false
+            #if DEBUG
+            // scripts/mac.sh: HUB_SHEET=request opens the request sheet once the page is there.
+            if resolved == nil, item.canRequest, !requested, ProcessInfo.processInfo.environment["HUB_SHEET"] == "request" {
+                sheetOpen = true
+            }
+            #endif
+        }
         guard [ReadingType.ebook, ReadingType.audiobook].contains(item.contentType) else { return }
         if let answer = try? await model.hub.fetch(HubEndpoints.readingResolve(source: item.source, sourceId: item.sourceId,
                                                                                isbn: item.isbn), as: ReadingResolveResponse.self),

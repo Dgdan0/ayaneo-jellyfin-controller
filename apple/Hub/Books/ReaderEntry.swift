@@ -91,43 +91,69 @@ struct ReaderComingView: View {
         ZStack {
             AmbientBackground(path: artwork, palette: model.colors.palette(for: artwork))
                 .ignoresSafeArea()
+            // A phone on its side has room across, not down: the cover goes
+            // beside the words there rather than the panel running off the
+            // bottom of the screen.
             ViewThatFits(in: .vertical) {
                 card(cover: sizeClass == .compact ? 150 : 190)
                 card(cover: 96)
+                wideCard(cover: 104)
                 ScrollView { card(cover: 96) }
             }
             .padding(20)
         }
         .environment(\.glassPalette, model.colors.palette(for: artwork))
         .task { model.colors.want([artwork]) }
+        // A container, so Close keeps its own identifier rather than taking this one.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reader-coming")
     }
 
     private func card(cover: CGFloat) -> some View {
         VStack(spacing: 14) {
-            BookCover(path: artwork, square: work.kind == "audiobook", width: 480)
-                .frame(width: cover)
-                .shadow(color: .black.opacity(0.5), radius: 24, y: 24)
-            Text(ReadingBookFacts.eyebrow(work).uppercased())
-                .font(HubType.body(12, weight: .bold, relativeTo: .caption))
-                .tracking(1.6)
-                .foregroundStyle(.white.opacity(0.7))
-            Text(work.title)
-                .font(HubType.heading(28, weight: .heavy, relativeTo: .title))
-                .foregroundStyle(.white)
-            Text("\(what) open here once the reader is built. Your place is kept on \(keeper): \(place).")
-                .font(HubType.body(15, relativeTo: .body))
-                .foregroundStyle(.white.opacity(0.8))
-                .frame(maxWidth: 420)
-            Button("Close") { read.close() }
-                .buttonStyle(PrimaryPillStyle())
-                .keyboardShortcut(.cancelAction)
-                .padding(.top, 6)
-                .accessibilityIdentifier("reader-close")
+            coverView(cover)
+            words(alignment: .center)
         }
         .multilineTextAlignment(.center)
         .padding(28)
         .glassPanel(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .frame(maxWidth: 520)
+    }
+
+    private func wideCard(cover: CGFloat) -> some View {
+        HStack(alignment: .center, spacing: 24) {
+            coverView(cover)
+            VStack(alignment: .leading, spacing: 10) { words(alignment: .leading) }
+        }
+        .multilineTextAlignment(.leading)
+        .padding(24)
+        .glassPanel(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .frame(maxWidth: 600)
+    }
+
+    private func coverView(_ width: CGFloat) -> some View {
+        BookCover(path: artwork, square: work.kind == "audiobook", width: 480)
+            .frame(width: width)
+            .shadow(color: .black.opacity(0.5), radius: 24, y: 24)
+    }
+
+    @ViewBuilder
+    private func words(alignment: HorizontalAlignment) -> some View {
+        Text(ReadingBookFacts.eyebrow(work).uppercased())
+            .font(HubType.body(12, weight: .bold, relativeTo: .caption))
+            .tracking(1.6)
+            .foregroundStyle(.white.opacity(0.7))
+        Text(work.title)
+            .font(HubType.heading(28, weight: .heavy, relativeTo: .title))
+            .foregroundStyle(.white)
+        Text("\(what) open here once the reader is built. Your place is kept on \(keeper): \(place).")
+            .font(HubType.body(15, relativeTo: .body))
+            .foregroundStyle(.white.opacity(0.8))
+            .frame(maxWidth: 420, alignment: alignment == .leading ? .leading : .center)
+        Button("Close") { read.close() }
+            .buttonStyle(PrimaryPillStyle())
+            .keyboardShortcut(.cancelAction)
+            .padding(.top, 6)
+            .accessibilityIdentifier("reader-close")
     }
 }

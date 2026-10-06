@@ -511,12 +511,14 @@ public struct ReadingSearchPresentation: Equatable, Sendable {
     }
 
     public var summary: String {
-        if showBroader && close.isEmpty { return "\(broader.count) broader results · no close matches" }
+        let closeWords = close.count == 1 ? "1 close match" : "\(close.count) close matches"
+        let broaderWords = broader.count == 1 ? "1 broader result" : "\(broader.count) broader results"
+        if showBroader && close.isEmpty { return broaderWords + " · no close matches" }
         if showBroader { return "\(close.count + broader.count) results · \(broader.count) broader" }
         if close.isEmpty && broader.isEmpty { return "No results" }
-        if close.isEmpty { return "No close matches · \(broader.count) broader results" }
-        if broader.isEmpty { return "\(close.count) close matches" }
-        return "\(close.count) close matches · \(broader.count) broader results"
+        if close.isEmpty { return "No close matches · " + broaderWords }
+        if broader.isEmpty { return closeWords }
+        return closeWords + " · " + broaderWords
     }
 }
 

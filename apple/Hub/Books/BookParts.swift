@@ -177,6 +177,8 @@ struct BookCard: View {
     /// read-along edition says that.
     private var pill: String? {
         if showKind, let kind = ReadingBookFacts.kindTag(work.kind) { return kind }
+        // A series is many books: no one format speaks for it.
+        guard !work.isSeries else { return nil }
         let formats = ReadingBookFacts.formats(work)
         if work.kind == "audiobook" || (!formats.isEmpty && !formats.contains("ebook") && formats.contains("audiobook")) {
             return "Audio"
@@ -195,7 +197,8 @@ struct BookCard: View {
                 .overlay(alignment: .topTrailing) { if work.progress?.completed == true { ReadTick().padding(6) } }
                 .litArtwork(corner: 9)
             if caption {
-                CardCaption(title: work.title, detail: detail ?? work.cardSubtitle)
+                CardCaption(title: work.title, detail: detail ?? (ReadingBookFacts.kindTag(work.kind) != nil
+                                                                  ? ReadingBookFacts.comicLine(work.progress) : work.cardSubtitle))
             }
         }
         .contentShape(Rectangle())
@@ -274,9 +277,13 @@ struct CoverFan: View {
     private static let lean: [Double] = [-13, -5, 4, 12]
     private static let step: [CGFloat] = [0, 0.333, 0.667, 0.98]
 
-    /// The fan's own size for a cover this wide.
+    /// Room either side for the outer covers' lean: a cover turned 13° about
+    /// its foot reaches a third of its width past where it stands.
+    static func inset(coverWidth: CGFloat) -> CGFloat { coverWidth * 0.36 }
+
+    /// The fan's own size for a cover this wide, its lean included.
     static func size(coverWidth: CGFloat) -> CGSize {
-        CGSize(width: coverWidth * 1.98, height: coverWidth * 1.5 + coverWidth * 0.18)
+        CGSize(width: coverWidth * 1.98 + inset(coverWidth: coverWidth) * 2, height: coverWidth * 1.5 + coverWidth * 0.18)
     }
 
     var body: some View {
@@ -289,13 +296,13 @@ struct CoverFan: View {
                     .frame(width: coverWidth)
                     .shadow(color: .black.opacity(lit ? 0.6 : 0.5), radius: lit ? 13 : 11, x: -6, y: lit ? 12 : 10)
                     .rotationEffect(.degrees(angle(slot, count: shown.count)), anchor: .bottom)
-                    .offset(x: Self.step[slot] * coverWidth, y: -4)
+                    .offset(x: Self.inset(coverWidth: coverWidth) + Self.step[slot] * coverWidth, y: -4)
                     .overlay(alignment: .bottomLeading) {
                         if lit && index == shown.count - 1 {
                             BookShape().stroke(.white, lineWidth: 3)
                                 .frame(width: coverWidth, height: coverWidth * 1.5)
                                 .rotationEffect(.degrees(angle(slot, count: shown.count)), anchor: .bottom)
-                                .offset(x: Self.step[slot] * coverWidth, y: -4)
+                                .offset(x: Self.inset(coverWidth: coverWidth) + Self.step[slot] * coverWidth, y: -4)
                         }
                     }
             }

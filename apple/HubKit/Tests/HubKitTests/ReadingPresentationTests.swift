@@ -351,6 +351,16 @@ struct ReadingPresentationTests {
         #expect(ReadingDiscoverRows.feature([silent])?.key == "a")
     }
 
+    @Test func aTitlesKindAndWhereItWasFoundReadAsWords() {
+        #expect(ReadingType.one(ReadingType.ebook) == "Ebook")
+        #expect(ReadingType.one(ReadingType.lightNovel) == "Light novel")
+        #expect(ReadingType.label(ReadingType.ebook) == "Ebooks")
+        #expect(ReadingType.one("graphic_novel") == "Graphic novel")
+        #expect(ReadingType.source("openlibrary") == "Open Library")
+        #expect(ReadingType.source("AniList") == "AniList")
+        #expect(ReadingType.source("somewhere_new") == "Somewhere new")
+    }
+
     @Test func closeResultsShowFirstAndBroaderOnesOnRequest() {
         let close = [ReadingItem(title: "Light Bringer"), ReadingItem(title: "Light Bringer: A Red Rising Novel")]
         let broader = [ReadingItem(title: "The Black Prism"), ReadingItem(title: "And They Found Dragons")]
@@ -361,6 +371,9 @@ struct ReadingPresentationTests {
         #expect(initial.toggledBroader().toggledBroader().visibleResults == close)
         let onlyBroader = ReadingSearchPresentation.forResults(close: [], broader: broader)
         #expect(onlyBroader.summary == "2 broader results · no close matches")
+        // One is one: "1 close match", "1 broader result".
+        #expect(ReadingSearchPresentation.forResults(close: [close[0]], broader: []).summary == "1 close match")
+        #expect(ReadingSearchPresentation(close: [close[0]], broader: [broader[0]]).summary == "1 close match · 1 broader result")
         #expect(onlyBroader.visibleResults == broader && !onlyBroader.canToggle)
         #expect(!ReadingSearchPresentation().hasBroaderResults)
     }

@@ -62,17 +62,20 @@ struct BooksActivityView: View {
                                                                      set: { if !$0 { cancelling = nil } }),
                             titleVisibility: .visible) {
             Button("Keep transfer", role: .cancel) { cancelling = nil }
+                .accessibilityIdentifier("keep-transfer")
             Button("Cancel transfer", role: .destructive) {
                 if let item = cancelling { Task { await run(.cancel, on: item) } }
                 cancelling = nil
             }
+            .accessibilityIdentifier("confirm-cancel")
         } message: {
             if let item = cancelling { Text("\(item.title)\nStop this transfer and delete its incomplete files.") }
         }
     }
 
+    /// What an action just did, until the transfers have settled; else the page's own line.
     private var shownStatus: StatusMessage {
-        status.text.isEmpty && !notice.isEmpty ? StatusMessage(notice) : status
+        notice.isEmpty ? status : StatusMessage(notice)
     }
 
     /// "1 downloading · 2 queued   ↓ 1.2 MB/s".
@@ -125,6 +128,7 @@ struct BooksActivityView: View {
                 status = StatusMessage(error.message + " · retrying", tone: .error)
             }
             let settling = settleUntil.map { .now < $0 } ?? false
+            if !settling && !working { notice = "" }
             guard let delay = PollSchedule.next(active: items?.contains(where: \.isActive) ?? false, failures: failures,
                                                 settling: settling) else { return }
             try? await Task.sleep(for: delay)
@@ -216,6 +220,7 @@ struct ReadingTransferRow: View {
                             Button(action == .retry ? "Retry" : "Cancel transfer") { act(action) }
                                 .buttonStyle(GlassControlStyle())
                                 .disabled(working)
+                                .accessibilityIdentifier("\(action.rawValue)-\(item.id)")
                         }
                     }
                     .padding(.top, 4)

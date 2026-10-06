@@ -189,14 +189,16 @@ struct BookView: View {
         let label = (work.isSeries ? ReadingBookFacts.seriesProgress(work) : ReadingBookFacts.progress(work)) ?? ""
         if fraction > 0 || !label.isEmpty {
             HStack(spacing: 12) {
+                // The words keep their room; the bar takes what is left, up to its own length.
                 HeroProgress(progress: fraction, accent: accent.tint)
-                    .frame(width: metrics.small ? 120 : 220)
+                    .frame(minWidth: 60, maxWidth: metrics.small ? 120 : 220)
                     .accessibilityHidden(true)
                 Text(label)
                     .font(HubType.body(13, relativeTo: .caption))
                     .foregroundStyle(.white.opacity(0.82))
                     .monospacedDigit()
                     .lineLimit(1)
+                    .fixedSize()
             }
             .frame(height: 18)
             .accessibilityElement(children: .combine)
@@ -233,62 +235,84 @@ struct BookView: View {
         } else {
             let remembered = books.entryPreference(work.id)
             let menu = ReadingFormatMenu.forWork(work, remembered: remembered)
-            HStack(spacing: metrics.small ? 8 : 10) {
-                if let choice = preview ?? menu.defaultChoice {
-                    Button {
-                        launch(work, choice, remembered: remembered)
-                    } label: {
-                        Label(menu.entryLabel(choice, remembered: remembered != nil, preview: preview),
-                              systemImage: Self.icon(choice.mode))
-                    }
-                    .buttonStyle(PrimaryPillStyle(accent: accent))
-                    .accessibilityIdentifier("book-entry")
+            // The words of Change format give way to its mark where the row would not fit.
+            ViewThatFits(in: .horizontal) {
+                actionRow(work, menu: menu, remembered: remembered, compact: false)
+                actionRow(work, menu: menu, remembered: remembered, compact: true)
+            }
+        }
+    }
+
+    private func actionRow(_ work: ReadingWork, menu: ReadingFormatMenu, remembered: ReadingEntryPreference?,
+                           compact: Bool) -> some View {
+        HStack(spacing: metrics.small ? 8 : 10) {
+            if let choice = preview ?? menu.defaultChoice {
+                Button {
+                    launch(work, choice, remembered: remembered)
+                } label: {
+                    Label(menu.entryLabel(choice, remembered: remembered != nil, preview: preview),
+                          systemImage: Self.icon(choice.mode))
+                        .lineLimit(1)
                 }
-                if menu.options.count > 1 {
-                    Menu {
-                        let current = menu.option(for: preview ?? menu.defaultChoice)?.key
-                        ForEach(menu.options) { option in
-                            Button {
-                                preview = option.choice
-                            } label: {
-                                if option.key == current {
-                                    Label("\(option.label) · \(option.detail)", systemImage: "checkmark")
-                                } else {
-                                    Text("\(option.label) · \(option.detail)")
-                                }
+                .buttonStyle(PrimaryPillStyle(accent: accent))
+                .fixedSize()
+                .accessibilityIdentifier("book-entry")
+            }
+            if menu.options.count > 1 {
+                Menu {
+                    let current = menu.option(for: preview ?? menu.defaultChoice)?.key
+                    ForEach(menu.options) { option in
+                        Button {
+                            preview = option.choice
+                        } label: {
+                            if option.key == current {
+                                Label("\(option.label) · \(option.detail)", systemImage: "checkmark")
+                            } else {
+                                Text("\(option.label) · \(option.detail)")
                             }
                         }
-                    } label: {
-                        Text("Change format")
-                    }
-                    .menuStyle(.button)
-                    .buttonStyle(GlassPillStyle())
-                    .accessibilityHint("Choose ebook, audiobook or read along")
-                }
-                let wanted = books.isWanted(work.id)
-                GlassRoundButton(systemImage: wanted ? "bookmark.fill" : "bookmark",
-                                 label: wanted ? "Remove from Want to Read" : "Add to Want to Read",
-                                 on: wanted, size: 46) {
-                    notice = books.toggleWanted(work) ? "Added to Want to Read" : "Removed from Want to Read"
-                }
-                .accessibilityIdentifier("book-want")
-                Menu {
-                    ReadingListsMenu(work: work) {
-                        listName = ""
-                        naming = true
                     }
                 } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 46, height: 46)
-                        .glassPanel(Circle())
-                        .contentShape(Circle())
+                    if compact {
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 46, height: 46)
+                            .glassPanel(Circle())
+                            .contentShape(Circle())
+                    } else {
+                        Text("Change format").lineLimit(1)
+                    }
                 }
                 .menuStyle(.button)
-                .buttonStyle(.plain)
-                .accessibilityLabel("More actions for \(work.title)")
+                .modifier(FormatMenuStyle(compact: compact))
+                .fixedSize()
+                .accessibilityLabel("Change format")
+                .accessibilityHint("Choose ebook, audiobook or read along")
             }
+            let wanted = books.isWanted(work.id)
+            GlassRoundButton(systemImage: wanted ? "bookmark.fill" : "bookmark",
+                             label: wanted ? "Remove from Want to Read" : "Add to Want to Read",
+                             on: wanted, size: 46) {
+                notice = books.toggleWanted(work) ? "Added to Want to Read" : "Removed from Want to Read"
+            }
+            .accessibilityIdentifier("book-want")
+            Menu {
+                ReadingListsMenu(work: work) {
+                    listName = ""
+                    naming = true
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .glassPanel(Circle())
+                    .contentShape(Circle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .accessibilityLabel("More actions for \(work.title)")
         }
     }
 
@@ -444,6 +468,19 @@ struct BookView: View {
     }
 }
 
+/// Change format: a glass pill with its words, or a round glass mark.
+private struct FormatMenuStyle: ViewModifier {
+    let compact: Bool
+
+    func body(content: Content) -> some View {
+        if compact {
+            content.buttonStyle(.plain)
+        } else {
+            content.buttonStyle(GlassPillStyle())
+        }
+    }
+}
+
 /// A link under a book's title: a small glass pill (`.chip`).
 struct LinkPillStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -548,8 +585,11 @@ struct IssueStrip: View {
                         Button {
                             read(.pages(work: work, publication: item))
                         } label: {
+                            // At its own height: a lazy row offers every card the first
+                            // one's, and a two-line caption then shrank its cover.
                             IssueCard(item: item, kind: work.kind, fallback: work.artwork)
                                 .frame(width: metrics.small ? 92 : 104)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .buttonStyle(GlassCardStyle())
                         .disabled(!ReadingWorkPresentation.canRead(kind: kind, sourceItemId: item.sourceItemId))
@@ -600,10 +640,12 @@ struct IssueCard: View {
                 .font(HubType.body(13, weight: .bold, relativeTo: .footnote))
                 .foregroundStyle(.white)
                 .lineLimit(1)
+            // "24 pages · Not started" is wider than a cover: two lines, not "Not st…".
             Text(ReadingBookFacts.issueLine(item))
                 .font(HubType.body(11.5, relativeTo: .caption2))
                 .foregroundStyle(progress > 0 && progress < 1 ? accent.tint : .white.opacity(0.6))
-                .lineLimit(1)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)

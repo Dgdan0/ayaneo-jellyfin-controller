@@ -205,6 +205,13 @@ struct ReadingLibraryView: View {
         .onAppear {
             guard !ready else { return }
             view = canShowAuthors ? books.libraryView : .series
+            #if DEBUG
+            // scripts/mac.sh: HUB_SHEET=view:authors (or series, books) opens a library on that view.
+            if let sheet = ProcessInfo.processInfo.environment["HUB_SHEET"], sheet.hasPrefix("view:"),
+               let chosen = BooksModel.LibraryView(rawValue: String(sheet.dropFirst(5))), canShowAuthors || chosen != .authors {
+                view = chosen
+            }
+            #endif
             sort = view == .books ? books.bookSort(fields: fields.map(\.id))
                 : view == .authors ? SortPreference(field: "author", ascending: true)
                 : books.seriesSort(fields: gridFields.map(\.id))
@@ -217,6 +224,8 @@ struct ReadingLibraryView: View {
             items: BooksModel.LibraryView.allCases.map { GlassCapsulePicker<BooksModel.LibraryView>.Item(id: $0, title: $0.title) },
             selection: view) { chosen in show(chosen) }
             .fixedSize()
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("library-views")
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 10) {
                 if canShowAuthors { capsule }
