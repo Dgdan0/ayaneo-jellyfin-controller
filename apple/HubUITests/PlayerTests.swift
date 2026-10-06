@@ -148,4 +148,60 @@ final class PlayerTests: XCTestCase {
         app.buttons["Back"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 5))
     }
+
+    /// As on the Pocket (#24): a drag across the picture scrubs, with the time
+    /// it lands on and how far over the timeline, and letting go seeks there;
+    /// dragging the timeline itself shows where it lands, without how far.
+    @MainActor
+    func testADragAcrossThePictureScrubsAndLettingGoSeeks() {
+        let app = launchPlaying(holdingFeedback: true)
+        let timeline = app.descendants(matching: .any).matching(identifier: "player-timeline").firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 10), "the timeline is missing")
+        // The video's length is known once the timeline stops reading "… of 0:00".
+        XCTAssertTrue(waitUntil(15) { !Self.value(of: timeline).hasSuffix(" of 0:00") }, "the video's length never came")
+
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.3))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.3)))
+        let preview = app.descendants(matching: .any).matching(identifier: "player-scrub").firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 5), "a drag across the picture showed no preview")
+        let words = preview.label
+        XCTAssertTrue(words.contains(", +"), "the preview did not say how far the drag went: \(words)")
+        let landed = Self.seconds(words.components(separatedBy: ", ").first ?? "")
+        XCTAssertGreaterThan(landed, 30, "half the picture's width moved the video only to \(words)")
+        // Letting go sought there: the timeline reads it, give or take what has played since.
+        XCTAssertTrue(waitUntil(10) {
+            let now = Self.seconds(Self.value(of: timeline).components(separatedBy: " of ").first ?? "")
+            return now >= landed - 2 && now <= landed + 20
+        }, "the video did not move to \(words): the timeline reads \(Self.value(of: timeline))")
+
+        // Along the timeline: only where it lands.
+        timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)))
+        XCTAssertTrue(waitUntil(5) { preview.exists && !preview.label.contains(",") },
+                      "dragging the timeline showed \(preview.label)")
+
+        app.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 5))
+    }
+
+    /// Asks `condition` every quarter of a second until it holds or `seconds` pass.
+    @MainActor
+    private func waitUntil(_ seconds: TimeInterval, _ condition: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(seconds)
+        while Date() < end {
+            if condition() { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        return condition()
+    }
+
+    @MainActor
+    private static func value(of element: XCUIElement) -> String { element.value as? String ?? "" }
+
+    /// "1:42" or "1:02:03" in seconds; -1 for anything else.
+    private static func seconds(_ clock: String) -> Int {
+        let parts = clock.trimmingCharacters(in: .whitespaces).split(separator: ":").compactMap { Int($0) }
+        guard (2...3).contains(parts.count) else { return -1 }
+        return parts.reduce(0) { $0 * 60 + $1 }
+    }
 }

@@ -20,9 +20,15 @@ import SwiftUI
 /// Android, and stays while paused or while a panel is open. Space, ← and →
 /// play, pause and step ten seconds from a keyboard; Escape closes a panel,
 /// then leaves. As on the Pocket (#24), a double tap on either half of the
-/// picture steps back or on, and on iOS an up-or-down drag sets the
-/// brightness on the left half and the player's volume on the right.
+/// picture steps back or on; a drag across it scrubs, showing the time it
+/// lands on, how far that is and the frame there over the timeline, and
+/// letting go seeks (a click-drag on the Mac); and on iOS an up-or-down drag
+/// sets the brightness on the left half and the player's volume on the
+/// right. Dragging the timeline itself shows the time and the frame.
 struct PlayerView: View {
+    /// The player's own coordinates: the screen's, safe area and all.
+    nonisolated static let space = "player"
+
     let player: PlayerModel
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
@@ -42,10 +48,22 @@ struct PlayerView: View {
     @State private var seekShown: PlayerSeekShown?
     @State private var levelShown: PlayerLevelShown?
     @State private var gestureHiding: Task<Void, Never>?
-    /// A drag on the picture, decided once at its first movement: which half
-    /// it sets and from what level, or nothing for a drag across.
-    @State private var levelDrag: (side: PlayerGestures.Side, start: Double)?
+    /// A drag on the picture, decided once at its first movement: across
+    /// scrubs, up or down sets a level (`PlayerGestures.drag`).
+    @State private var pictureDrag: PlayerGestures.Drag?
     @State private var dragDecided = false
+    /// An up-or-down drag: which half it sets and from what level.
+    @State private var levelDrag: (side: PlayerGestures.Side, start: Double)?
+    /// A drag across the picture: where the video was when it began.
+    @State private var scrubFrom: Int64?
+    /// Where a scrub lands, over the timeline; it stays a moment after
+    /// letting go, as on the Pocket.
+    @State private var scrubShown: PlayerScrubShown?
+    @State private var scrubHiding: Task<Void, Never>?
+    /// The timeline's track and the top of its bar in the player's own space,
+    /// for the preview over them.
+    @State private var timelineFrame = CGRect.zero
+    @State private var timelineBarTop: CGFloat = 0
     @FocusState private var keys: Bool
 
     /// Debug builds: HUB_PLAY_CHROME=pinned keeps the chrome up for screenshots.
@@ -96,9 +114,7 @@ struct PlayerView: View {
                     .contentShape(Rectangle())
                     .onTapGesture(count: 2) { location in doubleTapped(at: location, width: screen.width) }
                     .onTapGesture(perform: tapped)
-                    #if os(iOS)
-                    .simultaneousGesture(levelGesture(size: screen))
-                    #endif
+                    .simultaneousGesture(pictureGesture(size: screen))
                 if showsChrome {
                     chrome(layout).transition(.opacity)
                 }
@@ -112,6 +128,9 @@ struct PlayerView: View {
                 }
                 if let levelShown {
                     PlayerLevelBar(shown: levelShown, inset: layout.side + 24).transition(.opacity)
+                }
+                if let scrubShown {
+                    scrubPreview(scrubShown, layout: layout, screen: screen).transition(.opacity)
                 }
                 if locked && unlockShown {
                     GlassRoundButton(systemImage: "lock.open.fill", label: "Unlock controls", size: layout.round) { unlock() }
@@ -134,6 +153,7 @@ struct PlayerView: View {
                     .frame(maxHeight: .infinity, alignment: .top)
                 #endif
             }
+            .coordinateSpace(.named(Self.space))
             .ignoresSafeArea()
             .animation(.easeOut(duration: 0.2), value: showsChrome)
             .animation(.easeOut(duration: 0.25), value: player.upNext == nil)
@@ -193,6 +213,7 @@ struct PlayerView: View {
                                                  "video": [.video], "chapters": [.chapters]]
             panels = name.flatMap { tour[$0] } ?? []
         }
+        .task(id: player.durationMillis > 0) { await showDebugScrub() }
         #endif
         .accessibilityAddTraits(.isModal)
     }
@@ -392,10 +413,15 @@ struct PlayerView: View {
         return VStack(spacing: layout.phone ? 7 : 10) {
             PlayerTimeline(positionMillis: position, durationMillis: duration, bufferedMillis: player.bufferedMillis,
                            marks: duration > 0 ? chapters.map { Double($0.positionMillis) / Double(duration) }.filter { $0 > 0 } : [],
-                           scrub: $scrub, seek: { target in
+                           scrub: timelineScrub, seek: { target in
                                player.seek(to: target)
                                scheduleHide()
                            }, adjust: { delta in act { player.seek(by: delta) } })
+                .onGeometryChange(for: CGRect.self) { proxy in
+                    proxy.frame(in: .named(Self.space))
+                } action: { frame in
+                    timelineFrame = frame
+                }
             HStack {
                 Text(PlayerLabels.positionLine(positionMillis: position, chapterName: chapter))
                 Spacer(minLength: 12)
@@ -410,6 +436,11 @@ struct PlayerView: View {
         .padding(.horizontal, layout.phone ? 14 : 18)
         .padding(.vertical, layout.phone ? 10 : 14)
         .glassPanel(RoundedRectangle(cornerRadius: layout.phone ? 18 : 24, style: .continuous))
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.frame(in: .named(Self.space)).minY
+        } action: { top in
+            timelineBarTop = top
+        }
     }
 
     /// Above the timeline's bar at the right: Skip intro while an intro (or a
@@ -541,34 +572,157 @@ struct PlayerView: View {
                                    side: PlayerGestures.side(x: location.x, width: width)))
     }
 
-    #if os(iOS)
-    /// An up-or-down drag: the screen's brightness on the left half, the
-    /// player's volume on the right, with the level as a small bar.
-    private func levelGesture(size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 12, coordinateSpace: .local)
+    /// A drag on the picture, decided by its first movement (#24, as on the
+    /// Pocket): across, it scrubs and letting go seeks; up or down, on iOS, it
+    /// sets the screen's brightness on the left half and the player's volume
+    /// on the right, with the level as a small bar. A click-drag on the Mac
+    /// scrubs the same way.
+    private func pictureGesture(size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: PlayerGestures.slop, coordinateSpace: .local)
             .onChanged { value in
                 if !dragDecided {
-                    dragDecided = true
-                    guard !locked, panels.isEmpty, player.plan != nil,
-                          PlayerGestures.isVertical(dx: value.translation.width, dy: value.translation.height)
+                    // Within a tap's wobble it waits for more movement.
+                    guard let kind = PlayerGestures.drag(dx: value.translation.width, dy: value.translation.height)
                     else { return }
-                    let side = PlayerGestures.side(x: value.startLocation.x, width: size.width)
-                    levelDrag = (side, side == .left ? player.brightness : player.volume)
+                    dragDecided = true
+                    guard !locked, panels.isEmpty, player.plan != nil else { return }
+                    beginDrag(kind, at: value.startLocation, width: size.width)
                 }
-                guard let drag = levelDrag else { return }
-                let left = drag.side == .left
-                let level = PlayerGestures.level(start: drag.start, dy: value.translation.height, height: size.height,
-                                                 floor: left ? PlayerGestures.brightnessFloor : 0)
-                if left { player.setBrightness(level) } else { player.setVolume(level) }
-                show(level: PlayerLevelShown(kind: left ? .brightness : .volume, value: level, side: drag.side))
+                switch pictureDrag {
+                case .across?: scrubbed(dx: value.translation.width, width: size.width)
+                case .upDown?: leveled(dy: value.translation.height, height: size.height)
+                case nil: break
+                }
             }
-            .onEnded { _ in
+            .onEnded { value in
+                switch pictureDrag {
+                case .across?: finishScrub(dx: value.translation.width, width: size.width)
+                case .upDown?: hideGestureSoon(after: 0.7)
+                case nil: break
+                }
                 dragDecided = false
+                pictureDrag = nil
                 levelDrag = nil
-                hideGestureSoon(after: 0.7)
             }
     }
+
+    private func beginDrag(_ kind: PlayerGestures.Drag, at start: CGPoint, width: CGFloat) {
+        switch kind {
+        case .across:
+            guard player.durationMillis > 0 else { return }
+            pictureDrag = .across
+            scrubFrom = player.positionMillis
+            gestureHiding?.cancel()
+            seekShown = nil
+            levelShown = nil
+            // The timeline comes up and stays while the drag lasts: the
+            // preview stands over it and its thumb follows.
+            hiding?.cancel()
+            chromeShown = true
+        case .upDown:
+            #if os(iOS)
+            pictureDrag = .upDown
+            let side = PlayerGestures.side(x: start.x, width: width)
+            levelDrag = (side, side == .left ? player.brightness : player.volume)
+            #endif
+        }
+    }
+
+    /// Where a drag across lands, as the timeline's thumb and the preview.
+    private func scrubbed(dx: CGFloat, width: CGFloat) {
+        guard let from = scrubFrom, player.durationMillis > 0 else { return }
+        let target = PlayerGestures.scrubTarget(startMillis: from, dx: dx, width: width,
+                                                durationMillis: player.durationMillis)
+        let share = Double(target) / Double(player.durationMillis)
+        scrub = share
+        showScrub(PlayerScrubShown(targetMillis: target, deltaMillis: target - from, share: share))
+    }
+
+    private func finishScrub(dx: CGFloat, width: CGFloat) {
+        guard let from = scrubFrom else { return }
+        let target = PlayerGestures.scrubTarget(startMillis: from, dx: dx, width: width,
+                                                durationMillis: player.durationMillis)
+        player.seek(to: target)
+        scrubFrom = nil
+        scrub = nil
+        hideScrubSoon()
+        scheduleHide()
+    }
+
+    private func leveled(dy: CGFloat, height: CGFloat) {
+        #if os(iOS)
+        guard let drag = levelDrag else { return }
+        let left = drag.side == .left
+        let level = PlayerGestures.level(start: drag.start, dy: dy, height: height,
+                                         floor: left ? PlayerGestures.brightnessFloor : 0)
+        if left { player.setBrightness(level) } else { player.setVolume(level) }
+        show(level: PlayerLevelShown(kind: left ? .brightness : .volume, value: level, side: drag.side))
+        #endif
+    }
+
+    /// The preview over the point of the timeline the scrub lands on, just
+    /// above the timeline's bar; until the bar has been laid out, in the middle
+    /// above where it will be.
+    private func scrubPreview(_ shown: PlayerScrubShown, layout: PlayerLayout, screen: CGSize) -> some View {
+        let width = PlayerScrubPreview.width(compact: layout.phone)
+        let track = timelineFrame
+        let measured = track.width > 0 && timelineBarTop > 0
+        let center = measured
+            ? PlayerGestures.scrubCardCenter(share: shown.share, trackMinX: track.minX, trackWidth: track.width,
+                                             cardWidth: width, screenWidth: screen.width)
+            : screen.width / 2
+        let above = measured ? max(0, screen.height - timelineBarTop + 8) : layout.bottom + layout.bottomBarHeight + 8
+        return PlayerScrubPreview(shown: shown, previewUrl: player.plan?.previewUrl ?? "", compact: layout.phone)
+            .padding(.bottom, above)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .offset(x: center - width / 2)
+            .allowsHitTesting(false)
+    }
+
+    #if DEBUG
+    /// Debug builds: HUB_PLAY_SCRUB=<seconds> holds a drag across the picture
+    /// that far from where the video is, for screenshots of the preview over
+    /// the timeline (`scripts/mac.sh shot` and `mac-shot`).
+    private func showDebugScrub() async {
+        guard let seconds = ProcessInfo.processInfo.environment["HUB_PLAY_SCRUB"].flatMap(Int64.init),
+              player.durationMillis > 0 else { return }
+        try? await Task.sleep(for: .seconds(1.5))
+        guard !Task.isCancelled else { return }
+        let duration = player.durationMillis
+        let target = PlaybackRules.clampSeek(player.positionMillis + seconds * 1_000, durationMillis: duration)
+        let share = Double(target) / Double(duration)
+        chromeShown = true
+        scrub = share
+        showScrub(PlayerScrubShown(targetMillis: target, deltaMillis: target - player.positionMillis, share: share))
+    }
     #endif
+
+    /// The timeline's own drag: its thumb, and the preview of where it lands
+    /// without how far, which only a drag across the picture says.
+    private var timelineScrub: Binding<Double?> {
+        Binding(get: { scrub }, set: { share in
+            scrub = share
+            guard let share else { return hideScrubSoon() }
+            let target = Int64((share * Double(player.durationMillis)).rounded())
+            showScrub(PlayerScrubShown(targetMillis: target, deltaMillis: nil, share: share))
+        })
+    }
+
+    private func showScrub(_ shown: PlayerScrubShown) {
+        scrubHiding?.cancel()
+        scrubShown = shown
+    }
+
+    /// Gone a moment after letting go, so the time it landed on is read.
+    private func hideScrubSoon() {
+        scrubHiding?.cancel()
+        guard !holdsFeedback else { return }
+        scrubHiding = Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) { scrubShown = nil }
+        }
+    }
 
     private func show(seek: PlayerSeekShown) {
         levelShown = nil

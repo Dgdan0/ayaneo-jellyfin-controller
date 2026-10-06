@@ -266,9 +266,9 @@ public enum PlaybackRules {
 }
 
 /// The player's gestures on the picture (#24), as the Pocket's: a double tap
-/// on either half seeks back or forward by the step, and an up-or-down drag
-/// sets the brightness on the left half and the player's volume on the right,
-/// each shown as a small bar.
+/// on either half seeks back or forward by the step, a drag across scrubs,
+/// and an up-or-down drag sets the brightness on the left half and the
+/// player's volume on the right, each shown as a small bar.
 public enum PlayerGestures {
     public enum Side: Equatable, Sendable { case left, right }
 
@@ -283,10 +283,43 @@ public enum PlayerGestures {
         side(x: x, width: width) == .left ? -step : step
     }
 
-    /// An up-or-down drag: well past a tap's wobble and clearly more vertical
-    /// than across.
-    public static func isVertical(dx: Double, dy: Double) -> Bool {
-        abs(dy) >= 12 && abs(dy) > abs(dx) * 1.5
+    /// What a drag on the picture does, decided once by its first movement
+    /// (Android's `PlayerGestureView`): across scrubs, up or down sets a level.
+    public enum Drag: Equatable, Sendable { case across, upDown }
+
+    /// A tap's wobble: a drag is decided once it has moved further than this.
+    public static let slop = 10.0
+
+    /// Across when it has moved at least as far across as up or down; nil
+    /// while it is still within a tap's wobble.
+    public static func drag(dx: Double, dy: Double) -> Drag? {
+        guard max(abs(dx), abs(dy)) > slop else { return nil }
+        return abs(dx) >= abs(dy) ? .across : .upDown
+    }
+
+    /// Where a drag across the picture lands: `dx` points of a picture
+    /// `width` wide, from `startMillis` (`PlaybackRules.scrubTarget`: the
+    /// whole width is a third of the video, from two to twenty minutes).
+    public static func scrubTarget(startMillis: Int64, dx: Double, width: Double, durationMillis: Int64) -> Int64 {
+        PlaybackRules.scrubTarget(startMillis: startMillis, dragFraction: width > 0 ? dx / width : 0,
+                                  durationMillis: durationMillis)
+    }
+
+    /// The middle of the scrub preview, `cardWidth` wide, over the point of the
+    /// timeline it lands on (`share` along a track from `trackMinX`,
+    /// `trackWidth` long), kept `margin` inside a screen `screenWidth` wide.
+    public static func scrubCardCenter(share: Double, trackMinX: Double, trackWidth: Double, cardWidth: Double,
+                                       screenWidth: Double, margin: Double = 8) -> Double {
+        let point = trackMinX + min(max(share, 0), 1) * trackWidth
+        let lowest = margin + cardWidth / 2
+        let highest = screenWidth - margin - cardWidth / 2
+        return highest < lowest ? screenWidth / 2 : min(highest, max(lowest, point))
+    }
+
+    /// The scrub preview's words, for VoiceOver and the UI tests: where it
+    /// lands, and from a drag across the picture how far that is ("2:20, +1:20").
+    public static func scrubLabel(targetMillis: Int64, deltaMillis: Int64?) -> String {
+        ([Fmt.clock(targetMillis)] + (deltaMillis.map { [PlayerLabels.signedTime($0)] } ?? [])).joined(separator: ", ")
     }
 
     /// A level from 0 to 1 after a drag of `dy` points (down is positive)

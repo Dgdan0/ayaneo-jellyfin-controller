@@ -80,3 +80,77 @@ struct PlayerLevelBar: View {
         .accessibilityIdentifier("player-level")
     }
 }
+
+/// Where a scrub lands (#24): from a drag across the picture or along the
+/// timeline. `deltaMillis` is how far the drag across moved it, nil from the
+/// timeline; `share` is the point along the timeline it lands on.
+struct PlayerScrubShown: Equatable {
+    let targetMillis: Int64
+    let deltaMillis: Int64?
+    let share: Double
+}
+
+/// The scrub's preview, as the Pocket's: the hub's frame there, the time it
+/// lands on and, from a drag across the picture, how far that is in the
+/// accent ("+1:20"). Until the first frame comes it is the time alone, and
+/// each frame stays until the next has come, so a drag never flickers to
+/// an empty box.
+struct PlayerScrubPreview: View {
+    let shown: PlayerScrubShown
+    /// The session's frame route (`previewUrl`); empty when it has none.
+    let previewUrl: String
+    let compact: Bool
+    @Environment(AppModel.self) private var model
+    @Environment(\.glassAccent) private var accent
+    @State private var frame: DecodedArtwork?
+
+    static func width(compact: Bool) -> CGFloat { compact ? 156 : 188 }
+
+    private var bucket: Int64 { PlaybackEnhancements.frameMillis(shown.targetMillis) }
+
+    var body: some View {
+        let width = Self.width(compact: compact)
+        VStack(spacing: 7) {
+            if let frame {
+                Image(decorative: frame.image, scale: 1)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: width - 20, height: (width - 20) * 9 / 16)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .transition(.opacity)
+            }
+            HStack(spacing: 10) {
+                Text(Fmt.clock(shown.targetMillis))
+                    .font(HubType.body(compact ? 16 : 17, weight: .bold, relativeTo: .headline))
+                if let delta = shown.deltaMillis {
+                    Text(PlayerLabels.signedTime(delta))
+                        .font(HubType.body(13, weight: .semibold, relativeTo: .subheadline))
+                        .foregroundStyle(accent.tint)
+                }
+            }
+            .monospacedDigit()
+            .lineLimit(1)
+        }
+        .padding(10)
+        .frame(width: width)
+        .glassPanel(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(PlayerGestures.scrubLabel(targetMillis: shown.targetMillis, deltaMillis: shown.deltaMillis))
+        .accessibilityIdentifier("player-scrub")
+        .accessibilityAddTraits(.updatesFrequently)
+        .task(id: bucket) { await load() }
+    }
+
+    private func load() async {
+        guard !previewUrl.isEmpty else { return }
+        // Asked for once the drag rests a moment (Android's 180 ms): a drag
+        // crosses many of the hub's five-second frames, and it extracts each
+        // one it is asked for.
+        try? await Task.sleep(for: .milliseconds(180))
+        guard !Task.isCancelled else { return }
+        let path = HubEndpoints.playbackPreview(previewUrl, positionMillis: bucket)
+        // A frame that cannot be had leaves the last one there.
+        guard let loaded = await loadArtwork(model.hub, request: path, maxPixels: 360), !Task.isCancelled else { return }
+        withAnimation(.easeOut(duration: 0.15)) { frame = loaded }
+    }
+}

@@ -62,6 +62,10 @@ struct PlaybackEnhancementsTests {
         #expect(PlaybackEnhancements.chapterFrameMillis(startMillis: 0, endMillis: 12_000) == 0)
         // The last chapter, with no end known.
         #expect(PlaybackEnhancements.chapterFrameMillis(startMillis: 1_616_000, endMillis: 0) == 1_630_000)
+        // A scrub asks for the frame at the start of its five seconds.
+        #expect(PlaybackEnhancements.frameMillis(84_999) == 80_000)
+        #expect(PlaybackEnhancements.frameMillis(85_000) == 85_000)
+        #expect(PlaybackEnhancements.frameMillis(-300) == 0)
     }
 
     @Test func aSegmentBelongsToTheChapterItStartsWith() {

@@ -99,8 +99,9 @@ struct PlayerPlayDisc: View {
 
 /// The timeline (`.pl-line`): what has loaded in faint white, what has played
 /// in white, a notch where each chapter starts, and a thumb with a soft ring.
-/// Dragging moves only the thumb and the time under it; letting go seeks
-/// there, so a stream is not asked for every position on the way.
+/// Dragging moves only the thumb, the time under it and the player's preview
+/// of the frame there (`PlayerScrubPreview`); letting go seeks there, so a
+/// stream is not asked for every position on the way.
 struct PlayerTimeline: View {
     let positionMillis: Int64
     let durationMillis: Int64
@@ -145,6 +146,7 @@ struct PlayerTimeline: View {
         .frame(height: 22)
         .accessibilityElement()
         .accessibilityLabel("Position")
+        .accessibilityIdentifier("player-timeline")
         .accessibilityValue("\(Fmt.clock(positionMillis)) of \(Fmt.clock(durationMillis))")
         .accessibilityAdjustableAction { direction in
             switch direction {
