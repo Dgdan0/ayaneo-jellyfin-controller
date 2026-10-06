@@ -18,12 +18,13 @@ final class PlayerTests: XCTestCase {
     /// The app with the player open on the demo's Bleach S1E5, its chrome held
     /// up; `width` lays it out in a window that narrow (`HUB_WIDTH`).
     @MainActor
-    private func launchPlaying(width: Int? = nil) -> XCUIApplication {
+    private func launchPlaying(width: Int? = nil, holdingFeedback: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo"]
         app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "media",
                                  "HUB_PLAY": "demo-e5", "HUB_PLAY_CHROME": "pinned"]
         if let width { app.launchEnvironment["HUB_WIDTH"] = String(width) }
+        if holdingFeedback { app.launchEnvironment["HUB_PLAY_FEEDBACK"] = "hold" }
         app.launch()
         XCTAssertTrue(app.buttons["Lock controls"].waitForExistence(timeout: 15), "the player did not open")
         XCTAssertTrue(app.staticTexts["Bleach"].exists)
@@ -96,6 +97,54 @@ final class PlayerTests: XCTestCase {
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(heading.waitForNonExistence(timeout: 5), "the panel did not close")
         XCTAssertTrue(app.buttons["Pause"].waitForExistence(timeout: 5), "the video stopped when the device turned")
+        app.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 5))
+    }
+
+    /// Another language is asked for with the version playing (#24): the demo
+    /// hub, like Jellyfin, will not apply a track without it.
+    @MainActor
+    func testAnotherLanguageIsAskedForWithTheVersionPlaying() {
+        let app = launchPlaying()
+        app.buttons["Audio & subtitles"].firstMatch.tap()
+        let english = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@",
+                                                       "English", "Stereo")).firstMatch
+        XCTAssertTrue(english.waitForExistence(timeout: 5), "the audio tracks are missing")
+        english.tap()
+        XCTAssertTrue(english.wait(for: \.isSelected, toEqual: true, timeout: 10),
+                      "English was not chosen: the hub refused a track without its version")
+        app.buttons["Close"].firstMatch.tap()
+        app.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 5))
+    }
+
+    /// As on the Pocket (#24): a double tap on the right steps on and on the
+    /// left back, and an up-or-down drag sets the volume on the right half and
+    /// the brightness on the left, each shown as a small bar.
+    @MainActor
+    func testADoubleTapStepsAndADragSetsTheVolumeAndTheBrightness() {
+        let app = launchPlaying(holdingFeedback: true)
+        // Above the middle row and below it: the picture with nothing on it.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.3)).doubleTap()
+        let on = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "+0:10")).firstMatch
+        XCTAssertTrue(on.waitForExistence(timeout: 5), "a double tap on the right did not step on")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.3)).doubleTap()
+        let back = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "\u{2212}0:10")).firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "a double tap on the left did not step back")
+
+        // Whatever kind of element the bar is exposed as.
+        let level = app.descendants(matching: .any).matching(identifier: "player-level").firstMatch
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.35))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.65)))
+        XCTAssertTrue(level.waitForExistence(timeout: 5), "a drag down on the right showed no level")
+        XCTAssertTrue(level.label.hasPrefix("Volume"), "the right half set \(level.label)")
+        XCTAssertNotEqual(level.label, "Volume, 100%", "a drag down did not lower the volume")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.65))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.4)))
+        let brightness = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", "player-level", "Brightness")).firstMatch
+        XCTAssertTrue(brightness.waitForExistence(timeout: 5), "a drag up on the left showed no brightness")
+
         app.buttons["Back"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 5))
     }

@@ -160,8 +160,12 @@ upright), `678` (half sideways) and `981` (two thirds sideways): debug builds la
 window that wide, compact below 660 as Apple's table has it. The Mac's windows are checked with
 `scripts/mac.sh mac-shot 760x560` and `1440x860`: the app opens a fresh window of that size, draws
 it into its container (a screenshot over SSH needs Screen Recording, which stays off) and quits.
+A sheet open on the window is drawn over it where it sits, since on the Mac it is a window of its
+own; `-demo` goes after AppKit's own arguments, or the app opens a stray "YES" as a document.
 The Mac's Debug build is `com.dgdan.jellyhub.debug`: the TestFlight copy in `/Applications` owns
-the plain id's container, and macOS keeps another app's container from an SSH session.
+the plain id's container, and macOS keeps another app's container from an SSH session. The Mac's
+disk is small: `scripts/mac.sh shots-prune` deletes the build copy's pictures older than two hours,
+which every run has already copied back.
 
 ## Discover, search and requests (#17)
 
@@ -208,7 +212,8 @@ hub (`-demo`) answers every one of these calls, for the UI tests.
 | Player wording, the up-next card, seeking and the end | HubKit `PlayerLabels`, `UpNext`, `PlaybackRules` (Android's, with their tests); the card is `UpNextCardView` |
 | Pages reading their progress again after playback | `@Environment(\.playbackClosed)`, which changes once the stop and the close have reached the hub |
 | The panels (Audio & subtitles, This video, Chapters and their pages) | `Playback/PlayerPanels`: `PlayerSheet` with `SheetGroup`, `SheetRow`, `SheetLabel`, `SheetNote`; opened by pills, round icons or one menu as `PlayerLayout.panelButtons` decides |
-| Another track, quality or version | `PlayerModel.change` through `select`; it plays on when `PlaybackChoices.sameStream`, else reopens where it was |
+| Another track, quality or version | `PlayerModel.change` through `select`; it plays on when `PlaybackChoices.sameStream`, else reopens where it was. Every select body comes from HubKit `PlaybackRules.selection`, which names the version playing: Jellyfin applies a track only with its source (#24), and the demo hub refuses one without it |
+| The picture's gestures: a double tap's step, the brightness and volume drags | HubKit `PlayerGestures` (sides, the step, what counts as up-or-down, the level a drag sets); drawn by `Playback/PlayerTouch` (`PlayerSeekBubble`, `PlayerLevelBar`); the drags on iOS only, the screen's brightness put back when the player closes (#24) |
 | The choice kept per profile and series or film, the subtitle look for every video | HubKit `PlaybackChoices` (Android's `PlaybackPreferences`), stored by `Playback/PlaybackMemory` |
 | Subtitles the app draws | HubKit `SubtitleParser` (SRT, WebVTT, ASS as text; a broken block is skipped) and `SubtitleTimeline`; drawn by `SubtitleOverlay`; the delay is `SubtitleTimingPolicy` |
 | Chapters, Skip intro, where subtitles sit | HubKit `PlaybackEnhancements` (Android's, with its tests); the notches are `ChapterNotches` |

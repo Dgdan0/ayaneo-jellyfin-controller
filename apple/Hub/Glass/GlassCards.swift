@@ -34,6 +34,18 @@ struct GlassMetrics: Equatable {
     var rowTitle: CGFloat { small ? 18 : 19 }
 }
 
+extension GlassMetrics {
+    /// A title page's (TitleView, MediaTitleView): phone-sideways placement
+    /// and title where the words must start under the bars
+    /// (`ShellLayout.titleWordsUnderBars`), else these.
+    func forTitlePage(size: CGSize, safe: EdgeInsets) -> GlassMetrics {
+        var page = self
+        page.short = ShellLayout.titleWordsUnderBars(width: size.width, height: size.height + safe.top + safe.bottom,
+                                                     short: short)
+        return page
+    }
+}
+
 extension EnvironmentValues {
     @Entry var glassMetrics = GlassMetrics()
     /// Whether the card this view belongs to is lit: a pointer resting on it,

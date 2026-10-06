@@ -11,10 +11,12 @@ import Synchronization
 /// to skip and the credits. A change of track, quality or version is kept
 /// per session, as the hub keeps it, so a second change keeps the first.
 ///
-/// Stricter than the hub on one point (#2): it refuses a prepare that does not
-/// name AVPlayer's containers and ask for fMP4 HLS, which the hub would serve
-/// with the Pocket's Media3 profile. So every UI test that plays proves the
-/// app sends them.
+/// Stricter than the hub on two points, so the UI tests that play prove what
+/// the app sends: it refuses a prepare that does not name AVPlayer's
+/// containers and ask for fMP4 HLS (#2), which the hub would serve with the
+/// Pocket's Media3 profile; and a select that changes a track without naming
+/// the version it belongs to (#24), which Jellyfin takes and then converts the
+/// default track again.
 enum DemoPlayback {
     /// fMP4 HLS, H.264 and AAC, about ten minutes.
     static let stream = "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8"
@@ -50,6 +52,9 @@ enum DemoPlayback {
             choices.withLock { $0[sessionId(number)] = Choice() }
             return DemoTransport.Answer(200, plan(number: number, choice: Choice()))
         case ("POST", "sessions", "select"):
+            guard namesItsVersion(body) else {
+                return DemoTransport.Answer(400, #"{"error":{"code":"invalid_request","message":"Name the version a track belongs to (#24)"}}"#)
+            }
             let session = parts[3]
             let choice = choices.withLock { all in
                 var choice = all[session] ?? Choice()
@@ -84,6 +89,14 @@ enum DemoPlayback {
               let containers = capabilities["containers"] as? [String] else { return false }
         return containers.contains("mp4") && !containers.contains("mkv")
             && (capabilities["hlsSegments"] as? String)?.lowercased() == "fmp4"
+    }
+
+    /// A select changing the audio or the subtitles names the media source
+    /// they belong to, as Jellyfin needs to apply them.
+    static func namesItsVersion(_ body: Data?) -> Bool {
+        guard let body, let fields = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return false }
+        let changesTrack = fields["audioStreamIndex"] != nil || fields["subtitleStreamIndex"] != nil
+        return !changesTrack || !((fields["mediaSourceId"] as? String) ?? "").isEmpty
     }
 
     private static let episodes = [4: "Cursed Parakeet", 5: "Beat the Invisible Enemy!", 6: "Fight to the Death! Ichigo vs. Ichigo"]

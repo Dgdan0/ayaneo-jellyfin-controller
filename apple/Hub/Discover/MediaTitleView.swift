@@ -43,17 +43,19 @@ struct MediaTitleView: View {
 
     var body: some View {
         GeometryReader { proxy in
+            // A small Mac window lays the words out as a phone turned sideways does.
+            let page = metrics.forTitlePage(size: proxy.size, safe: proxy.safeAreaInsets)
             ScrollView {
                 ZStack(alignment: .top) {
                     FadedArtwork.title(backdrop)
-                        .frame(height: metrics.short ? proxy.size.height + proxy.safeAreaInsets.top
-                               : (metrics.compact ? 470 : 590))
+                        .frame(height: page.short ? proxy.size.height + proxy.safeAreaInsets.top
+                               : (page.compact ? 470 : 590))
                         .frame(maxWidth: .infinity)
                         .clipped()
                     VStack(alignment: .leading, spacing: 0) {
-                        header
-                            .padding(.top, metrics.short ? proxy.safeAreaInsets.top + 10
-                                     : max(metrics.compact ? 290 : 236, proxy.safeAreaInsets.top + 120))
+                        header(page)
+                            .padding(.top, page.short ? proxy.safeAreaInsets.top + 10
+                                     : max(page.compact ? 290 : 236, proxy.safeAreaInsets.top + 120))
                             .padding(.horizontal, metrics.margin)
                         StatusLine(message: shownStatus) { reloads += 1 }
                             .padding(.horizontal, metrics.margin)
@@ -87,7 +89,7 @@ struct MediaTitleView: View {
 
     // MARK: Header
 
-    private var header: some View {
+    private func header(_ page: GlassMetrics) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             let eyebrow = TitleFacts.eyebrow(availability)
             Text(detail == nil ? " " : eyebrow.text)
@@ -95,8 +97,8 @@ struct MediaTitleView: View {
                 .tracking(1.75)
                 .foregroundStyle(eyebrow.accent ? accent.tint : .white.opacity(0.72))
             Text(detail?.media.title ?? route.title)
-                .font(HubType.heading(metrics.heroTitle, weight: .heavy))
-                .tracking(-0.02 * metrics.heroTitle)
+                .font(HubType.heading(page.heroTitle, weight: .heavy))
+                .tracking(-0.02 * page.heroTitle)
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 .minimumScaleFactor(0.6)

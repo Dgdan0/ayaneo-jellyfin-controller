@@ -209,6 +209,23 @@ public enum PlaybackRules {
         Quality(label: "2 Mbps", bitrate: 2_000_000),
     ]
 
+    /// A change to what plays (a track, the quality, a conversion, a version)
+    /// as the hub's select takes it, naming the version playing unless the
+    /// change is another version: Android's `PlaybackRules.selection` (#24).
+    /// Jellyfin applies an audio or subtitle stream index only with the media
+    /// source it belongs to; without one it converted the default track again,
+    /// so a language chosen in the player never reached the sound (Bleach S1E6
+    /// on Apple, 2026-10-05).
+    public static func selection(_ plan: PlaybackPrepareResponse, positionMillis: Int64? = nil,
+                                 mediaSourceId: String? = nil, audioStreamIndex: Int? = nil,
+                                 subtitleStreamIndex: Int? = nil, maxBitrate: Int? = nil,
+                                 forceTranscode: Bool? = nil) -> PlaybackSelectBody {
+        PlaybackSelectBody(positionMillis: positionMillis ?? plan.positionMillis,
+                           mediaSourceId: mediaSourceId ?? (plan.selectedMediaSourceId.isEmpty ? nil : plan.selectedMediaSourceId),
+                           audioStreamIndex: audioStreamIndex, subtitleStreamIndex: subtitleStreamIndex,
+                           maxBitrate: maxBitrate, forceTranscode: forceTranscode)
+    }
+
     /// A held seek goes further the longer it is held.
     public static func seekStep(repeatCount: Int) -> Int64 {
         repeatCount >= 12 ? 60_000 : repeatCount >= 5 ? 30_000 : 10_000
@@ -245,6 +262,50 @@ public enum PlaybackRules {
         let offset = thumbnail % perTile
         return TrickplayFrame(thumbnailIndex: thumbnail, tileIndex: thumbnail / perTile,
                               column: offset % info.tileWidth, row: offset / info.tileWidth)
+    }
+}
+
+/// The player's gestures on the picture (#24), as the Pocket's: a double tap
+/// on either half seeks back or forward by the step, and an up-or-down drag
+/// sets the brightness on the left half and the player's volume on the right,
+/// each shown as a small bar.
+public enum PlayerGestures {
+    public enum Side: Equatable, Sendable { case left, right }
+
+    /// The Pocket's default step. The Apple app has no Settings › Playback
+    /// yet, so this is the step.
+    public static let seekStepMillis: Int64 = 10_000
+
+    public static func side(x: Double, width: Double) -> Side { x < width / 2 ? .left : .right }
+
+    /// What a double tap at `x` seeks by: back on the left half, on on the right.
+    public static func doubleTapSeek(x: Double, width: Double, step: Int64 = seekStepMillis) -> Int64 {
+        side(x: x, width: width) == .left ? -step : step
+    }
+
+    /// An up-or-down drag: well past a tap's wobble and clearly more vertical
+    /// than across.
+    public static func isVertical(dx: Double, dy: Double) -> Bool {
+        abs(dy) >= 12 && abs(dy) > abs(dx) * 1.5
+    }
+
+    /// A level from 0 to 1 after a drag of `dy` points (down is positive)
+    /// that began at `start`: up raises it, and a drag over 60% of the
+    /// picture's height takes it from nothing to all. Brightness keeps a
+    /// little light (`floor`), as the Pocket's does at 2%.
+    public static func level(start: Double, dy: Double, height: Double, floor: Double = 0) -> Double {
+        guard height > 0 else { return start }
+        return min(1, max(floor, start - dy / (height * 0.6)))
+    }
+
+    public static let brightnessFloor = 0.02
+
+    /// "60%".
+    public static func percent(_ level: Double) -> String { "\(Int((min(max(level, 0), 1) * 100).rounded()))%" }
+
+    /// The double tap's words: "−0:10 · 12:34", where it lands.
+    public static func seekFeedback(deltaMillis: Int64, targetMillis: Int64) -> String {
+        PlayerLabels.signedTime(deltaMillis) + "  ·  " + Fmt.clock(targetMillis)
     }
 }
 

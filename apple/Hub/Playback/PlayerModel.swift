@@ -248,6 +248,9 @@ final class PlayerModel {
         #endif
         poll?.cancel()
         poll = nil
+        #if os(iOS)
+        restoreBrightness()
+        #endif
         if let pip, pip.isPictureInPictureActive { pip.stopPictureInPicture() }
         pip = nil
         pipObserver = nil
@@ -366,8 +369,8 @@ final class PlayerModel {
             // This profile's last audio and subtitles for the series or film,
             // asked for before the first frame, as Android does.
             if let wanted = wantedTracks(plan) {
-                let choose = PlaybackSelectBody(positionMillis: plan.positionMillis, audioStreamIndex: wanted.audio,
-                                                subtitleStreamIndex: wanted.subtitle)
+                let choose = PlaybackRules.selection(plan, audioStreamIndex: wanted.audio,
+                                                     subtitleStreamIndex: wanted.subtitle)
                 if let chosen = try? await hub.fetch(HubEndpoints.selectPlayback(sessionId: plan.sessionId, body: choose, user: user),
                                                      as: PlaybackPrepareResponse.self) {
                     plan = chosen
@@ -553,7 +556,7 @@ final class PlayerModel {
         fallbackTried = true
         phase = .opening
         let at = max(positionMillis, plan.positionMillis)
-        let body = PlaybackSelectBody(positionMillis: at, forceTranscode: true)
+        let body = PlaybackRules.selection(plan, positionMillis: at, forceTranscode: true)
         let request = HubEndpoints.selectPlayback(sessionId: plan.sessionId, body: body, user: user)
         let generation = generation
         Task {
@@ -608,6 +611,39 @@ final class PlayerModel {
         }
     }
 
+    // MARK: Volume and brightness (the picture's up-and-down drags, #24)
+
+    /// The player's own volume, 0…1: iOS lets an app set no other.
+    var volume: Double { Double(player.volume) }
+
+    func setVolume(_ value: Double) {
+        player.volume = Float(min(max(value, 0), 1))
+    }
+
+    #if os(iOS)
+    /// The screen's brightness before the first drag, put back on leaving, so
+    /// the setting lasts only while watching, as the Pocket's dimming does.
+    @ObservationIgnored private var brightnessBefore: Double?
+
+    private var screen: UIScreen? {
+        (UIApplication.shared.connectedScenes.first { $0 is UIWindowScene } as? UIWindowScene)?.screen
+    }
+
+    var brightness: Double { Double(screen?.brightness ?? 0.5) }
+
+    func setBrightness(_ value: Double) {
+        guard let screen else { return }
+        if brightnessBefore == nil { brightnessBefore = Double(screen.brightness) }
+        screen.brightness = CGFloat(min(max(value, 0), 1))
+    }
+
+    private func restoreBrightness() {
+        guard let before = brightnessBefore else { return }
+        brightnessBefore = nil
+        screen?.brightness = CGFloat(before)
+    }
+    #endif
+
     // MARK: Tracks, quality and version (This video, Audio & subtitles)
 
     func chooseAudio(_ track: PlaybackTrack) {
@@ -642,9 +678,13 @@ final class PlayerModel {
     private func change(_ body: PlaybackSelectBody, failed: @escaping @MainActor () -> Void = {}) {
         guard let plan, let hub, !applying else { return }
         applying = true
-        var body = body
         let at = positionMillis
-        body.positionMillis = at
+        // Named with the version playing (#24): Jellyfin applies a track only
+        // with the source it belongs to.
+        let body = PlaybackRules.selection(plan, positionMillis: at, mediaSourceId: body.mediaSourceId,
+                                           audioStreamIndex: body.audioStreamIndex,
+                                           subtitleStreamIndex: body.subtitleStreamIndex, maxBitrate: body.maxBitrate,
+                                           forceTranscode: body.forceTranscode)
         let wasPlaying = isPlaying
         let generation = generation
         let request = HubEndpoints.selectPlayback(sessionId: plan.sessionId, body: body, user: user)

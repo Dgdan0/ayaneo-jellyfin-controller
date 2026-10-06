@@ -154,6 +154,52 @@ struct PlaybackRulesTests {
     }
 }
 
+/// Android's `PlaybackRules.selection` cases (#24): every select names the
+/// version playing, or the one asked for.
+struct PlaybackSelectionTests {
+    let plan = PlaybackPrepareResponse(positionMillis: 5_000, selectedMediaSourceId: "source-1")
+
+    @Test func aTrackChangeNamesTheVersionPlaying() {
+        let audio = PlaybackRules.selection(plan, positionMillis: 61_000, audioStreamIndex: 2)
+        #expect(audio == PlaybackSelectBody(positionMillis: 61_000, mediaSourceId: "source-1", audioStreamIndex: 2))
+        let subtitles = PlaybackRules.selection(plan, subtitleStreamIndex: -1)
+        #expect(subtitles.mediaSourceId == "source-1" && subtitles.positionMillis == 5_000)
+        #expect(PlaybackRules.selection(plan, maxBitrate: 5_000_000).mediaSourceId == "source-1")
+        #expect(PlaybackRules.selection(plan, forceTranscode: true).mediaSourceId == "source-1")
+    }
+
+    @Test func anotherVersionIsNamedItselfAndAPlanWithoutOneNamesNone() {
+        #expect(PlaybackRules.selection(plan, mediaSourceId: "source-2").mediaSourceId == "source-2")
+        #expect(PlaybackRules.selection(PlaybackPrepareResponse(), audioStreamIndex: 1).mediaSourceId == nil)
+    }
+}
+
+/// The player's gestures on the picture (#24).
+struct PlayerGestureTests {
+    @Test func aDoubleTapSeeksBackOnTheLeftHalfAndOnOnTheRight() {
+        #expect(PlayerGestures.doubleTapSeek(x: 100, width: 1_000) == -10_000)
+        #expect(PlayerGestures.doubleTapSeek(x: 499.9, width: 1_000) == -10_000)
+        #expect(PlayerGestures.doubleTapSeek(x: 500, width: 1_000) == 10_000)
+        #expect(PlayerGestures.doubleTapSeek(x: 900, width: 1_000, step: 30_000) == 30_000)
+        #expect(PlayerGestures.seekFeedback(deltaMillis: -10_000, targetMillis: 754_000) == "\u{2212}0:10  ·  12:34")
+    }
+
+    @Test func onlyAClearlyUpOrDownDragSetsALevel() {
+        #expect(PlayerGestures.isVertical(dx: 2, dy: -40))
+        #expect(!PlayerGestures.isVertical(dx: 30, dy: -40))
+        #expect(!PlayerGestures.isVertical(dx: 0, dy: 8))
+    }
+
+    @Test func upRaisesALevelAndSixtyPercentOfTheHeightIsAllOfIt() {
+        #expect(PlayerGestures.level(start: 0.5, dy: -300, height: 1_000) == 1)
+        #expect(abs(PlayerGestures.level(start: 0.5, dy: 60, height: 1_000) - 0.4) < 1e-9)
+        #expect(PlayerGestures.level(start: 0.1, dy: 600, height: 1_000) == 0)
+        #expect(PlayerGestures.level(start: 0.1, dy: 600, height: 1_000, floor: PlayerGestures.brightnessFloor) == 0.02)
+        #expect(PlayerGestures.percent(0.456) == "46%")
+        #expect(PlayerGestures.percent(1.2) == "100%")
+    }
+}
+
 /// What a session tells the hub, and when (Android's `PlaybackService`).
 struct PlaybackReporterTests {
     @Test func theFirstPlayIsStartedAndEveryLaterOneUnpaused() {
@@ -389,6 +435,14 @@ struct DemoPlaybackTests {
         try await hub.send(HubEndpoints.closePlayback(sessionId: plan.sessionId, user: ""))
     }
 
+    /// So the UI tests that change a track prove the app names its version (#24).
+    @Test func theDemoRefusesATrackWithoutTheVersionItBelongsTo() async throws {
+        #expect(!DemoPlayback.namesItsVersion(HubEndpoints.json(PlaybackSelectBody(positionMillis: 0, audioStreamIndex: 2))))
+        #expect(DemoPlayback.namesItsVersion(HubEndpoints.json(
+            PlaybackSelectBody(positionMillis: 0, mediaSourceId: "demo-1080", audioStreamIndex: 2))))
+        #expect(DemoPlayback.namesItsVersion(HubEndpoints.json(PlaybackSelectBody(positionMillis: 0, maxBitrate: 2_000_000))))
+    }
+
     /// So the UI tests that play prove the app sends #2's profile.
     @Test func theDemoRefusesAPrepareWithoutAVPlayersContainersAndFMP4() async throws {
         let hub = HubClient(credentials: HubCredentials(baseURL: DemoTransport.address, token: DemoTransport.token),
@@ -416,17 +470,17 @@ struct DemoPlaybackTests {
                                        as: PlaybackPrepareResponse.self)
         #expect(plan.selectedSubtitleIndex == nil && plan.selectedAudioIndex == 1)
         let subtitles = try await hub.fetch(HubEndpoints.selectPlayback(
-            sessionId: plan.sessionId, body: PlaybackSelectBody(positionMillis: 5_000, subtitleStreamIndex: 4), user: ""),
+            sessionId: plan.sessionId, body: PlaybackRules.selection(plan, positionMillis: 5_000, subtitleStreamIndex: 4), user: ""),
             as: PlaybackPrepareResponse.self)
         #expect(subtitles.item.episodeNumber == 4 && subtitles.selectedSubtitleIndex == 4)
         #expect(PlaybackChoices.sameStream(plan, subtitles))
         let audio = try await hub.fetch(HubEndpoints.selectPlayback(
-            sessionId: plan.sessionId, body: PlaybackSelectBody(positionMillis: 5_000, audioStreamIndex: 2), user: ""),
+            sessionId: plan.sessionId, body: PlaybackRules.selection(plan, positionMillis: 5_000, audioStreamIndex: 2), user: ""),
             as: PlaybackPrepareResponse.self)
         #expect(audio.selectedAudioIndex == 2 && audio.selectedSubtitleIndex == 4)
         // A lower quality is a conversion at an address of its own.
         let lower = try await hub.fetch(HubEndpoints.selectPlayback(
-            sessionId: plan.sessionId, body: PlaybackSelectBody(positionMillis: 5_000, maxBitrate: 5_000_000), user: ""),
+            sessionId: plan.sessionId, body: PlaybackRules.selection(plan, positionMillis: 5_000, maxBitrate: 5_000_000), user: ""),
             as: PlaybackPrepareResponse.self)
         #expect(lower.playMethod == "Transcode" && !PlaybackChoices.sameStream(audio, lower))
         // Its subtitle files read as subtitles, and a chapter's frame is a picture.
