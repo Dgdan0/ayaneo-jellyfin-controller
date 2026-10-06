@@ -45,6 +45,14 @@ enum AppRoute: Hashable {
     case person(PersonRoute)
     case releaseTargets(ReleaseTargetsRoute)
     case releases(ReleasesRoute)
+    // The Books side (#25).
+    case readingLibrary(ReadingLibraryRoute)
+    case book(BookRoute)
+    case author(AuthorRoute)
+    case missingBook(MissingBookRoute)
+    case bookRequest(BookRequestRoute)
+    case readingReleases(ReadingReleasesRoute)
+    case listen(ListenRoute)
 
     /// What the back pill calls this page from the one above it.
     var name: String {
@@ -56,6 +64,13 @@ enum AppRoute: Hashable {
         case .person(let route): route.name
         case .releaseTargets: "Find releases"
         case .releases: "Releases"
+        case .readingLibrary(let route): route.library.title
+        case .book(let route): route.title
+        case .author(let route): route.name
+        case .missingBook(let route): route.item.title
+        case .bookRequest(let route): route.item.title
+        case .readingReleases: "Releases"
+        case .listen(let route): route.title
         }
     }
 }
@@ -88,6 +103,15 @@ struct OpenRouteAction {
 
 extension EnvironmentValues {
     @Entry var openRoute = OpenRouteAction()
+    @Entry var selectSection = SelectSectionAction()
+}
+
+/// Goes to one of the sections, as its tab does: a request's Open Library and
+/// Open Transfers (#25).
+struct SelectSectionAction {
+    var select: @MainActor (AppSection) -> Void = { _ in }
+
+    @MainActor func callAsFunction(_ section: AppSection) { select(section) }
 }
 
 /// What the shell shows besides the pages: the profiles, the bell's count
@@ -175,6 +199,12 @@ struct MainView: View {
     @State private var shell = ShellModel()
     /// The player, over the whole window while something plays.
     @State private var player = PlayerModel()
+    /// The Books side's lists, ways and orders (#25).
+    @State private var books = BooksModel()
+    /// A book being read, over the whole window (#25 phases 3 and 4).
+    @State private var reading: ReadRequest?
+    /// Counts the readers closed, so pages read their progress again.
+    @State private var readersClosed = 0
     @State private var profilesOpen = false
     @State private var sheetPlaces = false
     /// The Mac's window buttons sit over the page under its hidden title bar:
@@ -186,6 +216,8 @@ struct MainView: View {
     @State private var debugPlay = ""
 
     private var key: StackKey { StackKey(side: side, section: section) }
+    /// Something over the pages and bars: the player or a reader.
+    private var covered: Bool { player.isOpen || reading != nil }
     private var pages: [AppRoute] { paths[key] ?? [] }
 
     var body: some View {
@@ -208,11 +240,11 @@ struct MainView: View {
                         .allowsHitTesting(shown)
                         // A section out of sight keeps its pages but not its
                         // keyboard shortcuts.
-                        .disabled(!shown || player.isOpen)
-                        .accessibilityHidden(!shown || player.isOpen)
+                        .disabled(!shown || covered)
+                        .accessibilityHidden(!shown || covered)
                 }
                 topBar(metrics)
-                    .accessibilityHidden(player.isOpen)
+                    .accessibilityHidden(covered)
                 if !metrics.wide {
                     ShellTabBar(section: section, short: metrics.short, select: select)
                         // An iPad mini in portrait is wider than a phone: the
@@ -222,7 +254,7 @@ struct MainView: View {
                         .padding(.bottom, metrics.tabBarBottom)
                         .frame(maxHeight: .infinity, alignment: .bottom)
                         .ignoresSafeArea(edges: .bottom)
-                        .accessibilityHidden(player.isOpen)
+                        .accessibilityHidden(covered)
                 }
                 // Over the bars too; the pages under it keep their places.
                 if player.isOpen {
@@ -230,8 +262,14 @@ struct MainView: View {
                         .transition(.opacity)
                         .zIndex(1)
                 }
+                if let reading, !player.isOpen {
+                    ReaderHost(request: reading)
+                        .transition(.opacity)
+                        .zIndex(2)
+                }
             }
             .animation(.easeOut(duration: 0.25), value: player.isOpen)
+            .animation(.easeOut(duration: 0.25), value: reading?.id)
             #if DEBUG && os(macOS)
             .onChange(of: windowButtons) { _, _ in
                 let line = "safe area top \(metrics.safe.top), bar from \(metrics.safe.top + metrics.barTop), "
@@ -265,6 +303,16 @@ struct MainView: View {
         .environment(ambient)
         .environment(\.play, PlayAction { request in player.open(request, app: model) })
         .environment(\.playbackClosed, player.closedCount)
+        .environment(books)
+        .environment(\.read, ReadAction(open: { request in reading = request }, close: {
+            reading = nil
+            readersClosed += 1
+        }))
+        .environment(\.readerClosed, readersClosed)
+        .environment(\.selectSection, SelectSectionAction { target in select(target) })
+        .onChange(of: "\(model.address)\u{0}\(model.userId)", initial: true) { _, _ in
+            books.use(address: model.address, userId: model.userId)
+        }
         .environment(\.glassPalette, model.colors.palette(for: ambient.displayed))
         .environment(\.glassAccent, AccentPreset.defaultFor(side))
         .onChange(of: key, initial: true) { _, latest in open(latest) }
@@ -327,6 +375,10 @@ struct MainView: View {
         case (.media?, .home): HomeView()
         case (.media?, .discover): DiscoverView()
         case (.media?, .library): LibraryView()
+        case (.books?, .home): BooksHomeView()
+        case (.books?, .discover): BooksDiscoverView()
+        case (.books?, .library): BooksLibraryView()
+        case (.books?, .activity): BooksActivityView()
         case (_, .services): ServicesView()
         case (_, .settings): SettingsView()
         default: ComingNextView(side: stackKey.side, section: stackKey.section)
@@ -343,6 +395,14 @@ struct MainView: View {
         case .person(let person): PersonView(route: person)
         case .releaseTargets(let targets): ReleaseTargetsView(route: targets)
         case .releases(let releases): ReleasesView(route: releases)
+        case .readingLibrary(let library): ReadingLibraryView(route: library)
+        case .book(let book): BookView(route: book)
+        case .author(let author): AuthorView(route: author)
+        case .missingBook(let missing): MissingBookView(route: missing)
+        case .bookRequest(let request): BookRequestView(route: request)
+        case .readingReleases(let releases): ReadingReleasesView(route: releases)
+        case .listen(let listen): ComingNextView(title: listen.title, systemImage: "headphones",
+                                                 detail: "Audiobooks play here next, with their place kept as the Pocket keeps it.")
         }
     }
 
