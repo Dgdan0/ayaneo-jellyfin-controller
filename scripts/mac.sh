@@ -12,6 +12,8 @@
 #                                   turn the simulators' Reduce transparency on or off
 #   scripts/mac.sh uitest           the UI tests on the iPhone simulator, against -demo
 #                                   (UITEST_ONLY=<Class>[/<test>] runs one alone)
+#   scripts/mac.sh quit             end JellyHub on the simulators (SHOT_SIMS, or all three)
+#                                   and the Mac's Debug build, and nothing else
 #   scripts/mac.sh shots-prune [minutes]
 #                                   delete the build copy's screenshots older than that
 #                                   (120); each run has already copied its own back
@@ -276,6 +278,19 @@ turn() {
     echo "$orientation" > "$SHOTS/.turned-$udid"
     echo "$name: $orientation"
   done < <(selected_sims)
+}
+
+# Nothing of ours is left running when a session ends: `sims` and `shot`
+# leave the app open on each simulator. Only JellyHub's own id is ended;
+# the simulators stay booted and anything else on them is left alone.
+quit_app() {
+  while IFS= read -r name; do
+    local udid
+    udid="$(find_udid "$name")" || continue
+    xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
+    echo "$name: JellyHub ended"
+  done < <(selected_sims)
+  pkill -f "$(app_mac)/Contents/MacOS/JellyHub" >/dev/null 2>&1 || true
 }
 
 # Screenshots in the build copy older than MINUTES (120 by default) are
@@ -553,10 +568,11 @@ case "${1:-build}" in
   transparency) shift; transparency "$@" ;;
   uitest) uitest ;;
   turn) shift; turn "$@" ;;
+  quit) quit_app ;;
   shots-prune) shift; shots_prune "$@" ;;
   mac) shift; mac "$@" ;;
   mac-shot) shift; mac_shot "$@" ;;
   testflight) testflight ;;
   logs) xcrun simctl spawn booted log stream --level debug --predicate "subsystem == '$BUNDLE_ID' OR process == 'Hub'" ;;
-  *) sed -n '2,45p' "$0"; exit 2 ;;
+  *) sed -n '2,48p' "$0"; exit 2 ;;
 esac
