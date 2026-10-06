@@ -49,7 +49,7 @@ struct ComicReaderScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.closeReader) private var closeReader
     @Environment(\.scenePhase) private var scenePhase
-    @State private var pad = ComicPadInput()
+    @State private var pad = ReaderPadInput()
     @State private var scrubbing: Int?
     @State private var scrubTrack = CGRect.zero
     @FocusState private var keys: Bool

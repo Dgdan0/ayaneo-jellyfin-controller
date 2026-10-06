@@ -44,7 +44,9 @@
 # HUB_PLAY_TOUR=1 (its panels open in turn), HUB_PLAY_SUBTITLE=<language>,
 # HUB_PLAY_SCRUB=<seconds> (a drag across the picture held that far on),
 # HUB_READ=<work id>/<issue id> (the comic reader, with -demo only: rw_demo_ff/rw_demo_ff-51),
-# HUB_READ_CHROME=pinned, HUB_READ_PAGE=<n>, HUB_READ_SHEET=display|keys|pages|end and,
+# HUB_READ_CHROME=pinned, HUB_READ_PAGE=<n>, HUB_READ_SHEET=display|keys|pages|end,
+# HUB_BOOK=<work id>/<edition id> (the ebook reader, with -demo only: rw_demo_rr6/rr6),
+# HUB_BOOK_CHROME=pinned, HUB_BOOK_AT=<percent>, HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys and,
 # with -demo, HUB_PLAY_FROM_END=<seconds>. SHOT_SIMS="iPad Pro (12.9-inch) (4th generation),iPhone 17 Pro Max"
 # limits sims and shot to those simulators, and HUB_WIDTH=375 lays the app out
 # in a window that wide, as an iPad's Split View would; SHOT_STATE names the screenshots
@@ -158,6 +160,10 @@ launch_sim() {
     echo "HUB_READ opens the reader only with -demo"
     exit 2
   fi
+  if [[ -n "${HUB_BOOK:-}" && " $* " != *" -demo "* ]]; then
+    echo "HUB_BOOK opens the reader only with -demo"
+    exit 2
+  fi
   xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
   # SIMCTL_CHILD_ variables reach the app's environment without the token
   # ever being written into the simulator.
@@ -169,7 +175,9 @@ launch_sim() {
     SIMCTL_CHILD_HUB_PLAY_TOUR="${HUB_PLAY_TOUR:-}" SIMCTL_CHILD_HUB_PLAY_SUBTITLE="${HUB_PLAY_SUBTITLE:-}" \
     SIMCTL_CHILD_HUB_PLAY_SCRUB="${HUB_PLAY_SCRUB:-}" SIMCTL_CHILD_HUB_READ="${HUB_READ:-}" \
     SIMCTL_CHILD_HUB_READ_CHROME="${HUB_READ_CHROME:-}" SIMCTL_CHILD_HUB_READ_PAGE="${HUB_READ_PAGE:-}" \
-    SIMCTL_CHILD_HUB_READ_SHEET="${HUB_READ_SHEET:-}" \
+    SIMCTL_CHILD_HUB_READ_SHEET="${HUB_READ_SHEET:-}" SIMCTL_CHILD_HUB_BOOK="${HUB_BOOK:-}" \
+    SIMCTL_CHILD_HUB_BOOK_CHROME="${HUB_BOOK_CHROME:-}" SIMCTL_CHILD_HUB_BOOK_AT="${HUB_BOOK_AT:-}" \
+    SIMCTL_CHILD_HUB_BOOK_SHEET="${HUB_BOOK_SHEET:-}" \
     SIMCTL_CHILD_HUB_WIDTH="${HUB_WIDTH:-}" SIMCTL_CHILD_HUB_ORIENT="$(cat "$SHOTS/.turned-$udid" 2>/dev/null)" \
     xcrun simctl launch "$udid" "$BUNDLE_ID" $(launch_args "$@") >/dev/null
 }
@@ -373,7 +381,7 @@ mac_shot() {
     echo "mac-shot opens the player only with -demo"
     exit 2
   fi
-  if [[ -n "${HUB_READ:-}" && " $* " != *" -demo "* ]]; then
+  if [[ -n "${HUB_READ:-}${HUB_BOOK:-}" && " $* " != *" -demo "* ]]; then
     echo "mac-shot opens the reader only with -demo"
     exit 2
   fi
@@ -381,7 +389,8 @@ mac_shot() {
     HUB_OPEN="${HUB_OPEN:-}" HUB_SHEET="${HUB_SHEET:-}" HUB_WINDOW="$size" HUB_SNAPSHOT="${SHOT_WAIT:-8}" \
     HUB_PLAY="${HUB_PLAY:-}" HUB_PLAY_CHROME="${HUB_PLAY_CHROME:-}" HUB_PLAY_SCRUB="${HUB_PLAY_SCRUB:-}" \
     HUB_READ="${HUB_READ:-}" HUB_READ_CHROME="${HUB_READ_CHROME:-}" HUB_READ_PAGE="${HUB_READ_PAGE:-}" \
-    HUB_READ_SHEET="${HUB_READ_SHEET:-}" \
+    HUB_READ_SHEET="${HUB_READ_SHEET:-}" HUB_BOOK="${HUB_BOOK:-}" HUB_BOOK_CHROME="${HUB_BOOK_CHROME:-}" \
+    HUB_BOOK_AT="${HUB_BOOK_AT:-}" HUB_BOOK_SHEET="${HUB_BOOK_SHEET:-}" \
     nohup "$app" -ApplePersistenceIgnoreState YES $(launch_args "$@") > "$DERIVED/mac-app.log" 2>&1 < /dev/null &
   pid=$!
   for _ in $(seq 1 90); do
@@ -594,5 +603,5 @@ case "${1:-build}" in
   mac-shot) shift; mac_shot "$@" ;;
   testflight) testflight ;;
   logs) xcrun simctl spawn booted log stream --level debug --predicate "subsystem == '$BUNDLE_ID' OR process == 'Hub'" ;;
-  *) sed -n '2,52p' "$0"; exit 2 ;;
+  *) sed -n '2,54p' "$0"; exit 2 ;;
 esac

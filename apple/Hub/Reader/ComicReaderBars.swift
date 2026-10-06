@@ -122,27 +122,13 @@ struct ComicReaderBars: View {
         .glassPanel(RoundedRectangle(cornerRadius: layout.corner, style: .continuous))
     }
 
-    /// What the controller's main keys do now (`ReaderPadMap.hints`); a tap
-    /// on a chip does it, as the key would.
+    /// What the controller's main keys do now (`ReaderPadMap.hints`), each
+    /// chip a button too: the readers' shared row, which keeps to the keys'
+    /// caps where their words would be cut short (an iPhone upright).
     private var hintRow: some View {
         var state = reader.padState
         state.controlsVisible = true
-        return HStack(spacing: 14) {
-            ForEach(ReaderPadMap.hints(state), id: \.glyph) { hint in
-                Button { reader.pad(hint.action) } label: {
-                    HStack(spacing: 5) {
-                        Text(hint.glyph).font(HubType.chrome(13, weight: .bold))
-                        Text(hint.label).font(HubType.chrome(12, weight: .semibold))
-                    }
-                    .lineLimit(1)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.white.opacity(0.85))
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .glassPanel(Capsule())
+        return ReaderHintRow(hints: ReaderPadMap.hints(state)) { reader.pad($0) }
     }
 
     /// A control as the bar shows it: a pill on a wide bar where it has a

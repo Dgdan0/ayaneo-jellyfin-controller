@@ -61,8 +61,9 @@ struct RootView: View {
         .task { await DebugWindow.apply() }
         #endif
         #if DEBUG
-        // HUB_READ opens the comic reader at launch, with -demo only.
+        // HUB_READ opens the comic reader at launch, and HUB_BOOK the ebook reader, with -demo only.
         .modifier(ComicReaderDebugLaunch())
+        .modifier(BookReaderDebugLaunch())
         #endif
     }
 }

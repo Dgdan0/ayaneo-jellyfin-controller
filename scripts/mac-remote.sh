@@ -83,7 +83,9 @@ run() {
   # opens its panels in turn, HUB_PLAY_SUBTITLE=eng turns those subtitles on,
   # HUB_PLAY_SCRUB=100 holds a drag across the picture 100 seconds on).
   # HUB_READ=rw_demo_ff/rw_demo_ff-51 opens the comic reader, with -demo only
-  # (HUB_READ_CHROME=pinned, HUB_READ_PAGE=<n>, HUB_READ_SHEET=display|keys|pages|end).
+  # (HUB_READ_CHROME=pinned, HUB_READ_PAGE=<n>, HUB_READ_SHEET=display|keys|pages|end), and
+  # HUB_BOOK=rw_demo_rr6/rr6 the ebook reader, with -demo only (HUB_BOOK_CHROME=pinned,
+  # HUB_BOOK_AT=<percent>, HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys).
   # SHOT_SIMS names the simulators to use, comma-separated (all three by
   # default), SHOT_STATE names the screenshots and SHOT_TIMES takes several,
   # that many seconds after launch. `turn landscape` turns the simulators, and
@@ -98,7 +100,9 @@ run() {
     HUB_PLAY_TOUR=$(printf '%q' "${HUB_PLAY_TOUR:-}") HUB_PLAY_SUBTITLE=$(printf '%q' "${HUB_PLAY_SUBTITLE:-}") \
     HUB_PLAY_SCRUB=$(printf '%q' "${HUB_PLAY_SCRUB:-}") HUB_READ=$(printf '%q' "${HUB_READ:-}") \
     HUB_READ_CHROME=$(printf '%q' "${HUB_READ_CHROME:-}") HUB_READ_PAGE=$(printf '%q' "${HUB_READ_PAGE:-}") \
-    HUB_READ_SHEET=$(printf '%q' "${HUB_READ_SHEET:-}") \
+    HUB_READ_SHEET=$(printf '%q' "${HUB_READ_SHEET:-}") HUB_BOOK=$(printf '%q' "${HUB_BOOK:-}") \
+    HUB_BOOK_CHROME=$(printf '%q' "${HUB_BOOK_CHROME:-}") HUB_BOOK_AT=$(printf '%q' "${HUB_BOOK_AT:-}") \
+    HUB_BOOK_SHEET=$(printf '%q' "${HUB_BOOK_SHEET:-}") \
     HUB_WIDTH=$(printf '%q' "${HUB_WIDTH:-}") \
     SHOT_SIMS=$(printf '%q' "${SHOT_SIMS:-}") SHOT_WAIT=$(printf '%q' "${SHOT_WAIT:-3}") \
     SHOT_STATE=$(printf '%q' "${SHOT_STATE:-}") SHOT_TIMES=$(printf '%q' "${SHOT_TIMES:-}") \

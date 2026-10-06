@@ -25,6 +25,12 @@ settings:
 packages:
   HubKit:
     path: HubKit
+  # The ebook reader (#25, phase 4): Readium's Swift toolkit, pinned to one
+  # release. Its navigator is UIKit, so the app takes it on iOS only.
+  # Licences: THIRD_PARTY_SOFTWARE.md and Hub/Resources/Licenses.
+  Readium:
+    url: https://github.com/readium/swift-toolkit.git
+    exactVersion: 3.11.0
 targets:
   Hub:
     type: application
@@ -33,6 +39,15 @@ targets:
       - path: Hub
     dependencies:
       - package: HubKit
+      - package: Readium
+        product: ReadiumShared
+        destinationFilters: [iOS]
+      - package: Readium
+        product: ReadiumStreamer
+        destinationFilters: [iOS]
+      - package: Readium
+        product: ReadiumNavigator
+        destinationFilters: [iOS]
     # The Mac's sandbox and outgoing network. macOS only: App Store Connect
     # refuses an iOS build signed with macOS entitlements (ITMS-90046).
     entitlements:

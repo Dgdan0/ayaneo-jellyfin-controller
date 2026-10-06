@@ -1,0 +1,265 @@
+#if os(iOS)
+@preconcurrency import ReadiumNavigator
+@preconcurrency import ReadiumShared
+@preconcurrency import ReadiumStreamer
+import HubKit
+import UIKit
+import WebKit
+
+/// Where the page is, as the reader needs it: Readium's locator as JSON, and
+/// the parts of it the menu and the pace read.
+struct BookPlaceOnPage: Equatable {
+    let json: String
+    let href: String
+    let title: String?
+    let progression: Double
+    let totalProgression: Double?
+}
+
+/// A line of the contents: a part of the book, how deep it sits, and the
+/// place it opens (a Readium locator as JSON).
+struct BookContentsRow: Identifiable, Equatable {
+    let id: Int
+    let depth: Int
+    let title: String
+    let href: String
+    let locator: String
+}
+
+/// The book as Readium has it (#25, phase 4): the EPUB opened from the file
+/// the reader downloaded, and Readium's navigator over it. This is the one
+/// file that speaks Readium; the model and the views get strings, numbers
+/// and closures, so SwiftUI's `Color`, `Link` and `TextAlignment` never meet
+/// Readium's.
+@MainActor
+final class BookNavigator: NSObject {
+    /// What opening the file gave: the publication and what the reader reads from it.
+    struct Loaded {
+        let publication: Publication
+        let sections: BookSections
+        let contents: [BookContentsRow]
+        /// Each part's file, in reading order.
+        let readingOrder: [String]
+    }
+
+    var onPlace: (BookPlaceOnPage) -> Void = { _ in }
+    /// A note reference was followed: the note's words, for the card.
+    var onNote: (String) -> Void = { _ in }
+    /// A link in the book is being followed (a note's own "Go to the note" too).
+    var onFollowLink: () -> Void = {}
+    /// The navigator jumped somewhere, for whatever reason.
+    var onJump: () -> Void = {}
+    /// A link out of the book was tapped; it is not opened.
+    var onExternalLink: () -> Void = {}
+    /// A tap on the page, how far across it, 0 to 1.
+    var onTap: (Double) -> Void = { _ in }
+    var onKey: (ReaderKey) -> Void = { _ in }
+    /// Part of the book could not be read.
+    var onFailure: (String) -> Void = { _ in }
+
+    private var publication: Publication?
+    private var controller: EPUBNavigatorViewController?
+    /// The note whose card is open: where "Go to the note" goes.
+    private var noteLink: ReadiumShared.Link?
+
+    /// Opens the EPUB at `file`: its publication, its parts and their
+    /// positions, and its contents. Off the main actor, where Readium does
+    /// its reading; only the result comes back.
+    nonisolated static func load(file: URL) async throws -> sending Loaded {
+        guard let url = FileURL(url: file) else { throw CocoaError(.fileReadInvalidFileName) }
+        let http = DefaultHTTPClient()
+        let retriever = AssetRetriever(httpClient: http)
+        let asset = try await retriever.retrieve(url: url).get()
+        let opener = PublicationOpener(parser: DefaultPublicationParser(httpClient: http, assetRetriever: retriever,
+                                                                        pdfFactory: DefaultPDFDocumentFactory()))
+        let publication = try await opener.open(asset: asset, allowUserInteraction: false).get()
+        let positions = (try? await publication.positions().get()) ?? []
+        let sections = BookSections(positions: positions.map {
+            (href: $0.href.string, totalProgression: $0.locations.totalProgression)
+        })
+        var links: [(depth: Int, link: ReadiumShared.Link)] = []
+        func flatten(_ list: [ReadiumShared.Link], depth: Int) {
+            for link in list {
+                links.append((depth, link))
+                flatten(link.children, depth: depth + 1)
+            }
+        }
+        let toc = (try? await publication.tableOfContents().get()) ?? []
+        flatten(toc.isEmpty ? publication.readingOrder : toc, depth: 0)
+        var contents: [BookContentsRow] = []
+        for (index, entry) in links.enumerated() {
+            guard let locator = await publication.locate(entry.link), let json = try? locator.jsonString() else { continue }
+            let title = entry.link.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            contents.append(BookContentsRow(id: index, depth: entry.depth, title: title.isEmpty ? "Section \(index + 1)" : title,
+                                            href: BookSections.path(locator.href.string), locator: json))
+        }
+        return Loaded(publication: publication, sections: sections, contents: contents,
+                      readingOrder: publication.readingOrder.map { BookSections.path($0.href) })
+    }
+
+    /// The navigator over `loaded`, at `locator` (JSON) or the beginning,
+    /// drawn as `rendering` says.
+    func makeController(_ loaded: Loaded, at locator: String?, rendering: EpubRendering) throws -> UIViewController {
+        let initial = locator.flatMap { try? Locator(jsonString: $0) }
+        let navigator = try EPUBNavigatorViewController(
+            publication: loaded.publication, initialLocation: initial,
+            config: EPUBNavigatorViewController.Configuration(preferences: Self.preferences(rendering)))
+        navigator.delegate = self
+        publication = loaded.publication
+        controller = navigator
+        return navigator
+    }
+
+    /// The appearance changed: Readium lays the book out again where it is.
+    func submit(_ rendering: EpubRendering) {
+        controller?.submitPreferences(Self.preferences(rendering))
+    }
+
+    @discardableResult
+    func goForward() async -> Bool {
+        await controller?.goForward(options: NavigatorGoOptions(animated: true)) ?? false
+    }
+
+    @discardableResult
+    func goBackward() async -> Bool {
+        await controller?.goBackward(options: NavigatorGoOptions(animated: true)) ?? false
+    }
+
+    /// To a place given as a Readium locator's JSON.
+    func go(to json: String) async -> Bool {
+        guard let controller, let locator = try? Locator(jsonString: json) else { return false }
+        return await controller.go(to: locator, options: NavigatorGoOptions(animated: false))
+    }
+
+    /// To the note whose card is open.
+    func followNote() async -> Bool {
+        guard let controller, let link = noteLink else { return false }
+        noteLink = nil
+        onFollowLink()
+        return await controller.go(to: link, options: NavigatorGoOptions(animated: false))
+    }
+
+    /// The web view showing the part on screen: what the keys and the stick
+    /// scroll, and what tells the page of a part. Readium gives each part its
+    /// own, so it is the one covering most of the navigator.
+    func visibleScrollView() -> UIScrollView? {
+        guard let root = controller?.view else { return nil }
+        var best: (view: WKWebView, area: CGFloat)?
+        func walk(_ view: UIView) {
+            if let web = view as? WKWebView, !web.isHidden, web.window != nil {
+                let frame = web.convert(web.bounds, to: root).intersection(root.bounds)
+                let area = frame.isNull ? 0 : frame.width * frame.height
+                if area > (best?.area ?? 0) { best = (web, area) }
+                return
+            }
+            for child in view.subviews { walk(child) }
+        }
+        walk(root)
+        return best?.view.scrollView
+    }
+
+    /// Which screen of the part is showing, and of how many: a paginated
+    /// part scrolls across, a screen at a time.
+    func pageInPart() -> (index: Int, count: Int)? {
+        guard let view = visibleScrollView(), view.bounds.width > 0 else { return nil }
+        let count = Int((view.contentSize.width / view.bounds.width).rounded())
+        guard count > 0 else { return nil }
+        return (min(max(Int((abs(view.contentOffset.x) / view.bounds.width).rounded()), 0), count - 1), count)
+    }
+
+    func close() {
+        controller?.delegate = nil
+        controller = nil
+        publication = nil
+    }
+
+    /// The appearance as Readium's preferences.
+    private static func preferences(_ rendering: EpubRendering) -> EPUBPreferences {
+        EPUBPreferences(
+            backgroundColor: ReadiumNavigator.Color(hex: rendering.background),
+            columnCount: rendering.columns == .one ? .one : rendering.columns == .two ? .two : .auto,
+            fontFamily: rendering.fontFamily.map { FontFamily(rawValue: $0) },
+            fontSize: rendering.fontSize,
+            lineHeight: rendering.lineHeight,
+            pageMargins: rendering.pageMargins,
+            publisherStyles: rendering.publisherStyles,
+            scroll: rendering.scroll,
+            textAlign: rendering.textAlign == "justify" ? ReadiumNavigator.TextAlignment.justify : .start,
+            textColor: ReadiumNavigator.Color(hex: rendering.text),
+            theme: rendering.theme == "dark" ? ReadiumNavigator.Theme.dark : rendering.theme == "sepia" ? .sepia : .light)
+    }
+
+    /// A key Readium heard, as a reader's key.
+    private static func readerKey(_ key: Key) -> ReaderKey? {
+        switch key {
+        case .space: .space
+        case .enter: .returnKey
+        case .backspace: .delete
+        case .escape: .escape
+        case .arrowLeft: .left
+        case .arrowRight: .right
+        case .arrowUp: .up
+        case .arrowDown: .down
+        case .pageUp: .pageUp
+        case .pageDown: .pageDown
+        case .character(let text):
+            switch text {
+            case "-": .minus
+            case "=", "+": .plus
+            case "\u{8}", "\u{7F}": .delete
+            default: nil
+            }
+        default: nil
+        }
+    }
+}
+
+extension BookNavigator: EPUBNavigatorDelegate {
+    func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+        guard let json = try? locator.jsonString() else { return }
+        onPlace(BookPlaceOnPage(json: json, href: BookSections.path(locator.href.string), title: locator.title,
+                                progression: locator.locations.progression ?? 0,
+                                totalProgression: locator.locations.totalProgression))
+    }
+
+    func navigator(_ navigator: Navigator, presentError error: NavigatorError) {}
+
+    func navigator(_ navigator: Navigator, didJumpTo locator: Locator) {
+        onJump()
+    }
+
+    /// A note opens as a card and the page stays; an empty one is followed.
+    func navigator(_ navigator: Navigator, shouldNavigateToNoteAt link: ReadiumShared.Link, content: String,
+                   referrer: String?) -> Bool {
+        let text = FootnoteText.plain(content)
+        if text.isEmpty { return true }
+        noteLink = link
+        onNote(text)
+        return false
+    }
+
+    func navigator(_ navigator: VisualNavigator, shouldNavigateToLink link: ReadiumShared.Link) -> Bool {
+        onFollowLink()
+        return true
+    }
+
+    /// Not opened: a book read on the couch should not throw anyone into a browser.
+    func navigator(_ navigator: Navigator, presentExternalURL url: URL) {
+        onExternalLink()
+    }
+
+    func navigator(_ navigator: Navigator, didFailToLoadResourceAt href: RelativeURL, withError error: ReadError) {
+        onFailure("Part of this book could not be read")
+    }
+
+    func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
+        guard let width = controller?.view.bounds.width, width > 0 else { return }
+        onTap(Double(point.x / width))
+    }
+
+    func navigator(_ navigator: VisualNavigator, didPressKey event: KeyEvent) {
+        guard event.modifiers.isEmpty || event.modifiers == [.shift], let key = Self.readerKey(event.key) else { return }
+        onKey(key)
+    }
+}
+#endif
