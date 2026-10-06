@@ -160,6 +160,15 @@ public enum AudiobookContents {
 /// because the outbox decides by equality: a moment past a track's end is its
 /// end, and the last two seconds of the book are the book finished, which the
 /// hub writes as the end of its last track. Nothing here reads a timestamp.
+///
+/// This device also keeps beside a place how far through the whole book it
+/// is (`progress`, 0 to 1; #30), so a place still waiting to be sent shows as
+/// a share of the book on its page and on Books Home before the hub has it: a
+/// place is a track and a moment, and says nothing of that by itself. It is a
+/// note, not part of the place. The hub never reads it back and `body` never
+/// sends it, so the outbox compares places by track, moment and finish alone
+/// (`samePlace`); compared whole, the hub's own reading of the place just
+/// sent would look like another device moving the book.
 public struct AudioPlace: Equatable, Hashable, Sendable {
     public let trackId: String
     public let offsetMs: Int64
@@ -177,8 +186,27 @@ public struct AudioPlace: Equatable, Hashable, Sendable {
     /// The hub's own rule: the last two seconds of the last track are the end of the book.
     public static let finishedMs: Int64 = 2_000
 
-    public func location() -> ReadingLocation {
-        ReadingLocation(locator: ["trackId": .string(trackId), "offsetMs": .int(offsetMs), "completed": .bool(completed)])
+    /// How far through the book, beside the place on this device (#30): not the hub's, so never sent.
+    static let progressKey = "progress"
+
+    /// The place as a location. `progress` is how far through the whole book
+    /// it is, kept beside the track and the moment on this device alone; it is
+    /// left out where it is not known, and for the hub's own reading of a
+    /// place, which has none.
+    public func location(progress: Double? = nil) -> ReadingLocation {
+        var locator: [String: JSONValue] = ["trackId": .string(trackId), "offsetMs": .int(offsetMs), "completed": .bool(completed)]
+        if let progress, progress.isFinite { locator[Self.progressKey] = .double(min(max(progress, 0), 1)) }
+        return ReadingLocation(locator: locator)
+    }
+
+    /// How far through the whole book this place is, 0 to 1: 1 once it is
+    /// finished, else the tracks before its own and its moment over every
+    /// track's length (`Listening.bookProgress`). Nil when a track's length is
+    /// unknown or its track is not in `tracks`.
+    public func progress(_ tracks: [ReadingAudioTrack]) -> Double? {
+        if completed { return 1 }
+        return Listening.bookProgress(part: tracks.firstIndex { $0.id == trackId } ?? -1, positionMs: offsetMs,
+                                      partsMs: tracks.map { $0.durationMs > 0 ? $0.durationMs : nil })
     }
 
     /// Where to open: the part and the moment, or the start of the book once it is finished.
@@ -215,6 +243,33 @@ public struct AudioPlace: Equatable, Hashable, Sendable {
         let offset = track.durationMs > 0 ? min(max(offsetMs, 0), track.durationMs) : max(0, offsetMs)
         if part == tracks.count - 1 && track.durationMs > 0 && offset >= track.durationMs - finishedMs { return finished }
         return AudioPlace(track.id, offset)
+    }
+
+    /// What the outbox keeps for the player at `part` and `offsetMs` (#30):
+    /// the place as the hub will read it back (`canonical`), and how far
+    /// through the book it is beside it. Nil where there is no place.
+    public static func kept(_ tracks: [ReadingAudioTrack], part: Int, offsetMs: Int64, completed: Bool = false) -> ReadingLocation? {
+        canonical(tracks, part: part, offsetMs: offsetMs, completed: completed).map { $0.location(progress: $0.progress(tracks)) }
+    }
+
+    /// How far through the whole book a kept `location` says the listener
+    /// is, 0 to 1 (#30): 1 once it is finished, else the fraction kept beside
+    /// it. Nil when it says nothing: a place an older build kept, or a
+    /// location of another kind. Not 0, which is the start.
+    public static func progressOf(_ location: ReadingLocation?) -> Double? {
+        guard let place = of(location) else { return nil }
+        if place.completed { return 1 }
+        guard let kept = location?.locator?[progressKey]?.doubleValue, kept.isFinite else { return nil }
+        return min(max(kept, 0), 1)
+    }
+
+    /// Whether two locations are the same place: the same track, moment and
+    /// finish, whatever else this device keeps beside them (#30). The
+    /// outbox's compare. Anything that is not a place compares as it is.
+    public static func samePlace(_ one: ReadingLocation?, _ other: ReadingLocation?) -> Bool {
+        guard let a = of(one) else { return one == other }
+        guard let b = of(other) else { return false }
+        return a == b
     }
 
     /// The write the outbox sends: the place, and `expected`, the place this
