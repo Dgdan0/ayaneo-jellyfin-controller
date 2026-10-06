@@ -428,6 +428,55 @@ Differences from Android, on purpose, for now: no whole-ZIP audiobook, no Kavita
 lists, no mark-read or offline copy on a book's page, and list actions on a card's context menu
 rather than Ⓨ.
 
+## The comic reader (#25, phase 3)
+
+`ComicReaderView(work: ReadingWork, publication: ReadingSectionItem)` (`Hub/Reader`) is what a comic
+run's issue or a manga volume opens, over the whole window. It leaves through
+`@Environment(\.closeReader)`, which its host sets; `ReaderHost` hands it `read.close()`.
+
+| Behaviour | Owner |
+|---|---|
+| The steps down a page, spreads, the place in an issue, panning | HubKit `ViewportStepPlanner`, `SpreadPlanner`, `PagedImageState`, `ComicPanPolicy` (`Rules/ComicPages`), Android's with its test cases |
+| How a series reads (fit, direction, Trim margins), the third you were on, the zoom kept, an issue's cover | HubKit `ComicView`, `ComicPlace`, `ComicZoom`, `IssueCover` (`Rules/ComicView`); stored per work by `ComicReaderSettings` in Android's encodings |
+| The heading, "Issue 51 · Page 2 of 24", "Part 2 of 3", the end card's words | HubKit `ReaderTitleFormatter`, `EndOfIssue` (`Rules/ComicWords`) |
+| Pages decoded ahead, the Pages grid's cursor, the paper round a page | HubKit `PageSlots`, `PageGrid`, `PageBounds` (`content(ofThumbnail:)` reads the hub's 96-wide thumbnail) |
+| A tap, a swipe | HubKit `ComicTouch` |
+| Every key in every reader, and a keyboard's | HubKit `ReaderPadMap`, `ReaderKeyboard`; a game controller through `Reader/ComicPadInput` (GameController) |
+| Two pages side by side, where the page goes on screen | HubKit `ComicSpreads` (a window 980 wide or more and 1.25 times as wide as tall), `ComicUnits`, `ComicUnitLayout`, `ComicFrame` and `ComicCamera`: the fit, thirds, kept zoom, pans, pinches and double taps Android keeps in its screen |
+| The issue, its pages and thumbnails, the place sent | HubKit `ReadingPublicationManifest` (`Model/ReadingPages`), `HubEndpoints.readingPublication…` (`Net/ReaderEndpoints`), `ComicProgressOutbox` (`Rules/ComicProgress`) |
+| The reader on screen | `ComicReaderModel` (state, opening, moving, zoom, the place; `ComicReaderPages` the pictures, `ComicReaderInput` the keys), `ComicPageCanvas`, `ComicReaderBars`, `ComicPagesGrid`, `ComicReaderSheetView`, `ComicReaderOverlays` |
+
+As on the Pocket: Thirds unless a series or every series is set otherwise; a zoom of your own is
+kept for the next page and the next issue, at the same place across; the paper round a page is left
+out of the fit and the steps; the pages either side stay decoded, so a turn never shows black, and a
+jump keeps the page shown until the next is ready; the last page ends on a card naming the next
+issue (Continue, Stay, Leave). The bars float over the page, which never resizes, and go three
+seconds after it opens; a tap in the middle brings them back. In a wide window held sideways (an
+iPad, most Mac windows) two pages stand side by side where `SpreadPlanner` pairs them: the cover and a
+wide page alone, manga right to left. Kavita's place goes through the hub once the reading has moved
+(opening an issue, even on a spread, writes nothing), three seconds after a page rests and at once on
+leaving, at the end of an issue and between issues, each save naming the page the hub last had; a 409
+stops the saves for that issue and says so. When phase 2's checkpoints reach this branch, a comic's
+page goes through them.
+
+Keys: Ⓐ forward, Ⓑ back, Ⓧ Ⓨ a whole page, L1 R1 L2 R2 zoom, the D-pad across the page, the right
+stick pans, L3 held looks closer, R3 the Keys sheet, Start the controls, Select leaves; with the
+controls open the D-pad moves a ring between them and Ⓐ presses one. A keyboard: Space and Return,
+Delete, the arrows, Page Up and Page Down, − and =, and Escape, which closes what is open, then
+leaves. Touch: the outer thirds read on and back, the middle shows the controls, a swipe across
+turns the page while not zoomed, a pinch or a double tap zooms, a drag moves the page.
+
+Debug builds take `HUB_READ=<work id>/<issue id>` with `-demo` only (the scripts and the app both
+refuse it otherwise, since reading writes the place): `rw_demo_ff/rw_demo_ff-51` is Fantastic Four
+at issue 51, `rw_demo_csm/rw_demo_csm-1` manga. `HUB_READ_CHROME=pinned` keeps the controls up,
+`HUB_READ_PAGE=<n>` opens a page, and `HUB_READ_SHEET=display|keys|pages|end` opens a sheet, the
+Pages grid or the end card. The demo hub draws every page (`DemoComics`), with paper margins and a
+spread in the middle of each issue. `scripts/mac.sh build-tests` compiles the UI tests without a
+simulator.
+
+Differences from Android, for now: two pages side by side are new; no Comfort layer; the sheets
+are not walked with the D-pad (Ⓑ closes them); no reading lists.
+
 ## Working on the Mac
 
 ### From the PC
