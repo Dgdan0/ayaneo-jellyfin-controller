@@ -89,8 +89,10 @@ struct TransfersView: View {
         .alert(confirming.map { $0.choice.label + "?" } ?? "",
                isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
                presenting: confirming) { pending in
-            // The harmless answer first.
-            Button("Cancel", role: .cancel) { confirming = nil }
+            // The harmless answer first. Given the cancel role, iOS 26 moves it
+            // after the destructive one, so it is a plain button that Escape presses.
+            Button("Cancel") { confirming = nil }
+                .keyboardShortcut(.cancelAction)
             Button(pending.choice.label, role: .destructive) {
                 confirming = nil
                 Task { await run(pending.choice.id, on: pending.item) }
@@ -259,6 +261,7 @@ struct TransferRow: View {
                         .font(HubType.body(15, weight: .bold, relativeTo: .subheadline))
                         .foregroundStyle(.white)
                         .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 6)
                     Text(Stages.label(item.stage))
                         .font(HubType.chrome(11.5, weight: .bold))
@@ -298,31 +301,10 @@ struct TransferRow: View {
                         .foregroundStyle(Color.dangerText)
                         .lineLimit(3)
                 }
-                HStack(spacing: 8) {
-                    if let toggle {
-                        Button(toggle.label) { act(toggle) }
-                            .buttonStyle(GlassControlStyle())
-                            .disabled(working)
-                            .accessibilityIdentifier("\(toggle.id)-\(item.id)")
-                    }
-                    if item.isBroken, let why = choices.first {
-                        Button(why.label) { act(why) }
-                            .buttonStyle(GlassControlStyle())
-                            .accessibilityIdentifier("diagnosis-\(item.id)")
-                    }
-                    Menu {
-                        ForEach(choices.filter { $0.id != toggle?.id && !(item.isBroken && $0.id == "diagnosis") }) { choice in
-                            Button(role: choice.danger ? .destructive : nil) { act(choice) } label: {
-                                Label(choice.label, systemImage: Self.symbol(choice.id))
-                            }
-                        }
-                    } label: {
-                        Label("More", systemImage: "ellipsis")
-                    }
-                    .menuStyle(.button)
-                    .buttonStyle(GlassControlStyle())
-                    .disabled(working)
-                    .accessibilityIdentifier("more-\(item.id)")
+                // A phone's row has room for "Why?" where an iPad's says it in full.
+                ViewThatFits(in: .horizontal) {
+                    buttons(choices, toggle: toggle, why: choices.first?.label ?? "")
+                    buttons(choices, toggle: toggle, why: "Why?")
                 }
                 .padding(.top, 4)
             }
@@ -332,6 +314,37 @@ struct TransferRow: View {
         .glassPanel(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transfer-\(item.id)")
+    }
+
+    private func buttons(_ choices: [TransferPresentation.Choice], toggle: TransferPresentation.Choice?, why: String) -> some View {
+        HStack(spacing: 8) {
+            if let toggle {
+                Button(toggle.label) { act(toggle) }
+                    .buttonStyle(GlassControlStyle())
+                    .disabled(working)
+                    .accessibilityIdentifier("\(toggle.id)-\(item.id)")
+            }
+            if item.isBroken, let diagnosis = choices.first {
+                Button(why) { act(diagnosis) }
+                    .buttonStyle(GlassControlStyle())
+                    .accessibilityLabel(diagnosis.label)
+                    .accessibilityIdentifier("diagnosis-\(item.id)")
+            }
+            Menu {
+                ForEach(choices.filter { $0.id != toggle?.id && !(item.isBroken && $0.id == "diagnosis") }) { choice in
+                    Button(role: choice.danger ? .destructive : nil) { act(choice) } label: {
+                        Label(choice.label, systemImage: Self.symbol(choice.id))
+                    }
+                }
+            } label: {
+                Label("More", systemImage: "ellipsis")
+            }
+            .menuStyle(.button)
+            .buttonStyle(GlassControlStyle())
+            .disabled(working)
+            .accessibilityIdentifier("more-\(item.id)")
+        }
+        .fixedSize()
     }
 
     /// Each choice's mark in the menu.
@@ -404,6 +417,8 @@ struct TransferSheetView: View {
         }
         .presentationBackground { GlassSheetFill() }
         .presentationDetents(sizeClass == .compact ? [.medium, .large] : [.large])
+        // An iPad's or the Mac's sheet as tall as what it says, so Refresh status is never cut off.
+        .presentationSizing(.form.fitted(horizontal: false, vertical: true))
         .accessibilityIdentifier("transfer-sheet")
     }
 

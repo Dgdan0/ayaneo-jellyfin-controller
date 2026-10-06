@@ -17,6 +17,7 @@ struct ActivityView: View {
     @Environment(\.glassMetrics) private var metrics
     @Environment(\.glassAccent) private var accent
     @Environment(\.openURL) private var openURL
+    @Environment(\.openRoute) private var openRoute
     /// False while another section or the player is in front: nothing is asked for then.
     @Environment(\.isEnabled) private var isEnabled
 
@@ -59,6 +60,9 @@ struct ActivityView: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         }
         .refreshable { polls += 1 }
+        #if DEBUG
+        .onAppear(perform: applyDebugOpen)
+        #endif
         .task(id: "\(polls)·\(isEnabled)") {
             guard isEnabled else { return }
             await pollTransfers()
@@ -71,6 +75,27 @@ struct ActivityView: View {
             }
         }
     }
+
+    #if DEBUG
+    /// scripts/mac.sh opens a page of Activity for screenshots, once a launch:
+    /// HUB_OPEN=transfers, transfers:<transfer id> (its explanation open, as
+    /// Why is this stuck? does) or speed (the speed limits).
+    @MainActor private static var debugOpened = false
+
+    private func applyDebugOpen() {
+        guard !Self.debugOpened, let open = ProcessInfo.processInfo.environment["HUB_OPEN"] else { return }
+        if open == "transfers" {
+            openRoute(.transfers(TransfersRoute()))
+        } else if open.hasPrefix("transfers:") {
+            openRoute(.transfers(TransfersRoute(target: String(open.dropFirst("transfers:".count)))))
+        } else if open == "speed" {
+            openRoute(.speedLimits)
+        } else {
+            return
+        }
+        Self.debugOpened = true
+    }
+    #endif
 
     // MARK: Layout
 

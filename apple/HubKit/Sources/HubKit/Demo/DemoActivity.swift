@@ -95,6 +95,22 @@ enum DemoActivity {
 
     private static func hash(_ pair: String) -> String { String(repeating: pair, count: 20) }
 
+    // The hub's own words for each state (`hub/internal/api/diagnostics.go`).
+    private static let downloading = ActivityDiagnosis(
+        code: "downloading", title: "Download is in progress", explanation: "The latest queue state reports an active download.",
+        nextStep: "Keep downloading; refresh to see updated progress.")
+    private static let importing = ActivityDiagnosis(
+        code: "importing", title: "Waiting for library import",
+        explanation: "The download queue reports an import in progress. Jellyfin availability has not been checked here.",
+        nextStep: "Allow Radarr/Sonarr to import the files, then check the title in Library.")
+    private static let paused = ActivityDiagnosis(
+        code: "paused", title: "Transfer is paused", explanation: "The download client is not running this transfer.",
+        nextStep: "Resume when you want it to continue.", action: "start")
+    private static let complete = ActivityDiagnosis(
+        code: "download_complete", title: "Download is complete",
+        explanation: "The client has finished downloading. This does not confirm a successful import or Jellyfin scan.",
+        nextStep: "Open the title in Library to check availability.")
+
     private static let gib: Int64 = 1 << 30
     private static let all = ["stop", "priority_up", "priority_down", "delete", "delete_with_data", "arr_remove",
                               "arr_blocklist_and_search"]
@@ -108,56 +124,56 @@ enum DemoActivity {
                           status: "warning", problem: "Found executable file with extension: '.exe'"),
                  actions: ["stop", "delete", "delete_with_data", "arr_remove", "arr_blocklist_and_search"],
                  diagnosis: ActivityDiagnosis(
-                    code: "import_blocked", title: "Sonarr won't import it",
-                    explanation: "The download finished, but Sonarr found a program among its files and stopped there. A real episode never comes with one.",
-                    evidence: ["Found executable file with extension: '.exe'"],
-                    nextStep: "Blocklist this release and let Sonarr search for another.", needsAttention: true)),
+                    code: "import_blocked", title: "Import needs attention",
+                    explanation: "sonarr reported a problem with this release. Its exact message is shown below.",
+                    evidence: ["qBittorrent: stalledUP", "sonarr: importBlocked", "Found executable file with extension: '.exe'"],
+                    nextStep: "Check the reported import issue in sonarr. Search for another release only if this one cannot be used.",
+                    needsAttention: true)),
         Transfer(id: "qbit:" + hash("07"), title: "The.Expanse.S03.1080p.BluRay.x265-RARBG", stage: Stages.stuck,
                  clientStage: Stages.stuck, clientState: "missingFiles", progress: 0.87, sizeBytes: 22 * gib,
                  warnings: ["missingFiles"], actions: ["delete", "delete_with_data"],
                  diagnosis: ActivityDiagnosis(
-                    code: "missing_files", title: "qBittorrent can't find the files",
-                    explanation: "The files were moved or deleted outside qBittorrent, so it has nothing to seed or finish.",
-                    nextStep: "Remove it, or put the files back and recheck it in qBittorrent.", needsAttention: true)),
+                    code: "missing_files", title: "Downloaded files are missing",
+                    explanation: "qBittorrent reports missing files. The current state does not tell us whether they were moved, deleted, or the drive disconnected.",
+                    evidence: ["qBittorrent: missingFiles"],
+                    nextStep: "Check the download drive and save location in qBittorrent before retrying.", needsAttention: true)),
         Transfer(id: "qbit:" + hash("a1"), title: "Severance.S02E09.The.After.Hours.2160p.ATVP.WEB-DL.DDP5.1.H.265-NTb",
                  mediaTitle: "Severance", stage: Stages.downloading, clientStage: Stages.downloading, progress: 0.62,
                  sizeBytes: 6_871_947_673, movingBps: 3_565_158, uploadBps: 225_280, etaSeconds: 690, seeds: 41, peers: 8,
                  priority: 1, category: "tv-sonarr", arr: Arr(service: "sonarr", queueId: 501, seriesId: 11, tvdbId: 371_980),
-                 actions: all, diagnosis: ActivityDiagnosis(code: "downloading", title: "Downloading normally")),
+                 actions: all, diagnosis: downloading),
         Transfer(id: "qbit:" + hash("b2"), title: "The.Mentalist.S01.1080p.BluRay.x264-SHORTBREHD", mediaTitle: "The Mentalist",
                  stage: Stages.downloading, clientStage: Stages.downloading, progress: 0.31, sizeBytes: 43_808_666_419,
                  movingBps: 1_992_294, uploadBps: 51_200, etaSeconds: 15_840, seeds: 12, peers: 3, priority: 2,
                  category: "tv-sonarr", arr: Arr(service: "sonarr", queueId: 502, seriesId: 3, tvdbId: 82_459),
-                 queueItems: 23, actions: all, diagnosis: ActivityDiagnosis(code: "downloading", title: "Downloading normally")),
+                 queueItems: 23, actions: all, diagnosis: downloading),
         Transfer(id: "qbit:" + hash("f6"), title: "Ted.Lasso.S04E09.1080p.ATVP.WEB-DL.DDP5.1.H.264-FLUX", mediaTitle: "Ted Lasso",
                  stage: Stages.importing, clientStage: Stages.seeding, progress: 1, sizeBytes: 2_040_109_466,
                  uploadBps: 96_000, seeds: 30, peers: 1, category: "tv-sonarr",
                  arr: Arr(service: "sonarr", queueId: 504, seriesId: 7, tvdbId: 383_203),
                  actions: ["stop", "delete", "delete_with_data", "arr_remove"],
-                 diagnosis: ActivityDiagnosis(code: "importing", title: "Importing",
-                                              explanation: "Sonarr is copying it into the library.")),
+                 diagnosis: importing),
         Transfer(id: "qbit:" + hash("c3"), title: "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX",
                  mediaTitle: "Dune: Part Two", stage: Stages.queued, clientStage: Stages.queued, progress: 0,
                  sizeBytes: 9_771_050_598, movingBps: 2_400_000, etaSeconds: 3_900, seeds: 64, peers: 11, priority: 3,
                  category: "radarr", arr: Arr(service: "radarr", queueId: 601, movieId: 3, tmdbId: 693_134), actions: all,
                  diagnosis: ActivityDiagnosis(
-                    code: "queued", title: "Waiting for a slot",
-                    explanation: "qBittorrent runs two downloads at once; this one starts when one of them finishes.")),
+                    code: "queued", title: "Waiting in the download queue",
+                    explanation: "qBittorrent has queued this transfer behind its active-transfer limits.",
+                    nextStep: "Let an active transfer finish, or review queue limits and priority in qBittorrent.")),
         Transfer(id: "qbit:" + hash("e5"), title: "Gran.Torino.2008.1080p.BluRay.x264-AMIABLE", mediaTitle: "Gran Torino",
                  stage: Stages.stopped, clientStage: Stages.stopped, progress: 0.45, sizeBytes: 8_697_620_480,
                  movingBps: 1_310_720, etaSeconds: 3_660, seeds: 9, peers: 2, priority: 4, category: "radarr",
                  arr: Arr(service: "radarr", queueId: 602, movieId: 9, tmdbId: 13_223),
                  actions: ["start", "priority_up", "priority_down", "delete", "delete_with_data", "arr_remove",
                            "arr_blocklist_and_search"],
-                 diagnosis: ActivityDiagnosis(code: "stopped", title: "Stopped",
-                                              explanation: "qBittorrent is holding it. Start picks up where it left off.",
-                                              action: "start")),
+                 diagnosis: paused),
         Transfer(id: "qbit:" + hash("08"), title: "Andor.S02E12.2160p.DSNP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX",
                  stage: Stages.seeding, clientStage: Stages.seeding, progress: 1, sizeBytes: 8_482_560_000, uploadBps: 419_840,
-                 seeds: 120, peers: 6, actions: ["stop", "delete", "delete_with_data"], finished: true),
+                 seeds: 120, peers: 6, actions: ["stop", "delete", "delete_with_data"], diagnosis: complete, finished: true),
         Transfer(id: "qbit:" + hash("09"), title: "Oppenheimer.2023.2160p.UHD.BluRay.x265-SURCODE", stage: Stages.done,
                  clientStage: Stages.stopped, progress: 1, sizeBytes: 31 * gib, actions: ["delete", "delete_with_data"],
-                 finished: true),
+                 diagnosis: complete, finished: true),
     ]
 
     private static let transfers = Mutex<[Transfer]>(start)
@@ -232,19 +248,13 @@ enum DemoActivity {
                 if row.stage != Stages.stuck { row.stage = Stages.stopped }
                 row.clientStage = Stages.stopped
                 row.actions = row.actions.map { $0 == "stop" ? "start" : $0 }
-                if row.diagnosis?.needsAttention != true {
-                    row.diagnosis = ActivityDiagnosis(code: "stopped", title: "Stopped",
-                                                      explanation: "qBittorrent is holding it. Start picks up where it left off.",
-                                                      action: "start")
-                }
+                if row.diagnosis?.needsAttention != true { row.diagnosis = paused }
             case "start":
                 let finished = row.progress >= 1
                 if row.stage != Stages.stuck { row.stage = finished ? Stages.seeding : Stages.downloading }
                 row.clientStage = finished ? Stages.seeding : Stages.downloading
                 row.actions = row.actions.map { $0 == "start" ? "stop" : $0 }
-                if row.diagnosis?.needsAttention != true {
-                    row.diagnosis = ActivityDiagnosis(code: row.stage, title: finished ? "Seeding" : "Downloading normally")
-                }
+                if row.diagnosis?.needsAttention != true { row.diagnosis = finished ? complete : downloading }
             case "priority_up":
                 row.priority = max(1, row.priority - 1)
             default:
