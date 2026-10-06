@@ -213,7 +213,8 @@ hub (`-demo`) answers every one of these calls, for the UI tests.
 | Pages reading their progress again after playback | `@Environment(\.playbackClosed)`, which changes once the stop and the close have reached the hub |
 | The panels (Audio & subtitles, This video, Chapters and their pages) | `Playback/PlayerPanels`: `PlayerSheet` with `SheetGroup`, `SheetRow`, `SheetLabel`, `SheetNote`; opened by pills, round icons or one menu as `PlayerLayout.panelButtons` decides |
 | Another track, quality or version | `PlayerModel.change` through `select`; it plays on when `PlaybackChoices.sameStream`, else reopens where it was. Every select body comes from HubKit `PlaybackRules.selection`, which names the version playing: Jellyfin applies a track only with its source (#24), and the demo hub refuses one without it |
-| The picture's gestures: a double tap's step, the brightness and volume drags | HubKit `PlayerGestures` (sides, the step, what counts as up-or-down, the level a drag sets); drawn by `Playback/PlayerTouch` (`PlayerSeekBubble`, `PlayerLevelBar`); the drags on iOS only, the screen's brightness put back when the player closes (#24) |
+| The picture's gestures: a double tap's step, the scrub across, the brightness and volume drags | HubKit `PlayerGestures` (sides, the step, `drag`: the first movement decides across or up-and-down, `scrubTarget`: the whole width is a third of the video from two to twenty minutes, `scrubCardCenter`, the level a drag sets); drawn by `Playback/PlayerTouch` (`PlayerSeekBubble`, `PlayerLevelBar`, `PlayerScrubPreview`); the level drags on iOS only, the screen's brightness put back when the player closes; the scrub on the Mac too, as a click-drag (#24) |
+| The frame a scrub or a chapter shows | The session's `previewUrl` on the hub's five-second grid (HubKit `PlaybackEnhancements.frameMillis`, `chapterFrameMillis`); a scrub asks once the drag rests 180 ms and keeps the last frame until the next comes |
 | The choice kept per profile and series or film, the subtitle look for every video | HubKit `PlaybackChoices` (Android's `PlaybackPreferences`), stored by `Playback/PlaybackMemory` |
 | Subtitles the app draws | HubKit `SubtitleParser` (SRT, WebVTT, ASS as text; a broken block is skipped) and `SubtitleTimeline`; drawn by `SubtitleOverlay`; the delay is `SubtitleTimingPolicy` |
 | Chapters, Skip intro, where subtitles sit | HubKit `PlaybackEnhancements` (Android's, with its tests); the notches are `ChapterNotches` |
@@ -230,7 +231,8 @@ AirPlay will need it too.
 
 `HUB_PLAY=<item id>` opens the player at launch (with `-demo`, `demo-e5` plays Apple's public
 HLS test stream as Bleach S1E5), `HUB_PLAY_EXIT=<seconds>` leaves it through Back's own path,
-`HUB_PLAY_CHROME=pinned` holds the controls up for a screenshot, and with `-demo`
+`HUB_PLAY_CHROME=pinned` holds the controls up for a screenshot, `HUB_PLAY_SCRUB=<seconds>` holds a
+drag across the picture that far on (the preview over the timeline), and with `-demo`
 `HUB_PLAY_FROM_END=<seconds>` starts near the end for the up-next card. `SHOT_SIMS` limits
 `sims` and `shot` to some simulators, and `scripts/mac.sh capture` takes screenshots without
 relaunching. Against the real hub, play only a title that is unwatched and at 0:00, for under

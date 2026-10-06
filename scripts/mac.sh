@@ -37,7 +37,8 @@
 # Debug launches also take HUB_PLAY=<item id> (the player opens on it; "demo-e5"
 # with -demo), HUB_PLAY_EXIT=<seconds> (it leaves through Back's own path, so a
 # run against the real hub never leaves a session open), HUB_PLAY_CHROME=pinned,
-# HUB_PLAY_TOUR=1 (its panels open in turn), HUB_PLAY_SUBTITLE=<language> and,
+# HUB_PLAY_TOUR=1 (its panels open in turn), HUB_PLAY_SUBTITLE=<language>,
+# HUB_PLAY_SCRUB=<seconds> (a drag across the picture held that far on) and,
 # with -demo, HUB_PLAY_FROM_END=<seconds>. SHOT_SIMS="iPad Pro (12.9-inch) (4th generation),iPhone 17 Pro Max"
 # limits sims and shot to those simulators, and HUB_WIDTH=375 lays the app out
 # in a window that wide, as an iPad's Split View would; SHOT_STATE names the screenshots
@@ -155,6 +156,7 @@ launch_sim() {
     SIMCTL_CHILD_HUB_PLAY="${HUB_PLAY:-}" SIMCTL_CHILD_HUB_PLAY_EXIT="${HUB_PLAY_EXIT:-}" \
     SIMCTL_CHILD_HUB_PLAY_CHROME="${HUB_PLAY_CHROME:-}" SIMCTL_CHILD_HUB_PLAY_FROM_END="${HUB_PLAY_FROM_END:-}" \
     SIMCTL_CHILD_HUB_PLAY_TOUR="${HUB_PLAY_TOUR:-}" SIMCTL_CHILD_HUB_PLAY_SUBTITLE="${HUB_PLAY_SUBTITLE:-}" \
+    SIMCTL_CHILD_HUB_PLAY_SCRUB="${HUB_PLAY_SCRUB:-}" \
     SIMCTL_CHILD_HUB_WIDTH="${HUB_WIDTH:-}" SIMCTL_CHILD_HUB_ORIENT="$(cat "$SHOTS/.turned-$udid" 2>/dev/null)" \
     xcrun simctl launch "$udid" "$BUNDLE_ID" $(launch_args "$@") >/dev/null
 }
@@ -346,7 +348,7 @@ mac_shot() {
   fi
   HUB_URL="${HUB_URL:-}" HUB_TOKEN="${HUB_TOKEN:-}" HUB_SECTION="${HUB_SECTION:-}" HUB_SIDE="${HUB_SIDE:-}" \
     HUB_OPEN="${HUB_OPEN:-}" HUB_SHEET="${HUB_SHEET:-}" HUB_WINDOW="$size" HUB_SNAPSHOT="${SHOT_WAIT:-8}" \
-    HUB_PLAY="${HUB_PLAY:-}" HUB_PLAY_CHROME="${HUB_PLAY_CHROME:-}" \
+    HUB_PLAY="${HUB_PLAY:-}" HUB_PLAY_CHROME="${HUB_PLAY_CHROME:-}" HUB_PLAY_SCRUB="${HUB_PLAY_SCRUB:-}" \
     nohup "$app" -ApplePersistenceIgnoreState YES $(launch_args "$@") > "$DERIVED/mac-app.log" 2>&1 < /dev/null &
   pid=$!
   for _ in $(seq 1 90); do

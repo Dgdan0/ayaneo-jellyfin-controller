@@ -86,8 +86,14 @@ public enum PlaybackEnhancements {
     /// still the fade from black on an episode's cold open.
     public static func chapterFrameMillis(startMillis: Int64, endMillis: Int64) -> Int64 {
         let length = endMillis - startMillis > 0 ? endMillis - startMillis : 60_000
-        let at = startMillis + min(30_000, length / 4)
-        return at / 5_000 * 5_000
+        return frameMillis(startMillis + min(30_000, length / 4))
+    }
+
+    /// The hub's frame for `positionMillis`: it extracts one every five
+    /// seconds, so asking at the start of the five seconds lets every scrub
+    /// over them share one picture (Android's `loadExtractedPreview`).
+    public static func frameMillis(_ positionMillis: Int64) -> Int64 {
+        max(0, positionMillis) / 5_000 * 5_000
     }
 
     /// The segment that starts with this chapter, within two seconds, if any.
