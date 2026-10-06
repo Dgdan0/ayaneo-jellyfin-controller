@@ -251,7 +251,13 @@ struct BookReaderScreen: View {
 struct BookPageHost: UIViewControllerRepresentable {
     let controller: UIViewController
 
-    func makeUIViewController(context: Context) -> UIViewController { controller }
+    func makeUIViewController(context: Context) -> UIViewController {
+        // What the UI tests find the page by, on the UIKit view as well as
+        // SwiftUI's. Loaded here, as it is about to be shown, never earlier:
+        // Readium lays the book out for the size its view first has.
+        controller.view.accessibilityIdentifier = "book-page"
+        return controller
+    }
 
     func updateUIViewController(_ controller: UIViewController, context: Context) {}
 }
