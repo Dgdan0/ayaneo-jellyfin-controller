@@ -31,6 +31,17 @@ final class BooksTests: XCTestCase {
         app.buttons.allElementsBoundByIndex.map { $0.label }.filter { !$0.isEmpty }.joined(separator: " | ")
     }
 
+    /// Whether `condition` comes true within `seconds`, asking four times a second.
+    @MainActor
+    private func waitUntil(_ seconds: TimeInterval, _ condition: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if condition() { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        return condition()
+    }
+
     /// Scrolls the page until `element` is on screen, or gives up.
     @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, tries: Int = 6) -> Bool {
@@ -119,11 +130,18 @@ final class BooksTests: XCTestCase {
         XCTAssertTrue(entry.waitForExistence(timeout: 15), "the comic's page did not open: \(buttons(app))")
         XCTAssertTrue(text(app, containing: "On issue 51").exists, "the comic's page does not say which issue is being read")
         entry.tap()
-        XCTAssertTrue(app.buttons["reader-close"].waitForExistence(timeout: 10), "the issue did not open the reader")
-        // The comic reader is phase 3's: its place for now names the issue and where its page is kept.
-        XCTAssertTrue(text(app, containing: "Your place is kept on Kavita: Issue 51").exists)
-        app.buttons["reader-close"].tap()
-        XCTAssertTrue(entry.waitForExistence(timeout: 10), "closing the reader did not come back to the comic")
+        // Phase 3's comic reader opens at the issue, or, until it is in ReaderHost, the place
+        // that names the issue and where its page is kept.
+        let page = app.descendants(matching: .any).matching(identifier: "comic-page").firstMatch
+        let standIn = app.buttons["reader-close"]
+        XCTAssertTrue(waitUntil(10) { page.exists || standIn.exists }, "the issue did not open the reader")
+        if standIn.exists {
+            XCTAssertTrue(text(app, containing: "Your place is kept on Kavita: Issue 51").exists)
+            standIn.tap()
+            XCTAssertTrue(entry.waitForExistence(timeout: 10), "closing the reader did not come back to the comic")
+        } else {
+            XCTAssertTrue(waitUntil(15) { (page.value as? String ?? "").contains("Issue 51") }, "the reader did not open at issue 51")
+        }
     }
 
     // MARK: Requests
