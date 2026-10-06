@@ -152,6 +152,14 @@ struct ReadingCheckpointTests {
         #expect(ReadingResumePrompt.make(ReadingResume(page(2)), checkpoint: nil) { $0.label() } == nil)
     }
 
+    @Test func aPlacesScopeIsTheHubAndTheProfileWhateverTheAddressEndsIn() {
+        let scope = ReadingCheckpointKey.scope(address: "https://hub.example/", userId: "dgdan")
+        #expect(scope == ReadingCheckpointKey.scope(address: "https://hub.example", userId: "dgdan"))
+        #expect(scope != ReadingCheckpointKey.scope(address: "https://hub.example", userId: "hadas"))
+        #expect(scope != ReadingCheckpointKey.scope(address: "https://other.example", userId: "dgdan"))
+        #expect(scope.count == 64)
+    }
+
     // MARK: The sync
 
     private func pending(_ folder: Folder) throws -> ReadingCheckpointStore {

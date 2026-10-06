@@ -29,6 +29,15 @@ public struct ReadingCheckpointKey: Codable, Equatable, Hashable, Sendable {
     public static func digest(_ value: String) -> String {
         SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
     }
+
+    /// Whose places these are: the hub, without the slashes an address may
+    /// end in, and the profile. A new token keeps them; another profile
+    /// never sees them.
+    public static func scope(address: String, userId: String) -> String {
+        var trimmed = Substring(address.trimmingCharacters(in: .whitespacesAndNewlines))
+        while trimmed.hasSuffix("/") { trimmed = trimmed.dropLast() }
+        return digest(String(trimmed) + "\u{0}" + userId)
+    }
 }
 
 /// A place: a locator (an EPUB's, a listening place's) or a page of a comic,
