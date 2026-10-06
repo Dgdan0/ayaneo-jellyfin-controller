@@ -162,10 +162,7 @@ final class ListeningModel {
     /// plays. A book the hub cannot stream says so: Apple has no whole-book
     /// download.
     func prepare(work: ReadingWork, sourceItemId: String, app: AppModel) async throws(HubFailure) -> Opening {
-        hub = app.hub
-        address = app.address
-        token = app.storedToken()
-        demo = app.isDemo
+        connect(app)
         let hub = app.hub
         let manifest = try await hub.fetch(HubEndpoints.readingAudioManifest(workId: work.id, sourceItemId: sourceItemId),
                                            as: ReadingAudioManifest.self)
@@ -619,13 +616,15 @@ final class ListeningModel {
 
     // MARK: The place
 
-    /// Kept here first, then to the hub no faster than every 15 seconds (the
+    /// Kept here first, with how far through the book it is beside it, so
+    /// the book's page and Books Home show it before the hub has it (#30);
+    /// then to the hub, the place alone, no faster than every 15 seconds (the
     /// last always goes). Finishing writes the book finished.
     private func save(completed: Bool = false) {
         guard let book else { return }
         lastSave = .now
-        guard let place = AudioPlace.canonical(book.manifest.tracks, part: part, offsetMs: positionMs, completed: completed),
-              (try? store.save(book.key, place.location(), now: Self.nowMillis())) != nil else { return }
+        guard let kept = AudioPlace.kept(book.manifest.tracks, part: part, offsetMs: positionMs, completed: completed),
+              (try? store.save(book.key, kept, now: Self.nowMillis())) != nil else { return }
         scheduleSync()
     }
 
@@ -683,6 +682,24 @@ final class ListeningModel {
             }
         })
         return try? await sync.sync(key)
+    }
+
+    /// The hub the places go to, and how the tracks are asked for.
+    private func connect(_ app: AppModel) {
+        hub = app.hub
+        address = app.address
+        token = app.storedToken()
+        demo = app.isDemo
+    }
+
+    /// The places a closed app left unsent for this hub and profile, sent at
+    /// launch and when the profile changes. A book of another hub or profile
+    /// leaves the player first: its places are not this profile's.
+    func flushPending(app: AppModel) async {
+        let scope = ReadingCheckpointKey.scope(address: app.address, userId: app.userId)
+        if let book, book.key.scope != scope { stop() }
+        if book == nil { connect(app) }
+        await flushPending(scope: scope)
     }
 
     /// Every listening place this hub and profile still has to send: those a

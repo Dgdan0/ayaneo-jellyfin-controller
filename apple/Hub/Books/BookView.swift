@@ -35,6 +35,8 @@ struct BookView: View {
     @State private var notice = ""
     @State private var reloads = 0
     @State private var lit: String?
+    /// Shown before: coming back to the page (from the audiobook's) reads it again.
+    @State private var appeared = false
 
     var body: some View {
         ScrollView {
@@ -68,6 +70,10 @@ struct BookView: View {
         .ambientArtwork(lit ?? work?.artwork ?? "")
         .refreshable { reloads += 1 }
         .task(id: "\(route.workId)·\(model.userId)·\(readerClosed)·\(reloads)") { await load() }
+        .onAppear {
+            if appeared { reloads += 1 }
+            appeared = true
+        }
         .alert("New reading list", isPresented: $naming) {
             TextField("List name", text: $listName)
             Button("Cancel", role: .cancel) {}
@@ -427,7 +433,10 @@ struct BookView: View {
     private func load() async {
         if work == nil { status = StatusText.loading("details", refreshing: false) }
         do {
-            let response = try await model.hub.fetch(HubEndpoints.readingWork(route.workId), as: ReadingWork.self)
+            let fetched = try await model.hub.fetch(HubEndpoints.readingWork(route.workId), as: ReadingWork.self)
+            // The places this device kept and the hub has not had yet (#30).
+            let scope = ReadingCheckpointKey.scope(address: model.address, userId: model.userId)
+            let response = ReadingProgressPresentation.project(fetched, pending: ListeningStore.shared.pending(scope: scope))
             if response != work { work = response }
             books.observe([response])
             model.colors.want([response.artwork])

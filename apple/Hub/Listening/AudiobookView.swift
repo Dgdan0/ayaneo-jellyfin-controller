@@ -88,7 +88,7 @@ struct AudiobookView: View {
         let layout = metrics.centred ? AnyLayout(VStackLayout(alignment: .leading, spacing: 18))
             : AnyLayout(HStackLayout(alignment: .center, spacing: metrics.short ? 22 : 30))
         return layout {
-            ListeningCover(path: work?.artwork ?? "", width: 600)
+            BookCover(path: work?.artwork ?? "", square: true, width: 600)
                 .frame(width: metrics.short ? 150 : metrics.centred ? 220 : 260)
                 .shadow(color: .black.opacity(0.5), radius: 26, y: 24)
                 .frame(maxWidth: metrics.centred ? .infinity : nil)
@@ -314,7 +314,7 @@ struct ListeningMiniPlayer: View {
             HStack(spacing: 12) {
                 Button(action: open) {
                     HStack(spacing: 12) {
-                        ListeningCover(path: book.artwork, width: 120)
+                        BookCover(path: book.artwork, square: true, width: 120)
                             .frame(width: 40)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(book.title)
@@ -339,22 +339,10 @@ struct ListeningMiniPlayer: View {
             .padding(.vertical, 8)
             .frame(maxWidth: 420)
             .glassPanel(Capsule())
+            // A container, so its buttons keep their own identifiers.
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("mini-player")
         }
-    }
-}
-
-/// An audiobook's cover: square, as an audiobook's is. Books' own
-/// `BookCover(square:)` takes its place once this branch sits on Books.
-struct ListeningCover: View {
-    let path: String
-    var width = 360
-
-    var body: some View {
-        Color.clear
-            .aspectRatio(1, contentMode: .fit)
-            .overlay { ArtworkView(path: path, width: width) }
-            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 }
 

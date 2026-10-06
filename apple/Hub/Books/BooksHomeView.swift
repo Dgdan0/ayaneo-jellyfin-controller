@@ -21,6 +21,12 @@ struct BooksHomeView: View {
 
     /// Every book and series the libraries say is being read, a series in full.
     @State private var candidates: [ReadingWork] = []
+    /// The books with a place this device kept and the hub has not had yet,
+    /// as this device has them, the latest first (#30).
+    @State private var unsent: [ReadingWork] = []
+    /// Shown before: coming back to Home reads it again.
+    @State private var appeared = false
+    @State private var returns = 0
     /// The books on the person's lists, as the hub last said.
     @State private var observed: [String: ReadingWork] = [:]
     @State private var recent: [ReadingWork] = []
@@ -44,7 +50,7 @@ struct BooksHomeView: View {
     private static let recentLimit = 12
 
     private var rows: [ReadingShelfRow] {
-        ReadingShelves.rows(current: candidates, state: books.lists, resolved: observed,
+        ReadingShelves.rows(current: unsent + candidates, state: books.lists, resolved: observed,
                             next: ReadingShelves.nextInSeries(candidates), recent: recent)
     }
 
@@ -86,7 +92,11 @@ struct BooksHomeView: View {
         }
         .ambientArtwork(lit ?? hero?.artwork ?? rows.first?.items.first?.artwork ?? "")
         .refreshable { await load() }
-        .task(id: "\(model.userId)·\(readerClosed)") { await load() }
+        .task(id: "\(model.userId)·\(readerClosed)·\(returns)") { await load() }
+        .onAppear {
+            if appeared { returns += 1 }
+            appeared = true
+        }
         .task(id: hero?.id) { if let hero { await loadHeroDetail(hero) } }
         .alert(naming?.listId == nil ? "New reading list" : "Rename reading list", isPresented: Binding(
             get: { naming != nil }, set: { if !$0 { naming = nil } })) {
@@ -340,8 +350,30 @@ struct BooksHomeView: View {
         let listedWorks = await fetchEach(listed.map(HubEndpoints.readingWork), hub: hub, as: ReadingWork.self)
         failures += listedWorks.filter { $0 == nil }.count
         for work in listedWorks.compactMap({ $0 }) { fresh[work.id] = work }
+        // A place this device kept and the hub has not had yet (#30): its book
+        // read in full and shown as this device has it, read at the moment it was kept.
+        let scope = ReadingCheckpointKey.scope(address: model.address, userId: model.userId)
+        let pending = ListeningStore.shared.pending(scope: scope).filter { !$0.conflicted }
+        var pendingIds: [String] = []
+        for checkpoint in pending.sorted(by: { $0.updatedAt > $1.updatedAt }) where !pendingIds.contains(checkpoint.key.workId) {
+            pendingIds.append(checkpoint.key.workId)
+        }
+        let pendingWorks = await fetchEach(pendingIds.map(HubEndpoints.readingWork), hub: hub, as: ReadingWork.self)
+        failures += pendingWorks.filter { $0 == nil }.count
+        var shownUnsent: [ReadingWork] = []
+        for (id, fetched) in zip(pendingIds, pendingWorks) {
+            guard let fetched else { continue }
+            let forWork = pending.filter { $0.key.workId == id }
+            var shown = ReadingProgressPresentation.project(fetched, pending: forWork)
+            if let kept = forWork.map(\.updatedAt).max(), shown.progress != nil {
+                shown.progress?.updatedAt = Self.stamp(kept)
+            }
+            fresh[id] = shown
+            shownUnsent.append(shown)
+        }
         guard !Task.isCancelled else { return }
         books.observe(Array(fresh.values))
+        unsent = shownUnsent
         candidates = found
         observed = fresh
         recent = Array(added.compactMap { $0 }.flatMap { $0.items.prefix(Self.recentLimit) }
@@ -391,6 +423,11 @@ struct BooksHomeView: View {
         }
     }
     #endif
+
+    /// This device's moment, in the hub's words (ISO 8601), for the shelves' order.
+    private static func stamp(_ millis: Int64) -> String {
+        ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: Double(millis) / 1_000))
+    }
 
     /// The hero's own page, once per book, for its length.
     private func loadHeroDetail(_ hero: ReadingWork) async {
