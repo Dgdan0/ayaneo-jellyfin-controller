@@ -1,80 +1,20 @@
 import HubKit
 import SwiftUI
 
-/// The reader's sheets, as the player's (`PlayerSheet`): glass at the right
-/// edge over a dimmed page, or from the bottom where a side sheet would cover
-/// most of it. Display chooses how this series reads and how every new one
-/// opens; Keys lists what every key does here. Like the player's, it comes in
-/// without a transition and then slides, so no row is laid out on SwiftUI's
-/// own animation thread (two crashes on 2026-10-04).
+/// The comic reader's sheets, in the readers' frame (`ReaderSheetFrame`):
+/// Display chooses how this series reads and how every new one opens; Keys
+/// lists what every key does here.
 struct ComicReaderSheetView: View {
     let reader: ComicReaderModel
     let sheet: ComicReaderModel.Sheet
     let layout: ComicReaderLayout
-    @State private var shown = false
-    @Environment(\.glassAccent) private var accent
-
-    private var bottom: Bool { layout.size.width < 600 }
-    private var width: CGFloat { bottom ? layout.size.width : min(400 + layout.safe.trailing, layout.size.width - 40) }
 
     var body: some View {
-        ZStack(alignment: bottom ? .bottom : .trailing) {
-            Color.black.opacity(shown ? 0.4 : 0)
-                .contentShape(Rectangle())
-                .onTapGesture { close() }
-                .accessibilityLabel("Close")
-                .accessibilityAddTraits(.isButton)
-                .accessibilityAction { close() }
-            panel
-                .offset(x: shown || bottom ? 0 : 60, y: shown || !bottom ? 0 : 80)
-                .opacity(shown ? 1 : 0)
+        ReaderSheetFrame(title: sheet == .display ? "Reading options" : "Keys",
+                         subtitle: sheet == .display ? reader.heading : "What the keys do while you read a comic",
+                         size: layout.size, safe: layout.safe, headingId: "comic-sheet-heading", close: close) { _ in
+            if sheet == .display { display } else { keys }
         }
-        .task {
-            await Task.yield()
-            withAnimation(.easeOut(duration: 0.26)) { shown = true }
-        }
-    }
-
-    private var panel: some View {
-        let shape = UnevenRoundedRectangle(topLeadingRadius: bottom ? 32 : 0, topTrailingRadius: bottom ? 32 : 0,
-                                           style: .continuous)
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(sheet == .display ? "Reading options" : "Keys")
-                        .font(HubType.heading(23, weight: .heavy, relativeTo: .title2))
-                        .accessibilityAddTraits(.isHeader)
-                        .accessibilityIdentifier("comic-sheet-heading")
-                    Text(sheet == .display ? reader.heading : "What the keys do while you read a comic")
-                        .font(HubType.body(13, weight: .medium, relativeTo: .footnote))
-                        .foregroundStyle(.white.opacity(0.65))
-                }
-                Spacer(minLength: 0)
-                GlassRoundButton(systemImage: "xmark", label: "Close", size: 38) { close() }
-            }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    if sheet == .display { display } else { keys }
-                }
-                .padding(.bottom, 4)
-            }
-            .scrollIndicators(.hidden)
-            .scrollBounceBehavior(.basedOnSize)
-        }
-        .padding(.top, 22 + (bottom ? 0 : layout.safe.top))
-        .padding(.leading, 20 + (bottom ? layout.safe.leading : 0))
-        .padding(.trailing, 20 + layout.safe.trailing)
-        .padding(.bottom, (bottom ? 22 : 30) + layout.safe.bottom)
-        .frame(width: width, alignment: .leading)
-        .frame(height: bottom ? layout.size.height * 0.72 : layout.size.height, alignment: .top)
-        .background { GlassSheetFill().clipShape(shape) }
-        .overlay(alignment: .leading) {
-            if !bottom { Rectangle().fill(Color(argb: GlassColors.edge)).frame(width: 1) }
-        }
-        .contentShape(shape)
-        .frame(maxHeight: .infinity, alignment: bottom ? .bottom : .top)
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
     }
 
     // MARK: Display
@@ -110,11 +50,11 @@ struct ComicReaderSheetView: View {
             SheetLabel(text: "This issue")
             SheetGroup {
                 SheetRow(title: "Previous issue", chevron: true) {
-                    close()
+                    reader.sheet = nil
                     reader.movePublication(-1)
                 }
                 SheetRow(title: "Next issue", chevron: true) {
-                    close()
+                    reader.sheet = nil
                     reader.movePublication(1)
                 }
                 SheetRow(title: "Keys", chevron: true) { reader.sheet = .keys }
@@ -126,12 +66,12 @@ struct ComicReaderSheetView: View {
 
     @ViewBuilder private var keys: some View {
         SheetLabel(text: "Game controller")
-        lines(ReaderPadMap.sheet(.comic))
+        ReaderKeyLines(lines: ReaderPadMap.sheet(.comic))
         SheetNote(text: "With the controls open, A presses the control in focus and B closes them. Select always leaves.")
         SheetLabel(text: "Keyboard")
-        lines(ReaderKeyboard.sheet(.comic))
+        ReaderKeyLines(lines: ReaderKeyboard.sheet(.comic))
         SheetLabel(text: "Touch")
-        lines(touch)
+        ReaderKeyLines(lines: touch)
     }
 
     /// What a finger does, the way this issue reads.
@@ -147,39 +87,8 @@ struct ComicReaderSheetView: View {
         ]
     }
 
-    private func lines(_ lines: [ReaderKeyLine]) -> some View {
-        SheetGroup {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                HStack(spacing: 12) {
-                    HStack(spacing: 4) {
-                        ForEach(line.keys, id: \.self) { key in
-                            Text(key)
-                                .font(HubType.chrome(12.5, weight: .bold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Capsule().fill(.white.opacity(0.14)))
-                        }
-                    }
-                    Spacer(minLength: 8)
-                    Text(line.does)
-                        .font(HubType.body(14, relativeTo: .subheadline))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .multilineTextAlignment(.trailing)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .sheetDivider()
-                .accessibilityElement(children: .combine)
-            }
-        }
-    }
-
+    /// Once the sheet has slid away: unless another opened meanwhile.
     private func close() {
-        withAnimation(.easeIn(duration: 0.2)) { shown = false }
-        let closing = sheet
-        Task {
-            try? await Task.sleep(for: .milliseconds(210))
-            if reader.sheet == closing { reader.sheet = nil }
-        }
+        if reader.sheet == sheet { reader.sheet = nil }
     }
 }

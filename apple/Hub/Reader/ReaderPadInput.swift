@@ -10,7 +10,7 @@ import Observation
 /// pushed. Only while a reader is open: nothing else in the app reads a pad.
 @MainActor
 @Observable
-final class ComicPadInput {
+final class ReaderPadInput {
     /// A controller is connected: the reader shows its cursor and key hints.
     private(set) var connected = false
 
