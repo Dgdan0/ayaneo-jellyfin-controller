@@ -105,6 +105,10 @@ struct ArtworkView: View {
                 }
             }
             .clipped()
+            // A fill reaches past the frame it was given, and clipping hides it
+            // without stopping it taking taps: a portrait cover behind a wide
+            // library tile took the taps meant for the tile above it.
+            .contentShape(Rectangle())
             .task(id: key) { await load() }
     }
 
