@@ -617,7 +617,16 @@ one step:
 3. it exports each with `method app-store-connect`, `destination upload` and manual signing,
    which signs it and uploads it with the App Store Connect API key;
 4. `apple/Tools/asc.swift` follows the builds through App Store Connect's processing until both
-   are `VALID`, and lists the TestFlight group's builds.
+   are `VALID`, gives both their notes, and lists the TestFlight group's builds.
+
+**Every build says what it is about** in the TestFlight app: its "What to Test", the en-US
+`betaBuildLocalizations` `whatsNew` of the iOS and the Mac build, made or changed and then read
+back (`asc.swift notes`). `testflight` takes them as `NOTES="…"` or `NOTES_FILE=<path on the PC>`
+and starts nothing without them; the text reaches the build copy through ssh's input, so no
+quoting changes it. They are written for the owner, not for developers: a few short lines of what
+is new, what to try, and anything else worth knowing, in plain words ("New: audiobooks. Open one
+from Books and press Listen…" / "Please check: …" / "Also: …"). `testflight-notes <build>` gives a
+build already up its notes, or shows what it says without them.
 
 When the Mac upload fails after the iOS one, `BUILD_NUMBER=<that build> TESTFLIGHT_PLATFORMS=macOS`
 sends the Mac build alone, under the same number. `asc.swift builds`, `certificates` and

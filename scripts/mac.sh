@@ -30,7 +30,14 @@
 #   scripts/mac.sh logs             stream the app's log from the booted simulators
 #   scripts/mac.sh testflight       archive JellyHub for iOS (iPhone and iPad) and macOS,
 #                                   upload both to App Store Connect and wait until they
-#                                   are VALID and in the TestFlight group
+#                                   are VALID, give them their notes and see them in the
+#                                   TestFlight group. The notes are the build's "What to
+#                                   Test" in the TestFlight app, a few plain lines for the
+#                                   owner: NOTES="..." or NOTES_FILE=<path>, and a build
+#                                   is not started without them
+#   scripts/mac.sh testflight-notes <build>
+#                                   give a build that is already up those notes (NOTES or
+#                                   NOTES_FILE), or show what it says without them
 #
 # A hub address and token in apple/dev.env (gitignored) are passed to Debug
 # builds on launch, the way dev.sh seed does on the Pocket DS:
@@ -530,7 +537,7 @@ PLIST
   } > "$file"
 }
 
-testflight() {
+tf_env() {
   local env="${ASC_ENV:-$TF_DIR/jellyhub.env}"
   if [[ ! -f "$env" ]]; then
     echo "no $env: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH, APPLE_TEAM_ID, ASC_APP_ID, TESTFLIGHT_GROUP"
@@ -540,13 +547,41 @@ testflight() {
   # shellcheck disable=SC1090
   source "$env"
   set +a
-  project
+}
+
+# The build's notes, "What to Test" in the TestFlight app, written to $1 from
+# NOTES_FILE or NOTES (mac-remote.sh puts either from the PC in a file here).
+# Checked before anything is archived: App Store Connect takes 4000 characters.
+tf_notes() {
+  local file="$1" text
+  if [[ -n "${NOTES_FILE:-}" ]]; then
+    [[ -f "$NOTES_FILE" ]] || { echo "no notes file $NOTES_FILE"; exit 2; }
+    text="$(tr -d '\r' < "$NOTES_FILE")"
+  else
+    text="$(printf '%s' "${NOTES:-}" | tr -d '\r')"
+  fi
+  if [[ -z "${text//[[:space:]]/}" ]]; then
+    echo "no notes for the TestFlight app: NOTES=\"...\" or NOTES_FILE=<path>, a few plain lines for the owner"
+    exit 2
+  fi
+  # Bytes, which are never fewer than the characters App Store Connect counts.
+  if (( $(printf '%s' "$text" | wc -c) > 4000 )); then
+    echo "the notes are $(printf '%s' "$text" | wc -c | tr -d ' ') bytes; What to Test takes 4000 characters"
+    exit 2
+  fi
+  mkdir -p "$(dirname "$file")"
+  printf '%s\n' "$text" > "$file"
+}
+
+testflight() {
+  tf_env
   local build version out auth platform installer
   # Always increasing: the minute of the upload in UTC, yyMMddHHmm.
   build="${BUILD_NUMBER:-$(date -u +%y%m%d%H%M)}"
   version="$(awk -F'"' '/MARKETING_VERSION:/ {print $2; exit}' "$APPLE/project.yml")"
   out="$APPLE/build/testflight/$build"
-  mkdir -p "$out"
+  tf_notes "$out/notes.txt"
+  project
   auth=(-allowProvisioningUpdates -authenticationKeyPath "$ASC_KEY_PATH"
         -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
 
@@ -582,7 +617,23 @@ testflight() {
   done
   echo "waiting for App Store Connect to process $build"
   swift "$APPLE/Tools/asc.swift" wait "$build" "${TESTFLIGHT_WAIT_MINUTES:-60}"
+  # As soon as it is VALID: the group gets the build then, and its testers the notes.
+  swift "$APPLE/Tools/asc.swift" notes "$build" "$out/notes.txt"
   swift "$APPLE/Tools/asc.swift" group "${TESTFLIGHT_GROUP:-me}" "$build"
+}
+
+# Notes for a build already up, from NOTES or NOTES_FILE, or what it says now.
+testflight_notes() {
+  local build="${1:-}"
+  [[ -n "$build" ]] || { echo "testflight-notes <build>"; exit 2; }
+  tf_env
+  if [[ -z "${NOTES_FILE:-}" && -z "${NOTES:-}" ]]; then
+    swift "$APPLE/Tools/asc.swift" notes "$build"
+    return
+  fi
+  local file="$APPLE/build/testflight/$build/notes.txt"
+  tf_notes "$file"
+  swift "$APPLE/Tools/asc.swift" notes "$build" "$file"
 }
 
 case "${1:-build}" in
@@ -602,6 +653,7 @@ case "${1:-build}" in
   mac) shift; mac "$@" ;;
   mac-shot) shift; mac_shot "$@" ;;
   testflight) testflight ;;
+  testflight-notes) shift; testflight_notes "$@" ;;
   logs) xcrun simctl spawn booted log stream --level debug --predicate "subsystem == '$BUNDLE_ID' OR process == 'Hub'" ;;
-  *) sed -n '2,54p' "$0"; exit 2 ;;
+  *) sed -n '2,61p' "$0"; exit 2 ;;
 esac

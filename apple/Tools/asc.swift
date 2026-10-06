@@ -5,6 +5,9 @@
 //   swift asc.swift wait <build> [minutes]   until the build is VALID on iOS and macOS
 //   swift asc.swift group <name> [build]     the builds a TestFlight group has, or
 //                                            until it has that build on iOS and macOS
+//   swift asc.swift notes <build> [file]     the build's "What to Test" in the TestFlight
+//                                            app (en-US), on iOS and macOS: the file's
+//                                            text set and read back, or what it says now
 //   swift asc.swift cert <type> <csr> <out>  a new certificate (DISTRIBUTION,
 //                                            MAC_INSTALLER_DISTRIBUTION) for a CSR, as DER
 //   swift asc.swift profile <type> <bundle id> <certificate serial> <name> <out>
@@ -126,6 +129,53 @@ func line(_ build: Build) -> String {
     "\(build.platform) \(build.version) (\(build.number)) \(build.state) \(build.uploaded)"
 }
 
+/// The TestFlight app's "What to Test" is a build's beta localization; the
+/// tester sees the one in their language, and en-US is the one we write.
+let notesLocale = "en-US"
+/// The most App Store Connect takes in "What to Test".
+let notesLimit = 4_000
+
+/// A build's en-US localization: its id and its "What to Test", if it has one yet.
+func notesLocalization(_ build: String) async -> (id: String, text: String?)? {
+    let json = await get("/v1/builds/\(build)/betaBuildLocalizations?limit=50"
+        + "&fields[betaBuildLocalizations]=locale,whatsNew")
+    for item in json["data"] as? [[String: Any]] ?? [] {
+        let attributes = item["attributes"] as? [String: Any] ?? [:]
+        if attributes["locale"] as? String == notesLocale, let id = item["id"] as? String {
+            return (id, attributes["whatsNew"] as? String)
+        }
+    }
+    return nil
+}
+
+func changeNotes(_ localization: String, _ text: String) async {
+    _ = await call("PATCH", "/v1/betaBuildLocalizations/\(localization)", body: [
+        "data": ["type": "betaBuildLocalizations", "id": localization, "attributes": ["whatsNew": text]],
+    ])
+}
+
+/// The build's "What to Test": its en-US localization changed, or made when
+/// it has none. App Store Connect may make one itself as processing ends, so
+/// a refusal to make a second is answered by changing that one.
+func setNotes(_ build: Build, _ text: String) async {
+    if let existing = await notesLocalization(build.id) {
+        await changeNotes(existing.id, text)
+        return
+    }
+    let (status, json) = await send("POST", "/v1/betaBuildLocalizations", body: [
+        "data": [
+            "type": "betaBuildLocalizations",
+            "attributes": ["locale": notesLocale, "whatsNew": text],
+            "relationships": ["build": ["data": ["type": "builds", "id": build.id]]],
+        ],
+    ])
+    if status == 409, let made = await notesLocalization(build.id) {
+        await changeNotes(made.id, text)
+    } else if status >= 400 {
+        fail("App Store Connect answered \(status) to \(build.platform)'s notes: \(problems(json))")
+    }
+}
+
 let arguments = Array(CommandLine.arguments.dropFirst())
 switch arguments.first {
 case "builds":
@@ -168,6 +218,33 @@ case "group":
         let numbers = (linked["data"] as? [[String: Any]] ?? []).compactMap { ($0["attributes"] as? [String: Any])?["version"] as? String }
         print("group \(name): \(numbers.isEmpty ? "no builds" : numbers.joined(separator: ", "))")
     }
+case "notes":
+    let rest = Array(arguments.dropFirst())
+    guard let number = rest.first else { fail("asc.swift notes <build> [file]") }
+    // One build per platform under the number, and each has its own notes.
+    let found = await builds(limit: 10, filter: "&filter[version]=\(number)")
+    guard !found.isEmpty else { fail("App Store Connect has no build \(number)") }
+    guard rest.count > 1 else {
+        for build in found {
+            let notes = await notesLocalization(build.id)
+            print("\(build.platform) \(number): \(notes?.text ?? "no What to Test")")
+        }
+        exit(0)
+    }
+    guard let read = try? String(contentsOfFile: rest[1], encoding: .utf8) else { fail("could not read \(rest[1])") }
+    let text = read.replacingOccurrences(of: "\r\n", with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else { fail("the notes in \(rest[1]) are empty") }
+    guard text.count <= notesLimit else { fail("the notes are \(text.count) characters; What to Test takes \(notesLimit)") }
+    for build in found { await setNotes(build, text) }
+    // Read back, as the TestFlight app will show them.
+    for build in found {
+        let shown = await notesLocalization(build.id)?.text ?? ""
+        guard shown.trimmingCharacters(in: .whitespacesAndNewlines) == text else {
+            fail("\(build.platform) \(number) does not show the notes it was given")
+        }
+    }
+    let platforms = found.map(\.platform).sorted().joined(separator: " and ")
+    print("What to Test set on \(number) for \(platforms), \(text.count) characters")
 case "cert":
     let rest = Array(arguments.dropFirst())
     guard rest.count == 3, let csr = try? String(contentsOfFile: rest[1], encoding: .utf8) else {
@@ -244,5 +321,6 @@ case "profiles":
             + "until \(attributes["expirationDate"] ?? "?") id \(item["id"] ?? "?") certificates \(certificateIds(item).joined(separator: ","))")
     }
 default:
-    fail("swift asc.swift builds | wait <build> | group <name> | cert <type> <csr> <out> | profile ... | certificates | profiles")
+    fail("swift asc.swift builds | wait <build> | group <name> | notes <build> [file] | cert <type> <csr> <out> | profile ... "
+        + "| certificates | profiles")
 }

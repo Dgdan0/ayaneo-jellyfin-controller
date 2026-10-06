@@ -8,6 +8,9 @@
 #                                           shots/apple/ back into this checkout
 #     e.g.  test | build | sims [-demo] | shot [-demo] | mac [-demo] | logs | testflight
 #
+# testflight and testflight-notes <build> take the build's notes for the TestFlight
+# app, NOTES="..." or NOTES_FILE=<a file here>; testflight starts nothing without them.
+#
 # The Mac side is a build copy, ~/Builds/ayaneo-jellyfin-controller: a plain
 # directory, not a git checkout, so nothing there is ever committed or discarded,
 # and the Mac's own checkout is left alone. Files go over as git sees them here,
@@ -68,9 +71,32 @@ fetch_shots() {
   fi
 }
 
+# testflight's notes, NOTES or NOTES_FILE: the text goes to the build copy
+# through ssh's own input, so no quoting on the way can change a word of it,
+# and mac.sh reads it there. False when there are none, and notes an earlier
+# run left there are removed.
+send_notes() {
+  local text=""
+  if [[ -n "${NOTES_FILE:-}" ]]; then
+    [[ -f "$NOTES_FILE" ]] || { echo "no notes file $NOTES_FILE" >&2; exit 2; }
+    text="$(tr -d '\r' < "$NOTES_FILE")"
+  else
+    text="${NOTES:-}"
+  fi
+  if [[ -z "${text//[[:space:]]/}" ]]; then
+    remote "rm -f ~/$REMOTE_DIR/.testflight-notes"
+    return 1
+  fi
+  printf '%s\n' "$text" | remote "cat > ~/$REMOTE_DIR/.testflight-notes"
+}
+
 run() {
   sync
   remote "touch ~/$REMOTE_DIR/.run-start"
+  local notes=""
+  case "${1:-}" in
+    testflight|testflight-notes) if send_notes; then notes="\$HOME/$REMOTE_DIR/.testflight-notes"; fi ;;
+  esac
   # A non-interactive SSH shell on the Mac does not read the login profile, so
   # Homebrew's tools (xcodegen) are not on its PATH.
   # HUB_SECTION (home, library, services, …) opens that section in Debug
@@ -91,7 +117,7 @@ run() {
   # that many seconds after launch. `turn landscape` turns the simulators, and
   # HUB_WIDTH lays the app out as narrow as an iPad's Split View. testflight
   # takes BUILD_NUMBER (the minute in UTC otherwise), TESTFLIGHT_PLATFORMS
-  # ("iOS macOS") and TESTFLIGHT_WAIT_MINUTES.
+  # ("iOS macOS"), TESTFLIGHT_WAIT_MINUTES and its notes (send_notes).
   remote "export PATH=/opt/homebrew/bin:\$PATH; cd ~/$REMOTE_DIR && \
     HUB_SECTION=$(printf '%q' "${HUB_SECTION:-}") HUB_OPEN=$(printf '%q' "${HUB_OPEN:-}") \
     HUB_SIDE=$(printf '%q' "${HUB_SIDE:-}") HUB_SHEET=$(printf '%q' "${HUB_SHEET:-}") \
@@ -109,6 +135,7 @@ run() {
     ${BUILD_NUMBER:+BUILD_NUMBER=$(printf '%q' "$BUILD_NUMBER")} \
     ${TESTFLIGHT_WAIT_MINUTES:+TESTFLIGHT_WAIT_MINUTES=$(printf '%q' "$TESTFLIGHT_WAIT_MINUTES")} \
     ${TESTFLIGHT_PLATFORMS:+TESTFLIGHT_PLATFORMS=$(printf '%q' "$TESTFLIGHT_PLATFORMS")} \
+    ${notes:+NOTES_FILE=$notes} \
     ${UITEST_ONLY:+UITEST_ONLY=$(printf '%q' "$UITEST_ONLY")} \
     ${UITEST_SIM:+UITEST_SIM=$(printf '%q' "$UITEST_SIM")} \
     HUB_DEV_ENV=\$HOME/$DEV_ENV bash scripts/mac.sh $(printf '%q ' "$@")"
@@ -116,7 +143,7 @@ run() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,22p' "$0" ;;
+  ""|-h|--help) sed -n '2,24p' "$0" ;;
   sync) sync ;;
   *) run "$@" ;;
 esac
