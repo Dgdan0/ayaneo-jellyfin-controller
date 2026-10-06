@@ -3,9 +3,11 @@ package config
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +39,57 @@ func (d Duration) OrDefault(fallback time.Duration) time.Duration {
 	return time.Duration(d)
 }
 
+// ByteSize is a size in bytes that YAML may write as a number of bytes or with a
+// unit: 512MB, 150 GB, 20GiB, 1.5TiB. KB, MB, GB and TB are powers of ten, and
+// KiB, MiB, GiB and TiB powers of two, so the unit says which is meant.
+type ByteSize int64
+
+func (b *ByteSize) UnmarshalYAML(node *yaml.Node) error {
+	var text string
+	if err := node.Decode(&text); err != nil {
+		return err
+	}
+	parsed, err := ParseByteSize(text)
+	if err != nil {
+		return err
+	}
+	*b = ByteSize(parsed)
+	return nil
+}
+
+func (b ByteSize) Bytes() int64 { return int64(b) }
+
+var byteSizeUnits = map[string]float64{
+	"": 1, "b": 1,
+	"kb": 1e3, "mb": 1e6, "gb": 1e9, "tb": 1e12,
+	"kib": 1 << 10, "mib": 1 << 20, "gib": 1 << 30, "tib": 1 << 40,
+}
+
+// ParseByteSize reads "150GB", "1.5 GiB" or a plain count of bytes.
+func ParseByteSize(text string) (int64, error) {
+	trimmed := strings.TrimSpace(text)
+	split := len(trimmed)
+	for index, char := range trimmed {
+		if (char < '0' || char > '9') && char != '.' {
+			split = index
+			break
+		}
+	}
+	number, unit := strings.TrimSpace(trimmed[:split]), strings.ToLower(strings.TrimSpace(trimmed[split:]))
+	multiplier, known := byteSizeUnits[unit]
+	value, err := strconv.ParseFloat(number, 64)
+	if number == "" || err != nil || !known {
+		return 0, fmt.Errorf("%q is not a size like 512MB or 150GB: %w", text, errBadSize)
+	}
+	bytes := math.Round(value * multiplier)
+	if bytes < 0 || bytes >= math.MaxInt64 {
+		return 0, fmt.Errorf("%q is too large: %w", text, errBadSize)
+	}
+	return int64(bytes), nil
+}
+
+var errBadSize = fmt.Errorf("sizes are a number of bytes or a number with KB, MB, GB, TB, KiB, MiB, GiB or TiB")
+
 type Config struct {
 	Server   ServerConfig             `yaml:"server"`
 	Auth     AuthConfig               `yaml:"auth"`
@@ -59,6 +112,16 @@ type ServerConfig struct {
 	// OfflineRegistry persists short-lived download grants and progress-sync
 	// receipts. Relative paths are resolved beside the main config file.
 	OfflineRegistry string `yaml:"offline_registry"`
+	// OfflineCache is the folder the hub repackages an Apple download into: one
+	// MP4 per grant, kept until it is released or ages out (#5). Relative paths
+	// are resolved beside the main config file. Keep it outside every library
+	// folder, on a drive with room: the hub only reads the library.
+	OfflineCache string `yaml:"offline_cache"`
+	// OfflineCacheMaxBytes caps what finished files may hold (default 20GB).
+	OfflineCacheMaxBytes ByteSize `yaml:"offline_cache_max_bytes"`
+	// OfflineCacheMaxAge is how long a finished file is kept after it was last
+	// fetched (default 48h).
+	OfflineCacheMaxAge Duration `yaml:"offline_cache_max_age"`
 	// ReadingCatalog persists stable Hub work IDs and their source bindings.
 	// Relative paths are resolved beside the main config file.
 	ReadingCatalog string `yaml:"reading_catalog"`
@@ -211,6 +274,11 @@ func Load(path string) (*Config, error) {
 	} else if !filepath.IsAbs(cfg.Server.OfflineRegistry) {
 		cfg.Server.OfflineRegistry = filepath.Join(filepath.Dir(path), cfg.Server.OfflineRegistry)
 	}
+	if cfg.Server.OfflineCache == "" {
+		cfg.Server.OfflineCache = filepath.Join(filepath.Dir(path), "offline-cache")
+	} else if !filepath.IsAbs(cfg.Server.OfflineCache) {
+		cfg.Server.OfflineCache = filepath.Join(filepath.Dir(path), cfg.Server.OfflineCache)
+	}
 	if cfg.Server.ReadingCatalog == "" {
 		cfg.Server.ReadingCatalog = filepath.Join(filepath.Dir(path), "reading-catalog.json")
 	} else if !filepath.IsAbs(cfg.Server.ReadingCatalog) {
@@ -286,6 +354,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Server.ShutdownGrace == 0 {
 		c.Server.ShutdownGrace = Duration(10 * time.Second)
+	}
+	if c.Server.OfflineCacheMaxBytes == 0 {
+		c.Server.OfflineCacheMaxBytes = ByteSize(20 << 30)
+	}
+	if c.Server.OfflineCacheMaxAge == 0 {
+		c.Server.OfflineCacheMaxAge = Duration(48 * time.Hour)
 	}
 	if c.Auth.RateLimit.RPM == 0 {
 		c.Auth.RateLimit.RPM = 90

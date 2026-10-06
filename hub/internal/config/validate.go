@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 )
 
 // ExitConfig is sysexits.h EX_CONFIG. A supervisor restarting a service that is
@@ -56,10 +57,35 @@ func (c *Config) Validate() error {
 	if err := c.validateServer(); err != nil {
 		return err
 	}
+	if err := c.validateOfflineCache(); err != nil {
+		return err
+	}
 	if err := c.validateAuth(); err != nil {
 		return err
 	}
 	return c.validateServices()
+}
+
+// minOfflineCacheBytes is a size that could hold one episode. A smaller number
+// is nearly always bytes written where kilobytes or gigabytes were meant.
+const minOfflineCacheBytes = 1_000_000_000
+
+func (c *Config) validateOfflineCache() error {
+	if c.Server.OfflineCacheMaxBytes.Bytes() < minOfflineCacheBytes {
+		return &Error{
+			Path:    "server.offline_cache_max_bytes",
+			Problem: fmt.Sprintf("is %d bytes, too small to hold one episode", c.Server.OfflineCacheMaxBytes.Bytes()),
+			Fix:     "give a size with a unit, such as 20GB",
+		}
+	}
+	if c.Server.OfflineCacheMaxAge.Std() < time.Minute {
+		return &Error{
+			Path:    "server.offline_cache_max_age",
+			Problem: fmt.Sprintf("is %v, which would delete a file before an app could fetch it", c.Server.OfflineCacheMaxAge.Std()),
+			Fix:     "use at least a few hours, such as 48h",
+		}
+	}
+	return nil
 }
 
 func (c *Config) validateServer() error {
