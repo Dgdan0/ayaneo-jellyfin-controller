@@ -198,6 +198,31 @@ public enum ReadingBookFacts {
         return out.joined(separator: " · ")
     }
 
+    /// A series page's line under its title (Android's `ReadingWorkScreen`):
+    /// its writers when the hub sent no author link, "6 books", "1 missing",
+    /// its genres. How far through is the bar's own label.
+    public static func seriesLine(_ series: ReadingWork) -> String {
+        var out: [String] = []
+        if series.authorRefs.isEmpty && !series.authors.isEmpty { out.append(series.authors.joined(separator: ", ")) }
+        out.append(plural(series.bookCount, "book"))
+        let missing = series.sections.reduce(0) { $0 + $1.items.filter { !$0.isAvailable }.count }
+        if missing > 0 { out.append("\(missing) missing") }
+        if !series.genres.isEmpty { out.append(series.genres.joined(separator: ", ")) }
+        return out.joined(separator: " · ")
+    }
+
+    /// A series' or a run's main button: "Continue · Book 6", "Continue ·
+    /// Issue 51", "Continue · Chapter 11", or "Continue reading" without a number.
+    public static func continueLabel(_ point: ReadingContinue, kind: String) -> String {
+        guard !blank(point.number) else { return "Continue reading" }
+        let noun = switch kind {
+        case "comic": "Issue"
+        case "manga": "Chapter"
+        default: "Book"
+        }
+        return "Continue · \(noun) \(point.number)"
+    }
+
     /// What a book can be opened as, always in this order: ebook, audiobook,
     /// read along. From the hub's list, else from the editions it has.
     public static func formats(_ work: ReadingWork) -> [String] {
@@ -229,7 +254,7 @@ public enum ReadingBookFacts {
         min(max(Int(fraction * Double(pages)), 1), pages)
     }
 
-    static func plural(_ n: Int, _ one: String) -> String { n == 1 ? "1 \(one)" : "\(n) \(one)s" }
+    public static func plural(_ n: Int, _ one: String) -> String { n == 1 ? "1 \(one)" : "\(n) \(one)s" }
 
     static func blank(_ text: String) -> Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }

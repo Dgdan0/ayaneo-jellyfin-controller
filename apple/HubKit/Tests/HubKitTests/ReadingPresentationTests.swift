@@ -14,6 +14,27 @@ struct ReadingPresentationTests {
         #expect(ReadingWorkPresentation.primaryRead(work)?.sourceItemId == "901")
     }
 
+    @Test func kavitaComicsAndMangaOpenThePagesAndEverythingElseTheEbookReader() {
+        #expect(ReadingWorkPresentation.opensPages(ReadingWork(kind: "comic"), source: "kavita"))
+        #expect(ReadingWorkPresentation.opensPages(ReadingWork(kind: "manga"), source: "kavita"))
+        #expect(!ReadingWorkPresentation.opensPages(ReadingWork(kind: "book"), source: "kavita"))
+        #expect(!ReadingWorkPresentation.opensPages(ReadingWork(kind: "ebook"), source: "storyteller"))
+        #expect(!ReadingWorkPresentation.opensPages(ReadingWork(kind: "comic"), source: "storyteller"))
+    }
+
+    @Test func thePublicationOpenedIsTheIssueOnThePageElseOneMadeFromTheContinue() {
+        let issue = ReadingSectionItem(sourceItemId: "901", title: "Issue 51", number: "51", kind: "comic", pageCount: 24)
+        let work = ReadingWork(id: "rw_ff", kind: "comic", title: "Fantastic Four", artwork: "/cover",
+                               sections: [ReadingSection(items: [issue])],
+                               continueAt: ReadingContinue(sourceItemId: "902", title: "Issue 52", number: "52", artwork: "/52"))
+        #expect(ReadingWorkPresentation.publication(work, sourceItemId: "901") == issue)
+        let continued = ReadingWorkPresentation.publication(work, sourceItemId: "902")
+        #expect(continued.title == "Issue 52" && continued.number == "52" && continued.artwork == "/52")
+        #expect(continued.workId == "rw_ff" && continued.kind == "comic")
+        let unknown = ReadingWorkPresentation.publication(work, sourceItemId: "999")
+        #expect(unknown.title == "Fantastic Four" && unknown.artwork == "/cover" && unknown.sourceItemId == "999")
+    }
+
     @Test func aBookResumesItsContinuedReadableEdition() {
         let work = ReadingWork(id: "golden-son", entityType: "work", kind: "ebook", title: "Golden Son",
                                editions: [ReadingEdition(source: "storyteller", sourceItemId: "edition-a", kind: "ebook", format: "epub",
@@ -150,6 +171,24 @@ struct ReadingPresentationTests {
         #expect(menu.availability == "Ebook ready  ·  Audiobook ready  ·  Read along ready")
     }
 
+    @Test func theMainButtonSaysContinueForABookOpenedBeforeElseWhatItOpens() throws {
+        let menu = ReadingFormatMenu.forWork(book(text, alice, bob, aligned))
+        let first = try #require(menu.defaultChoice)
+        #expect(menu.entryLabel(first, remembered: false, preview: nil) == "Read")
+        #expect(menu.entryLabel(first, remembered: true, preview: nil) == "Continue")
+        let bobs = try #require(menu.options.first { $0.choice.audio?.sourceItemId == "bob" && $0.choice.mode == .listen })
+        #expect(menu.entryLabel(bobs.choice, remembered: true, preview: bobs.choice) == "Listen · Bob")
+        let along = try #require(menu.options.first { $0.choice.mode == .readAlong })
+        #expect(menu.entryLabel(along.choice, remembered: false, preview: along.choice) == "Read along · Alice")
+        // Read's own words win: a book being read says how far.
+        var started = book(text)
+        started.progress = ReadingProgress(percentage: 0.49)
+        let resume = ReadingFormatMenu.forWork(started)
+        #expect(resume.entryLabel(try #require(resume.defaultChoice), remembered: false, preview: nil) == "Resume · 49%")
+        let audioOnly = ReadingFormatMenu.forWork(book(alice))
+        #expect(audioOnly.entryLabel(try #require(audioOnly.defaultChoice), remembered: false, preview: nil) == "Listen")
+    }
+
     @Test func aReadAlongStillAligningCannotBeOpened() {
         var aligning = aligned
         aligning.availability = "processing"
@@ -274,7 +313,6 @@ struct ReadingPresentationTests {
         #expect(SortPreference(field: "title", ascending: true).directionLabel == "A to Z")
         #expect(!SortPreference.forField("last_read").ascending && SortPreference.forField("author").ascending)
         #expect(ReadingLibraryTiles.summary(libraries) == "3 libraries from Storyteller and Kavita")
-        #expect(ReadingLibraryTiles.kindLabel("manga") == "Manga" && ReadingLibraryTiles.kindLabel("book") == "Books & audio")
         var names = ReadingLibraryNames()
         names.remember(libraries)
         #expect(names.name(of: "kavita:2") == "My Marvelous Year" && names.name(of: "kavita:9") == nil)
@@ -295,6 +333,22 @@ struct ReadingPresentationTests {
                 == ["Trending now · Ebooks", "Trending now · Manga", "Popular · Manga", "New light novels"])
         #expect(ReadingDiscoverRows.shown(rows.filter { $0.contentType == ReadingType.manga }, filter: ReadingType.manga).map(\.title)
                 == ["Trending now", "Popular"])
+    }
+
+    @Test func theFirstTitleIsFeaturedOnlyWithACoverANameAndSomethingToSay() {
+        let full = ReadingItem(key: "a", title: "Atomic Habits", author: "James Clear", cover: "/v1/img/x")
+        let rest = ReadingItem(key: "b", title: "Deep Work")
+        #expect(ReadingDiscoverRows.feature([full, rest])?.key == "a")
+        #expect(ReadingDiscoverRows.shelf([full, rest]).map(\.key) == ["b"])
+        var bare = full
+        bare.cover = ""
+        #expect(ReadingDiscoverRows.feature([bare, rest]) == nil)
+        #expect(ReadingDiscoverRows.shelf([bare, rest]).count == 2)
+        var silent = full
+        silent.author = ""
+        #expect(ReadingDiscoverRows.feature([silent]) == nil)
+        silent.description = "A book about habits."
+        #expect(ReadingDiscoverRows.feature([silent])?.key == "a")
     }
 
     @Test func closeResultsShowFirstAndBroaderOnesOnRequest() {
@@ -426,6 +480,30 @@ struct ReadingPresentationTests {
         #expect(ReadingTransferSummary.tone("imported", failed: false) == .good)
         #expect(ReadingTransferSummary.tone("importing", failed: false) == .waiting)
         #expect(ReadingTransferSummary.tone("queued", failed: true) == .bad)
+    }
+
+    @Test func thePagesLineSaysNothingYetWhatNeedsAttentionOrHowMany() {
+        #expect(ReadingTransferSummary.status([]) == "No book transfers yet.")
+        let queued = ReadingDownloadItem(id: "1", status: "queued")
+        #expect(ReadingTransferSummary.status([queued]) == "1 BookKeeprr transfer")
+        #expect(ReadingTransferSummary.status([queued, queued]) == "2 BookKeeprr transfers")
+        let failed = ReadingDownloadItem(id: "2", status: "failed", failed: true)
+        #expect(ReadingTransferSummary.status([queued, failed]) == "1 transfer needs attention")
+        #expect(ReadingTransferSummary.status([failed, failed]) == "2 transfers need attention")
+    }
+
+    // MARK: PollSchedule
+
+    @Test func transfersAreAskedFastWhileMovingOrSettlingAndBackOffAfterFailures() {
+        #expect(PollSchedule.next(active: true, failures: 0) == .seconds(2))
+        #expect(PollSchedule.next(active: false, failures: 0) == .seconds(10))
+        #expect(PollSchedule.next(active: false, failures: 0, settling: true) == .seconds(2))
+        #expect(PollSchedule.next(active: true, failures: 1) == .seconds(5))
+        #expect(PollSchedule.next(active: true, failures: 2) == .seconds(15))
+        #expect(PollSchedule.next(active: true, failures: 9) == .seconds(30))
+        let quiet = PollCadence(active: .seconds(15), idle: nil)
+        #expect(PollSchedule.next(active: false, failures: 0, cadence: quiet) == nil)
+        #expect(PollSchedule.next(active: false, failures: 1, cadence: quiet) == .seconds(15))
     }
 
     @Test func transfersGroupByKindWithoutReorderingAKind() {

@@ -124,6 +124,24 @@ public enum ReadingWorkPresentation {
         !blank(sourceItemId) && readableKinds.contains(kind)
     }
 
+    /// Whether a publication opens in the page reader (a Kavita comic or
+    /// manga) rather than the ebook reader (a Storyteller edition, a book or
+    /// an ebook): Android's `openPublication`.
+    public static func opensPages(_ work: ReadingWork, source: String) -> Bool {
+        source != "storyteller" && !["book", "ebook"].contains(work.kind)
+    }
+
+    /// The issue or volume a page reader opens for an id: the work's own,
+    /// else one made from its Continue, or from the work itself.
+    public static func publication(_ work: ReadingWork, sourceItemId: String) -> ReadingSectionItem {
+        if let item = work.sections.lazy.flatMap(\.items).first(where: { $0.sourceItemId == sourceItemId }) { return item }
+        let point = work.continueAt.flatMap { $0.sourceItemId == sourceItemId ? $0 : nil }
+        return ReadingSectionItem(sourceItemId: sourceItemId, workId: work.id, title: point?.title ?? work.title,
+                                  number: point?.number ?? "", kind: work.kind,
+                                  artwork: point.map(\.artwork).flatMap { $0.isEmpty ? nil : $0 } ?? work.artwork,
+                                  authors: work.authors, progress: work.progress)
+    }
+
     private static func distinct(_ editions: [ReadingEdition]) -> [ReadingEdition] {
         var seen = Set<String>()
         return editions.filter { seen.insert($0.source + "\u{0}" + $0.sourceItemId).inserted }
@@ -293,6 +311,31 @@ public struct ReadingFormatMenu: Equatable, Sendable {
         }
         return ReadingFormatMenu(defaultChoice: defaultChoice, options: options, availability: ready.joined(separator: "  ·  "))
     }
+
+    /// The option a choice is, when the menu has it.
+    public func option(for choice: ReadingEntryChoice?) -> Option? {
+        guard let choice else { return nil }
+        let key = Option(choice: choice, label: "", detail: "").key
+        return options.first { $0.key == key }
+    }
+
+    /// What the main button says (Android's `ReadingWorkScreen`): "Continue"
+    /// for a book opened before, unless another format is being tried;
+    /// otherwise Read's own words ("Resume · 49%", "Continue · Issue 51"),
+    /// "Listen" or "Read along", naming the narration once one is chosen.
+    public func entryLabel(_ choice: ReadingEntryChoice, remembered: Bool, preview: ReadingEntryChoice?) -> String {
+        if remembered && preview == nil { return "Continue" }
+        let chosen = option(for: preview)
+        switch choice.mode {
+        case .read:
+            if let label = choice.text?.label, label != "Read book" { return label }
+            return chosen?.label ?? "Read"
+        case .listen:
+            return preview != nil ? "Listen · \(chosen?.detail ?? "")" : "Listen"
+        case .readAlong:
+            return preview != nil ? "Read along · \(chosen?.narration ?? "")" : "Read along"
+        }
+    }
 }
 
 /// Whether a format of a book can be opened.
@@ -388,18 +431,9 @@ public struct ReadingLibraryNames: Equatable, Sendable {
     public func name(of libraryId: String) -> String? { names[libraryId] }
 }
 
-/// A reading library's tile and the root's line.
+/// The line under "Your reading libraries" (a tile's own words are the
+/// app's `LibraryKind.reading`, beside the media side's).
 public enum ReadingLibraryTiles {
-    /// The small capitals over a tile's name.
-    public static func kindLabel(_ kind: String) -> String {
-        switch kind {
-        case "comic": "Comics"
-        case "manga": "Manga"
-        case "reading_list": "Kavita"
-        default: "Books & audio"
-        }
-    }
-
     /// "3 libraries from Storyteller and Kavita".
     public static func summary(_ libraries: [ReadingLibrary]) -> String {
         let shelves = libraries.filter { $0.kind != "reading_list" }
@@ -426,6 +460,20 @@ public enum ReadingDiscoverRows {
             named.title = "\(row.title) · \(ReadingType.label(row.contentType))"
             return named
         }
+    }
+
+    /// The first row's first title, large, when it has a cover, a name and
+    /// something to say (Android's `DiscoverFeaturePolicy.readingFeature`;
+    /// on Apple a phone stacks the card rather than leaving it out).
+    public static func feature(_ items: [ReadingItem]) -> ReadingItem? {
+        guard let first = items.first, !ReadingWorkPresentation.blank(first.title), !first.cover.isEmpty,
+              !ReadingWorkPresentation.blank(first.author) || !ReadingWorkPresentation.blank(first.description) else { return nil }
+        return first
+    }
+
+    /// The row without the title featured above it.
+    public static func shelf(_ items: [ReadingItem]) -> [ReadingItem] {
+        feature(items) == nil ? items : Array(items.dropFirst())
     }
 
     private static func saysWhatItHolds(_ row: ReadingDiscoverRow) -> Bool {
@@ -745,6 +793,20 @@ public enum ReadingTransferSummary {
         let more = fallback(item.status, failed: item.failed)
         if parts.count == 1 && more.caseInsensitiveCompare(stage) != .orderedSame { parts.append(more) }
         return parts.joined(separator: " · ")
+    }
+
+    /// "1 transfer needs attention" (Android's `ActivityDashboard.needAttention`).
+    public static func needAttention(_ count: Int) -> String {
+        count == 1 ? "1 transfer needs attention" : "\(count) transfers need attention"
+    }
+
+    /// The line under the page's heading: nothing yet, what needs attention,
+    /// or how many transfers BookKeeprr has.
+    public static func status(_ items: [ReadingDownloadItem]) -> String {
+        let failed = items.filter(\.failed).count
+        if items.isEmpty { return "No book transfers yet." }
+        if failed > 0 { return needAttention(failed) }
+        return items.count == 1 ? "1 BookKeeprr transfer" : "\(items.count) BookKeeprr transfers"
     }
 
     /// The page's summary: "1 downloading · 2 queued · 1 failed".

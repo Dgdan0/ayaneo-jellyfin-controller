@@ -153,6 +153,28 @@ struct ReadingFactsTests {
         #expect(ReadingBookFacts.continueLine(first, kind: "book", pages: 300) == "Book 1")
     }
 
+    @Test func aSeriesLineCountsItsBooksAndTheMissingOnes() {
+        let series = ReadingWork(entityType: "collection", genres: ["Science fiction"], bookCount: 6,
+                                 sections: [ReadingSection(items: [ReadingSectionItem(workId: "b1"),
+                                                                   ReadingSectionItem(workId: "", availability: "missing")])])
+        #expect(ReadingBookFacts.seriesLine(series) == "6 books · 1 missing · Science fiction")
+        var unlinked = series
+        unlinked.authors = ["Pierce Brown"]
+        unlinked.genres = []
+        unlinked.bookCount = 1
+        #expect(ReadingBookFacts.seriesLine(unlinked) == "Pierce Brown · 1 book · 1 missing")
+        unlinked.authorRefs = pierce
+        #expect(ReadingBookFacts.seriesLine(unlinked) == "1 book · 1 missing")
+    }
+
+    @Test func aSeriesOrRunNamesTheBookIssueOrChapterToContinue() {
+        let point = ReadingContinue(title: "Light Bringer", number: "6")
+        #expect(ReadingBookFacts.continueLabel(point, kind: "book") == "Continue · Book 6")
+        #expect(ReadingBookFacts.continueLabel(point, kind: "comic") == "Continue · Issue 6")
+        #expect(ReadingBookFacts.continueLabel(point, kind: "manga") == "Continue · Chapter 6")
+        #expect(ReadingBookFacts.continueLabel(ReadingContinue(title: "Light Bringer"), kind: "book") == "Continue reading")
+    }
+
     @Test func formatsComeInOneOrderWhateverOrderTheHubSends() {
         #expect(ReadingBookFacts.formats(ReadingWork(availability: ["readaloud", "ebook", "audiobook"]))
                 == ["ebook", "audiobook", "readaloud"])
