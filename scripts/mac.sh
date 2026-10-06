@@ -2,7 +2,7 @@
 # The Apple client's dev.sh, run on the MacBook.
 #
 #   scripts/mac.sh project          generate apple/Hub.xcodeproj from apple/project.yml
-#   scripts/mac.sh test             HubKit tests (swift test), the JVM-test equivalent
+#   scripts/mac.sh test [filter]    HubKit tests (swift test), the JVM-test equivalent; a filter runs those alone
 #   scripts/mac.sh build            build for the iOS Simulator and for the Mac
 #   scripts/mac.sh sims [-demo]     boot iPad Pro 12.9", iPad mini and iPhone; install,
 #                                   launch and screenshot each into shots/apple/
@@ -587,7 +587,7 @@ testflight() {
 
 case "${1:-build}" in
   project) project ;;
-  test) (cd "$APPLE/HubKit" && swift test) ;;
+  test) shift; (cd "$APPLE/HubKit" && swift test ${1:+--filter "$1"}) ;;
   build) build_ios && build_mac ;;
   sims) shift; sims "$@" ;;
   shot) shift; shot "$@" ;;
