@@ -412,13 +412,19 @@ struct TransferSheetView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
-                .padding(.bottom, 24)
+                .padding(.bottom, 16)
+            }
+            // What may be done stays in sight under the words, however long they run.
+            if case .diagnosis(let item) = sheet {
+                actions(item)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
             }
         }
         .presentationBackground { GlassSheetFill() }
         .presentationDetents(sizeClass == .compact ? [.medium, .large] : [.large])
-        // An iPad's or the Mac's sheet as tall as what it says, so Refresh status is never cut off.
-        .presentationSizing(.form.fitted(horizontal: false, vertical: true))
+        // A page's height on an iPad and the Mac: an explanation is for reading.
+        .presentationSizing(.page)
         .accessibilityIdentifier("transfer-sheet")
     }
 
@@ -446,6 +452,9 @@ struct TransferSheetView: View {
             ForEach(said.evidence, id: \.self) { paragraph($0) }
         }
         paragraph("A snapshot from the last refresh.")
+    }
+
+    private func actions(_ item: ActivityItem) -> some View {
         HStack(spacing: 10) {
             Button {
                 refresh()
@@ -465,8 +474,8 @@ struct TransferSheetView: View {
                 .buttonStyle(PrimaryPillStyle())
                 .accessibilityIdentifier("resume-transfer")
             }
+            Spacer(minLength: 0)
         }
-        .padding(.top, 6)
     }
 
     @ViewBuilder private func details(_ item: ActivityItem) -> some View {
