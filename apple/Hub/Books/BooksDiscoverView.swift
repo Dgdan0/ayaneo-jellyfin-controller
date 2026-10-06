@@ -171,8 +171,11 @@ struct BooksDiscoverView: View {
     }
 
     #if DEBUG
-    /// scripts/mac.sh: HUB_OPEN=search:<words> types a search; request opens
-    /// the first title that can be requested; a title's key opens it. Once.
+    /// scripts/mac.sh: HUB_OPEN=search:<words> types a search; book-request opens
+    /// the first title that can be requested; book-releases:<series id>|<title>
+    /// its releases; a title's key opens it. Once. (Media's Discover reads
+    /// HUB_OPEN too, and its request and releases would open a page of their
+    /// own, and a sheet over the window: hence the names.)
     private func applyDebugOpen() {
         guard !debugOpened, let open = ProcessInfo.processInfo.environment["HUB_OPEN"], !open.isEmpty else { return }
         debugOpened = true
@@ -180,8 +183,8 @@ struct BooksDiscoverView: View {
             query = String(open.dropFirst("search:".count))
             return
         }
-        if open.hasPrefix("releases:") {
-            let fields = open.dropFirst("releases:".count).split(separator: "|").map(String.init)
+        if open.hasPrefix("book-releases:") {
+            let fields = open.dropFirst("book-releases:".count).split(separator: "|").map(String.init)
             if let seriesId = fields.first.flatMap(Int.init) {
                 openRoute(.readingReleases(ReadingReleasesRoute(targets: [ReadingRequestTarget(seriesId: seriesId,
                                                                                               title: fields.last ?? "")])))
@@ -189,7 +192,7 @@ struct BooksDiscoverView: View {
             return
         }
         let all = rows.flatMap(\.items)
-        let item = open == "request" ? all.first(where: \.canRequest) : all.first { $0.key == open }
+        let item = open == "book-request" ? all.first(where: \.canRequest) : all.first { $0.key == open }
         if let item { openRoute(.bookRequest(BookRequestRoute(item: item))) }
     }
     #endif

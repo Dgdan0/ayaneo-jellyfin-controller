@@ -130,7 +130,7 @@ final class BooksTests: XCTestCase {
 
     @MainActor
     func testARequestReachesTheReleasesAndAGrabShowsInActivity() {
-        let app = launch("discover", open: "request")
+        let app = launch("discover", open: "book-request")
         let request = app.buttons["book-request"]
         XCTAssertTrue(request.waitForExistence(timeout: 15), "the title to request did not open: \(buttons(app))")
         request.tap()
