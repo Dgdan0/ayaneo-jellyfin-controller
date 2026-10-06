@@ -31,7 +31,7 @@ extension HubEndpoints {
                    body: json(body))
     }
 
-    private static func publicationPath(workId: String, sourceItemId: String) -> String {
+    static func publicationPath(workId: String, sourceItemId: String) -> String {
         "/v1/reading/works/" + encode(workId) + "/publications/" + encode(sourceItemId)
     }
 }
