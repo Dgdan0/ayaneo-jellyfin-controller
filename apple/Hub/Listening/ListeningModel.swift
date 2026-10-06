@@ -36,10 +36,20 @@ enum ListeningSettings {
 
 /// Where the listening places live on this device: one file per book under
 /// Application Support, kept per hub and profile by their keys.
+///
+/// The demo hub (`-demo`, as `AppModel` reads it) forgets every place when
+/// the app starts again, so the demo's places start again too, in a folder
+/// of their own that never meets a real hub's: kept across launches, every
+/// demo place would be another device's on the next.
 enum ListeningStore {
     static let shared: ReadingCheckpointStore = {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
+        let files = FileManager.default
+        if ProcessInfo.processInfo.arguments.contains("-demo") {
+            let demo = files.temporaryDirectory.appendingPathComponent("demo-reading-checkpoints", isDirectory: true)
+            try? files.removeItem(at: demo)
+            return ReadingCheckpointStore(root: demo)
+        }
+        let base = files.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? files.temporaryDirectory
         return ReadingCheckpointStore(root: base.appendingPathComponent("reading-checkpoints", isDirectory: true))
     }()
 }
