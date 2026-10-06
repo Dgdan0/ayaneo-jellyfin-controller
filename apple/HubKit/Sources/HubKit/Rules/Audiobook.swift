@@ -250,3 +250,21 @@ public struct AudioPlace: Equatable, Hashable, Sendable {
         return place.completed || place.offsetMs > 0
     }
 }
+
+extension AudioPlace {
+    /// A place the hub only worked out from a reader's page in a book it
+    /// cannot align is a guess: the player asks before going there. Only when
+    /// the place chosen is that answer itself.
+    public static func asksBeforeJumping(to place: AudioPlace?, answered: ReadingAudioPosition?) -> Bool {
+        guard let place, let answered, !answered.exact else { return false }
+        return place == fromServer(answered)
+    }
+
+    /// The question it asks: "Listen from where you were reading?"
+    public static func estimatePrompt(_ place: AudioPlace, tracks: [ReadingAudioTrack]) -> ReadingResumePrompt {
+        ReadingResumePrompt(title: "Listen from where you were reading?",
+                            message: "Worked out from your place in the book, so it may be a little off",
+                            choices: [.init(id: "there", label: "Listen from there", detail: label(place.location(), tracks: tracks)),
+                                      .init(id: "start", label: "Start at the beginning", detail: "")])
+    }
+}

@@ -201,6 +201,22 @@ struct AudiobookTests {
         #expect(!AudioPlace.started(AudioPlace("t_000000000001", 0).location()))
     }
 
+    @Test func aPlaceWorkedOutFromAReadersPageIsAskedAboutBeforeThePlayerGoesThere() {
+        let guess = ReadingAudioPosition(trackId: "t_000000000002", track: 1, offsetMs: 61_250, exact: false, form: "text")
+        let place = AudioPlace("t_000000000002", 61_250)
+        #expect(AudioPlace.asksBeforeJumping(to: place, answered: guess))
+        // The hub's own exact place, another place chosen, or none: no question.
+        var exact = guess
+        exact.exact = true
+        #expect(!AudioPlace.asksBeforeJumping(to: place, answered: exact))
+        #expect(!AudioPlace.asksBeforeJumping(to: AudioPlace("t_000000000001", 5), answered: guess))
+        #expect(!AudioPlace.asksBeforeJumping(to: nil, answered: guess))
+        let ask = AudioPlace.estimatePrompt(place, tracks: tracks)
+        #expect(ask.title == "Listen from where you were reading?")
+        #expect(ask.choices.map(\.label) == ["Listen from there", "Start at the beginning"])
+        #expect(ask.choices.first?.detail == "Part 2 of 3 · 1:01")
+    }
+
     @Test func aNumberIsTheSameNumberHoweverItWasWritten() throws {
         let whole = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"a":1,"b":1.0,"c":0.5,"d":[true,null,"x"]}"#.utf8))
         #expect(whole["a"] == whole["b"])

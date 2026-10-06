@@ -344,3 +344,40 @@ public struct ReadingCheckpointSync: Sendable {
         return try store.read(key)?.pending == true ? .retry : .synced
     }
 }
+
+/// The sheet that asks where to go on (Android's `chooseReadingResume`):
+/// another device moved the place, or the hub could not be asked. Nil when
+/// there is nothing to ask.
+public struct ReadingResumePrompt: Equatable, Sendable {
+    public struct Choice: Equatable, Sendable, Identifiable {
+        /// "local", "server" or "start".
+        public let id: String
+        public let label: String
+        public let detail: String
+    }
+
+    public let title: String
+    public let message: String
+    public let choices: [Choice]
+
+    /// `describe` says where a place is: a page or a chapter for a book, a
+    /// part and a time for an audiobook.
+    public static func make(_ resume: ReadingResume, checkpoint: ReadingCheckpoint?,
+                            describe: (ReadingLocation) -> String) -> ReadingResumePrompt? {
+        if resume.conflict {
+            return ReadingResumePrompt(
+                title: "Choose reading position",
+                message: "Another reader moved your position. Both positions will be kept on this device.",
+                choices: [Choice(id: "local", label: "Continue on this device", detail: checkpoint?.local.map(describe) ?? ""),
+                          Choice(id: "server", label: "Use server position", detail: checkpoint?.remote.map(describe) ?? "Beginning")])
+        }
+        if resume.unavailable {
+            return ReadingResumePrompt(
+                title: "Reading position unavailable",
+                message: "Go back to retry, or explicitly start here.",
+                choices: [Choice(id: "start", label: "Start from the beginning",
+                                 detail: "Your server position could not be checked. This choice is saved locally.")])
+        }
+        return nil
+    }
+}

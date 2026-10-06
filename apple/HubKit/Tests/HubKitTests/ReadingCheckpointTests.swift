@@ -137,6 +137,21 @@ struct ReadingCheckpointTests {
         #expect(throws: (any Error).self) { try store.save(key, page(9), now: 101) }
     }
 
+    @Test func theSheetAsksWhichPlaceOrToStartWhenTheHubCouldNotBeAsked() throws {
+        let store = Folder().store()
+        try store.reconcile(key, .available(page(2)))
+        try store.save(key, page(8), now: 100)
+        let moved = try store.reconcile(key, .available(page(19)))
+        let ask = try #require(ReadingResumePrompt.make(moved, checkpoint: try store.read(key)) { $0.label() })
+        #expect(ask.title == "Choose reading position")
+        #expect(ask.choices.map(\.id) == ["local", "server"])
+        #expect(ask.choices.map(\.detail) == ["Page 9", "Page 20"])
+        let unreachable = try #require(ReadingResumePrompt.make(ReadingResume(nil, unavailable: true), checkpoint: nil) { $0.label() })
+        #expect(unreachable.title == "Reading position unavailable")
+        #expect(unreachable.choices.map(\.label) == ["Start from the beginning"])
+        #expect(ReadingResumePrompt.make(ReadingResume(page(2)), checkpoint: nil) { $0.label() } == nil)
+    }
+
     // MARK: The sync
 
     private func pending(_ folder: Folder) throws -> ReadingCheckpointStore {
