@@ -27,6 +27,31 @@ public enum ReadingType {
         let words = wire.replacingOccurrences(of: "_", with: " ")
         return words.prefix(1).uppercased() + words.dropFirst()
     }
+
+    /// One title's kind: "Ebook", "Audiobook", "Comic", "Manga", "Light novel".
+    public static func one(_ wire: String) -> String {
+        switch wire {
+        case ebook: "Ebook"
+        case audiobook: "Audiobook"
+        case comic: "Comic"
+        case manga: "Manga"
+        case lightNovel: "Light novel"
+        default: label(wire)
+        }
+    }
+
+    /// Where BookKeeprr found a title, by name: "Open Library", "AniList".
+    public static func source(_ wire: String) -> String {
+        switch wire.lowercased() {
+        case "openlibrary": "Open Library"
+        case "googlebooks": "Google Books"
+        case "itunes": "Apple Books"
+        case "anilist": "AniList"
+        case "mangadex": "MangaDex"
+        case "comicvine": "Comic Vine"
+        default: label(wire)
+        }
+    }
 }
 
 /// How far through a book, a series or a comic run.

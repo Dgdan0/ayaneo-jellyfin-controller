@@ -60,6 +60,10 @@ struct RootView: View {
         #elseif DEBUG && os(macOS)
         .task { await DebugWindow.apply() }
         #endif
+        #if DEBUG
+        // HUB_READ opens the comic reader at launch, with -demo only.
+        .modifier(ComicReaderDebugLaunch())
+        #endif
     }
 }
 

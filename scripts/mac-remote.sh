@@ -80,7 +80,10 @@ run() {
   # avatar's sheet. SHOT_WAIT gives a screen with artwork longer to load.
   # HUB_PLAY opens the player on an item (HUB_PLAY_EXIT leaves it after that
   # many seconds, HUB_PLAY_CHROME=pinned keeps its controls up, HUB_PLAY_TOUR=1
-  # opens its panels in turn, HUB_PLAY_SUBTITLE=eng turns those subtitles on).
+  # opens its panels in turn, HUB_PLAY_SUBTITLE=eng turns those subtitles on,
+  # HUB_PLAY_SCRUB=100 holds a drag across the picture 100 seconds on).
+  # HUB_READ=rw_demo_ff/rw_demo_ff-51 opens the comic reader, with -demo only
+  # (HUB_READ_CHROME=pinned, HUB_READ_PAGE=<n>, HUB_READ_SHEET=display|keys|pages|end).
   # SHOT_SIMS names the simulators to use, comma-separated (all three by
   # default), SHOT_STATE names the screenshots and SHOT_TIMES takes several,
   # that many seconds after launch. `turn landscape` turns the simulators, and
@@ -93,6 +96,9 @@ run() {
     HUB_PLAY=$(printf '%q' "${HUB_PLAY:-}") HUB_PLAY_EXIT=$(printf '%q' "${HUB_PLAY_EXIT:-}") \
     HUB_PLAY_CHROME=$(printf '%q' "${HUB_PLAY_CHROME:-}") HUB_PLAY_FROM_END=$(printf '%q' "${HUB_PLAY_FROM_END:-}") \
     HUB_PLAY_TOUR=$(printf '%q' "${HUB_PLAY_TOUR:-}") HUB_PLAY_SUBTITLE=$(printf '%q' "${HUB_PLAY_SUBTITLE:-}") \
+    HUB_PLAY_SCRUB=$(printf '%q' "${HUB_PLAY_SCRUB:-}") HUB_READ=$(printf '%q' "${HUB_READ:-}") \
+    HUB_READ_CHROME=$(printf '%q' "${HUB_READ_CHROME:-}") HUB_READ_PAGE=$(printf '%q' "${HUB_READ_PAGE:-}") \
+    HUB_READ_SHEET=$(printf '%q' "${HUB_READ_SHEET:-}") \
     HUB_WIDTH=$(printf '%q' "${HUB_WIDTH:-}") \
     SHOT_SIMS=$(printf '%q' "${SHOT_SIMS:-}") SHOT_WAIT=$(printf '%q' "${SHOT_WAIT:-3}") \
     SHOT_STATE=$(printf '%q' "${SHOT_STATE:-}") SHOT_TIMES=$(printf '%q' "${SHOT_TIMES:-}") \

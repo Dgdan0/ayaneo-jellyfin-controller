@@ -184,10 +184,45 @@ struct PlayerGestureTests {
         #expect(PlayerGestures.seekFeedback(deltaMillis: -10_000, targetMillis: 754_000) == "\u{2212}0:10  ·  12:34")
     }
 
-    @Test func onlyAClearlyUpOrDownDragSetsALevel() {
-        #expect(PlayerGestures.isVertical(dx: 2, dy: -40))
-        #expect(!PlayerGestures.isVertical(dx: 30, dy: -40))
-        #expect(!PlayerGestures.isVertical(dx: 0, dy: 8))
+    @Test func theFirstMovementDecidesBetweenAScrubAndALevel() {
+        #expect(PlayerGestures.drag(dx: 2, dy: -40) == .upDown)
+        #expect(PlayerGestures.drag(dx: 30, dy: -40) == .upDown)
+        #expect(PlayerGestures.drag(dx: -40, dy: 30) == .across)
+        // Exactly diagonal reads across, as on the Pocket.
+        #expect(PlayerGestures.drag(dx: 25, dy: 25) == .across)
+        // Within a tap's wobble nothing is decided yet.
+        #expect(PlayerGestures.drag(dx: 0, dy: 8) == nil)
+        #expect(PlayerGestures.drag(dx: 10, dy: -10) == nil)
+    }
+
+    @Test func aDragAcrossTheWholePictureCoversAThirdOfTheVideo() {
+        // Ten minutes: the whole width is 200 seconds, so 40% of it is 80.
+        #expect(PlayerGestures.scrubTarget(startMillis: 60_000, dx: 400, width: 1_000, durationMillis: 600_000) == 140_000)
+        #expect(PlayerGestures.scrubTarget(startMillis: 60_000, dx: -1_000, width: 1_000, durationMillis: 600_000) == 0)
+        // Two hours: at most twenty minutes, and never past the end.
+        #expect(PlayerGestures.scrubTarget(startMillis: 0, dx: 500, width: 1_000, durationMillis: 7_200_000) == 600_000)
+        #expect(PlayerGestures.scrubTarget(startMillis: 7_100_000, dx: 900, width: 1_000, durationMillis: 7_200_000)
+                == 7_200_000)
+        // A short clip: at least two minutes, but no more than it lasts.
+        #expect(PlayerGestures.scrubTarget(startMillis: 0, dx: 1_000, width: 1_000, durationMillis: 90_000) == 90_000)
+        #expect(PlayerGestures.scrubTarget(startMillis: 0, dx: 300, width: 0, durationMillis: 600_000) == 0)
+        #expect(PlayerGestures.scrubLabel(targetMillis: 140_000, deltaMillis: 80_000) == "2:20, +1:20")
+        #expect(PlayerGestures.scrubLabel(targetMillis: 20_000, deltaMillis: -40_000) == "0:20, \u{2212}0:40")
+        #expect(PlayerGestures.scrubLabel(targetMillis: 140_000, deltaMillis: nil) == "2:20")
+    }
+
+    @Test func theScrubPreviewSitsOverItsPointOfTheTimelineInsideTheScreen() {
+        // A 600-point track from x 100 on an 800-point screen, a 200-point card.
+        #expect(PlayerGestures.scrubCardCenter(share: 0.5, trackMinX: 100, trackWidth: 600, cardWidth: 200,
+                                               screenWidth: 800) == 400)
+        // At either end it stops 8 points inside the screen.
+        #expect(PlayerGestures.scrubCardCenter(share: 0, trackMinX: 100, trackWidth: 600, cardWidth: 200,
+                                               screenWidth: 800) == 108)
+        #expect(PlayerGestures.scrubCardCenter(share: 1.2, trackMinX: 100, trackWidth: 600, cardWidth: 200,
+                                               screenWidth: 800) == 692)
+        // A screen narrower than the card: its middle.
+        #expect(PlayerGestures.scrubCardCenter(share: 0.9, trackMinX: 0, trackWidth: 150, cardWidth: 200,
+                                               screenWidth: 150) == 75)
     }
 
     @Test func upRaisesALevelAndSixtyPercentOfTheHeightIsAllOfIt() {
