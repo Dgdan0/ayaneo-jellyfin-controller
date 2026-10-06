@@ -305,7 +305,7 @@ demo hub (`-demo`) and generated fixtures; the real hub is only read.
 | A book to request | "EBOOK · NOT IN YOUR LIBRARY", Find a download (gold) opening the request sheet (what to download and the quality), the series' books to tick when the mode asks for them, then the release picker; the transfer's state while it runs. A title the library already has opens its book page instead | `GET /v1/reading/resolve`, `…/requests/options`, `…/requests/series-preview`, `POST /v1/reading/requests`, `…/requests/{seriesId}/releases` and `/search`, `POST …/grab`, `GET /v1/reading/downloads` |
 | Activity (Books) | BookKeeprr's transfers grouped by kind, the state as a chip, the bar while it moves, Retry and Cancel with a confirmation | `GET /v1/reading/downloads`, `POST …/downloads/{id}/retry`, `DELETE …/downloads/{id}` |
 | The audiobook (phase 2) | The square cover large beside the eyebrow, title and time left; the glass dock with the line, the part steps, the jumps (the seek step from Settings) and the white Play; Parts, Speed, Sleep and Stop as glass pills. A mini player in the shell brings it back while you browse | `…/publications/{id}/audio`, `…/audio/tracks/{n}?rev=`, `GET`/`POST …/audio/position` |
-| The readers (phases 3 and 4) | Until they are built, Read, Read along and an issue open a "coming next" page that says where your place is kept | none |
+| The readers (phases 3 and 4) | Shown over the whole window by `ReaderHost` (below). Until they are built, Read, Read along and an issue open a "coming next" page there that says where your place is kept | none |
 
 ### HubKit: the models and rules to port, with Android's test cases
 
@@ -350,6 +350,29 @@ demo hub (`-demo`) and generated fixtures; the real hub is only read.
   and screenshots need no network and never touch a real book.
 
 ### The readers (phases 3 and 4)
+
+**Where a book page meets a reader.** Phase 3 is built by the other Apple session on
+`apple/client`; this is the seam between the two. No book page pushes a reader: it asks
+`@Environment(\.read)` with a `ReadRequest` (`Hub/Books/ReaderEntry.swift`), and the shell shows
+`ReaderHost` over the whole window and its bars, as it shows the video player.
+
+- `ReadRequest.pages(work:publication:)` is a comic issue or a manga volume: the `ReadingWork` the
+  page loaded (its volumes and their issues, so the reader goes on to the next issue without asking
+  the hub again) and the issue as a `ReadingSectionItem` (`sourceItemId`, `title`, `number`, `kind`,
+  `pageCount`, `progress`). Phase 3's entry point is **`ComicReaderView(work: ReadingWork,
+  publication: ReadingSectionItem)`**. It takes the place of the coming-next page in `ReaderHost`'s
+  `.pages` case, a one-line change.
+- `ReadRequest.ebook(work:sourceItemId:readAlong:)` is phase 4's: an EPUB alone, or read along.
+- Which one Read opens is HubKit's `ReadingWorkPresentation.opensPages(_:source:)` (Android's
+  `openPublication`: a Storyteller edition, a book or an ebook opens the ebook reader; a Kavita comic
+  or manga opens the pages), and the issue for an id is `ReadingWorkPresentation.publication(_:sourceItemId:)`.
+- A reader closes with `read.close()`. The shell then changes `\.readerClosed`, and the book, series
+  and comic pages and Books Home read their progress again, as `\.playbackClosed` does for video.
+- HubKit's reading models and endpoints are on `apple/books` from 9dd3a39. Phase 3 merges that
+  branch first and puts its own routes, models and rules in new files (`Net/ReaderEndpoints.swift`,
+  `Model/ReadingPages.swift`, `Rules/Comic*.swift`), so the two branches never edit the same file.
+  Phase 2 brings `Rules/ReadingCheckpoints.swift`, the place kept on the device and its outbox; a
+  comic's page goes through it once both branches are merged.
 
 - **Comics and manga (phase 3).** The hub's pages (`…/pages/{n}`) and thumbnails (`…/thumb?w=`),
   Android's `ComicView` rules kept per series (fit, Thirds, the zoom and its anchor, trimmed
@@ -396,7 +419,8 @@ the Mac.** Checked on 2026-10-05 (github.com/readium/swift-toolkit):
    the mini player, Now Playing and Settings › Playback.
 6. UI tests against `-demo`, then both ways up on the three simulators and the Mac at two sizes,
    once the simulators are free.
-7. Phases 3 and 4.
+7. Phase 3 (comics and manga), by the other session on `apple/client`, through `ReaderHost`; then
+   phase 4.
 
 Differences from Android, on purpose, for now: no whole-ZIP audiobook, no Kavita server reading
 lists, no mark-read or offline copy on a book's page, and list actions on a card's context menu
