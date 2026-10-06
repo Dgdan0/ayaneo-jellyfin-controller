@@ -74,7 +74,9 @@ struct SpeedLimitsView: View {
                     }
                 }
             }
+            // Held to a readable width at the page's own margin, as the other pages' rows are.
             .frame(maxWidth: 900, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, metrics.margin)
             .padding(.top, 4)
             .padding(.bottom, 28)
