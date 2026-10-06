@@ -191,7 +191,7 @@ func TestBuildCopiesWhatApplePlaysConvertsTheRestAndStatesTheTracks(t *testing.T
 
 	out := filepath.Join(dir, "out.mp4.part")
 	var reported []int
-	err = Build(context.Background(), Spec{
+	err = Build(context.Background(), BuildSpec{
 		FFmpeg: ffmpeg, Plan: plan, Out: out, Duration: 6 * time.Second, Encoder: X264,
 		Inputs: Inputs{SourcePath: source, Subtitles: map[int]string{5: sidecar}},
 	}, func(percent int) { reported = append(reported, percent) })
@@ -283,7 +283,7 @@ func TestBuildConvertsAnOldVideoToEightBitH264(t *testing.T) {
 		t.Fatalf("plan = %+v", plan)
 	}
 	out := filepath.Join(dir, "old.mp4")
-	if err := Build(context.Background(), Spec{
+	if err := Build(context.Background(), BuildSpec{
 		FFmpeg: ffmpeg, Plan: plan, Out: out, Duration: 3 * time.Second, Encoder: X264,
 		Inputs: Inputs{SourcePath: source},
 	}, nil); err != nil {
@@ -313,7 +313,7 @@ func TestBuildStopsWhenItsContextEnds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	started := time.Now()
-	err = Build(ctx, Spec{
+	err = Build(ctx, BuildSpec{
 		FFmpeg: ffmpeg, Plan: plan, Out: filepath.Join(dir, "long.mp4"), Duration: 60 * time.Second, Encoder: X264,
 		Inputs: Inputs{SourcePath: source},
 	}, func(int) { cancel() })
@@ -347,7 +347,7 @@ func TestBuildFailsOnAStreamTheSourceDoesNotHave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = Build(context.Background(), Spec{
+	err = Build(context.Background(), BuildSpec{
 		FFmpeg: ffmpeg, Plan: plan, Out: filepath.Join(dir, "out.mp4"), Duration: 6 * time.Second, Encoder: X264,
 		Inputs: Inputs{SourcePath: source},
 	}, nil)

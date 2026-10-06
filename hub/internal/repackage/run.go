@@ -96,8 +96,8 @@ func parseProgressLine(line string) (time.Duration, bool) {
 	return time.Duration(microseconds) * time.Microsecond, true
 }
 
-// Spec is one repackage.
-type Spec struct {
+// BuildSpec is one ffmpeg repackage.
+type BuildSpec struct {
 	FFmpeg string
 	Plan   Plan
 	Inputs Inputs
@@ -111,7 +111,7 @@ type Spec struct {
 // Build runs ffmpeg for the plan, then states the finished file's track headers.
 // progress is told how far along it is, as a percent that stops at 99: the last
 // of it, moving the movie box to the front of the file, prints nothing.
-func Build(ctx context.Context, spec Spec, progress func(percent int)) error {
+func Build(ctx context.Context, spec BuildSpec, progress func(percent int)) error {
 	args, err := BuildArgs(spec.Plan, spec.Inputs, spec.Out, spec.Encoder)
 	if err != nil {
 		return err
