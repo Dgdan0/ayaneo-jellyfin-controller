@@ -18,6 +18,7 @@ final class ListeningTests: XCTestCase {
         return app
     }
 
+    @MainActor
     private func button(_ app: XCUIApplication, containing words: String) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", words)).firstMatch
     }
