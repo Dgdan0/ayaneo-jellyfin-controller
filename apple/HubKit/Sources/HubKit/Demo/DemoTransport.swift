@@ -18,6 +18,7 @@ public struct DemoTransport: HubTransport {
         let query = request.url?.query ?? ""
         let answer = DemoPlayback.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoMedia.answer(method: method, path: path, query: query, body: request.httpBody)
+            ?? DemoComics.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoReading.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? Self.fixture(method: method, path: path)
         let response = HTTPURLResponse(url: request.url!, statusCode: answer.status, httpVersion: "HTTP/1.1",
