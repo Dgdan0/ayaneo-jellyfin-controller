@@ -158,6 +158,8 @@ struct ShellMetrics {
     let safe: EdgeInsets
     /// A phone turned sideways (`GlassMetrics.short`).
     var short = false
+    /// An audiobook on the player, away from its own page: the mini player shows.
+    var miniPlayer = false
 
     /// The round icons, the avatar and the back pill.
     var control: CGFloat { wide ? 44 : 40 }
@@ -173,8 +175,17 @@ struct ShellMetrics {
     /// From the bottom of the screen: the prototype's 22 on an iPhone with a
     /// home indicator, never closer than 12.
     var tabBarBottom: CGFloat { max(safe.bottom - 12, 12) }
-    /// Room under the pages for the tab bar, beyond the safe area.
-    var bottomInset: CGFloat { wide ? 0 : max(0, tabBarBottom + tabBarHeight + 10 - safe.bottom) }
+    /// The mini player's height (`ListeningMiniPlayer`).
+    static let miniPlayerHeight: CGFloat = 56
+    /// From the bottom of the screen to the mini player: over the tab bar on
+    /// a phone, near the foot of the window on an iPad and the Mac.
+    var miniPlayerBottom: CGFloat { wide ? max(safe.bottom, 16) : tabBarBottom + tabBarHeight + 8 }
+    /// Room under the pages for the tab bar and the mini player, beyond the safe area.
+    var bottomInset: CGFloat {
+        let bars = wide ? 0 : max(0, tabBarBottom + tabBarHeight + 10 - safe.bottom)
+        guard miniPlayer else { return bars }
+        return max(bars, miniPlayerBottom + Self.miniPlayerHeight + 10 - safe.bottom)
+    }
 }
 
 /// The Glass shell (GLASS_PLAN.md, "Navigation per device"): the page in
@@ -205,6 +216,10 @@ struct MainView: View {
     @State private var reading: ReadRequest?
     /// Counts the readers closed, so pages read their progress again.
     @State private var readersClosed = 0
+    /// The audiobook player, one for the app (#25 phase 2).
+    @State private var listening = ListeningModel.shared
+    /// One sound at a time: the video and an audiobook.
+    @State private var sounds = SoundGuard()
     @State private var profilesOpen = false
     @State private var sheetPlaces = false
     /// The Mac's window buttons sit over the page under its hidden title bar:
@@ -218,13 +233,22 @@ struct MainView: View {
     private var key: StackKey { StackKey(side: side, section: section) }
     /// Something over the pages and bars: the player or a reader.
     private var covered: Bool { player.isOpen || reading != nil }
+    /// The book playing, everywhere but on its own page and under the player or a reader.
+    private var showsMiniPlayer: Bool {
+        guard let book = listening.book, !covered else { return false }
+        if case .listen(let route)? = pages.last, book.isSame(workId: route.workId, sourceItemId: route.sourceItemId) {
+            return false
+        }
+        return true
+    }
     private var pages: [AppRoute] { paths[key] ?? [] }
 
     var body: some View {
         GeometryReader { proxy in
             let metrics = ShellMetrics(wide: ShellLayout.isWide(width: proxy.size.width), safe: proxy.safeAreaInsets,
                                        short: ShellLayout.isShort(height: proxy.size.height + proxy.safeAreaInsets.top
-                                                                  + proxy.safeAreaInsets.bottom))
+                                                                  + proxy.safeAreaInsets.bottom),
+                                       miniPlayer: showsMiniPlayer)
             ZStack(alignment: .top) {
                 AmbientBackground(path: ambient.displayed, palette: model.colors.palette(for: ambient.displayed))
                     .ignoresSafeArea()
@@ -256,6 +280,14 @@ struct MainView: View {
                         .ignoresSafeArea(edges: .bottom)
                         .accessibilityHidden(covered)
                 }
+                if showsMiniPlayer {
+                    ListeningMiniPlayer(open: openListening)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, metrics.miniPlayerBottom)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .ignoresSafeArea(edges: .bottom)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 // Over the bars too; the pages under it keep their places.
                 if player.isOpen {
                     PlayerView(player: player)
@@ -269,6 +301,7 @@ struct MainView: View {
                 }
             }
             .animation(.easeOut(duration: 0.25), value: player.isOpen)
+            .animation(.easeOut(duration: 0.25), value: showsMiniPlayer)
             .animation(.easeOut(duration: 0.25), value: reading?.id)
             #if DEBUG && os(macOS)
             .onChange(of: windowButtons) { _, _ in
@@ -301,7 +334,10 @@ struct MainView: View {
         // The keyboard rises over the tab bar, as it does over the system's.
         .ignoresSafeArea(.keyboard)
         .environment(ambient)
-        .environment(\.play, PlayAction { request in player.open(request, app: model) })
+        .environment(\.play, PlayAction { request in
+            sounds.started(.video)
+            player.open(request, app: model)
+        })
         .environment(\.playbackClosed, player.closedCount)
         .environment(books)
         .environment(\.read, ReadAction(open: { request in reading = request }, close: {
@@ -313,6 +349,16 @@ struct MainView: View {
         .onChange(of: "\(model.address)\u{0}\(model.userId)", initial: true) { _, _ in
             books.use(address: model.address, userId: model.userId)
         }
+        // Listening places a closed app left unsent go now, and again for
+        // another profile; a book of another profile leaves the player.
+        .task(id: "\(model.address)\u{0}\(model.userId)") { await listening.flushPending(app: model) }
+        .onAppear {
+            sounds.pause(.video) { [player] in if player.isPlaying { player.togglePlay() } }
+            sounds.pause(.audiobook) { ListeningModel.shared.pause() }
+            listening.onStart = { [sounds] in sounds.started(.audiobook) }
+        }
+        .onChange(of: player.isPlaying) { _, playing in playing ? sounds.started(.video) : sounds.stopped(.video) }
+        .onChange(of: listening.playing) { _, playing in playing ? sounds.started(.audiobook) : sounds.stopped(.audiobook) }
         .environment(\.glassPalette, model.colors.palette(for: ambient.displayed))
         .environment(\.glassAccent, AccentPreset.defaultFor(side))
         .onChange(of: key, initial: true) { _, latest in open(latest) }
@@ -401,8 +447,7 @@ struct MainView: View {
         case .missingBook(let missing): MissingBookView(route: missing)
         case .bookRequest(let request): BookRequestView(route: request)
         case .readingReleases(let releases): ReadingReleasesView(route: releases)
-        case .listen(let listen): ComingNextView(title: listen.title, systemImage: "headphones",
-                                                 detail: "Audiobooks play here next, with their place kept as the Pocket keeps it.")
+        case .listen(let listen): AudiobookView(workId: listen.workId, sourceItemId: listen.sourceItemId, title: listen.title)
         }
     }
 
@@ -480,6 +525,13 @@ struct MainView: View {
         } else {
             section = target
         }
+    }
+
+    /// The mini player: the book's own page, on top of wherever you are.
+    private func openListening() {
+        guard let book = listening.book else { return }
+        paths[key, default: []].append(.listen(ListenRoute(workId: book.workId, sourceItemId: book.sourceItemId,
+                                                           title: book.title)))
     }
 
     private func goBack() {
