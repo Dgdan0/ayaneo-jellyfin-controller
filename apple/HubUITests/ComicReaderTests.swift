@@ -80,6 +80,36 @@ final class ComicReaderTests: XCTestCase {
         XCTAssertTrue(page(app).waitForNonExistence(timeout: 5), "the reader stayed open")
     }
 
+    /// From a run's page, as the Books side opens it (`ReaderHost`): the
+    /// issue being read opens, taps read on, the middle brings the controls
+    /// back, and Close comes back to the run's page.
+    @MainActor
+    func testARunsPageOpensItsIssueAndCloseComesBackToThePage() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo"]
+        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_OPEN": "book:rw_demo_ff"]
+        app.launch()
+        let entry = app.buttons["book-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 15), "the comic's page did not open")
+        entry.tap()
+        let reader = page(app)
+        XCTAssertTrue(reader.waitForExistence(timeout: 15), "the issue did not open in the reader")
+        XCTAssertTrue(waitUntil(15) { Self.value(of: reader).contains("Issue 51") }, "the reader did not open at issue 51")
+        XCTAssertTrue(app.buttons["Close reader"].waitForNonExistence(timeout: 8), "the controls stayed over the page")
+        let opened = Self.value(of: reader)
+        for _ in 0..<3 {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.5)).tap()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        }
+        XCTAssertTrue(waitUntil(5) { Self.value(of: reader) != opened }, "taps on the right third did not read on")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let close = app.buttons["Close reader"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "the middle did not bring the controls back")
+        close.tap()
+        XCTAssertTrue(reader.waitForNonExistence(timeout: 5), "the reader stayed open")
+        XCTAssertTrue(entry.waitForExistence(timeout: 10), "closing the reader did not come back to the run's page")
+    }
+
     /// Asks `condition` every quarter of a second until it holds or `seconds` pass.
     @MainActor
     private func waitUntil(_ seconds: TimeInterval, _ condition: () -> Bool) -> Bool {
