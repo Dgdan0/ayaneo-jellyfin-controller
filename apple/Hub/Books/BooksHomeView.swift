@@ -406,8 +406,13 @@ struct BooksHomeView: View {
         Self.debugOpened = true
         let value = parts[1]
         switch parts[0] {
-        case "book": openRoute(.book(BookRoute(workId: value, title: "")))
-        case "entry": openRoute(.book(BookRoute(workId: value, title: "", openEntry: true)))
+        case "book", "entry":
+            // With its title, as a card opens it: the page above names it on its back button.
+            let entry = parts[0] == "entry"
+            Task {
+                let title = (try? await model.hub.fetch(HubEndpoints.readingWork(value), as: ReadingWork.self))?.title ?? ""
+                openRoute(.book(BookRoute(workId: value, title: title, openEntry: entry)))
+            }
         case "author":
             let fields = value.split(separator: "|").map(String.init)
             guard fields.count == 3 else { return }
