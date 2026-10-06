@@ -410,8 +410,8 @@ class AudiobookScreen(
         val offset = saved.getLong("$legacy:ms", 0)
         if (part > 0 || offset > 0) {
             val sizes = AudiobookArchive.partSizes(File(zipDirectory(session.identity), "book.zip"))
-            AudioPlace.legacyTrack(part, sizes, tracks)?.let { AudioPlace.canonical(tracks, it, offset) }
-                ?.let { progress.store.seed(key, it.location(), System.currentTimeMillis()) }
+            AudioPlace.legacyTrack(part, sizes, tracks)?.let { AudioPlace.kept(tracks, it, offset) }
+                ?.let { progress.store.seed(key, it, System.currentTimeMillis()) }
         }
         saved.edit().remove("$legacy:part").remove("$legacy:ms").apply()
     }

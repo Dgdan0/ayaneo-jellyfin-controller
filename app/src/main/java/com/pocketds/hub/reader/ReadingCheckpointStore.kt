@@ -77,7 +77,7 @@ class ReadingCheckpointStore(private val root: File) {
 
     @Synchronized fun save(key: ReadingCheckpointKey, location: ReadingLocation, now: Long): ReadingCheckpoint {
         val previous = read(key) ?: ReadingCheckpoint(key)
-        if (previous.local == location) return previous
+        if (same(key, previous.local, location)) return previous
         return write(previous.copy(local = location, revision = previous.revision + 1, updatedAt = now, pending = true))
     }
 
@@ -104,11 +104,11 @@ class ReadingCheckpointStore(private val root: File) {
                 remote = remote, pending = false, conflicted = false))
             return ReadingResume(remote)
         }
-        if (previous.local == remote) {
+        if (same(key, previous.local, remote)) {
             acknowledge(key, previous.revision, remote)
             return ReadingResume(remote)
         }
-        val conflict = !previous.baseKnown || previous.base != remote
+        val conflict = !previous.baseKnown || !same(key, previous.base, remote)
         write(previous.copy(remote = remote, conflicted = conflict))
         return ReadingResume(previous.local, conflict)
     }
@@ -124,7 +124,7 @@ class ReadingCheckpointStore(private val root: File) {
         val current = requireNotNull(read(key))
         return write(current.copy(base = current.remote, baseKnown = true, conflicted = false,
             revision = current.revision + 1, updatedAt = now,
-            pending = current.local != current.remote, savedAlternatives = alternatives(current)))
+            pending = !same(key, current.local, current.remote), savedAlternatives = alternatives(current)))
     }
 
     @Synchronized fun chooseRemote(key: ReadingCheckpointKey): ReadingCheckpoint {
@@ -132,6 +132,15 @@ class ReadingCheckpointStore(private val root: File) {
         return write(current.copy(local = current.remote, base = current.remote, baseKnown = true,
             revision = current.revision + 1, pending = false, conflicted = false, savedAlternatives = alternatives(current)))
     }
+
+    /**
+     * Whether two locations of [key]'s book are the same place. An audiobook's place is its
+     * track and moment: this device keeps how far through the book it is beside them (#30),
+     * which the hub never reads back, so the whole location would take the hub's own reading
+     * of the place just sent for another device's. Every other kind compares whole.
+     */
+    private fun same(key: ReadingCheckpointKey, one: ReadingLocation?, other: ReadingLocation?): Boolean =
+        if (key.kind == AudioPlace.KIND) AudioPlace.samePlace(one, other) else one == other
 
     private fun alternatives(value: ReadingCheckpoint) =
         (value.savedAlternatives + listOfNotNull(value.local, value.remote)).distinct().takeLast(20)

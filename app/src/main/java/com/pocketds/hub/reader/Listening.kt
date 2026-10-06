@@ -3,8 +3,8 @@ package com.pocketds.hub.reader
 /**
  * The listening controls' arithmetic (#16, A2), pure so JVM tests pin it:
  * the speeds offered, the sleep timer with its fade, the smart rewind when
- * it stops playback, and the time left in a part and in the book at the
- * speed playing.
+ * it stops playback, the time left in a part and in the book at the speed
+ * playing, and how far through the book a moment is (#30).
  */
 object Listening {
     /** The speeds a book plays at: 0.75 to 3, the common steps between. */
@@ -32,6 +32,19 @@ object Listening {
         val rest = partsMs.drop(part.coerceAtLeast(0))
         if (rest.isEmpty() || rest.any { it == null || it <= 0 }) return null
         return heard(rest.sumOf { it!! } - positionMs.coerceAtLeast(0), speed)
+    }
+
+    /**
+     * How far through the book [positionMs] into [part] is, 0 to 1: the parts before it and the
+     * moment in it, over every part. Of the recording, not of the time it takes to hear, so a
+     * speed does not move it (Storyteller's `totalProgression` is the same sum). Null while any
+     * part's length is unknown or there is no such part: a share nobody could count is not 0.
+     */
+    fun bookProgress(part: Int, positionMs: Long, partsMs: List<Long?>): Double? {
+        if (part !in partsMs.indices || partsMs.any { it == null || it <= 0 }) return null
+        val lengths = partsMs.map { it!! }
+        val heard = lengths.take(part).sum() + positionMs.coerceIn(0, lengths[part])
+        return (heard.toDouble() / lengths.sum()).coerceIn(0.0, 1.0)
     }
 }
 

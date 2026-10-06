@@ -66,8 +66,9 @@ class AudioOutboxTest {
 
     private val store by lazy { ReadingCheckpointStore(directory.root) }
     private fun sync(hub: Hub) = ReadingCheckpointSync(store, { hub.get() }, { hub.post(requireNotNull(AudioPlace.body(it))) })
+    /** A stretch of listening as the player keeps it: the place, and how far through the book it is beside it. */
     private fun listen(part: Int, offsetMs: Long, completed: Boolean = false, now: Long = 100) =
-        store.save(key, AudioPlace.canonical(tracks, part, offsetMs, completed)!!.location(), now)
+        store.save(key, AudioPlace.kept(tracks, part, offsetMs, completed)!!, now)
 
     @Test fun `a place moves on from the one read, checked against it`() = runBlocking {
         val hub = Hub(tracks).apply { held = AudioPlace("t_aaaaaaaaaaaa", 10_000) }
@@ -158,5 +159,71 @@ class AudioOutboxTest {
         val asked = store.reconcile(second, other.get())
         assertTrue("The hub has a place of its own: the person chooses", asked.conflict)
         assertNull(other.held?.takeIf { it.offsetMs != 42_000L })
+    }
+
+    @Test fun `a place waiting to be sent says how far through the book it is, and that survives a restart`() {
+        val hub = Hub(tracks)
+        store.reconcile(key, hub.get())
+        listen(1, 300_000)
+        // The whole of the first track and five minutes of the second, of thirty minutes.
+        val waiting = ReadingCheckpointStore(directory.root).pending(key.scope).single()
+        assertEquals(0.5, AudioPlace.progressOf(waiting.local)!!, 1e-9)
+        assertEquals(AudioPlace("t_bbbbbbbbbbbb", 300_000), AudioPlace.of(waiting.local))
+        // What will go out says nothing of it.
+        assertEquals(setOf("trackId", "offsetMs", "completed", "expected"), AudioPlace.body(waiting)!!.keys)
+    }
+
+    @Test fun `the fraction kept beside a place never makes the hub's own reading look like another device`() = runBlocking {
+        val hub = Hub(tracks).apply { held = AudioPlace("t_aaaaaaaaaaaa", 10_000) }
+        store.reconcile(key, hub.get())
+        // Stretch after stretch, each kept with its fraction and read back from the hub without one.
+        listOf(50_000L, 90_000L, 150_000L, 400_000L).forEach { offset ->
+            listen(0, offset)
+            assertEquals(CheckpointSyncResult.SYNCED, sync(hub).sync(key))
+            assertEquals(AudioPlace("t_aaaaaaaaaaaa", offset), hub.held)
+            assertFalse(store.read(key)!!.pending)
+        }
+        // Each was based on the one before.
+        assertEquals(listOf(10_000L, 50_000L, 90_000L, 150_000L),
+            hub.writes.map { it["expected"]!!.jsonObject["offsetMs"]!!.jsonPrimitive.long })
+    }
+
+    @Test fun `a write that landed but was never acknowledged is this device's own, not another's`() = runBlocking {
+        val hub = Hub(tracks).apply { held = AudioPlace("t_aaaaaaaaaaaa", 10_000) }
+        store.reconcile(key, hub.get())
+        listen(0, 50_000)
+        // The hub took it and the answer never got back: nothing was acknowledged here.
+        assertTrue(hub.post(requireNotNull(AudioPlace.body(store.read(key)!!))))
+        assertTrue(store.read(key)!!.pending)
+        // The next look finds the same place the hub was sent: no question, and nothing left to send.
+        assertFalse(store.reconcile(key, hub.get()).conflict)
+        assertFalse(store.read(key)!!.pending)
+        assertEquals(1, hub.writes.size)
+    }
+
+    @Test fun `a place an older build left waiting goes out as it did, and the next stretch carries on from it`() = runBlocking {
+        val hub = Hub(tracks).apply { held = AudioPlace("t_aaaaaaaaaaaa", 10_000) }
+        store.reconcile(key, hub.get())
+        // Kept by a build that wrote no fraction: it says nothing of how far through the book it is.
+        store.save(key, AudioPlace("t_aaaaaaaaaaaa", 50_000).location(), 100)
+        assertNull(AudioPlace.progressOf(store.read(key)!!.local))
+        assertEquals(CheckpointSyncResult.SYNCED, sync(hub).sync(key))
+        assertEquals(AudioPlace("t_aaaaaaaaaaaa", 50_000), hub.held)
+        // This build's next stretch, with a fraction, is based on it and is not a conflict.
+        listen(0, 80_000)
+        assertEquals(80_000.0 / 1_800_000, AudioPlace.progressOf(store.read(key)!!.local)!!, 1e-9)
+        assertEquals(CheckpointSyncResult.SYNCED, sync(hub).sync(key))
+        assertEquals(AudioPlace("t_aaaaaaaaaaaa", 80_000), hub.held)
+        assertEquals(50_000L, hub.writes.last()["expected"]!!.jsonObject["offsetMs"]!!.jsonPrimitive.long)
+    }
+
+    @Test fun `listening on to the very place the hub holds is no new write`() {
+        val hub = Hub(tracks).apply { held = AudioPlace("t_aaaaaaaaaaaa", 10_000) }
+        store.reconcile(key, hub.get())
+        val before = store.read(key)!!
+        // The same place again, kept with a fraction the hub's reading does not have.
+        listen(0, 10_000)
+        assertEquals(before, store.read(key))
+        assertTrue(store.pending(key.scope).isEmpty())
     }
 }

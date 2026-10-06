@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
@@ -28,13 +29,39 @@ import kotlinx.serialization.json.put
  * The hub stamps every write with its own clock. Nothing here reads a
  * timestamp: whether a place is newer is the outbox's question (a local write
  * not yet sent wins) and the base's (what this device last read).
+ *
+ * This device also keeps beside a place how far through the whole book it is
+ * ([progress], 0 to 1; #30), so a place still waiting to be sent shows as a
+ * share of the book on its page and on Books Home before the hub has it: a
+ * place is a track and a moment, and says nothing of that by itself. It is a
+ * note, not part of the place. The hub never reads it back and [body] never
+ * sends it, so the outbox compares places by track, moment and finish alone
+ * ([samePlace]); compared whole, the hub's own reading of the place just sent
+ * would look like another device moving the book.
  */
 data class AudioPlace(val trackId: String, val offsetMs: Long, val completed: Boolean = false) {
     init { require(trackId.isNotBlank()); require(offsetMs >= 0) }
 
-    fun location(): ReadingLocation = ReadingLocation(locator = buildJsonObject {
+    /**
+     * The place as a location. [progress] is how far through the whole book it is, kept
+     * beside the track and the moment on this device alone; it is left out where it is not
+     * known, and for the hub's own reading of a place, which has none.
+     */
+    fun location(progress: Double? = null): ReadingLocation = ReadingLocation(locator = buildJsonObject {
         put(TRACK_ID, trackId); put(OFFSET_MS, offsetMs); put(COMPLETED, completed)
+        progress?.takeIf { it.isFinite() }?.let { put(PROGRESS, it.coerceIn(0.0, 1.0)) }
     })
+
+    /**
+     * How far through the whole book this place is, 0 to 1: 1 once it is finished, else the
+     * tracks before its own and its moment over every track's length ([Listening.bookProgress]).
+     * Null when a track's length is unknown or its track is not in [tracks].
+     */
+    fun progress(tracks: List<ReadingAudioTrack>): Double? {
+        if (completed) return 1.0
+        return Listening.bookProgress(tracks.indexOfFirst { it.id == trackId }, offsetMs,
+            tracks.map { it.durationMs.takeIf { length -> length > 0 } })
+    }
 
     /** Where to open: the part and the moment, or the start of the book once it is finished. */
     fun openAt(tracks: List<ReadingAudioTrack>): Pair<Int, Long> {
@@ -50,6 +77,8 @@ data class AudioPlace(val trackId: String, val offsetMs: Long, val completed: Bo
         private const val TRACK_ID = "trackId"
         private const val OFFSET_MS = "offsetMs"
         private const val COMPLETED = "completed"
+        /** How far through the book, beside the place on this device (#30): not the hub's, so never sent. */
+        private const val PROGRESS = "progress"
         /** The hub's own rule: the last two seconds of the last track are the end of the book. */
         const val FINISHED_MS = 2_000L
 
@@ -79,6 +108,37 @@ data class AudioPlace(val trackId: String, val offsetMs: Long, val completed: Bo
             val offset = if (track.durationMs > 0) offsetMs.coerceIn(0, track.durationMs) else offsetMs.coerceAtLeast(0)
             if (part == tracks.lastIndex && track.durationMs > 0 && offset >= track.durationMs - FINISHED_MS) return finished()
             return AudioPlace(track.id, offset)
+        }
+
+        /**
+         * What the outbox keeps for the player at [part] and [offsetMs] (#30): the place as the
+         * hub will read it back ([canonical]), and how far through the book it is beside it.
+         * Null where there is no place.
+         */
+        fun kept(tracks: List<ReadingAudioTrack>, part: Int, offsetMs: Long, completed: Boolean = false): ReadingLocation? =
+            canonical(tracks, part, offsetMs, completed)?.let { it.location(it.progress(tracks)) }
+
+        /**
+         * How far through the whole book a kept [location] says the listener is, 0 to 1 (#30):
+         * 1 once it is finished, else the fraction kept beside it. Null when it says nothing: a
+         * place an older build kept, or a location of another kind. Not 0, which is the start.
+         */
+        fun progressOf(location: ReadingLocation?): Double? {
+            val place = of(location) ?: return null
+            if (place.completed) return 1.0
+            val kept = (location?.locator?.get(PROGRESS) as? JsonPrimitive)?.doubleOrNull
+            return kept?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0)
+        }
+
+        /**
+         * Whether two locations are the same place: the same track, moment and finish, whatever
+         * else this device keeps beside them (#30). The outbox's compare. Anything that is not
+         * a place compares as it is.
+         */
+        fun samePlace(one: ReadingLocation?, other: ReadingLocation?): Boolean {
+            val a = of(one) ?: return one == other
+            val b = of(other) ?: return false
+            return a == b
         }
 
         /**

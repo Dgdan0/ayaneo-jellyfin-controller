@@ -45,6 +45,23 @@ class ListeningTest {
         assertEquals("12 min left in part", PlayerLabels.timeLeft(12 * 60_000L, null))
     }
 
+    @Test fun `how far through the book is of the recording, whatever the speed`() {
+        val parts = listOf<Long?>(600_000, 1_200_000, 300_000)
+        assertEquals(0.0, Listening.bookProgress(0, 0, parts)!!, 1e-9)
+        // The first part and five minutes of the second, of thirty-five minutes in all.
+        assertEquals(900_000.0 / 2_100_000, Listening.bookProgress(1, 300_000, parts)!!, 1e-9)
+        assertEquals(1.0, Listening.bookProgress(2, 300_000, parts)!!, 1e-9)
+        // A player runs a little past a part's length, and may report a moment before its start.
+        assertEquals(1.0, Listening.bookProgress(2, 999_999, parts)!!, 1e-9)
+        assertEquals(600_000.0 / 2_100_000, Listening.bookProgress(1, -5, parts)!!, 1e-9)
+        // A length still being read, or a part the book does not have: nothing to say, which is not 0.
+        assertNull(Listening.bookProgress(0, 0, listOf(600_000L, null)))
+        assertNull(Listening.bookProgress(0, 0, listOf(600_000L, 0L)))
+        assertNull(Listening.bookProgress(3, 0, parts))
+        assertNull(Listening.bookProgress(-1, 0, parts))
+        assertNull(Listening.bookProgress(0, 0, emptyList()))
+    }
+
     @Test fun `a minutes timer counts while playing, fades over its last half minute and runs out`() {
         var timer = SleepTimer.start(SleepChoice.Minutes(15), partLeftHeardMs = 0)
         assertEquals(15 * 60_000L, timer.remainingMs)

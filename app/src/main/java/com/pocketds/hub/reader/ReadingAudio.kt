@@ -477,9 +477,11 @@ object ReadingAudio {
                 .apply()
             return
         }
-        val place = AudioPlace.canonical(book.tracks, player.currentMediaItemIndex.coerceAtLeast(0),
+        // The place, and how far through the book it is beside it: a place still waiting to be sent
+        // shows as that share on the book's page and on Books Home (#30). The hub is sent only the place.
+        val place = AudioPlace.kept(book.tracks, player.currentMediaItemIndex.coerceAtLeast(0),
             player.currentPosition.coerceAtLeast(0), completed) ?: return
-        try { ReadingProgress.get(context).save(key, place.location(), sync = false) }
+        try { ReadingProgress.get(context).save(key, place, sync = false) }
         catch (_: Exception) { DebugLog.log("listen", "the listening place could not be kept on this device"); return }
         handler.removeCallbacks(syncNow)
         handler.postDelayed(syncNow, throttle.waitFor(SystemClock.elapsedRealtime()))
