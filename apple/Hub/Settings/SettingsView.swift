@@ -11,12 +11,13 @@ struct SettingsView: View {
     @Environment(\.glassMetrics) private var metrics
 
     enum Pane: String, CaseIterable, Identifiable {
-        case appearance, libraries, playback, subtitles, notifications, controller, licences
+        case appearance, home, libraries, playback, subtitles, notifications, controller, licences
 
         var id: String { rawValue }
         var title: String {
             switch self {
             case .appearance: "Appearance"
+            case .home: "Home"
             case .libraries: "Libraries"
             case .playback: "Playback"
             case .subtitles: "Subtitles"
@@ -28,6 +29,7 @@ struct SettingsView: View {
         var systemImage: String {
             switch self {
             case .appearance: "paintpalette"
+            case .home: "house"
             case .libraries: "books.vertical"
             case .playback: "play.circle"
             case .subtitles: "captions.bubble"
@@ -123,6 +125,7 @@ struct SettingsView: View {
     @ViewBuilder private var content: some View {
         switch pane {
         case .appearance: AppearanceSettings()
+        case .home: HomeSettingsPane()
         case .libraries: LibrariesSettings()
         case .playback: PlaybackSettingsPane()
         case .subtitles: SubtitlesSettings()

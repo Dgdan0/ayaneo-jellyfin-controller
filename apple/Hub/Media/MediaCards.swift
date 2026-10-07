@@ -13,6 +13,8 @@ struct TitleRoute: Hashable {
 struct PosterCard: View {
     let hit: MediaHit
     var caption = true
+    /// A day in the corner in place of the watch mark: Coming up's "Tomorrow", "Fri".
+    var dayChip = ""
     @Environment(\.glassMetrics) private var metrics
 
     private var progress: Double {
@@ -27,9 +29,19 @@ struct PosterCard: View {
                 .overlay { ArtworkProgress(progress: progress) }
                 .clipShape(RoundedRectangle(cornerRadius: metrics.radius, style: .continuous))
                 .overlay(alignment: .topTrailing) {
-                    WatchBadge(played: hit.played, progress: hit.progress, unplayedCount: hit.unplayedCount,
-                               favorite: hit.favorite)
-                        .padding(6)
+                    if dayChip.isEmpty {
+                        WatchBadge(played: hit.played, progress: hit.progress, unplayedCount: hit.unplayedCount,
+                                   favorite: hit.favorite)
+                            .padding(6)
+                    } else {
+                        Text(dayChip)
+                            .font(HubType.chrome(11, weight: .bold))
+                            .foregroundStyle(Color.glassInk)
+                            .padding(.horizontal, 8)
+                            .frame(minHeight: 22)
+                            .background(.white.opacity(0.9), in: Capsule())
+                            .padding(6)
+                    }
                 }
                 .litArtwork(corner: metrics.radius)
             if caption {

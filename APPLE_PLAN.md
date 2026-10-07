@@ -710,3 +710,27 @@ token (`hubctl.exe token new --label ipad-pro`, `ipad-mini`, `iphone`).
 - LF line endings (`.gitattributes`).
 - **Branch:** work on `apple/client`. The Windows sessions use `claude/consolidation`. Merges
   between the two are coordinated through the user.
+
+## Notifications, the server monitor, Settings and Home's rows (#36, #38, #35)
+
+| Behaviour | Owner |
+|---|---|
+| What has been seen of the services' notifications, the bell's count and the page's dots | HubKit `NotificationReadReducer` / `NotificationReadStore` (Android's `NotificationReadState`, with its test cases); the app's one `NotificationsModel`, owned by `ShellModel` (so the bell and the page are one answer) |
+| The Notifications page's columns, words, times and summary line | HubKit `NotificationsPresentation` (`column`, `summary`, `time`, `humanizeHealthTitle`); drawn by `Notifications/NotificationsView` |
+| How many entries each service's column loads | HubKit `NotificationSettings` / `NotificationLimits`, Settings › Notifications |
+| The server monitor's figures, containers, sessions and status line | HubKit `ServerMonitorPresentation`, drawn by `Services/ServerMonitorView`; `DashboardTone` is the one colour of a status dot (`StatusDot`, `StatCard` in `Glass/DashboardParts`) |
+| Each side's accent, per hub and profile | HubKit `AccentSettings` / `PreferenceScope`; the app's one `AccentModel.shared` (the shell, the side picker and the readers read it) |
+| How subtitles look, in Settings and in the player's sheet | HubKit `SubtitleLookWords` (words, placement, size); the stored look is `PlaybackMemory.look`; the picture is `SubtitleLine` |
+| The licences the app ships | HubKit `Licences`, held by a test to `Hub/Resources/Licenses` |
+| What a game controller says | HubKit `ControllerProbe`, read by `Settings/ControllerSettings` by polling (readers set handlers on the same controls) |
+| The last answer Home and Discover open with | HubKit `AnswerKeeper` (`HubClient.fetchKept` / `lastAnswer`, `LastAnswer` words), kept in the caches folder under a hash of hub, token and profile; `AppModel.answers` |
+| Home's rows: order, hidden, Coming up, a library's newest | HubKit `HomeRows`, `HomeLayout` / `HomeLayoutEditor` / `HomeRowSettings`; the app's one `HomeLayoutModel.shared`, edited in `Home/HomeSettings` |
+
+Debug launches also take `HUB_OPEN=pane:<name>` (Settings), `HUB_SHEET=licence:<id>`, `HUB_HERO=<row id>` (Home's
+hero on that row's first card), `HUB_SEEN_DWELL_MS`, `HUB_DEMO_DELAY_MS` and `HUB_FORGET_ANSWERS=1`. The demo hub keeps accents, Home's
+layout and the notifications' seen list for the run only, so a test never leaves them chosen.
+
+Differences from Android, on purpose: the bell and Notifications count what is unread on every service while a side shows its
+own three columns; a column shows its newest eight and Show all opens the rest; Settings › Home moves a row with arrows, not
+with X and Y; there is no Classic look or theme (Glass is always dark); local alerts for finished downloads and new subtitles
+are later.

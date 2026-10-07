@@ -365,6 +365,7 @@ struct MainView: View {
         .onChange(of: "\(model.address)\u{0}\(model.userId)", initial: true) { _, _ in
             books.use(address: model.address, userId: model.userId)
             accents.use(address: model.address, userId: model.userId, demo: model.isDemo)
+            HomeLayoutModel.shared.use(demo: model.isDemo)
         }
         // Listening places a closed app left unsent go now, and again for
         // another profile; a book of another profile leaves the player.
