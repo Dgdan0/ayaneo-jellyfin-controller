@@ -26,6 +26,7 @@ public struct DemoTransport: HubTransport {
         let answer = offline
             ?? DemoActivity.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoNotifications.answer(method: method, path: path, query: query, body: request.httpBody)
+            ?? DemoUpkeep.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoPlayback.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoMedia.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoComics.answer(method: method, path: path, query: query, body: request.httpBody)
