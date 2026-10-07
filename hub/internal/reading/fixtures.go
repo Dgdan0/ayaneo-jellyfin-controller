@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"image"
 	"image/color"
 	"image/png"
@@ -589,6 +590,59 @@ type AlignedEPUBOptions struct {
 	SpineOrder []int
 	// Layout names the files; its zero value is the plain one.
 	Layout AlignedLayout
+	// Contents is the table of contents the edition lists, nested as written. Empty
+	// is every chapter once, in the order the package lists them, titled "Part N" and
+	// all at one level.
+	Contents []FixtureContent
+	// ContentsIn says which document holds it: the EPUB 3 navigation document (the
+	// zero value), an NCX alone, as an EPUB 2 book has, or both.
+	ContentsIn FixtureContentsIn
+	// Documents are text documents that nothing narrates: a cover, a copyright page, a
+	// chapter's heading that is only a picture.
+	Documents []FixtureDocument
+	// Anchors are ids on elements that carry no narration (a heading's id), for a
+	// contents entry to point at.
+	Anchors []FixtureAnchor
+}
+
+// FixtureContent is one entry of a generated edition's table of contents. It
+// points into the text document of chapter Chapter (the first spoken is 1) or, when
+// that is 0, into the Document of that name, at Fragment when it has one.
+type FixtureContent struct {
+	Title    string
+	Chapter  int
+	Document string
+	Fragment string
+	Children []FixtureContent
+}
+
+// FixtureContentsIn is where a generated edition keeps its table of contents.
+type FixtureContentsIn int
+
+const (
+	// ContentsInNav is an EPUB 3 navigation document.
+	ContentsInNav FixtureContentsIn = iota
+	// ContentsInNCX is an NCX and no navigation document.
+	ContentsInNCX
+	// ContentsInBoth is both; the NCX's titles begin "NCX " so that a test can tell
+	// which of the two a reader took.
+	ContentsInBoth
+)
+
+// FixtureDocument is a text document that is not narrated, listed in the package's
+// reading order just ahead of the chapter numbered Before (0 puts it ahead of every
+// chapter, -1 after the last).
+type FixtureDocument struct {
+	Name   string
+	Before int
+}
+
+// FixtureAnchor is an empty element with an id, put in chapter Chapter just ahead of
+// its sentence Before (the first is 0).
+type FixtureAnchor struct {
+	ID      string
+	Chapter int
+	Before  int
 }
 
 // AlignedLayout is where an edition keeps its files and what it calls them. The
@@ -695,7 +749,15 @@ func GenerateAlignedEPUB(path string, options AlignedEPUBOptions) (AlignedEPUBFi
 	fixture := AlignedEPUBFixture{Path: path, Package: rel("content.opf")}
 	files := []zipFileSpec{}
 	var manifest strings.Builder
-	manifest.WriteString(`<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`)
+	if options.ContentsIn != ContentsInNCX {
+		manifest.WriteString(`<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`)
+	}
+	if options.ContentsIn != ContentsInNav {
+		manifest.WriteString(`<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`)
+	}
+	for i, document := range options.Documents {
+		fmt.Fprintf(&manifest, `<item id="doc%d" href="%s" media-type="application/xhtml+xml"/>`, i, ref(document.Name))
+	}
 	parIndex := 0
 	var chapters []*fixtureChapter
 	for sourceIndex, narration := range options.Narrations {
@@ -747,6 +809,11 @@ func GenerateAlignedEPUB(path string, options AlignedEPUBOptions) (AlignedEPUBFi
 				}
 				fragment := fmt.Sprintf("id%d-s%d", current.number, current.sentences)
 				current.sentences++
+				for _, anchor := range options.Anchors {
+					if anchor.Chapter == current.number && anchor.Before == current.sentences-1 {
+						fmt.Fprintf(&current.body, `<a id="%s"/>`, anchor.ID)
+					}
+				}
 				fmt.Fprintf(&current.body, `<span id="%s">Sentence %d of part %d.</span> `, fragment, current.sentences, current.number)
 				// From the overlay's folder to the text and to the audio.
 				fmt.Fprintf(&current.smil, `<par id="p%d"><text src="../%s#%s"/><audio src="../%s" clipBegin="%s" clipEnd="%s"/></par>`,
@@ -779,22 +846,79 @@ func GenerateAlignedEPUB(path string, options AlignedEPUBOptions) (AlignedEPUBFi
 	if len(order) != len(chapters) {
 		return AlignedEPUBFixture{}, fmt.Errorf("the spine lists %d chapters of %d", len(order), len(chapters))
 	}
-	var spine, navigation strings.Builder
+	var spine strings.Builder
+	// A document that nothing narrates sits just ahead of the chapter it names.
+	documentsBefore := func(number int) {
+		for i, document := range options.Documents {
+			if document.Before == number {
+				fmt.Fprintf(&spine, `<itemref idref="doc%d"/>`, i)
+			}
+		}
+	}
+	documentsBefore(0)
+	var everyChapter []FixtureContent
 	for _, index := range order {
 		if index < 0 || index >= len(chapters) {
 			return AlignedEPUBFixture{}, fmt.Errorf("the spine names chapter %d of %d", index, len(chapters))
 		}
 		chapter := chapters[index]
+		documentsBefore(chapter.number)
 		fmt.Fprintf(&spine, `<itemref idref="ch%d"/>`, chapter.number)
-		fmt.Fprintf(&navigation, `<li><a href="%s">Part %d</a></li>`, ref(chapter.textHref), chapter.number)
+		everyChapter = append(everyChapter, FixtureContent{Title: fmt.Sprintf("Part %d", chapter.number), Chapter: chapter.number})
 	}
+	documentsBefore(-1)
+
+	// The contents: where an entry points is written from the document it is in, which
+	// is the package folder for the navigation document and the NCX alike.
+	contents := options.Contents
+	if len(contents) == 0 {
+		contents = everyChapter
+	}
+	var contentsErr error
+	href := func(entry FixtureContent) string {
+		target := ""
+		switch {
+		case entry.Chapter > 0 && entry.Chapter <= len(chapters):
+			target = ref(chapters[entry.Chapter-1].textHref)
+		case entry.Chapter == 0 && entry.Document != "" && fixtureHasDocument(options.Documents, entry.Document):
+			target = ref(entry.Document)
+		default:
+			contentsErr = fmt.Errorf("the contents entry %q points at nothing", entry.Title)
+		}
+		if entry.Fragment != "" {
+			target += "#" + entry.Fragment
+		}
+		return target
+	}
+	navList := fixtureNavList(contents, href)
+	ncxPoints := fixtureNCXPoints(contents, href, "")
+	if options.ContentsIn == ContentsInBoth {
+		ncxPoints = fixtureNCXPoints(contents, href, "NCX ")
+	}
+	if contentsErr != nil {
+		return AlignedEPUBFixture{}, contentsErr
+	}
+	spineElement := "<spine>"
+	if options.ContentsIn != ContentsInNav {
+		spineElement = `<spine toc="ncx">`
+	}
+
 	container := fmt.Sprintf(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="%s" media-type="application/oebps-package+xml"/></rootfiles></container>`, fixture.Package)
-	pack := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">%saligned</dc:identifier><dc:title>Aligned fixture</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta></metadata><manifest>%s</manifest><spine>%s</spine></package>`, FixtureIdentifierPrefix, manifest.String(), spine.String())
-	nav := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol>%s</ol></nav></body></html>`, navigation.String())
+	pack := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">%saligned</dc:identifier><dc:title>Aligned fixture</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta></metadata><manifest>%s</manifest>%s%s</spine></package>`, FixtureIdentifierPrefix, manifest.String(), spineElement, spine.String())
 	head := []zipFileSpec{
 		{name: "META-INF/container.xml", data: []byte(container)},
 		{name: fixture.Package, data: []byte(pack)},
-		{name: rel("nav.xhtml"), data: []byte(nav)},
+	}
+	if options.ContentsIn != ContentsInNCX {
+		nav := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc">%s</nav></body></html>`, navList)
+		head = append(head, zipFileSpec{name: rel("nav.xhtml"), data: []byte(nav)})
+	}
+	if options.ContentsIn != ContentsInNav {
+		ncx := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="%saligned"/></head><docTitle><text>Aligned fixture</text></docTitle><navMap>%s</navMap></ncx>`, FixtureIdentifierPrefix, ncxPoints)
+		head = append(head, zipFileSpec{name: rel("toc.ncx"), data: []byte(ncx)})
+	}
+	for _, document := range options.Documents {
+		head = append(head, zipFileSpec{name: rel(document.Name), data: []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>%s</title></head><body><p>%s</p></body></html>`, html.EscapeString(document.Name), html.EscapeString(document.Name)))})
 	}
 	data, err := writeZip("application/epub+zip", append(head, files...))
 	if err != nil {
@@ -804,6 +928,49 @@ func GenerateAlignedEPUB(path string, options AlignedEPUBOptions) (AlignedEPUBFi
 		return AlignedEPUBFixture{}, err
 	}
 	return fixture, os.WriteFile(path, data, 0o644)
+}
+
+// fixtureNavList writes entries as the nested lists of a navigation document.
+func fixtureNavList(entries []FixtureContent, href func(FixtureContent) string) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	var out strings.Builder
+	out.WriteString("<ol>")
+	for _, entry := range entries {
+		fmt.Fprintf(&out, `<li><a href="%s">%s</a>%s</li>`, href(entry), html.EscapeString(entry.Title), fixtureNavList(entry.Children, href))
+	}
+	out.WriteString("</ol>")
+	return out.String()
+}
+
+// fixtureNCXPoints writes entries as the navPoints of an NCX, each parent ahead of
+// the points inside it and numbered in the order they are written.
+func fixtureNCXPoints(entries []FixtureContent, href func(FixtureContent) string, titlePrefix string) string {
+	order := 0
+	var write func(entries []FixtureContent) string
+	write = func(entries []FixtureContent) string {
+		var out strings.Builder
+		for _, entry := range entries {
+			order++
+			number := order
+			target := href(entry)
+			fmt.Fprintf(&out, `<navPoint id="np%d" playOrder="%d"><navLabel><text>%s</text></navLabel><content src="%s"/>`, number, number, html.EscapeString(titlePrefix+entry.Title), target)
+			out.WriteString(write(entry.Children))
+			out.WriteString("</navPoint>")
+		}
+		return out.String()
+	}
+	return write(entries)
+}
+
+func fixtureHasDocument(documents []FixtureDocument, name string) bool {
+	for _, document := range documents {
+		if document.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // fixtureClock writes a moment as a SMIL clock value, in a form chosen by n.
