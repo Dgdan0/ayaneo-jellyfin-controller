@@ -12,7 +12,7 @@ final class ListeningTracks {
     static let shared = ListeningTracks()
 
     /// A track to keep: its book, its key, the extension its type needs and its route.
-    struct Track: Equatable {
+    struct Track: Equatable, Sendable {
         let sourceItemId: String
         let key: String
         let ext: String
@@ -31,15 +31,27 @@ final class ListeningTracks {
         return AudioTrackCache(root: EpubPackageCache.folder(base: caches, address: address, userId: ""))
     }
 
-    /// Track `index` of `manifest`, as it is kept and asked for.
-    static func track(_ index: Int, manifest: ReadingAudioManifest, parts: [AudiobookPart], workId: String,
-                      sourceItemId: String) -> Track? {
-        guard parts.indices.contains(index), let entry = manifest.tracks.first(where: { $0.index == index }),
-              !parts[index].cacheKey.isEmpty else { return nil }
-        return Track(sourceItemId: sourceItemId, key: parts[index].cacheKey,
+    /// The manifest's track at `position` (the player's part), as it is kept
+    /// and asked for: under `AudiobookStream.cacheKey`, the key the parts and
+    /// read along's runs carry.
+    static func track(_ position: Int, manifest: ReadingAudioManifest, workId: String, sourceItemId: String) -> Track? {
+        guard manifest.tracks.indices.contains(position) else { return nil }
+        let entry = manifest.tracks[position]
+        return Track(sourceItemId: sourceItemId, key: AudiobookStream.cacheKey(sourceItemId: sourceItemId, track: entry),
                      ext: AudioTrackCache.fileExtension(mime: entry.mime, title: entry.title),
-                     path: HubEndpoints.readingAudioTrack(workId: workId, sourceItemId: sourceItemId, index: index,
+                     path: HubEndpoints.readingAudioTrack(workId: workId, sourceItemId: sourceItemId, index: entry.index,
                                                           revision: manifest.revision))
+    }
+
+    /// Every track of `manifest` by its key: read along's runs name theirs so.
+    static func tracks(_ manifest: ReadingAudioManifest, workId: String, sourceItemId: String) -> [String: Track] {
+        var byKey: [String: Track] = [:]
+        for position in manifest.tracks.indices {
+            if let track = track(position, manifest: manifest, workId: workId, sourceItemId: sourceItemId) {
+                byKey[track.key] = track
+            }
+        }
+        return byKey
     }
 
     /// The kept file for `track`, marked as played now; nil when it is not kept.

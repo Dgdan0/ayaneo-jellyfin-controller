@@ -22,6 +22,12 @@ final class NarrationModel {
         let timeline: ReadAlongTimeline
         let sources: [NarrationSource]
         let manifest: ReadingAudioManifest
+        /// The audiobook's tracks kept on this device, shared with its player
+        /// (#37, as on the Pocket, whose players share one cache): by key,
+        /// the hub that has them and where this hub's are kept.
+        let tracks: [String: ListeningTracks.Track]
+        let hub: HubClient
+        let cache: AudioTrackCache
     }
 
     let timeline: ReadAlongTimeline
@@ -41,6 +47,9 @@ final class NarrationModel {
     @ObservationIgnored var onError: (() -> Void)?
 
     @ObservationIgnored private let runs: NarrationRuns
+    @ObservationIgnored private let kept: (tracks: [String: ListeningTracks.Track], hub: HubClient, cache: AudioTrackCache)
+    /// The track the player has, by its key: a run of it is a seek, wherever it is read from.
+    @ObservationIgnored private var itemKey: String?
     @ObservationIgnored private let workId: String
     @ObservationIgnored private let token: String
     @ObservationIgnored private let player = AVPlayer()
@@ -62,6 +71,7 @@ final class NarrationModel {
     init(_ narration: Narration, workId: String, token: String, initial: ReadAlongPosition?) {
         timeline = narration.timeline
         runs = NarrationRuns(narration.timeline, sources: narration.sources)
+        kept = (narration.tracks, narration.hub, narration.cache)
         self.workId = workId
         self.token = token
         speed = ListeningSettings.speed(for: workId)
@@ -177,6 +187,7 @@ final class NarrationModel {
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers = []
         player.replaceCurrentItem(with: nil)
+        ListeningTracks.shared.stop()
         SoundGuard.shared.forget(.narration)
         ListeningAudio.deactivateSession(for: .narration)
     }
@@ -190,8 +201,7 @@ final class NarrationModel {
         let entry = runs.runs[time.run]
         // The run ends where its last sentence does: the player stops there and the next run is loaded.
         let end = CMTime(value: entry.toMs, timescale: 1_000)
-        if let item = player.currentItem, item.status != .failed,
-           run == time.run || (item.asset as? AVURLAsset)?.url.absoluteString == entry.url {
+        if let item = player.currentItem, item.status != .failed, run == time.run || itemKey == entry.cacheKey {
             // The same source: a seek, not a load (another run of one track is only another end).
             run = time.run
             item.forwardPlaybackEndTime = end
@@ -202,10 +212,13 @@ final class NarrationModel {
             }
             return
         }
-        guard let url = URL(string: entry.url) else {
+        // A track kept on this device is heard from there (#37), else from the hub.
+        let local = kept.tracks[entry.cacheKey].flatMap { ListeningTracks.shared.kept($0, in: kept.cache) }
+        guard let url = local ?? URL(string: entry.url) else {
             fail()
             return
         }
+        itemKey = entry.cacheKey
         let item = ListeningAudio.item(url, token: token)
         item.forwardPlaybackEndTime = end
         player.pause()
@@ -237,6 +250,7 @@ final class NarrationModel {
         switch item.status {
         case .readyToPlay where readyItem != id:
             readyItem = id
+            keepAhead(after: run)
             if let start = pending {
                 pending = nil
                 seekPlayer(start.ms, play: start.play)
@@ -259,6 +273,16 @@ final class NarrationModel {
             onSegment?(now)
         }
         if playing && ContinuousClock.now - lastSave >= .seconds(10) { save() }
+    }
+
+    /// The track playing kept on the device, then the next run's, once the
+    /// run has started: the audiobook player's way (`ListeningTracks`).
+    private func keepAhead(after run: Int) {
+        let keys = [runs.runs[run].cacheKey] + runs.runs[(run + 1)...].map(\.cacheKey).filter { $0 != runs.runs[run].cacheKey }.prefix(1)
+        let wanted = keys.compactMap { kept.tracks[$0] }
+        let playing = (player.currentItem?.asset as? AVURLAsset)?.url
+        ListeningTracks.shared.keep(wanted, hub: kept.hub, cache: kept.cache,
+                                    playing: playing?.isFileURL == true ? playing : nil) { _ in }
     }
 
     /// A run played to its end: the next, or the end of the book's narration.
@@ -329,6 +353,9 @@ final class NarrationModel {
         }
         let tones = app.isDemo ? await ListeningAudio.demoFiles(manifest, sourceItemId: sourceItemId) : nil
         let address = app.address
+        let hub = app.hub
+        let audioCache = ListeningTracks.cache(address: address)
+        let tracks = ListeningTracks.tracks(manifest, workId: workId, sourceItemId: sourceItemId)
         do {
             let narration = try await Task.detached(priority: .userInitiated) { () throws -> Narration in
                 let timeline = try ReadAlongPackage.read(edition, requireAudio: false)
@@ -336,7 +363,8 @@ final class NarrationModel {
                     ListeningAudio.trackAddress(index, manifest: manifest, workId: workId, sourceItemId: sourceItemId,
                                                 address: address, demo: tones)
                 }
-                return Narration(timeline: timeline, sources: sources, manifest: manifest)
+                return Narration(timeline: timeline, sources: sources, manifest: manifest, tracks: tracks,
+                                 hub: hub, cache: audioCache)
             }.value
             return Opening(edition: edition, narration: narration, note: "")
         } catch {
