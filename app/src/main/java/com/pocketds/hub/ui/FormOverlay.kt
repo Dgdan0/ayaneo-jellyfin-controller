@@ -39,11 +39,21 @@ class FormOverlay(
     private val colors: PocketColors,
     private val ringVisible: () -> Boolean,
     /** The side whose request this is; its main action takes the side's face (PillButton.mainFace). */
-    private val side: com.pocketds.hub.state.ContentMode = com.pocketds.hub.state.ContentMode.MEDIA
+    private val side: com.pocketds.hub.state.ContentMode = com.pocketds.hub.state.ContentMode.MEDIA,
+    /** A small centred card in place of the side sheet: a short question, "When did you finish?" (#39). */
+    centred: Boolean = false
 ) : FrameLayout(context) {
 
     /** The side sheet the rows are drawn into. It brings its own shade and takes a tap outside it as Cancel. */
-    private val sheet = SidePanelView(context, colors, ringVisible, side = true)
+    private val sheet: SidePanelView = if (centred) CentredSheet(context, colors, ringVisible)
+        else SidePanelView(context, colors, ringVisible, side = true)
+
+    /** The centred form of the same panel, as high as its rows and no wider than a question needs. */
+    private class CentredSheet(context: Context, colors: PocketColors, ringVisible: () -> Boolean) :
+        SidePanelView(context, colors, ringVisible, side = false) {
+        override val wrapsHeight: Boolean get() = true
+        override val centredWidthDp: Int get() = 380
+    }
 
     private var model: FormModel? = null
     private var onSubmit: ((String, FormModel) -> Unit)? = null
@@ -238,14 +248,16 @@ class FormOverlay(
         textWeight(700)
         gravity = Gravity.CENTER
         includeFontPadding = false
-        val ink = if (row.danger) colors.dangerText else PillButton.mainInk(colors, side)
+        // Glass in the danger colour for a destructive one, glass in white words for a Cancel, else the side's main face.
+        val glass = row.danger || row.quiet
+        val ink = if (row.danger) colors.dangerText else if (row.quiet) Color.WHITE else PillButton.mainInk(colors, side)
         setTextColor(ink)
         // The icon beside the word, the pair centred, as the prototype's Request has it.
-        if (!row.danger) setCenteredIcon(MediaActionIconDrawable(context, MediaActionIcon.DOWNLOAD, ink),
+        if (!glass && row.icon) setCenteredIcon(MediaActionIconDrawable(context, MediaActionIcon.DOWNLOAD, ink),
             Styler.dpInt(context, 14f), Styler.dpInt(context, 7f))
         val ring = Styler.dpInt(context, PillButton.RING_DP)
         val corner = Styler.dp(context, 11f)
-        val fill = if (row.danger) com.pocketds.hub.ui.glass.GlassPanelDrawable(GlassColors.panel(GlassPage.palette(context)), corner)
+        val fill = if (glass) com.pocketds.hub.ui.glass.GlassPanelDrawable(GlassColors.panel(GlassPage.palette(context)), corner)
             else ThemeGradientDrawable.rounded(corner, PillButton.mainFace(colors, side))
         background = if (selected && ringVisible()) android.graphics.drawable.LayerDrawable(arrayOf(
             ThemeGradientDrawable.rounded(corner + ring, Color.TRANSPARENT, Styler.dpInt(context, 2f), colors.focusRing),

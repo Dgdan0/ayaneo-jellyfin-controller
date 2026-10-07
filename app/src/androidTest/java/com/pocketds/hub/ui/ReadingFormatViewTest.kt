@@ -55,7 +55,9 @@ class ReadingFormatViewTest {
             }
             instrumentation.waitForIdleSync()
             instrumentation.runOnMainSync {
-                all(root).filterIsInstance<TextView>().first { it.text == "Change format" }.performClick()
+                // A book with two readers asks which from the ⋯ menu (#39); the formats themselves are the row of chips.
+                all(root).first { it.contentDescription?.toString() == "More actions for ${work.title}" }.performClick()
+                all(root).first { it.contentDescription?.toString()?.startsWith("Choose narration") == true }.performClick()
                 all(root).first { it.contentDescription?.toString()?.startsWith("Listen to audiobook, Bob") == true }.performClick()
                 assertEquals(0, pushes)
                 assertNull(ReadingEntryPreferences.get(activity, work.id))

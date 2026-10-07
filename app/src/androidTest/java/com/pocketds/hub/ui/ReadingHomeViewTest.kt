@@ -56,12 +56,12 @@ class ReadingHomeViewTest {
             instrumentation.waitForIdleSync()
             instrumentation.runOnMainSync {
                 all(root).first { it.contentDescription?.toString() == "More actions for ${work.title}" }.performClick()
-                all(root).first { it.contentDescription?.toString()?.startsWith("Reading lists") == true }.performClick()
+                all(root).first { it.contentDescription?.toString()?.startsWith("Add to a list") == true }.performClick()
                 all(root).first { it.contentDescription?.toString()?.startsWith("Comics") == true }.performClick()
                 assertTrue(ReadingListsRepository.get(activity).lists.single().items.any { it.workId == work.id })
-                all(root).first {
-                    it.contentDescription?.toString() == "Add ${work.title} to Want to Read"
-                }.performClick()
+                // Want to read is a row of the ⋯ menu on a book's page (#39).
+                all(root).first { it.contentDescription?.toString() == "More actions for ${work.title}" }.performClick()
+                all(root).first { it.contentDescription?.toString()?.startsWith("Want to read") == true }.performClick()
                 assertTrue(ReadingListsRepository.get(activity).wantToRead.any { it.workId == work.id })
                 HubSettings.save(activity, "https://reading-list-test.example", "token-two")
                 assertTrue(ReadingListsRepository.get(activity).lists.single().items.any { it.workId == work.id })

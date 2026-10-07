@@ -57,14 +57,9 @@ class ReadingWorkRefreshTest {
         lateinit var root: View
         fun all(view: View): List<View> = listOf(view) + (view as? ViewGroup)
             ?.let { group -> (0 until group.childCount).flatMap { all(group.getChildAt(it)) } }.orEmpty()
-        fun offersReadAlong(): Boolean {
-            all(root).filterIsInstance<TextView>().first { it.text == "Change format" }.performClick()
-            // The sheet's row: "Read along, <narrator> · Synchronized".
-            val offered = all(root).any { view -> view.isShown &&
-                view.contentDescription?.toString()?.let { it.startsWith("Read along, ") && it.contains("Synchronized") } == true }
-            screen.onSystemBack()
-            return offered
-        }
+        // The read-along chip of the formats row (#39): a control once there is an edition to open, grey before.
+        fun offersReadAlong(): Boolean = all(root).any { view -> view.isShown && view.isFocusable &&
+            view.contentDescription?.toString() == "Read along, opens at your place" }
         try {
             instrumentation.runOnMainSync {
                 root = screen.onCreateView(host, FrameLayout(activity))

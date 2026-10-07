@@ -83,7 +83,7 @@ object DetailStyler {
  * at full size at the left (square for an audiobook, [squareCover]) or a
  * series' fan in its place ([replacePoster]), and the words beside its foot.
  */
-class DetailHeaderView(context: Context, private val colors: PocketColors, ringVisible: () -> Boolean) : FrameLayout(context) {
+class DetailHeaderView(context: Context, private val colors: PocketColors, private val ringVisible: () -> Boolean) : FrameLayout(context) {
     val landscape: ImageView = com.pocketds.hub.ui.glass.FadedImageView(context).apply {
         stops = com.pocketds.hub.ui.glass.FadedImageView.TITLE
         shade = com.pocketds.hub.ui.glass.FadedImageView.TITLE_SHADE
@@ -100,6 +100,22 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         background = ThemeGradientDrawable.rounded(Styler.dp(context, COVER_CORNER_DP), colors.posterPlaceholder)
         clipToOutline = true
         elevation = Styler.dp(context, 14f)
+    }
+    /**
+     * A book's cover and what is under it (#39): your stars, when you finished, your shelves. Nothing
+     * shows when there is nothing to say.
+     */
+    val coverColumn = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; clipChildren = false; clipToPadding = false }
+    val ratingView = StarRatingView(context, colors, ringVisible).apply { visibility = GONE }
+    val finishedView = label(context, 11.5f, FACTS).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END; visibility = GONE }
+    val shelvesView = label(context, 11.5f, colors.accent).apply {
+        textWeight(700); maxLines = 2; ellipsize = TextUtils.TruncateAt.END; visibility = GONE
+    }
+    /** The formats as a row of icon and name, between the facts and the actions (#39). */
+    val formatRow = ReadingFormatRowView(context, colors, ringVisible).apply { visibility = GONE }
+    /** The genres as one quiet line under the actions (#39). */
+    val genresView = label(context, 11.5f, com.pocketds.hub.ui.glass.GlassColors.QUIET).apply {
+        maxLines = 1; ellipsize = TextUtils.TruncateAt.END; visibility = GONE
     }
     val titleView = label(context, TITLE_SP, colors.primaryText).apply {
         typeRole(Type.Role.HERO); maxLines = 2; ellipsize = TextUtils.TruncateAt.END
@@ -160,6 +176,12 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
     /** A book's page: an audiobook's cover is square. */
     var squareCover = false
         set(value) { field = value; layoutKey = ""; requestLayout() }
+    /**
+     * A book's page under the owner's layout "1" (#39): the formats and the actions follow the facts, the
+     * genres come under them, and under the cover are your stars. Set before the page is bound.
+     */
+    var reading = false
+        set(value) { if (field != value) { field = value; arrangeBody(); layoutKey = ""; requestLayout() } }
     private var hasLandscape = false
     private var layoutKey = ""
     private var imageKey: List<Any?> = emptyList()
@@ -170,22 +192,47 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         clipChildren = false
         setBackgroundColor(colors.background)
         addView(landscape, LayoutParams(MATCH, MATCH))
-        row.addView(poster, LinearLayout.LayoutParams(dp(92), dp(138)).apply { marginEnd = dp(20) })
-        body.addView(eyebrowView, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(6) })
-        body.addView(titleView, LinearLayout.LayoutParams(MATCH, WRAP))
-        body.addView(links, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6) })
-        body.addView(subtitleView, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(4) })
-        body.addView(metadataView, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(7) })
-        body.addView(underFacts, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6) })
-        body.addView(formatStatus, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin=dp(4) })
-        body.addView(stateView, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(5) })
-        body.addView(progressRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(8) })
-        // The overview is read before acting on it, so it sits above the buttons.
-        body.addView(overview, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6) })
-        body.addView(actionScroll, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(6); marginStart = -dp(PillButton.RING_DP.toInt()) })
-        body.addView(continuation, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(10) })
+        coverColumn.addView(poster, LinearLayout.LayoutParams(dp(92), dp(138)))
+        coverColumn.addView(ratingView, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = dp(8); marginStart = -dp(RATING_BLEED_DP) })
+        coverColumn.addView(finishedView, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(2) })
+        coverColumn.addView(shelvesView, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(3) })
+        row.addView(coverColumn, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(20) })
+        arrangeBody()
         row.addView(body, LinearLayout.LayoutParams(0, WRAP, 1f))
         addView(row, LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+    }
+
+    /**
+     * The words beside the cover, in the order a page keeps them: a title page puts the overview before the
+     * actions, which are read after it; a book's page under layout "1" ([reading], #39) goes straight from
+     * the facts to the formats, the actions and the genres, with the overview after them.
+     */
+    private fun arrangeBody() {
+        body.removeAllViews()
+        fun add(view: View, top: Int = 0, bottom: Int = 0, start: Int = 0) =
+            body.addView(view, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(top); bottomMargin = dp(bottom); marginStart = start })
+        val ring = -dp(PillButton.RING_DP.toInt())
+        add(eyebrowView, bottom = 6)
+        add(titleView)
+        add(links, top = 6)
+        add(subtitleView, top = 4)
+        add(metadataView, top = 7)
+        add(underFacts, top = 6)
+        add(formatStatus, top = 4)
+        add(stateView, top = 5)
+        if (reading) {
+            add(formatRow, top = 6, start = ring)
+            add(actionScroll, top = 2, start = ring)
+            add(genresView, top = 2)
+            add(progressRow, top = 8)
+            add(overview, top = 6)
+        } else {
+            add(progressRow, top = 8)
+            // The overview is read before acting on it, so it sits above the buttons.
+            add(overview, top = 6)
+            add(actionScroll, top = 6, start = ring)
+        }
+        add(continuation, top = 10)
     }
 
     /** How far through: the bar under the facts. */
@@ -240,19 +287,21 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
                 // wide, the words 18dp beside it, both standing on one line
                 // (the pills' ring room lies below them).
                 val ring = dp(PillButton.RING_DP.toInt())
-                row.gravity = Gravity.BOTTOM
+                // Under layout "1" (#39) the cover and the words start together, and what is under the cover hangs below it.
+                row.gravity = if (reading) Gravity.TOP else Gravity.BOTTOM
                 row.setPadding(dp(EDGE_DP), dp(BOOK_TOP_DP), dp(EDGE_DP), dp(4))
-                poster.visibility = if (leading == null) VISIBLE else GONE
+                coverColumn.visibility = if (leading == null) VISIBLE else GONE
+                poster.visibility = VISIBLE
                 leading?.visibility = VISIBLE
-                poster.layoutParams = LinearLayout.LayoutParams(dp(COVER_DP),
-                    dp(if (squareCover) COVER_DP else COVER_DP * 3 / 2)).apply {
+                poster.layoutParams = LinearLayout.LayoutParams(dp(COVER_DP), dp(if (squareCover) COVER_DP else COVER_DP * 3 / 2))
+                coverColumn.layoutParams = LinearLayout.LayoutParams(dp(COVER_DP), WRAP).apply {
                     marginEnd = dp(BOOK_GAP_DP); bottomMargin = ring
                 }
                 (leading?.layoutParams as? LinearLayout.LayoutParams)?.let { it.marginEnd = dp(BOOK_GAP_DP); it.bottomMargin = ring }
                 body.layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
             } else {
                 row.gravity = Gravity.TOP
-                poster.visibility = GONE
+                coverColumn.visibility = GONE
                 leading?.visibility = GONE
                 row.setPadding(dp(EDGE_DP), dp(TOP_DP), dp(EDGE_DP), dp(4))
                 body.layoutParams = LinearLayout.LayoutParams(minOf(dp(WORDS_DP), width - 2 * dp(EDGE_DP)), WRAP)
@@ -283,6 +332,8 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, ringV
         const val COVER_CORNER_DP = 9f
         const val BOOK_GAP_DP = 18
         const val PROGRESS_DP = 220
+        /** Your stars hang this far left of the cover's edge, their ring's room, so the first star lines up with it. */
+        const val RATING_BLEED_DP = 3
         /** The facts in white at 82%, an original title at 60%, the overview at 86%, an eyebrow at 72%. */
         const val FACTS = com.pocketds.hub.ui.glass.GlassColors.FACTS
         const val SUBTITLE = 0x99FFFFFF.toInt()

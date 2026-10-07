@@ -64,9 +64,10 @@ class ReadingPolishIntegrationTest {
             ins.runOnMainSync{root=screen.onCreateView(host,FrameLayout(activity));activity.setContentView(root);screen.onShow()}
             ins.waitForIdleSync()
             ins.runOnMainSync{
-                assertTrue(all(root).any{it.contentDescription=="Ebook, available" && !it.isFocusable && !it.isClickable})
-                assertTrue(all(root).any{it.contentDescription=="Audiobook, not available"})
-                assertTrue(all(root).filterIsInstance<TextView>().any{it.text=="Read"})
+                // The book's page (#39): a format the book has is a control that opens at your place, one it lacks is quiet.
+                assertTrue(all(root).any{it.contentDescription=="Ebook, opens at your place" && it.isFocusable})
+                assertTrue(all(root).any{it.contentDescription=="Audiobook, not available" && !it.isFocusable})
+                assertTrue(all(root).filterIsInstance<TextView>().any{it.text=="Read book"})
                 assertFalse(all(root).filterIsInstance<TextView>().any{it.text=="Ebook ready" || it.text=="Available"})
             }
         }finally{ins.runOnMainSync{screen.onHide();screen.onDestroyView();activity.finish()}}

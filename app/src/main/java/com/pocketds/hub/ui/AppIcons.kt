@@ -3,7 +3,12 @@ package com.pocketds.hub.ui
 import android.graphics.*
 import android.graphics.drawable.Drawable
 
-enum class AppIcon { CLOSE, CONTENTS, APPEARANCE, PREVIOUS, NEXT, PREVIOUS_ITEM, NEXT_ITEM, THIRDS, FIT, DIRECTION, ZOOM_IN, ZOOM_OUT, SEARCH, OPEN, REFRESH, BOOK, HEADPHONES, READ_ALONG, BOOKMARK, BOOKMARK_FILLED, COMIC, MOVIE, TV, SETTINGS, CHECK, MEDIA, SORT, PANEL, PLAY, INFO, PERSON, SERIES, ADD, STAR, HOME, SUBTITLES, DOWNLOAD, MORE, ARRANGE, GRIP, PAD, COMFORT, PAGES, SPEED, SLEEP, STOP }
+enum class AppIcon { CLOSE, CONTENTS, APPEARANCE, PREVIOUS, NEXT, PREVIOUS_ITEM, NEXT_ITEM, THIRDS, FIT, DIRECTION, ZOOM_IN, ZOOM_OUT, SEARCH, OPEN, REFRESH, BOOK, HEADPHONES, READ_ALONG, BOOKMARK, BOOKMARK_FILLED, COMIC, MOVIE, TV, SETTINGS, CHECK, MEDIA, SORT, PANEL, PLAY, INFO, PERSON, SERIES, ADD, STAR, HOME, SUBTITLES, DOWNLOAD, MORE, ARRANGE, GRIP, PAD, COMFORT, PAGES, SPEED, SLEEP, STOP;
+    companion object {
+        /** The star, on the icons' 24 x 24 grid: a rating draws it filled as well as in outline (#39). */
+        const val STAR_PATH = "M12 3.6l2.5 5.2 5.7.8-4.1 4 1 5.7L12 16.6l-5.1 2.7 1-5.7-4.1-4 5.7-.8z"
+    }
+}
 
 /** Original vector geometry; controls do not depend on the vendor's symbol font. */
 class AppIconDrawable(private val icon: AppIcon, color: Int) : Drawable() {
@@ -45,7 +50,7 @@ class AppIconDrawable(private val icon: AppIcon, color: Int) : Drawable() {
             AppIcon.PERSON->{canvas.drawCircle(12f,8f,4f,paint);path("M4 21c0-4 3.6-7 8-7s8 3 8 7")}
             AppIcon.SERIES->{canvas.drawRoundRect(4f,6f,16f,21f,1.5f,1.5f,paint);path("M8 3h10.5a1.5 1.5 0 0 1 1.5 1.5V18")}
             AppIcon.ADD->{line(12f,5f,12f,19f);line(5f,12f,19f,12f)}
-            AppIcon.STAR->path("M12 3.6l2.5 5.2 5.7.8-4.1 4 1 5.7L12 16.6l-5.1 2.7 1-5.7-4.1-4 5.7-.8z")
+            AppIcon.STAR->path(AppIcon.STAR_PATH)
             AppIcon.HOME->path("M4 11 12 4l8 7v9h-5v-6H9v6H4z")
             AppIcon.SUBTITLES->{canvas.drawRoundRect(3f,5f,21f,19f,2.5f,2.5f,paint);path("M10.5 10.2a2.4 2.4 0 1 0 0 3.6m7-3.6a2.4 2.4 0 1 0 0 3.6")}
             AppIcon.DOWNLOAD->path("M12 4v11m-5-5 5 5 5-5M5 20h14")

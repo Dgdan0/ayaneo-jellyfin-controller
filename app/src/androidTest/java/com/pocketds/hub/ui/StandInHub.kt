@@ -42,6 +42,18 @@ class StandInHub(
     @Volatile var revision = "aaaaaaaaaaaa"
     @Volatile var held: Place? = null
     val requests = CopyOnWriteArrayList<Request>()
+    /**
+     * The work's own page (#39): `GET /v1/reading/works/{work}` answers it, its "you" as `PATCH …/you` has left
+     * it. The patch is the hub's: a key present sets, `null` clears, absent keeps; a rating is a number from 1
+     * to 5, a month `YYYY-MM`, a count 1 to 99; a month finished with no count is count 1.
+     */
+    @Volatile var page: JSONObject? = null
+    val you = JSONObject()
+    val youWrites = CopyOnWriteArrayList<JSONObject>()
+    /** A status and a code the patch answers instead (a hub that cannot save). */
+    @Volatile var youRefused: Pair<Int, String>? = null
+    /** A generated cover, served at `/v1/img/fixture/cover`. */
+    @Volatile var cover: ByteArray? = null
     val writes = CopyOnWriteArrayList<Pair<JSONObject, Long>>()
     private val publication = "/v1/reading/works/$work/publications/$book"
 
@@ -71,6 +83,11 @@ class StandInHub(
             request.getHeader("Authorization"), System.currentTimeMillis())
         val path = url.encodedPath
         return when {
+            path == "/v1/reading/works/$work" && request.method == "GET" ->
+                page?.let { json(JSONObject(it.toString()).put("you", JSONObject(you.toString()))) } ?: error(404, "not_found")
+            path == "/v1/reading/works/$work/you" && request.method == "PATCH" -> patchYou(request.body.readUtf8())
+            path == "/v1/img/fixture/cover" -> cover?.let { MockResponse().setHeader("Content-Type", "image/jpeg").setBody(Buffer().write(it)) }
+                ?: MockResponse().setResponseCode(404)
             path == "$publication/audio" -> refuse?.let { (status, code) -> error(status, code, "unmapped_root") } ?: manifest()
             path.startsWith("$publication/audio/tracks/") -> track(path.substringAfterLast('/').toInt(), url.queryParameter("rev"), request.getHeader("Range"))
             path == "$publication/audio/position" && request.method == "GET" -> position()
@@ -84,6 +101,29 @@ class StandInHub(
             path == "$publication/position" -> json(JSONObject().put("ok", true))
             else -> json(JSONObject(), 404)
         }
+    }
+
+    /** `PATCH …/works/{id}/you`, with the hub's rules. */
+    private fun patchYou(raw: String): MockResponse {
+        val body = runCatching { JSONObject(raw) }.getOrNull() ?: return error(400, "invalid_request")
+        youWrites += body
+        youRefused?.let { (status, code) -> return error(status, code) }
+        val keys = body.keys().asSequence().toList()
+        if (keys.isEmpty() || keys.any { it !in setOf("rating", "finished", "readCount") }) return error(400, "invalid_request")
+        for (key in keys) {
+            val value = body.get(key)
+            if (value == JSONObject.NULL) continue
+            val valid = when (key) {
+                "rating" -> value is Int && value in 1..5
+                "readCount" -> value is Int && value in 1..99
+                else -> value is String && Regex("""\d{4}-(0[1-9]|1[0-2])""").matches(value)
+            }
+            if (!valid) return error(400, "invalid_request")
+        }
+        keys.forEach { key -> if (body.isNull(key)) you.remove(key) else you.put(key, body.get(key)) }
+        if (you.has("finished") && !you.has("readCount")) you.put("readCount", 1)
+        you.put("status", if (you.has("finished")) "read" else "")
+        return json(JSONObject().put("workId", work).put("you", JSONObject(you.toString())))
     }
 
     private fun manifest(): MockResponse = json(JSONObject()

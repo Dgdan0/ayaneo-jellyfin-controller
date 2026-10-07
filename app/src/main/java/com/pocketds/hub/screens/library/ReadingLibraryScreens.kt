@@ -39,6 +39,14 @@ import com.pocketds.hub.model.ReadingSection
 import com.pocketds.hub.model.ReadingAuthor
 import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.model.ReadingWork
+import com.pocketds.hub.model.ReadingYou
+import com.pocketds.hub.model.ReadingYouPatch
+import com.pocketds.hub.model.YouEdit
+import kotlinx.coroutines.sync.withLock
+import com.pocketds.hub.state.FormModel
+import com.pocketds.hub.ui.FormOverlay
+import com.pocketds.hub.ui.StarRatingView
+import java.time.YearMonth
 import com.pocketds.hub.screens.home.ReadingListEntry
 import com.pocketds.hub.screens.home.ReadingListsRepository
 import com.pocketds.hub.screens.home.ReadingListsState
@@ -569,6 +577,19 @@ class ReadingWorkScreen(
     private var hasChildLinks = false
     private lateinit var detailHeader: DetailHeaderView
     private lateinit var listOverlay: ChoiceOverlay
+    /** "When did you finish?" (#39): a small centred card over the page. */
+    private lateinit var finishedPanel: FormOverlay
+    /**
+     * Writes of what this profile says of the book (a rating, a finish month) are not the page's own
+     * jobs: leaving the page must not cancel one that was asked for, so they run here (#39).
+     */
+    private val saves = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /** What the page had before this visit marked the book finished, so Mark unread can put it back (#39). */
+    private var finishedFrom: ReadingYou? = null
+    private var finishedMarked = false
+    /** Writes of "you" go one at a time and in the order they were asked (a mutex is fair). */
+    private val youLock = kotlinx.coroutines.sync.Mutex()
+    private var youPending = 0
     private var lastActionKey: String? = null
     private val actionViews = linkedMapOf<String, View>()
     /** A series' continue card, when it shows one. */
@@ -615,6 +636,8 @@ class ReadingWorkScreen(
             addView(main, FrameLayout.LayoutParams(MATCH, MATCH))
             listOverlay = ChoiceOverlay(context, colors, ringVisible, sidePanel = true)
             addView(listOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
+            finishedPanel = FormOverlay(context, colors, ringVisible, side = ContentMode.BOOKS, centred = true)
+            addView(finishedPanel, FrameLayout.LayoutParams(MATCH, MATCH))
         }.also { pageView = it }
     }
 
@@ -622,6 +645,7 @@ class ReadingWorkScreen(
         visible = true
         if (::detailHeader.isInitialized) detailHeader.overview.collapse()
         if (::listOverlay.isInitialized && listOverlay.isOpen) listOverlay.dismiss()
+        if (::finishedPanel.isInitialized && finishedPanel.isOpen) finishedPanel.dismiss()
         // Drawn again on coming back: the place Back returns to moves to its new view,
         // and the host puts focus there (#23).
         lastWork?.let(::render)
@@ -646,6 +670,7 @@ class ReadingWorkScreen(
 
     override fun onDestroyView() {
         scope.cancel()
+        // A write already asked for finishes; the page is not there to hear how it went (#39).
         host = null
     }
 
@@ -654,6 +679,9 @@ class ReadingWorkScreen(
             actionViews.keys.filterNot { it.startsWith("list:") } + actionViews.keys.filter { it.startsWith("list:") })]?.requestFocus() == true
 
     override fun hints() = buildList {
+        if (::finishedPanel.isInitialized && finishedPanel.isOpen) {
+            add(ButtonHint.activate("Choose")); add(ButtonHint.back("Cancel")); return@buildList
+        }
         if (::listOverlay.isInitialized && listOverlay.isOpen) {
             add(ButtonHint.activate("Choose")); add(ButtonHint.back("Cancel")); return@buildList
         }
@@ -665,9 +693,11 @@ class ReadingWorkScreen(
         val focusedAction = actionViews.entries.firstOrNull { it.value.isShown && it.value.hasFocus() }
         if (focusedAction != null) {
             val view = focusedAction.value
-            add(ButtonHint.activate(ReadingActionHint.label(focusedAction.key,
-                text = (view as? TextView)?.text?.toString().orEmpty(),
-                description = view.contentDescription?.toString().orEmpty())))
+            // Your stars say what Ⓐ would do with the cursor where it stands (#39).
+            add(ButtonHint.activate((view as? StarRatingView)?.let { ReadingStars.hint(it.rating, it.cursor) }
+                ?: ReadingActionHint.label(focusedAction.key,
+                    text = (view as? TextView)?.text?.toString().orEmpty(),
+                    description = view.contentDescription?.toString().orEmpty())))
         } else if (hasChildLinks) add(ButtonHint.activate("Open"))
         add(ButtonHint.back())
         add(ButtonHint.refresh())
@@ -681,12 +711,19 @@ class ReadingWorkScreen(
     }
 
     override fun onPad(action: PadAction): Boolean {
+        if (::finishedPanel.isInitialized && finishedPanel.isOpen) {
+            val handled = finishedPanel.onPad(action)
+            if (handled) host?.refreshHints()
+            return handled
+        }
         if (::listOverlay.isInitialized && listOverlay.isOpen) {
             val handled = listOverlay.onPad(action)
             if (handled) host?.refreshHints()
             return handled
         }
         if (::detailHeader.isInitialized && detailHeader.overview.onPad(action)) return true
+        // Left and right move the cursor along your stars, and Ⓐ rates with it (#39).
+        if (::detailHeader.isInitialized && detailHeader.ratingView.onPad(action)) return true
         return when (action) {
         PadAction.Refresh -> {
             load(force = true)
@@ -697,6 +734,11 @@ class ReadingWorkScreen(
     }
 
     override fun onSystemBack(): Boolean {
+        if (::finishedPanel.isInitialized && finishedPanel.isOpen) {
+            finishedPanel.dismiss()
+            host?.refreshHints()
+            return true
+        }
         if (::listOverlay.isInitialized && listOverlay.isOpen) {
             listOverlay.dismiss()
             host?.refreshHints()
@@ -722,12 +764,18 @@ class ReadingWorkScreen(
     /** The page drawn from [source]; the place Back returns to moves to its new view (#23). */
     private fun render(source: ReadingWork) = FocusPlace.across(pageView) { draw(source) }
 
-    private fun draw(source: ReadingWork) {
-        lastWork = source
-        val checkpoints = com.pocketds.hub.reader.ReadingProgress.get(requireNotNull(host).viewContext)
-        val work = ReadingCompletionRepository.get(requireNotNull(host).viewContext).project(
+    /** [source] as this device sees it: a place not yet sent counted, a book marked read here finished. */
+    private fun projected(source: ReadingWork): ReadingWork {
+        val context = requireNotNull(host).viewContext
+        val checkpoints = com.pocketds.hub.reader.ReadingProgress.get(context)
+        return ReadingCompletionRepository.get(context).project(
             com.pocketds.hub.reader.ReadingProgressPresentation.project(source,
                 checkpoints.store.pending(checkpoints.session().identity)))
+    }
+
+    private fun draw(source: ReadingWork) {
+        lastWork = source
+        val work = projected(source)
         val previouslyFocusedSource = actionViews.entries.firstOrNull { it.value.hasFocus() }?.key ?: lastActionKey
         // A comic's issue: its strip opens at it, and focus goes back to it once the strip has its cards.
         val issueKey = previouslyFocusedSource?.takeIf(IssueStrip::isTag)
@@ -820,12 +868,15 @@ class ReadingWorkScreen(
         scroll.revealWhole = this
         // The prototype's book page: the cover at the left, "BOOK 6 · RED RISING" over the title.
         book = true
+        // A book of its own takes the owner's layout "1" (#39): formats, stars under the cover, genres on a line.
+        reading = ReadingBookPage.isBook(work)
         squareCover = work.kind == com.pocketds.hub.model.ReadingType.AUDIOBOOK
         eyebrowView.text = ReadingBookFacts.eyebrow(work, ReadingLibraryNames.of(work.libraryId).orEmpty())
         overview.onChanged = { host?.refreshHints() }
         titleView.text = work.title
         subtitleView.visibility = View.GONE
-        metadataView.text = if (work.entityType != "collection") ReadingBookFacts.line(work, null)
+        metadataView.text = if (ReadingBookPage.isBook(work)) ReadingBookPage.facts(work)
+        else if (work.entityType != "collection") ReadingBookFacts.line(work, null)
         else buildList {
             // Linked writers are chips under the title; how far through is the bar below.
             if (work.authorRefs.isEmpty() && work.authors.isNotEmpty()) add(work.authors.joinToString(", "))
@@ -850,6 +901,7 @@ class ReadingWorkScreen(
         }
         bindArtwork("book", null, work.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
             Artwork.loader(api, context))
+        if (ReadingBookPage.isBook(work)) { bookPage(this, work); return@apply }
         if (work.entityType != "collection") {
             val remembered = ReadingEntryPreferences.get(context, work.id)
             val formatMenu = ReadingFormatMenu.forWork(work, remembered)
@@ -917,22 +969,7 @@ class ReadingWorkScreen(
                         colors), dp(21))
                 setPadding(dp(12), 0, dp(12), 0)
                 attachActionFocus(this)
-                activateOnTap {
-                    val context = requireNotNull(host).viewContext
-                    val changed = ReadingCompletionRepository.update(context) { current ->
-                        if (work.progress?.completed == true) completionSession.unmark(current, work.id)
-                        else completionSession.markRead(current, work.id)
-                    }
-                    ReadingListsRepository.update(context) { state ->
-                        state.recordProgress(work.id, changed.project(requireNotNull(lastWork)).progress?.percentage ?: 0.0)
-                    }
-                    render(requireNotNull(lastWork))
-                    host?.notify(when {
-                        changed.isRead(work.id) -> "Marked as read"
-                        changed.shouldStartAtBeginning(work.id) -> "Marked unread · next read starts at the beginning"
-                        else -> "Previous reading position restored"
-                    })
-                }
+                activateOnTap { toggleRead(work) }
             }
             val wanted = ReadingListsRepository.get(context).wantToRead.any { it.workId == work.id }
             val want = CenteredIconTextView(context).apply {
@@ -943,15 +980,10 @@ class ReadingWorkScreen(
                 bookmark(this, wanted)
                 attachActionFocus(this)
                 activateOnTap {
-                    val next = ReadingListsRepository.update(context) { state ->
-                        if (state.wantToRead.any { it.workId == work.id }) state.remove(ReadingListsState.WANT_TO_READ, work.id)
-                        else state.add(ReadingListsState.WANT_TO_READ, ReadingListEntry.from(work))
-                    }
-                    val selected = next.wantToRead.any { it.workId == work.id }
+                    val selected = toggleWant(work)
                     contentDescription = if (selected) "Remove ${work.title} from Want to Read"
                         else "Add ${work.title} to Want to Read"
                     bookmark(this, selected)
-                    host?.notify(if (selected) "Added to Want to Read" else "Removed from Want to Read")
                     host?.refreshHints()
                 }
             }
@@ -997,6 +1029,276 @@ class ReadingWorkScreen(
                 actionViews["list:more"] = editions
             }
         }
+    }
+
+    /**
+     * A book's page under the owner's layout "1" (#39): the formats as a row of icon and name, the Resume
+     * pill with where you are and a round ⋯, the genres on one quiet line; under the cover your stars, when
+     * you finished and your shelves. What the words say is [ReadingBookPage]'s; this only places them.
+     */
+    private fun bookPage(header: DetailHeaderView, work: ReadingWork) {
+        val context = requireNotNull(host).viewContext
+        val remembered = ReadingEntryPreferences.get(context, work.id)
+        val formatMenu = ReadingFormatMenu.forWork(work, remembered)
+        if (previewFormatWorkId != work.id) {
+            previewFormatWorkId = work.id
+            previewFormat = null
+        }
+        val previewKey = previewFormat?.let { ReadingFormatMenu.Option(it, "", "").key }
+        val selectedOption = formatMenu.options.firstOrNull { it.key == previewKey }
+        val choice = selectedOption?.choice ?: formatMenu.defaultChoice.also { previewFormat = null }
+        // The formats are chips of their own now; the status line and the state say nothing more.
+        header.formatStatus.visibility = View.GONE
+        header.stateView.visibility = View.GONE
+        header.stateView.isFocusable = false
+        header.genresView.text = ReadingBookPage.genres(work)
+        header.genresView.visibility = if (header.genresView.text.isNullOrBlank()) View.GONE else View.VISIBLE
+        // A narration picked from the menu is the one the audiobook chip opens.
+        val chips = ReadingFormatChips.of(work,
+            previewFormat?.audio?.let { ReadingEntryPreference(ReadingEntryMode.LISTEN, it.sourceItemId) } ?: remembered)
+        header.formatRow.bind(chips,
+            onOpen = { chip -> chip.choice?.let { launchEntry(work, it) } },
+            onQuiet = { chip -> host?.notify(chip.note) },
+            onFocused = { chip -> lastActionKey = "list:format:${chip.kind}"; host?.refreshHints() })
+        chips.filter { it.ready }.forEach { chip ->
+            header.formatRow.chipViews[chip.kind]?.let { actionViews["list:format:${chip.kind}"] = it; hasChildLinks = true }
+        }
+        choice?.let { picked ->
+            val modeName = when (picked.mode) {
+                ReadingEntryMode.READ -> "reading"
+                ReadingEntryMode.LISTEN -> "listening"
+                ReadingEntryMode.READ_ALONG -> "read along"
+            }
+            val narration = when {
+                previewFormat == null -> ""
+                picked.mode == ReadingEntryMode.LISTEN -> selectedOption?.detail.orEmpty()
+                picked.mode == ReadingEntryMode.READ_ALONG -> selectedOption?.narration.orEmpty()
+                else -> ""
+            }
+            val label = ReadingResumeLabel.of(picked.mode, work.progress, resumeChapter(work, picked), narration)
+            val icon = when (picked.mode) {
+                ReadingEntryMode.READ -> AppIcon.BOOK
+                ReadingEntryMode.LISTEN -> AppIcon.HEADPHONES
+                ReadingEntryMode.READ_ALONG -> AppIcon.READ_ALONG
+            }
+            // The Books side's main action, gold (PillButton.mainFace).
+            val primary: TextView = PillButton.create(context, colors, label, icon, primary = true,
+                heightDp = PILL_DP, side = ContentMode.BOOKS)
+            primary.apply {
+                contentDescription = "$label ${work.title}, $modeName"
+                attachActionFocus(this)
+                activateOnTap { launchEntry(work, previewFormat ?: picked) }
+            }
+            header.actions.addView(primary, LinearLayout.LayoutParams(WRAP, WRAP).apply {
+                marginStart = -dp(PillButton.RING_DP.toInt()); marginEnd = dp(2)
+            })
+            actionViews["entry"] = primary
+            hasChildLinks = true
+        }
+        val more = CenteredIconTextView(context).apply {
+            text = ""
+            contentDescription = "More actions for ${work.title}"
+            textSize = 21f
+            DetailStyler.glassToggle(this, colors)
+            setCenteredIcon(MediaActionIconDrawable.onGlass(context, MediaActionIcon.MORE, colors), dp(16))
+            attachActionFocus(this)
+            activateOnTap { showMore(work) }
+        }
+        header.actions.addView(more, glassToggleParams())
+        actionViews["list:more"] = more
+        // Your stars: Ⓐ or a tap rates, and the hub keeps it.
+        header.ratingView.onRate = { rating -> rate(work, rating) }
+        header.ratingView.onCursor = {
+            if (header.ratingView.isFocused) lastActionKey = "list:rating"
+            host?.refreshHints()
+        }
+        actionViews["list:rating"] = header.ratingView
+        bindYou(work)
+    }
+
+    /** The chapter the text was left in, from this device's own saved place; null for anything else (#39). */
+    private fun resumeChapter(work: ReadingWork, choice: ReadingEntryChoice): String? {
+        val sourceItemId = when (choice.mode) {
+            ReadingEntryMode.READ -> choice.text?.sourceItemId
+            ReadingEntryMode.READ_ALONG -> choice.aligned?.sourceItemId
+            ReadingEntryMode.LISTEN -> null
+        }?.takeIf(String::isNotBlank) ?: return null
+        val progress = com.pocketds.hub.reader.ReadingProgress.get(requireNotNull(host).viewContext)
+        val checkpoint = runCatching { progress.store.read(progress.session().key(work.id, sourceItemId, "epub")) }.getOrNull()
+        return ReadingResumeLabel.chapter(checkpoint?.local?.locator)
+    }
+
+    /** Your stars, when you finished and your shelves, under the cover (#39). */
+    private fun bindYou(work: ReadingWork) {
+        val header = detailHeader
+        header.ratingView.rating = work.you?.rating ?: 0
+        header.ratingView.visibility = View.VISIBLE
+        val finished = ReadingBookPage.finished(work.you, finished = work.progress?.completed == true)
+        header.finishedView.text = finished.orEmpty()
+        header.finishedView.visibility = if (finished == null) View.GONE else View.VISIBLE
+        val shelves = ReadingBookPage.shelves(work.you)
+        header.shelvesView.text = shelves.orEmpty()
+        header.shelvesView.visibility = if (shelves == null) View.GONE else View.VISIBLE
+        header.requestLayout()
+    }
+
+    /** What the page shows of "you", changed at once; the hub's word follows (#39). */
+    private fun setYou(you: ReadingYou?) {
+        val shown = lastWork ?: return
+        val next = shown.copy(you = you)
+        lastWork = next
+        if (visible && host != null && ::detailHeader.isInitialized) bindYou(projected(next))
+    }
+
+    private fun rate(work: ReadingWork, rating: Int?) {
+        val shown = lastWork ?: return
+        setYou((shown.you ?: ReadingYou()).copy(rating = rating ?: 0))
+        host?.notify(if (rating == null) "Rating removed" else "Rated $rating ${if (rating == 1) "star" else "stars"}")
+        saveYou(work.id, ReadingYouEdits.rate(rating), "Your rating")
+    }
+
+    /**
+     * One write of "you" to the hub, in the order it was asked. It runs on the page's own scope, which
+     * outlives the page: leaving straight after rating must not lose the rating. A failure says so and
+     * reads the page again, so what is shown is what the hub holds.
+     */
+    private fun saveYou(workId: String, patch: ReadingYouPatch, what: String) {
+        youPending++
+        saves.launch {
+            val result = youLock.withLock { api.updateReadingYou(workId, patch) }
+            youPending--
+            when (result) {
+                is HubResult.Ok -> if (youPending == 0 && lastWork?.id == workId) setYou(result.value.you)
+                is HubResult.Failed -> {
+                    host?.notify("$what could not be saved · ${result.message}")
+                    if (youPending == 0 && visible) load(force = true)
+                }
+            }
+        }
+    }
+
+    /** The round ⋯: what [ReadingMoreMenu] offers for the state this book is in. */
+    private fun showMore(work: ReadingWork) {
+        val context = requireNotNull(host).viewContext
+        val you = lastWork?.you
+        val finished = work.progress?.completed == true
+        val wanted = ReadingListsRepository.get(context).wantToRead.any { it.workId == work.id }
+        val narrations = ReadingWorkPresentation.audiobooks(work).size > 1 || ReadingWorkPresentation.readAlongEditions(work).size > 1
+        listOverlay.show("More actions", work.title,
+            ReadingMoreMenu.entries(you, finished, wanted, narrations).map {
+                ChoiceOverlay.Choice(it.id, it.label, it.detail, danger = it.danger)
+            },
+            onCancel = { actionViews["list:more"]?.requestFocus(); host?.refreshHints() }) { id ->
+            when (id) {
+                ReadingMoreMenu.FINISHED -> showFinished(work, finished)
+                ReadingMoreMenu.UNREAD -> markUnread(work)
+                ReadingMoreMenu.NARRATION -> showFormatMenu(work, ReadingFormatMenu.forWork(work, ReadingEntryPreferences.get(context, work.id)))
+                ReadingMoreMenu.WANT -> toggleWant(work)
+                ReadingMoreMenu.LISTS -> showReadingLists(work)
+                ReadingMoreMenu.OFFLINE -> removeOfflineReading(requireNotNull(host), listOverlay, work, scope)
+                ReadingMoreMenu.SERVER -> { refreshOnShow = true; host?.push(MediaRemovalScreen(api, "reading", work.id, ringVisible)) }
+            }
+            host?.refreshHints()
+        }
+        host?.refreshHints()
+    }
+
+    /**
+     * "When did you finish?": a small centred card with Month and Year, this month unless the book is
+     * already finished (then the month kept, to put right), Cancel and Mark finished.
+     */
+    private fun showFinished(work: ReadingWork, finishedNow: Boolean) {
+        val now = YearMonth.now()
+        val kept = lastWork?.you?.takeIf { finishedNow }
+        val model = FormModel(ReadingFinished.rows(ReadingFinished.preset(kept, now), now))
+        finishedPanel.show("When did you finish?", work.title, model,
+            onCancel = { actionViews["list:more"]?.requestFocus(); host?.refreshHints() },
+            // A month later than this one is this one: the rows are drawn again as the hub would take them.
+            onChanged = { form ->
+                if (ReadingFinished.needsSettling(form.rows(), now))
+                    form.replace(ReadingFinished.rows(ReadingFinished.chosen(form.rows(), now), now))
+            }
+        ) { id, form ->
+            when (id) {
+                ReadingFinished.CANCEL -> finishedPanel.dismiss()
+                ReadingFinished.MARK -> {
+                    val month = ReadingFinished.chosen(form.rows(), now)
+                    finishedPanel.dismiss()
+                    markFinished(work, month, finishedNow)
+                }
+            }
+            actionViews["list:more"]?.requestFocus()
+            host?.refreshHints()
+        }
+        host?.refreshHints()
+    }
+
+    /**
+     * Mark finished in [month]: the date and the count go to the hub, and the book is marked read here
+     * as the page's read toggle always did (the hub has no route that marks a book read in Kavita or
+     * Storyteller). The page keeps what it had, so Mark unread can put it back.
+     */
+    private fun markFinished(work: ReadingWork, month: YearMonth, finishedNow: Boolean) {
+        val shown = lastWork ?: return
+        val before = shown.you
+        if (!finishedMarked) { finishedMarked = true; finishedFrom = before }
+        val patch = ReadingYouEdits.finish(before, month, finishedNow)
+        val count = (patch.readCount as? YouEdit.To)?.value ?: (before?.readCount ?: 0).coerceAtLeast(1)
+        setYou((before ?: ReadingYou()).copy(finished = month.toString(), readCount = count, status = "read"))
+        saveYou(work.id, patch, "The date you finished")
+        if (!finishedNow) markReadHere(work, read = true)
+        lastActionKey = "list:more"
+        lastWork?.let(::render)
+        host?.notify("Marked finished · ${ReadingBookPage.monthLabel(month.toString())}")
+    }
+
+    /** Mark unread: starts again from the beginning here, and undoes the finish this visit made, if it made one. */
+    private fun markUnread(work: ReadingWork) {
+        if (finishedMarked) {
+            val from = finishedFrom
+            ReadingYouEdits.unfinish(lastWork?.you, from)?.let { patch ->
+                setYou((lastWork?.you ?: ReadingYou()).copy(finished = from?.finished.orEmpty(), readCount = from?.readCount ?: 0,
+                    status = from?.status.orEmpty()))
+                saveYou(work.id, patch, "The date you finished")
+            }
+            finishedMarked = false
+            finishedFrom = null
+        }
+        lastActionKey = "list:more"
+        toggleRead(work)
+    }
+
+    /** Marks the book read on this device, or unread again: the hub has no route for it. */
+    private fun markReadHere(work: ReadingWork, read: Boolean): com.pocketds.hub.reader.ReadingCompletionState {
+        val context = requireNotNull(host).viewContext
+        val changed = ReadingCompletionRepository.update(context) { current ->
+            if (read) completionSession.markRead(current, work.id) else completionSession.unmark(current, work.id)
+        }
+        ReadingListsRepository.update(context) { state ->
+            state.recordProgress(work.id, changed.project(requireNotNull(lastWork)).progress?.percentage ?: 0.0)
+        }
+        return changed
+    }
+
+    private fun toggleRead(work: ReadingWork) {
+        val changed = markReadHere(work, read = work.progress?.completed != true)
+        render(requireNotNull(lastWork))
+        host?.notify(when {
+            changed.isRead(work.id) -> "Marked as read"
+            changed.shouldStartAtBeginning(work.id) -> "Marked unread · next read starts at the beginning"
+            else -> "Previous reading position restored"
+        })
+    }
+
+    /** Want to read on or off; whether it is on now. */
+    private fun toggleWant(work: ReadingWork): Boolean {
+        val next = ReadingListsRepository.update(requireNotNull(host).viewContext) { state ->
+            if (state.wantToRead.any { it.workId == work.id }) state.remove(ReadingListsState.WANT_TO_READ, work.id)
+            else state.add(ReadingListsState.WANT_TO_READ, ReadingListEntry.from(work))
+        }
+        val selected = next.wantToRead.any { it.workId == work.id }
+        host?.notify(if (selected) "Added to Want to Read" else "Removed from Want to Read")
+        return selected
     }
 
     /** Want to Read's mark: dark on the toggle's white face while on, white on glass while off. */
