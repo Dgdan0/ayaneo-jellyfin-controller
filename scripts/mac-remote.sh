@@ -113,6 +113,8 @@ run() {
   # HUB_BOOK=rw_demo_rr6/rr6 the ebook reader, with -demo only (HUB_BOOK_CHROME=pinned,
   # HUB_BOOK_AT=<percent>, HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys, HUB_BOOK_SCROLL=1|0,
   # HUB_BOOK_READALONG=1 to read along).
+  # HUB_TITLE=<item id>[|subtitles|removal] opens a library title and on to its subtitles or deletion
+  # page, HUB_SUBTITLES=search searches and opens the first result, HUB_REMOVAL=confirm asks the alert.
   # SHOT_SIMS names the simulators to use, comma-separated (all three by
   # default), SHOT_STATE names the screenshots and SHOT_TIMES takes several,
   # that many seconds after launch. `turn landscape` turns the simulators, and
@@ -134,6 +136,8 @@ run() {
     HUB_WIDTH=$(printf '%q' "${HUB_WIDTH:-}") \
     HUB_SEEN_DWELL_MS=$(printf '%q' "${HUB_SEEN_DWELL_MS:-}") \
     HUB_HERO=$(printf '%q' "${HUB_HERO:-}") \
+    HUB_TITLE=$(printf '%q' "${HUB_TITLE:-}") HUB_SUBTITLES=$(printf '%q' "${HUB_SUBTITLES:-}") \
+    HUB_REMOVAL=$(printf '%q' "${HUB_REMOVAL:-}") \
     SHOT_SIMS=$(printf '%q' "${SHOT_SIMS:-}") SHOT_WAIT=$(printf '%q' "${SHOT_WAIT:-3}") \
     SHOT_STATE=$(printf '%q' "${SHOT_STATE:-}") SHOT_TIMES=$(printf '%q' "${SHOT_TIMES:-}") \
     ${BUILD_NUMBER:+BUILD_NUMBER=$(printf '%q' "$BUILD_NUMBER")} \

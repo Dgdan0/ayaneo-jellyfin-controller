@@ -15,7 +15,7 @@ struct ReleaseTargetsView: View {
     @State private var loads = 0
 
     private var chosen: Int {
-        season ?? (route.seasons.first { $0.number > 0 } ?? route.seasons.first)?.number ?? 1
+        season ?? route.startSeason ?? (route.seasons.first { $0.number > 0 } ?? route.seasons.first)?.number ?? 1
     }
 
     private var seasonTitle: String {

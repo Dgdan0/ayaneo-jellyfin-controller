@@ -57,6 +57,43 @@ enum DemoLibrary {
 
     private static let states = Mutex<[String: UserState]>([:])
 
+    /// What has been deleted from the server in this run (#34): a title the
+    /// hub's confirmed removal took. Nothing real is deleted.
+    private static let removed = Mutex<Set<String>>([])
+
+    /// The titles still on the demo server.
+    static var available: [Title] {
+        let gone = removed.withLock { $0 }
+        return titles.filter { !gone.contains($0.id) }
+    }
+
+    /// Deletes a title, as a confirmed removal would.
+    static func remove(_ id: String) { removed.withLock { _ = $0.insert(id) } }
+
+    /// The titles back, for a test that deleted one.
+    static func restoreRemoved() { removed.withLock { $0 = [] } }
+
+    /// What an id names, as the hub's removal plan sees it: a film or a series
+    /// by its own id, its season ("-s1") or an episode ("-e2"), with the files
+    /// that would go.
+    static func plan(for id: String) -> (type: String, title: String, files: [String])? {
+        let base = String(id.prefix(32))
+        guard let found = title(base) else { return nil }
+        let suffix = id.dropFirst(32)
+        func episodeFile(_ number: Int) -> String {
+            "\(found.title) · S01E0\(number) · \(episodeNames[number - 1]).mkv"
+        }
+        switch (found.type, suffix) {
+        case ("movie", ""): return ("movie", found.title, ["\(found.title) (\(found.year)).mkv"])
+        case ("series", ""): return ("series", found.title, (1...3).map(episodeFile))
+        case ("series", "-s1"): return ("season", "\(found.title) · Season 1", (1...3).map(episodeFile))
+        case ("series", _) where suffix.hasPrefix("-e"):
+            guard let number = Int(suffix.dropFirst(2)), (1...3).contains(number) else { return nil }
+            return ("episode", episodeNames[number - 1], [episodeFile(number)])
+        default: return nil
+        }
+    }
+
     private static let episodeNames = ["The Beginning", "A Second Look", "Third Time Lucky"]
 
     static func answer(method: String, path: String, query: String, body: Data?) -> DemoTransport.Answer? {
@@ -70,22 +107,22 @@ enum DemoLibrary {
                 return failure(400, "invalid_request", "viewId must be a library's 32-character id")
             }
             let words = value("q", in: query).lowercased()
-            let found = titles.filter { (viewId.isEmpty || $0.folder == viewId) && $0.title.lowercased().contains(words) }
+            let found = available.filter { (viewId.isEmpty || $0.folder == viewId) && $0.title.lowercased().contains(words) }
             return page(title: "Search", found)
         case ("GET", 3, "favorites"):
-            let starred = states.withLock { all in titles.filter { all[$0.id]?.favorite == true } }
+            let starred = states.withLock { all in available.filter { all[$0.id]?.favorite == true } }
             return page(title: "Favourites", starred)
         case ("GET", 4, _) where parts[3] == "items":
             guard let folder = DemoMedia.folders.first(where: { $0.id == parts[2] }) else {
                 return failure(404, "not_found", "No such library")
             }
-            return page(title: folder.name, titles.filter { $0.folder == folder.id })
+            return page(title: folder.name, available.filter { $0.folder == folder.id })
         case ("GET", 4, "items"):
             guard let title = title(parts[3]) else { return episode(parts[3]) }
             return item(title)
         case ("GET", 5, "items") where parts[4] == "similar":
             guard let title = title(parts[3]) else { return failure(404, "not_found", "No such title") }
-            return page(title: "More like this", titles.filter { $0.folder == title.folder && $0.id != title.id })
+            return page(title: "More like this", available.filter { $0.folder == title.folder && $0.id != title.id })
         case ("POST", 5, "items") where parts[4] == "state":
             return change(parts[3], body: body)
         case ("GET", 5, "series") where parts[4] == "seasons":
@@ -110,7 +147,7 @@ enum DemoLibrary {
     /// new and the favourites, for the profile. An empty row is never sent, as
     /// the hub's.
     static func home() -> DemoTransport.Answer {
-        func tile(_ index: Int) -> Title { titles.first { $0.id == id(index) }! }
+        func tile(_ index: Int) -> Title? { available.first { $0.id == id(index) } }
         func partway(_ title: Title, _ progress: Double) -> [String: Any] {
             var card = hit(title)
             card["progress"] = progress
@@ -122,11 +159,13 @@ enum DemoLibrary {
             return ["media": media, "subtitle": "S1E\(number) · \(episodeNames[number - 1])", "availability": "available",
                     "jellyfinItemId": episode["id"] ?? "", "actions": ["play", "detail"]]
         }
-        let starred = states.withLock { all in titles.filter { all[$0.id]?.favorite == true } }
+        let starred = states.withLock { all in available.filter { all[$0.id]?.favorite == true } }
         let rows: [[String: Any]] = [
-            ["id": "continue", "title": "Continue watching", "items": [partway(tile(11), 0.42), partway(tile(13), 0.12)]],
-            ["id": "nextup", "title": "Next up", "items": [next(tile(17), number: 2), next(tile(19), number: 3)]],
-            ["id": "latest", "title": "Recently added", "items": [tile(13), tile(14), tile(6), tile(18)].map(hit)],
+            ["id": "continue", "title": "Continue watching",
+             "items": [tile(11).map { partway($0, 0.42) }, tile(13).map { partway($0, 0.12) }].compactMap { $0 }],
+            ["id": "nextup", "title": "Next up",
+             "items": [tile(17).map { next($0, number: 2) }, tile(19).map { next($0, number: 3) }].compactMap { $0 }],
+            ["id": "latest", "title": "Recently added", "items": [tile(13), tile(14), tile(6), tile(18)].compactMap { $0 }.map(hit)],
             ["id": "favourites", "title": "Favourites", "items": starred.map(hit)],
         ].filter { !(($0["items"] as? [Any]) ?? []).isEmpty }
         return json(["rows": rows, "partial": [Any](), "cache": ["hit": false, "ageSeconds": 0, "stale": false]])
@@ -134,7 +173,7 @@ enum DemoLibrary {
 
     // MARK: Answers
 
-    private static func title(_ id: String) -> Title? { titles.first { $0.id == id } }
+    private static func title(_ id: String) -> Title? { available.first { $0.id == id } }
 
     private static func state(_ id: String) -> UserState { states.withLock { $0[id] ?? UserState() } }
 
@@ -159,6 +198,8 @@ enum DemoLibrary {
                 "runtimeSeconds": title.minutes * 60, "rating": 8.1, "officialRating": "PG-13", "genres": title.genres,
                 "played": now.played, "favorite": now.favorite,
                 "unplayedCount": title.type == "series" && !now.played ? 3 : 0,
+                // A series the hub can name on TMDB has the key its release search is asked by (#34).
+                "mediaKey": title.type == "series" ? "tmdb:series:\(100_000 + (Int(title.id.suffix(4), radix: 16) ?? 0))" : "",
                 // One the hub names on TMDB (#27), whose portrait opens the
                 // filmography the demo hub answers, and one it cannot name.
                 "people": [["id": "demo-person-1", "name": "Rebecca Ferguson", "role": "Lead", "type": "Actor",

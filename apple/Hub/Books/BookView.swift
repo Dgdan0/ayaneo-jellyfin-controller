@@ -308,6 +308,14 @@ struct BookView: View {
                     listName = ""
                     naming = true
                 }
+                // Last, and in its own words: a preview and a confirmation follow (#34).
+                Divider()
+                Button(role: .destructive) {
+                    openRoute(.removal(RemovalRoute(kind: "reading", id: work.id, title: work.title)))
+                } label: {
+                    Label(RemovalLines.heading, systemImage: "trash")
+                }
+                .accessibilityIdentifier("book-delete")
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 18, weight: .bold))

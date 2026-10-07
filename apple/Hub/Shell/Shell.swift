@@ -58,6 +58,9 @@ enum AppRoute: Hashable {
     case speedLimits
     /// Settings › Fonts and licences (#38).
     case licence(LicenceRoute)
+    // Library upkeep (#34).
+    case subtitles(SubtitlesRoute)
+    case removal(RemovalRoute)
 
     /// What the back pill calls this page from the one above it.
     var name: String {
@@ -79,6 +82,8 @@ enum AppRoute: Hashable {
         case .transfers: "Transfers"
         case .speedLimits: "Speed limits"
         case .licence(let route): Licences.all.first { $0.id == route.id }?.name ?? "Licence"
+        case .subtitles: "Subtitles"
+        case .removal: RemovalLines.heading
         }
     }
 }
@@ -105,6 +110,9 @@ struct OpenRouteAction {
     /// Swaps the page on top for `route` without a push, so Back still goes
     /// where it went: another library chosen from a library's own capsule.
     var replace: @MainActor (AppRoute) -> Void = { _ in }
+    /// Takes the top `count` pages off the stack: a page that finished its
+    /// work and the one that led to it (a deleted title's two).
+    var pop: @MainActor (Int) -> Void = { _ in }
 
     @MainActor func callAsFunction(_ route: AppRoute) { push(route) }
 }
@@ -242,6 +250,8 @@ struct MainView: View {
     @State private var debugSheet = false
     /// Debug builds: HUB_PLAY=<item id> opens the player at launch.
     @State private var debugPlay = ""
+    /// Debug builds: HUB_TITLE=<item id>[|subtitles|removal] opens that library title, and on from it, on the first section's stack (#34).
+    @State private var debugTitle = ""
 
     private var key: StackKey { StackKey(side: side, section: section) }
     /// Something over the pages and bars: the player or a reader.
@@ -333,6 +343,23 @@ struct MainView: View {
                 guard !Task.isCancelled, debugPlay == itemId else { return }
                 debugPlay = ""
                 player.open(PlayRequest(itemId: itemId), app: model)
+            }
+            .task(id: debugTitle) {
+                let itemId = debugTitle
+                guard !itemId.isEmpty else { return }
+                // Once the section has settled under it.
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled, debugTitle == itemId else { return }
+                debugTitle = ""
+                // "<id>|subtitles" or "<id>|removal" goes on to that page.
+                let parts = itemId.split(separator: "|", maxSplits: 1).map(String.init)
+                var pages: [AppRoute] = [.title(TitleRoute(itemId: parts[0], title: "Title"))]
+                switch parts.count > 1 ? parts[1] : "" {
+                case "subtitles": pages.append(.subtitles(SubtitlesRoute(itemId: parts[0], title: "Bleach · S1E2 · A Second Look")))
+                case "removal": pages.append(.removal(RemovalRoute(kind: "video", id: parts[0], title: "Bleach")))
+                default: break
+                }
+                paths[key, default: []].append(contentsOf: pages)
             }
             .task(id: debugSheet) {
                 guard debugSheet else { return }
@@ -436,6 +463,11 @@ struct MainView: View {
                 var swap = Transaction()
                 swap.disablesAnimations = true
                 withTransaction(swap) { paths[stackKey] = path }
+            },
+            pop: { count in
+                guard var path = paths[stackKey], !path.isEmpty else { return }
+                path.removeLast(min(max(count, 0), path.count))
+                paths[stackKey] = path
             }))
     }
 
@@ -475,6 +507,8 @@ struct MainView: View {
         case .transfers(let transfers): TransfersView(route: transfers)
         case .speedLimits: SpeedLimitsView()
         case .licence(let licence): LicenceView(route: licence)
+        case .subtitles(let subtitles): SubtitlesView(route: subtitles)
+        case .removal(let removal): RemovalView(route: removal)
         }
     }
 
@@ -574,13 +608,14 @@ struct MainView: View {
 
     #if DEBUG
     /// scripts/mac.sh opens a chosen place for screenshots: HUB_SECTION=library,
-    /// HUB_SIDE=books, HUB_SHEET=profiles, HUB_PLAY=<item id>. (HUB_OPEN is Home's.)
+    /// HUB_SIDE=books, HUB_SHEET=profiles, HUB_PLAY=<item id>, HUB_TITLE=<item id>. (HUB_OPEN is Home's.)
     private func applyDebugLaunch() {
         let environment = ProcessInfo.processInfo.environment
         if let name = environment["HUB_SECTION"], let chosen = AppSection(rawValue: name) { section = chosen }
         if let name = environment["HUB_SIDE"], let chosen = AppSide(rawValue: name) { side = chosen }
         if environment["HUB_SHEET"] == "profiles" { debugSheet = true }
         if let itemId = environment["HUB_PLAY"], !itemId.isEmpty { debugPlay = itemId }
+        if let itemId = environment["HUB_TITLE"], !itemId.isEmpty { debugTitle = itemId }
     }
     #endif
 }
