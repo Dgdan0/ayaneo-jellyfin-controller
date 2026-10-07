@@ -112,19 +112,44 @@ final class ListeningModel {
     /// screen asks which to keep.
     private(set) var conflicted = false
 
+    /// What the contents sheet lists and the steps go through: the book's
+    /// chapters across the tracks, the marks inside them, else the tracks.
+    /// Worked out once a book is on the player.
+    private(set) var contents: [AudiobookContents.Entry] = []
+
     var partsMs: [Int64?] { book?.parts.map(\.durationMs) ?? [] }
-    var partLeftMs: Int64 { Listening.partLeft(positionMs: positionMs, partMs: partMs, speed: speed) }
     var bookLeftMs: Int64? { Listening.bookLeft(part: part, positionMs: positionMs, partsMs: partsMs, speed: speed) }
-    /// What the Parts sheet lists: the chapters inside the tracks, else the tracks.
-    var contents: [AudiobookContents.Entry] {
-        book.map { AudiobookContents.entries($0.parts, partsMs: partsMs, chapters: $0.manifest.chapters) } ?? []
+    /// What the line, its times, the time left and the lock screen measure
+    /// (#31): the chapter playing, across tracks when it is the book's own;
+    /// else the part.
+    var span: AudiobookContents.Span {
+        AudiobookContents.span(contents, part: part, positionMs: positionMs, partMs: partMs, partsMs: partsMs)
+    }
+    /// Left of the chapter (or part) playing, as heard.
+    var spanLeftMs: Int64 { Listening.heard(span.leftMs, speed: speed) }
+    /// "chapter" where the book has chapters (#31), else "part".
+    var noun: String { AudiobookContents.noun(contents) }
+    /// The chapter playing, for the mini player and the lock screen; nil for a book of parts.
+    var chapter: String? {
+        let title = span.title
+        return noun == "chapter" && !title.isEmpty ? title : nil
+    }
+    /// The tracks' lengths, the part playing by the player's own.
+    private var lengths: [Int64?] {
+        var known = partsMs
+        if partMs > 0 && known.indices.contains(part) { known[part] = partMs }
+        return known
     }
 
     /// Pauses whatever else plays (the video) when the book starts: set by the shell.
     @ObservationIgnored var onStart: (() -> Void)?
+    /// A place was kept for a book (its work): a mark of read or unread is forgotten (#37).
+    @ObservationIgnored var onKept: ((String) -> Void)?
 
     @ObservationIgnored private let player = AVQueuePlayer()
     @ObservationIgnored private let store = ListeningStore.shared
+    /// The tracks kept on this device, and the one fetching them (#37).
+    @ObservationIgnored private let tracks = ListeningTracks.shared
     @ObservationIgnored private var indexes: [ObjectIdentifier: Int] = [:]
     @ObservationIgnored private var hub: HubClient?
     @ObservationIgnored private var address = ""
@@ -245,6 +270,7 @@ final class ListeningModel {
         }
         if book != nil { stop() }
         book = opening.book
+        contents = Self.contents(of: opening.book)
         problem = ""
         conflicted = false
         reloads = 0
@@ -261,29 +287,11 @@ final class ListeningModel {
     /// The parts with their addresses: the hub's tracks, or in the demo
     /// generated tones written on this device.
     private func partsFor(_ manifest: ReadingAudioManifest, workId: String, sourceItemId: String) async -> [AudiobookPart] {
-        if demo {
-            let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("demo-audio", isDirectory: true)
-            let tracks = manifest.tracks
-            let files = await Task.detached(priority: .utility) { () -> [Int: String] in
-                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                var urls: [Int: String] = [:]
-                for track in tracks {
-                    let file = folder.appendingPathComponent("\(sourceItemId)-\(track.index).wav")
-                    if !FileManager.default.fileExists(atPath: file.path) {
-                        let tone = 220 + 55 * Double(track.index % 4)
-                        try? DemoAudio.wav(milliseconds: track.durationMs, frequency: tone).write(to: file)
-                    }
-                    urls[track.index] = file.absoluteString
-                }
-                return urls
-            }.value
-            return AudiobookStream.parts(manifest, sourceItemId: sourceItemId) { files[$0] ?? "" }
-        }
+        let tones = demo ? await ListeningAudio.demoFiles(manifest, sourceItemId: sourceItemId) : nil
         let base = address
         return AudiobookStream.parts(manifest, sourceItemId: sourceItemId) { index in
-            base + HubEndpoints.readingAudioTrack(workId: workId, sourceItemId: sourceItemId, index: index,
-                                                  revision: manifest.revision)
+            ListeningAudio.trackAddress(index, manifest: manifest, workId: workId, sourceItemId: sourceItemId,
+                                        address: base, demo: tones)
         }
     }
 
@@ -331,6 +339,15 @@ final class ListeningModel {
         seek(part: target.part, offsetMs: target.offsetMs)
     }
 
+    /// To `ms` into the chapter (or part) playing: the line under the player
+    /// and the lock screen's.
+    func seek(inSpan ms: Int64) {
+        guard book != nil else { return }
+        touched()
+        let target = AudiobookContents.place(span, at: ms, partsMs: lengths)
+        seek(part: target.part, offsetMs: target.offsetMs)
+    }
+
     func seek(part target: Int, offsetMs: Int64) {
         guard let book, book.parts.indices.contains(target) else { return }
         if target == part, player.currentItem != nil {
@@ -343,11 +360,12 @@ final class ListeningModel {
         updateNowPlaying()
     }
 
-    /// The entry before (from its own start once three seconds in) or the
-    /// next: a chapter where the hub found chapters inside the tracks, else a part.
+    /// The entry before (from its own start once three seconds in, counted
+    /// across tracks) or the next: a chapter where the hub found chapters, else a part.
     func step(_ delta: Int) {
         touched()
-        guard let entry = AudiobookContents.step(contents, part: part, positionMs: positionMs, delta: delta) else { return }
+        guard let entry = AudiobookContents.step(contents, part: part, positionMs: positionMs, delta: delta,
+                                                 partsMs: lengths) else { return }
         seek(part: entry.part, offsetMs: entry.startMs)
     }
 
@@ -361,21 +379,36 @@ final class ListeningModel {
         updateNowPlaying()
     }
 
-    /// Sets the sleep timer, or nil to cancel it.
+    /// Sets the sleep timer, or nil to cancel it. The end of the part is the
+    /// end of the chapter where the book has chapters (#31), which it counts
+    /// to by its place in the contents.
     func setSleep(_ choice: SleepChoice?) {
         player.volume = 1
         lastTick = .now
-        sleep = choice.map { SleepTimer.start($0, partLeftHeardMs: partLeftMs) }
-        player.actionAtItemEnd = sleep?.endsWithPart == true ? .pause : .advance
+        let now = span
+        sleep = choice.map { SleepTimer.start($0, entryLeftHeardMs: Listening.heard(now.leftMs, speed: speed), entry: now.entry) }
+        player.actionAtItemEnd = itemEndAction()
     }
 
-    /// Any control while the sleep timer fades keeps you listening.
+    /// Any control while the sleep timer fades keeps you listening: to the
+    /// end of the next chapter (or part) when it was counting to this one's.
     func touched() {
         guard let timer = sleep, timer.fading else { return }
-        let next = partsMs.indices.contains(part + 1) ? partsMs[part + 1].map { Listening.heard($0, speed: speed) } : nil
+        let now = span
+        let next = contents.indices.contains(now.entry + 1)
+            ? contents[now.entry + 1].durationMs.map { Listening.heard($0, speed: speed) } : nil
         player.volume = 1
-        sleep = timer.extended(partLeftHeardMs: partLeftMs, nextPartHeardMs: next)
-        player.actionAtItemEnd = sleep?.endsWithPart == true ? .pause : .advance
+        sleep = timer.extended(entryLeftHeardMs: Listening.heard(now.leftMs, speed: speed), nextEntryHeardMs: next)
+        player.actionAtItemEnd = itemEndAction()
+    }
+
+    /// What the queue does at a track's end: it stops there only for a sleep
+    /// timer counting to the end of an entry that ends with the track. A
+    /// chapter that runs on into the next track plays on through the change (#31).
+    private func itemEndAction() -> AVPlayer.ActionAtItemEnd {
+        guard let timer = sleep, timer.endsWithPart else { return .advance }
+        let length = partMs > 0 ? partMs : (partsMs.indices.contains(part) ? partsMs[part] ?? 0 : 0)
+        return AudiobookContents.endsWithPart(contents, part: part, lengthMs: length) ? .pause : .advance
     }
 
     /// Takes the book off the player, its place kept.
@@ -386,11 +419,13 @@ final class ListeningModel {
         poll = nil
         player.pause()
         player.removeAllItems()
+        tracks.stop()
         indexes = [:]
         pendingStart = nil
         startedItem = nil
         failedItem = nil
         book = nil
+        contents = []
         playing = false
         sleep = nil
         problem = ""
@@ -427,14 +462,46 @@ final class ListeningModel {
     // MARK: The player
 
     private func item(_ index: Int) -> AVPlayerItem? {
-        guard let book, book.parts.indices.contains(index), let url = URL(string: book.parts[index].url) else { return nil }
-        let asset = url.isFileURL ? AVURLAsset(url: url)
-            // The hub takes the token only in its header, never in an address.
-            : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer " + token]])
-        let item = AVPlayerItem(asset: asset)
-        item.audioTimePitchAlgorithm = .timeDomain
+        guard let book, book.parts.indices.contains(index) else { return nil }
+        // A track kept on this device plays from there (#37), else from the hub.
+        let kept = track(index).flatMap { tracks.kept($0, in: trackCache) }
+        guard let url = kept ?? URL(string: book.parts[index].url) else { return nil }
+        let item = ListeningAudio.item(url, token: token)
         indexes[ObjectIdentifier(item)] = index
         return item
+    }
+
+    // MARK: Tracks kept on the device (#37)
+
+    private var trackCache: AudioTrackCache { ListeningTracks.cache(address: address) }
+
+    private func track(_ index: Int) -> ListeningTracks.Track? {
+        guard let book else { return nil }
+        return ListeningTracks.track(index, manifest: book.manifest, parts: book.parts, workId: book.workId,
+                                     sourceItemId: book.sourceItemId)
+    }
+
+    /// The part playing kept on the device, then the next fetched ahead: one
+    /// at a time, once the part has started, so the stream comes first.
+    private func keepAhead() {
+        guard let hub else { return }
+        let wanted = [part, part + 1].compactMap { track($0) }
+        let playing = (player.currentItem?.asset as? AVURLAsset)?.url
+        tracks.keep(wanted, hub: hub, cache: trackCache, playing: playing?.isFileURL == true ? playing : nil) { [weak self] kept in
+            self?.trackKept(kept)
+        }
+    }
+
+    /// A track came to be kept: the part queued next from the hub is queued
+    /// from the device instead, so the change of part plays at once.
+    private func trackKept(_ kept: ListeningTracks.Track) {
+        let items = player.items()
+        guard items.count > 1, let current = player.currentItem, items[0] === current,
+              let index = indexes[ObjectIdentifier(items[1])], track(index) == kept,
+              (items[1].asset as? AVURLAsset)?.url.isFileURL == false, let local = item(index) else { return }
+        indexes[ObjectIdentifier(items[1])] = nil
+        player.remove(items[1])
+        player.insert(local, after: current)
     }
 
     private func load(part target: Int, offsetMs: Int64, play: Bool) {
@@ -451,7 +518,7 @@ final class ListeningModel {
         partMs = book?.parts[target].durationMs ?? 0
         player.defaultRate = speed
         player.volume = sleep?.volume ?? 1
-        player.actionAtItemEnd = sleep?.endsWithPart == true ? .pause : .advance
+        player.actionAtItemEnd = itemEndAction()
         pendingStart = (positionMs, play)
         playing = play
     }
@@ -501,15 +568,18 @@ final class ListeningModel {
         let elapsedMs = elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000
         lastTick = now
         if var timer = sleep, playing {
-            timer = timer.tick(elapsedMs: elapsedMs, partLeftHeardMs: partLeftMs)
+            // The end of the chapter, across tracks, or of the part; which one it is tells the timer when it ended.
+            let now = span
+            timer = timer.tick(elapsedMs: elapsedMs, entryLeftHeardMs: Listening.heard(now.leftMs, speed: speed), entry: now.entry)
             if timer.runsOut {
-                // Asleep: pause, then back over what faded so it is heard again.
+                // Asleep: pause, then back over what faded so it is heard again, into the track before if need be.
                 sleep = nil
                 player.pause()
                 playing = false
                 player.volume = 1
                 player.actionAtItemEnd = .advance
-                seek(part: part, offsetMs: SmartRewind.afterSleep(positionMs))
+                let back = SmartRewind.afterSleep(part: part, positionMs: positionMs, partsMs: lengths)
+                seek(part: back.part, offsetMs: back.offsetMs)
             } else {
                 player.volume = timer.volume
                 sleep = timer
@@ -522,6 +592,7 @@ final class ListeningModel {
     /// The first item can play: to its start, then playing if asked.
     private func itemReady(_ item: AVPlayerItem) {
         reloads = 0
+        keepAhead()
         guard let start = pendingStart, indexes[ObjectIdentifier(item)] == part else { return }
         pendingStart = nil
         let play = start.play
@@ -573,15 +644,18 @@ final class ListeningModel {
                 return
             }
             let parts = await partsFor(manifest, workId: book.workId, sourceItemId: book.sourceItemId)
-            self.book = Book(workId: book.workId, sourceItemId: book.sourceItemId, title: book.title, author: book.author,
-                             artwork: book.artwork, manifest: manifest, parts: parts, key: book.key)
+            let reread = Book(workId: book.workId, sourceItemId: book.sourceItemId, title: book.title, author: book.author,
+                              artwork: book.artwork, manifest: manifest, parts: parts, key: book.key)
+            self.book = reread
+            contents = Self.contents(of: reread)
             let start = place?.openAt(manifest.tracks) ?? (part: part, offsetMs: positionMs)
             load(part: start.part, offsetMs: start.offsetMs, play: wasPlaying)
         }
     }
 
-    /// The queue moved on to the next part: the one after is queued, the
-    /// sleep timer counts to the new part's end, and the place is kept.
+    /// The queue moved on to the next part: the one after is queued and the
+    /// place is kept. A sleep timer carried past an end counts to the next
+    /// one when its entry begins, which its tick sees.
     private func partChanged(to index: Int) {
         part = index
         positionMs = 0
@@ -590,23 +664,25 @@ final class ListeningModel {
            let next = item(index + 1) {
             player.insert(next, after: last)
         }
-        sleep = sleep?.partChanged(partLeftHeardMs: Listening.heard(partMs, speed: speed))
-        player.actionAtItemEnd = sleep?.endsWithPart == true ? .pause : .advance
+        player.actionAtItemEnd = itemEndAction()
         save()
         updateNowPlaying()
+        keepAhead()
     }
 
-    /// A part played to its end: under an end-of-part timer, stop and step
-    /// back over what faded; the last part, the book is finished.
+    /// A part played to its end: under an end-of-part timer whose entry ends
+    /// with it, stop and step back over what faded; the last part, the book
+    /// is finished.
     private func itemEnded(_ ended: ObjectIdentifier?) {
         guard let ended, let index = indexes[ended], let book else { return }
-        if let timer = sleep, timer.endsWithPart {
+        let length = book.parts[index].durationMs ?? partMs
+        if let timer = sleep, timer.endsWithPart, AudiobookContents.endsWithPart(contents, part: index, lengthMs: length) {
             sleep = nil
             playing = false
             player.volume = 1
             player.actionAtItemEnd = .advance
-            let length = book.parts[index].durationMs ?? partMs
-            seek(part: index, offsetMs: SmartRewind.afterSleep(length))
+            let back = SmartRewind.afterSleep(part: index, positionMs: length, partsMs: partsMs)
+            seek(part: back.part, offsetMs: back.offsetMs)
             return
         }
         if index == book.parts.count - 1 {
@@ -636,6 +712,7 @@ final class ListeningModel {
         lastSave = .now
         guard let kept = AudioPlace.kept(book.manifest.tracks, part: part, offsetMs: positionMs, completed: completed),
               (try? store.save(book.key, kept, now: Self.nowMillis())) != nil else { return }
+        onKept?(book.workId)
         scheduleSync()
     }
 
@@ -734,26 +811,35 @@ final class ListeningModel {
         }
     }
 
-    /// Now Playing: the book, its author, the part, the cover, and where in the part.
+    /// Now Playing: the book, its author, the chapter (or part), the cover,
+    /// and where in the chapter, across tracks when it is the book's own (#31).
     private func updateNowPlaying(position: Bool = false) {
         guard let book else { return }
+        let span = self.span
         if position {
-            // Four times a second only the moment changes.
-            NowPlaying.shared.publishPosition(.audiobook, elapsedSeconds: Double(positionMs) / 1_000,
-                                              rate: playing ? Double(speed) : 0)
-            return
+            // Behind the video, nothing of the book's moves on the lock screen.
+            guard let info = NowPlaying.shared.info(.audiobook) else { return }
+            if (info[MPNowPlayingInfoPropertyChapterNumber] as? Int) == (span.entry >= 0 ? span.entry : part) {
+                // Four times a second only the moment changes, while the chapter is the same.
+                NowPlaying.shared.publishPosition(.audiobook, elapsedSeconds: Double(span.positionMs) / 1_000,
+                                                  rate: playing ? Double(speed) : 0,
+                                                  durationSeconds: Double(span.durationMs) / 1_000)
+                return
+            }
         }
+        // The chapter playing under the book's title, where the lock screen shows it (#31); else the author and the part.
+        let partLabel = book.parts.indices.contains(part) ? AudiobookStream.partLabel(book.parts[part].title) : ""
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: book.title,
-            MPMediaItemPropertyArtist: book.author,
-            MPMediaItemPropertyAlbumTitle: book.parts.indices.contains(part) ? AudiobookStream.partLabel(book.parts[part].title) : "",
-            MPMediaItemPropertyPlaybackDuration: Double(partMs) / 1_000,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: Double(positionMs) / 1_000,
+            MPMediaItemPropertyArtist: chapter ?? book.author,
+            MPMediaItemPropertyAlbumTitle: chapter != nil ? book.author : partLabel,
+            MPMediaItemPropertyPlaybackDuration: Double(span.durationMs) / 1_000,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: Double(span.positionMs) / 1_000,
             MPNowPlayingInfoPropertyPlaybackRate: playing ? Double(speed) : 0,
             MPNowPlayingInfoPropertyDefaultPlaybackRate: Double(speed),
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
-            MPNowPlayingInfoPropertyChapterNumber: part,
-            MPNowPlayingInfoPropertyChapterCount: book.parts.count,
+            MPNowPlayingInfoPropertyChapterNumber: span.entry >= 0 ? span.entry : part,
+            MPNowPlayingInfoPropertyChapterCount: span.entry >= 0 ? contents.count : book.parts.count,
         ]
         if let nowPlayingArt { info[MPMediaItemPropertyArtwork] = nowPlayingArt }
         NowPlaying.shared.publish(.audiobook, info: info, playing: playing)
@@ -770,20 +856,13 @@ final class ListeningModel {
         }
     }
 
+    private func activateSession() { ListeningAudio.activateSession(for: .audiobook) }
 
+    private func deactivateSession() { ListeningAudio.deactivateSession(for: .audiobook) }
 
-    private func activateSession() {
-        #if os(iOS)
-        // Plays with the ring switch on silent, and goes on with the screen off.
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-        try? AVAudioSession.sharedInstance().setActive(true)
-        #endif
-    }
-
-    private func deactivateSession() {
-        #if os(iOS)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        #endif
+    /// A book's contents, by the manifest's lengths.
+    private static func contents(of book: Book) -> [AudiobookContents.Entry] {
+        AudiobookContents.entries(book.parts, partsMs: book.parts.map(\.durationMs), chapters: book.manifest.chapters)
     }
 
     // MARK: Clocks
@@ -803,7 +882,8 @@ extension ListeningModel: NowPlayingClient {
         case .toggle: toggle()
         case .skip(let forward): seek(by: (forward ? 1 : -1) * Int64(ListeningSettings.seekSeconds) * 1_000)
         case .step(let delta): step(delta)
-        case .seek(let millis): seek(part: part, offsetMs: millis)
+        // The lock screen's line is the chapter's, as the player's own is (#31).
+        case .seek(let millis): seek(inSpan: millis)
         }
     }
 

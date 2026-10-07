@@ -81,10 +81,14 @@ final class ComicReaderModel {
     }
 
     let hub: HubClient
-    let workId: String
+    /// The run the open issue belongs to; a reading list moves it from run to run.
+    private(set) var workId: String
     /// The run the issue belongs to, when the page that opened it had it:
     /// the names and covers of the issues either side, without asking again.
-    let work: ReadingWork?
+    private(set) var work: ReadingWork?
+    /// Kavita's reading list being read (#37): previous and next go along it,
+    /// across runs, instead of along the run.
+    @ObservationIgnored var list: ReadingListRun?
 
     private(set) var issue: ReadingSectionItem
     var phase: Phase = .opening
@@ -181,6 +185,18 @@ final class ComicReaderModel {
         ReaderPadState(.comic, controlsVisible: controlsVisible, loading: phase != .reading)
     }
 
+    /// Where the issues' page lists are kept for an outage, and whose (#37): set by the view.
+    @ObservationIgnored var manifests: ReadingManifestCache?
+    @ObservationIgnored var scope = ""
+    /// The issue was opened from the page list kept on this device: its pages
+    /// come from the device first.
+    @ObservationIgnored var offline = false
+
+    /// The run was marked unread (#37): the first issue opened starts at its first page.
+    @ObservationIgnored var startsFresh = false
+    /// A page was sent for a run (its work): a mark of read or unread is forgotten.
+    @ObservationIgnored var onKept: ((String) -> Void)?
+
     init(hub: HubClient, work: ReadingWork?, workId: String, publication: ReadingSectionItem) {
         self.hub = hub
         self.work = work
@@ -258,13 +274,24 @@ final class ComicReaderModel {
         }
         phase = .opening
         let request = HubEndpoints.readingPublication(workId: workId, sourceItemId: sourceItemId)
-        opening = Task { [weak self, hub] in
+        let key = ReadingCheckpointKey(scope: scope, workId: workId, sourceItemId: sourceItemId, kind: "pages")
+        opening = Task { [weak self, hub, manifests] in
             do throws(HubFailure) {
-                let manifest = try await hub.fetch(request, as: ReadingPublicationManifest.self)
+                let answer = try await hub.data(request)
+                guard let manifest = try? JSONDecoder().decode(ReadingPublicationManifest.self, from: answer) else {
+                    throw HubFailure(.badResponse)
+                }
                 guard !Task.isCancelled else { return }
+                // Kept to reopen the issue in an outage (#37).
+                try? manifests?.save(key, answer: answer)
+                self?.offline = false
                 self?.apply(manifest, atEnd: atEnd, moving: moving)
             } catch {
                 guard !Task.isCancelled, error.kind != .cancelled else { return }
+                if let self, self.openKept(key, failure: error, atEnd: atEnd, moving: moving) {
+                    self.opening = nil
+                    return
+                }
                 self?.failedOpen = FailedOpen(sourceItemId: sourceItemId, atEnd: atEnd, moving: moving)
                 self?.phase = .failed(error.message)
             }
@@ -272,7 +299,20 @@ final class ComicReaderModel {
         }
     }
 
-    private func apply(_ manifest: ReadingPublicationManifest, atEnd: Bool, moving: Bool) {
+    /// The hub could not be reached: the page list kept the last time the
+    /// issue opened, at the page this device kept, its pages from the device
+    /// (#37; Android's "Using cached pages"). A refusal is not an outage.
+    private func openKept(_ key: ReadingCheckpointKey, failure: HubFailure, atEnd: Bool, moving: Bool) -> Bool {
+        guard failure.kind.isRetryable || failure.kind == .unknown, let kept = manifests?.read(key) else { return false }
+        let place = ComicReaderSettings.place(workId: key.workId)
+        offline = true
+        apply(kept, atEnd: atEnd, moving: moving, at: place?.sourceItemId == key.sourceItemId ? place?.page : nil)
+        say("Using cached pages · reading progress is saved on this device")
+        return true
+    }
+
+    /// The issue laid out at its place: the hub's, or `at` (this device's, in an outage).
+    private func apply(_ manifest: ReadingPublicationManifest, atEnd: Bool, moving: Bool, at kept: Int? = nil) {
         guard manifest.pageCount > 0 else {
             failedOpen = FailedOpen(sourceItemId: manifest.sourceItemId, atEnd: atEnd, moving: moving)
             phase = .failed("This issue has no pages to read")
@@ -282,9 +322,12 @@ final class ComicReaderModel {
         outbox = ComicProgressOutbox(saved: manifest.currentPage)
         units = makeUnits(for: manifest)
         slots = Array(repeating: nil, count: units.slotCount)
-        let page = atEnd ? manifest.pageCount - 1 : manifest.startPage
+        let fresh = startsFresh && !atEnd
+        startsFresh = false
+        let page = atEnd ? manifest.pageCount - 1 : fresh ? 0 : kept.map { min(max($0, 0), manifest.pageCount - 1) } ?? manifest.startPage
         let unit = units.unit(containing: page)
         let step = atEnd ? Int.max
+            : fresh ? 0
             : ComicReaderSettings.place(workId: workId)?.stepFor(manifest.sourceItemId, page: units.units[unit].place,
                                                                    steps: steps(unit: unit)) ?? 0
         state = PagedImageState(pageCount: units.units.count, startPage: unit, stepsFor: stepsFor, startStep: step)
@@ -405,8 +448,17 @@ final class ComicReaderModel {
         loadUnit()
     }
 
+    /// Whether there is an issue that way: along the reading list when one
+    /// is read, else along the run.
+    func hasIssue(_ delta: Int) -> Bool {
+        if let list { return list.neighbour(delta) != nil }
+        guard let manifest else { return false }
+        return !(delta < 0 ? manifest.previousSourceItemId : manifest.nextSourceItemId).isEmpty
+    }
+
     /// The issue before or after, from the manifest, or why there is none.
     func movePublication(_ delta: Int) {
+        if list != nil { return moveAlongList(delta) }
         guard let manifest else { return }
         endCard = nil
         let target = delta < 0 ? manifest.previousSourceItemId : manifest.nextSourceItemId
@@ -415,6 +467,26 @@ final class ComicReaderModel {
         }
         flushPlace()
         open(target, atEnd: delta < 0, moving: true)
+    }
+
+    /// A reading list's issue before or after (#37; Android's `movePublication`
+    /// with a list): that issue in its own run, its series' way of reading
+    /// with it, the zoom coming along; else that the list ends there.
+    private func moveAlongList(_ delta: Int) {
+        guard let list else { return }
+        endCard = nil
+        guard let moved = list.moved(delta) else { return say(ReadingListRun.edge(forward: delta > 0)) }
+        flushPlace()
+        let entry = moved.current
+        self.list = moved
+        if entry.workId != workId {
+            workId = entry.workId
+            work = nil
+            view = ComicReaderSettings.view(workId: entry.workId)
+        }
+        issue = entry.publication
+        open(entry.sourceItemId, atEnd: delta < 0, moving: true)
+        say(moved.position)
     }
 
     // MARK: The end of an issue (#16, C6)
@@ -427,6 +499,15 @@ final class ComicReaderModel {
         flushPlace()
         let series = manifest.seriesTitle.isEmpty ? (work?.title ?? "") : manifest.seriesTitle
         let heading = EndOfIssue.heading(series: series, title: manifest.title, number: manifest.number)
+        if let list {
+            // In a reading list, what comes next is the list's next issue, whichever run it is in.
+            let next = list.neighbour(1)
+            endCard = EndCard(heading: heading, next: EndOfIssue.next(currentSeries: series, nextSeries: next?.seriesTitle,
+                                                                        nextTitle: next?.title ?? "", nextNumber: "",
+                                                                        readingList: true),
+                              canContinue: next != nil)
+            return
+        }
         guard !manifest.nextSourceItemId.isEmpty else {
             endCard = EndCard(heading: heading, next: EndOfIssue.next(currentSeries: series, nextSeries: nil, nextTitle: "",
                                                                         nextNumber: "", readingList: false),
@@ -773,6 +854,7 @@ final class ComicReaderModel {
         guard let manifest, let body = outbox.next() else { return }
         let request = HubEndpoints.saveReadingPublicationProgress(workId: workId, sourceItemId: manifest.sourceItemId, body)
         let publication = manifest.sourceItemId
+        let run = workId
         Task { [weak self, hub] in
             var ok = false
             var conflict = false
@@ -783,6 +865,7 @@ final class ComicReaderModel {
                 conflict = error.status == 409
             }
             guard let self, self.manifest?.sourceItemId == publication else { return }
+            if ok { self.onKept?(run) }
             self.outbox.answered(ok: ok, conflict: conflict)
             if conflict {
                 self.say("This issue was read on another device since, so your page here was not saved")

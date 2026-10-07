@@ -98,12 +98,16 @@ final class BookNavigator: NSObject {
     }
 
     /// The navigator over `loaded`, at `locator` (JSON) or the beginning,
-    /// drawn as `rendering` says.
-    func makeController(_ loaded: Loaded, at locator: String?, rendering: EpubRendering) throws -> UIViewController {
+    /// drawn as `rendering` says. Reading along, the sentence spoken glows
+    /// in `narration`'s colour (`ReadAlongHighlight`).
+    func makeController(_ loaded: Loaded, at locator: String?, rendering: EpubRendering,
+                        narration: UInt32? = nil) throws -> UIViewController {
         let initial = locator.flatMap { try? Locator(jsonString: $0) }
+        let templates = narration.map(ReadAlongHighlight.allTemplates) ?? HTMLDecorationTemplate.defaultTemplates()
         let navigator = try EPUBNavigatorViewController(
             publication: loaded.publication, initialLocation: initial,
-            config: EPUBNavigatorViewController.Configuration(preferences: Self.preferences(rendering)))
+            config: EPUBNavigatorViewController.Configuration(preferences: Self.preferences(rendering),
+                                                              decorationTemplates: templates))
         navigator.delegate = self
         publication = loaded.publication
         controller = navigator
@@ -129,6 +133,68 @@ final class BookNavigator: NSObject {
     func go(to json: String) async -> Bool {
         guard let controller, let locator = try? Locator(jsonString: json) else { return false }
         return await controller.go(to: locator, options: NavigatorGoOptions(animated: false))
+    }
+
+    // MARK: Read along
+
+    /// The sentence spoken glows, or nothing does.
+    func highlight(_ segment: ReadAlongSegment?) {
+        controller?.apply(decorations: ReadAlongHighlight.decorations(segment), in: ReadAlongHighlight.group)
+    }
+
+    /// A script's answer from the page on screen (`ReadAlongPageScript`), or nil.
+    func evaluate(_ script: String) async -> Any? {
+        guard let controller else { return nil }
+        let answer = await controller.evaluateJavaScript(script)
+        #if DEBUG
+        if case .failure(let error) = answer { NSLog("book: a script on the page failed: %@", String(describing: error)) }
+        #endif
+        return try? answer.get()
+    }
+
+    // MARK: Search (#37)
+
+    /// The first `limit` passages with `query` in them, in reading order, from
+    /// Readium's search of the publication's text (Android's `EpubBookSearch`),
+    /// or why there are none. A cancelled search stops between Readium's pages
+    /// of results. Readium names no chapter for a result: `chapters` does,
+    /// the contents' title of each part by its file.
+    func search(_ query: String, chapters: [String: String], limit: Int = BookSearch.limit)
+        async -> Result<[BookSearchHit], BookSearch.Problem> {
+        guard let publication, publication.isSearchable else { return .failure(.notSearchable) }
+        guard case .success(let iterator) = await publication.search(query: query) else { return .failure(.failed) }
+        defer { iterator.close() }
+        var hits: [BookSearchHit] = []
+        while hits.count < limit {
+            if Task.isCancelled { return .success(hits) }
+            switch await iterator.next() {
+            case .success(let page?):
+                for locator in page.locators.prefix(limit - hits.count) {
+                    guard let json = try? locator.jsonString() else { continue }
+                    let words = BookSearch.snippet(before: locator.text.before ?? "", match: locator.text.highlight ?? query,
+                                                   after: locator.text.after ?? "")
+                    let chapter = locator.title ?? chapters[BookSections.path(locator.href.string)]
+                    hits.append(BookSearchHit(id: hits.count, chapter: BookSearch.chapter(chapter), before: words.before,
+                                              match: words.match, after: words.after, locator: json))
+                }
+            case .success(nil):
+                return .success(hits)
+            case .failure:
+                return hits.isEmpty ? .failure(.failed) : .success(hits)
+            }
+        }
+        return .success(hits)
+    }
+
+    private static let searchGroup = "search"
+
+    /// The passage a search opened, marked on its page; nil takes the mark away.
+    func markFound(_ json: String?) {
+        guard let controller else { return }
+        let decorations = json.flatMap { try? Locator(jsonString: $0) }.map {
+            [Decoration(id: "found", locator: $0, style: .highlight(tint: UIColor(red: 1, green: 0.78, blue: 0.2, alpha: 1)))]
+        } ?? []
+        controller.apply(decorations: decorations, in: Self.searchGroup)
     }
 
     /// To the note whose card is open.

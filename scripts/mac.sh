@@ -12,7 +12,7 @@
 #                                   turn the simulators' Reduce transparency on or off
 #   scripts/mac.sh build-tests      compile the UI tests for the iOS Simulator, running none
 #   scripts/mac.sh uitest           the UI tests on the iPhone simulator, against -demo
-#                                   (UITEST_ONLY=<Class>[/<test>] runs one alone,
+#                                   (UITEST_ONLY=<Class>[/<test>][,…] runs those alone,
 #                                   UITEST_SIM=<simulator> runs them on another)
 #   scripts/mac.sh quit             end JellyHub on the simulators (SHOT_SIMS, or all three)
 #                                   and the Mac's Debug build, and nothing else
@@ -54,8 +54,12 @@
 # HUB_READ_CHROME=pinned, HUB_READ_PAGE=<n>, HUB_READ_SHEET=display|keys|pages|end,
 # HUB_BOOK=<work id>/<edition id> (the ebook reader, with -demo only: rw_demo_rr6/rr6),
 # HUB_BOOK_CHROME=pinned, HUB_BOOK_AT=<percent>, HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys,
-# HUB_BOOK_SCROLL=1|0 (continuous scrolling on or off, kept as Appearance keeps it) and,
-# with -demo, HUB_PLAY_FROM_END=<seconds>. SHOT_SIMS="iPad Pro (12.9-inch) (4th generation),iPhone 17 Pro Max"
+# HUB_BOOK_SCROLL=1|0 (continuous scrolling on or off, kept as Appearance keeps it), HUB_BOOK_READALONG=1
+# (read along: rw_demo_darkmatter/demo-dm) and,
+# with -demo, HUB_PLAY_FROM_END=<seconds>; HUB_TITLE=<item id>[|subtitles|removal] opens that library
+# title and on to its subtitles or deletion page ("000000000000000000000000deb00003-e2" with -demo),
+# HUB_SUBTITLES=search searches and opens the first result, and HUB_REMOVAL=confirm asks the alert.
+# SHOT_SIMS="iPad Pro (12.9-inch) (4th generation),iPhone 17 Pro Max"
 # limits sims and shot to those simulators, and HUB_WIDTH=375 lays the app out
 # in a window that wide, as an iPad's Split View would; SHOT_STATE names the screenshots
 # <state>-<device>[-landscape].png, and SHOT_TIMES="5 9 13" takes them that many
@@ -186,6 +190,10 @@ launch_sim() {
     SIMCTL_CHILD_HUB_READ_SHEET="${HUB_READ_SHEET:-}" SIMCTL_CHILD_HUB_BOOK="${HUB_BOOK:-}" \
     SIMCTL_CHILD_HUB_BOOK_CHROME="${HUB_BOOK_CHROME:-}" SIMCTL_CHILD_HUB_BOOK_AT="${HUB_BOOK_AT:-}" \
     SIMCTL_CHILD_HUB_BOOK_SHEET="${HUB_BOOK_SHEET:-}" SIMCTL_CHILD_HUB_BOOK_SCROLL="${HUB_BOOK_SCROLL:-}" \
+    SIMCTL_CHILD_HUB_SEEN_DWELL_MS="${HUB_SEEN_DWELL_MS:-}" \
+    SIMCTL_CHILD_HUB_HERO="${HUB_HERO:-}" SIMCTL_CHILD_HUB_TITLE="${HUB_TITLE:-}" \
+    SIMCTL_CHILD_HUB_SUBTITLES="${HUB_SUBTITLES:-}" SIMCTL_CHILD_HUB_REMOVAL="${HUB_REMOVAL:-}" \
+    SIMCTL_CHILD_HUB_BOOK_READALONG="${HUB_BOOK_READALONG:-}" \
     SIMCTL_CHILD_HUB_WIDTH="${HUB_WIDTH:-}" SIMCTL_CHILD_HUB_ORIENT="$(cat "$SHOTS/.turned-$udid" 2>/dev/null)" \
     xcrun simctl launch "$udid" "$BUNDLE_ID" $(launch_args "$@") >/dev/null
 }
@@ -264,9 +272,13 @@ uitest() {
   local udid
   udid="$(udid_of "${UITEST_SIM:-iPhone 17 Pro Max}")"
   xcrun simctl boot "$udid" >/dev/null 2>&1 || true
-  # UITEST_ONLY=LibraryArrangeTests runs one class (or Class/testMethod) alone.
-  local only=()
-  [[ -n "${UITEST_ONLY:-}" ]] && only=(-only-testing:"HubUITests/$UITEST_ONLY")
+  # UITEST_ONLY=LibraryArrangeTests runs one class (or Class/testMethod) alone, and a
+  # comma-separated list runs those: a few classes, not the whole suite, on a shared Mac.
+  local only=() picked=() one
+  if [[ -n "${UITEST_ONLY:-}" ]]; then
+    IFS=',' read -ra picked <<<"$UITEST_ONLY"
+    for one in "${picked[@]}"; do only+=(-only-testing:"HubUITests/$one"); done
+  fi
   xcodebuild -project "$APPLE/Hub.xcodeproj" -scheme Hub -configuration Debug \
     -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$DERIVED" ${only[@]+"${only[@]}"} test 2>&1 |
     grep -E "Test Case|Test Suite|error:|failed|passed|TEST (SUCCEEDED|FAILED)|\*\*" || true
@@ -399,6 +411,8 @@ mac_shot() {
     HUB_READ="${HUB_READ:-}" HUB_READ_CHROME="${HUB_READ_CHROME:-}" HUB_READ_PAGE="${HUB_READ_PAGE:-}" \
     HUB_READ_SHEET="${HUB_READ_SHEET:-}" HUB_BOOK="${HUB_BOOK:-}" HUB_BOOK_CHROME="${HUB_BOOK_CHROME:-}" \
     HUB_BOOK_AT="${HUB_BOOK_AT:-}" HUB_BOOK_SHEET="${HUB_BOOK_SHEET:-}" HUB_BOOK_SCROLL="${HUB_BOOK_SCROLL:-}" \
+    HUB_SEEN_DWELL_MS="${HUB_SEEN_DWELL_MS:-}" \
+    HUB_HERO="${HUB_HERO:-}" \
     nohup "$app" -ApplePersistenceIgnoreState YES $(launch_args "$@") > "$DERIVED/mac-app.log" 2>&1 < /dev/null &
   pid=$!
   for _ in $(seq 1 90); do

@@ -139,11 +139,18 @@ final class NowPlaying {
         if next != summary { summary = next }
     }
 
-    /// Four times a second only the moment changes.
-    func publishPosition(_ source: AudioSource, elapsedSeconds: Double, rate: Double) {
+    /// What `source` shows now, if it is in front.
+    func info(_ source: AudioSource) -> [String: Any]? {
+        owners.current == source ? MPNowPlayingInfoCenter.default().nowPlayingInfo : nil
+    }
+
+    /// Four times a second only the moment changes (and an audiobook's
+    /// chapter length, its line being the chapter's).
+    func publishPosition(_ source: AudioSource, elapsedSeconds: Double, rate: Double, durationSeconds: Double? = nil) {
         guard owners.current == source, var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedSeconds
         info[MPNowPlayingInfoPropertyPlaybackRate] = rate
+        if let durationSeconds { info[MPMediaItemPropertyPlaybackDuration] = durationSeconds }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         #if os(macOS)
         MPNowPlayingInfoCenter.default().playbackState = rate > 0 ? .playing : .paused

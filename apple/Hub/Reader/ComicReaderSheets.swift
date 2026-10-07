@@ -60,6 +60,8 @@ struct ComicReaderSheetView: View {
                 SheetRow(title: "Keys", chevron: true) { reader.sheet = .keys }
             }
         }
+        // Brightness and warmth, for every reader (#37).
+        ComfortControls(book: false, heading: true)
     }
 
     // MARK: Keys

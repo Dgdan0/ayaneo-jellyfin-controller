@@ -7,13 +7,15 @@ import SwiftUI
 /// and sets `\.closeReader`; debug builds can open it at launch against the
 /// demo hub (`BookReaderDebugLaunch`). Readium's navigator is UIKit, so it
 /// reads on the iPad and the iPhone; the Mac says ebooks come later.
-/// Read along (`readAlong`) arrives after phase 2: until then the book opens
-/// to be read.
+/// Read along (`readAlong`) opens the read-along edition with its narration
+/// (`ReadAlongReader`): the dock is the menu's lower bar, the sentence spoken
+/// glows, and the page follows the voice.
 struct BookReaderView: View {
     let work: ReadingWork
     let sourceItemId: String
     var readAlong = false
     @Environment(AppModel.self) private var model
+    @Environment(\.readingMarks) private var marks
     #if os(iOS)
     @State private var reader: BookReaderModel?
     #endif
@@ -28,7 +30,12 @@ struct BookReaderView: View {
         }
         .task {
             guard reader == nil else { return }
-            let opened = BookReaderModel(app: model, work: work, sourceItemId: sourceItemId)
+            let opened = BookReaderModel(app: model, work: work, sourceItemId: sourceItemId, readAlong: readAlong)
+            // Marked unread: from the beginning. A place kept forgets the mark (#37).
+            opened.startsFresh = marks.startsFresh(work.id)
+            let keeper = marks.kept
+            let bookId = work.id
+            opened.onKept = { keeper(bookId) }
             reader = opened
             opened.start()
             #if DEBUG
@@ -85,6 +92,7 @@ struct BookReaderScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
     @State private var pad = ReaderPadInput()
+    @State private var comfort = ReaderComfort.shared
     @State private var topBar = CGRect.zero
     @State private var bottomBar = CGRect.zero
     @FocusState private var keys: Bool
@@ -107,6 +115,14 @@ struct BookReaderScreen: View {
                     BookReaderBars(reader: reader, layout: layout, leave: leave, topBar: $topBar, bottomBar: $bottomBar)
                         .transition(.opacity)
                 }
+                if reader.sheet == nil && !reader.controlsVisible, let reading = reader.readAlong,
+                   let narration = reading.narration, narration.playing {
+                    ReadAlongPill(reading: reading, narration: narration) { reader.setControls(true) }
+                        .padding(.horizontal, layout.side + 4)
+                        .padding(.bottom, layout.bottom + 6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .transition(.opacity)
+                }
                 if let note = reader.footnote {
                     FootnoteCard(text: note, compact: layout.phone, follow: { reader.followNote() },
                                  close: { reader.closeNote() })
@@ -124,6 +140,8 @@ struct BookReaderScreen: View {
                     BookReaderSheetView(reader: reader, sheet: sheet, layout: layout)
                         .id(sheet == .bookmarks ? BookReaderModel.Sheet.contents : sheet)
                 }
+                // Comfort over the whole reader, page and controls (#37).
+                ComfortLayer(comfort: comfort.value)
             }
             .coordinateSpace(.named(Self.space))
             .ignoresSafeArea()
@@ -135,7 +153,7 @@ struct BookReaderScreen: View {
         // its cover, and the accent is Books' gold.
         .environment(\.glassPalette, model.colors.palette(for: reader.cover))
         .environment(\.glassOverVideo, true)
-        .environment(\.glassAccent, AccentPreset.defaultFor(.books))
+        .environment(\.glassAccent, AccentModel.shared.books)
         .onChange(of: reader.cover, initial: true) { _, path in
             if !path.isEmpty { model.colors.want([path]) }
         }
@@ -171,11 +189,21 @@ struct BookReaderScreen: View {
         .onDisappear {
             pad.stop()
             reader.stop()
+            comfort.letSleep()
+        }
+        .onChange(of: comfort.value.blackPage) { _, _ in reader.comfortChanged() }
+        // Reading along, the screen stays awake while the voice reads, as Comfort asks.
+        .onChange(of: "\(reader.readAlong?.narration?.playing == true)·\(comfort.value.awakeWhileNarrating)") { _, _ in
+            comfort.keepAwake(narrating: reader.readAlong?.narration?.playing == true)
         }
         .onChange(of: pad.connected, initial: true) { _, connected in reader.controllerActive = connected }
         .onChange(of: colorScheme) { _, scheme in reader.systemDark = scheme == .dark }
         .onChange(of: reader.leaving) { _, leaving in
             if leaving { leave() }
+        }
+        // A sheet that took the keyboard (Search) gives it back to the screen.
+        .onChange(of: reader.sheet) { _, sheet in
+            if sheet == nil { keys = true }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { reader.flushPlace() }
@@ -235,8 +263,8 @@ struct BookReaderScreen: View {
     /// Debug builds, for screenshots: HUB_BOOK_SCROLL=1 (or 0) turns continuous
     /// scrolling on (or off) for every book, as Appearance would and kept as it
     /// keeps it; HUB_BOOK_AT=<percent> goes that far into the book;
-    /// HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys opens the menu
-    /// or a sheet, once the book has opened.
+    /// HUB_BOOK_SHEET=menu|contents|bookmarks|search|appearance|comfort|keys opens the menu
+    /// or a sheet, once the book has opened; HUB_BOOK_SEARCH=<words> searches for them.
     private func debugTour() async {
         guard reader.phase == .reading else { return }
         let environment = ProcessInfo.processInfo.environment
@@ -255,7 +283,16 @@ struct BookReaderScreen: View {
         case "menu": reader.setControls(true)
         case "contents": reader.openSheet(.contents)
         case "bookmarks": reader.openSheet(.bookmarks)
+        case "search":
+            reader.openSheet(.search)
+            if let words = environment["HUB_BOOK_SEARCH"], !words.isEmpty {
+                reader.searchText = words
+                reader.runSearch()
+            }
         case "appearance": reader.openSheet(.appearance)
+        case "comfort":
+            reader.appearanceTab = .comfort
+            reader.openSheet(.appearance)
         case "keys": reader.openSheet(.keys)
         default: break
         }

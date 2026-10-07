@@ -139,24 +139,14 @@ public struct HeroContent: Equatable, Sendable {
     /// The words on Glass's white Play pill: "Resume", "Play S2E1" on Next
     /// up, "Play".
     public var playAction: String = ""
+    /// A title not in the library (Coming up) has no item to open: its key
+    /// opens the request side instead. Empty for one in the library.
+    public var mediaKey: String = ""
 }
 
 /// A port of Android's `screens/home/HomeHero`: built first from the card
 /// alone, then again when the item's details add runtime and certification.
 public enum HomeHero {
-    /// Home's rows in Android's default order (`HomeRows.DEFAULT_ORDER`);
-    /// the hub sends Favourites first.
-    public static let rowOrder = ["continue", "nextup", "latest", "favourites"]
-
-    /// The hub's rows in Home's order; rows it adds later follow, in its order.
-    public static func ordered(_ rows: [HomeRow]) -> [HomeRow] {
-        rows.enumerated().sorted { a, b in
-            let ra = rowOrder.firstIndex(of: a.element.id) ?? rowOrder.count
-            let rb = rowOrder.firstIndex(of: b.element.id) ?? rowOrder.count
-            return ra != rb ? ra < rb : a.offset < b.offset
-        }.map(\.element)
-    }
-
     /// Continue watching and Next up are concrete episodes and films, shown as
     /// 16:9 stills; every other row is posters.
     public static func isLandscape(rowId: String) -> Bool {
@@ -238,7 +228,7 @@ public enum HomeHero {
             eyebrow: [eyebrow(rowId: rowId, rowTitle: rowTitle), mark].filter { !$0.isEmpty }.joined(separator: " · "),
             title: hit.media.title, meta: meta, progress: watching ? hit.progress : 0, progressLabel: left,
             playLabel: watching ? "Resume" : "Play", backdrop: backdrop, canPlay: !hit.jellyfinItemId.isEmpty,
-            eyebrowMark: mark, playAction: action)
+            eyebrowMark: mark, playAction: action, mediaKey: hit.jellyfinItemId.isEmpty ? hit.media.key : "")
     }
 
     /// What `EpisodeLabel.code` writes: "S1E4".

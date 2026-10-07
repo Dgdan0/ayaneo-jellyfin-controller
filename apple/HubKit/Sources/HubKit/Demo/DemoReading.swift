@@ -18,13 +18,17 @@ public enum DemoReading {
         public let title: String
         public let narrator: String
         public let tracksMs: [Int64]
+        /// Chapter marks inside the tracks.
         public let chapters: [(title: String, startMs: Int64, track: Int)]
+        /// Aligned with its read-along edition (`DemoReadAlong`, #31): the
+        /// hub maps the edition's audio onto the tracks, and the chapters
+        /// are the book's own, placed by their narration.
+        public var aligned = false
     }
 
     public static let audiobooks = [
         Audiobook(workId: "rw_demo_darkmatter", sourceItemId: "demo-dm", title: "Dark Matter", narrator: "Jon Lindstrom",
-                  tracksMs: [90_000, 75_000, 60_000],
-                  chapters: [("One", 0, 0), ("Two", 40_000, 0), ("Three", 0, 1), ("Four", 0, 2)]),
+                  tracksMs: [90_000, 75_000, 60_000], chapters: [], aligned: true),
         Audiobook(workId: "rw_demo_alloy", sourceItemId: "demo-alloy", title: "The Alloy of Law", narrator: "Michael Kramer",
                   tracksMs: [80_000, 80_000], chapters: []),
     ]
@@ -615,12 +619,29 @@ public enum DemoReading {
             return json(positionFields(book))
         case ("POST", 8) where parts[7] == "position":
             return savePosition(book, body: body)
+        case ("GET", 9) where parts[7] == "tracks":
+            // A track's bytes, which the app keeps on the device (#37): its tone.
+            guard let index = Int(parts[8]), book.tracksMs.indices.contains(index) else {
+                return failure(404, "not_found", "No such track")
+            }
+            return DemoTransport.Answer(200, data: DemoAudio.wav(milliseconds: book.tracksMs[index],
+                                                                 frequency: DemoAudio.tone(index)), type: "audio/wav")
         default:
             return failure(404, "not_found", "No such route in the demo hub")
         }
     }
 
     static func manifestFields(_ book: Audiobook) -> [String: Any] {
+        var fields = plainManifestFields(book)
+        if book.aligned {
+            fields["aligned"] = true
+            fields["alignment"] = DemoReadAlong.alignment()
+            fields["chapters"] = DemoReadAlong.bookChapters()
+        }
+        return fields
+    }
+
+    private static func plainManifestFields(_ book: Audiobook) -> [String: Any] {
         ["workId": book.workId, "sourceItemId": book.sourceItemId, "revision": revision, "narrator": book.narrator,
          "totalMs": book.tracksMs.reduce(0, +), "aligned": false,
          "tracks": book.tracksMs.enumerated().map { index, length in
@@ -628,7 +649,8 @@ public enum DemoReading {
               "durationMs": length, "bytes": DemoAudio.byteCount(milliseconds: length), "mime": "audio/wav",
               "etag": "\"demo\(index)\""] as [String: Any]
          },
-         "chapters": book.chapters.map { ["title": $0.title, "startMs": $0.startMs, "track": $0.track] as [String: Any] },
+         "chapters": book.chapters.map { ["title": $0.title, "startMs": $0.startMs, "track": $0.track,
+                                          "source": ReadingAudioChapter.marks] as [String: Any] },
          "cache": ["hit": false, "ageSeconds": 0]]
     }
 
@@ -756,11 +778,15 @@ public enum DemoReading {
 
 /// The demo's audiobook tracks: a quiet tone a few seconds long per track,
 /// written by the app to a file it plays (AVPlayer cannot fetch from the demo
-/// hub, which answers only the app's own requests). A WAV, so it needs no
-/// encoder: 8 kHz, 16-bit mono, a soft tone that changes with the track, so a
-/// change of track can be heard.
+/// hub, which answers only the app's own requests), and served by the demo
+/// hub to the app's track cache (#37). A WAV, so it needs no encoder: 8 kHz,
+/// 16-bit mono, a soft tone that changes with the track, so a change of
+/// track can be heard.
 public enum DemoAudio {
     public static let sampleRate = 8_000
+
+    /// Track `index`'s tone, in hertz.
+    public static func tone(_ index: Int) -> Double { 220 + 55 * Double(index % 4) }
 
     public static func byteCount(milliseconds: Int64) -> Int64 {
         44 + Int64(sampleRate) * 2 * max(0, milliseconds) / 1_000

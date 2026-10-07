@@ -44,13 +44,24 @@ final class BooksTests: XCTestCase {
         return condition()
     }
 
-    /// Scrolls the page until `element` is on screen, or gives up.
+    /// Scrolls the page until `element` is on screen, clear of the tab bar at
+    /// the foot (a tap there lands on the bar: the iPhone 17's screen is
+    /// shorter than the Pro Max's), or gives up.
     @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, tries: Int = 6) -> Bool {
-        for _ in 0..<tries where !(element.exists && element.isHittable) {
-            app.swipeUp()
+        func shown() -> Bool {
+            guard element.exists, element.isHittable else { return false }
+            let window = app.windows.firstMatch.frame
+            return element.frame.maxY < window.maxY - window.height * 0.15 && element.frame.minY > window.minY + 60
         }
-        return element.exists && element.isHittable
+        for _ in 0..<tries where !shown() {
+            if element.exists && element.frame.minY <= app.windows.firstMatch.frame.minY + 60 {
+                app.swipeDown()
+            } else {
+                app.swipeUp()
+            }
+        }
+        return shown()
     }
 
     // MARK: Home
@@ -59,7 +70,8 @@ final class BooksTests: XCTestCase {
     func testResumeReadingOpensTheBookAndItsReaderAndCloseComesBackToIt() {
         let app = launch("home")
         let resume = app.buttons["books-resume"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 15), "Books Home has no Resume reading: \(buttons(app))")
+        // A Mac busy with another simulator's tests can take its time over Books Home.
+        XCTAssertTrue(resume.waitForExistence(timeout: 40), "Books Home has no Resume reading: \(buttons(app))")
         XCTAssertTrue(text(app, containing: "Dark Matter").exists)
         resume.tap()
         // The ebook reader opens on the book (phase 4); the middle of the page
@@ -184,18 +196,29 @@ final class BooksTests: XCTestCase {
         let app = launch("activity")
         let retry = app.buttons["retry-rt_demo_xmen"]
         XCTAssertTrue(retry.waitForExistence(timeout: 15), "the failed transfer has no Retry: \(buttons(app))")
+        XCTAssertTrue(reveal(retry, in: app), "the failed transfer's Retry cannot be reached: \(buttons(app))")
         retry.tap()
         XCTAssertTrue(text(app, containing: "Retrying Uncanny X-Men").waitForExistence(timeout: 10), "the retry was not sent")
 
         let cancel = app.buttons["cancel-rt_demo_will"]
         XCTAssertTrue(reveal(cancel, in: app), "the moving transfer has no Cancel: \(buttons(app))")
         cancel.tap()
-        // It asks first, and the transfer stays until the answer is Cancel transfer. (iOS shows
-        // the harmless answer, Keep transfer, as a tap outside the question.)
-        let confirm = app.buttons["confirm-cancel"].firstMatch
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "cancelling did not ask first: \(buttons(app))")
-        XCTAssertTrue(app.staticTexts["Cancel transfer?"].exists)
-        XCTAssertTrue(text(app, containing: "The Will of the Many").exists)
+        // It asks first, and Keep transfer keeps it.
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "cancelling did not ask first: \(buttons(app))")
+        XCTAssertTrue(alert.staticTexts["Cancel transfer?"].exists)
+        XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "The Will of the Many")).firstMatch.exists)
+        let answers = alert.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }
+        // Its two answers and no third: the harmless one has the cancel role, which iOS 26
+        // shows last, where without it iOS adds a Cancel of its own. (The tree lists each twice.)
+        XCTAssertEqual(Set(answers), ["Keep transfer", "Cancel transfer"], "the question offers more than its two answers: \(answers)")
+        alert.buttons["keep-transfer"].firstMatch.tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5), "Keep transfer did not close the question")
+        XCTAssertTrue(app.buttons["cancel-rt_demo_will"].exists, "Keep transfer cancelled the transfer")
+
+        app.buttons["cancel-rt_demo_will"].tap()
+        let confirm = app.alerts.firstMatch.buttons["confirm-cancel"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "cancelling did not ask again: \(buttons(app))")
         confirm.tap()
         XCTAssertTrue(text(app, containing: "Cancelled The Will of the Many").waitForExistence(timeout: 10), "the cancel was not sent")
     }

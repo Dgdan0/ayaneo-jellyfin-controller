@@ -53,9 +53,16 @@ enum AppRoute: Hashable {
     case bookRequest(BookRequestRoute)
     case readingReleases(ReadingReleasesRoute)
     case listen(ListenRoute)
+    /// Kavita's reading lists, or one of them (#37).
+    case readingLists(ReadingListsRoute)
     // Activity (#29).
     case transfers(TransfersRoute)
     case speedLimits
+    /// Settings › Fonts and licences (#38).
+    case licence(LicenceRoute)
+    // Library upkeep (#34).
+    case subtitles(SubtitlesRoute)
+    case removal(RemovalRoute)
 
     /// What the back pill calls this page from the one above it.
     var name: String {
@@ -74,8 +81,12 @@ enum AppRoute: Hashable {
         case .bookRequest(let route): route.item.title
         case .readingReleases: "Releases"
         case .listen(let route): route.title
+        case .readingLists(let route): route.list?.title ?? "Reading lists"
         case .transfers: "Transfers"
         case .speedLimits: "Speed limits"
+        case .licence(let route): Licences.all.first { $0.id == route.id }?.name ?? "Licence"
+        case .subtitles: "Subtitles"
+        case .removal: RemovalLines.heading
         }
     }
 }
@@ -102,6 +113,9 @@ struct OpenRouteAction {
     /// Swaps the page on top for `route` without a push, so Back still goes
     /// where it went: another library chosen from a library's own capsule.
     var replace: @MainActor (AppRoute) -> Void = { _ in }
+    /// Takes the top `count` pages off the stack: a page that finished its
+    /// work and the one that led to it (a deleted title's two).
+    var pop: @MainActor (Int) -> Void = { _ in }
 
     @MainActor func callAsFunction(_ route: AppRoute) { push(route) }
 }
@@ -125,8 +139,13 @@ struct SelectSectionAction {
 @Observable
 final class ShellModel {
     private(set) var users: [HubUser] = []
-    private(set) var attention = 0
+    /// The services' notifications and what has been seen of them (#36): the
+    /// bell's count and the Notifications page are one answer.
+    let notifications = NotificationsModel()
     private(set) var servicesSummary = ""
+
+    /// The bell's count: what is unread, as Android's header badge counts.
+    var attention: Int { notifications.unread }
 
     /// Android's header badge cadence: it only has to notice new trouble eventually.
     static let attentionEvery: Duration = .seconds(60)
@@ -143,11 +162,9 @@ final class ShellModel {
         }
     }
 
-    /// The hub's own count of what needs attention: services it cannot reach,
-    /// and active warnings and errors.
-    func refreshAttention(_ hub: HubClient) async {
-        guard let response = try? await hub.fetch(HubEndpoints.notifications(), as: NotificationsResponse.self) else { return }
-        attention = response.attentionCount
+    /// Asks for the notifications again, for the bell's count.
+    func refreshAttention(_ app: AppModel) async {
+        await notifications.refresh(app)
     }
 
     func refreshServices(_ hub: HubClient, address: String) async {
@@ -217,6 +234,8 @@ struct MainView: View {
     @State private var player = PlayerModel()
     /// The Books side's lists, ways and orders (#25).
     @State private var books = BooksModel()
+    /// The accent each side wears, chosen in Settings (#38).
+    @State private var accents = AccentModel.shared
     /// A book being read, over the whole window (#25 phases 3 and 4).
     @State private var reading: ReadRequest?
     /// Counts the readers closed, so pages read their progress again.
@@ -224,7 +243,7 @@ struct MainView: View {
     /// The audiobook player, one for the app (#25 phase 2).
     @State private var listening = ListeningModel.shared
     /// One sound at a time: the video and an audiobook.
-    @State private var sounds = SoundGuard()
+    @State private var sounds = SoundGuard.shared
     @State private var profilesOpen = false
     @State private var sheetPlaces = false
     /// The Mac's window buttons sit over the page under its hidden title bar:
@@ -234,6 +253,8 @@ struct MainView: View {
     @State private var debugSheet = false
     /// Debug builds: HUB_PLAY=<item id> opens the player at launch.
     @State private var debugPlay = ""
+    /// Debug builds: HUB_TITLE=<item id>[|subtitles|removal] opens that library title, and on from it, on the first section's stack (#34).
+    @State private var debugTitle = ""
 
     private var key: StackKey { StackKey(side: side, section: section) }
     /// Something over the pages and bars: the player or a reader.
@@ -326,6 +347,23 @@ struct MainView: View {
                 debugPlay = ""
                 player.open(PlayRequest(itemId: itemId), app: model)
             }
+            .task(id: debugTitle) {
+                let itemId = debugTitle
+                guard !itemId.isEmpty else { return }
+                // Once the section has settled under it.
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled, debugTitle == itemId else { return }
+                debugTitle = ""
+                // "<id>|subtitles" or "<id>|removal" goes on to that page.
+                let parts = itemId.split(separator: "|", maxSplits: 1).map(String.init)
+                var pages: [AppRoute] = [.title(TitleRoute(itemId: parts[0], title: "Title"))]
+                switch parts.count > 1 ? parts[1] : "" {
+                case "subtitles": pages.append(.subtitles(SubtitlesRoute(itemId: parts[0], title: "Bleach · S1E2 · A Second Look")))
+                case "removal": pages.append(.removal(RemovalRoute(kind: "video", id: parts[0], title: "Bleach")))
+                default: break
+                }
+                paths[key, default: []].append(contentsOf: pages)
+            }
             .task(id: debugSheet) {
                 guard debugSheet else { return }
                 // After the first layout settles, so the sheet is the one for
@@ -345,14 +383,22 @@ struct MainView: View {
         })
         .environment(\.playbackClosed, player.closedCount)
         .environment(books)
+        .environment(shell.notifications)
+        .environment(accents)
+        .environment(\.appSide, side)
         .environment(\.read, ReadAction(open: { request in reading = request }, close: {
             reading = nil
             readersClosed += 1
         }))
         .environment(\.readerClosed, readersClosed)
+        // A book marked unread starts again; a place kept forgets the mark (#37).
+        .environment(\.readingMarks, ReadingMarks(startsFresh: { [books] in books.completion.startsAtBeginning($0) },
+                                                   kept: { [books] in books.readerKept($0) }))
         .environment(\.selectSection, SelectSectionAction { target in select(target) })
         .onChange(of: "\(model.address)\u{0}\(model.userId)", initial: true) { _, _ in
             books.use(address: model.address, userId: model.userId)
+            accents.use(address: model.address, userId: model.userId, demo: model.isDemo)
+            HomeLayoutModel.shared.use(demo: model.isDemo)
         }
         // Listening places a closed app left unsent go now, and again for
         // another profile; a book of another profile leaves the player.
@@ -366,6 +412,7 @@ struct MainView: View {
             sounds.pause(.video) { [player] in if player.isPlaying { player.togglePlay() } }
             sounds.pause(.audiobook) { ListeningModel.shared.pause() }
             listening.onStart = { [sounds] in sounds.started(.audiobook) }
+            listening.onKept = { [books] workId in books.readerKept(workId) }
         }
         .onChange(of: player.isPlaying) { _, playing in playing ? sounds.started(.video) : sounds.stopped(.video) }
         #if DEBUG
@@ -381,17 +428,17 @@ struct MainView: View {
         #endif
         .onChange(of: listening.playing) { _, playing in playing ? sounds.started(.audiobook) : sounds.stopped(.audiobook) }
         .environment(\.glassPalette, model.colors.palette(for: ambient.displayed))
-        .environment(\.glassAccent, AccentPreset.defaultFor(side))
+        .environment(\.glassAccent, accents.accent(side))
         .onChange(of: key, initial: true) { _, latest in open(latest) }
         .onChange(of: ambient.displayed, initial: true) { _, path in model.colors.want([path]) }
         // Closing the window (the Mac's, or an iPad's in the app switcher)
         // ends what plays in it, as Back would; minimising it does not.
         .onDisappear { player.close() }
         .task(id: model.userId) { await shell.loadUsers(model.hub) }
-        .task(id: scenePhase == .active) {
+        .task(id: "\(scenePhase == .active)·\(model.address)·\(model.connectionChanges)") {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
-                await shell.refreshAttention(model.hub)
+                await shell.refreshAttention(model)
                 try? await Task.sleep(for: ShellModel.attentionEvery)
             }
         }
@@ -402,7 +449,7 @@ struct MainView: View {
                 profilesOpen = false
                 select(place)
             }
-            .environment(\.glassAccent, AccentPreset.defaultFor(side))
+            .environment(\.glassAccent, accents.accent(side))
             .environment(\.glassPalette, model.colors.palette(for: ambient.displayed))
         }
         #if DEBUG
@@ -434,6 +481,11 @@ struct MainView: View {
                 var swap = Transaction()
                 swap.disablesAnimations = true
                 withTransaction(swap) { paths[stackKey] = path }
+            },
+            pop: { count in
+                guard var path = paths[stackKey], !path.isEmpty else { return }
+                path.removeLast(min(max(count, 0), path.count))
+                paths[stackKey] = path
             }))
     }
 
@@ -447,6 +499,7 @@ struct MainView: View {
         case (.books?, .discover): BooksDiscoverView()
         case (.books?, .library): BooksLibraryView()
         case (.books?, .activity): BooksActivityView()
+        case (_, .notifications): NotificationsView()
         case (_, .services): ServicesView()
         case (_, .settings): SettingsView()
         default: ComingNextView(side: stackKey.side, section: stackKey.section)
@@ -457,8 +510,7 @@ struct MainView: View {
         switch route {
         case .title(let title): TitleView(route: title)
         case .folder(let folder): FolderView(route: folder)
-        case .monitor: ComingNextView(title: "Server monitor", systemImage: "cpu",
-                                      detail: "CPU, memory, disk space, containers and current playback.")
+        case .monitor: ServerMonitorView()
         case .media(let media): MediaTitleView(route: media)
         case .person(let person): PersonView(route: person)
         case .releaseTargets(let targets): ReleaseTargetsView(route: targets)
@@ -470,8 +522,12 @@ struct MainView: View {
         case .bookRequest(let request): BookRequestView(route: request)
         case .readingReleases(let releases): ReadingReleasesView(route: releases)
         case .listen(let listen): AudiobookView(workId: listen.workId, sourceItemId: listen.sourceItemId, title: listen.title)
+        case .readingLists(let lists): ReadingListsView(route: lists)
         case .transfers(let transfers): TransfersView(route: transfers)
         case .speedLimits: SpeedLimitsView()
+        case .licence(let licence): LicenceView(route: licence)
+        case .subtitles(let subtitles): SubtitlesView(route: subtitles)
+        case .removal(let removal): RemovalView(route: removal)
         }
     }
 
@@ -571,13 +627,14 @@ struct MainView: View {
 
     #if DEBUG
     /// scripts/mac.sh opens a chosen place for screenshots: HUB_SECTION=library,
-    /// HUB_SIDE=books, HUB_SHEET=profiles, HUB_PLAY=<item id>. (HUB_OPEN is Home's.)
+    /// HUB_SIDE=books, HUB_SHEET=profiles, HUB_PLAY=<item id>, HUB_TITLE=<item id>. (HUB_OPEN is Home's.)
     private func applyDebugLaunch() {
         let environment = ProcessInfo.processInfo.environment
         if let name = environment["HUB_SECTION"], let chosen = AppSection(rawValue: name) { section = chosen }
         if let name = environment["HUB_SIDE"], let chosen = AppSide(rawValue: name) { side = chosen }
         if environment["HUB_SHEET"] == "profiles" { debugSheet = true }
         if let itemId = environment["HUB_PLAY"], !itemId.isEmpty { debugPlay = itemId }
+        if let itemId = environment["HUB_TITLE"], !itemId.isEmpty { debugTitle = itemId }
     }
     #endif
 }

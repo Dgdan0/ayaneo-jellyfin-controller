@@ -1187,23 +1187,37 @@ public struct ReadingAudioTrack: Decodable, Equatable, Sendable, Hashable {
     }
 }
 
-/// A chapter mark inside a track: `startMs` counts from the start of `track`.
+/// A chapter of the audiobook: `startMs` counts from the start of `track`.
+/// `source` says where it comes from (#31): `marks`, a chapter mark inside a
+/// file, or `book`, an entry of the table of contents of the book's
+/// read-along edition, placed where its narration starts, so one chapter can
+/// run on from one track into the next. A book's chapters have one source; an
+/// older hub sends none, and its chapters are marks.
 public struct ReadingAudioChapter: Decodable, Equatable, Sendable, Hashable {
     public var title: String
     public var startMs: Int64
     public var track: Int
+    public var source: String
 
-    public init(title: String = "", startMs: Int64 = 0, track: Int = 0) {
+    /// A chapter of the book's own contents rather than a mark in a file.
+    public var fromBook: Bool { source == Self.book }
+
+    public static let marks = "marks"
+    public static let book = "book"
+
+    public init(title: String = "", startMs: Int64 = 0, track: Int = 0, source: String = "") {
         self.title = title
         self.startMs = startMs
         self.track = track
+        self.source = source
     }
 
-    enum CodingKeys: String, CodingKey { case title, startMs, track }
+    enum CodingKeys: String, CodingKey { case title, startMs, track, source }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(title: c.value(.title, ""), startMs: c.value(.startMs, 0), track: c.value(.track, 0))
+        self.init(title: c.value(.title, ""), startMs: c.value(.startMs, 0), track: c.value(.track, 0),
+                  source: c.value(.source, ""))
     }
 }
 

@@ -562,7 +562,8 @@ struct LibraryGrid: View {
             .padding(.bottom, 26)
         }
         .ambientArtwork(lit ?? items.first?.media.poster ?? "")
-        .task(id: model.userId) { await reload() }
+        // A title deleted from the server (#34) is read out of the grid.
+        .task(id: "\(model.userId)·\(model.libraryChanges)") { await reload() }
     }
 
     private func reload() async {

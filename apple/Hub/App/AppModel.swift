@@ -17,6 +17,9 @@ final class AppModel {
     /// Counts the library orders saved from this device (#15): a page that drew
     /// the libraries reads them again when it changes.
     private(set) var libraryOrderChanges = 0
+    /// Counts the times the library lost something from here (#34): a title or
+    /// a book deleted from the server. The pages that list titles read again.
+    private(set) var libraryChanges = 0
     /// Titles requested on this device this session: cards show it at once,
     /// before the hub's next read does (Android's `RequestedTitles`).
     private(set) var requested = RequestedTitles()
@@ -27,6 +30,16 @@ final class AppModel {
     let hub: HubClient
     /// Each artwork's Glass colours, asked of the hub and kept on the device.
     let colors: ArtworkColors
+    /// The last answers Home and Discover opened with (#38). The demo hub keeps
+    /// its own, apart from a real hub's, and forgets them at launch when a
+    /// debug run asks (HUB_FORGET_ANSWERS=1).
+    @ObservationIgnored private(set) lazy var answers: AnswerKeeper = {
+        let keeper = isDemo ? AnswerKeeper.standard(named: "last-answers-demo") : AnswerKeeper.standard()
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["HUB_FORGET_ANSWERS"] == "1" { keeper.removeAll() }
+        #endif
+        return keeper
+    }()
     @ObservationIgnored private let defaults: UserDefaults
 
     var isConfigured: Bool { !address.isEmpty && hasToken }
@@ -104,6 +117,10 @@ final class AppModel {
 
     func libraryOrderChanged() {
         libraryOrderChanges += 1
+    }
+
+    func libraryChanged() {
+        libraryChanges += 1
     }
 
     func recordRequest(key: String, availability: String, requestId: Int) {

@@ -162,6 +162,18 @@ extension ComicReaderModel {
         }
     }
 
+    /// A page's bytes from the hub, else from the device's artwork cache,
+    /// which an issue opened in an outage asks first (#37).
+    nonisolated static func pageBytes(_ path: String, hub: HubClient, offline: Bool) async throws(HubFailure) -> Data {
+        if offline, let kept = try? await hub.cachedImage(path) { return kept }
+        do throws(HubFailure) {
+            return try await hub.image(path)
+        } catch {
+            if error.kind != .cancelled, let kept = try? await hub.cachedImage(path) { return kept }
+            throw error
+        }
+    }
+
     /// Pictures neither in a slot nor on screen are let go.
     func pruneImages() {
         let kept = Set(slots.compactMap { $0 })
@@ -175,10 +187,11 @@ extension ComicReaderModel {
 
     private func load(_ key: PageKey) {
         let path = HubEndpoints.readingPublicationPage(workId: workId, sourceItemId: key.publication, page: key.page)
+        let offline = offline
         loads[key] = Task { [weak self, hub] in
             let data: Data
             do throws(HubFailure) {
-                data = try await hub.image(path)
+                data = try await Self.pageBytes(path, hub: hub, offline: offline)
             } catch {
                 guard !Task.isCancelled, let self else { return }
                 self.loads[key] = nil

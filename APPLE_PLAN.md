@@ -503,8 +503,8 @@ Checked on the simulators with pictures of a curl held half way: a page alone on
 manga page from the left, and spreads on the iPad Pro sideways both ways. Just after a turn, until
 the next page is decoded, the edge is the canvas's, so a quick second drag turns as a swipe does.
 
-Differences from Android, for now: two pages side by side are new; no Comfort layer; the sheets
-are not walked with the D-pad (Ⓑ closes them); no reading lists.
+Differences from Android, for now: two pages side by side and the page curl are new; the sheets
+are not walked with the D-pad (Ⓑ closes them). Comfort and Kavita's reading lists came with #37.
 
 ## The ebook reader (#25, phase 4)
 
@@ -590,9 +590,9 @@ Appearance keeps it (every UI test launches with 0, so a test cut short leaves n
 (`DemoEpub`): made-up words, eight chapters of 9 to 18 KB, a footnote in One, a link on to Five in
 Two, an endnote in Three, a link out of the book in Four and a second part in Eight's contents.
 
-Differences from Android, for now: no search, no Comfort layer, no dictionary, Appearance and the
-Keys sheet are not walked with the D-pad (Ⓑ closes them), the edges of the page turn nothing on a tap
-(Android's too), and no Mac reader.
+Differences from Android, for now: Appearance and the Keys sheet are not walked with the D-pad
+(Ⓑ closes them), the edges of the page turn nothing on a tap (Android's too), and no Mac reader.
+Search, Look Up and Comfort came with #37.
 
 ## Working on the Mac
 
@@ -735,3 +735,48 @@ token (`hubctl.exe token new --label ipad-pro`, `ipad-mini`, `iphone`).
 - LF line endings (`.gitattributes`).
 - **Branch:** work on `apple/client`. The Windows sessions use `claude/consolidation`. Merges
   between the two are coordinated through the user.
+
+## Notifications, the server monitor, Settings and Home's rows (#36, #38, #35)
+
+| Behaviour | Owner |
+|---|---|
+| What has been seen of the services' notifications, the bell's count and the page's dots | HubKit `NotificationReadReducer` / `NotificationReadStore` (Android's `NotificationReadState`, with its test cases); the app's one `NotificationsModel`, owned by `ShellModel` (so the bell and the page are one answer) |
+| The Notifications page's columns, words, times and summary line | HubKit `NotificationsPresentation` (`column`, `summary`, `time`, `humanizeHealthTitle`); drawn by `Notifications/NotificationsView` |
+| How many entries each service's column loads | HubKit `NotificationSettings` / `NotificationLimits`, Settings › Notifications |
+| The server monitor's figures, containers, sessions and status line | HubKit `ServerMonitorPresentation`, drawn by `Services/ServerMonitorView`; `DashboardTone` is the one colour of a status dot (`StatusDot`, `StatCard` in `Glass/DashboardParts`) |
+| Each side's accent, per hub and profile | HubKit `AccentSettings` / `PreferenceScope`; the app's one `AccentModel.shared` (the shell, the side picker and the readers read it) |
+| How subtitles look, in Settings and in the player's sheet | HubKit `SubtitleLookWords` (words, placement, size); the stored look is `PlaybackMemory.look`; the picture is `SubtitleLine` |
+| The licences the app ships | HubKit `Licences`, held by a test to `Hub/Resources/Licenses` |
+| What a game controller says | HubKit `ControllerProbe`, read by `Settings/ControllerSettings` by polling (readers set handlers on the same controls) |
+| The last answer Home and Discover open with | HubKit `AnswerKeeper` (`HubClient.fetchKept` / `lastAnswer`, `LastAnswer` words), kept in the caches folder under a hash of hub, token and profile; `AppModel.answers` |
+| Home's rows: order, hidden, Coming up, a library's newest | HubKit `HomeRows`, `HomeLayout` / `HomeLayoutEditor` / `HomeRowSettings`; the app's one `HomeLayoutModel.shared`, edited in `Home/HomeSettings` |
+
+Debug launches also take `HUB_OPEN=pane:<name>` (Settings), `HUB_SHEET=licence:<id>`, `HUB_HERO=<row id>` (Home's
+hero on that row's first card), `HUB_SEEN_DWELL_MS`, `HUB_DEMO_DELAY_MS` and `HUB_FORGET_ANSWERS=1`. The demo hub keeps accents, Home's
+layout and the notifications' seen list for the run only, so a test never leaves them chosen.
+
+Differences from Android, on purpose: the bell and Notifications count what is unread on every service while a side shows its
+own three columns; a column shows its newest eight and Show all opens the rest; Settings › Home moves a row with arrows, not
+with X and Y; there is no Classic look or theme (Glass is always dark); local alerts for finished downloads and new subtitles
+are later.
+
+## Library upkeep: subtitles, release searches and deleting from the server (#34)
+
+| Behaviour | Owner |
+|---|---|
+| Which pages offer subtitles, a release search, deleting; a series' release key; an episode's heading | HubKit `LibraryUpkeep` (`offersSubtitles`, `offersReleases`, `releaseKey`, `offersDeleting`, `pageTitle`, `episodeHeading`); `LibraryItem.mediaKey` is the hub's TMDB key for a film or series |
+| The subtitle page's words (a language in English, flags, a candidate's line, a record's line, what a download says) | HubKit `SubtitleLines`, drawn by `Library/SubtitlesView` (`SubtitlesRoute`) |
+| The deletion page's words, the alert's title and message | HubKit `RemovalLines`, drawn by `Library/RemovalView` (`RemovalRoute`); the preview and the one-use ticket are `HubEndpoints.removalPreview` / `removeMedia`, each sent once |
+| A season's or an episode's release search from a Library series | `ReleaseTargetsRoute` (`startSeason`) and `ReleasesRoute`, the pages the request side already uses; entered from the title page's More menu, a season pill's menu and an episode's menu |
+| Going back past a page that finished its work | `OpenRouteAction.pop(count)` (a deletion pops its own page and the title's) |
+| Pages that list titles reading again after a deletion | `AppModel.libraryChanges` / `libraryChanged()`, read by `LibraryGrid`, Home, a title's page and the Books grids |
+
+The demo hub's subtitles and deletions (`DemoUpkeep`, `DemoLibrary.remove`) keep the hub's rules: a ticket per search
+candidate that a download spends (a second use is 409), a same-language-and-type subtitle replaces the old one, a deletion
+is previewed first and confirmed by a ticket good once, and a confirmed one only takes the title out of the demo for the
+run. A subtitle downloaded for an item is in the tracks its player lists. Debug launches also take `HUB_TITLE=<item id>`,
+which opens that library title on the first section's stack.
+
+Differences from Android, on purpose: no per-subtitle rating kept on the device and no offline subtitle copy (those wait for
+Downloads' subtitle sync); a result opens in place under its row rather than in a side panel; the deletion's confirmation is
+a native alert whose Cancel has the cancel role (iOS 26 places it last), with Cancel first on the page itself.

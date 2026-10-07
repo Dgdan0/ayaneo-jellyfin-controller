@@ -24,6 +24,9 @@ struct ReleaseTargetsRoute: Hashable {
     let title: String
     let seasons: [SeasonOption]
     let poster: String
+    /// The season to open on, when the page was reached from one (a Library
+    /// series' season or episode, #34); nil opens on the first real season.
+    var startSeason: Int?
 }
 
 /// An interactive release search: a film, a series' season, or one episode.

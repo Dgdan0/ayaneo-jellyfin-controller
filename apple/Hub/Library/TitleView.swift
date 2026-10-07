@@ -88,6 +88,9 @@ struct TitleView: View {
         .refreshable { await load() }
         .task(id: model.userId) { await load() }
         .onChange(of: playbackClosed) { _, _ in Task { await refreshAfterPlayback() } }
+        // Something was deleted from the server below this page (#34): an
+        // episode of this series, and what is left is read again.
+        .onChange(of: model.libraryChanges) { _, _ in Task { await load() } }
         .onChange(of: tabs.map(\.id)) { _, ids in
             if let first = ids.first, !tabChosen || !ids.contains(tab) { tab = first }
         }
@@ -204,7 +207,72 @@ struct TitleView: View {
                 Task { await change(.favorite(!item.favorite)) }
             }
             .disabled(saving)
+            more(item)
         }
+    }
+
+    /// The round "…" (Android's More actions): subtitles for a film or an
+    /// episode, a release search for a series, and deleting from the server
+    /// last, in its own words (#34).
+    private func more(_ item: HubKit.LibraryItem) -> some View {
+        Menu {
+            if LibraryUpkeep.offersSubtitles(item) {
+                Button {
+                    openRoute(.subtitles(SubtitlesRoute(itemId: item.id, title: LibraryUpkeep.pageTitle(item))))
+                } label: {
+                    Label("Find subtitles", systemImage: "captions.bubble")
+                }
+            }
+            if LibraryUpkeep.offersReleases(item) {
+                Button {
+                    findRelease(item, season: seasons.first { $0.id == seasonId }?.indexNumber)
+                } label: {
+                    Label("Find release", systemImage: "magnifyingglass")
+                }
+            }
+            if LibraryUpkeep.offersDeleting(item) {
+                Divider()
+                Button(role: .destructive) {
+                    openRoute(.removal(RemovalRoute(kind: "video", id: item.id, title: LibraryUpkeep.pageTitle(item))))
+                } label: {
+                    Label(RemovalLines.heading, systemImage: "trash")
+                }
+            }
+        } label: {
+            let size: CGFloat = metrics.small ? 42 : 46
+            Image(systemName: "ellipsis")
+                .font(.system(size: size * 0.4, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .glassPanel(Circle())
+                .contentShape(Circle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .accessibilityLabel("More actions")
+        .accessibilityIdentifier("title-more")
+    }
+
+    /// A series' seasons and aired episodes to search for releases, on the
+    /// season given; a series the hub could not name on TMDB says so instead.
+    private func findRelease(_ series: HubKit.LibraryItem, season: Int? = nil) {
+        guard let key = LibraryUpkeep.releaseKey(series) else {
+            status = StatusMessage(LibraryUpkeep.noMatchWords, tone: .warning)
+            return
+        }
+        let options = seasons.map { SeasonOption(number: $0.indexNumber, name: $0.title, year: $0.year, image: $0.poster) }
+        openRoute(.releaseTargets(ReleaseTargetsRoute(key: key, title: series.title, seasons: options, poster: series.poster,
+                                                      startSeason: season)))
+    }
+
+    /// One episode's releases, without choosing it again on the targets page.
+    private func findRelease(of episode: HubKit.LibraryItem, in series: HubKit.LibraryItem) {
+        guard let key = LibraryUpkeep.releaseKey(series) else {
+            status = StatusMessage(LibraryUpkeep.noMatchWords, tone: .warning)
+            return
+        }
+        openRoute(.releases(ReleasesRoute(key: key, heading: LibraryUpkeep.pageTitle(episode),
+                                          season: episode.seasonNumber, episode: episode.indexNumber)))
     }
 
     /// Play: a movie or an episode where it was left, or from the start
@@ -255,6 +323,16 @@ struct TitleView: View {
                             guard season.id != seasonId else { return }
                             seasonId = season.id
                             Task { await loadEpisodes(reset: true) }
+                        }
+                        .contextMenu {
+                            if let item, LibraryUpkeep.offersReleases(item) {
+                                Button {
+                                    findRelease(item, season: season.indexNumber)
+                                } label: {
+                                    Label("Find release for \(season.title.isEmpty ? EpisodeLabel.season(season.indexNumber) : season.title)",
+                                          systemImage: "magnifyingglass")
+                                }
+                            }
                         }
                     }
                 }
@@ -323,6 +401,20 @@ struct TitleView: View {
             openRoute(.title(TitleRoute(itemId: episode.id, title: episode.title)))
         } label: {
             Label("Episode details", systemImage: "info.circle")
+        }
+        if LibraryUpkeep.offersSubtitles(episode) {
+            Button {
+                openRoute(.subtitles(SubtitlesRoute(itemId: episode.id, title: LibraryUpkeep.pageTitle(episode))))
+            } label: {
+                Label("Find subtitles", systemImage: "captions.bubble")
+            }
+        }
+        if let item, LibraryUpkeep.offersReleases(item) {
+            Button {
+                findRelease(of: episode, in: item)
+            } label: {
+                Label("Find release", systemImage: "magnifyingglass")
+            }
         }
     }
 

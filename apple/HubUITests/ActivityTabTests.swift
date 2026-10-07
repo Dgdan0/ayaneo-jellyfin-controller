@@ -36,10 +36,21 @@ final class ActivityTabTests: XCTestCase {
     /// Scrolls the page until `element` is on screen, or gives up.
     @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, tries: Int = 6) -> Bool {
-        for _ in 0..<tries where !(element.exists && element.isHittable) {
-            app.swipeUp()
+        // On screen and clear of the tab bar at the foot, where a tap lands on the bar:
+        // the iPhone 17's screen is shorter than the Pro Max's.
+        func shown() -> Bool {
+            guard element.exists, element.isHittable else { return false }
+            let window = app.windows.firstMatch.frame
+            return element.frame.maxY < window.maxY - window.height * 0.15 && element.frame.minY > window.minY + 60
         }
-        return element.exists && element.isHittable
+        for _ in 0..<tries where !shown() {
+            if element.exists && element.frame.minY <= app.windows.firstMatch.frame.minY + 60 {
+                app.swipeDown()
+            } else {
+                app.swipeUp()
+            }
+        }
+        return shown()
     }
 
     // MARK: The dashboard
@@ -80,12 +91,14 @@ final class ActivityTabTests: XCTestCase {
         XCTAssertTrue(stop.waitForExistence(timeout: 15), "Severance cannot be stopped: \(buttons(app))")
         XCTAssertTrue(reveal(stop, in: app))
         stop.tap()
-        XCTAssertTrue(text(app, containing: "Stopped Severance").waitForExistence(timeout: 10), "the stop was not sent")
+        // The transfer's own state, not the notice, which is gone a few seconds after the answer.
         let start = app.buttons["start-\(severance)"]
-        XCTAssertTrue(start.waitForExistence(timeout: 10), "a stopped transfer offers no Start")
+        XCTAssertTrue(start.waitForExistence(timeout: 15), "the stop was not sent: a stopped transfer offers no Start")
+        XCTAssertFalse(app.buttons["stop-\(severance)"].exists, "the stopped transfer still offers Stop")
+        XCTAssertTrue(reveal(start, in: app))
         start.tap()
-        XCTAssertTrue(text(app, containing: "Started Severance").waitForExistence(timeout: 10), "the start was not sent")
-        XCTAssertTrue(app.buttons["stop-\(severance)"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["stop-\(severance)"].waitForExistence(timeout: 15), "the start was not sent: it offers no Stop")
+        XCTAssertFalse(start.exists, "the started transfer still offers Start")
     }
 
     @MainActor
@@ -98,11 +111,10 @@ final class ActivityTabTests: XCTestCase {
         let delete = app.buttons["Remove and delete files"]
         XCTAssertTrue(delete.waitForExistence(timeout: 5), "the menu has no Remove and delete files: \(buttons(app))")
         delete.tap()
-        // The harmless answer first.
+        // It asks first, with the harmless answer in the cancel role (iOS 26 shows it last).
         let alert = app.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 5), "deleting the files did not ask first")
         let answers = alert.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }
-        XCTAssertEqual(answers.first, "Cancel", "the harmless answer is not first: \(answers)")
         XCTAssertEqual(Set(answers), ["Cancel", "Remove and delete files"], "the question offers more than its two answers: \(answers)")
         alert.buttons["Cancel"].firstMatch.tap()
         XCTAssertTrue(app.buttons["more-\(expanse)"].exists, "Cancel removed the transfer")

@@ -38,6 +38,9 @@ enum DemoPlayback {
     }
 
     private static let choices = Mutex<[String: Choice]>([:])
+    /// The library item each session was prepared for, so a subtitle downloaded
+    /// for it (#34) is among the tracks its player lists.
+    private static let sessionItems = Mutex<[String: String]>([:])
 
     static func answer(method: String, path: String, query: String, body: Data?) -> DemoTransport.Answer? {
         let parts = path.split(separator: "/").map(String.init)
@@ -50,7 +53,8 @@ enum DemoPlayback {
             }
             let number = Int(parts[3].split(separator: "e").last ?? "") ?? 5
             choices.withLock { $0[sessionId(number)] = Choice() }
-            return DemoTransport.Answer(200, plan(number: number, choice: Choice()))
+            sessionItems.withLock { $0[sessionId(number)] = parts[3] }
+            return DemoTransport.Answer(200, plan(number: number, choice: Choice(), item: parts[3]))
         case ("POST", "sessions", "select"):
             guard namesItsVersion(body) else {
                 return DemoTransport.Answer(400, #"{"error":{"code":"invalid_request","message":"Name the version a track belongs to (#24)"}}"#)
@@ -62,7 +66,8 @@ enum DemoPlayback {
                 all[session] = choice
                 return choice
             }
-            return DemoTransport.Answer(200, plan(number: Int(session.suffix(2)) ?? 5, choice: choice))
+            let item = sessionItems.withLock { $0[session] } ?? ""
+            return DemoTransport.Answer(200, plan(number: Int(session.suffix(2)) ?? 5, choice: choice, item: item))
         case ("POST", "sessions", "cast-grant"):
             return DemoTransport.Answer(200, #"{"mediaUrl":"\#(stream)","mimeType":"application/x-mpegURL","subtitleUrls":{}}"#)
         case ("GET", "sessions", "subtitles") where parts.count == 6:
@@ -75,6 +80,7 @@ enum DemoPlayback {
             return ok
         case ("DELETE", "sessions", ""):
             choices.withLock { $0[parts[3]] = nil }
+            sessionItems.withLock { $0[parts[3]] = nil }
             return ok
         default:
             return nil
@@ -105,7 +111,7 @@ enum DemoPlayback {
         String(repeating: "d", count: 30) + String(format: "%02d", number % 100)
     }
 
-    private static func plan(number: Int, choice: Choice) -> String {
+    private static func plan(number: Int, choice: Choice, item itemId: String = "") -> String {
         func item(_ n: Int) -> String {
             let title = episodes[n] ?? "Episode \(n)"
             return #"{"id":"demo-e\#(n)","type":"episode","title":"\#(title)","seriesTitle":"Bleach","seriesId":"demo-bleach","seasonNumber":1,"episodeNumber":\#(n)}"#
@@ -121,6 +127,12 @@ enum DemoPlayback {
         let reason = converted ? #","transcodeReason":"ContainerBitrateExceedsLimit""# : ""
         let height = choice.source == "demo-720" ? 720 : 1080
         let file = "/v1/playback/sessions/\(session)/subtitles"
+        // What Bazarr downloaded for this item in this run: external tracks after the three that every item has.
+        let downloaded = DemoUpkeep.downloadedTracks(for: itemId).enumerated().map { offset, track in
+            let flags = (track.forced ? #","forced":true"# : "") + (track.hi ? #","hearingImpaired":true"# : "")
+            return #",{"index":\#(10 + offset),"type":"subtitle","language":"\#(track.code)","codec":"srt","external":true,"#
+                + #""externalUrl":"\#(file)/\#(10 + offset)"\#(flags)}"#
+        }.joined()
         return #"""
         {"sessionId":"\#(session)","item":\#(item(number)),
          "positionMillis":0,"durationMillis":0,"mediaUrl":"\#(media)",
@@ -134,7 +146,7 @@ enum DemoPlayback {
          "selectedAudioIndex":\#(choice.audio)\#(subtitle),
          "subtitleTracks":[{"index":3,"type":"subtitle","language":"eng","codec":"srt","external":true,"externalUrl":"\#(file)/3"},
                            {"index":4,"type":"subtitle","language":"heb","codec":"webvtt","external":true,"externalUrl":"\#(file)/4"},
-                           {"index":5,"type":"subtitle","label":"Signs","language":"eng","codec":"ass","forced":true,"external":true,"externalUrl":"\#(file)/5"}],
+                           {"index":5,"type":"subtitle","label":"Signs","language":"eng","codec":"ass","forced":true,"external":true,"externalUrl":"\#(file)/5"}\#(downloaded)],
          "nextItem":\#(item(number + 1))\#(previous),
          "previewUrl":"/v1/playback/sessions/\#(session)/preview",
          "chapters":[{"id":"0","name":"Opening","positionMillis":0},{"id":"1","name":"Part A","positionMillis":90000},

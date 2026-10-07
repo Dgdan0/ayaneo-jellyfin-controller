@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Answers hub requests from fixtures, for the `-demo` launch argument, SwiftUI
 /// previews and layout screenshots taken without a reachable hub. The fixtures
@@ -9,23 +10,51 @@ public struct DemoTransport: HubTransport {
     public static let address = "https://demo.hub.invalid"
     public static let token = String(repeating: "d", count: 43)
 
+    /// An outage of the reading servers (#37, debug builds' UI tests): every
+    /// issue's page list, page and place goes unanswered, as with no network,
+    /// except a page this run already served asked for from the device's
+    /// cache only, which the demo stands in for.
+    static let outage = Mutex(false)
+    private static let served = Mutex<Set<String>>([])
+
+    public static func beginOutage() { outage.withLock { $0 = true } }
+    public static func endOutage() { outage.withLock { $0 = false } }
+
     public init() {}
 
+    /// How long each answer takes: a moment, as a hub does. HUB_DEMO_DELAY_MS
+    /// makes it longer, for a screen's state while it waits (the last answer
+    /// kept, #38).
+    static let delay: Duration = .milliseconds(ProcessInfo.processInfo.environment["HUB_DEMO_DELAY_MS"].flatMap(Int.init) ?? 250)
+
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        try await Task.sleep(for: .milliseconds(250))
+        try await Task.sleep(for: Self.delay)
         let path = request.url?.path ?? ""
         let method = request.httpMethod ?? "GET"
         let query = request.url?.query ?? ""
+        if path.contains("/publications/") {
+            if request.cachePolicy == .returnCacheDataDontLoad {
+                guard Self.served.withLock({ $0.contains(path) }) else { throw URLError(.resourceUnavailable) }
+            } else if Self.outage.withLock({ $0 }) {
+                throw URLError(.notConnectedToInternet)
+            }
+        }
         // Offline downloads first: their video is written once per run, which takes a moment (#5).
         let offline = await DemoOffline.answer(method: method, path: path, query: query, body: request.httpBody)
         let answer = offline
             ?? DemoActivity.answer(method: method, path: path, query: query, body: request.httpBody)
+            ?? DemoNotifications.answer(method: method, path: path, query: query, body: request.httpBody)
+            ?? DemoUpkeep.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoPlayback.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoMedia.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoComics.answer(method: method, path: path, query: query, body: request.httpBody)
+            ?? DemoReadAlong.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoBooks.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoReading.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? Self.fixture(method: method, path: path)
+        if method == "GET", answer.status == 200, path.contains("/publications/"), path.contains("/pages/") {
+            _ = Self.served.withLock { $0.insert(path) }
+        }
         let response = HTTPURLResponse(url: request.url!, statusCode: answer.status, httpVersion: "HTTP/1.1",
                                        headerFields: answer.headers.merging(["Content-Type": answer.type]) { _, type in type })!
         return (answer.body, response)
@@ -56,7 +85,6 @@ public struct DemoTransport: HubTransport {
         switch (method, path) {
         case ("GET", "/v1/health"): Answer(200, health)
         case ("GET", "/v1/users"): Answer(200, users)
-        case ("GET", "/v1/notifications"): Answer(200, notifications)
         case ("POST", "/v1/manage/jellyfin/scan"), ("POST", "/v1/manage/reading/scan"):
             Answer(202, #"{"ok":true,"action":"scan_library"}"#)
         default: Answer(404, #"{"error":{"code":"not_found","message":"Not in the demo hub yet"}}"#)
@@ -83,16 +111,5 @@ public struct DemoTransport: HubTransport {
               {"id":"66666666666666666666666666666666","name":"Hadas"},
               {"id":"77777777777777777777777777777777","name":"Horim"}],
      "partial":[],"cache":{"hit":true,"ageSeconds":3,"stale":false}}
-    """#
-
-    /// One active warning and one service the hub cannot reach: two need attention.
-    static let notifications = #"""
-    {"generatedAt":"2026-10-04T09:00:00Z","attentionCount":2,
-     "sections":[
-      {"service":"sonarr","state":"up","items":[
-        {"id":"sonarr:health:demo","service":"sonarr","kind":"health","severity":"warning",
-         "title":"IndexerLongTermStatusCheck","detail":"Indexers unavailable due to failures for more than 6 hours","active":true}]},
-      {"service":"storyteller","state":"unavailable","items":[]}],
-     "partial":[],"cache":{"hit":false,"ageSeconds":0,"stale":false}}
     """#
 }

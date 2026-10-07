@@ -249,6 +249,8 @@ final class PlayerModel {
         backdrop = request.backdrop
         opens += 1
         aspect = .standard
+        // Settings › Subtitles may have changed it since the window began.
+        subtitleLook = PlaybackMemory.look()
         speed = PlaybackEnhancements.defaultSpeed
         player.defaultRate = speed
         startSession()

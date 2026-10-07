@@ -10,7 +10,9 @@ struct ComicReaderView: View {
     private let work: ReadingWork?
     private let workId: String
     private let publication: ReadingSectionItem
+    private let list: ReadingListRun?
     @Environment(AppModel.self) private var model
+    @Environment(\.readingMarks) private var marks
     @State private var reader: ComicReaderModel?
 
     /// The issue `publication` of `work`, the run its page loaded.
@@ -18,6 +20,15 @@ struct ComicReaderView: View {
         self.work = work
         workId = work.id
         self.publication = publication
+        list = nil
+    }
+
+    /// Kavita's reading list `list`, at its issue open (#37): each issue in its own run.
+    init(list: ReadingListRun) {
+        work = nil
+        workId = list.current.workId
+        publication = list.current.publication
+        self.list = list
     }
 
     var body: some View {
@@ -30,6 +41,14 @@ struct ComicReaderView: View {
         .task {
             guard reader == nil else { return }
             let opened = ComicReaderModel(hub: model.hub, work: work, workId: workId, publication: publication)
+            opened.list = list
+            // The issues' page lists kept for an outage (#37).
+            opened.manifests = ReadingOffline.manifests(app: model)
+            opened.scope = ReadingOffline.scope(app: model)
+            // Marked unread: the issue opens at its first page. A page sent forgets the mark (#37).
+            opened.startsFresh = marks.startsFresh(workId)
+            let keeper = marks.kept
+            opened.onKept = { runId in keeper(runId) }
             #if DEBUG
             opened.controlsPinned = ProcessInfo.processInfo.environment["HUB_READ_CHROME"] == "pinned"
             #endif
@@ -50,6 +69,7 @@ struct ComicReaderScreen: View {
     @Environment(\.closeReader) private var closeReader
     @Environment(\.scenePhase) private var scenePhase
     @State private var pad = ReaderPadInput()
+    @State private var comfort = ReaderComfort.shared
     @State private var scrubbing: Int?
     @State private var scrubTrack = CGRect.zero
     @FocusState private var keys: Bool
@@ -105,6 +125,8 @@ struct ComicReaderScreen: View {
                     ComicReaderSheetView(reader: reader, sheet: sheet, layout: layout)
                         .id(sheet)
                 }
+                // Comfort over the whole reader, pages and controls (#37).
+                ComfortLayer(comfort: comfort.value)
                 #if os(macOS)
                 // The hidden title bar's band still moves the window.
                 Color.clear
@@ -125,7 +147,7 @@ struct ComicReaderScreen: View {
         // issue's cover, and the accent is Books' gold.
         .environment(\.glassPalette, model.colors.palette(for: reader.cover))
         .environment(\.glassOverVideo, true)
-        .environment(\.glassAccent, AccentPreset.defaultFor(.books))
+        .environment(\.glassAccent, AccentModel.shared.books)
         .onChange(of: reader.cover, initial: true) { _, path in
             if !path.isEmpty { model.colors.want([path]) }
         }
@@ -235,6 +257,10 @@ struct ComicReaderScreen: View {
         pad.stop()
         reader.stop()
         closeReader()
+        #if DEBUG
+        // HUB_DEMO_OUTAGE=after-close, the demo hub only: the reading servers go once a reader has closed (#37).
+        if model.isDemo, ProcessInfo.processInfo.environment["HUB_DEMO_OUTAGE"] == "after-close" { DemoTransport.beginOutage() }
+        #endif
     }
 
     #if DEBUG

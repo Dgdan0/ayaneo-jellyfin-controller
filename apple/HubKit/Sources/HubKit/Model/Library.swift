@@ -379,6 +379,9 @@ public struct LibraryItem: Decodable, Equatable, Sendable, Identifiable {
     public var poster: String
     public var thumb: String
     public var backdrop: String
+    /// "tmdb:series:1234" for a series the hub can name on TMDB: what its release
+    /// search is asked by. Empty for any other, and from an older hub (#34).
+    public var mediaKey: String
 
     public init(id: String, type: String, title: String, subtitle: String = "", seriesTitle: String = "", seriesId: String = "",
                 seasonId: String = "", year: Int = 0, indexNumber: Int = 0, seasonNumber: Int = 0,
@@ -386,7 +389,8 @@ public struct LibraryItem: Decodable, Equatable, Sendable, Identifiable {
                 runtimeSeconds: Int = 0, rating: Double = 0, criticRating: Double = 0, officialRating: String = "",
                 genres: [String] = [], studios: [String] = [], people: [LibraryPerson] = [],
                 played: Bool = false, favorite: Bool = false, unplayedCount: Int = 0, progress: Double = 0,
-                positionSeconds: Int = 0, poster: String = "", thumb: String = "", backdrop: String = "") {
+                positionSeconds: Int = 0, poster: String = "", thumb: String = "", backdrop: String = "",
+                mediaKey: String = "") {
         self.id = id
         self.type = type
         self.title = title
@@ -415,12 +419,13 @@ public struct LibraryItem: Decodable, Equatable, Sendable, Identifiable {
         self.poster = poster
         self.thumb = thumb
         self.backdrop = backdrop
+        self.mediaKey = mediaKey
     }
 
     enum CodingKeys: String, CodingKey {
         case id, type, title, subtitle, seriesTitle, seriesId, seasonId, year, indexNumber, seasonNumber, overview,
              originalTitle, premiereDate, runtimeSeconds, rating, criticRating, officialRating, genres, studios,
-             people, played, favorite, unplayedCount, progress, positionSeconds, poster, thumb, backdrop
+             people, played, favorite, unplayedCount, progress, positionSeconds, poster, thumb, backdrop, mediaKey
     }
 
     public init(from decoder: any Decoder) throws {
@@ -437,7 +442,7 @@ public struct LibraryItem: Decodable, Equatable, Sendable, Identifiable {
             played: c.value(.played, false), favorite: c.value(.favorite, false),
             unplayedCount: c.value(.unplayedCount, 0), progress: c.value(.progress, 0),
             positionSeconds: c.value(.positionSeconds, 0), poster: c.value(.poster, ""),
-            thumb: c.value(.thumb, ""), backdrop: c.value(.backdrop, ""))
+            thumb: c.value(.thumb, ""), backdrop: c.value(.backdrop, ""), mediaKey: c.value(.mediaKey, ""))
     }
 }
 

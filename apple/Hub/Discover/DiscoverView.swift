@@ -153,8 +153,16 @@ struct DiscoverView: View {
         loading = true
         defer { loading = false }
         status = StatusText.loading("Discover", refreshing: !rows.isEmpty)
+        // The last answer first, while the new one is asked for (#38).
+        if rows.isEmpty, let kept = await model.hub.lastAnswer(HubEndpoints.discover, as: DiscoverResponse.self, keeper: model.answers) {
+            rows = kept.value.rows
+            model.colors.want(rows.flatMap { $0.items.prefix(12).map(\.pageArtwork) })
+            status = LastAnswer.status(ageSeconds: kept.ageSeconds)
+        }
         do {
-            let response = try await model.hub.fetch(HubEndpoints.discover, as: DiscoverResponse.self)
+            let response = try await model.hub.fetchKept(HubEndpoints.discover, as: DiscoverResponse.self, keeper: model.answers) {
+                LastAnswer.worthKeeping(rows: $0.rows.count, unavailable: $0.partial.count)
+            }
             rows = response.rows
             paging.clear()
             model.colors.want(rows.flatMap { $0.items.prefix(12).map(\.pageArtwork) })

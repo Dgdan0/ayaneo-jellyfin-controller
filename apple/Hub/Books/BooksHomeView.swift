@@ -49,12 +49,15 @@ struct BooksHomeView: View {
 
     private static let recentLimit = 12
 
+    /// The shelves, each book as the person marked it (#37): one marked read leaves Continue reading.
     private var rows: [ReadingShelfRow] {
-        ReadingShelves.rows(current: unsent + candidates, state: books.lists, resolved: observed,
-                            next: ReadingShelves.nextInSeries(candidates), recent: recent)
+        let marked = candidates.map(books.project)
+        return ReadingShelves.rows(current: unsent.map(books.project) + marked, state: books.lists,
+                                   resolved: observed.mapValues(books.project),
+                                   next: ReadingShelves.nextInSeries(marked), recent: recent)
     }
 
-    private var series: [ReadingShelves.SeriesShelfItem] { ReadingShelves.yourSeries(candidates) }
+    private var series: [ReadingShelves.SeriesShelfItem] { ReadingShelves.yourSeries(candidates.map(books.project)) }
 
     var body: some View {
         let rows = rows
@@ -104,14 +107,16 @@ struct BooksHomeView: View {
             Button("Cancel", role: .cancel) { naming = nil }
             Button(naming?.listId == nil ? "Create" : "Save") { saveNaming() }
         }
-        .confirmationDialog("Delete \(deleting?.title ?? "")?", isPresented: Binding(
-            get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
+        .alert("Delete \(deleting?.title ?? "")?", isPresented: Binding(
+            get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { list in
+            // The harmless answer has the cancel role: Escape presses it, and iOS 26 shows it
+            // (as the last answer, its own place for it). Without it iOS adds a Cancel of its own.
             Button("Keep the list", role: .cancel) { deleting = nil }
             Button("Delete list", role: .destructive) {
-                if let id = deleting?.id { books.updateLists { $0.delete(id) } }
                 deleting = nil
+                books.updateLists { $0.delete(list.id) }
             }
-        } message: {
+        } message: { _ in
             Text("The books remain in your library.")
         }
     }

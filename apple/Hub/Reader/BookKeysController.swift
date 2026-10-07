@@ -97,8 +97,13 @@ final class BookKeysController: UIViewController {
         onKey(.delete)
     }
 
+    /// The key's own command, or any while this controller holds the
+    /// keyboard. A word selected on the page (which then holds it) asks the
+    /// responders what its menu may offer, and answering yes to that put
+    /// "Delete" in a book's menu beside Copy and Look Up (the simulator, 2026-10-07).
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        action == #selector(delete(_:)) ? true : super.canPerformAction(action, withSender: sender)
+        guard action == #selector(delete(_:)) else { return super.canPerformAction(action, withSender: sender) }
+        return sender is UIKeyCommand || isFirstResponder
     }
 
     // MARK: Presses
