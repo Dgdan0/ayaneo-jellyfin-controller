@@ -250,7 +250,7 @@ struct MainView: View {
     @State private var debugSheet = false
     /// Debug builds: HUB_PLAY=<item id> opens the player at launch.
     @State private var debugPlay = ""
-    /// Debug builds: HUB_TITLE=<item id> opens that library title on the first section's stack (#34).
+    /// Debug builds: HUB_TITLE=<item id>[|subtitles|removal] opens that library title, and on from it, on the first section's stack (#34).
     @State private var debugTitle = ""
 
     private var key: StackKey { StackKey(side: side, section: section) }
@@ -351,7 +351,15 @@ struct MainView: View {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled, debugTitle == itemId else { return }
                 debugTitle = ""
-                paths[key, default: []].append(.title(TitleRoute(itemId: itemId, title: "Title")))
+                // "<id>|subtitles" or "<id>|removal" goes on to that page.
+                let parts = itemId.split(separator: "|", maxSplits: 1).map(String.init)
+                var pages: [AppRoute] = [.title(TitleRoute(itemId: parts[0], title: "Title"))]
+                switch parts.count > 1 ? parts[1] : "" {
+                case "subtitles": pages.append(.subtitles(SubtitlesRoute(itemId: parts[0], title: "Bleach · S1E2 · A Second Look")))
+                case "removal": pages.append(.removal(RemovalRoute(kind: "video", id: parts[0], title: "Bleach")))
+                default: break
+                }
+                paths[key, default: []].append(contentsOf: pages)
             }
             .task(id: debugSheet) {
                 guard debugSheet else { return }

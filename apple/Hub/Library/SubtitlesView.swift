@@ -27,6 +27,9 @@ struct SubtitlesView: View {
     @State private var notice = StatusMessage("")
     @State private var working = false
     @State private var loads = 0
+    #if DEBUG
+    @State private var debugSearched = false
+    #endif
 
     private var shownStatus: StatusMessage {
         if !notice.text.isEmpty { return notice }
@@ -71,6 +74,15 @@ struct SubtitlesView: View {
         .ambientArtwork("")
         .refreshable { loads += 1 }
         .task(id: "\(route.itemId)·\(model.userId)·\(loads)") { await load() }
+        #if DEBUG
+        // scripts/mac.sh: HUB_SUBTITLES=search searches once the page has read its tracks, and opens the first result.
+        .task(id: state != nil) {
+            guard state != nil, !debugSearched, ProcessInfo.processInfo.environment["HUB_SUBTITLES"] == "search" else { return }
+            debugSearched = true
+            await search()
+            chosen = candidates?.first?.id
+        }
+        #endif
     }
 
     // MARK: The lists

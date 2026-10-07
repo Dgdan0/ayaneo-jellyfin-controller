@@ -28,6 +28,9 @@ struct RemovalView: View {
     /// A deletion that did not end well: some files may be gone, so the page
     /// offers to look again, or to leave for a library that reads again.
     @State private var failed = false
+    #if DEBUG
+    @State private var debugAsked = false
+    #endif
 
     var body: some View {
         ScrollView {
@@ -99,6 +102,14 @@ struct RemovalView: View {
         }
         .ambientArtwork("")
         .task(id: "\(route.id)·\(loads)") { await loadPreview() }
+        #if DEBUG
+        // scripts/mac.sh: HUB_REMOVAL=confirm asks the alert once the preview is there.
+        .onChange(of: preview?.ticket) { _, ticket in
+            guard ticket != nil, !debugAsked, ProcessInfo.processInfo.environment["HUB_REMOVAL"] == "confirm" else { return }
+            debugAsked = true
+            confirming = true
+        }
+        #endif
         // A native alert, Cancel in the cancel role (which iOS 26 places last).
         .alert(preview.map(RemovalLines.confirmTitle) ?? "", isPresented: $confirming, presenting: preview) { preview in
             Button(RemovalLines.keep, role: .cancel) {}
