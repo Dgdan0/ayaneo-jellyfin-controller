@@ -82,6 +82,30 @@ final class ListeningTests: XCTestCase {
         XCTAssertFalse(app.buttons["mini-play"].exists, "the mini player stayed after Stop")
     }
 
+    /// Parts lists the book's chapters by their titles (#31), from the
+    /// manifest's `chapters`: Dark Matter's demo names four across its three tracks.
+    @MainActor
+    func testPartsListTheBooksChaptersByTitle() {
+        // Its own page, as Listen opens it: the book on the player, paused.
+        let app = launch(open: "listen:rw_demo_darkmatter|demo-dm")
+        let play = app.buttons["listen-play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 15), "the audiobook's page did not open: \(buttons(app))")
+        XCTAssertTrue(waitUntil(15) { play.isEnabled }, "the audiobook was not put on the player")
+        let parts = app.buttons["Parts"]
+        XCTAssertTrue(parts.waitForExistence(timeout: 5), "the audiobook's page has no Parts: \(buttons(app))")
+        parts.tap()
+        for title in ["One", "Two", "Three", "Four"] {
+            let chapter = app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", title, title + " ·"))
+                .firstMatch
+            XCTAssertTrue(chapter.waitForExistence(timeout: 5), "Parts does not list \(title): \(buttons(app))")
+        }
+        // Chosen, the chapter plays from its start; the book is stopped after.
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Three'")).firstMatch.tap()
+        let stop = app.buttons["listen-stop"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        stop.tap()
+    }
+
     /// One sound at a time: a video opened while the book plays pauses it.
     @MainActor
     func testAVideoPausesTheAudiobook() {
