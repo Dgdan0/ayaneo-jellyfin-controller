@@ -279,8 +279,9 @@ func TestAlignmentChaptersBeginWhereTheirEntryIsFirstSpoken(t *testing.T) {
 		// Its heading is a picture in a document nothing narrates; the words are in the
 		// document after it, which no entry points at.
 		"Chapter 3: id3-s0",
-		// An entry that names a sentence begins with it.
-		"Chapter 4: id4-s1",
+		// The only entry into its document begins at its top, though it names the
+		// second sentence: it is the first, and has the document from there.
+		"Chapter 4: id4-s0",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("chapters = %q\nwant %q", got, want)
@@ -428,6 +429,71 @@ func TestAlignmentChaptersOfATextWithNoneOfItsSentencesBeginAtTheTopOfItsDocumen
 	}
 }
 
+// Mistborn's chapters open with an epigraph, spoken ahead of the heading the contents
+// point at. The first entry into a document has the document from its top, so the
+// epigraph is its chapter's and not the end of the chapter before.
+func TestAlignmentChaptersTheFirstEntryIntoADocumentBeginsAtItsTopWhateverItNames(t *testing.T) {
+	options := contentsEdition()
+	options.Documents = nil
+	options.Anchors = []FixtureAnchor{
+		{ID: "heading1", Chapter: 1, Before: 2}, // two sentences of epigraph, then the heading
+		{ID: "heading2", Chapter: 2, Before: 3},
+	}
+	options.Contents = []FixtureContent{
+		{Title: "One", Chapter: 1, Fragment: "heading1"},
+		// Naming a sentence, which is no more a reason to begin there.
+		{Title: "Two", Chapter: 2, Fragment: "id2-s3"},
+		{Title: "Three", Chapter: 3},
+	}
+	fixture := generateAligned(t, options)
+	alignment, err := readAlignmentOf(t, fixture.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := chapterLines(t, alignment, fixture), []string{"One: id1-s0", "Two: id2-s0", "Three: id3-s0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("chapters = %q, want %q", got, want)
+	}
+
+	// With no text to look through nothing changes: the first entry never needed it.
+	original := maxTextBytes
+	t.Cleanup(func() { maxTextBytes = original })
+	maxTextBytes = 1
+	alignment, err = readAlignmentOf(t, fixture.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := chapterLines(t, alignment, fixture), []string{"One: id1-s0", "Two: id2-s0", "Three: id3-s0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("with no text read, chapters = %q, want %q", got, want)
+	}
+}
+
+// Where several entries share a document the first has it from the top and each of the
+// others begins where it points, since what lies between two anchors is the earlier's.
+func TestAlignmentChaptersEntriesThatShareADocumentBeginAtTheirAnchorsAfterTheFirst(t *testing.T) {
+	options := contentsEdition()
+	options.Documents = nil
+	options.Anchors = []FixtureAnchor{
+		{ID: "a1", Chapter: 2, Before: 2},
+		{ID: "b1", Chapter: 2, Before: 4},
+	}
+	options.Contents = []FixtureContent{
+		{Title: "A", Chapter: 2, Fragment: "a1"},
+		{Title: "B", Chapter: 2, Fragment: "b1"},
+		// A sentence named by an entry after the first begins there.
+		{Title: "C", Chapter: 2, Fragment: "id2-s5"},
+		// No place named: the top of the document, where the first entry already is.
+		{Title: "D", Chapter: 2},
+	}
+	fixture := generateAligned(t, options)
+	alignment, err := readAlignmentOf(t, fixture.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := chapterLines(t, alignment, fixture), []string{"A: id2-s0", "B: id2-s4", "C: id2-s5", "D: id2-s0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("chapters = %q, want %q", got, want)
+	}
+}
+
 // An anchor after every narrated sentence of its document, as a heading left at the
 // end of one document is when the next begins its chapter: the words are in the
 // documents that follow, up to the next that an entry points at.
@@ -436,6 +502,7 @@ func TestAlignmentChaptersOfAnAnchorAfterTheLastSentenceBeginInTheDocumentsThatF
 	options.Anchors = nil
 	options.Contents = []FixtureContent{
 		{Title: "Chapter 1", Chapter: 1},
+		{Title: "Chapter 2", Chapter: 2},
 		{Title: "End of two", Chapter: 2, Fragment: "end2"},
 		{Title: "Chapter 4", Chapter: 4},
 	}
@@ -450,12 +517,12 @@ func TestAlignmentChaptersOfAnAnchorAfterTheLastSentenceBeginInTheDocumentsThatF
 	}
 	// Chapter 3's heading picture has no sentence, and its document, the next after it,
 	// has: the entry begins with it.
-	if got, want := chapterLines(t, alignment, fixture), []string{"Chapter 1: id1-s0", "End of two: id3-s0", "Chapter 4: id4-s0"}; !reflect.DeepEqual(got, want) {
+	if got, want := chapterLines(t, alignment, fixture), []string{"Chapter 1: id1-s0", "Chapter 2: id2-s0", "End of two: id3-s0", "Chapter 4: id4-s0"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("chapters = %q, want %q", got, want)
 	}
 
 	// Were the next document one an entry points at, there would be nothing to begin with.
-	options.Contents = append(options.Contents[:2:2], FixtureContent{Title: "Chapter 3", Chapter: 3}, options.Contents[2])
+	options.Contents = append(options.Contents[:3:3], FixtureContent{Title: "Chapter 3", Chapter: 3}, options.Contents[3])
 	fixture = generateAligned(t, options)
 	changed = rewriteEPUB(t, fixture.Path, func(files map[string][]byte, _ *[]string) {
 		replaceIn(files, "OEBPS/text/part0002.xhtml", "</p>", `<a id="end2"/></p>`)
@@ -464,7 +531,7 @@ func TestAlignmentChaptersOfAnAnchorAfterTheLastSentenceBeginInTheDocumentsThatF
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := chapterLines(t, alignment, fixture), []string{"Chapter 1: id1-s0", "Chapter 3: id3-s0", "Chapter 4: id4-s0"}; !reflect.DeepEqual(got, want) {
+	if got, want := chapterLines(t, alignment, fixture), []string{"Chapter 1: id1-s0", "Chapter 2: id2-s0", "Chapter 3: id3-s0", "Chapter 4: id4-s0"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("chapters = %q, want %q: the heading's own document is claimed by the next entry", got, want)
 	}
 }
@@ -500,7 +567,7 @@ func TestAlignmentChaptersBeginWithTheFirstSentenceOfTheTextNotTheFirstHeard(t *
 func TestAlignmentChaptersAnAnchorOnTheElementOfASentenceBeginsWithIt(t *testing.T) {
 	options := contentsEdition()
 	options.Anchors, options.Documents = nil, nil
-	options.Contents = []FixtureContent{{Title: "Chapter 1", Chapter: 1}, {Title: "Seam", Chapter: 2, Fragment: "seam"}}
+	options.Contents = []FixtureContent{{Title: "Chapter 1", Chapter: 1}, {Title: "Chapter 2", Chapter: 2}, {Title: "Seam", Chapter: 2, Fragment: "seam"}}
 	fixture := generateAligned(t, options)
 	changed := rewriteEPUB(t, fixture.Path, func(files map[string][]byte, _ *[]string) {
 		replaceIn(files, "OEBPS/text/part0002.xhtml", `<span id="id2-s3">Sentence 4 of part 2.</span>`, `<a id="id2-s3" name="seam">Sentence 4 of part 2.</a>`)
@@ -509,7 +576,7 @@ func TestAlignmentChaptersAnAnchorOnTheElementOfASentenceBeginsWithIt(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := chapterLines(t, alignment, fixture), []string{"Chapter 1: id1-s0", "Seam: id2-s3"}; !reflect.DeepEqual(got, want) {
+	if got, want := chapterLines(t, alignment, fixture), []string{"Chapter 1: id1-s0", "Chapter 2: id2-s0", "Seam: id2-s3"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("chapters = %q, want %q", got, want)
 	}
 }

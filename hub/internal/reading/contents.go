@@ -11,10 +11,11 @@ package reading
 // how the narrated files lie among the book's.
 //
 // What it reads besides the narration's own documents: the navigation document
-// or the NCX, and, for an entry that points at an anchor no sentence carries (a
-// heading's id), the one text document the anchor is in, only to learn where the
-// anchor stands among the sentences. Each is read within the same size cap, and
-// a document that is not well-formed or declares a DTD gives no contents.
+// or the NCX, and, for an entry that is not the first into its document and
+// points at an anchor no sentence carries (a heading's id), the one text document
+// the anchor is in, only to learn where the anchor stands among the sentences.
+// Each is read within the same size cap, and a document that is not well-formed
+// or declares a DTD gives no contents.
 
 import (
 	"archive/zip"
@@ -64,13 +65,17 @@ type Chapter struct {
 // that is the order of the tracks the audio files are matched to, which this
 // reader does not know. The slice is shared; do not change it.
 //
-// An entry begins where the first narrated sentence at or after its place in the
-// text is spoken, and the place is a document and, when it has one, the id of an
-// element in it. A sentence of its own document is the first choice. When there
-// is none the next documents are looked through, up to the next one another entry
-// points at, because a chapter's heading may be a picture in a document of its
-// own with the words in the document after it (Dark Matter's chapters ten and
-// eleven, whose headings are documents of 805 and 811 bytes holding one picture).
+// An entry begins where a narrated sentence of its own document is spoken. The
+// first entry into a document has all of it from the top, wherever its anchor is:
+// what is spoken ahead of its heading, such as Mistborn's epigraph, is its
+// chapter's. The entries after it in the same document begin at the first narrated
+// sentence at or after the id they name (an anchor, or a sentence itself), since
+// what lies between two anchors belongs to the earlier. When the entry's own
+// document has nothing narrated the next documents are looked through, up to the
+// next one another entry points at, because a chapter's heading may be a picture
+// in a document of its own with the words in the document after it (Dark Matter's
+// chapters ten and eleven, whose headings are documents of 805 and 811 bytes
+// holding one picture).
 func (a *Alignment) Chapters() []Chapter { return a.chapters }
 
 // packageNavProperty is how an EPUB 3 package marks its navigation document.
@@ -309,20 +314,27 @@ func cleanTitle(raw string) string {
 	return title
 }
 
-// placeChapters finds where each entry of the contents begins: the first
-// narrated sentence at or after its place in the text, in its own document or,
-// when that has none, in the documents after it that no entry points at. An entry
-// with no such sentence is not narrated and has no chapter.
+// placeChapters finds where each entry of the contents begins (see Chapters): the
+// top of its document when it is the first entry into one that is narrated, else
+// the first narrated sentence at or after the id it names, and when its own
+// document has nothing to begin with, the first narrated sentence of the documents
+// after it that no entry points at. An entry with none is not narrated and has no
+// chapter.
 func (a *Alignment) placeChapters(entries map[string]*zip.File) []Chapter {
 	if len(a.Contents) == 0 {
 		return nil
 	}
-	// The documents entries point into, and where each is in the reading order.
+	// The documents entries point into, which entry is the first into each, and the
+	// anchors the entries after it name: the first begins at the top of its document
+	// and needs none of them placed.
 	targets := map[string]bool{}
+	firstInto := map[string]int{}
 	anchors := map[string][]string{}
-	for _, entry := range a.Contents {
+	for index, entry := range a.Contents {
 		targets[entry.Document] = true
-		if entry.Fragment != "" {
+		if _, seen := firstInto[entry.Document]; !seen {
+			firstInto[entry.Document] = index
+		} else if entry.Fragment != "" {
 			anchors[entry.Document] = append(anchors[entry.Document], entry.Fragment)
 		}
 	}
@@ -413,13 +425,17 @@ func (a *Alignment) placeChapters(entries map[string]*zip.File) []Chapter {
 		return placed
 	}
 
-	begin := func(entry ContentsEntry) (findLocation, bool) {
+	begin := func(index int, entry ContentsEntry) (findLocation, bool) {
 		own := sentences[entry.Document]
 		if len(own) > 0 {
-			if entry.Fragment == "" {
+			// The first entry into a document has it from the top, wherever its anchor is:
+			// what is spoken ahead of the heading (Mistborn's epigraph, which comes before
+			// the "2") is its chapter's. So is an entry that names no place.
+			if entry.Fragment == "" || firstInto[entry.Document] == index {
 				return own[0], true
 			}
-			// An entry that names a sentence begins there.
+			// The entries after it begin where they point, since what lies between two
+			// anchors belongs to the earlier. One that names a sentence begins there.
 			if loc, spoken := a.finds[findKey{entry.Document, entry.Fragment}]; spoken {
 				return loc, true
 			}
@@ -450,7 +466,7 @@ func (a *Alignment) placeChapters(entries map[string]*zip.File) []Chapter {
 
 	chapters := make([]Chapter, 0, len(a.Contents))
 	for index, entry := range a.Contents {
-		if loc, narrated := begin(entry); narrated {
+		if loc, narrated := begin(index, entry); narrated {
 			chapters = append(chapters, Chapter{Entry: index, Title: entry.Title, File: loc.file, Par: a.par(loc)})
 		}
 	}
