@@ -201,6 +201,10 @@ struct BookReaderScreen: View {
         .onChange(of: reader.leaving) { _, leaving in
             if leaving { leave() }
         }
+        // A sheet that took the keyboard (Search) gives it back to the screen.
+        .onChange(of: reader.sheet) { _, sheet in
+            if sheet == nil { keys = true }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { reader.flushPlace() }
         }
@@ -259,8 +263,8 @@ struct BookReaderScreen: View {
     /// Debug builds, for screenshots: HUB_BOOK_SCROLL=1 (or 0) turns continuous
     /// scrolling on (or off) for every book, as Appearance would and kept as it
     /// keeps it; HUB_BOOK_AT=<percent> goes that far into the book;
-    /// HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|comfort|keys opens the menu
-    /// or a sheet, once the book has opened.
+    /// HUB_BOOK_SHEET=menu|contents|bookmarks|search|appearance|comfort|keys opens the menu
+    /// or a sheet, once the book has opened; HUB_BOOK_SEARCH=<words> searches for them.
     private func debugTour() async {
         guard reader.phase == .reading else { return }
         let environment = ProcessInfo.processInfo.environment
@@ -279,6 +283,12 @@ struct BookReaderScreen: View {
         case "menu": reader.setControls(true)
         case "contents": reader.openSheet(.contents)
         case "bookmarks": reader.openSheet(.bookmarks)
+        case "search":
+            reader.openSheet(.search)
+            if let words = environment["HUB_BOOK_SEARCH"], !words.isEmpty {
+                reader.searchText = words
+                reader.runSearch()
+            }
         case "appearance": reader.openSheet(.appearance)
         case "comfort":
             reader.appearanceTab = .comfort

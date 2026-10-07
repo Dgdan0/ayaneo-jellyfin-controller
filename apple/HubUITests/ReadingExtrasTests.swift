@@ -262,4 +262,78 @@ final class ReadingExtrasTests: XCTestCase {
     private func waitUntilLabel(_ element: XCUIElement, _ label: String) -> Bool {
         waitUntil(20) { element.exists && element.label == label }
     }
+
+    // MARK: Search and Look Up
+
+    /// Recursion in the demo, paged, at its first page, with a sheet open.
+    @MainActor
+    private func openBook(_ environment: [String: String] = [:]) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo"]
+        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_BOOK": "rw_demo_recursion/demo-rw_demo_recursion",
+                                 "HUB_BOOK_SCROLL": "0"].merging(environment) { $1 }
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "book-page").firstMatch.waitForExistence(timeout: 20),
+                      "the book did not open")
+        return app
+    }
+
+    /// A word typed and searched for: the passages with it, under their
+    /// chapters; one chosen opens its page, with the way back in the menu,
+    /// and the search keeps what it found for the next time.
+    @MainActor
+    func testABookIsSearchedAndAPassageOpens() {
+        let app = openBook(["HUB_BOOK_SHEET": "search"])
+        let field = app.textFields["book-search-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 15), "the reader has no search")
+        field.tap()
+        field.typeText("harbour")
+        app.buttons["book-search-go"].tap()
+        let summary = app.staticTexts.matching(identifier: "book-search-summary").firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: 30), "the search found nothing to say")
+        XCTAssertTrue(summary.label.lowercased().contains("match"), summary.label)
+        XCTAssertFalse(summary.label.hasPrefix("No matches"), "harbour is in the book: \(summary.label)")
+        let first = app.buttons["book-search-hit-0"]
+        XCTAssertTrue(first.exists)
+        XCTAssertTrue(first.label.lowercased().contains("harbour"), "the passage does not show the word: \(first.label)")
+        keep(app, "book-search-results")
+        let chapter = first.label.components(separatedBy: ",").first ?? ""
+        first.tap()
+
+        // Its page, the sheet gone, and the way back to where the search began.
+        XCTAssertTrue(waitForGone(field, 8), "the passage did not open")
+        let back = app.buttons.matching(NSPredicate(format: "identifier IN %@", ["book-returnPlace", "book-return"])).firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 8), "the menu has no way back: \(buttons(app))")
+        let position = app.staticTexts["book-position"]
+        XCTAssertTrue(waitUntil(8) { position.label.contains(chapter) }, "it did not open \(chapter): \(position.label)")
+        keep(app, "book-search-opened")
+
+        // The search again: what it found is still there.
+        app.buttons["book-search"].tap()
+        XCTAssertTrue(summary.waitForExistence(timeout: 5), "the search forgot what it found")
+        XCTAssertTrue(app.buttons["book-search-hit-0"].exists)
+    }
+
+    /// A word held on the page offers the system's Look Up, and not the
+    /// reader's own Delete key as an action on the words.
+    @MainActor
+    func testAWordOnThePageCanBeLookedUp() {
+        let app = openBook()
+        let page = app.descendants(matching: .any).matching(identifier: "book-page").firstMatch
+        // Readium lays the page out after it appears.
+        _ = waitUntil(2) { false }
+        // The opening paragraph, a little way down the page.
+        let word = page.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.22))
+        var lookUp = app.menuItems["Look Up"]
+        for _ in 0..<3 where !lookUp.exists {
+            word.press(forDuration: 1.1)
+            lookUp = app.menuItems["Look Up"].exists ? app.menuItems["Look Up"] : app.buttons["Look Up"]
+            _ = lookUp.waitForExistence(timeout: 3)
+        }
+        keep(app, "book-look-up-menu")
+        XCTAssertTrue(lookUp.exists, "a word held offers no Look Up: \(app.menuItems.allElementsBoundByIndex.map(\.label))")
+        XCTAssertFalse(app.menuItems["Delete"].exists || app.buttons["Delete"].exists, "a book's words offer Delete")
+        lookUp.tap()
+        keep(app, "book-look-up")
+    }
 }

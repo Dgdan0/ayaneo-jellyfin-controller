@@ -4,7 +4,7 @@ import SwiftUI
 
 /// The book's sheets, in the readers' frame (`ReaderSheetFrame`), the page
 /// shrunk beside them so a change of appearance shows as it is made:
-/// Contents (with the bookmarks beside it), Appearance and Keys.
+/// Contents (with the bookmarks beside it), Search, Appearance and Keys.
 struct BookReaderSheetView: View {
     let reader: BookReaderModel
     let sheet: BookReaderModel.Sheet
@@ -16,6 +16,7 @@ struct BookReaderSheetView: View {
                          close: close) { proxy in
             switch sheet {
             case .contents, .bookmarks: navigator(proxy)
+            case .search: BookSearchSheet(reader: reader, proxy: proxy)
             case .appearance: BookAppearanceSheet(reader: reader)
             case .keys: keys
             }
@@ -25,6 +26,7 @@ struct BookReaderSheetView: View {
     private var title: String {
         switch sheet {
         case .contents, .bookmarks: "Contents"
+        case .search: "Search this book"
         case .appearance: "Appearance"
         case .keys: "Keys"
         }
@@ -33,6 +35,7 @@ struct BookReaderSheetView: View {
     private var subtitle: String {
         switch sheet {
         case .contents, .bookmarks: reader.title
+        case .search: "Find a passage in this edition"
         case .appearance: "Every book · kept as you change it"
         case .keys: "What the keys do while you read a book"
         }
@@ -356,6 +359,133 @@ struct PageSample: View {
             }
         }
         .accessibilityHidden(true)
+    }
+}
+/// Search this book (#37; Android's search sheet): a word or phrase, then
+/// the passages with it, each under its chapter with the match in bold. A
+/// passage opens its page with the match marked; what was found stays for
+/// the next time the sheet opens, so the next passage is a step away.
+struct BookSearchSheet: View {
+    @Bindable var reader: BookReaderModel
+    let proxy: ScrollViewProxy
+    @FocusState private var typing: Bool
+    @Environment(\.glassAccent) private var accent
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.white.opacity(0.6))
+                TextField("Word or phrase", text: $reader.searchText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .focused($typing)
+                    .onSubmit { reader.runSearch() }
+                    .onChange(of: reader.searchText) { _, text in
+                        if text.count > BookSearch.longestQuery { reader.searchText = String(text.prefix(BookSearch.longestQuery)) }
+                    }
+                    .accessibilityLabel("Search this book")
+                    .accessibilityIdentifier("book-search-field")
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .glassPanel(Capsule())
+            Button {
+                typing = false
+                reader.runSearch()
+            } label: {
+                Text("Search")
+            }
+            .buttonStyle(PrimaryPillStyle(accent: accent))
+            .disabled(reader.searchState == .searching)
+            .accessibilityIdentifier("book-search-go")
+        }
+        .onAppear {
+            // A new search starts typing; one with results keeps them in view.
+            if reader.searchState == .idle { typing = true }
+        }
+        results
+    }
+
+    @ViewBuilder private var results: some View {
+        switch reader.searchState {
+        case .idle:
+            SheetNote(text: "A word or phrase as it is written in this edition. The first 100 passages are shown.")
+        case .searching:
+            HStack(spacing: 10) {
+                ProgressView().tint(.white)
+                Text(BookSearch.searching)
+                    .font(HubType.body(14, relativeTo: .subheadline))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .padding(.vertical, 6)
+            .accessibilityElement(children: .combine)
+        case .problem(let problem):
+            SheetGroup {
+                SheetRow(title: problem.title, detail: problem.detail, chevron: problem != .notSearchable) {
+                    if problem != .notSearchable { reader.runSearch() }
+                }
+            }
+        case .found(let hits):
+            SheetLabel(text: BookSearch.summary(hits.count))
+                .accessibilityIdentifier("book-search-summary")
+            if !hits.isEmpty {
+                SheetGroup {
+                    ForEach(Array(hits.enumerated()), id: \.element.id) { index, hit in
+                        Button { reader.openFound(hit) } label: { row(hit) }
+                            .buttonStyle(SheetRowStyle())
+                            .overlay { cursor(index) }
+                            .accessibilityLabel(hit.label)
+                            .accessibilityIdentifier("book-search-hit-\(index)")
+                            .id(hit.id)
+                    }
+                }
+                .onChange(of: reader.sheetCursor) { _, cursor in
+                    if hits.indices.contains(cursor) {
+                        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(hits[cursor].id, anchor: .center) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func row(_ hit: BookSearchHit) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(hit.chapter)
+                .font(HubType.body(12.5, weight: .semibold, relativeTo: .caption))
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(1)
+            Text(passage(hit))
+                .font(HubType.body(14.5, relativeTo: .body))
+                .foregroundStyle(.white.opacity(0.78))
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+
+    /// The passage with its match in bold, white.
+    private func passage(_ hit: BookSearchHit) -> AttributedString {
+        var line = AttributedString(hit.before)
+        var match = AttributedString(hit.match)
+        match.font = HubType.body(14.5, weight: .bold, relativeTo: .body)
+        match.foregroundColor = .white
+        line.append(match)
+        line.append(AttributedString(hit.after))
+        return line
+    }
+
+    @ViewBuilder private func cursor(_ index: Int) -> some View {
+        if reader.controllerActive && index == reader.sheetCursor {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(.white, lineWidth: 2)
+                .padding(2)
+                .allowsHitTesting(false)
+        }
     }
 }
 #endif
