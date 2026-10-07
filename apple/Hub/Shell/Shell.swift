@@ -53,6 +53,9 @@ enum AppRoute: Hashable {
     case bookRequest(BookRequestRoute)
     case readingReleases(ReadingReleasesRoute)
     case listen(ListenRoute)
+    // Activity (#29).
+    case transfers(TransfersRoute)
+    case speedLimits
 
     /// What the back pill calls this page from the one above it.
     var name: String {
@@ -71,6 +74,8 @@ enum AppRoute: Hashable {
         case .bookRequest(let route): route.item.title
         case .readingReleases: "Releases"
         case .listen(let route): route.title
+        case .transfers: "Transfers"
+        case .speedLimits: "Speed limits"
         }
     }
 }
@@ -426,6 +431,7 @@ struct MainView: View {
         case (.media?, .home): HomeView()
         case (.media?, .discover): DiscoverView()
         case (.media?, .library): LibraryView()
+        case (.media?, .activity): ActivityView()
         case (.books?, .home): BooksHomeView()
         case (.books?, .discover): BooksDiscoverView()
         case (.books?, .library): BooksLibraryView()
@@ -453,6 +459,8 @@ struct MainView: View {
         case .bookRequest(let request): BookRequestView(route: request)
         case .readingReleases(let releases): ReadingReleasesView(route: releases)
         case .listen(let listen): AudiobookView(workId: listen.workId, sourceItemId: listen.sourceItemId, title: listen.title)
+        case .transfers(let transfers): TransfersView(route: transfers)
+        case .speedLimits: SpeedLimitsView()
         }
     }
 

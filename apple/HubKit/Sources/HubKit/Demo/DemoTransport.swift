@@ -19,6 +19,7 @@ public struct DemoTransport: HubTransport {
         // Offline downloads first: their video is written once per run, which takes a moment (#5).
         let offline = await DemoOffline.answer(method: method, path: path, query: query, body: request.httpBody)
         let answer = offline
+            ?? DemoActivity.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoPlayback.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoMedia.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoComics.answer(method: method, path: path, query: query, body: request.httpBody)
