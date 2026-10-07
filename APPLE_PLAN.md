@@ -307,7 +307,7 @@ demo hub (`-demo`) and generated fixtures; the real hub is only read.
 | A book to request | "EBOOK · NOT IN YOUR LIBRARY", Find a download (gold) opening the request sheet (what to download and the quality), the series' books to tick when the mode asks for them, then the release picker; the transfer's state while it runs. A title the library already has opens its book page instead | `GET /v1/reading/resolve`, `…/requests/options`, `…/requests/series-preview`, `POST /v1/reading/requests`, `…/requests/{seriesId}/releases` and `/search`, `POST …/grab`, `GET /v1/reading/downloads` |
 | Activity (Books) | BookKeeprr's transfers grouped by kind, the state as a chip, the bar while it moves, Retry and Cancel with a confirmation | `GET /v1/reading/downloads`, `POST …/downloads/{id}/retry`, `DELETE …/downloads/{id}` |
 | The audiobook (phase 2) | The square cover large beside the eyebrow, title and time left; the glass dock with the line, the part steps, the jumps (the seek step from Settings) and the white Play; Parts, Speed, Sleep and Stop as glass pills. A mini player in the shell brings it back while you browse | `…/publications/{id}/audio`, `…/audio/tracks/{n}?rev=`, `GET`/`POST …/audio/position` |
-| The readers (phases 3 and 4) | Shown over the whole window by `ReaderHost` (below). Until they are built, Read, Read along and an issue open a "coming next" page there that says where your place is kept | none |
+| The readers (phases 3 and 4) | Shown over the whole window by `ReaderHost` (below): an issue or a volume in the comic reader, Read and Read along in the ebook reader | none |
 
 ### HubKit: the models and rules to port, with Android's test cases
 
@@ -483,9 +483,9 @@ are not walked with the D-pad (Ⓑ closes them); no reading lists.
 
 `BookReaderView(work: ReadingWork, sourceItemId: String, readAlong: Bool = false)` (`Hub/Reader`) is
 what a book's EPUB opens, over the whole window: the view for `ReadRequest.ebook(work:sourceItemId:
-readAlong:)`. It leaves through `@Environment(\.closeReader)`, as the comic reader does. Read along
-comes after phase 2 (below). `ReaderHost`'s `.ebook` case still shows the stand-in: wiring it is one
-line, done after the reader's simulator pass, so a reader bug cannot move a real book's place.
+readAlong:)`. It leaves through `@Environment(\.closeReader)`, as the comic reader does, and
+`ReaderHost`'s `.ebook` case opens it for every book since its simulator pass (2026-10-07). Read
+along comes after phase 2 (below).
 
 **Readium**: the Swift toolkit 3.11.0, pinned exactly in `project.yml` (`ReadiumShared`,
 `ReadiumStreamer`, `ReadiumNavigator`), linked on iOS only through `destinationFilters`. Its
@@ -510,7 +510,8 @@ speaks Readium (`@preconcurrency` imports; the EPUB opened off the main actor an
 | The routes: the EPUB, the place read and sent | HubKit `HubEndpoints.readingEpubFile`, `readingEpubPosition`, `saveReadingEpubPosition`, `EpubPosition`, `EpubPositionBody` (`Net/BookEndpoints`) |
 | Where a book opens and where it was left | HubKit `BookPlaceKeeper`, kept by `CheckpointBookPlaces` through phase 2's reading outbox (`ListeningStore.shared`, `ReadingCheckpointKey` kind `epub`) |
 | The reader on screen | `BookReaderModel` (opening, the place, the pace, keys and pad, scrolling, bookmarks, appearance), `BookNavigator`, `BookReaderScreen`, `BookReaderBars`, `BookReaderSheetView` with `BookAppearanceSheet`, `FootnoteCard`, `BookReaderStatus` |
-| A reader's sheet and its rows of keys, the keys' hint row | `ReaderSheetFrame`, `ReaderKeyLines`, `ReaderHintRow`: both readers |
+| A reader's sheet and its rows of keys, the keys' hint row | `ReaderSheetFrame`, `ReaderKeyLines`, `ReaderHintRow`: both readers. A book's sheet sits beside the page wherever the page keeps at least half the window (`keepsPage`), and Appearance from the bottom leaves the page above it undimmed (`previews`) |
+| The keyboard while Readium holds it | `BookKeysController`: Readium's navigator inside a controller that takes the first responder after it |
 
 As on the Pocket: Ⓑ opens the menu and the page shrinks inside it, round with the cover's glass;
 Ⓑ again leaves the book. The top bar has Close, the title over the time left, Contents, Bookmark,
@@ -529,6 +530,17 @@ and Return read on (a screen at a time while scrolling), the arrows, Delete, Pag
 and Escape, which closes a note or a sheet, then leaves. Touch: the middle shows or hides the menu,
 a swipe turns the page; Readium's own gestures otherwise.
 
+The keys reach the reader in two ways. Until the page is on screen the reader's own view holds them
+(`.focusable()` with `onKeyPress`); then Readium makes its navigator the first responder and reads
+every press itself, passing on no Delete (its press reading has no case for that key), and key
+commands on a parent never fire because the navigator handles the presses first (the simulator,
+2026-10-07). So `BookKeysController`, the navigator's parent, takes the first responder back once
+the navigator has appeared and whenever the app becomes active, reads each key the reader uses as a
+`ReaderKey` (Delete arrives as the system's `delete:` action, not as a press), repeats a held arrow,
+and passes every other press on. A page that takes the keyboard back (selecting text) sends its keys
+through Readium's script, which `BookNavigator` hears too. XCUITest's `typeKey(.delete)` reaches no
+view without text input, so the UI tests open the menu with ↑.
+
 The place: the reader asks its `BookPlaceKeeper` where to open and hands it the place reached once
 the reading has moved (opening a book writes nothing), two seconds after the reading pauses, and on
 leaving or going to the background. `CheckpointBookPlaces` keeps it as the listening place is kept:
@@ -545,8 +557,9 @@ Readium's decorations, and the time left the narration's own.
 Debug builds take `HUB_BOOK=<work id>/<edition id>` with `-demo` only (the scripts and the app both
 refuse it otherwise, since reading writes the place): `rw_demo_recursion/demo-rw_demo_recursion` is a
 book not started, `rw_demo_rr6/rr6` Light Bringer half read. `HUB_BOOK_CHROME=pinned` opens the menu,
-`HUB_BOOK_AT=<percent>` goes that far in, and `HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys`
-opens the menu or a sheet. The demo hub writes a real EPUB 3 for every Books demo work with an ebook
+`HUB_BOOK_AT=<percent>` goes that far in, `HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys`
+opens the menu or a sheet, and `HUB_BOOK_SCROLL=1|0` turns continuous scrolling on or off, kept as
+Appearance keeps it (every UI test launches with 0, so a test cut short leaves no scrolling behind). The demo hub writes a real EPUB 3 for every Books demo work with an ebook
 (`DemoEpub`): made-up words, eight chapters of 9 to 18 KB, a footnote in One, a link on to Five in
 Two, an endnote in Three, a link out of the book in Four and a second part in Eight's contents.
 

@@ -142,6 +142,8 @@ struct BookReaderScreen: View {
         .foregroundStyle(.white)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
+        // The screen's keys until Readium's page takes the keyboard; from
+        // then on the page's own container hears them (`BookKeysController`).
         .focusable()
         .focused($keys)
         .focusEffectDisabled()
@@ -158,6 +160,9 @@ struct BookReaderScreen: View {
         .onKeyPress(characters: CharacterSet(charactersIn: "-=+")) { press in
             self.press(press.characters == "-" ? .minus : .plus)
         }
+        #if DEBUG
+        .onChange(of: keys) { _, focused in NSLog("book: the screen %@ the keys", focused ? "holds" : "lost") }
+        #endif
         .onAppear {
             keys = true
             reader.systemDark = colorScheme == .dark
@@ -186,7 +191,7 @@ struct BookReaderScreen: View {
     @ViewBuilder private func page(_ layout: ComicReaderLayout) -> some View {
         if let controller = reader.controller {
             let fit = pageFit(layout)
-            BookPageHost(controller: controller)
+            BookPageHost(controller: controller) { key in reader.key(key) }
                 .id(ObjectIdentifier(controller))
                 .frame(width: layout.size.width, height: layout.size.height)
                 .clipShape(RoundedRectangle(cornerRadius: fit.scale < 1 ? 14 / fit.scale : 0, style: .continuous))
@@ -199,18 +204,22 @@ struct BookReaderScreen: View {
     }
 
     private func pageFit(_ layout: ComicReaderLayout) -> ReaderPageTransform {
-        let beside = reader.sheet != nil && !ReaderSheetFrame<EmptyView>.fromBottom(layout.size)
+        let beside = reader.sheet != nil
+            && !ReaderSheetFrame<EmptyView>.fromBottom(layout.size, safe: layout.safe, keepsPage: true)
         let menu = reader.controlsVisible && reader.sheet == nil && reader.phase == .reading
         guard menu || beside else { return .identity }
         // Until the bars have been measured, about where they will be.
         let top = !menu ? 0 : topBar.height > 0 ? topBar.maxY : layout.top + layout.round + 12
         let bottom = !menu ? 0 : bottomBar.height > 0 ? max(0, layout.size.height - bottomBar.minY) : layout.bottom + 100
-        let right = beside ? ReaderSheetFrame<EmptyView>.width(layout.size, safe: layout.safe) : 0
+        let right = beside ? ReaderSheetFrame<EmptyView>.width(layout.size, safe: layout.safe, keepsPage: true) : 0
         return ReaderPagePreview.fit(width: layout.size.width, height: layout.size.height, top: top, bottom: bottom,
                                      right: right, margin: 12)
     }
 
     private func press(_ key: ReaderKey) -> KeyPress.Result {
+        #if DEBUG
+        NSLog("book: key %@ from the screen", String(describing: key))
+        #endif
         reader.key(key)
         return .handled
     }
@@ -223,14 +232,21 @@ struct BookReaderScreen: View {
     }
 
     #if DEBUG
-    /// Debug builds, for screenshots: HUB_BOOK_AT=<percent> goes that far
-    /// into the book, HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys
-    /// opens the menu or a sheet, once the book has opened.
+    /// Debug builds, for screenshots: HUB_BOOK_SCROLL=1 (or 0) turns continuous
+    /// scrolling on (or off) for every book, as Appearance would and kept as it
+    /// keeps it; HUB_BOOK_AT=<percent> goes that far into the book;
+    /// HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys opens the menu
+    /// or a sheet, once the book has opened.
     private func debugTour() async {
         guard reader.phase == .reading else { return }
         let environment = ProcessInfo.processInfo.environment
         try? await Task.sleep(for: .milliseconds(900))
         guard !Task.isCancelled else { return }
+        if let scroll = environment["HUB_BOOK_SCROLL"], scroll == "1" || scroll == "0",
+           reader.preferences.scroll != (scroll == "1") {
+            reader.setPreferences(EpubLayoutPolicy.selectScroll(reader.preferences, scroll == "1"))
+            try? await Task.sleep(for: .milliseconds(900))
+        }
         if let percent = environment["HUB_BOOK_AT"].flatMap(Double.init) {
             reader.seek(percent / 100)
             try? await Task.sleep(for: .milliseconds(900))
@@ -247,18 +263,20 @@ struct BookReaderScreen: View {
     #endif
 }
 
-/// Readium's navigator in the SwiftUI page.
+/// Readium's navigator in the SwiftUI page, inside the container that hears
+/// the keyboard while Readium holds it.
 struct BookPageHost: UIViewControllerRepresentable {
     let controller: UIViewController
+    let onKey: (ReaderKey) -> Void
 
-    func makeUIViewController(context: Context) -> UIViewController {
+    func makeUIViewController(context: Context) -> BookKeysController {
         // What the UI tests find the page by, on the UIKit view as well as
         // SwiftUI's. Loaded here, as it is about to be shown, never earlier:
         // Readium lays the book out for the size its view first has.
         controller.view.accessibilityIdentifier = "book-page"
-        return controller
+        return BookKeysController(content: controller, onKey: onKey)
     }
 
-    func updateUIViewController(_ controller: UIViewController, context: Context) {}
+    func updateUIViewController(_ container: BookKeysController, context: Context) {}
 }
 #endif

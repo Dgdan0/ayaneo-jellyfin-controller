@@ -62,13 +62,15 @@ final class BooksTests: XCTestCase {
         XCTAssertTrue(resume.waitForExistence(timeout: 15), "Books Home has no Resume reading: \(buttons(app))")
         XCTAssertTrue(text(app, containing: "Dark Matter").exists)
         resume.tap()
-        // Phase 4's ebook reader opens on the book, or, until it is in ReaderHost, the place
-        // that says where the book's place is kept.
+        // The ebook reader opens on the book (phase 4); the middle of the page
+        // brings its menu, whose Close comes back.
         let page = app.descendants(matching: .any).matching(identifier: "book-page").firstMatch
-        let close = app.buttons["reader-close"]
-        XCTAssertTrue(waitUntil(10) { page.exists || close.exists }, "Resume reading did not open the reader")
-        guard close.exists else { return }
-        XCTAssertTrue(text(app, containing: "Your place is kept on Storyteller").exists)
+        XCTAssertTrue(page.waitForExistence(timeout: 20), "Resume reading did not open the reader")
+        let close = app.buttons["book-close"]
+        XCTAssertTrue(waitUntil(15) {
+            if !close.exists { page.tap() }
+            return close.waitForExistence(timeout: 2)
+        }, "the reader's menu did not come")
         close.tap()
         XCTAssertTrue(app.buttons["book-entry"].waitForExistence(timeout: 10), "closing the reader did not come back to the book")
         XCTAssertTrue(text(app, containing: "Blake Crouch").exists)
