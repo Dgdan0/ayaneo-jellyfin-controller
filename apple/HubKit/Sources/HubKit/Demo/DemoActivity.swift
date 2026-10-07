@@ -339,11 +339,20 @@ enum DemoActivity {
         ]
         let host: [String: Any] = ["os": "Windows 11 Pro", "cpuPercent": 14.5, "memoryTotalBytes": 32 * gib,
                                    "memoryAvailableBytes": 17 * gib, "uptimeSeconds": 363_600, "disks": disks,
-                                   "warnings": [String]()]
-        return ["host": host,
-                "containers": [["name": "jellyseerr", "image": "fallenbagel/jellyseerr:2.7.3", "state": "running",
-                                "status": "Up 4 days"]],
-                "sessions": [Any](), "dockerWarning": "", "sessionWarning": "",
+                                   "warnings": ["G:\\ space unavailable"]]
+        // The server monitor's (#36): one container that is up and well, one that says it is not, one stopped.
+        let containers: [[String: String]] = [
+            ["name": "jellyseerr", "image": "fallenbagel/jellyseerr:2.7.3", "state": "running", "status": "Up 4 days"],
+            ["name": "cleanuparr", "image": "ghcr.io/cleanuparr/cleanuparr:2.1", "state": "running",
+             "status": "Up 4 days (unhealthy)"],
+            ["name": "flaresolverr", "image": "flaresolverr/flaresolverr:3.3", "state": "exited", "status": "Exited (0) 2 days ago"],
+        ]
+        let sessions: [[String: Any]] = [
+            ["title": "Severance S2E9", "device": "Living Room TV", "client": "Jellyfin Android TV", "method": "Direct play",
+             "paused": false],
+            ["title": "Gran Torino", "device": "Daniel's iPad", "client": "JellyHub", "method": "Transcoding", "paused": true],
+        ]
+        return ["host": host, "containers": containers, "sessions": sessions, "dockerWarning": "", "sessionWarning": "",
                 "checkedAt": ISO8601DateFormatter().string(from: Date())]
     }
 

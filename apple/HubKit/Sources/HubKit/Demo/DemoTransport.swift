@@ -20,6 +20,7 @@ public struct DemoTransport: HubTransport {
         let offline = await DemoOffline.answer(method: method, path: path, query: query, body: request.httpBody)
         let answer = offline
             ?? DemoActivity.answer(method: method, path: path, query: query, body: request.httpBody)
+            ?? DemoNotifications.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoPlayback.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoMedia.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoComics.answer(method: method, path: path, query: query, body: request.httpBody)
@@ -56,7 +57,6 @@ public struct DemoTransport: HubTransport {
         switch (method, path) {
         case ("GET", "/v1/health"): Answer(200, health)
         case ("GET", "/v1/users"): Answer(200, users)
-        case ("GET", "/v1/notifications"): Answer(200, notifications)
         case ("POST", "/v1/manage/jellyfin/scan"), ("POST", "/v1/manage/reading/scan"):
             Answer(202, #"{"ok":true,"action":"scan_library"}"#)
         default: Answer(404, #"{"error":{"code":"not_found","message":"Not in the demo hub yet"}}"#)
@@ -83,16 +83,5 @@ public struct DemoTransport: HubTransport {
               {"id":"66666666666666666666666666666666","name":"Hadas"},
               {"id":"77777777777777777777777777777777","name":"Horim"}],
      "partial":[],"cache":{"hit":true,"ageSeconds":3,"stale":false}}
-    """#
-
-    /// One active warning and one service the hub cannot reach: two need attention.
-    static let notifications = #"""
-    {"generatedAt":"2026-10-04T09:00:00Z","attentionCount":2,
-     "sections":[
-      {"service":"sonarr","state":"up","items":[
-        {"id":"sonarr:health:demo","service":"sonarr","kind":"health","severity":"warning",
-         "title":"IndexerLongTermStatusCheck","detail":"Indexers unavailable due to failures for more than 6 hours","active":true}]},
-      {"service":"storyteller","state":"unavailable","items":[]}],
-     "partial":[],"cache":{"hit":false,"ageSeconds":0,"stale":false}}
     """#
 }
