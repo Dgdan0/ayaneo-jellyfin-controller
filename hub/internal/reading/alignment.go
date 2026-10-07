@@ -21,7 +21,8 @@ import (
 // audio (a file and the clip of it that speaks the sentence). That is the one
 // exact account of where each sentence is in the audio, and everything here is
 // reading it: the hub's conversions between a text place and an audio place,
-// and the slim EPUB, rest on it. It never reads the audio.
+// the slim EPUB and the book's own chapters (contents.go) rest on it. It never
+// reads the audio.
 
 var (
 	// ErrBadAlignment is any reason the narration cannot be used: an archive that
@@ -60,9 +61,17 @@ type Alignment struct {
 	// the chunk their names carry, and as the text first reaches them for names
 	// that are not Storyteller's.
 	Files []AlignedFile
+	// Contents is the edition's table of contents, nested entries flattened in the
+	// order it lists them. It is empty when the edition has none that can be read,
+	// which is no reason to refuse its narration.
+	Contents []ContentsEntry
 
 	finds    map[findKey]findLocation
 	packages map[string]string // a text document's path inside the package folder -> its zip path
+	// spine is the package's text documents in reading order, narrated or not.
+	spine []string
+	// chapters are the contents' entries that are narrated, placed (contents.go).
+	chapters []Chapter
 }
 
 type AlignedFile struct {
@@ -82,6 +91,9 @@ type AlignedPar struct {
 	Fragment string // the id of the span in it
 	BeginMs  int64
 	EndMs    int64
+	// seq is where the overlays list the sentence: the order of the text, which is
+	// not always the order it is spoken in.
+	seq int
 }
 
 type findKey struct{ text, fragment string }
@@ -92,6 +104,10 @@ type findLocation struct {
 }
 
 var chunkName = regexp.MustCompile(`^([0-9]{5})-([0-9]{5})\.[A-Za-z0-9]+$`)
+
+// packageItem is one item of the package's manifest: where it is, the overlay that
+// narrates it, what it is and what the package says it is for (EPUB 3's "nav").
+type packageItem struct{ href, overlay, mediaType, properties string }
 
 // ReadAlignment reads the narration of an EPUB from its zip directory,
 // container.xml, package document and SMIL files. The audio entries are named
@@ -107,6 +123,11 @@ var chunkName = regexp.MustCompile(`^([0-9]{5})-([0-9]{5})\.[A-Za-z0-9]+$`)
 // declaration refuses them. Its overlays are listed in the order of the text, and
 // the narration need not follow that order, so the sentences of each audio file
 // are taken in the order they are spoken.
+//
+// It also reads the edition's table of contents, from its navigation document or
+// its NCX, and places each entry on the narration (contents.go). That is an extra,
+// never a condition: contents that are missing, unreadable or over a cap leave the
+// narration as it is and the edition without chapters.
 func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 	archive, err := zip.NewReader(file, size)
 	if err != nil {
@@ -140,13 +161,24 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 	if err != nil {
 		return nil, err
 	}
-	type item struct{ href, overlay string }
-	items := map[string]item{}
+	items := map[string]packageItem{}
+	// The manifest in the order it lists its items, and the id of the NCX the spine
+	// names: which of several navigation documents is the first, and which NCX is
+	// the contents, must not depend on how a map happens to be walked.
+	var manifestOrder []string
 	var spine []string
+	var ncxID string
 	if err := walkXML(document, func(start xml.StartElement, _ int) {
 		switch start.Name.Local {
 		case "item":
-			items[attribute(start, "id")] = item{href: attribute(start, "href"), overlay: attribute(start, "media-overlay")}
+			id := attribute(start, "id")
+			items[id] = packageItem{
+				href: attribute(start, "href"), overlay: attribute(start, "media-overlay"),
+				mediaType: attribute(start, "media-type"), properties: attribute(start, "properties"),
+			}
+			manifestOrder = append(manifestOrder, id)
+		case "spine":
+			ncxID = attribute(start, "toc")
 		case "itemref":
 			spine = append(spine, attribute(start, "idref"))
 		}
@@ -160,6 +192,11 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 	pars := 0
 	for _, reference := range spine {
 		chapter, found := items[reference]
+		if found {
+			if text, _, ok := resolveRef(packagePath, chapter.href); ok {
+				alignment.spine = append(alignment.spine, text)
+			}
+		}
 		if !found || chapter.overlay == "" {
 			continue
 		}
@@ -200,7 +237,7 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 				alignment.Files = append(alignment.Files, audioFile)
 			}
 			audio := &alignment.Files[index]
-			audio.Pars = append(audio.Pars, AlignedPar{Text: sentence.text, Fragment: sentence.fragment, BeginMs: sentence.begin, EndMs: sentence.end})
+			audio.Pars = append(audio.Pars, AlignedPar{Text: sentence.text, Fragment: sentence.fragment, BeginMs: sentence.begin, EndMs: sentence.end, seq: pars})
 			audio.LengthMs = max(audio.LengthMs, sentence.end)
 		}
 	}
@@ -224,6 +261,10 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 		return left.Chunk < right.Chunk
 	})
 	alignment.index()
+	// The book's own chapters are an addition to the narration, never a condition of
+	// it: an edition whose contents cannot be read is still a read-along edition.
+	alignment.Contents = readContents(entries, packagePath, items, manifestOrder, ncxID)
+	alignment.chapters = alignment.placeChapters(entries)
 	return alignment, nil
 }
 

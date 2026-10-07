@@ -90,7 +90,7 @@ Scope `reading`, `GET` (HEAD works). The path differs from the draft `.../audio/
   "narrator": "Jon Lindstrom", "totalMs": 36538680, "aligned": true,
   "tracks": [ { "index": 0, "id": "t_5d41402abc4b", "title": "Track 01", "durationMs": 4610652,
                 "bytes": 36942522, "mime": "audio/mpeg", "etag": "\"2a9f1c\"" } ],
-  "chapters": [ { "title": "Part One", "startMs": 0, "track": 0 } ],
+  "chapters": [ { "title": "Part One", "startMs": 0, "track": 0, "source": "book" } ],
   "alignment": { "audio": [ { "href": "Audio/00001-00001.mp3", "track": 0, "startMs": 0 } ] } }
 ```
 
@@ -185,7 +185,24 @@ differ. No `expected` skips the check. GET returns exactly what the last POST se
 
 - M4B chapter marks exist in the format, but here each M4B has one mark spanning the whole file (measured, all 7) and the 8 MP3s have
   none. The hub lists chapters only for a file with two or more marks (ffprobe `-show_chapters`) or a lone-M4B manifest that has them;
-  never from file names. Today that is `chapters: []`.
+  never from file names. Today that is `chapters: []`. These carry `source: "marks"`.
+- **An aligned book lists the book's own chapters (#31), `source: "book"`.** The read-along edition's table of contents (the EPUB 3 `nav`
+  of `epub:type` `toc`, else the NCX; nested entries flattened parent first) names them, and its SMIL says where each is spoken. The first
+  entry into a document begins at that document's first narrated sentence, wherever its anchor is: Mistborn speaks each chapter's epigraph
+  ahead of the heading the contents point at ("2" at 0:58:25.7, its epigraph from 0:58:02), and the epigraph is the chapter's. A later entry
+  into the same document begins at the first sentence at or after the id it names (a sentence, or an anchor placed by looking through that one
+  text document), since what lies between two anchors belongs to the earlier. When nothing in an entry's own document is narrated it begins at
+  the first sentence of the documents after it, up to the next that an entry points at. That last step is measured, not guessed: Dark Matter's
+  chapters ten and eleven are headed by a document of one picture with no sentence, the words are in the next document, and the plain rule
+  loses both. The sentence goes through the narration map of §6 to a track and a moment. The book's titles are dressed once, in the hub, so
+  both apps show the same: a bare number is "Chapter N", a title wholly in capitals is in title case ("PROLOGUE" is "Prologue", a Roman
+  numeral is kept), anything else is as written; a file mark's name is never dressed. Left out:
+  entries with no narration (cover, copyright), an entry that begins outside its track, and the entries that are not in the order they are heard
+  (Mistborn's front matter is spoken mid-way through the second part, listed among the first entries): the longest run of strictly later places
+  stays, so the displaced entry is the one that goes and, of entries at one moment (a part and its first chapter), the first stays. At least two
+  must remain or the files' chapters stay; so they do for an unaligned book and a mapping that is refused. Measured through the hub's own plan
+  builder on the real files: Dark Matter 21 entries, 15 chapters on 8 tracks; The Final Empire 40 entries, 40 chapters on 2 tracks. Nothing is
+  read but the zip directory, the container, the package, the SMIL, the contents and, for an anchor, the one text document it is in.
 - ffmpeg and ffprobe exist: `C:\Program Files\Jellyfin\Server\ffmpeg.exe` and `ffprobe.exe` (ffprobe also in `C:\ProgramData\Radarr\bin`
   and `Sonarr\bin`); neither is on PATH. ffprobe took 84 ms on a 419 MB M4B and 22 ms on an MP3.
 - The hub finds ffmpeg in `findFFmpeg` (`playback_transport.go:257-274`): `LookPath`, then `%ProgramFiles%\Jellyfin\Server\`. Add
