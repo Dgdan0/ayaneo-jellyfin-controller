@@ -10,6 +10,7 @@ struct ServicesView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.glassMetrics) private var metrics
+    @Environment(\.openRoute) private var openRoute
 
     @State private var health: HealthResponse?
     @State private var status = StatusMessage("")
@@ -44,6 +45,9 @@ struct ServicesView: View {
             .padding(.top, 4)
         }
         .refreshable { await load() }
+        #if DEBUG
+        .onAppear(perform: applyDebugOpen)
+        #endif
         .task { await load() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await load() } }
@@ -55,6 +59,18 @@ struct ServicesView: View {
                 #endif
         }
     }
+
+    #if DEBUG
+    /// scripts/mac.sh opens the server monitor for screenshots, once a launch:
+    /// HUB_SECTION=services HUB_OPEN=monitor.
+    @MainActor private static var debugOpened = false
+
+    private func applyDebugOpen() {
+        guard !Self.debugOpened, ProcessInfo.processInfo.environment["HUB_OPEN"] == "monitor" else { return }
+        Self.debugOpened = true
+        openRoute(.monitor)
+    }
+    #endif
 
     /// The page's own heading, now that the shell's bar carries no title: the
     /// name, then how everything is ("All 13 running"), and Refresh.

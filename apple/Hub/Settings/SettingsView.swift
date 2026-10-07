@@ -10,11 +10,23 @@ struct SettingsView: View {
     @Environment(\.glassMetrics) private var metrics
 
     enum Pane: String, CaseIterable, Identifiable {
-        case libraries, playback
+        case libraries, playback, notifications
 
         var id: String { rawValue }
-        var title: String { self == .playback ? "Playback" : "Libraries" }
-        var systemImage: String { self == .playback ? "play.circle" : "books.vertical" }
+        var title: String {
+            switch self {
+            case .libraries: "Libraries"
+            case .playback: "Playback"
+            case .notifications: "Notifications"
+            }
+        }
+        var systemImage: String {
+            switch self {
+            case .libraries: "books.vertical"
+            case .playback: "play.circle"
+            case .notifications: "bell"
+            }
+        }
     }
 
     @SceneStorage("settings.pane") private var pane: Pane = .libraries
@@ -31,6 +43,7 @@ struct SettingsView: View {
                                     ChoicePill(title: place.title, selected: place == pane, systemImage: place.systemImage) {
                                         pane = place
                                     }
+                                    .accessibilityIdentifier("pane-\(place.rawValue)")
                                 }
                             }
                         }
@@ -75,6 +88,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
+                .accessibilityIdentifier("pane-\(place.rawValue)")
             }
         }
     }
@@ -83,6 +97,7 @@ struct SettingsView: View {
         switch pane {
         case .libraries: LibrariesSettings()
         case .playback: PlaybackSettingsPane()
+        case .notifications: NotificationsSettingsPane()
         }
     }
 }

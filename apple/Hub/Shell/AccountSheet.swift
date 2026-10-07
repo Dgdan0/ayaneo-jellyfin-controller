@@ -138,7 +138,7 @@ struct AccountSheet: View {
         let attention = shell.attention
         return VStack(spacing: 0) {
             PlaceRow(section: .notifications,
-                     value: attention == 0 ? "" : "\(attention) need\(attention == 1 ? "s" : "") attention") {
+                     value: attention == 0 ? "" : "\(attention) unread") {
                 open(.notifications)
             }
             Divider().overlay(Color.white.opacity(0.08))

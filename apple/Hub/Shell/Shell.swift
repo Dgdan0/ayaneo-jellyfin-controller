@@ -125,8 +125,13 @@ struct SelectSectionAction {
 @Observable
 final class ShellModel {
     private(set) var users: [HubUser] = []
-    private(set) var attention = 0
+    /// The services' notifications and what has been seen of them (#36): the
+    /// bell's count and the Notifications page are one answer.
+    let notifications = NotificationsModel()
     private(set) var servicesSummary = ""
+
+    /// The bell's count: what is unread, as Android's header badge counts.
+    var attention: Int { notifications.unread }
 
     /// Android's header badge cadence: it only has to notice new trouble eventually.
     static let attentionEvery: Duration = .seconds(60)
@@ -143,11 +148,9 @@ final class ShellModel {
         }
     }
 
-    /// The hub's own count of what needs attention: services it cannot reach,
-    /// and active warnings and errors.
-    func refreshAttention(_ hub: HubClient) async {
-        guard let response = try? await hub.fetch(HubEndpoints.notifications(), as: NotificationsResponse.self) else { return }
-        attention = response.attentionCount
+    /// Asks for the notifications again, for the bell's count.
+    func refreshAttention(_ app: AppModel) async {
+        await notifications.refresh(app)
     }
 
     func refreshServices(_ hub: HubClient, address: String) async {
@@ -345,6 +348,8 @@ struct MainView: View {
         })
         .environment(\.playbackClosed, player.closedCount)
         .environment(books)
+        .environment(shell.notifications)
+        .environment(\.appSide, side)
         .environment(\.read, ReadAction(open: { request in reading = request }, close: {
             reading = nil
             readersClosed += 1
@@ -377,10 +382,10 @@ struct MainView: View {
         // ends what plays in it, as Back would; minimising it does not.
         .onDisappear { player.close() }
         .task(id: model.userId) { await shell.loadUsers(model.hub) }
-        .task(id: scenePhase == .active) {
+        .task(id: "\(scenePhase == .active)·\(model.address)·\(model.connectionChanges)") {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
-                await shell.refreshAttention(model.hub)
+                await shell.refreshAttention(model)
                 try? await Task.sleep(for: ShellModel.attentionEvery)
             }
         }
@@ -436,6 +441,7 @@ struct MainView: View {
         case (.books?, .discover): BooksDiscoverView()
         case (.books?, .library): BooksLibraryView()
         case (.books?, .activity): BooksActivityView()
+        case (_, .notifications): NotificationsView()
         case (_, .services): ServicesView()
         case (_, .settings): SettingsView()
         default: ComingNextView(side: stackKey.side, section: stackKey.section)
@@ -446,8 +452,7 @@ struct MainView: View {
         switch route {
         case .title(let title): TitleView(route: title)
         case .folder(let folder): FolderView(route: folder)
-        case .monitor: ComingNextView(title: "Server monitor", systemImage: "cpu",
-                                      detail: "CPU, memory, disk space, containers and current playback.")
+        case .monitor: ServerMonitorView()
         case .media(let media): MediaTitleView(route: media)
         case .person(let person): PersonView(route: person)
         case .releaseTargets(let targets): ReleaseTargetsView(route: targets)
