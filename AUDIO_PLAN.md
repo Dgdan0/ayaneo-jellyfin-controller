@@ -244,7 +244,9 @@ the rules of `database/positions.ts`; its `/files` fails the test if streaming c
 - `HubEndpoints`/`HubApi`/`HubClient` (through `HubClient.shared`): manifest, track URL with `rev`, slim EPUB URL. `AudiobookPart(title, file)`
   (`AudiobookArchive.kt:6`) becomes title, `uri` (hub or local), `durationMs`, `bytes`; `ReadingAudio.load` builds items from `uri`
   (`:219-224`) and drops `length()` (`:240-245`). `AudiobookScreen.load()` (`:404-434`) fetches the manifest and opens; on 409 it falls
-  back to the ZIP path. The parts sheet uses `chapters`.
+  back to the ZIP path. The parts sheet uses `chapters`. With the book's own chapters (#31, `source: "book"`, which can run on from one
+  track into the next) so do the steps, the line under the title and its two times, the time left and the sleep timer's end, counted
+  across the tracks (`AudiobookContents.span` and `step`); the media notification names the chapter, and the mini player too.
 - `ReadingAudioService` (`:27-35`): ExoPlayer over `CacheDataSource` and `OkHttpDataSource` with the bearer, as `PlaybackService.kt:123`
   does (already a dependency). Add a `SimpleCache` LRU (budget is X5's call), prefetch the next track's head, and
   `setWakeMode(C.WAKE_MODE_NETWORK)`: `:33-34` assumed local files.
