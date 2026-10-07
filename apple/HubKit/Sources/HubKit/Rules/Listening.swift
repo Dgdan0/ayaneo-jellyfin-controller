@@ -222,9 +222,10 @@ extension PlayerLabels {
     }
 
     /// What is left as heard at the speed playing: "12 min left in part · 4h
-    /// 10m in book"; the book's part drops while its lengths are unknown.
-    public static func timeLeft(partLeftMs: Int64, bookLeftMs: Int64?) -> String {
-        var parts = ["\(Fmt.runtime(max(partLeftMs / 1_000, 60))) left in part"]
+    /// 10m in book", or "in chapter" where the book has chapters (#31); the
+    /// book's part drops while its lengths are unknown.
+    public static func timeLeft(partLeftMs: Int64, bookLeftMs: Int64?, unit: String = "part") -> String {
+        var parts = ["\(Fmt.runtime(max(partLeftMs / 1_000, 60))) left in \(unit)"]
         if let bookLeftMs { parts.append("\(Fmt.runtime(max(bookLeftMs / 1_000, 60))) in book") }
         return parts.joined(separator: " · ")
     }

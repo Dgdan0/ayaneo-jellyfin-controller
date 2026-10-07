@@ -84,11 +84,18 @@ public enum AudiobookStream {
     private static let audioExtensions: Set<String> = ["mp3", "m4a", "m4b", "aac", "flac", "ogg", "opus", "wav"]
 }
 
-/// What the Parts sheet lists and the part steps go through: the chapters the
-/// hub found inside the tracks (two or more of a file's own marks, never file
-/// names), else the tracks. A track without marks stays one entry among
-/// chapters, and a track whose first mark comes after its start keeps that
-/// opening as an entry of its own.
+/// What the contents sheet lists and the steps go through: the chapters the
+/// hub found, else the tracks.
+///
+/// - The book's own chapters (#31, `source` "book"): the read-along
+///   edition's table of contents, each where its narration starts, so a
+///   chapter runs from its moment to the next one's, across tracks. The voice
+///   before the first chapter (the credits) belongs to the first, so the
+///   book's first entry starts with the book.
+/// - Chapter marks inside the tracks (two or more of a file's own, never file
+///   names): a track without marks stays one entry among chapters, and a
+///   track whose first mark comes after its start keeps that opening as an
+///   entry of its own.
 public enum AudiobookContents {
     public struct Entry: Equatable, Sendable {
         public let title: String
@@ -110,14 +117,22 @@ public enum AudiobookContents {
     public static let restartMs: Int64 = 3_000
 
     public static func entries(_ parts: [AudiobookPart], partsMs: [Int64?], chapters: [ReadingAudioChapter]) -> [Entry] {
-        parts.indices.flatMap { part -> [Entry] in
-            let title = AudiobookStream.partLabel(parts[part].title)
+        let lengths = parts.indices.map { part -> Int64? in
             let measured = partsMs.indices.contains(part) ? partsMs[part].flatMap { $0 > 0 ? $0 : nil } : nil
-            let length = measured ?? parts[part].durationMs
+            return measured ?? parts[part].durationMs.flatMap { $0 > 0 ? $0 : nil }
+        }
+        let book = chapters.filter(\.fromBook)
+        if !book.isEmpty, let entries = bookEntries(lengths: lengths, chapters: book) { return entries }
+        return parts.indices.flatMap { part -> [Entry] in
+            let title = AudiobookStream.partLabel(parts[part].title)
+            let length = lengths[part]
             var seen = Set<Int64>()
-            let marks = chapters
-                .filter { $0.track == part && $0.startMs >= 0 && (length == nil || $0.startMs < length!) }
-                .sorted { $0.startMs < $1.startMs }
+            // In time, and of two at one moment the one the hub listed first.
+            let marks = chapters.enumerated()
+                .filter { !$0.element.fromBook && $0.element.track == part && $0.element.startMs >= 0
+                    && (length == nil || $0.element.startMs < length!) }
+                .sorted { ($0.element.startMs, $0.offset) < ($1.element.startMs, $1.offset) }
+                .map(\.element)
                 .filter { seen.insert($0.startMs).inserted }
             guard let first = marks.first else { return [Entry(title: title, part: part, startMs: 0, durationMs: length)] }
             var out: [Entry] = []
@@ -126,11 +141,53 @@ public enum AudiobookContents {
                 // A first mark a moment in is the track's start: every track's first entry starts at 0.
                 let start = index == 0 && mark.startMs < leadMs ? 0 : mark.startMs
                 let end = index + 1 < marks.count ? marks[index + 1].startMs : length
-                out.append(Entry(title: mark.title.trimmingCharacters(in: .whitespaces).isEmpty ? "Chapter \(index + 1)" : mark.title,
-                                 part: part, startMs: start, durationMs: end.map { $0 - start }))
+                out.append(Entry(title: name(mark, index), part: part, startMs: start, durationMs: end.map { $0 - start }))
             }
             return out
         }
+    }
+
+    /// The book's chapters across the tracks, in the order they are heard; nil
+    /// when none is a place in them. Each lasts until the next one starts, the
+    /// last until the end of the book: unknown while a track's length between is.
+    private static func bookEntries(lengths: [Int64?], chapters: [ReadingAudioChapter]) -> [Entry]? {
+        var seen = Set<[Int64]>()
+        // In the order they are heard, and of two at one moment the one the contents list first.
+        let marks = chapters.enumerated()
+            .filter { lengths.indices.contains($0.element.track) && $0.element.startMs >= 0
+                && (lengths[$0.element.track] == nil || $0.element.startMs < lengths[$0.element.track]!) }
+            .sorted { ($0.element.track, $0.element.startMs, $0.offset) < ($1.element.track, $1.element.startMs, $1.offset) }
+            .map(\.element)
+            .filter { seen.insert([Int64($0.track), $0.startMs]).inserted }
+        guard !marks.isEmpty else { return nil }
+        let last = lengths.count - 1
+        return marks.enumerated().map { index, mark in
+            // The book's first entry starts with the book: its credits are the first chapter's.
+            let start = index == 0 ? (part: 0, ms: Int64(0)) : (part: mark.track, ms: mark.startMs)
+            let end: (part: Int, ms: Int64)? = index + 1 < marks.count
+                ? (marks[index + 1].track, marks[index + 1].startMs)
+                : lengths[last].map { (last, $0) }
+            let length = end.flatMap { distance(from: start, to: $0, lengths: lengths) }
+            return Entry(title: name(mark, index), part: start.part, startMs: start.ms, durationMs: length)
+        }
+    }
+
+    private static func name(_ chapter: ReadingAudioChapter, _ index: Int) -> String {
+        chapter.title.trimmingCharacters(in: .whitespaces).isEmpty ? "Chapter \(index + 1)" : chapter.title
+    }
+
+    /// How much of the recording lies from one place to a later one, across
+    /// the tracks between: nil while a length it needs is unknown, or when
+    /// `to` comes first.
+    public static func distance(from: (part: Int, ms: Int64), to: (part: Int, ms: Int64), lengths: [Int64?]) -> Int64? {
+        if from.part == to.part { return to.ms >= from.ms ? to.ms - from.ms : nil }
+        guard from.part < to.part, lengths.indices.contains(from.part), lengths.indices.contains(to.part - 1) else { return nil }
+        var total = -from.ms + to.ms
+        for part in from.part..<to.part {
+            guard let length = lengths[part], length > 0 else { return nil }
+            total += length
+        }
+        return total >= 0 ? total : nil
     }
 
     /// The entry playing at `positionMs` of `part`: the last one begun.
@@ -138,17 +195,74 @@ public enum AudiobookContents {
         max(0, entries.lastIndex { $0.part < part || ($0.part == part && $0.startMs <= positionMs) } ?? -1)
     }
 
-    /// Where the part steps go: forward, the next entry, or nothing at the
-    /// end; back, the entry's own start once `restartMs` into it, else the one before.
-    public static func step(_ entries: [Entry], part: Int, positionMs: Int64, delta: Int) -> Entry? {
+    /// Where the steps go: forward, the next entry, or nothing at the end;
+    /// back, the entry's own start once `restartMs` into it, else the one
+    /// before. How far into an entry that began in an earlier track is counted
+    /// across the tracks (`partsMs`), and is taken as well in while unknown.
+    public static func step(_ entries: [Entry], part: Int, positionMs: Int64, delta: Int, partsMs: [Int64?] = []) -> Entry? {
         guard !entries.isEmpty, delta != 0 else { return nil }
         let here = current(entries, part: part, positionMs: positionMs)
         if delta > 0 { return entries.indices.contains(here + delta) ? entries[here + delta] : nil }
         let entry = entries[here]
-        let into = entry.part == part ? positionMs - entry.startMs : Int64.max
+        let into = distance(from: (entry.part, entry.startMs), to: (part, positionMs), lengths: partsMs) ?? Int64.max
         if into > restartMs { return entry }
         return entries.indices.contains(here + delta) ? entries[here + delta] : entry
     }
+
+    /// What the line under the player, its times and the lock screen measure
+    /// (#31): the entry playing, a chapter across tracks or a part, while its
+    /// length is known; else the part playing, by the player's own length.
+    public struct Span: Equatable, Sendable {
+        /// The entry's place in the contents, or nil for the part.
+        public let entry: Int?
+        public let title: String
+        /// Where it starts.
+        public let part: Int
+        public let startMs: Int64
+        /// How far into it, within its length.
+        public let positionMs: Int64
+        public let durationMs: Int64
+
+        public init(entry: Int?, title: String, part: Int, startMs: Int64, positionMs: Int64, durationMs: Int64) {
+            self.entry = entry
+            self.title = title
+            self.part = part
+            self.startMs = startMs
+            self.positionMs = positionMs
+            self.durationMs = durationMs
+        }
+
+        /// What is left of it, of the recording.
+        public var leftMs: Int64 { max(0, durationMs - positionMs) }
+    }
+
+    /// The span at `positionMs` of `part`; `partMs` is the player's length of
+    /// the part playing, which counts before the manifest's (`partsMs`).
+    public static func span(_ entries: [Entry], part: Int, positionMs: Int64, partMs: Int64, partsMs: [Int64?]) -> Span {
+        var lengths = partsMs
+        if partMs > 0 && lengths.indices.contains(part) { lengths[part] = partMs }
+        if !entries.isEmpty {
+            let here = current(entries, part: part, positionMs: positionMs)
+            let entry = entries[here]
+            if let length = entry.durationMs, length > 0,
+               let into = distance(from: (entry.part, entry.startMs), to: (part, max(0, positionMs)), lengths: lengths) {
+                return Span(entry: here, title: entry.title, part: entry.part, startMs: entry.startMs,
+                            positionMs: min(into, length), durationMs: length)
+            }
+        }
+        let length = max(0, partMs)
+        return Span(entry: nil, title: "", part: part, startMs: 0, positionMs: min(max(0, positionMs), length), durationMs: length)
+    }
+
+    /// Where `ms` into `span` is: its part and the moment in it, across tracks.
+    public static func place(_ span: Span, at ms: Int64, partsMs: [Int64?]) -> (part: Int, offsetMs: Int64) {
+        let into = min(max(0, ms), max(0, span.durationMs))
+        guard span.entry != nil else { return (span.part, into) }
+        return Listening.jump(part: span.part, positionMs: span.startMs, by: into, partsMs: partsMs)
+    }
+
+    /// What an entry is called: a chapter where the hub found chapters, else a part.
+    public static func noun(_ chapters: [ReadingAudioChapter]) -> String { chapters.isEmpty ? "part" : "chapter" }
 }
 
 /// A listening place as the hub keeps it: a track of the manifest, by its id,

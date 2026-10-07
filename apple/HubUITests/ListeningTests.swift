@@ -82,6 +82,43 @@ final class ListeningTests: XCTestCase {
         XCTAssertFalse(app.buttons["mini-play"].exists, "the mini player stayed after Stop")
     }
 
+    /// An aligned audiobook goes by the book's own chapters (#31): the demo's
+    /// Dark Matter, whose chapters run on from one track into the next, opens
+    /// at its place ten seconds into Three, in its second track.
+    @MainActor
+    func testAnAlignedAudiobookGoesByTheBooksChapters() {
+        let app = launch(open: "listen:rw_demo_darkmatter|demo-dm")
+        let play = app.buttons["listen-play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 15), "the audiobook's page did not open: \(buttons(app))")
+        XCTAssertTrue(waitUntil(15) { play.isEnabled }, "the audiobook was not put on the player")
+        let entry = app.staticTexts["listen-entry"]
+        XCTAssertTrue(waitUntil(10) { entry.exists && entry.label == "Three" }, "not in Three: \(entry.label)")
+        let left = app.staticTexts["listen-time-left"]
+        XCTAssertTrue(left.label.hasPrefix("1 min left in chapter"), "the time left is not the chapter's: \(left.label)")
+
+        // The contents are the book's chapters, by title, the one playing marked.
+        let contents = app.buttons["listen-contents"]
+        XCTAssertEqual(contents.label, "Chapters")
+        contents.tap()
+        for title in ["One · 0:52", "Two · 0:58", "Four · 0:45"] {
+            XCTAssertTrue(button(app, containing: title).waitForExistence(timeout: 5), "no \(title) in the contents: \(buttons(app))")
+        }
+        XCTAssertTrue(button(app, containing: "Three").exists)
+        XCTAssertFalse(button(app, containing: "Track 0").exists, "a track is listed among the chapters")
+        // A chapter chosen is where the book goes.
+        button(app, containing: "One · 0:52").tap()
+        XCTAssertTrue(waitUntil(5) { entry.label == "One" }, "choosing One did not go there: \(entry.label)")
+
+        // Next is the next chapter, Three in the next track; back from its start is the one before.
+        app.buttons["Next chapter"].tap()
+        XCTAssertTrue(waitUntil(5) { entry.label == "Two" }, "Next did not go to Two: \(entry.label)")
+        app.buttons["Next chapter"].tap()
+        XCTAssertTrue(waitUntil(5) { entry.label == "Three" }, "Next did not go on to Three: \(entry.label)")
+        app.buttons["Previous chapter"].tap()
+        XCTAssertTrue(waitUntil(5) { entry.label == "Two" }, "Previous did not go back to Two: \(entry.label)")
+        app.buttons["listen-stop"].tap()
+    }
+
     /// One sound at a time: a video opened while the book plays pauses it.
     @MainActor
     func testAVideoPausesTheAudiobook() {

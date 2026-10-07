@@ -112,11 +112,14 @@ struct AudiobookView: View {
                 }
                 if mine {
                     if let entry = currentEntry {
+                        // The chapter playing (#31), else the part.
                         Text(entry.title)
                             .font(HubType.body(14, relativeTo: .subheadline))
                             .foregroundStyle(.white.opacity(0.72))
+                            .accessibilityIdentifier("listen-entry")
                     }
-                    Text(PlayerLabels.timeLeft(partLeftMs: listening.partLeftMs, bookLeftMs: listening.bookLeftMs))
+                    Text(PlayerLabels.timeLeft(partLeftMs: listening.spanLeftMs, bookLeftMs: listening.bookLeftMs,
+                                               unit: listening.noun))
                         .font(HubType.body(14, weight: .bold, relativeTo: .subheadline))
                         .foregroundStyle(accent.tint)
                         .accessibilityIdentifier("listen-time-left")
@@ -146,28 +149,32 @@ struct AudiobookView: View {
     // MARK: The dock
 
     /// The read-along dock's glass player: the line, then the times either
-    /// side of the part steps, the jumps and the white Play.
+    /// side of the steps, the jumps and the white Play. The line and its times
+    /// are the chapter's where the book has chapters, across its tracks (#31),
+    /// else the part's.
     private var dock: some View {
-        VStack(spacing: 10) {
-            PlayerTimeline(positionMillis: mine ? listening.positionMs : 0, durationMillis: mine ? listening.partMs : 0,
+        let span = listening.span
+        let noun = listening.noun
+        return VStack(spacing: 10) {
+            PlayerTimeline(positionMillis: mine ? span.positionMs : 0, durationMillis: mine ? span.durationMs : 0,
                            bufferedMillis: 0, scrub: $scrub,
-                           seek: { listening.seek(part: listening.part, offsetMs: $0) },
+                           seek: { listening.seek(inSpan: $0) },
                            adjust: { listening.seek(by: $0) })
                 .disabled(!mine)
             HStack(spacing: metrics.small ? 8 : 12) {
-                Text(mine ? Fmt.clock(scrubbed ?? listening.positionMs) : "0:00")
+                Text(mine ? Fmt.clock(scrub.map { Int64($0 * Double(span.durationMs)) } ?? span.positionMs) : "0:00")
                     .font(HubType.chrome(13, weight: .bold))
                     .monospacedDigit()
                     .frame(maxWidth: .infinity, alignment: .leading)
-                PlayerSkipButton(systemImage: "backward.end.fill", text: nil, label: "Previous part", size: 44) { listening.step(-1) }
+                PlayerSkipButton(systemImage: "backward.end.fill", text: nil, label: "Previous \(noun)", size: 44) { listening.step(-1) }
                 PlayerSkipButton(systemImage: Self.jumpSymbol(seekSeconds, forward: false), text: nil,
                                  label: "Back \(seekSeconds) seconds", size: 44) { listening.seek(by: -Int64(seekSeconds) * 1_000) }
                 PlayerPlayDisc(playing: mine && listening.playing, buffering: false, size: 58) { listening.toggle() }
                     .accessibilityIdentifier("listen-play")
                 PlayerSkipButton(systemImage: Self.jumpSymbol(seekSeconds, forward: true), text: nil,
                                  label: "Forward \(seekSeconds) seconds", size: 44) { listening.seek(by: Int64(seekSeconds) * 1_000) }
-                PlayerSkipButton(systemImage: "forward.end.fill", text: nil, label: "Next part", size: 44) { listening.step(1) }
-                Text(mine ? PlayerLabels.remainingLine(positionMillis: listening.positionMs, durationMillis: listening.partMs) : "")
+                PlayerSkipButton(systemImage: "forward.end.fill", text: nil, label: "Next \(noun)", size: 44) { listening.step(1) }
+                Text(mine ? PlayerLabels.remainingLine(positionMillis: span.positionMs, durationMillis: span.durationMs) : "")
                     .font(HubType.chrome(12.5, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.7))
                     .monospacedDigit()
@@ -180,8 +187,6 @@ struct AudiobookView: View {
         .padding(.bottom, 12)
         .glassPanel(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
-
-    private var scrubbed: Int64? { scrub.map { Int64($0 * Double(listening.partMs)) } }
 
     /// The SF Symbol with the step written in it: 5, 10, 15 and 30 all have one.
     static func jumpSymbol(_ seconds: Int, forward: Bool) -> String {
@@ -207,8 +212,9 @@ struct AudiobookView: View {
                         }
                     }
                 } label: {
-                    Label("Parts", systemImage: "list.bullet")
+                    Label(listening.noun == "chapter" ? "Chapters" : "Parts", systemImage: "list.bullet")
                 }
+                .accessibilityIdentifier("listen-contents")
                 .menuStyle(.button)
                 .buttonStyle(GlassControlStyle())
                 Menu {
@@ -320,7 +326,8 @@ struct ListeningMiniPlayer: View {
                             Text(book.title)
                                 .font(HubType.body(14, weight: .bold, relativeTo: .subheadline))
                                 .foregroundStyle(.white)
-                            Text(PlayerLabels.timeLeft(partLeftMs: listening.partLeftMs, bookLeftMs: listening.bookLeftMs))
+                            Text(PlayerLabels.timeLeft(partLeftMs: listening.spanLeftMs, bookLeftMs: listening.bookLeftMs,
+                                                       unit: listening.noun))
                                 .font(HubType.body(12, relativeTo: .caption))
                                 .foregroundStyle(.white.opacity(0.7))
                         }
