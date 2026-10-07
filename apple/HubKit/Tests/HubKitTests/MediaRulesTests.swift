@@ -199,11 +199,7 @@ struct HomeHeroTests {
         #expect(HomeHero.from(rowId: "nextup", rowTitle: "Next up", hit: watched).eyebrow == "NEXT UP · S3E4")
     }
 
-    @Test func rowsFollowHomesOrderNotTheHubs() {
-        let rows = ["favourites", "continue", "nextup", "latest", "something-new"].map {
-            HomeRow(id: $0, title: $0, items: [])
-        }
-        #expect(HomeHero.ordered(rows).map(\.id) == ["continue", "nextup", "latest", "favourites", "something-new"])
+    @Test func onlyRowsYouArePartwayThroughAreLandscape() {
         #expect(HomeHero.isLandscape(rowId: "continue") && !HomeHero.isLandscape(rowId: "latest"))
     }
 }

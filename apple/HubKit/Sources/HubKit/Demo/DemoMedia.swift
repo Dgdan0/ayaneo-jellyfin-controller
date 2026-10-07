@@ -29,6 +29,8 @@ enum DemoMedia {
 
     static func answer(method: String, path: String, query: String, body: Data?) -> DemoTransport.Answer? {
         switch (method, path) {
+        case ("GET", "/v1/home"):
+            return DemoLibrary.home()
         case ("GET", "/v1/library"):
             let (ids, custom) = arranged(folders.map { ($0.id, $0.name) }, side: "media")
             let views = ids.compactMap { id in folders.first { $0.id == id } }.map { folder in

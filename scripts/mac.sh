@@ -186,6 +186,8 @@ launch_sim() {
     SIMCTL_CHILD_HUB_READ_SHEET="${HUB_READ_SHEET:-}" SIMCTL_CHILD_HUB_BOOK="${HUB_BOOK:-}" \
     SIMCTL_CHILD_HUB_BOOK_CHROME="${HUB_BOOK_CHROME:-}" SIMCTL_CHILD_HUB_BOOK_AT="${HUB_BOOK_AT:-}" \
     SIMCTL_CHILD_HUB_BOOK_SHEET="${HUB_BOOK_SHEET:-}" SIMCTL_CHILD_HUB_BOOK_SCROLL="${HUB_BOOK_SCROLL:-}" \
+    SIMCTL_CHILD_HUB_SEEN_DWELL_MS="${HUB_SEEN_DWELL_MS:-}" \
+    SIMCTL_CHILD_HUB_HERO="${HUB_HERO:-}" \
     SIMCTL_CHILD_HUB_WIDTH="${HUB_WIDTH:-}" SIMCTL_CHILD_HUB_ORIENT="$(cat "$SHOTS/.turned-$udid" 2>/dev/null)" \
     xcrun simctl launch "$udid" "$BUNDLE_ID" $(launch_args "$@") >/dev/null
 }
@@ -399,6 +401,8 @@ mac_shot() {
     HUB_READ="${HUB_READ:-}" HUB_READ_CHROME="${HUB_READ_CHROME:-}" HUB_READ_PAGE="${HUB_READ_PAGE:-}" \
     HUB_READ_SHEET="${HUB_READ_SHEET:-}" HUB_BOOK="${HUB_BOOK:-}" HUB_BOOK_CHROME="${HUB_BOOK_CHROME:-}" \
     HUB_BOOK_AT="${HUB_BOOK_AT:-}" HUB_BOOK_SHEET="${HUB_BOOK_SHEET:-}" HUB_BOOK_SCROLL="${HUB_BOOK_SCROLL:-}" \
+    HUB_SEEN_DWELL_MS="${HUB_SEEN_DWELL_MS:-}" \
+    HUB_HERO="${HUB_HERO:-}" \
     nohup "$app" -ApplePersistenceIgnoreState YES $(launch_args "$@") > "$DERIVED/mac-app.log" 2>&1 < /dev/null &
   pid=$!
   for _ in $(seq 1 90); do

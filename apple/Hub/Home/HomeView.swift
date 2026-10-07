@@ -12,7 +12,15 @@ struct HomeView: View {
     @Environment(\.play) private var play
     @Environment(\.playbackClosed) private var playbackClosed
 
-    @State private var rows: [HomeRow] = []
+    /// What the hub sent, and the rows Home makes itself (Coming up, a library's newest), by id.
+    @State private var hubRows: [HomeRow] = []
+    @State private var extras: [String: HomeRow] = [:]
+    /// Which rows show and in what order: Settings > Home (#35).
+    @State private var layout = HomeLayoutModel.shared
+    /// Counts the refreshes asked for, so the rows Home makes itself read again.
+    @State private var refreshes = 0
+    /// The profile the rows belong to.
+    @State private var rowsOwner: String?
     @State private var status = StatusMessage("")
     @State private var loading = false
     @State private var selection: HeroPick?
@@ -21,6 +29,13 @@ struct HomeView: View {
     /// Debug builds: scripts/mac.sh opens a row's first title for screenshots
     /// (HUB_OPEN=latest), once.
     @State private var debugOpened = false
+    /// Debug builds: HUB_HERO=<row id> shows that row's first card in the hero, once.
+    @State private var debugHeroed = false
+
+    /// The rows as Home shows them: in the chosen order, without those hidden or empty.
+    private var rows: [HomeRow] {
+        HomeRows.ordered(hubRows + extras.values.sorted { $0.id < $1.id }, order: layout.layout.order, hidden: layout.layout.hidden)
+    }
 
     private var hero: HeroContent? {
         guard let pick = selection ?? firstPick else { return nil }
@@ -61,14 +76,33 @@ struct HomeView: View {
             .ignoresSafeArea(edges: .top)
         }
         .ambientArtwork(hero?.backdrop ?? "")
-        .refreshable { await load() }
+        .refreshable {
+            refreshes += 1
+            await load()
+        }
+        // The rows Home makes itself: asked for again when Settings turns one on or off, and on a refresh.
+        .task(id: "\(model.userId)·\(layout.layout.fetchKey)·\(refreshes)") { await loadExtras() }
         // A new profile is a new Home: everything reloads under its name.
         .task(id: model.userId) {
             details = [:]
             selection = nil
+            // Another profile's rows are not this one's to show while it loads.
+            if let owner = rowsOwner, owner != model.userId {
+                hubRows = []
+                extras = [:]
+            }
+            rowsOwner = model.userId
             await load()
         }
         .task(id: hero?.itemId) { await loadHeroDetail() }
+        #if DEBUG
+        .onChange(of: rows.map(\.id)) { _, _ in
+            guard !debugHeroed, let rowId = ProcessInfo.processInfo.environment["HUB_HERO"],
+                  let row = rows.first(where: { $0.id == rowId }), let hit = row.items.first else { return }
+            debugHeroed = true
+            selection = HeroPick(rowId: row.id, rowTitle: row.title, hit: hit)
+        }
+        #endif
         // Back from the player: the rows read again in place, the hero on the
         // same card with its new progress.
         .onChange(of: playbackClosed) { _, _ in
@@ -90,9 +124,20 @@ struct HomeView: View {
         loading = true
         defer { loading = false }
         status = StatusText.loading("Home", refreshing: !rows.isEmpty)
+        // The last answer for this profile first, while the new one is asked for (#38).
+        if hubRows.isEmpty, let kept = await model.hub.lastAnswer(HubEndpoints.home, as: HomeResponse.self, keeper: model.answers) {
+            hubRows = kept.value.rows
+            model.colors.want(rows.flatMap { row in
+                row.items.map { HomeHero.from(rowId: row.id, rowTitle: row.title, hit: $0).backdrop }
+            })
+            status = LastAnswer.status(ageSeconds: kept.ageSeconds)
+        }
         do {
-            let home = try await model.hub.fetch(HubEndpoints.home, as: HomeResponse.self)
-            rows = HomeHero.ordered(home.rows)
+            let home = try await model.hub.fetchKept(HubEndpoints.home, as: HomeResponse.self, keeper: model.answers) {
+                LastAnswer.worthKeeping(rows: $0.rows.count, unavailable: $0.partial.count)
+            }
+            // A row the hub could not refresh keeps its place (Android's `HomeRows.merge`).
+            hubRows = home.partial.isEmpty ? home.rows : HomeRows.merge(next: home.rows, previous: hubRows)
             // Any card can become the hero, so ask for every hero's colours
             // now: the page re-tints the moment a card is chosen.
             model.colors.want(rows.flatMap { row in
@@ -102,7 +147,7 @@ struct HomeView: View {
             if let rowId = ProcessInfo.processInfo.environment["HUB_OPEN"], !debugOpened,
                let hit = rows.first(where: { $0.id == rowId })?.items.first {
                 debugOpened = true
-                openRoute(.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title)))
+                openRoute(hit.route)
             }
             #endif
             let unavailable = home.partial.map(\.service)
@@ -112,6 +157,39 @@ struct HomeView: View {
         } catch {
             if error.kind == .cancelled { return }
             status = StatusText.failed(error.message, kind: error.kind, hasData: !rows.isEmpty)
+        }
+    }
+
+    /// Coming up and the library rows chosen in Settings > Home, asked for beside
+    /// the hub's rows and slotted in as they arrive. One the hub cannot answer
+    /// for is left out, and says nothing: Home's own status line is the hub's.
+    private func loadExtras() async {
+        let wanted = layout.layout
+        // What is no longer wanted goes at once.
+        let keep = Set(wanted.order).subtracting(wanted.hidden)
+        extras = extras.filter { keep.contains($0.key) }
+        guard wanted.wantsUpcoming || !wanted.wantedLibraries.isEmpty else { return }
+        let hub = model.hub
+        let zone = TimeZone.current
+        let today = UpcomingPresentation.today(now: .now, zone: zone)
+        let range = HomeRows.upcomingRange(today: today)
+        async let upcoming: Result<CalendarResponse, HubFailure>? = wanted.wantsUpcoming
+            ? ActivityView.calendar(hub, start: range.start, end: range.end, zone: zone)
+            : nil
+        async let libraries: [LibraryFolder] = wanted.wantedLibraries.isEmpty
+            ? [] : ((try? await hub.fetch(HubEndpoints.library, as: LibraryResponse.self))?.views ?? [])
+        if let result = await upcoming, case .success(let response) = result, !Task.isCancelled {
+            let row = HomeRows.upcoming(response.items, today: today)
+            extras[HomeRows.upcoming] = row
+            model.colors.want(row.items.map { HomeHero.from(rowId: HomeRows.upcoming, rowTitle: row.title, hit: $0).backdrop })
+        }
+        let views = Dictionary(await libraries.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        for viewId in wanted.wantedLibraries {
+            guard let name = views[viewId], !Task.isCancelled else { continue }
+            guard let page = try? await hub.fetch(HubEndpoints.libraryItems(viewId: viewId, sort: "added", order: "desc"),
+                                                  as: LibraryPage.self), !Task.isCancelled else { continue }
+            let id = HomeRows.libraryRowId(viewId)
+            extras[id] = HomeRow(id: id, title: HomeRows.libraryRowTitle(name), items: Array(page.items.prefix(HomeRows.libraryRowSize)))
         }
     }
 
@@ -209,6 +287,12 @@ struct HeroView: View {
                         Label("Details", systemImage: "info.circle")
                     }
                     .buttonStyle(GlassPillStyle())
+                } else if !content.mediaKey.isEmpty {
+                    // Coming up: not in the library, so Details is its request-side page, and the only button.
+                    NavigationLink(value: AppRoute.media(MediaRoute(key: content.mediaKey, title: content.title))) {
+                        Label("Details", systemImage: "info.circle")
+                    }
+                    .buttonStyle(GlassPillStyle())
                 }
             }
             .padding(.top, 4)
@@ -274,18 +358,23 @@ struct HomeRowView: View {
                 .font(HubType.body(metrics.rowTitle, weight: .bold, relativeTo: .title3))
                 .foregroundStyle(.white)
                 .padding(.horizontal, metrics.margin)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("home-title-\(row.id)")
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: metrics.gap) {
                     ForEach(row.items) { hit in
-                        NavigationLink(value: AppRoute.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title))) {
+                        // A title in the library opens its page; Coming up's is not, and opens its request side.
+                        NavigationLink(value: hit.route) {
                             if landscape {
                                 LandscapeCard(hit: hit).frame(width: metrics.tile)
                             } else {
-                                PosterCard(hit: hit, caption: false).frame(width: metrics.poster)
+                                PosterCard(hit: hit, caption: false,
+                                           dayChip: row.id == HomeRows.upcoming ? HomeRows.dayTag(hit.subtitle) : "")
+                                    .frame(width: metrics.poster)
                             }
                         }
                         .buttonStyle(GlassCardStyle())
-                        .disabled(hit.jellyfinItemId.isEmpty)
+                        .disabled(hit.jellyfinItemId.isEmpty && hit.media.key.isEmpty)
                         .previewsWhenFocused { preview(hit) }
                         .contextMenu { playMenu(hit) }
                     }

@@ -104,6 +104,34 @@ enum DemoLibrary {
         }
     }
 
+    // MARK: Home
+
+    /// `GET /v1/home` (#35): what is part way through, what comes next, what is
+    /// new and the favourites, for the profile. An empty row is never sent, as
+    /// the hub's.
+    static func home() -> DemoTransport.Answer {
+        func tile(_ index: Int) -> Title { titles.first { $0.id == id(index) }! }
+        func partway(_ title: Title, _ progress: Double) -> [String: Any] {
+            var card = hit(title)
+            card["progress"] = progress
+            return card
+        }
+        func next(_ title: Title, number: Int) -> [String: Any] {
+            let episode = episodeFields(title, number: number)
+            let media: [String: Any] = ["type": "episode", "title": title.title, "year": title.year, "key": "jf:\(title.id)"]
+            return ["media": media, "subtitle": "S1E\(number) · \(episodeNames[number - 1])", "availability": "available",
+                    "jellyfinItemId": episode["id"] ?? "", "actions": ["play", "detail"]]
+        }
+        let starred = states.withLock { all in titles.filter { all[$0.id]?.favorite == true } }
+        let rows: [[String: Any]] = [
+            ["id": "continue", "title": "Continue watching", "items": [partway(tile(11), 0.42), partway(tile(13), 0.12)]],
+            ["id": "nextup", "title": "Next up", "items": [next(tile(17), number: 2), next(tile(19), number: 3)]],
+            ["id": "latest", "title": "Recently added", "items": [tile(13), tile(14), tile(6), tile(18)].map(hit)],
+            ["id": "favourites", "title": "Favourites", "items": starred.map(hit)],
+        ].filter { !(($0["items"] as? [Any]) ?? []).isEmpty }
+        return json(["rows": rows, "partial": [Any](), "cache": ["hit": false, "ageSeconds": 0, "stale": false]])
+    }
+
     // MARK: Answers
 
     private static func title(_ id: String) -> Title? { titles.first { $0.id == id } }

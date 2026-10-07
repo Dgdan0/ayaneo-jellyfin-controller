@@ -4,20 +4,45 @@ import UniformTypeIdentifiers
 
 /// Settings (the prototype's `pgSettings`): its places in a list on the left
 /// on an iPad or a Mac, as pills over the page on a phone, and the chosen
-/// one's glass cards. Libraries is the first place built (#15); the others
-/// come with the screens they belong to.
+/// one's glass cards. Each place is built with the screens it belongs to:
+/// Libraries (#15), Playback (#25), Notifications (#36), and Appearance,
+/// Subtitles, the controller test and the licences (#38).
 struct SettingsView: View {
     @Environment(\.glassMetrics) private var metrics
 
     enum Pane: String, CaseIterable, Identifiable {
-        case libraries, playback
+        case appearance, home, libraries, playback, subtitles, notifications, controller, licences
 
         var id: String { rawValue }
-        var title: String { self == .playback ? "Playback" : "Libraries" }
-        var systemImage: String { self == .playback ? "play.circle" : "books.vertical" }
+        var title: String {
+            switch self {
+            case .appearance: "Appearance"
+            case .home: "Home"
+            case .libraries: "Libraries"
+            case .playback: "Playback"
+            case .subtitles: "Subtitles"
+            case .notifications: "Notifications"
+            case .controller: "Controller test"
+            case .licences: "Fonts and licences"
+            }
+        }
+        var systemImage: String {
+            switch self {
+            case .appearance: "paintpalette"
+            case .home: "house"
+            case .libraries: "books.vertical"
+            case .playback: "play.circle"
+            case .subtitles: "captions.bubble"
+            case .notifications: "bell"
+            case .controller: "gamecontroller"
+            case .licences: "doc.text"
+            }
+        }
     }
 
-    @SceneStorage("settings.pane") private var pane: Pane = .libraries
+    @SceneStorage("settings.pane") private var pane: Pane = .appearance
+    /// How big the window is: Subtitles draws its words at the size the player would.
+    @State private var window = CGSize(width: 390, height: 844)
 
     var body: some View {
         ScrollView {
@@ -25,13 +50,21 @@ struct SettingsView: View {
                 if metrics.compact {
                     VStack(alignment: .leading, spacing: 14) {
                         PageHeading(title: "Settings") { EmptyView() }
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(Pane.allCases) { place in
-                                    ChoicePill(title: place.title, selected: place == pane, systemImage: place.systemImage) {
-                                        pane = place
+                        // Seven places do not fit a phone: the chosen one is brought into view.
+                        ScrollViewReader { proxy in
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(Pane.allCases) { place in
+                                        ChoicePill(title: place.title, selected: place == pane, systemImage: place.systemImage) {
+                                            pane = place
+                                        }
+                                        .id(place)
+                                        .accessibilityIdentifier("pane-\(place.rawValue)")
                                     }
                                 }
+                            }
+                            .onChange(of: pane, initial: true) { _, chosen in
+                                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(chosen, anchor: .center) }
                             }
                         }
                         content
@@ -48,6 +81,15 @@ struct SettingsView: View {
             .padding(.bottom, 30)
         }
         .ambientArtwork("")
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { window = $0 }
+        #if DEBUG
+        // scripts/mac.sh opens a place for screenshots: HUB_OPEN=pane:subtitles.
+        .onAppear {
+            if let open = ProcessInfo.processInfo.environment["HUB_OPEN"], open.hasPrefix("pane:"),
+               let chosen = Pane(rawValue: String(open.dropFirst("pane:".count))) { pane = chosen }
+        }
+        #endif
+        .environment(\.settingsWindow, window)
     }
 
     /// The prototype's `.snav`: the page's name, then its places.
@@ -75,14 +117,21 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
+                .accessibilityIdentifier("pane-\(place.rawValue)")
             }
         }
     }
 
     @ViewBuilder private var content: some View {
         switch pane {
+        case .appearance: AppearanceSettings()
+        case .home: HomeSettingsPane()
         case .libraries: LibrariesSettings()
         case .playback: PlaybackSettingsPane()
+        case .subtitles: SubtitlesSettings()
+        case .notifications: NotificationsSettingsPane()
+        case .controller: ControllerSettings()
+        case .licences: LicencesSettings()
         }
     }
 }

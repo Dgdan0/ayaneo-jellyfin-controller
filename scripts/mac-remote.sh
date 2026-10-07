@@ -130,6 +130,8 @@ run() {
     HUB_BOOK_CHROME=$(printf '%q' "${HUB_BOOK_CHROME:-}") HUB_BOOK_AT=$(printf '%q' "${HUB_BOOK_AT:-}") \
     HUB_BOOK_SHEET=$(printf '%q' "${HUB_BOOK_SHEET:-}") HUB_BOOK_SCROLL=$(printf '%q' "${HUB_BOOK_SCROLL:-}") \
     HUB_WIDTH=$(printf '%q' "${HUB_WIDTH:-}") \
+    HUB_SEEN_DWELL_MS=$(printf '%q' "${HUB_SEEN_DWELL_MS:-}") \
+    HUB_HERO=$(printf '%q' "${HUB_HERO:-}") \
     SHOT_SIMS=$(printf '%q' "${SHOT_SIMS:-}") SHOT_WAIT=$(printf '%q' "${SHOT_WAIT:-3}") \
     SHOT_STATE=$(printf '%q' "${SHOT_STATE:-}") SHOT_TIMES=$(printf '%q' "${SHOT_TIMES:-}") \
     ${BUILD_NUMBER:+BUILD_NUMBER=$(printf '%q' "$BUILD_NUMBER")} \
