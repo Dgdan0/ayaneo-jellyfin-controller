@@ -165,8 +165,8 @@ struct ComicReaderBars: View {
 
     private func enabled(_ item: ComicControl) -> Bool {
         switch item {
-        case .previousIssue: !(reader.manifest?.previousSourceItemId.isEmpty ?? true)
-        case .nextIssue: !(reader.manifest?.nextSourceItemId.isEmpty ?? true)
+        case .previousIssue: reader.hasIssue(-1)
+        case .nextIssue: reader.hasIssue(1)
         default: reader.manifest != nil
         }
     }

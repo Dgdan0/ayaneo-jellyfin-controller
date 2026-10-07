@@ -168,4 +168,98 @@ final class ReadingExtrasTests: XCTestCase {
         app.buttons["Done"].tap()
         XCTAssertTrue(waitForGone(brightness), "Done did not close Comfort")
     }
+
+    // MARK: Reading lists
+
+    /// Books › Library › Reading lists, then one of Kavita's lists.
+    @MainActor
+    private func openReadingList(_ environment: [String: String] = [:]) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo"]
+        app.launchEnvironment = ["HUB_SECTION": "library", "HUB_SIDE": "books"].merging(environment) { $1 }
+        app.launch()
+        let lists = app.buttons["reading-lists"]
+        XCTAssertTrue(lists.waitForExistence(timeout: 15), "Books' library has no reading lists: \(buttons(app))")
+        for _ in 0..<4 where !lists.isHittable { app.swipeUp() }
+        keep(app, "reading-lists-tile")
+        lists.tap()
+        let first = app.buttons["reading-list-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10), "Kavita's lists did not come: \(buttons(app))")
+        XCTAssertTrue(text(app, containing: "2 Kavita lists · title order").exists)
+        XCTAssertTrue(first.label.contains("Marvel's first year") && first.label.contains("4 issues"), first.label)
+        first.tap()
+        XCTAssertTrue(app.buttons["reading-list-entry-0"].waitForExistence(timeout: 10), "the list's issues did not come")
+        keep(app, "reading-list")
+        return app
+    }
+
+    @MainActor
+    private func endHeading(_ app: XCUIApplication) -> XCUIElement {
+        app.staticTexts.matching(identifier: "comic-end-heading").firstMatch
+    }
+
+    /// Marvel's first year, in Kavita's order across two runs: an issue
+    /// opened from it goes on to the list's next issue, whichever run it is
+    /// in, until the list ends; what was read shows on the list after.
+    @MainActor
+    func testAReadingListIsReadInItsOrderAcrossRuns() {
+        // HUB_READ_SHEET=end reads each issue to its end as it opens.
+        let app = openReadingList(["HUB_READ_SHEET": "end"])
+        XCTAssertTrue(app.buttons["reading-list-entry-0"].label.hasPrefix("1. Fantastic Four · Issue #1"))
+        let second = app.buttons["reading-list-entry-1"]
+        XCTAssertTrue(second.label.hasPrefix("2. Amazing Adult Fantasy · Issue #7"), second.label)
+        second.tap()
+
+        let heading = endHeading(app)
+        XCTAssertTrue(heading.waitForExistence(timeout: 20), "the issue did not open from the list")
+        XCTAssertEqual(heading.label, "End of Amazing Adult Fantasy #7")
+        XCTAssertTrue(app.staticTexts["Next: Fantastic Four #2"].exists, "the list's next issue, in another run, is not named")
+        app.buttons["Continue"].tap()
+
+        XCTAssertTrue(waitUntilLabel(heading, "End of Fantastic Four #2"), "Continue did not open the list's next issue")
+        XCTAssertTrue(app.staticTexts["Next: #3"].exists, "the list's next issue is not named")
+        app.buttons["Continue"].tap()
+
+        XCTAssertTrue(waitUntilLabel(heading, "End of Fantastic Four #3"), "Continue did not go on along the list")
+        XCTAssertTrue(app.staticTexts["End of the reading list"].exists, "the list's end is not said")
+        XCTAssertFalse(app.buttons["Continue"].exists, "Continue past the list's end")
+        keep(app, "reading-list-end")
+        app.buttons["Leave"].tap()
+
+        // Back on the list, the issues read to their end are read.
+        let third = app.buttons["reading-list-entry-2"]
+        XCTAssertTrue(third.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitUntil(10) { third.label.contains("Read") }, "the list does not show the issue read: \(third.label)")
+        XCTAssertTrue(app.buttons["reading-list-entry-1"].label.contains("Read"))
+        XCTAssertFalse(app.buttons["reading-list-entry-0"].label.contains("Read"))
+    }
+
+    /// The list's first issue, turned back from its first page: the list starts there.
+    @MainActor
+    func testAReadingListStartsWithItsFirstIssue() {
+        let app = openReadingList()
+        app.buttons["reading-list-entry-0"].tap()
+        let page = app.descendants(matching: .any).matching(identifier: "comic-page").firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 15), "the reader did not open")
+        XCTAssertTrue(waitUntil(15) { (page.value as? String ?? "").contains("Page 1 of 36") }, "the issue did not open at its start")
+        XCTAssertEqual(page.label, "Fantastic Four")
+        XCTAssertTrue(app.buttons["Close reader"].waitForNonExistence(timeout: 8), "the controls stayed over the page")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.5)).tap()
+        XCTAssertTrue(text(app, containing: "Start of reading list").waitForExistence(timeout: 5), "going back said nothing")
+    }
+
+    @MainActor
+    private func waitUntil(_ seconds: TimeInterval, _ condition: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if condition() { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        return condition()
+    }
+
+    @MainActor
+    private func waitUntilLabel(_ element: XCUIElement, _ label: String) -> Bool {
+        waitUntil(20) { element.exists && element.label == label }
+    }
 }

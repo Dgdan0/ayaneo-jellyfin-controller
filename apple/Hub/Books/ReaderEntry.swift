@@ -13,17 +13,15 @@ enum ReadRequest: Equatable, Identifiable {
     case pages(work: ReadingWork, publication: ReadingSectionItem)
     /// An EPUB, alone or read along with its narration (phase 4).
     case ebook(work: ReadingWork, sourceItemId: String, readAlong: Bool)
+    /// Kavita's reading list at one of its issues (#37), in the page reader,
+    /// which goes along the list from run to run.
+    case list(ReadingListRun)
 
     var id: String {
         switch self {
         case .pages(let work, let publication): "pages:\(work.id):\(publication.sourceItemId)"
         case .ebook(let work, let sourceItemId, let readAlong): "ebook:\(work.id):\(sourceItemId):\(readAlong)"
-        }
-    }
-
-    var work: ReadingWork {
-        switch self {
-        case .pages(let work, _), .ebook(let work, _, _): work
+        case .list(let run): "list:\(run.title):\(run.current.id)"
         }
     }
 
@@ -61,6 +59,9 @@ struct ReaderHost: View {
         case .pages(let work, let publication):
             // Phase 3: the comic and manga reader, which leaves through `closeReader`.
             ComicReaderView(work: work, publication: publication)
+                .environment(\.closeReader, CloseReaderAction { read.close() })
+        case .list(let run):
+            ComicReaderView(list: run)
                 .environment(\.closeReader, CloseReaderAction { read.close() })
         case .ebook(let work, let sourceItemId, let readAlong):
             // Phase 4: the ebook reader, Readium on the iPad and the iPhone; the
