@@ -51,6 +51,42 @@ class ReadingAudioManifestTest {
         assertEquals(ReadingAudioChapter("Bare"), json.decodeFromString<ReadingAudioChapter>("""{"title":"Bare"}"""))
     }
 
+    // ------------------------------------------------------------------ the book page's hub data (#39)
+
+    @Test fun `a book carries what readers think and what this profile says of it, and an older hub's carries neither`() {
+        val work = json.decodeFromString<ReadingWork>("""
+            { "id": "rw_1", "title": "The Final Empire", "genres": ["Fantasy", "Epic fantasy"],
+              "community": { "rating": 4.45, "count": 1204331, "source": "hardcover" },
+              "you": { "rating": 5, "finished": "2025-09", "readCount": 2, "shelves": ["cosmere", "favorites"],
+                       "status": "read", "source": "goodreads" }, "somethingNew": 1 }
+        """)
+        assertEquals(ReadingCommunity(4.45, 1_204_331, "hardcover"), work.community)
+        assertEquals(ReadingYou(5, "2025-09", 2, listOf("cosmere", "favorites"), "read", "goodreads"), work.you)
+        // Fields the hub leaves out are not there: a rating of 0 is not rated, and a blank month is unknown.
+        val sparse = json.decodeFromString<ReadingWork>("""{"id":"rw_2","you":{"shelves":[],"status":"to-read"},"community":{"rating":3.9,"source":"goodreads"}}""")
+        assertEquals(ReadingYou(status = "to-read"), sparse.you)
+        assertEquals(0L, sparse.community!!.count)
+        val older = json.decodeFromString<ReadingWork>("""{"id":"rw_3","title":"A Book"}""")
+        assertNull(older.community)
+        assertNull(older.you)
+    }
+
+    @Test fun `what is left to say after a write is a you, or null`() {
+        assertEquals(ReadingYouResponse("rw_1", ReadingYou(rating = 4, source = "app")),
+            json.decodeFromString<ReadingYouResponse>("""{"workId":"rw_1","you":{"rating":4,"shelves":[],"source":"app"}}"""))
+        assertNull(json.decodeFromString<ReadingYouResponse>("""{"workId":"rw_1","you":null}""").you)
+    }
+
+    @Test fun `a write names only the keys it changes, numbers as numbers, and null for what it takes away`() {
+        assertEquals("""{"rating":4}""", ReadingYouPatch(rating = YouEdit.To(4)).toJson())
+        assertEquals("""{"rating":null,"finished":"2026-10","readCount":2}""",
+            ReadingYouPatch(YouEdit.Clear, YouEdit.To("2026-10"), YouEdit.To(2)).toJson())
+        assertEquals("""{"finished":null,"readCount":null}""", ReadingYouPatch(finished = YouEdit.Clear, readCount = YouEdit.Clear).toJson())
+        assertTrue(ReadingYouPatch().isEmpty)
+        assertEquals("{}", ReadingYouPatch().toJson())
+        assertFalse(ReadingYouPatch(readCount = YouEdit.Clear).isEmpty)
+    }
+
     @Test fun `a book without a read-along edition has no alignment and may say why`() {
         val plain = json.decodeFromString<ReadingAudioManifest>("""{"revision":"05c8b6c63e2b","aligned":false,"tracks":[],"chapters":[]}""")
         assertFalse(plain.aligned)

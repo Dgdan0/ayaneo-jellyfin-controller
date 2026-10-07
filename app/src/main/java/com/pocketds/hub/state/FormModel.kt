@@ -35,11 +35,16 @@ sealed interface FormRow {
         val section: String = ""
     ) : FormRow
 
-    /** Press it. A submits. */
+    /**
+     * Press it. A submits. [danger] is glass in the danger colour, [quiet] glass in white words (a
+     * Cancel beside the main action), and [icon] false leaves out the symbol beside the words.
+     */
     data class Action(
         override val id: String,
         override val label: String,
-        val danger: Boolean = false
+        val danger: Boolean = false,
+        val quiet: Boolean = false,
+        val icon: Boolean = true
     ) : FormRow
 }
 
@@ -111,7 +116,11 @@ class FormModel(rows: List<FormRow>) {
                 rows[index] = row.copy(checked = !row.checked)
                 true
             }
-            is FormRow.Action -> false
+            // Buttons side by side (Cancel, Mark finished): left and right walk between them.
+            is FormRow.Action -> {
+                val next = index + delta
+                if (rows.getOrNull(next) is FormRow.Action) { index = next; true } else false
+            }
         }
     }
 

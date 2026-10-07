@@ -350,7 +350,11 @@ data class ReadingWork(
     val sections: List<ReadingSection> = emptyList(),
     @SerialName("continue") val continueAt: ReadingContinue? = null,
     val partial: List<PartialFailure> = emptyList(),
-    val cache: CacheInfo = CacheInfo()
+    val cache: CacheInfo = CacheInfo(),
+    /** How readers rate it (#39); absent when nothing is known. Only a book's own page carries it. */
+    val community: ReadingCommunity? = null,
+    /** What this profile has to say about it (#39); absent when there is nothing to say. */
+    val you: ReadingYou? = null
 ) {
     val byline: String get() = authors.joinToString(", ")
 
@@ -379,6 +383,35 @@ data class ReadingWork(
 /** An author page a book links to. */
 @Serializable
 data class ReadingAuthorRef(val id: String = "", val name: String = "")
+
+/**
+ * How readers rate a book (#39): [rating] is 0 to 5, [count] how many rated it (0 when the
+ * source does not say), [source] "hardcover", or "goodreads" (the average in the owner's
+ * export) when Hardcover has nothing.
+ */
+@Serializable
+data class ReadingCommunity(val rating: Double = 0.0, val count: Long = 0, val source: String = "")
+
+/**
+ * What this profile has to say about a book (#39), from the owner's Goodreads export and from
+ * the apps. Nothing is "0" or blank here: [rating] 0 is not rated, [finished] is "YYYY-MM" or
+ * blank, [readCount] 0 is unknown. [shelves] never holds the three statuses, which are
+ * [status]: "read", "to-read" or "currently-reading". [source] is "app" once an app set or
+ * cleared a rating, finish date or read count, else "goodreads".
+ */
+@Serializable
+data class ReadingYou(
+    val rating: Int = 0,
+    val finished: String = "",
+    val readCount: Int = 0,
+    val shelves: List<String> = emptyList(),
+    val status: String = "",
+    val source: String = ""
+)
+
+/** The answer to `PATCH /v1/reading/works/{id}/you`: what is left to say, null when nothing. */
+@Serializable
+data class ReadingYouResponse(val workId: String = "", val you: ReadingYou? = null)
 
 @Serializable
 data class ReadingLibraryItemsResponse(

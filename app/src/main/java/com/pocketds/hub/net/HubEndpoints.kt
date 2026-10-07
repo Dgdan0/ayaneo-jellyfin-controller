@@ -208,6 +208,10 @@ object HubEndpoints {
     fun readingWork(base: String, workId: String): HubRequest =
         HubRequest(join(base, "/v1/reading/works/" + encode(workId)))
 
+    /** What this profile says about a book (#39): `PATCH`, a key present sets, `null` clears, absent leaves. */
+    fun readingYou(base: String, workId: String): HubRequest =
+        HubRequest(join(base, "/v1/reading/works/" + encode(workId) + "/you"), method = "PATCH")
+
     fun readingPublication(base: String, workId: String, sourceItemId: String): HubRequest =
         HubRequest(
             join(base, "/v1/reading/works/" + encode(workId) +

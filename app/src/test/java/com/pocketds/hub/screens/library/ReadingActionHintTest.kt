@@ -16,6 +16,14 @@ class ReadingActionHintTest {
         assertEquals("Change format", ReadingActionHint.label("format"))
     }
 
+    @Test fun the_formats_of_a_book_page_say_what_they_open_and_resume_names_itself() {
+        assertEquals("Listen", ReadingActionHint.label("list:format:audiobook", text = "Audiobook"))
+        assertEquals("Read", ReadingActionHint.label("list:format:ebook", text = "Ebook"))
+        assertEquals("Read along", ReadingActionHint.label("list:format:readaloud", text = "Read along"))
+        assertEquals("Resume", ReadingActionHint.label("entry", text = "Resume · Chapter 14 · 32%"))
+        assertEquals("Read again", ReadingActionHint.label("entry", text = "Read again"))
+    }
+
     @Test fun volume_chips_and_the_continue_card_say_what_they_do() {
         assertEquals("Show volume", ReadingActionHint.label("list:volume:1"))
         assertEquals("Continue reading", ReadingActionHint.label("continue:8338"))

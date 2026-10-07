@@ -189,6 +189,12 @@ interface HubApi {
     suspend fun readingResolve(source:String,sourceId:String,isbn:String):HubResult<ReadingResolveResponse> =
         HubResult.Failed(FailureKind.UNKNOWN,"Library lookup is unavailable")
     suspend fun readingWork(workId: String): HubResult<ReadingWork>
+    /**
+     * Writes what this profile says about a book (#39): a rating, a month finished, a read count.
+     * The answer is what is left to say, null when nothing. A hub from before it answers 404/405.
+     */
+    suspend fun updateReadingYou(workId: String, patch: com.pocketds.hub.model.ReadingYouPatch): HubResult<com.pocketds.hub.model.ReadingYouResponse> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Your ratings are unavailable")
     suspend fun readingPublication(
         workId: String,
         sourceItemId: String
@@ -923,6 +929,12 @@ class HubClient(private val context: Context, private val connection: HubConnect
             json.decodeFromString<ReadingWork>(it)
         }
 
+    // Once: a write that timed out may have landed, and the page reads the book again when it comes back.
+    override suspend fun updateReadingYou(workId: String, patch: com.pocketds.hub.model.ReadingYouPatch): HubResult<com.pocketds.hub.model.ReadingYouResponse> =
+        postOnce(HubEndpoints.readingYou(base(), workId), patch.toJson()) {
+            json.decodeFromString<com.pocketds.hub.model.ReadingYouResponse>(it)
+        }
+
     override suspend fun readingPublication(
         workId: String,
         sourceItemId: String
@@ -1195,8 +1207,8 @@ class HubClient(private val context: Context, private val connection: HubConnect
                         .url(request.url)
                         .cacheControl(noStore)
                         .apply { if (userId.isNotEmpty()) header(JELLYFIN_USER_HEADER, userId) }
-                        // A PUT when the request says so (a library order); a POST otherwise.
-                        .method(if (request.method == "PUT") "PUT" else "POST", payload.toRequestBody(jsonMedia))
+                        // A PUT when the request says so (a library order), a PATCH for what a profile says of a book; a POST otherwise.
+                        .method(if (request.method == "PUT" || request.method == "PATCH") request.method else "POST", payload.toRequestBody(jsonMedia))
                         .build()
                 )
                 call.await().use { response ->

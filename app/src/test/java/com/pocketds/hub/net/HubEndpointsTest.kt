@@ -93,6 +93,11 @@ class HubEndpointsTest {
             "$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef",
             HubEndpoints.readingWork(base, "rw_0123456789abcdef0123456789abcdef").url
         )
+        // What this profile says of a book (#39) is written with PATCH.
+        assertEquals(
+            HubRequest("$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef/you", method = "PATCH"),
+            HubEndpoints.readingYou(base, "rw_0123456789abcdef0123456789abcdef")
+        )
         assertEquals(
             "$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef/publications/6",
             HubEndpoints.readingPublication(base, "rw_0123456789abcdef0123456789abcdef", "6").url

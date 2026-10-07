@@ -55,6 +55,26 @@ class FormModelTest {
     }
 
     @Test
+    fun `left and right walk between buttons side by side, and stop at the ends (#39)`() {
+        val model = FormModel(listOf(FormRow.Choice("a", "A", listOf("x", "y")), FormRow.Action("cancel", "Cancel"), FormRow.Action("ok", "OK")))
+        model.focus(1)
+        // Nothing to the left of the first button but a field.
+        assertFalse(model.adjust(-1))
+        assertEquals(1, model.index)
+        assertTrue(model.adjust(1))
+        assertEquals(2, model.index)
+        assertFalse(model.adjust(1))
+        assertEquals(2, model.index)
+        assertTrue(model.adjust(-1))
+        assertEquals(1, model.index)
+        // A lone button has nowhere to walk.
+        val lone = FormModel(listOf(FormRow.Choice("a", "A", listOf("x", "y")), FormRow.Action("go", "Go")))
+        lone.focus(1)
+        assertFalse(lone.adjust(1))
+        assertFalse(lone.adjust(-1))
+    }
+
+    @Test
     fun `a single-option choice does not pretend to change`() {
         val model = FormModel(listOf(FormRow.Choice("only", "Server", listOf("Radarr"))))
         assertFalse(model.adjust(1))
@@ -77,10 +97,12 @@ class FormModelTest {
     }
 
     @Test
-    fun `left and right do nothing on a button`() {
-        val model = requestForm()
-        model.focus(2)
+    fun `left and right do nothing on a button with no other beside it`() {
+        // The request form's one button; two side by side walk between them (below, #39).
+        val model = FormModel(listOf(FormRow.Choice("profile", "Quality", listOf("Any", "HD-720p")), FormRow.Action("submit", "Request")))
+        model.focus(1)
         assertFalse(model.adjust(1))
+        assertFalse(model.adjust(-1))
     }
 
     @Test
