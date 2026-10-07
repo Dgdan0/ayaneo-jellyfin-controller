@@ -971,17 +971,20 @@ struct ReadingReleasesView: View {
             .padding(.bottom, 28)
         }
         .task(id: "\(targetIndex)·\(searches)") { await search() }
-        .confirmationDialog(confirming?.title ?? "", isPresented: Binding(get: { confirming != nil },
-                                                                           set: { if !$0 { confirming = nil } }),
-                            titleVisibility: .visible) {
-            if let release = confirming, release.canGrab {
+        .alert(confirming?.title ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
+               presenting: confirming) { release in
+            // The harmless answer first, a plain button that Escape presses: iOS 26 hides a
+            // dialog's cancel role, which left a release that cannot be used with no answer at all.
+            Button("Choose another") { confirming = nil }
+                .keyboardShortcut(.cancelAction)
+            if release.canGrab {
                 Button(release.rejected ? "Download anyway" : "Download this release") {
+                    confirming = nil
                     Task { await grab(release) }
                 }
             }
-            Button("Choose another", role: .cancel) { confirming = nil }
-        } message: {
-            if let release = confirming { Text(confirmText(release)) }
+        } message: { release in
+            Text(confirmText(release))
         }
     }
 

@@ -185,12 +185,20 @@ final class BooksTests: XCTestCase {
         let cancel = app.buttons["cancel-rt_demo_will"]
         XCTAssertTrue(reveal(cancel, in: app), "the moving transfer has no Cancel: \(buttons(app))")
         cancel.tap()
-        // It asks first, and the transfer stays until the answer is Cancel transfer. (iOS shows
-        // the harmless answer, Keep transfer, as a tap outside the question.)
-        let confirm = app.buttons["confirm-cancel"].firstMatch
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "cancelling did not ask first: \(buttons(app))")
-        XCTAssertTrue(app.staticTexts["Cancel transfer?"].exists)
-        XCTAssertTrue(text(app, containing: "The Will of the Many").exists)
+        // It asks first, the harmless answer first, and Keep transfer keeps it.
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "cancelling did not ask first: \(buttons(app))")
+        XCTAssertTrue(alert.staticTexts["Cancel transfer?"].exists)
+        XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "The Will of the Many")).firstMatch.exists)
+        let answers = alert.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }
+        XCTAssertEqual(answers, ["Keep transfer", "Cancel transfer"], "the harmless answer is not first: \(answers)")
+        alert.buttons["keep-transfer"].firstMatch.tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5), "Keep transfer did not close the question")
+        XCTAssertTrue(app.buttons["cancel-rt_demo_will"].exists, "Keep transfer cancelled the transfer")
+
+        app.buttons["cancel-rt_demo_will"].tap()
+        let confirm = app.alerts.firstMatch.buttons["confirm-cancel"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "cancelling did not ask again: \(buttons(app))")
         confirm.tap()
         XCTAssertTrue(text(app, containing: "Cancelled The Will of the Many").waitForExistence(timeout: 10), "the cancel was not sent")
     }

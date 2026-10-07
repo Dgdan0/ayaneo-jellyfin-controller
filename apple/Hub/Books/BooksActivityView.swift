@@ -58,18 +58,20 @@ struct BooksActivityView: View {
         }
         .refreshable { polls += 1 }
         .task(id: polls) { await poll() }
-        .confirmationDialog("Cancel transfer?", isPresented: Binding(get: { cancelling != nil },
-                                                                     set: { if !$0 { cancelling = nil } }),
-                            titleVisibility: .visible) {
-            Button("Keep transfer", role: .cancel) { cancelling = nil }
+        .alert("Cancel transfer?", isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } }),
+               presenting: cancelling) { item in
+            // The harmless answer first. iOS 26 hides a dialog's cancel role and moves an
+            // alert's after the destructive answer, so it is a plain button that Escape presses.
+            Button("Keep transfer") { cancelling = nil }
+                .keyboardShortcut(.cancelAction)
                 .accessibilityIdentifier("keep-transfer")
             Button("Cancel transfer", role: .destructive) {
-                if let item = cancelling { Task { await run(.cancel, on: item) } }
                 cancelling = nil
+                Task { await run(.cancel, on: item) }
             }
             .accessibilityIdentifier("confirm-cancel")
-        } message: {
-            if let item = cancelling { Text("\(item.title)\nStop this transfer and delete its incomplete files.") }
+        } message: { item in
+            Text("\(item.title)\nStop this transfer and delete its incomplete files.")
         }
     }
 

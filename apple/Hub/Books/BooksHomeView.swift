@@ -104,14 +104,17 @@ struct BooksHomeView: View {
             Button("Cancel", role: .cancel) { naming = nil }
             Button(naming?.listId == nil ? "Create" : "Save") { saveNaming() }
         }
-        .confirmationDialog("Delete \(deleting?.title ?? "")?", isPresented: Binding(
-            get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
-            Button("Keep the list", role: .cancel) { deleting = nil }
+        .alert("Delete \(deleting?.title ?? "")?", isPresented: Binding(
+            get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { list in
+            // The harmless answer first, a plain button that Escape presses: iOS 26 hides a
+            // dialog's cancel role and moves an alert's after the destructive answer.
+            Button("Keep the list") { deleting = nil }
+                .keyboardShortcut(.cancelAction)
             Button("Delete list", role: .destructive) {
-                if let id = deleting?.id { books.updateLists { $0.delete(id) } }
                 deleting = nil
+                books.updateLists { $0.delete(list.id) }
             }
-        } message: {
+        } message: { _ in
             Text("The books remain in your library.")
         }
     }
