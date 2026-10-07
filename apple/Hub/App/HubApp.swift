@@ -20,6 +20,8 @@ struct HubApp: App {
                 // colour under its blurred picture (GLASS_PLAN.md).
                 .preferredColorScheme(.dark)
         }
+        // The Playback menu while a video is open (#33).
+        .commands { PlayerCommands() }
         #if os(iOS)
         // Downloads finishing while the app was away: the system wakes it to
         // hand over their files, then waits for the background session's events.

@@ -1,5 +1,8 @@
 import HubKit
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// The player, over everything (GLASS_PLAN.md › Player; the prototype's
 /// `.pl`; Android `playback/PlayerChrome`): the picture, and over it the Glass
@@ -174,9 +177,21 @@ struct PlayerView: View {
         .focusable()
         .focused($keys)
         .focusEffectDisabled()
-        .onKeyPress(.space) { panels.isEmpty ? act { player.togglePlay() } : .ignored }
-        .onKeyPress(.leftArrow) { panels.isEmpty ? act { player.seek(by: -seekMillis) } : .ignored }
-        .onKeyPress(.rightArrow) { panels.isEmpty ? act { player.seek(by: seekMillis) } : .ignored }
+        .onKeyPress(.space) { panels.isEmpty ? act { press(.playPause) } : .ignored }
+        .onKeyPress(.leftArrow) { panels.isEmpty ? act { press(.back) } : .ignored }
+        .onKeyPress(.rightArrow) { panels.isEmpty ? act { press(.forward) } : .ignored }
+        .onKeyPress(.upArrow) { panels.isEmpty ? act { press(.volumeUp) } : .ignored }
+        .onKeyPress(.downArrow) { panels.isEmpty ? act { press(.volumeDown) } : .ignored }
+        .onKeyPress(characters: CharacterSet(charactersIn: PlayerKeyboard.letters)) { key in
+            guard panels.isEmpty, let command = PlayerKeyboard.command(key.characters) else { return .ignored }
+            return act { press(command) }
+        }
+        // The Playback menu, while a video is open (`PlayerCommands`).
+        .focusedSceneValue(\.playerKeys, PlayerKeys(enabled: panels.isEmpty && !locked, playing: player.isPlaying,
+                                                    muted: player.muted, skipTitle: player.skipTitle,
+                                                    hasNext: player.plan?.nextItem != nil,
+                                                    subtitlesOn: (player.plan?.selectedSubtitleIndex ?? -1) >= 0,
+                                                    seekSeconds: seekSeconds, press: { key in act { press(key) } }))
         .onKeyPress(.escape) {
             if panels.isEmpty {
                 player.close()
@@ -771,6 +786,29 @@ struct PlayerView: View {
                 seekShown = nil
                 levelShown = nil
             }
+        }
+    }
+
+    /// A key's command, or the Playback menu's (#33): the same either way.
+    private func press(_ key: PlayerKey) {
+        switch key {
+        case .playPause: player.togglePlay()
+        case .back: player.seek(by: -seekMillis)
+        case .forward: player.seek(by: seekMillis)
+        case .volumeUp, .volumeDown:
+            let level = PlayerKeyboard.volume(player.muted ? 0 : player.volume, up: key == .volumeUp)
+            player.setVolume(level)
+            show(level: PlayerLevelShown(kind: .volume, value: level, side: .right))
+            hideGestureSoon(after: 0.9)
+        case .mute: player.toggleMute()
+        case .subtitles: player.toggleSubtitles()
+        case .slower, .faster: player.stepSpeed(faster: key == .faster)
+        case .skip: player.skipKey()
+        case .next: player.playNext()
+        case .fullScreen:
+            #if os(macOS)
+            NSApp.keyWindow?.toggleFullScreen(nil)
+            #endif
         }
     }
 

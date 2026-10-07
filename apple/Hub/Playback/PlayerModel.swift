@@ -98,6 +98,8 @@ final class PlayerModel {
     private(set) var aspect = PlaybackAspect.standard
     /// The segment a Skip button is for now.
     private(set) var skipSegment: PlaybackSegment?
+    /// M turned the player's sound off (#33).
+    private(set) var muted = false
     /// A track, quality or version change on its way to the hub.
     private(set) var applying = false
     /// A short word about something that did not work, shown for a moment.
@@ -146,6 +148,8 @@ final class PlayerModel {
     @ObservationIgnored private var autoSkipIntro = false
     /// The segments skipped by themselves in this video: going back into one brings its button.
     @ObservationIgnored private var autoSkipped: Set<String> = []
+    /// The subtitles C turned off in this video, for C to turn on again.
+    @ObservationIgnored private var subtitlesTurnedOff: Int?
 
     @ObservationIgnored let player = AVPlayer()
     @ObservationIgnored private var hub: HubClient?
@@ -353,6 +357,7 @@ final class PlayerModel {
         nextTiming = PlaybackSettings.nextTiming
         autoSkipIntro = PlaybackSettings.autoSkipIntro
         autoSkipped = []
+        subtitlesTurnedOff = nil
         applying = false
         subtitleKey = ""
         subtitleTask?.cancel()
@@ -816,6 +821,61 @@ final class PlayerModel {
 
     func setVolume(_ value: Double) {
         player.volume = Float(min(max(value, 0), 1))
+        // Turned up, it is heard again.
+        if value > 0, player.isMuted {
+            player.isMuted = false
+            muted = false
+        }
+    }
+
+    // MARK: The keyboard and the Playback menu (#33)
+
+    /// M: the player's sound off, or back on.
+    func toggleMute() {
+        player.isMuted.toggle()
+        muted = player.isMuted
+        show(notice: muted ? "Muted" : "Sound on")
+    }
+
+    /// C: subtitles off, or back on as they were (`PlaybackChoices.toggledSubtitle`).
+    func toggleSubtitles() {
+        guard let plan else { return }
+        guard let target = PlaybackChoices.toggledSubtitle(plan, last: subtitlesTurnedOff,
+                                                           language: selection.subtitleLanguage) else {
+            return show(notice: "This video has no subtitles")
+        }
+        if target < 0 { subtitlesTurnedOff = plan.selectedSubtitleIndex }
+        chooseSubtitle(target)
+        show(notice: PlayerLabels.subtitlesNotice(plan.subtitleTracks.first { $0.index == target }))
+    }
+
+    /// [ and ]: a speed down or up.
+    func stepSpeed(faster: Bool) {
+        setSpeed(PlayerKeyboard.speed(speed, faster: faster))
+        show(notice: PlayerLabels.speedNotice(speed))
+    }
+
+    /// What S does now: "Skip intro" (or recap, preview, ad), "Skip credits"
+    /// while they play or the next episode's card is up; nil otherwise.
+    var skipTitle: String? {
+        if let skipSegment { return UpNext.skipLabel(skipSegment.type) }
+        return upNext != nil || creditsPlaying != nil ? "Skip credits" : nil
+    }
+
+    /// S: past the intro its button is for; at the credits, the next episode,
+    /// or the credits' end where there is none.
+    func skipKey() {
+        if skipSegment != nil { return skip() }
+        if upNext != nil, plan?.nextItem != nil { return playNext() }
+        guard let credits = creditsPlaying else { return }
+        if plan?.nextItem != nil { playNext() } else { seek(to: credits.endMillis) }
+    }
+
+    private var creditsPlaying: PlaybackSegment? {
+        plan?.segments.first {
+            $0.type.caseInsensitiveCompare("Outro") == .orderedSame
+                && positionMillis >= $0.startMillis && positionMillis < $0.endMillis
+        }
     }
 
     #if os(iOS)

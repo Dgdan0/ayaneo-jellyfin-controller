@@ -193,4 +193,65 @@ final class PlayerBasicsTests: XCTestCase {
         stop.tap()
         XCTAssertTrue(waitUntil(5) { summary.label == "none" }, "the lock screen kept the audiobook: \(summary.label)")
     }
+
+    // MARK: The keyboard
+
+    @MainActor
+    private func text(_ app: XCUIApplication, beginning words: String) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", words)).firstMatch
+    }
+
+    /// M mutes and turns the sound on again, ] and [ change the speed, C
+    /// turns subtitles on and off, each saying so; S skips the intro the
+    /// episode opens on, and N plays the next episode.
+    @MainActor
+    func testThePlayersLetterKeys() {
+        let app = launchPlaying()
+        XCTAssertTrue(app.buttons["Skip intro"].waitForExistence(timeout: 20), "the intro has no Skip button")
+        app.typeKey("m", modifierFlags: [])
+        XCTAssertTrue(app.staticTexts["Muted"].waitForExistence(timeout: 5), "M did not mute")
+        app.typeKey("m", modifierFlags: [])
+        XCTAssertTrue(app.staticTexts["Sound on"].waitForExistence(timeout: 5), "M did not turn the sound on again")
+        app.typeKey("]", modifierFlags: [])
+        XCTAssertTrue(app.staticTexts["Speed 1.25×"].waitForExistence(timeout: 5), "] did not go faster")
+        app.typeKey("[", modifierFlags: [])
+        XCTAssertTrue(app.staticTexts["Speed Normal"].waitForExistence(timeout: 5), "[ did not go slower")
+
+        // Subtitles may start on, as this profile last chose for the series: C turns them over, twice.
+        app.typeKey("c", modifierFlags: [])
+        let off = app.staticTexts["Subtitles off"]
+        let on = text(app, beginning: "Subtitles: ")
+        XCTAssertTrue(waitUntil(5) { off.exists || on.exists }, "C said nothing")
+        let turnedOff = off.exists
+        // The hub's answer first, and the word gone, then the other way.
+        XCTAssertTrue(waitUntil(10) { !app.staticTexts["Changing playback…"].exists })
+        _ = waitUntil(3.5) { false }
+        app.typeKey("c", modifierFlags: [])
+        XCTAssertTrue((turnedOff ? on : off).waitForExistence(timeout: 5),
+                      "C did not turn subtitles \(turnedOff ? "on" : "off") again")
+        XCTAssertTrue(waitUntil(10) { !app.staticTexts["Changing playback…"].exists })
+
+        app.typeKey("s", modifierFlags: [])
+        XCTAssertTrue(app.buttons["Skip intro"].waitForNonExistence(timeout: 8), "S did not skip the intro")
+        app.typeKey("n", modifierFlags: [])
+        XCTAssertTrue(text(app, beginning: "S1E6").waitForExistence(timeout: 20), "N did not play the next episode")
+        app.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 5))
+    }
+
+    /// ↓ and ↑ set the player's volume a tenth at a time, the level showing.
+    @MainActor
+    func testTheArrowsSetTheVolume() {
+        let app = launchPlaying(environment: ["HUB_PLAY_FEEDBACK": "hold"])
+        let level = app.descendants(matching: .any).matching(identifier: "player-level").firstMatch
+        app.typeKey(.downArrow, modifierFlags: [])
+        XCTAssertTrue(level.waitForExistence(timeout: 5), "↓ showed no level")
+        XCTAssertEqual(level.label, "Volume, 90%")
+        app.typeKey(.downArrow, modifierFlags: [])
+        XCTAssertTrue(waitUntil(3) { level.label == "Volume, 80%" }, "↓ again said \(level.label)")
+        app.typeKey(.upArrow, modifierFlags: [])
+        XCTAssertTrue(waitUntil(3) { level.label == "Volume, 90%" }, "↑ said \(level.label)")
+        app.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 5))
+    }
 }
