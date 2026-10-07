@@ -128,11 +128,13 @@ class AudiobookStreamingTest {
                 assertEquals("rev=aaaaaaaaaaaa", it.query)
             }
 
-            // The sheet lists the chapters inside the tracks; the summit opens where it starts.
-            withContext(Dispatchers.Main) { all(root).first { it is TextView && it.text == "Parts" }.performClick() }
+            // The sheet lists the chapters inside the tracks; the summit opens where it starts. A book with chapters
+            // calls the tool by them (#31).
+            withContext(Dispatchers.Main) { all(root).first { it is TextView && it.text == "Chapters" }.performClick() }
             until("the chapters") { row(root, "3. The summit") != null }
             withContext(Dispatchers.Main) {
-                assertTrue(all(root).any { it is TextView && it.isShown && it.text == "Chapters" })
+                // The sheet's heading, as well as the pill that opened it.
+                assertEquals(2, all(root).count { it is TextView && it.isShown && it.text == "Chapters" })
                 assertTrue(row(root, "1. Track 01") != null && row(root, "2. The ridge") != null && row(root, "4. Track 03") != null)
                 row(root, "3. The summit")!!.performClick()
             }

@@ -376,6 +376,8 @@ class ReaderListeningTest {
             until("playing") { state().playing }
             withContext(Main) {
                 val at = player().currentPosition
+                // A book of parts keeps naming the part on the lock screen, as it did (#31 names a chapter only where there are some).
+                assertEquals("01 Opening.wav", player().mediaMetadata.artist?.toString())
                 all(root).first { it.contentDescription == "Forward 15 seconds" }.performClick()
                 assertTrue("Forward is the seek step: ${player().currentPosition - at}", player().currentPosition - at in 14_000L..16_500L)
             }

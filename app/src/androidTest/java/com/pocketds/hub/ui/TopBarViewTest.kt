@@ -2,6 +2,8 @@ package com.pocketds.hub.ui
 
 import android.content.Intent
 import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pocketds.hub.nav.TopBarView
@@ -15,6 +17,8 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class TopBarViewTest {
     private val tabs = listOf("Home", "Discover", "Library", "Downloads", "Activity")
+
+    private fun bar(activity: android.app.Activity) = (activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)) as TopBarView
 
     @Test fun tabs_mode_and_utility_icons_are_walked_in_order_and_keep_their_selection() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -87,6 +91,50 @@ class TopBarViewTest {
             assertTrue(bar.moveHorizontal(1))
             assertTrue(bar.modeButton(ContentMode.MEDIA).isFocused)
         }} finally { instrumentation.runOnMainSync { activity.finish() } }
+    }
+
+    /** #31: a book with chapters names the one playing under its title, with the time left beside it; one without is as it was. */
+    @Test fun the_mini_player_names_the_chapter_playing() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, DetailFixtureActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        fun shown(view: View): List<String> = when {
+            view is TextView && view.visibility == View.VISIBLE -> listOf(view.text.toString())
+            view is ViewGroup -> (0 until view.childCount).flatMap { shown(view.getChildAt(it)) }
+            else -> emptyList()
+        }
+        try { instrumentation.runOnMainSync {
+            val bar = TopBarView(activity, Theme.colors(activity), { true }, tabs)
+            activity.setContentView(bar)
+            val mini = bar.miniPlayer
+            // One line, as it was: the book and how long is left.
+            mini.show("The Last Observatory", "4h 10m left", isPlaying = true)
+            assertEquals(listOf("The Last Observatory · 4h 10m left"), shown(mini))
+            assertEquals("Open The Last Observatory, playing", mini.contentDescription)
+            // A chapter: the book alone on its line, the chapter and the time under it.
+            mini.show("The Last Observatory", "4h 10m left", isPlaying = true, chapter = "Chapter Two")
+            assertEquals(listOf("The Last Observatory", "Chapter Two · 4h 10m left"), shown(mini))
+            assertEquals("Open The Last Observatory, Chapter Two, playing", mini.contentDescription)
+            mini.show("The Last Observatory", "", isPlaying = false, chapter = "Prologue")
+            assertEquals(listOf("The Last Observatory", "Prologue"), shown(mini))
+            assertEquals("Open The Last Observatory, Prologue, paused", mini.contentDescription)
+            // The next book has none: the second line goes.
+            mini.show("The Last Observatory", "4h 10m left", isPlaying = true, chapter = null)
+            assertEquals(listOf("The Last Observatory · 4h 10m left"), shown(mini))
+        }
+            // Laid out again as the words change: the book on one line is wider than the chapter's two, and a pill that
+            // kept the width of the words before them cut its title short.
+            var narrow = 0
+            instrumentation.runOnMainSync { bar(activity).miniPlayer.show("The Last Observatory", "4h 10m left", isPlaying = true, chapter = "Prologue") }
+            Thread.sleep(400)
+            instrumentation.runOnMainSync { narrow = bar(activity).miniPlayer.width }
+            instrumentation.runOnMainSync { bar(activity).miniPlayer.show("The Last Observatory", "4h 10m left", isPlaying = true) }
+            Thread.sleep(400)
+            instrumentation.runOnMainSync {
+                val wide = bar(activity).miniPlayer.width
+                assertTrue("$wide is not wider than $narrow", wide > narrow)
+            }
+        } finally { instrumentation.runOnMainSync { activity.finish() } }
     }
 
     @Test fun utility_icons_open_their_sections_and_a_utility_page_leaves_no_tab_selected() {

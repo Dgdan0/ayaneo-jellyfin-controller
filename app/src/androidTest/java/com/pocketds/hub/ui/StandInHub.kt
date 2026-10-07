@@ -28,7 +28,9 @@ class StandInHub(
     private val alignment: List<Triple<String, Int, Long>> = emptyList(),
     /** The read-along edition whole, and without its audio (`audio=omit`). */
     private val whole: ByteArray? = null,
-    private val slim: ByteArray? = null
+    private val slim: ByteArray? = null,
+    /** Where the chapters come from, as the hub says it (#31): "book" or "marks"; none, as an older hub sends them. */
+    private val chapterSource: String? = null
 ) {
     data class Track(val index: Int, val id: String, val bytes: ByteArray, val durationMs: Long)
     data class Place(val trackId: String, val offsetMs: Long, val completed: Boolean = false, val exact: Boolean = true)
@@ -93,7 +95,9 @@ class StandInHub(
             JSONObject().put("index", track.index).put("id", track.id).put("title", "Track %02d".format(track.index + 1))
                 .put("durationMs", track.durationMs).put("bytes", track.bytes.size).put("mime", "audio/wav").put("etag", "\"e${track.index}\"")
         }))
-        .put("chapters", JSONArray(chapters.map { (title, track, start) -> JSONObject().put("title", title).put("track", track).put("startMs", start) }))
+        .put("chapters", JSONArray(chapters.map { (title, track, start) ->
+            JSONObject().put("title", title).put("track", track).put("startMs", start).apply { chapterSource?.let { put("source", it) } }
+        }))
         .put("cache", JSONObject()))
 
     /** The bytes by one Range, as http.ServeContent answers it. */
