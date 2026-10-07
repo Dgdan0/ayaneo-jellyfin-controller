@@ -116,6 +116,23 @@ final class ListeningTests: XCTestCase {
         XCTAssertTrue(waitUntil(5) { entry.label == "Three" }, "Next did not go on to Three: \(entry.label)")
         app.buttons["Previous chapter"].tap()
         XCTAssertTrue(waitUntil(5) { entry.label == "Two" }, "Previous did not go back to Two: \(entry.label)")
+
+        // The sleep timer's end is the chapter's.
+        button(app, containing: "Sleep").tap()
+        let endOfChapter = app.buttons["End of this chapter"]
+        XCTAssertTrue(endOfChapter.waitForExistence(timeout: 5), "the sleep timer has no end of chapter: \(buttons(app))")
+        endOfChapter.tap()
+        XCTAssertTrue(button(app, containing: "Sleep · end of chapter").waitForExistence(timeout: 5),
+                      "the sleep timer does not say it ends with the chapter: \(buttons(app))")
+        button(app, containing: "Sleep").tap()
+        app.buttons["Turn off"].tap()
+
+        // Away from its page, the mini player names the chapter under the book.
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Back to'")).firstMatch.tap()
+        let detail = app.staticTexts["mini-detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5), "no mini player away from the book's page: \(buttons(app))")
+        XCTAssertTrue(detail.label.hasPrefix("Two · "), "the mini player does not name the chapter: \(detail.label)")
+        button(app, containing: "Dark Matter, Two, open").tap()
         app.buttons["listen-stop"].tap()
     }
 

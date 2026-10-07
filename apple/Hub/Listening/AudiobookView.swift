@@ -118,8 +118,10 @@ struct AudiobookView: View {
                             .foregroundStyle(.white.opacity(0.72))
                             .accessibilityIdentifier("listen-entry")
                     }
-                    Text(PlayerLabels.timeLeft(partLeftMs: listening.spanLeftMs, bookLeftMs: listening.bookLeftMs,
-                                               unit: listening.noun))
+                    Text(listening.span.durationMs > 0
+                         ? PlayerLabels.timeLeft(entryLeftMs: listening.spanLeftMs, bookLeftMs: listening.bookLeftMs,
+                                                 noun: listening.noun)
+                         : "")
                         .font(HubType.body(14, weight: .bold, relativeTo: .subheadline))
                         .foregroundStyle(accent.tint)
                         .accessibilityIdentifier("listen-time-left")
@@ -235,14 +237,15 @@ struct AudiobookView: View {
                 .menuStyle(.button)
                 .buttonStyle(GlassControlStyle())
                 Menu {
+                    // The end of the chapter where the book has chapters (#31), else of the part.
                     ForEach(SleepChoice.all, id: \.self) { choice in
-                        Button(PlayerLabels.sleepChoice(choice)) { listening.setSleep(choice) }
+                        Button(PlayerLabels.sleepChoice(choice, noun: listening.noun)) { listening.setSleep(choice) }
                     }
                     if listening.sleep != nil {
                         Button("Turn off", role: .destructive) { listening.setSleep(nil) }
                     }
                 } label: {
-                    Label(PlayerLabels.sleep(listening.sleep), systemImage: "moon.zzz")
+                    Label(PlayerLabels.sleep(listening.sleep, noun: listening.noun), systemImage: "moon.zzz")
                 }
                 .menuStyle(.button)
                 .buttonStyle(GlassControlStyle())
@@ -309,8 +312,9 @@ struct AudiobookView: View {
 }
 
 /// The book playing, over the pages while it plays (Android's mini player):
-/// its cover, its title and the time left, Play or Pause, and a tap back to
-/// its page.
+/// its cover, its title, the chapter playing where the book has chapters
+/// (#31) and the time left of the book, Play or Pause, and a tap back to its
+/// page.
 struct ListeningMiniPlayer: View {
     let open: () -> Void
     @State private var listening = ListeningModel.shared
@@ -326,10 +330,10 @@ struct ListeningMiniPlayer: View {
                             Text(book.title)
                                 .font(HubType.body(14, weight: .bold, relativeTo: .subheadline))
                                 .foregroundStyle(.white)
-                            Text(PlayerLabels.timeLeft(partLeftMs: listening.spanLeftMs, bookLeftMs: listening.bookLeftMs,
-                                                       unit: listening.noun))
+                            Text(detail)
                                 .font(HubType.body(12, relativeTo: .caption))
                                 .foregroundStyle(.white.opacity(0.7))
+                                .accessibilityIdentifier("mini-detail")
                         }
                         .lineLimit(1)
                         Spacer(minLength: 0)
@@ -337,7 +341,7 @@ struct ListeningMiniPlayer: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(book.title), open")
+                .accessibilityLabel(listening.chapter.map { "\(book.title), \($0), open" } ?? "\(book.title), open")
                 PlayerPlayDisc(playing: listening.playing, buffering: false, size: 40) { listening.toggle() }
                     .accessibilityIdentifier("mini-play")
             }
@@ -350,6 +354,17 @@ struct ListeningMiniPlayer: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("mini-player")
         }
+    }
+}
+
+extension ListeningMiniPlayer {
+    /// Under the title: the chapter playing, and what is left of the book
+    /// ("Chapter Two · 4h 10m left"), or of the part while the book's length
+    /// is not known yet.
+    private var detail: String {
+        let span = listening.span
+        let left = listening.bookLeftMs ?? (span.durationMs > 0 ? listening.spanLeftMs : nil)
+        return [listening.chapter ?? "", PlayerLabels.leftLine(left)].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }
 
