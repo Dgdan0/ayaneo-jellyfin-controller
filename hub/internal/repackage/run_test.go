@@ -58,11 +58,14 @@ type probed struct {
 		Profile     string            `json:"profile"`
 		PixFmt      string            `json:"pix_fmt"`
 		Channels    int               `json:"channels"`
+		BitRate     string            `json:"bit_rate"`
 		Tags        map[string]string `json:"tags"`
 		Disposition map[string]int    `json:"disposition"`
 	} `json:"streams"`
 	Format struct {
 		FormatName string `json:"format_name"`
+		Duration   string `json:"duration"`
+		BitRate    string `json:"bit_rate"`
 	} `json:"format"`
 }
 
@@ -85,6 +88,12 @@ func sourceFrom(t *testing.T, path string, defaultAudio int) Source {
 	t.Helper()
 	info := probe(t, path)
 	source := Source{Container: strings.Split(info.Format.FormatName, ",")[0], DefaultAudio: defaultAudio, DurationSeconds: 6}
+	if seconds, err := strconv.ParseFloat(info.Format.Duration, 64); err == nil && seconds > 0 {
+		source.DurationSeconds = seconds
+	}
+	if rate, err := strconv.Atoi(info.Format.BitRate); err == nil {
+		source.BitRate = rate
+	}
 	if stat, err := os.Stat(path); err == nil {
 		source.SizeBytes = stat.Size()
 	}
@@ -97,6 +106,14 @@ func sourceFrom(t *testing.T, path string, defaultAudio int) Source {
 		}
 		if strings.HasSuffix(stream.PixFmt, "10le") {
 			converted.BitDepth = 10
+		}
+		// Jellyfin gives a stream's bit rate from the stream, or from the BPS tag
+		// that mkvmerge writes.
+		for _, text := range []string{stream.BitRate, stream.Tags["BPS"], stream.Tags["BPS-eng"]} {
+			if rate, err := strconv.Atoi(strings.TrimSpace(text)); err == nil && rate > 0 {
+				converted.BitRate = rate
+				break
+			}
 		}
 		source.Streams = append(source.Streams, converted)
 	}
@@ -262,6 +279,9 @@ func TestBuildCopiesWhatApplePlaysConvertsTheRestAndStatesTheTracks(t *testing.T
 			t.Fatalf("progress %v: a percent outside 0-99 or one that went back", reported)
 		}
 	}
+	if warning := readsBackClean(t, out); warning != "" {
+		t.Errorf("ffmpeg says of the file: %s", warning)
+	}
 	if fileHash(t, source) != original {
 		t.Fatal("the source file changed")
 	}
@@ -389,5 +409,67 @@ func TestTheTailOfWhatFFmpegSaidIsKeptAndBounded(t *testing.T) {
 	got := tail.String()
 	if len(got) > tailBytes || !strings.HasSuffix(got, "line 999") || bytes.Contains([]byte(got), []byte("line 0\n")) {
 		t.Fatalf("tail = %d bytes ending %q", len(got), got[max(0, len(got)-20):])
+	}
+}
+
+// readsBackClean reads a file's container as an ffmpeg reader would and returns
+// anything it has to say: a reference that points nowhere draws a warning.
+func readsBackClean(t *testing.T, path string) string {
+	t.Helper()
+	command := exec.Command(tool(t, "ffprobe"), "-v", "warning", "-i", path, "-show_entries", "format=duration", "-of", "csv=p=0")
+	var warnings bytes.Buffer
+	command.Stderr = &warnings
+	if err := command.Run(); err != nil {
+		return err.Error() + ": " + warnings.String()
+	}
+	return strings.TrimSpace(warnings.String())
+}
+
+// A film with chapters (a Blu-ray rip has them) made ffmpeg write a QuickTime
+// chapter reference on every track, pointing at track 0, which does not exist. The
+// MP4 carries no chapters at all.
+func TestBuildOfAFilmWithChaptersLeavesNoChapterReferencePointingNowhere(t *testing.T) {
+	ffmpeg := tool(t, "ffmpeg")
+	dir := t.TempDir()
+	chapters := filepath.Join(dir, "chapters.txt")
+	metadata := strings.Join([]string{
+		";FFMETADATA1",
+		"[CHAPTER]", "TIMEBASE=1/1000", "START=0", "END=1500", "title=One",
+		"[CHAPTER]", "TIMEBASE=1/1000", "START=1500", "END=3000", "title=Two", "",
+	}, "\n")
+	if err := os.WriteFile(chapters, []byte(metadata), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "chaptered.mkv")
+	generate(t,
+		"-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=3",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=3",
+		"-i", chapters, "-map_metadata", "2", "-map", "0:v", "-map", "1:a",
+		"-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", source)
+	listed, err := exec.Command(tool(t, "ffprobe"), "-v", "error", "-show_chapters", "-of", "json", source).Output()
+	if err != nil || !strings.Contains(string(listed), `"title": "Two"`) {
+		t.Fatalf("the sample has no chapters (%v): %s", err, listed)
+	}
+	plan, err := PlanApple(sourceFrom(t, source, -1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.mp4")
+	if err := Build(context.Background(), BuildSpec{
+		FFmpeg: ffmpeg, Plan: plan, Out: out, Duration: 3 * time.Second, Encoder: X264, Inputs: Inputs{SourcePath: source},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, box := range []string{"tref", "chap", "chpl"} {
+		if bytes.Contains(data, []byte(box)) {
+			t.Errorf("the file has a %q box", box)
+		}
+	}
+	if warning := readsBackClean(t, out); warning != "" {
+		t.Errorf("ffmpeg says of the file: %s", warning)
 	}
 }

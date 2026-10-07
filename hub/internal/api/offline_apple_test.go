@@ -307,7 +307,9 @@ func (r *appleRig) waitFor(grantID, state string) OfflineStatus {
 		if time.Now().After(deadline) {
 			r.t.Fatalf("gave up waiting for %s to be %s; it is %+v", grantID, state, status)
 		}
-		time.Sleep(5 * time.Millisecond)
+		// An app asks every few seconds; the transport budget is 60 a second, and
+		// a tight loop here would spend it and be told to slow down.
+		time.Sleep(40 * time.Millisecond)
 	}
 }
 

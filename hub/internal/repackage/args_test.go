@@ -53,7 +53,7 @@ func TestArgsCopyWhatApplePlaysAndTagTheHEVC(t *testing.T) {
 		{"-c:v", "copy"}, {"-tag:v", "hvc1"},
 		{"-c:a:1", "copy"}, {"-c:s", "mov_text"},
 		{"-movflags", "+faststart"}, {"-f", "mp4"},
-		{"-map_metadata", "-1"}, {"-map_chapters", "0"},
+		{"-map_metadata", "-1"}, {"-map_chapters", "-1"},
 	} {
 		if !has(args, want...) {
 			t.Errorf("arguments lack %v: %v", want, args)
@@ -110,15 +110,15 @@ func TestArgsOpenOnlyLocalFilesAndTheSidecarsInPlanOrder(t *testing.T) {
 func TestArgsConvertAudioAtThePlannedRateAndKeepTheRest(t *testing.T) {
 	args := mustArgs(t, hevcFilm(), hevcFilmInputs, "out.part", X264)
 	for _, want := range [][]string{
-		{"-c:a:0", "aac"}, {"-b:a:0", "384k"}, {"-ac:a:0", "6"}, // the DTS
+		{"-c:a:0", "aac"}, {"-aac_coder:a:0", "fast"}, {"-b:a:0", "384k"}, {"-ac:a:0", "6"}, // the DTS
 		{"-c:a:1", "copy"}, // the E-AC-3
 	} {
 		if !has(args, want...) {
 			t.Errorf("arguments lack %v: %v", want, args)
 		}
 	}
-	if has(args, "-b:a:1") || has(args, "-ac:a:1") {
-		t.Error("a copied audio track was given a rate or a channel count")
+	if has(args, "-b:a:1") || has(args, "-ac:a:1") || has(args, "-aac_coder:a:1", "fast") {
+		t.Error("a copied audio track was given an encoder's options")
 	}
 }
 

@@ -19,6 +19,11 @@ func (s *spanSet) add(start, end int64) {
 	if end <= start {
 		return
 	}
+	// A transfer reads on from where it stopped, which is nearly every call.
+	if last := len(*s) - 1; last >= 0 && start >= (*s)[last].start && start <= (*s)[last].end {
+		(*s)[last].end = max((*s)[last].end, end)
+		return
+	}
 	merged := append(*s, span{start, end})
 	sort.Slice(merged, func(i, j int) bool { return merged[i].start < merged[j].start })
 	out := merged[:1]

@@ -374,3 +374,35 @@ func TestTheSizeEstimateFollowsWhatIsCopiedAndWhatIsConverted(t *testing.T) {
 		t.Fatalf("an estimate without stream bitrates = %d, want near the 2 GB file", guess.EstimatedBytes)
 	}
 }
+
+func TestAConvertedPicturesEstimateFollowsHowMuchBetterItsOldCodecWas(t *testing.T) {
+	// A 24-minute episode with 1.1 Mb/s of video, as the library's AV1 anime is.
+	episode := func(codec string, pixel string) Plan {
+		video := video(0, codec, "", 0, pixel)
+		video.BitRate = 1_100_000
+		plan, err := PlanApple(Source{Container: "mkv", SizeBytes: 266_000_000, DurationSeconds: 1440, DefaultAudio: -1,
+			Streams: []Stream{video, audio(1, "aac", "jpn", 2)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return plan
+	}
+	av1, mpeg2, copied := episode("av1", "yuv420p10le"), episode("mpeg2video", "yuv420p"), episode("h264", "yuv420p")
+	// The same bits of picture cost more in H.264 than they did in AV1, less than in MPEG-2.
+	if !(av1.EstimatedBytes > copied.EstimatedBytes && copied.EstimatedBytes > mpeg2.EstimatedBytes) {
+		t.Fatalf("estimates: av1 %d, h264 %d, mpeg2 %d", av1.EstimatedBytes, copied.EstimatedBytes, mpeg2.EstimatedBytes)
+	}
+	// 1.1 Mb/s of AV1 for 24 minutes is 198 MB of picture; 1.7 times that, plus 192 kb/s of sound.
+	if want := int64(1.1e6/8*1440*1.7) + int64(192e3/8*1440); av1.EstimatedBytes < want || av1.EstimatedBytes > want+want/50 {
+		t.Errorf("av1 estimate = %d, want just over %d", av1.EstimatedBytes, want)
+	}
+	// A picture converted at a high rate is held to what the conversion would write.
+	fat := video(0, "av1", "", 0, "yuv420p10le")
+	fat.BitRate = 40_000_000
+	plan, _ := PlanApple(Source{Container: "mkv", SizeBytes: 9_000_000_000, DurationSeconds: 1440, DefaultAudio: -1,
+		Streams: []Stream{fat, audio(1, "aac", "jpn", 2)}})
+	ceiling := int64(8e6/8*1440) + int64(192e3/8*1440)
+	if ceiling += ceiling / 50; plan.EstimatedBytes > ceiling {
+		t.Errorf("a 1080p conversion is estimated at %d, above its ceiling of about %d", plan.EstimatedBytes, ceiling)
+	}
+}

@@ -82,9 +82,13 @@ func BuildArgs(plan Plan, in Inputs, out string, encoder Encoder) ([]string, err
 	for _, track := range subtitleMaps {
 		args = append(args, "-map", strconv.Itoa(track.input)+":"+strconv.Itoa(track.stream))
 	}
-	// The source's own tags (a release group's name, its muxer, its statistics)
-	// are not carried over. Chapters are.
-	args = append(args, "-map_metadata", "-1", "-map_chapters", "0")
+	// The source's own tags (a release group's name, its muxer, its statistics) are
+	// not carried over, and neither are its chapters: with chapters ffmpeg writes a
+	// QuickTime chapter reference on every track that points at a track that does not
+	// exist (measured on a Blu-ray rip), which ffmpeg itself warns of on reading the
+	// file back and which no Apple reader is known to take kindly. AVPlayer does not
+	// read the Nero-style list it writes beside it either.
+	args = append(args, "-map_metadata", "-1", "-map_chapters", "-1")
 
 	if plan.Video.Converted {
 		args = append(args, "-c:v", encoder.Name)
@@ -97,7 +101,11 @@ func BuildArgs(plan Plan, in Inputs, out string, encoder Encoder) ([]string, err
 	for at, track := range plan.Audio {
 		index := strconv.Itoa(at)
 		if track.Converted {
-			args = append(args, "-c:a:"+index, track.OutputCodec,
+			// The "fast" coder is three times as quick as the default search (a 5.1
+			// DTS track runs at about 65 times real time rather than 23, measured on
+			// a film from the library), and at 384 kb/s the difference is not one
+			// anyone hears; the source was lossy already.
+			args = append(args, "-c:a:"+index, track.OutputCodec, "-aac_coder:a:"+index, "fast",
 				"-b:a:"+index, strconv.Itoa(track.BitRateKbps)+"k", "-ac:a:"+index, strconv.Itoa(track.OutputChannels))
 		} else {
 			args = append(args, "-c:a:"+index, "copy")

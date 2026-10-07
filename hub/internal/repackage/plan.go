@@ -414,6 +414,7 @@ func estimate(plan Plan, src Source) int64 {
 		}
 	}
 	if plan.Video.Converted {
+		video = int64(float64(video) * conversionFactor(plan.Video.Codec))
 		video = min(video, bytesAt(conversionCeiling(plan.Video.Width, plan.Video.Height)))
 	}
 
@@ -425,6 +426,30 @@ func estimate(plan Plan, src Source) int64 {
 	}
 	total := video + audioOut + text
 	return total + total/200 + 64<<10
+}
+
+// conversionFactor is how large a picture comes out in H.264 at the constant
+// quality the conversion uses, against the same picture in the codec it was in.
+// AV1 is about twice as efficient: a 24-minute AV1 anime episode of 266 MB came
+// out at 367 MB with libx264 and 442 MB with NVENC (measured). Older codecs are
+// less efficient than H.264, so those come out smaller.
+func conversionFactor(codec string) float64 {
+	switch strings.ToLower(codec) {
+	case "av1":
+		return 1.7
+	case "vp9", "vp8":
+		return 1.4
+	case "hevc", "h265":
+		return 1.5
+	case "mpeg4", "msmpeg4v1", "msmpeg4v2", "msmpeg4v3", "h263":
+		return 0.9
+	case "mpeg2video", "mpeg1video":
+		return 0.7
+	case "h264", "vc1", "wmv3", "wmv2", "wmv1":
+		return 1.0
+	default:
+		return 1.2
+	}
 }
 
 // A converted video is written at constant quality, which for the sources that
@@ -461,7 +486,7 @@ func guessAudioBitRate(codec string, channels int) int {
 	case "mp3":
 		return 192_000
 	case "dts":
-		return 1_509_000
+		return 1_200_000 // between the half-rate 754 kb/s and the full-rate 1509 kb/s core
 	case "truehd":
 		return 3_000_000
 	case "flac":

@@ -170,6 +170,33 @@ episodes, sources without a known length, insufficient scope, another user's gra
 the selected series. The response describes the exact source and every embedded/external track so
 the app can prove what will be available offline.
 
+## Apple downloads (#5)
+
+AVPlayer cannot play an MKV, so an Apple device asks for `"format": "apple"` and the hub
+repackages the source into an MP4 under the same grant. The exact contract (fields, examples,
+errors, what an older app sees) is in issue #5; this is the design.
+
+- **Copy what AVPlayer plays, convert the rest.** H.264 (8-bit) and HEVC (as `hvc1`) are copied;
+  Xvid, VC-1, MPEG-2, AV1 and 10-bit H.264 become 8-bit H.264 (NVENC when present, else libx264).
+  Every audio track is kept: AAC, AC-3, E-AC-3 and MP3 are copied, DTS, TrueHD, FLAC, Opus and the
+  rest become AAC with 5.1 kept. Text subtitles, embedded and sidecar, become mov_text with their
+  language; picture subtitles are left out and the manifest says so before anything is made.
+  `internal/repackage/plan.go` decides this once, and the manifest and the ffmpeg command both
+  follow it.
+- **The file is made ahead and served by range.** `prepare` queues the batch; one repackage runs at
+  a time, into a cache folder on a configured drive; `status` says queued, preparing, ready or
+  failed with a percent, then the exact size and a strong ETag; `media` answers 409 until ready and
+  then serves the MP4 with Range and `If-Range`, so a resumed download is exact. The app tells the
+  hub when it has stored its copy (`DELETE …/media`); otherwise the file ages out.
+- **The source is only read.** The hub keeps no path (it asks Jellyfin when it builds and checks
+  the file is the one prepared), writes nothing beside the source, and gives out no path.
+- **Progress sync, scopes and renewal are unchanged.** A grant is bound to the token and the
+  Jellyfin user as before; renewing one keeps its file when the plan has not changed.
+
+Configuration (`hub.yaml`, `server:`): `offline_cache` (default `offline-cache` beside `hub.yaml`),
+`offline_cache_max_bytes` (20GB) and `offline_cache_max_age` (48h since last fetched). The folder
+belongs on a drive with room and outside every library folder.
+
 ## Offline playback and progress
 
 Before preparing a network stream, playback asks `OfflineRepository` for the active item ID:
