@@ -278,29 +278,11 @@ final class ListeningModel {
     /// The parts with their addresses: the hub's tracks, or in the demo
     /// generated tones written on this device.
     private func partsFor(_ manifest: ReadingAudioManifest, workId: String, sourceItemId: String) async -> [AudiobookPart] {
-        if demo {
-            let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("demo-audio", isDirectory: true)
-            let tracks = manifest.tracks
-            let files = await Task.detached(priority: .utility) { () -> [Int: String] in
-                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                var urls: [Int: String] = [:]
-                for track in tracks {
-                    let file = folder.appendingPathComponent("\(sourceItemId)-\(track.index).wav")
-                    if !FileManager.default.fileExists(atPath: file.path) {
-                        let tone = 220 + 55 * Double(track.index % 4)
-                        try? DemoAudio.wav(milliseconds: track.durationMs, frequency: tone).write(to: file)
-                    }
-                    urls[track.index] = file.absoluteString
-                }
-                return urls
-            }.value
-            return AudiobookStream.parts(manifest, sourceItemId: sourceItemId) { files[$0] ?? "" }
-        }
+        let tones = demo ? await ListeningAudio.demoFiles(manifest, sourceItemId: sourceItemId) : nil
         let base = address
         return AudiobookStream.parts(manifest, sourceItemId: sourceItemId) { index in
-            base + HubEndpoints.readingAudioTrack(workId: workId, sourceItemId: sourceItemId, index: index,
-                                                  revision: manifest.revision)
+            ListeningAudio.trackAddress(index, manifest: manifest, workId: workId, sourceItemId: sourceItemId,
+                                        address: base, demo: tones)
         }
     }
 
@@ -455,11 +437,7 @@ final class ListeningModel {
 
     private func item(_ index: Int) -> AVPlayerItem? {
         guard let book, book.parts.indices.contains(index), let url = URL(string: book.parts[index].url) else { return nil }
-        let asset = url.isFileURL ? AVURLAsset(url: url)
-            // The hub takes the token only in its header, never in an address.
-            : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer " + token]])
-        let item = AVPlayerItem(asset: asset)
-        item.audioTimePitchAlgorithm = .timeDomain
+        let item = ListeningAudio.item(url, token: token)
         indexes[ObjectIdentifier(item)] = index
         return item
     }
@@ -863,19 +841,9 @@ final class ListeningModel {
         return MPMediaItemArtwork(boundsSize: image.size) { _ in image }
     }
 
-    private func activateSession() {
-        #if os(iOS)
-        // Plays with the ring switch on silent, and goes on with the screen off.
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-        try? AVAudioSession.sharedInstance().setActive(true)
-        #endif
-    }
+    private func activateSession() { ListeningAudio.activateSession(for: .audiobook) }
 
-    private func deactivateSession() {
-        #if os(iOS)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        #endif
-    }
+    private func deactivateSession() { ListeningAudio.deactivateSession(for: .audiobook) }
 
     /// A book's contents, by the manifest's lengths.
     private static func contents(of book: Book) -> [AudiobookContents.Entry] {
