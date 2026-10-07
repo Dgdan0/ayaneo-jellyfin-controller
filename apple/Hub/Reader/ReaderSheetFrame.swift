@@ -17,23 +17,39 @@ struct ReaderSheetFrame<Content: View>: View {
     var headingId = "reader-sheet-heading"
     /// A comic's page darkens under the sheet; a book's page has made room beside it instead.
     var dims = true
+    /// A book's page: the sheet sits beside it only where the page keeps most
+    /// of the window (`fromBottom`), so an iPad mini upright gets the phone's sheet.
+    var keepsPage = false
+    /// Appearance: from the bottom, the page above stays undimmed and the
+    /// sheet lower, so each change shows on the page as it is made.
+    var previews = false
     /// Asked once the sheet has slid away.
     let close: () -> Void
     /// The sheet's rows, with the proxy of the scroll view they are in.
     @ViewBuilder let content: (ScrollViewProxy) -> Content
     @State private var shown = false
 
-    static func fromBottom(_ size: CGSize) -> Bool { size.width < 600 }
+    /// From the bottom on a narrow window; for a book, also where the page
+    /// beside a side sheet would keep less than 55% of the window's width.
+    static func fromBottom(_ size: CGSize, safe: EdgeInsets = EdgeInsets(), keepsPage: Bool = false) -> Bool {
+        if size.width < 600 { return true }
+        guard keepsPage else { return false }
+        return size.width - sideWidth(size, safe: safe) < size.width * 0.55
+    }
 
     /// How wide a sheet at the right edge is: what a book's page makes room for.
-    static func width(_ size: CGSize, safe: EdgeInsets) -> CGFloat {
-        fromBottom(size) ? size.width : min(400 + safe.trailing, size.width - 40)
+    static func width(_ size: CGSize, safe: EdgeInsets, keepsPage: Bool = false) -> CGFloat {
+        fromBottom(size, safe: safe, keepsPage: keepsPage) ? size.width : sideWidth(size, safe: safe)
+    }
+
+    private static func sideWidth(_ size: CGSize, safe: EdgeInsets) -> CGFloat {
+        min(400 + safe.trailing, size.width - 40)
     }
 
     var body: some View {
-        let bottom = Self.fromBottom(size)
+        let bottom = Self.fromBottom(size, safe: safe, keepsPage: keepsPage)
         ZStack(alignment: bottom ? .bottom : .trailing) {
-            Color.black.opacity(shown && (dims || bottom) ? 0.4 : 0)
+            Color.black.opacity(shown && (dims || bottom) && !(bottom && previews) ? 0.4 : 0)
                 .contentShape(Rectangle())
                 .onTapGesture { dismiss() }
                 .accessibilityLabel("Close")
@@ -82,8 +98,8 @@ struct ReaderSheetFrame<Content: View>: View {
         .padding(.leading, 20 + (bottom ? safe.leading : 0))
         .padding(.trailing, 20 + safe.trailing)
         .padding(.bottom, (bottom ? 22 : 30) + safe.bottom)
-        .frame(width: Self.width(size, safe: safe), alignment: .leading)
-        .frame(height: bottom ? size.height * 0.72 : size.height, alignment: .top)
+        .frame(width: Self.width(size, safe: safe, keepsPage: keepsPage), alignment: .leading)
+        .frame(height: bottom ? size.height * (previews ? 0.6 : 0.72) : size.height, alignment: .top)
         .background { GlassSheetFill().clipShape(shape) }
         .overlay(alignment: .leading) {
             if !bottom { Rectangle().fill(Color(argb: GlassColors.edge)).frame(width: 1) }

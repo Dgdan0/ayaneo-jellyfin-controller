@@ -178,4 +178,17 @@ struct ReaderPadMapTests {
         #expect(sheet["="] == "Zoom in")
         #expect(sheet["Escape"] == "Leave")
     }
+
+    @Test func aBooksArrowsSayTheSidesAndTheEndsApartAsTheDPadDoes() {
+        let sheet = Dictionary(ReaderKeyboard.sheet(.book).map { ($0.keys.joined(separator: " "), $0.does) },
+                               uniquingKeysWith: { first, _ in first })
+        // "Arrows: Previous page" told half of it.
+        #expect(sheet["Arrows"] == nil)
+        #expect(sheet["← →"] == "Previous page, next page")
+        #expect(sheet["↑ ↓"] == "Menu")
+        // The controller's lines say the same of the D-pad.
+        let pad = Dictionary(ReaderPadMap.sheet(.book).map { ($0.keys.joined(separator: " "), $0.does) },
+                             uniquingKeysWith: { first, _ in first })
+        #expect(pad.values.contains("Previous page, next page"))
+    }
 }

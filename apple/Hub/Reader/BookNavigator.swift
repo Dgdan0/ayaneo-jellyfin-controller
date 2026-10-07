@@ -258,6 +258,9 @@ extension BookNavigator: EPUBNavigatorDelegate {
     }
 
     func navigator(_ navigator: VisualNavigator, didPressKey event: KeyEvent) {
+        #if DEBUG
+        NSLog("book: key %@ from the page", String(describing: event.key))
+        #endif
         guard event.modifiers.isEmpty || event.modifiers == [.shift], let key = Self.readerKey(event.key) else { return }
         onKey(key)
     }
