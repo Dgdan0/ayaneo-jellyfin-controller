@@ -148,6 +148,8 @@ final class ListeningModel {
 
     @ObservationIgnored private let player = AVQueuePlayer()
     @ObservationIgnored private let store = ListeningStore.shared
+    /// The tracks kept on this device, and the one fetching them (#37).
+    @ObservationIgnored private let tracks = ListeningTracks.shared
     @ObservationIgnored private var indexes: [ObjectIdentifier: Int] = [:]
     @ObservationIgnored private var hub: HubClient?
     @ObservationIgnored private var address = ""
@@ -415,6 +417,7 @@ final class ListeningModel {
         poll = nil
         player.pause()
         player.removeAllItems()
+        tracks.stop()
         indexes = [:]
         pendingStart = nil
         startedItem = nil
@@ -458,10 +461,46 @@ final class ListeningModel {
     // MARK: The player
 
     private func item(_ index: Int) -> AVPlayerItem? {
-        guard let book, book.parts.indices.contains(index), let url = URL(string: book.parts[index].url) else { return nil }
+        guard let book, book.parts.indices.contains(index) else { return nil }
+        // A track kept on this device plays from there (#37), else from the hub.
+        let kept = track(index).flatMap { tracks.kept($0, in: trackCache) }
+        guard let url = kept ?? URL(string: book.parts[index].url) else { return nil }
         let item = ListeningAudio.item(url, token: token)
         indexes[ObjectIdentifier(item)] = index
         return item
+    }
+
+    // MARK: Tracks kept on the device (#37)
+
+    private var trackCache: AudioTrackCache { ListeningTracks.cache(address: address) }
+
+    private func track(_ index: Int) -> ListeningTracks.Track? {
+        guard let book else { return nil }
+        return ListeningTracks.track(index, manifest: book.manifest, parts: book.parts, workId: book.workId,
+                                     sourceItemId: book.sourceItemId)
+    }
+
+    /// The part playing kept on the device, then the next fetched ahead: one
+    /// at a time, once the part has started, so the stream comes first.
+    private func keepAhead() {
+        guard let hub else { return }
+        let wanted = [part, part + 1].compactMap { track($0) }
+        let playing = (player.currentItem?.asset as? AVURLAsset)?.url
+        tracks.keep(wanted, hub: hub, cache: trackCache, playing: playing?.isFileURL == true ? playing : nil) { [weak self] kept in
+            self?.trackKept(kept)
+        }
+    }
+
+    /// A track came to be kept: the part queued next from the hub is queued
+    /// from the device instead, so the change of part plays at once.
+    private func trackKept(_ kept: ListeningTracks.Track) {
+        let items = player.items()
+        guard items.count > 1, let current = player.currentItem, items[0] === current,
+              let index = indexes[ObjectIdentifier(items[1])], track(index) == kept,
+              (items[1].asset as? AVURLAsset)?.url.isFileURL == false, let local = item(index) else { return }
+        indexes[ObjectIdentifier(items[1])] = nil
+        player.remove(items[1])
+        player.insert(local, after: current)
     }
 
     private func load(part target: Int, offsetMs: Int64, play: Bool) {
@@ -552,6 +591,7 @@ final class ListeningModel {
     /// The first item can play: to its start, then playing if asked.
     private func itemReady(_ item: AVPlayerItem) {
         reloads = 0
+        keepAhead()
         guard let start = pendingStart, indexes[ObjectIdentifier(item)] == part else { return }
         pendingStart = nil
         let play = start.play
@@ -626,6 +666,7 @@ final class ListeningModel {
         player.actionAtItemEnd = itemEndAction()
         save()
         updateNowPlaying()
+        keepAhead()
     }
 
     /// A part played to its end: under an end-of-part timer whose entry ends

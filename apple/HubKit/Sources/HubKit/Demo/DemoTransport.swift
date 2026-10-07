@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Answers hub requests from fixtures, for the `-demo` launch argument, SwiftUI
 /// previews and layout screenshots taken without a reachable hub. The fixtures
@@ -9,6 +10,16 @@ public struct DemoTransport: HubTransport {
     public static let address = "https://demo.hub.invalid"
     public static let token = String(repeating: "d", count: 43)
 
+    /// An outage of the reading servers (#37, debug builds' UI tests): every
+    /// issue's page list, page and place goes unanswered, as with no network,
+    /// except a page this run already served asked for from the device's
+    /// cache only, which the demo stands in for.
+    static let outage = Mutex(false)
+    private static let served = Mutex<Set<String>>([])
+
+    public static func beginOutage() { outage.withLock { $0 = true } }
+    public static func endOutage() { outage.withLock { $0 = false } }
+
     public init() {}
 
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -16,6 +27,13 @@ public struct DemoTransport: HubTransport {
         let path = request.url?.path ?? ""
         let method = request.httpMethod ?? "GET"
         let query = request.url?.query ?? ""
+        if path.contains("/publications/") {
+            if request.cachePolicy == .returnCacheDataDontLoad {
+                guard Self.served.withLock({ $0.contains(path) }) else { throw URLError(.resourceUnavailable) }
+            } else if Self.outage.withLock({ $0 }) {
+                throw URLError(.notConnectedToInternet)
+            }
+        }
         // Offline downloads first: their video is written once per run, which takes a moment (#5).
         let offline = await DemoOffline.answer(method: method, path: path, query: query, body: request.httpBody)
         let answer = offline
@@ -27,6 +45,9 @@ public struct DemoTransport: HubTransport {
             ?? DemoBooks.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoReading.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? Self.fixture(method: method, path: path)
+        if method == "GET", answer.status == 200, path.contains("/publications/"), path.contains("/pages/") {
+            _ = Self.served.withLock { $0.insert(path) }
+        }
         let response = HTTPURLResponse(url: request.url!, statusCode: answer.status, httpVersion: "HTTP/1.1",
                                        headerFields: answer.headers.merging(["Content-Type": answer.type]) { _, type in type })!
         return (answer.body, response)

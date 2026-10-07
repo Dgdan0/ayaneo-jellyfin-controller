@@ -352,10 +352,7 @@ final class NarrationModel {
 @MainActor
 enum ReadAlongEdition {
     static func cache(app: AppModel) -> EpubPackageCache {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("reading-epub", isDirectory: true)
-        return EpubPackageCache(root: EpubPackageCache.folder(base: caches, address: app.address, userId: app.userId)
-            .appendingPathComponent("aligned-slim", isDirectory: true))
+        ReadingOffline.readAlong(app: app)
     }
 
     /// The edition, from the cache or the hub; `force` downloads it again.

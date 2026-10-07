@@ -176,6 +176,13 @@ final class ComicReaderModel {
         ReaderPadState(.comic, controlsVisible: controlsVisible, loading: phase != .reading)
     }
 
+    /// Where the issues' page lists are kept for an outage, and whose (#37): set by the view.
+    @ObservationIgnored var manifests: ReadingManifestCache?
+    @ObservationIgnored var scope = ""
+    /// The issue was opened from the page list kept on this device: its pages
+    /// come from the device first.
+    @ObservationIgnored var offline = false
+
     /// The run was marked unread (#37): the first issue opened starts at its first page.
     @ObservationIgnored var startsFresh = false
     /// A page was sent for a run (its work): a mark of read or unread is forgotten.
@@ -258,13 +265,24 @@ final class ComicReaderModel {
         }
         phase = .opening
         let request = HubEndpoints.readingPublication(workId: workId, sourceItemId: sourceItemId)
-        opening = Task { [weak self, hub] in
+        let key = ReadingCheckpointKey(scope: scope, workId: workId, sourceItemId: sourceItemId, kind: "pages")
+        opening = Task { [weak self, hub, manifests] in
             do throws(HubFailure) {
-                let manifest = try await hub.fetch(request, as: ReadingPublicationManifest.self)
+                let answer = try await hub.data(request)
+                guard let manifest = try? JSONDecoder().decode(ReadingPublicationManifest.self, from: answer) else {
+                    throw HubFailure(.badResponse)
+                }
                 guard !Task.isCancelled else { return }
+                // Kept to reopen the issue in an outage (#37).
+                try? manifests?.save(key, answer: answer)
+                self?.offline = false
                 self?.apply(manifest, atEnd: atEnd, moving: moving)
             } catch {
                 guard !Task.isCancelled, error.kind != .cancelled else { return }
+                if let self, self.openKept(key, failure: error, atEnd: atEnd, moving: moving) {
+                    self.opening = nil
+                    return
+                }
                 self?.failedOpen = FailedOpen(sourceItemId: sourceItemId, atEnd: atEnd, moving: moving)
                 self?.phase = .failed(error.message)
             }
@@ -272,7 +290,20 @@ final class ComicReaderModel {
         }
     }
 
-    private func apply(_ manifest: ReadingPublicationManifest, atEnd: Bool, moving: Bool) {
+    /// The hub could not be reached: the page list kept the last time the
+    /// issue opened, at the page this device kept, its pages from the device
+    /// (#37; Android's "Using cached pages"). A refusal is not an outage.
+    private func openKept(_ key: ReadingCheckpointKey, failure: HubFailure, atEnd: Bool, moving: Bool) -> Bool {
+        guard failure.kind.isRetryable || failure.kind == .unknown, let kept = manifests?.read(key) else { return false }
+        let place = ComicReaderSettings.place(workId: key.workId)
+        offline = true
+        apply(kept, atEnd: atEnd, moving: moving, at: place?.sourceItemId == key.sourceItemId ? place?.page : nil)
+        say("Using cached pages · reading progress is saved on this device")
+        return true
+    }
+
+    /// The issue laid out at its place: the hub's, or `at` (this device's, in an outage).
+    private func apply(_ manifest: ReadingPublicationManifest, atEnd: Bool, moving: Bool, at kept: Int? = nil) {
         guard manifest.pageCount > 0 else {
             failedOpen = FailedOpen(sourceItemId: manifest.sourceItemId, atEnd: atEnd, moving: moving)
             phase = .failed("This issue has no pages to read")
@@ -284,7 +315,7 @@ final class ComicReaderModel {
         slots = Array(repeating: nil, count: units.slotCount)
         let fresh = startsFresh && !atEnd
         startsFresh = false
-        let page = atEnd ? manifest.pageCount - 1 : fresh ? 0 : manifest.startPage
+        let page = atEnd ? manifest.pageCount - 1 : fresh ? 0 : kept.map { min(max($0, 0), manifest.pageCount - 1) } ?? manifest.startPage
         let unit = units.unit(containing: page)
         let step = atEnd ? Int.max
             : fresh ? 0

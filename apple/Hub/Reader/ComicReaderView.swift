@@ -42,6 +42,9 @@ struct ComicReaderView: View {
             guard reader == nil else { return }
             let opened = ComicReaderModel(hub: model.hub, work: work, workId: workId, publication: publication)
             opened.list = list
+            // The issues' page lists kept for an outage (#37).
+            opened.manifests = ReadingOffline.manifests(app: model)
+            opened.scope = ReadingOffline.scope(app: model)
             // Marked unread: the issue opens at its first page. A page sent forgets the mark (#37).
             opened.startsFresh = marks.startsFresh(workId)
             let keeper = marks.kept
@@ -232,6 +235,10 @@ struct ComicReaderScreen: View {
         pad.stop()
         reader.stop()
         closeReader()
+        #if DEBUG
+        // HUB_DEMO_OUTAGE=after-close, the demo hub only: the reading servers go once a reader has closed (#37).
+        if model.isDemo, ProcessInfo.processInfo.environment["HUB_DEMO_OUTAGE"] == "after-close" { DemoTransport.beginOutage() }
+        #endif
     }
 
     #if DEBUG

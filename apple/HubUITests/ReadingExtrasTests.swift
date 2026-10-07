@@ -336,4 +336,82 @@ final class ReadingExtrasTests: XCTestCase {
         lookUp.tap()
         keep(app, "book-look-up")
     }
+
+    // MARK: On the device
+
+    /// More actions › Remove offline copy on a book's page: what it says, as
+    /// the notice or the question.
+    @MainActor
+    private func askToRemove(_ app: XCUIApplication, title: String) -> String {
+        let more = app.buttons["More actions for \(title)"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10), "the book's page has no more actions: \(buttons(app))")
+        more.tap()
+        let remove = app.buttons["Remove offline copy"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5), "More actions has no Remove offline copy")
+        remove.tap()
+        let alert = app.alerts["Remove offline copy?"]
+        if alert.waitForExistence(timeout: 3) {
+            return alert.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " ")
+        }
+        return text(app, containing: "offline copy").label
+    }
+
+    /// An audiobook put on the player keeps its tracks on the device, the
+    /// next fetched ahead; Remove offline copy says how much and lets them go.
+    @MainActor
+    func testAnAudiobooksTracksAreKeptAndItsOfflineCopyRemoved() {
+        let app = launch(open: "book:rw_demo_alloy")
+        let entry = app.buttons["book-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 15), "the audiobook's page did not open: \(buttons(app))")
+        entry.tap()
+        let play = app.buttons["listen-play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 10), "Listen did not open the audiobook")
+        wait(for: [expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: play)], timeout: 15)
+        // Both tracks fetched, the one on the player first: a moment in the demo.
+        _ = waitUntil(6) { false }
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Back to'")).firstMatch.tap()
+
+        var said = ""
+        XCTAssertTrue(waitUntil(20) {
+            said = self.askToRemove(app, title: "The Alloy of Law")
+            if said.contains("No offline copy") { _ = self.waitUntil(2) { false } }
+            return said.contains("on this device.")
+        }, "the tracks were not kept: \(said)")
+        XCTAssertTrue(said.contains("The Alloy of Law · 2.") && said.contains("MB"), "the question says \(said)")
+        keep(app, "remove-offline-copy")
+        app.alerts.buttons["Remove from this device"].tap()
+        XCTAssertTrue(text(app, containing: "Offline copy removed").waitForExistence(timeout: 5), "nothing said it was removed")
+        // Gone: nothing left to remove.
+        XCTAssertTrue(askToRemove(app, title: "The Alloy of Law").contains("No offline copy is kept"))
+    }
+
+    /// Fantastic Four #51 read, then the reading servers gone: the issue
+    /// opens again from its page list and the pages kept on the device, and
+    /// says so.
+    @MainActor
+    func testAComicReopensInAnOutageFromWhatTheDeviceKept() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo"]
+        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_OPEN": "book:rw_demo_ff",
+                                 "HUB_READ": "rw_demo_ff/rw_demo_ff-51", "HUB_READ_CHROME": "pinned",
+                                 "HUB_DEMO_OUTAGE": "after-close"]
+        app.launch()
+        let page = app.descendants(matching: .any).matching(identifier: "comic-page").firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 20), "the reader did not open")
+        XCTAssertTrue(waitUntil(15) { (page.value as? String ?? "").contains("Page 2 of 24") }, "issue 51 did not open at its place")
+        _ = waitUntil(2) { false }
+        app.buttons["Close reader"].tap()
+        XCTAssertTrue(waitForGone(page, 5), "the reader stayed open")
+
+        // The reading servers are gone now; the run's page is still there.
+        let entry = app.buttons["book-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10), "Fantastic Four's page is not under the reader: \(buttons(app))")
+        entry.tap()
+        XCTAssertTrue(page.waitForExistence(timeout: 20), "the reader did not open again")
+        XCTAssertTrue(waitUntil(30) { (page.value as? String ?? "").contains("Page 2 of 24") },
+                      "the issue did not reopen from what was kept: \(page.value as? String ?? "")")
+        XCTAssertTrue(text(app, containing: "Using cached pages").waitForExistence(timeout: 5), "the outage was not said")
+        XCTAssertFalse(text(app, containing: "could not be loaded").exists, "the kept page did not show")
+        keep(app, "comic-outage")
+    }
 }

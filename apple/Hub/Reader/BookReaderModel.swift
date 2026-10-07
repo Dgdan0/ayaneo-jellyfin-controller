@@ -217,9 +217,7 @@ final class BookReaderModel {
         places = CheckpointBookPlaces(hub: app.hub, store: ListeningStore.shared,
                                       key: CheckpointBookPlaces.key(address: app.address, userId: app.userId,
                                                                     workId: work.id, sourceItemId: sourceItemId))
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("reading-epub", isDirectory: true)
-        cache = EpubPackageCache(root: EpubPackageCache.folder(base: caches, address: app.address, userId: app.userId))
+        cache = ReadingOffline.ebooks(app: app)
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("epub-bookmarks", isDirectory: true)
         bookmarkStore = EpubBookmarks(root: support, scope: EpubBookmarks.scope(address: app.address, userId: app.userId),

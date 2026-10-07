@@ -36,6 +36,8 @@ struct BookView: View {
     @State private var naming = false
     @State private var listName = ""
     @State private var notice = ""
+    /// Remove offline copy, asked about: the book and how much this device keeps of it.
+    @State private var removing: (work: ReadingWork, bytes: Int64)?
     @State private var reloads = 0
     @State private var lit: String?
     /// Shown before: coming back to the page (from the audiobook's) reads it again.
@@ -84,6 +86,14 @@ struct BookView: View {
             TextField("List name", text: $listName)
             Button("Cancel", role: .cancel) {}
             Button("Create") { createList() }
+        }
+        .alert("Remove offline copy?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+            Button("Keep offline copy", role: .cancel) {}
+            Button("Remove from this device", role: .destructive) { removeOffline() }
+        } message: {
+            if let removing {
+                Text("\(removing.work.title) · \(Fmt.bytes(removing.bytes)) on this device. Removes downloaded text, audio and cached comic pages for this title. Server files, bookmarks and reading progress are kept.")
+            }
         }
     }
 
@@ -323,6 +333,11 @@ struct BookView: View {
                     listName = ""
                     naming = true
                 }
+                Button {
+                    askRemoveOffline(work)
+                } label: {
+                    Label("Remove offline copy", systemImage: "trash")
+                }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 18, weight: .bold))
@@ -476,6 +491,28 @@ struct BookView: View {
 
     /// Marks the book read, or unread: undone at once, its earlier place
     /// comes back; later, its next read starts at the beginning.
+    // MARK: Remove offline copy (#37)
+
+    private func askRemoveOffline(_ work: ReadingWork) {
+        Task {
+            let bytes = await ReadingOffline.bytes(work, app: model)
+            if bytes > 0 {
+                removing = (work, bytes)
+            } else {
+                notice = "No offline copy is kept on this device"
+            }
+        }
+    }
+
+    private func removeOffline() {
+        guard let work = removing?.work else { return }
+        removing = nil
+        Task {
+            await ReadingOffline.remove(work, app: model)
+            notice = "Offline copy removed · reading progress kept"
+        }
+    }
+
     private func toggleRead(_ work: ReadingWork) {
         var session = completionSession
         books.updateCompletion { current in
