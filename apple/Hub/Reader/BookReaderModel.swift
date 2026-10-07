@@ -6,7 +6,7 @@ import UIKit
 
 /// A control in the book's menu, in the order the pad moves through them.
 enum BookControl: Hashable {
-    case close, contents, bookmark, appearance, keys, previous, returnPlace, next, slider
+    case close, contents, search, bookmark, appearance, keys, previous, returnPlace, next, slider
     /// Read along's dock, the lower bar while the narration is there (#21).
     case narrationBack, narrationPlay, narrationForward, narrationSpeed, narrationFollow
 
@@ -26,6 +26,7 @@ enum BookControl: Hashable {
         switch self {
         case .close: "Close the book"
         case .contents: "Contents"
+        case .search: "Search this book"
         case .bookmark: "Bookmark"
         case .appearance: "Appearance"
         case .keys: "Keys"
@@ -45,6 +46,7 @@ enum BookControl: Hashable {
         switch self {
         case .close: "xmark"
         case .contents: "list.bullet"
+        case .search: "magnifyingglass"
         case .bookmark: "bookmark"
         case .appearance: "textformat.size"
         case .keys: "gamecontroller"
@@ -83,11 +85,19 @@ final class BookReaderModel {
     }
 
     enum Sheet: Equatable {
-        case contents, bookmarks, appearance, keys
+        case contents, bookmarks, search, appearance, keys
+    }
+
+    /// The search sheet's state (#37): nothing asked yet, searching, what
+    /// was found, or why nothing could be.
+    enum SearchState: Equatable {
+        case idle, searching
+        case found([BookSearchHit])
+        case problem(BookSearch.Problem)
     }
 
     enum AppearanceTab: Hashable {
-        case font, layout, themes
+        case font, layout, themes, comfort
     }
 
     let workId: String
@@ -103,7 +113,17 @@ final class BookReaderModel {
     /// Readium's navigator, shown by the screen once the book is open.
     private(set) var controller: UIViewController?
     private(set) var controlsVisible = false
-    var sheet: Sheet?
+    var sheet: Sheet? {
+        // The search goes when its sheet does; what it found stays for the next time.
+        didSet { if sheet != .search { stopSearching() } }
+    }
+    /// The words typed in the search sheet, and what the search found.
+    var searchText = ""
+    private(set) var searchState = SearchState.idle
+    @ObservationIgnored private var searching: Task<Void, Never>?
+    @ObservationIgnored private var searchTimer: Task<Void, Never>?
+    /// The passage a search opened is marked until the reading moves on.
+    @ObservationIgnored private var markedFound = false
     var appearanceTab = AppearanceTab.font
     /// A note's words while its card is open.
     private(set) var footnote: String?
@@ -132,9 +152,17 @@ final class BookReaderModel {
     var controllerActive = false
     /// Set to leave: the screen closes the reader.
     var leaving = false
+    /// The book was marked unread (#37): it opens at its beginning, whatever place was kept.
+    @ObservationIgnored var startsFresh = false
+    /// A place was kept: a mark of read or unread is forgotten.
+    @ObservationIgnored var onKept: (() -> Void)?
     /// The device is in dark mode: system colours follow it.
     var systemDark = false {
-        didSet { if oldValue != systemDark && preferences.theme == .system { navigator.submit(rendering) } }
+        didSet {
+            if oldValue != systemDark && preferences.theme == .system && !ReaderComfort.shared.value.blackPage {
+                navigator.submit(rendering)
+            }
+        }
     }
 
     @ObservationIgnored private let hub: HubClient
@@ -189,9 +217,7 @@ final class BookReaderModel {
         places = CheckpointBookPlaces(hub: app.hub, store: ListeningStore.shared,
                                       key: CheckpointBookPlaces.key(address: app.address, userId: app.userId,
                                                                     workId: work.id, sourceItemId: sourceItemId))
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("reading-epub", isDirectory: true)
-        cache = EpubPackageCache(root: EpubPackageCache.folder(base: caches, address: app.address, userId: app.userId))
+        cache = ReadingOffline.ebooks(app: app)
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("epub-bookmarks", isDirectory: true)
         bookmarkStore = EpubBookmarks(root: support, scope: EpubBookmarks.scope(address: app.address, userId: app.userId),
@@ -240,7 +266,13 @@ final class BookReaderModel {
                        narration: readAlong?.narration != nil, loading: phase != .reading)
     }
 
-    var rendering: EpubRendering { EpubRendering(preferences, systemDark: systemDark) }
+    /// The page as Appearance chose it, black when Comfort asks (#37).
+    var rendering: EpubRendering { EpubRendering(preferences, systemDark: systemDark).comforted(ReaderComfort.shared.value) }
+
+    /// Comfort's black page went on or off: the page is drawn again.
+    func comfortChanged() {
+        navigator.submit(rendering)
+    }
 
     // MARK: Opening
 
@@ -271,6 +303,12 @@ final class BookReaderModel {
 
     /// Where the keeper says to open, or what it asks first.
     private func opened(_ loaded: BookNavigator.Loaded, _ opening: BookOpening) {
+        if startsFresh {
+            // Marked unread: the beginning, and no question about which place.
+            startsFresh = false
+            show(loaded, at: nil)
+            return
+        }
         switch opening {
         case .at(let locator):
             show(loaded, at: locator)
@@ -384,6 +422,7 @@ final class BookReaderModel {
     }
 
     func stop() {
+        stopSearching()
         loadTask?.cancel()
         noticeTask?.cancel()
         flushPlace()
@@ -448,6 +487,7 @@ final class BookReaderModel {
             guard !Task.isCancelled, let self, let page = self.place?.json, self.readAlong?.canKeepPage != false else { return }
             let json = self.keptPlace(page)
             let places = self.places
+            self.onKept?()
             await places.reached(json)
             await places.flush()
             if await places.conflicted() { self.conflicted() }
@@ -574,6 +614,7 @@ final class BookReaderModel {
 
     private func turn(_ delta: Int) {
         guard phase == .reading else { return }
+        clearFound()
         scroll.reset()
         moved = true
         Task {
@@ -593,6 +634,7 @@ final class BookReaderModel {
 
     /// To a place, leaving "Return to previous place" in the menu when `remember` says so.
     func jump(to json: String, remember: Bool = true, then done: (() -> Void)? = nil) {
+        clearFound()
         let previous = place?.json
         tracker.restart()
         scroll.reset()
@@ -713,7 +755,7 @@ final class BookReaderModel {
 
     /// The menu's controls by row: the top bar, the page buttons, the slider.
     var controlRows: [[BookControl]] {
-        let top: [BookControl] = [.close, .contents, .bookmark, .appearance, .keys]
+        let top: [BookControl] = [.close, .contents, .search, .bookmark, .appearance, .keys]
         if readAlong?.narration != nil {
             return [top, [.narrationBack, .narrationPlay, .narrationForward, .narrationSpeed, .narrationFollow]]
         }
@@ -753,6 +795,7 @@ final class BookReaderModel {
         switch control {
         case .close: leaving = true
         case .contents: openSheet(.contents)
+        case .search: openSheet(.search)
         case .bookmark: toggleBookmark()
         case .appearance: openSheet(.appearance)
         case .keys: openSheet(.keys)
@@ -779,6 +822,7 @@ final class BookReaderModel {
         case .bookmarks:
             refreshBookmarks()
             sheetCursor = 0
+        case .search: sheetCursor = 0
         default: break
         }
         sheet = next
@@ -806,6 +850,17 @@ final class BookReaderModel {
             if contents.indices.contains(sheetCursor) { openContents(contents[sheetCursor]) }
         case .activate where open == .bookmarks:
             if bookmarks.indices.contains(sheetCursor) { openBookmark(bookmarks[sheetCursor]) }
+        case .step(let direction) where open == .search:
+            // Up and down go through what was found.
+            guard case .found(let hits) = searchState, !hits.isEmpty else { return }
+            if direction == .up { sheetCursor = max(0, sheetCursor - 1) }
+            if direction == .down { sheetCursor = min(hits.count - 1, sheetCursor + 1) }
+        case .activate where open == .search:
+            if case .found(let hits) = searchState, hits.indices.contains(sheetCursor) {
+                openFound(hits[sheetCursor])
+            } else if searchState != .searching {
+                runSearch()
+            }
         case .secondary where open == .contents:
             sheet = nil
         case .click(.right, true):
@@ -813,6 +868,58 @@ final class BookReaderModel {
         default:
             break
         }
+    }
+
+    // MARK: Search (#37)
+
+    /// The words typed, searched for in the book: the first 100 passages,
+    /// for 30 seconds at most (Android's search sheet).
+    func runSearch() {
+        guard phase == .reading else { return say("The book is still opening") }
+        guard let phrase = BookSearch.query(searchText) else { return say(BookSearch.enterPhrase) }
+        stopSearching()
+        searchState = .searching
+        sheetCursor = 0
+        // Each part's title in the contents, the first line for a part that has several.
+        let chapters = Dictionary(contents.map { ($0.href, $0.title) }, uniquingKeysWith: { first, _ in first })
+        let search = Task { [weak self, navigator] in
+            let result = await navigator.search(phrase, chapters: chapters)
+            guard !Task.isCancelled, let self else { return }
+            self.searchTimer?.cancel()
+            switch result {
+            case .success(let hits): self.searchState = .found(hits)
+            case .failure(let problem): self.searchState = .problem(problem)
+            }
+        }
+        searching = search
+        searchTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(BookSearch.seconds))
+            guard !Task.isCancelled, let self, self.searchState == .searching else { return }
+            search.cancel()
+            self.searchState = .problem(.tooLong)
+        }
+    }
+
+    /// A passage found: its page, the passage marked, with "Return to previous place" in the menu.
+    func openFound(_ hit: BookSearchHit) {
+        jump(to: hit.locator) { [weak self] in
+            self?.navigator.markFound(hit.locator)
+            self?.markedFound = true
+        }
+    }
+
+    private func stopSearching() {
+        searching?.cancel()
+        searchTimer?.cancel()
+        searching = nil
+        searchTimer = nil
+        if searchState == .searching { searchState = .idle }
+    }
+
+    private func clearFound() {
+        guard markedFound else { return }
+        markedFound = false
+        navigator.markFound(nil)
     }
 
     // MARK: Bookmarks

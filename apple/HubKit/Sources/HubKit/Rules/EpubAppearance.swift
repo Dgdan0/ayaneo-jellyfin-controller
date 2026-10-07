@@ -151,9 +151,9 @@ public enum EpubPagePalette {
 /// Readium's own types by the reader.
 public struct EpubRendering: Equatable, Sendable {
     /// "light", "sepia" or "dark".
-    public let theme: String
-    public let background: String
-    public let text: String
+    public var theme: String
+    public var background: String
+    public var text: String
     public let columns: EpubColumns
     /// "serif", "sans-serif", or nil for the publisher's.
     public let fontFamily: String?

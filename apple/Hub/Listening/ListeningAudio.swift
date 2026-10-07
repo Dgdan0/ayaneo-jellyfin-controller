@@ -32,8 +32,7 @@ enum ListeningAudio {
             for track in tracks {
                 let file = folder.appendingPathComponent("\(sourceItemId)-\(track.index).wav")
                 if !FileManager.default.fileExists(atPath: file.path) {
-                    let tone = 220 + 55 * Double(track.index % 4)
-                    try? DemoAudio.wav(milliseconds: track.durationMs, frequency: tone).write(to: file)
+                    try? DemoAudio.wav(milliseconds: track.durationMs, frequency: DemoAudio.tone(track.index)).write(to: file)
                 }
                 urls[track.index] = file.absoluteString
             }

@@ -49,12 +49,15 @@ struct BooksHomeView: View {
 
     private static let recentLimit = 12
 
+    /// The shelves, each book as the person marked it (#37): one marked read leaves Continue reading.
     private var rows: [ReadingShelfRow] {
-        ReadingShelves.rows(current: unsent + candidates, state: books.lists, resolved: observed,
-                            next: ReadingShelves.nextInSeries(candidates), recent: recent)
+        let marked = candidates.map(books.project)
+        return ReadingShelves.rows(current: unsent.map(books.project) + marked, state: books.lists,
+                                   resolved: observed.mapValues(books.project),
+                                   next: ReadingShelves.nextInSeries(marked), recent: recent)
     }
 
-    private var series: [ReadingShelves.SeriesShelfItem] { ReadingShelves.yourSeries(candidates) }
+    private var series: [ReadingShelves.SeriesShelfItem] { ReadingShelves.yourSeries(candidates.map(books.project)) }
 
     var body: some View {
         let rows = rows

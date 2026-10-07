@@ -69,6 +69,9 @@ struct BooksLibraryView: View {
                     ForEach(Array(shown.enumerated()), id: \.element.id) { index, library in
                         tile(library, index: index)
                     }
+                    if !arranging, let kavita = libraries.first(where: { $0.source == "kavita" }) {
+                        readingLists(kavita)
+                    }
                 }
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 14)
@@ -116,6 +119,20 @@ struct BooksLibraryView: View {
                 #endif
                 .accessibilityAction(named: "Arrange libraries", startArranging)
         }
+    }
+
+    /// Kavita's reading lists, after the libraries and not among those
+    /// arranged (#37; Android's fixed "Reading lists" tile): on the picture
+    /// of Kavita's first library.
+    private func readingLists(_ kavita: ReadingLibrary) -> some View {
+        NavigationLink(value: AppRoute.readingLists(ReadingListsRoute(list: nil, artwork: kavita.artwork))) {
+            LibraryTile(folder: LibraryFolder(id: "kavita:reading-lists", name: "Reading lists", kind: "reading_list",
+                                              image: kavita.artwork, fan: []),
+                        posters: [], background: kavita.artwork, kindLabel: "Kavita · in order")
+        }
+        .buttonStyle(GlassCardStyle())
+        .previewsWhenFocused { lit = kavita.artwork }
+        .accessibilityIdentifier("reading-lists")
     }
 
     private func startArranging() {
@@ -291,6 +308,7 @@ struct ReadingLibraryView: View {
 /// A library's covers, 60 a page, the next page asked for six covers from the end.
 struct ReadingWorksGrid: View {
     @Environment(AppModel.self) private var model
+    @Environment(BooksModel.self) private var books
     @Environment(\.glassMetrics) private var metrics
     let library: ReadingLibrary
     let sort: SortPreference
@@ -320,7 +338,7 @@ struct ReadingWorksGrid: View {
                       alignment: .leading, spacing: 20) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, work in
                     NavigationLink(value: AppRoute.book(BookRoute(workId: work.id, title: work.title))) {
-                        BookCard(work: work)
+                        BookCard(work: books.project(work))
                     }
                     .buttonStyle(GlassCardStyle())
                     .previewsWhenFocused { lit = work.artwork }

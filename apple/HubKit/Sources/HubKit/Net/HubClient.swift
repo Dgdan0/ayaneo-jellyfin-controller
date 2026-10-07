@@ -4,6 +4,12 @@ import Foundation
 /// tests, so the client's rules are tested without a network.
 public protocol HubTransport: Sendable {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
+    /// The answers it keeps on the device, if it keeps any (the artwork's).
+    var urlCache: URLCache? { get }
+}
+
+extension HubTransport {
+    public var urlCache: URLCache? { nil }
 }
 
 public struct URLSessionTransport: HubTransport {
@@ -43,6 +49,8 @@ public struct URLSessionTransport: HubTransport {
         config.requestCachePolicy = .useProtocolCachePolicy
         return URLSessionTransport(session: URLSession(configuration: config))
     }
+
+    public var urlCache: URLCache? { session.configuration.urlCache }
 
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let (data, response) = try await session.data(for: request)
@@ -138,6 +146,44 @@ public actor HubClient {
     /// transport and its cache.
     public func image(_ hubPath: String) async throws(HubFailure) -> Data {
         try await perform(HubRequest(hubPath), transport: artwork)
+    }
+
+    /// A hub image from this device's artwork cache only, never the network
+    /// (#37: a comic's pages read before, in an outage); a picture not kept
+    /// fails at once.
+    public func cachedImage(_ hubPath: String) async throws(HubFailure) -> Data {
+        let creds = credentials
+        guard let url = URL(string: HubEndpoints.join(creds.baseURL, hubPath)) else { throw HubFailure(.badResponse) }
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataDontLoad)
+        request.setValue("Bearer " + creds.token, forHTTPHeaderField: "Authorization")
+        do {
+            let (data, response) = try await artwork.send(request)
+            guard (200...299).contains(response.statusCode), !data.isEmpty else { throw HubFailure(.notFound) }
+            return data
+        } catch let failure as HubFailure {
+            throw failure
+        } catch {
+            throw HubFailure(FailureKind.of(error: error) == .cancelled ? .cancelled : .notFound)
+        }
+    }
+
+    /// How many bytes of these hub images the artwork cache keeps on this device.
+    public func keptImageBytes(_ hubPaths: [String]) -> Int64 {
+        guard let cache = artwork.urlCache else { return 0 }
+        return hubPaths.reduce(0) { total, path in
+            guard let url = URL(string: HubEndpoints.join(credentials.baseURL, path)) else { return total }
+            return total + Int64(cache.cachedResponse(for: URLRequest(url: url))?.data.count ?? 0)
+        }
+    }
+
+    /// Lets go of these hub images on this device (Remove offline copy).
+    public func forgetImages(_ hubPaths: [String]) {
+        guard let cache = artwork.urlCache else { return }
+        for path in hubPaths {
+            if let url = URL(string: HubEndpoints.join(credentials.baseURL, path)) {
+                cache.removeCachedResponse(for: URLRequest(url: url))
+            }
+        }
     }
 
     private func perform(_ request: HubRequest, transport: any HubTransport) async throws(HubFailure) -> Data {

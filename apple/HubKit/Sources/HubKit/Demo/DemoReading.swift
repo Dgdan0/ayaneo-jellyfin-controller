@@ -619,6 +619,13 @@ public enum DemoReading {
             return json(positionFields(book))
         case ("POST", 8) where parts[7] == "position":
             return savePosition(book, body: body)
+        case ("GET", 9) where parts[7] == "tracks":
+            // A track's bytes, which the app keeps on the device (#37): its tone.
+            guard let index = Int(parts[8]), book.tracksMs.indices.contains(index) else {
+                return failure(404, "not_found", "No such track")
+            }
+            return DemoTransport.Answer(200, data: DemoAudio.wav(milliseconds: book.tracksMs[index],
+                                                                 frequency: DemoAudio.tone(index)), type: "audio/wav")
         default:
             return failure(404, "not_found", "No such route in the demo hub")
         }
@@ -771,11 +778,15 @@ public enum DemoReading {
 
 /// The demo's audiobook tracks: a quiet tone a few seconds long per track,
 /// written by the app to a file it plays (AVPlayer cannot fetch from the demo
-/// hub, which answers only the app's own requests). A WAV, so it needs no
-/// encoder: 8 kHz, 16-bit mono, a soft tone that changes with the track, so a
-/// change of track can be heard.
+/// hub, which answers only the app's own requests), and served by the demo
+/// hub to the app's track cache (#37). A WAV, so it needs no encoder: 8 kHz,
+/// 16-bit mono, a soft tone that changes with the track, so a change of
+/// track can be heard.
 public enum DemoAudio {
     public static let sampleRate = 8_000
+
+    /// Track `index`'s tone, in hertz.
+    public static func tone(_ index: Int) -> Double { 220 + 55 * Double(index % 4) }
 
     public static func byteCount(milliseconds: Int64) -> Int64 {
         44 + Int64(sampleRate) * 2 * max(0, milliseconds) / 1_000

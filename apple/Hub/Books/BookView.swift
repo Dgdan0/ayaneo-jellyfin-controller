@@ -21,7 +21,10 @@ struct BookView: View {
     @Environment(\.readerClosed) private var readerClosed
     let route: BookRoute
 
-    @State private var work: ReadingWork?
+    /// The book as the hub sent it; shown as the person marked it (`work`).
+    @State private var loaded: ReadingWork?
+    /// Unread straight after read gives back what was there; leaving the page ends that.
+    @State private var completionSession = ReadingCompletionSession()
     /// The book's series, for "More in"; its id, so another book's never shows.
     @State private var series: (id: String, items: [ReadingSectionItem])?
     @State private var status = StatusMessage("")
@@ -33,10 +36,14 @@ struct BookView: View {
     @State private var naming = false
     @State private var listName = ""
     @State private var notice = ""
+    /// Remove offline copy, asked about: the book and how much this device keeps of it.
+    @State private var removing: (work: ReadingWork, bytes: Int64)?
     @State private var reloads = 0
     @State private var lit: String?
     /// Shown before: coming back to the page (from the audiobook's) reads it again.
     @State private var appeared = false
+
+    private var work: ReadingWork? { loaded.map(books.project) }
 
     var body: some View {
         ScrollView {
@@ -74,10 +81,19 @@ struct BookView: View {
             if appeared { reloads += 1 }
             appeared = true
         }
+        .onDisappear { completionSession.leave() }
         .alert("New reading list", isPresented: $naming) {
             TextField("List name", text: $listName)
             Button("Cancel", role: .cancel) {}
             Button("Create") { createList() }
+        }
+        .alert("Remove offline copy?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+            Button("Keep offline copy", role: .cancel) {}
+            Button("Remove from this device", role: .destructive) { removeOffline() }
+        } message: {
+            if let removing {
+                Text("\(removing.work.title) · \(Fmt.bytes(removing.bytes)) on this device. Removes downloaded text, audio and cached comic pages for this title. Server files, bookmarks and reading progress are kept.")
+            }
         }
     }
 
@@ -296,6 +312,15 @@ struct BookView: View {
                 .accessibilityLabel("Change format")
                 .accessibilityHint("Choose ebook, audiobook or read along")
             }
+            if !work.isSeries {
+                // Read or unread by hand (#37): restored at once if undone here, else started again.
+                let read = work.progress?.completed == true
+                GlassRoundButton(systemImage: read ? "checkmark.circle.fill" : "checkmark.circle",
+                                 label: read ? "Mark \(work.title) unread" : "Mark \(work.title) read", on: read, size: 46) {
+                    toggleRead(work)
+                }
+                .accessibilityIdentifier("book-read")
+            }
             let wanted = books.isWanted(work.id)
             GlassRoundButton(systemImage: wanted ? "bookmark.fill" : "bookmark",
                              label: wanted ? "Remove from Want to Read" : "Add to Want to Read",
@@ -307,6 +332,11 @@ struct BookView: View {
                 ReadingListsMenu(work: work) {
                     listName = ""
                     naming = true
+                }
+                Button {
+                    askRemoveOffline(work)
+                } label: {
+                    Label("Remove offline copy", systemImage: "trash")
                 }
                 // Last, and in its own words: a preview and a confirmation follow (#34).
                 Divider()
@@ -341,6 +371,8 @@ struct BookView: View {
     /// Opens a book the way it was chosen, and remembers that way (Android's
     /// `launchEntry`): reading keeps the narration listened to last.
     private func launch(_ work: ReadingWork, _ choice: ReadingEntryChoice, remembered: ReadingEntryPreference?) {
+        // Opening a reader ends the undo window, as leaving the page does.
+        completionSession.leave()
         switch choice.mode {
         case .read:
             guard let text = choice.text else { return }
@@ -430,7 +462,7 @@ struct BookView: View {
             VStack(alignment: .leading, spacing: 0) {
                 RowHeading(title: "More in \(work.series)")
                     .padding(.horizontal, metrics.margin)
-                SeriesBookStrip(items: series.items, current: work.id)
+                SeriesBookStrip(items: series.items.map(books.completion.project), current: work.id)
             }
             .padding(.top, 20)
         }
@@ -445,7 +477,7 @@ struct BookView: View {
             // The places this device kept and the hub has not had yet (#30).
             let scope = ReadingCheckpointKey.scope(address: model.address, userId: model.userId)
             let response = ReadingProgressPresentation.project(fetched, pending: ListeningStore.shared.pending(scope: scope))
-            if response != work { work = response }
+            if response != loaded { loaded = response }
             books.observe([response])
             model.colors.want([response.artwork])
             status = StatusText.caveat(response.cache, unavailable: response.partial.map(\.service))
@@ -463,6 +495,40 @@ struct BookView: View {
             if error.kind == .cancelled { return }
             status = StatusText.failed(error.message, kind: error.kind, hasData: work != nil)
         }
+    }
+
+    /// Marks the book read, or unread: undone at once, its earlier place
+    /// comes back; later, its next read starts at the beginning.
+    // MARK: Remove offline copy (#37)
+
+    private func askRemoveOffline(_ work: ReadingWork) {
+        Task {
+            let bytes = await ReadingOffline.bytes(work, app: model)
+            if bytes > 0 {
+                removing = (work, bytes)
+            } else {
+                notice = "No offline copy is kept on this device"
+            }
+        }
+    }
+
+    private func removeOffline() {
+        guard let work = removing?.work else { return }
+        removing = nil
+        Task {
+            await ReadingOffline.remove(work, app: model)
+            notice = "Offline copy removed · reading progress kept"
+        }
+    }
+
+    private func toggleRead(_ work: ReadingWork) {
+        var session = completionSession
+        books.updateCompletion { current in
+            work.progress?.completed == true ? session.unmark(current, work.id) : session.markRead(current, work.id)
+        }
+        completionSession = session
+        books.updateLists { $0.recordProgress(work.id, percentage: books.project(loaded ?? work).progress?.percentage ?? 0) }
+        notice = books.completion.notice(work.id)
     }
 
     /// Resume reading from Home: the main button's own choice, once.

@@ -77,7 +77,7 @@ struct BookReaderBars: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("book-heading")
-            ForEach([BookControl.contents, .bookmark, .appearance, .keys], id: \.self) { control in
+            ForEach([BookControl.contents, .search, .bookmark, .appearance, .keys], id: \.self) { control in
                 BookControlButton(reader: reader, control: control, size: layout.round) { reader.choose(control) }
             }
         }

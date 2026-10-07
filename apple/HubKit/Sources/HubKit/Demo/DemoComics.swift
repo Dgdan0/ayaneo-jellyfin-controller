@@ -30,6 +30,14 @@ enum DemoComics {
         Run(workId: "rw_demo_csm", series: "Chainsaw Man", kind: "manga", issues: (1...8).map { ($0, 22) }, reading: nil),
     ]
 
+    /// Kavita's reading lists (#37): issues of the runs above, across runs,
+    /// in an order of Kavita's own. Their places are the runs' places.
+    static let lists: [(id: Int, title: String, summary: String, entries: [(workId: String, number: Int)])] = [
+        (1, "Marvel's first year", "Where it began, in the order the issues came out",
+         [("rw_demo_ff", 1), ("rw_demo_aaf", 7), ("rw_demo_ff", 2), ("rw_demo_ff", 3)]),
+        (2, "Chainsaw Man to start", "", [("rw_demo_csm", 1), ("rw_demo_csm", 2)]),
+    ]
+
     /// An issue's id, as the Books demo's run page names it.
     static func issueId(_ run: Run, _ number: Int) -> String { "\(run.workId)-\(number)" }
 
@@ -38,6 +46,9 @@ enum DemoComics {
 
     static func answer(method: String, path: String, query: String, body: Data?) -> DemoTransport.Answer? {
         let parts = path.split(separator: "/").map(String.init)
+        if method == "GET", parts.count >= 3, parts.count <= 4, parts[0] == "v1", parts[1] == "reading", parts[2] == "lists" {
+            return readingLists(parts.count == 4 ? parts[3] : nil)
+        }
         // /v1/reading/works/{work}/publications/{issue}[/pages/{n}[/thumb] | /progress]
         guard parts.count >= 6, parts[0] == "v1", parts[1] == "reading", parts[2] == "works", parts[4] == "publications",
               let run = runs.first(where: { $0.workId == parts[3] }) else { return nil }
@@ -68,6 +79,36 @@ enum DemoComics {
         default:
             return nil
         }
+    }
+
+    /// The hub's `handleServerReadingLists`: every list, or one with its issues.
+    private static func readingLists(_ asked: String?) -> DemoTransport.Answer {
+        let summaries = lists.map { list -> [String: Any] in
+            ["id": list.id, "title": list.title, "summary": list.summary, "itemCount": list.entries.count, "promoted": false]
+        }
+        guard let asked else { return json(["lists": summaries]) }
+        guard let id = Int(asked), id > 0 else { return failure(400, "invalid_request", "Invalid reading list") }
+        guard let index = lists.firstIndex(where: { $0.id == id }) else {
+            return failure(404, "not_found", "Reading list not found")
+        }
+        let items = lists[index].entries.enumerated().compactMap { order, entry -> [String: Any]? in
+            guard let run = runs.first(where: { $0.workId == entry.workId }),
+                  let issue = run.issues.first(where: { $0.number == entry.number }) else { return nil }
+            var fields: [String: Any] = [
+                "id": id * 100 + order, "order": order, "workId": run.workId, "sourceItemId": issueId(run, issue.number),
+                "title": (run.kind == "manga" ? "Chapter " : "Issue #") + "\(issue.number)", "seriesTitle": run.series,
+                "kind": run.kind, "artwork": DemoReading.art(String(run.workId.dropFirst("rw_demo_".count))),
+                "pageCount": issue.pages,
+            ]
+            let read = place(run, number: issue.number)
+            if read > 0 {
+                let percentage = Double(read + 1) / Double(issue.pages)
+                fields["progress"] = ["percentage": min(percentage, 1), "completed": read + 1 >= issue.pages,
+                                      "current": read + 1, "total": issue.pages]
+            }
+            return fields
+        }
+        return json(["list": summaries[index], "items": items])
     }
 
     /// A page's size: a comic page 1000 x 1538 (a US comic's 1988 x 3056
