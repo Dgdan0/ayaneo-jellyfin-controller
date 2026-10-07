@@ -310,7 +310,7 @@ public enum ReaderPadMap {
     }
 
     /// "Previous page, Next page" reads "Previous page, next page".
-    private static func lowercaseAfterFirst(_ text: String) -> String {
+    static func lowercaseAfterFirst(_ text: String) -> String {
         guard let comma = text.range(of: ", ") else { return text }
         let rest = text[comma.upperBound...]
         return String(text[..<comma.upperBound]) + rest.prefix(1).lowercased() + rest.dropFirst()
@@ -386,10 +386,27 @@ public enum ReaderKeyboard {
             (["Space", "Return"], [.space, .returnKey]), (["Delete"], [.delete]), (["Arrows"], [.left, .right, .up, .down]),
             (["Page Down"], [.pageDown]), (["Page Up"], [.pageUp]), (["−"], [.minus]), (["="], [.plus]),
         ]
+        func said(_ key: ReaderKey) -> String {
+            Self.action(key).map { ReaderPadMap.describe(kind, ReaderPadMap.command(reading, $0)) } ?? ""
+        }
         var lines: [ReaderKeyLine] = []
         for (caps, keys) in groups {
-            guard let action = keys.first.flatMap(Self.action) else { continue }
-            let does = ReaderPadMap.describe(kind, ReaderPadMap.command(reading, action))
+            if keys.count == 4 {
+                // The arrows, as the D-pad's lines: one when every way does the
+                // same, else the sides ("Previous page, next page") and the ends.
+                let sides = said(.right)
+                let ends = said(.down)
+                if sides == ends {
+                    if !sides.isEmpty { lines.append(ReaderKeyLine(caps, sides)) }
+                } else {
+                    let left = said(.left)
+                    let across = left == sides ? sides : ReaderPadMap.lowercaseAfterFirst(left + ", " + sides)
+                    if !across.isEmpty { lines.append(ReaderKeyLine(["←", "→"], across)) }
+                    if !ends.isEmpty { lines.append(ReaderKeyLine(["↑", "↓"], ends)) }
+                }
+                continue
+            }
+            let does = keys.first.map(said) ?? ""
             if !does.isEmpty { lines.append(ReaderKeyLine(caps, does)) }
         }
         lines.append(ReaderKeyLine(["Escape"], ReaderPadMap.describe(kind, .leave)))

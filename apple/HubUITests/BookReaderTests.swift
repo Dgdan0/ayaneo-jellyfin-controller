@@ -17,7 +17,8 @@ final class BookReaderTests: XCTestCase {
     private func launchReading(_ book: String = recursion, _ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo"]
-        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_BOOK": book]
+        // Pages, not continuous scrolling, whatever an earlier test left chosen.
+        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_BOOK": book, "HUB_BOOK_SCROLL": "0"]
             .merging(environment) { $1 }
         app.launch()
         XCTAssertTrue(page(app).waitForExistence(timeout: 20), "the book did not open")
@@ -107,6 +108,84 @@ final class BookReaderTests: XCTestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 5), "the menu is not there under the sheet")
         close.tap()
         XCTAssertTrue(page(app).waitForNonExistence(timeout: 5), "the reader stayed open")
+    }
+
+    /// The keyboard turns pages while the screen holds the keys, and still
+    /// once a tap on the page has given them to Readium's web view: both
+    /// hear a key, and the reader acts on it once.
+    @MainActor
+    func testKeysTurnThePageWhetherTheScreenOrThePageHoldsThem() {
+        let app = launchReading()
+        // Recursion opens at its first page; three pages on, then the menu.
+        turnPages(app, 3)
+        let afterKeys = place(app)
+        XCTAssertFalse(afterKeys.hasPrefix("About this edition · Page 1 of"), "the keys did not turn the page: \(afterKeys)")
+        // A tap in the page's middle puts the menu away, and the page now has the keys.
+        page(app).tap()
+        XCTAssertTrue(app.staticTexts["book-position"].waitForNonExistence(timeout: 5), "the tap left the menu up")
+        turnPages(app, 3)
+        let afterTap = place(app)
+        XCTAssertNotEqual(afterTap, afterKeys, "the keys did nothing once the page had been tapped")
+        XCTAssertGreaterThanOrEqual(percent(afterTap), percent(afterKeys), "the keys went back: \(afterKeys) to \(afterTap)")
+    }
+
+    /// Continuous scrolling, chosen in Appearance: the page scrolls, and the
+    /// menu says how far through without page numbers.
+    @MainActor
+    func testContinuousScrollingScrollsAndCountsNoPages() {
+        let app = launchReading(Self.recursion, ["HUB_BOOK_SHEET": "appearance"])
+        let layout = app.buttons["Layout"]
+        XCTAssertTrue(layout.waitForExistence(timeout: 15), "Appearance did not open")
+        layout.tap()
+        let scrolling = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Continuous scrolling'")).firstMatch
+        XCTAssertTrue(scrolling.waitForExistence(timeout: 5), "Layout has no continuous scrolling: "
+                      + app.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }.joined(separator: " | "))
+        scrolling.tap()
+        XCTAssertTrue(waitUntil(5) { scrolling.label.hasSuffix("On") }, "scrolling did not turn on: \(scrolling.label)")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(layout.waitForNonExistence(timeout: 5), "Appearance stayed open")
+        // The menu, under the sheet, says where the book is; while it scrolls, ↑ and ↓ scroll.
+        let before = shownPlace(app)
+        XCTAssertFalse(before.contains("Page "), "scrolling still counts pages: \(before)")
+        page(app).tap()
+        XCTAssertTrue(app.staticTexts["book-position"].waitForNonExistence(timeout: 5), "the tap left the menu up")
+        for _ in 0..<4 { page(app).swipeUp() }
+        page(app).tap()
+        let after = shownPlace(app)
+        XCTAssertGreaterThan(percent(after), percent(before), "the page did not scroll on: \(before) to \(after)")
+    }
+
+    /// Where the book is, from the menu on screen.
+    @MainActor
+    private func shownPlace(_ app: XCUIApplication) -> String {
+        let position = app.staticTexts["book-position"]
+        XCTAssertTrue(position.waitForExistence(timeout: 5), "the menu is not up")
+        XCTAssertTrue(waitUntil(5) { position.label.contains("% of book") }, "the menu says \(position.label)")
+        return position.label
+    }
+
+    /// Right arrow `count` times, a moment apart, as a person reads.
+    @MainActor
+    private func turnPages(_ app: XCUIApplication, _ count: Int) {
+        for _ in 0..<count {
+            app.typeKey(.rightArrow, modifierFlags: [])
+            RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        }
+    }
+
+    /// Where the book is, from its menu, which ↑ opens (as Ⓑ and Delete do).
+    @MainActor
+    private func place(_ app: XCUIApplication) -> String {
+        app.typeKey(.upArrow, modifierFlags: [])
+        let position = app.staticTexts["book-position"]
+        XCTAssertTrue(position.waitForExistence(timeout: 5), "↑ did not open the menu")
+        XCTAssertTrue(waitUntil(5) { position.label.contains("% of book") }, "the menu says \(position.label)")
+        return position.label
+    }
+
+    /// "One · Page 2 of 3 in chapter · 4% of book" is 4.
+    private func percent(_ line: String) -> Int {
+        Int(line.components(separatedBy: "% of book").first?.components(separatedBy: " ").last ?? "") ?? -1
     }
 
     /// Asks `condition` every quarter of a second until it holds or `seconds` pass.

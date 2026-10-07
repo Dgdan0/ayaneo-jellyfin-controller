@@ -99,6 +99,8 @@ final class BookReaderModel {
     var focusedControl = BookControl.contents
     /// The contents or bookmark line the pad is on while that sheet is open.
     var sheetCursor = 0
+    /// The pad has moved the sheet's cursor: the chapter on the page no longer places it.
+    @ObservationIgnored private var cursorMoved = false
     var controllerActive = false
     /// Set to leave: the screen closes the reader.
     var leaving = false
@@ -333,6 +335,8 @@ final class BookReaderModel {
                                          totalProgression: place.totalProgression)
         bookProgress = progress ?? 0
         currentContentsRow = contents.firstIndex { $0.href == place.href }
+        // Contents opened before the page said where it is: the cursor goes to it once it does.
+        if sheet == .contents, !cursorMoved, let row = currentContentsRow { sheetCursor = row }
         let title = place.title ?? currentContentsRow.map { contents[$0].title }
         positionLine = BookSections.line(title: title, page: preferences.scrolls ? nil : navigator.pageInPart(),
                                          progress: progress)
@@ -663,6 +667,7 @@ final class BookReaderModel {
     func openSheet(_ next: Sheet) {
         controlsVisible = true
         footnote = nil
+        cursorMoved = false
         switch next {
         case .contents: sheetCursor = currentContentsRow ?? 0
         case .bookmarks:
@@ -683,8 +688,12 @@ final class BookReaderModel {
         case .step(let direction) where open == .contents || open == .bookmarks:
             let count = open == .contents ? contents.count : bookmarks.count
             switch direction {
-            case .up: sheetCursor = max(0, sheetCursor - 1)
-            case .down: sheetCursor = max(0, min(count - 1, sheetCursor + 1))
+            case .up:
+                sheetCursor = max(0, sheetCursor - 1)
+                cursorMoved = true
+            case .down:
+                sheetCursor = max(0, min(count - 1, sheetCursor + 1))
+                cursorMoved = true
             case .left, .right: openSheet(open == .contents ? .bookmarks : .contents)
             }
         case .activate where open == .contents:
