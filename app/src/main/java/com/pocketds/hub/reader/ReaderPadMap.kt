@@ -20,7 +20,9 @@ data class ReaderPadState(
     /** Still opening, or it failed: Select tries again. */
     val loading: Boolean = false,
     /** Audiobooks: how far L2 and R2 jump. */
-    val seekSeconds: Int = 10
+    val seekSeconds: Int = 10,
+    /** Audiobooks: the book has chapters (#31), so L1 and R1 step by chapter rather than by part. */
+    val chapters: Boolean = false
 )
 
 /** What a key does in a reader, whichever reader it is. Each reader carries these out its own way. */
@@ -31,7 +33,7 @@ sealed interface ReaderCommand {
     data object Backward : ReaderCommand
     /** A whole page on or back, past any thirds. */
     data class Page(val delta: Int) : ReaderCommand
-    /** A book's chapter, an audiobook's part. */
+    /** A book's chapter, an audiobook's chapter or, without chapters, its part. */
     data class Chapter(val delta: Int) : ReaderCommand
     data class Zoom(val factor: Float) : ReaderCommand
     /** Comics, the D-pad: across the page, turning at its edge going sideways. */
@@ -151,13 +153,16 @@ object ReaderPadMap {
         is PadAction.Click -> if (action.stick == Stick.RIGHT && action.down) ReaderCommand.Keys else ReaderCommand.Ignore
     }
 
-    /** What [command] is called on a key cap's line, in this reader; blank for [ReaderCommand.Ignore]. */
-    fun describe(kind: ReaderKind, command: ReaderCommand): String = when (command) {
+    /**
+     * What [command] is called on a key cap's line, in this reader; blank for [ReaderCommand.Ignore].
+     * [chapters]: an audiobook that has them steps by chapter, and says so.
+     */
+    fun describe(kind: ReaderKind, command: ReaderCommand, chapters: Boolean = false): String = when (command) {
         ReaderCommand.Forward -> if (kind == ReaderKind.BOOK) "Next page" else "Forward"
         ReaderCommand.Backward -> "Back"
         is ReaderCommand.Page -> if (command.delta > 0) "Next page" else "Previous page"
         is ReaderCommand.Chapter -> when {
-            kind == ReaderKind.AUDIOBOOK -> if (command.delta > 0) "Next part" else "Previous part"
+            kind == ReaderKind.AUDIOBOOK && !chapters -> if (command.delta > 0) "Next part" else "Previous part"
             command.delta > 0 -> "Next chapter"
             else -> "Previous chapter"
         }
@@ -192,7 +197,7 @@ object ReaderPadMap {
      * a reader): what the main keys do now. Each chip is also a button.
      */
     fun hints(state: ReaderPadState): List<ButtonHint> = HINT_KEYS.getValue(state.kind).mapNotNull { (glyph, action) ->
-        describe(state.kind, command(state, action)).takeIf(String::isNotBlank)?.let { ButtonHint(glyph, it, action) }
+        describe(state.kind, command(state, action), state.chapters).takeIf(String::isNotBlank)?.let { ButtonHint(glyph, it, action) }
     }
 
     /**
@@ -203,11 +208,11 @@ object ReaderPadMap {
     fun sheet(kind: ReaderKind, state: ReaderPadState = ReaderPadState(kind)): List<ReaderKeyLine> = buildList {
         val reading = state.copy(controlsVisible = kind == ReaderKind.AUDIOBOOK, loading = false)
         fun line(keys: List<String>, action: PadAction) {
-            describe(kind, command(reading, action)).takeIf(String::isNotBlank)?.let { add(ReaderKeyLine(keys, it)) }
+            describe(kind, command(reading, action), state.chapters).takeIf(String::isNotBlank)?.let { add(ReaderKeyLine(keys, it)) }
         }
         fun pair(first: Pair<String, PadAction>, second: Pair<String, PadAction>) {
-            val a = describe(kind, command(reading, first.second))
-            val b = describe(kind, command(reading, second.second))
+            val a = describe(kind, command(reading, first.second), state.chapters)
+            val b = describe(kind, command(reading, second.second), state.chapters)
             when {
                 a.isBlank() && b.isBlank() -> Unit
                 a == b -> add(ReaderKeyLine(listOf(first.first, second.first), a))

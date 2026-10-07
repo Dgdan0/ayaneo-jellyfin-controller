@@ -69,26 +69,31 @@ object PlayerLabels {
 
     /**
      * Listening (#16, A2): what is left as heard at the speed playing, "12 min
-     * left in part · 4h 10m in book"; the book's part drops while the lengths
-     * of its parts are still being read.
+     * left in part · 4h 10m in book", or "in chapter" where the book has chapters
+     * (#31, [noun]); the book's part drops while the lengths of its parts are
+     * still being read.
      */
-    fun timeLeft(partLeftMs: Long, bookLeftMs: Long?): String = listOfNotNull(
-        "${Fmt.runtime((partLeftMs / 1_000).coerceAtLeast(60))} left in part",
+    fun timeLeft(entryLeftMs: Long, bookLeftMs: Long?, noun: String = "part"): String = listOfNotNull(
+        "${Fmt.runtime((entryLeftMs / 1_000).coerceAtLeast(60))} left in $noun",
         bookLeftMs?.let { "${Fmt.runtime((it / 1_000).coerceAtLeast(60))} in book" }
     ).joinToString(" · ")
 
-    /** The sleep timer on its button: "Sleep", "Sleep · 14:32", "Sleep · end of part", fading. */
-    fun sleep(timer: com.pocketds.hub.reader.SleepTimer?): String = when {
+    /** The mini player's time, "4h 10m left", and nothing while no length is known. */
+    fun leftLine(leftMs: Long?): String =
+        leftMs?.let { "${Fmt.runtime((it / 1_000).coerceAtLeast(60))} left" }.orEmpty()
+
+    /** The sleep timer on its button: "Sleep", "Sleep · 14:32", "Sleep · end of part" (or chapter), fading. */
+    fun sleep(timer: com.pocketds.hub.reader.SleepTimer?, noun: String = "part"): String = when {
         timer == null -> "Sleep"
         timer.fading -> "Sleep · fading"
-        timer.choice == com.pocketds.hub.reader.SleepChoice.EndOfPart && timer.skipParts == 0 -> "Sleep · end of part"
+        timer.choice == com.pocketds.hub.reader.SleepChoice.EndOfPart && timer.skipParts == 0 -> "Sleep · end of $noun"
         else -> "Sleep · ${Fmt.clock(timer.remainingMs)}"
     }
 
-    /** A sleep timer to choose: "15 minutes", "End of this part". */
-    fun sleepChoice(choice: com.pocketds.hub.reader.SleepChoice): String = when (choice) {
+    /** A sleep timer to choose: "15 minutes", "End of this part" (or chapter). */
+    fun sleepChoice(choice: com.pocketds.hub.reader.SleepChoice, noun: String = "part"): String = when (choice) {
         is com.pocketds.hub.reader.SleepChoice.Minutes -> if (choice.minutes == 60) "1 hour" else "${choice.minutes} minutes"
-        com.pocketds.hub.reader.SleepChoice.EndOfPart -> "End of this part"
+        com.pocketds.hub.reader.SleepChoice.EndOfPart -> "End of this $noun"
     }
 
     fun aspect(value: PlaybackAspect): String = when (value) {

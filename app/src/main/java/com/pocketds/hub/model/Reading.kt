@@ -478,9 +478,24 @@ data class ReadingAudioTrack(
     val etag: String = ""
 )
 
-/** A chapter mark inside a track: [startMs] counts from the start of that [track]. */
+/**
+ * A chapter of the audiobook: [startMs] counts from the start of that [track].
+ * [source] says where it comes from (#31): "marks", a chapter mark inside a file,
+ * or "book", an entry of the table of contents of the book's read-along edition,
+ * placed where its narration starts, so one chapter can run on from one track
+ * into the next. A book's chapters have one source; an older hub sends none,
+ * and its chapters are marks. A title arrives dressed ("Chapter 1", "Prologue"):
+ * it is shown as it comes.
+ */
 @Serializable
-data class ReadingAudioChapter(val title: String = "", val startMs: Long = 0, val track: Int = 0)
+data class ReadingAudioChapter(val title: String = "", val startMs: Long = 0, val track: Int = 0, val source: String = "") {
+    /** An entry of the book's own contents rather than a mark in a file. */
+    val fromBook: Boolean get() = source == BOOK
+
+    companion object {
+        const val BOOK = "book"
+    }
+}
 
 @Serializable
 data class ReadingAudioAlignment(val audio: List<ReadingAlignedAudio> = emptyList())

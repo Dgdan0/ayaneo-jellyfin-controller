@@ -32,6 +32,25 @@ class ReadingAudioManifestTest {
         assertTrue(manifest.cache.hit)
     }
 
+    @Test fun `a chapter says where it comes from, and an older hub's says nothing (#31)`() {
+        val manifest = json.decodeFromString<ReadingAudioManifest>("""
+            { "revision": "9f2c1a7e4b10", "aligned": true, "tracks": [],
+              "chapters": [ { "title": "Prologue", "startMs": 66990, "track": 0, "source": "book" },
+                            { "title": "Chapter 1", "startMs": 2219720, "track": 0, "source": "book" },
+                            { "title": "Part Two", "startMs": 5, "track": 1, "source": "marks" },
+                            { "title": "Older hub", "startMs": 9, "track": 1 } ] }
+        """)
+        assertEquals(listOf("book", "book", "marks", ""), manifest.chapters.map { it.source })
+        assertEquals(ReadingAudioChapter("Prologue", 66_990, 0, "book"), manifest.chapters[0])
+        assertEquals(listOf(true, true, false, false), manifest.chapters.map { it.fromBook })
+        // A source the hub may name later is read as it is, and is not the book's.
+        val later = json.decodeFromString<ReadingAudioChapter>("""{"title":"x","startMs":1,"track":2,"source":"something"}""")
+        assertEquals("something", later.source)
+        assertFalse(later.fromBook)
+        // The three fields an older app reads are still there, and a chapter written without one decodes.
+        assertEquals(ReadingAudioChapter("Bare"), json.decodeFromString<ReadingAudioChapter>("""{"title":"Bare"}"""))
+    }
+
     @Test fun `a book without a read-along edition has no alignment and may say why`() {
         val plain = json.decodeFromString<ReadingAudioManifest>("""{"revision":"05c8b6c63e2b","aligned":false,"tracks":[],"chapters":[]}""")
         assertFalse(plain.aligned)

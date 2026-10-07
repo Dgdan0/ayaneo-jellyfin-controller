@@ -551,10 +551,10 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         if (!::topBar.isInitialized) return
         val listening = com.pocketds.hub.reader.ReadingAudio.state.value
         val book = listening.book?.takeIf { (sections.stack().peek() as? Screen) !is com.pocketds.hub.reader.AudiobookScreen }
-        val left = listening.bookLeftMs ?: listening.partLeftMs.takeIf { listening.partMs > 0 }
+        val left = listening.bookLeftMs ?: listening.spanLeftMs.takeIf { listening.span.durationMs > 0 }
         val wasShown = topBar.miniPlayer.visibility == View.VISIBLE
-        topBar.miniPlayer.show(book?.title, left?.let { "${com.pocketds.hub.state.Fmt.runtime((it / 1_000).coerceAtLeast(60))} left" }.orEmpty(),
-            listening.playing)
+        // A book with chapters names the one playing under its title (#31).
+        topBar.miniPlayer.show(book?.title, com.pocketds.hub.playback.PlayerLabels.leftLine(left), listening.playing, listening.chapter)
         if (topBar.miniPlayer.hasFocus() || wasShown != (book != null)) refreshHints()
     }
 

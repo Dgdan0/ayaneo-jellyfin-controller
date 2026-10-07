@@ -111,6 +111,25 @@ class ReaderPadMapTest {
         }
     }
 
+    @Test fun `an audiobook's shoulders step by chapter where the book has chapters, and by part where it does not (#31)`() {
+        val chapters = audiobook.copy(chapters = true)
+        assertEquals(ReaderCommand.Chapter(1), on(chapters, PadAction.Section(1)))
+        val hints = ReaderPadMap.hints(chapters).associate { it.glyph to it.label }
+        assertEquals("Previous chapter", hints[ReaderPadMap.L1])
+        assertEquals("Next chapter", hints[ReaderPadMap.R1])
+        val sheet = ReaderPadMap.sheet(ReaderKind.AUDIOBOOK, chapters)
+        assertTrue(sheet.toString(), sheet.any { it.keys == listOf(ReaderPadMap.L1) && it.does == "Previous chapter" })
+        assertTrue(sheet.toString(), sheet.any { it.keys == listOf(ReaderPadMap.R1) && it.does == "Next chapter" })
+        // Without them, as it was.
+        assertEquals("Next part", ReaderPadMap.hints(audiobook).first { it.glyph == ReaderPadMap.R1 }.label)
+        assertTrue(ReaderPadMap.sheet(ReaderKind.AUDIOBOOK).any { it.keys == listOf(ReaderPadMap.R1) && it.does == "Next part" })
+        // A book's own chapters are chapters whatever the flag, and the chips still do what they say.
+        assertEquals("Next chapter", ReaderPadMap.describe(ReaderKind.BOOK, ReaderCommand.Chapter(1)))
+        ReaderPadMap.hints(chapters).forEach { hint ->
+            assertEquals(ReaderPadMap.describe(chapters.kind, ReaderPadMap.command(chapters, hint.action), chapters.chapters), hint.label)
+        }
+    }
+
     @Test fun `the controls sheet lists every key that does something, as the keys do it`() {
         val comicSheet = ReaderPadMap.sheet(ReaderKind.COMIC).associate { it.keys.joinToString(" ") to it.does }
         assertEquals("Forward", comicSheet[ReaderPadMap.A])

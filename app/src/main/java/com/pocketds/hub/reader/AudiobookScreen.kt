@@ -71,7 +71,10 @@ import kotlin.coroutines.resume
  * the screen going off, does not stop it, and a mini player in the top bar
  * brings you back. Stop ends it. The listening controls (A2) are the speed,
  * kept per book, a sleep timer that fades and steps back when it fires, the
- * time left in the part and the book, and the parts to jump between.
+ * time left in the part and the book, and the parts to jump between. Where the
+ * book has chapters (#31) the line under the title, its two times, the timeline,
+ * the steps, the time left and the sleep timer's end are the chapter's, which
+ * can run on from one track into the next; everything says "chapter" then.
  *
  * It is the book page and the read-along dock together (#11): the cover
  * large beside the eyebrow and the title, on a page tinted by the cover, then
@@ -107,6 +110,11 @@ class AudiobookScreen(
     private lateinit var playButton: PlayerIconButton
     private lateinit var speedButton: TextView
     private lateinit var sleepButton: TextView
+    private lateinit var partsButton: TextView
+    private lateinit var previousButton: ImageView
+    private lateinit var nextButton: ImageView
+    /** "chapter" where the book has chapters, else "part": what the words call a step and the sheet. */
+    private var noun = "part"
     /** The jumps, "−15" and "+15" written on their discs. */
     private lateinit var rewindButton: TextView
     private lateinit var forwardButton: TextView
@@ -145,12 +153,15 @@ class AudiobookScreen(
             max = 1000
             contentDescription = "Audiobook position"
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                // What the timeline spans is the chapter playing, across tracks, or the part (#31).
                 override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
-                    if (fromUser && listening.partMs > 0) position.text = Fmt.clock(listening.partMs * value / 1000) + " / " + Fmt.clock(listening.partMs)
+                    val span = listening.span
+                    if (fromUser && span.durationMs > 0) position.text = Fmt.clock(span.durationMs * value / 1000) + " / " + Fmt.clock(span.durationMs)
                 }
                 override fun onStartTrackingTouch(bar: SeekBar?) = Unit
                 override fun onStopTrackingTouch(bar: SeekBar?) {
-                    if (mine && listening.partMs > 0) ReadingAudio.seekTo(listening.part, listening.partMs * (bar?.progress ?: 0) / 1000)
+                    val span = listening.span
+                    if (mine && span.durationMs > 0) ReadingAudio.seekInSpan(span.durationMs * (bar?.progress ?: 0) / 1000)
                 }
             })
         }
@@ -247,8 +258,8 @@ class AudiobookScreen(
         dock.addView(row, LinearLayout.LayoutParams(MATCH, dp(58)))
         position.apply { textSize = 13f; typeface = Type.text(context, 700); setTextColor(Color.WHITE) }
         row.addView(position, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(register(OverlayButtons.round(context, ring, AppIcon.PREVIOUS_ITEM, "Previous part") { act { ReadingAudio.part(-1) } }),
-            LinearLayout.LayoutParams(dp(44), dp(44)))
+        previousButton = register(OverlayButtons.round(context, ring, AppIcon.PREVIOUS_ITEM, "Previous part") { act { ReadingAudio.part(-1) } })
+        row.addView(previousButton, LinearLayout.LayoutParams(dp(44), dp(44)))
         rewindButton = register(OverlayButtons.jump(context, ring, "−$seekSeconds", "Back") { act { ReadingAudio.seekBy(-seekSeconds * 1_000L) } })
         row.addView(rewindButton, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(10) })
         playButton = PlayerIconButton(context, PlayerControlIcon.PLAY).apply {
@@ -261,8 +272,8 @@ class AudiobookScreen(
         row.addView(register(playButton), LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginStart = dp(12); marginEnd = dp(12) })
         forwardButton = register(OverlayButtons.jump(context, ring, "+$seekSeconds", "Forward") { act { ReadingAudio.seekBy(seekSeconds * 1_000L) } })
         row.addView(forwardButton, LinearLayout.LayoutParams(dp(44), dp(44)))
-        row.addView(register(OverlayButtons.round(context, ring, AppIcon.NEXT_ITEM, "Next part") { act { ReadingAudio.part(1) } }),
-            LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(10) })
+        nextButton = register(OverlayButtons.round(context, ring, AppIcon.NEXT_ITEM, "Next part") { act { ReadingAudio.part(1) } })
+        row.addView(nextButton, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(10) })
         remaining = TextView(context).apply {
             textSize = 12f; setTextColor(ReaderBars.SOFT_TEXT); gravity = Gravity.END
         }.also { row.addView(it, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)) }
@@ -274,7 +285,7 @@ class AudiobookScreen(
                 tools.addView(it, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44)).apply { marginStart = dp(3); marginEnd = dp(3) })
             }
         if (ebook != null || narrations.size > 1) pill("Reading & listening", "Reading & listening", AppIcon.READ_ALONG) { showReadingModes() }
-        pill("Parts", "Parts", AppIcon.CONTENTS) { act { showParts() } }
+        partsButton = pill("Parts", "Parts", AppIcon.CONTENTS) { act { showParts() } }
         speedButton = pill("Speed 1×", "Speed", AppIcon.SPEED) { act { showSpeeds() } }
         sleepButton = pill("Sleep", "Sleep timer", AppIcon.SLEEP) { act { showSleep() } }
         pill("Comfort", "Comfort", AppIcon.COMFORT) { showComfort() }
@@ -292,7 +303,7 @@ class AudiobookScreen(
     }
 
     private fun padState() = ReaderPadState(ReaderKind.AUDIOBOOK, controlsVisible = true,
-        loading = !mine, seekSeconds = seekSeconds)
+        loading = !mine, seekSeconds = seekSeconds, chapters = noun == "chapter")
 
     private fun showKeys() = ReaderKeys.show(overlay, padState())
 
@@ -494,6 +505,7 @@ class AudiobookScreen(
 
     private fun render(value: ListeningState) {
         val before = mine
+        val nounBefore = noun
         listening = value
         if (!mine) {
             if (before) status.text = "Stopped"
@@ -501,20 +513,33 @@ class AudiobookScreen(
         }
         // Why it stopped, when the stream failed or the book's files changed; nothing while it plays.
         status.text = value.problem
-        val parts = value.book?.parts.orEmpty()
-        // The part, and what is playing in it: the chapter where the hub found chapters, else the part's own name.
-        val contents = value.contents
-        val entry = contents.getOrNull(AudiobookContents.current(contents, value.part, value.positionMs))
-        partTitle.text = "Part ${value.part + 1} of ${parts.size} · ${entry?.title ?: parts.getOrNull(value.part)?.title?.let(AudiobookArchive::partLabel).orEmpty()}"
-        position.text = "${Fmt.clock(value.positionMs)} / ${Fmt.clock(value.partMs)}"
-        remaining.text = if (value.partMs > 0) "−" + Fmt.clock((value.partMs - value.positionMs).coerceAtLeast(0)) else ""
-        left.text = if (value.partMs > 0) PlayerLabels.timeLeft(value.partLeftMs, value.bookLeftMs) else ""
-        if (!timeline.isPressed && value.partMs > 0) timeline.progress = (value.positionMs * 1000 / value.partMs).toInt().coerceIn(0, 1000)
+        noun = value.noun
+        // The chapter playing, across tracks where the book has chapters (#31), else the part.
+        val span = value.span
+        partTitle.text = if (noun == "chapter") span.title else {
+            val parts = value.book?.parts.orEmpty()
+            val contents = value.contents
+            val entry = contents.getOrNull(AudiobookContents.current(contents, value.part, value.positionMs))
+            "Part ${value.part + 1} of ${parts.size} · ${entry?.title ?: parts.getOrNull(value.part)?.title?.let(AudiobookArchive::partLabel).orEmpty()}"
+        }
+        position.text = "${Fmt.clock(span.positionMs)} / ${Fmt.clock(span.durationMs)}"
+        remaining.text = if (span.durationMs > 0) "−" + Fmt.clock(span.leftMs) else ""
+        left.text = if (span.durationMs > 0) PlayerLabels.timeLeft(value.spanLeftMs, value.bookLeftMs, noun) else ""
+        if (!timeline.isPressed && span.durationMs > 0) timeline.progress = (span.positionMs * 1000 / span.durationMs).toInt().coerceIn(0, 1000)
         playButton.setIcon(if (value.playing) PlayerControlIcon.PAUSE else PlayerControlIcon.PLAY)
         playButton.contentDescription = if (value.playing) "Pause audiobook" else "Play audiobook"
         speedButton.text = "Speed ${PlayerLabels.rate(value.speed)}"
-        sleepButton.text = PlayerLabels.sleep(value.sleep)
-        if (::keys.isInitialized && before != mine) keys.setHints(ReaderPadMap.hints(padState()))
+        sleepButton.text = PlayerLabels.sleep(value.sleep, noun)
+        if (nounBefore != noun) nameSteps()
+        if (::keys.isInitialized && (before != mine || nounBefore != noun)) keys.setHints(ReaderPadMap.hints(padState()))
+    }
+
+    /** What the steps and the sheet are called: "chapter" where the book has chapters (#31), else "part". */
+    private fun nameSteps() {
+        previousButton.contentDescription = "Previous $noun"
+        nextButton.contentDescription = "Next $noun"
+        partsButton.text = if (noun == "chapter") "Chapters" else "Parts"
+        partsButton.contentDescription = partsButton.text
     }
 
     private fun refreshSeekLabels() {
@@ -528,8 +553,9 @@ class AudiobookScreen(
     }
 
     /**
-     * The chapters the hub found inside the tracks (#19), else the parts, each
-     * with its length, the one playing ticked: choose one to jump to.
+     * The book's chapters (#19, #31), else the parts, each with its length, the
+     * one playing ticked: choose one to jump to. A chapter of the book's own can
+     * begin in one track and run on into the next, and is listed by its title.
      */
     private fun showParts() {
         val book = listening.book ?: return
@@ -539,9 +565,9 @@ class AudiobookScreen(
             ChoiceOverlay.Choice(index.toString(), "${index + 1}. ${entry.title}",
                 entry.durationMs?.let { Fmt.clock(it) }.orEmpty(), selected = index == current)
         }
-        val chapters = book.chapters.isNotEmpty()
-        overlay.show(if (chapters) "Chapters" else "Parts",
-            "${book.title} · ${entries.size} ${if (chapters) "chapters" else "parts"}", choices, startIndex = current) { id ->
+        val noun = listening.noun
+        overlay.show(if (noun == "chapter") "Chapters" else "Parts",
+            "${book.title} · ${entries.size} ${noun}s", choices, startIndex = current) { id ->
             id.toIntOrNull()?.let(entries::getOrNull)?.let { ReadingAudio.seekTo(it.part, it.startMs) }
         }
     }
@@ -552,12 +578,12 @@ class AudiobookScreen(
             label = PlayerLabels::rate) { ReadingAudio.setSpeed(it) }
     }
 
-    /** Off, minutes of listening, or the end of the part; it fades over its last half minute. */
+    /** Off, minutes of listening, or the end of the chapter (else the part); it fades over its last half minute. */
     private fun showSleep() {
         if (!mine) return
         val choices = listOf(ChoiceOverlay.Choice("off", "Off", selected = listening.sleep == null)) +
             SleepChoice.ALL.mapIndexed { index, choice ->
-                ChoiceOverlay.Choice(index.toString(), PlayerLabels.sleepChoice(choice), selected = listening.sleep?.choice == choice)
+                ChoiceOverlay.Choice(index.toString(), PlayerLabels.sleepChoice(choice, listening.noun), selected = listening.sleep?.choice == choice)
             }
         overlay.show("Sleep timer", "Fades over its last half minute, then steps back so you hear that again", choices) { id ->
             ReadingAudio.setSleep(id.toIntOrNull()?.let(SleepChoice.ALL::getOrNull))

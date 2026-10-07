@@ -48,7 +48,11 @@ data class ReadingAudioBook(
     val checkpoint: ReadingCheckpointKey? = null,
     /** The hub's tracks in the order played, for the place: their ids and lengths. */
     val tracks: List<ReadingAudioTrack> = emptyList(),
-    /** Chapter marks inside the tracks: the Parts sheet and the part steps go through them. */
+    /**
+     * The book's chapters (#31): its own, from its read-along edition, which can run on from one
+     * track into the next, or the marks inside its tracks. The Parts sheet, the steps, the line
+     * under the title and its times go through them.
+     */
     val chapters: List<ReadingAudioChapter> = emptyList(),
     /**
      * Reads the manifest again after the hub said the files changed (412): the
@@ -76,12 +80,29 @@ data class ListeningState(
     /** Why it stopped, when the player could not go on (the stream failed, the files changed); blank otherwise. */
     val problem: String = ""
 ) {
-    val partLeftMs: Long get() = Listening.partLeft(positionMs, partMs, speed)
     val bookLeftMs: Long? get() = Listening.bookLeft(part, positionMs, partsMs, speed)
 
-    /** What the Parts sheet lists: the chapters inside the tracks, else the parts. */
+    /** What the Parts sheet lists: the book's chapters, across its tracks, else the parts. */
     val contents: List<AudiobookContents.Entry> get() =
         book?.let { AudiobookContents.entries(it.parts, partsMs, it.chapters) }.orEmpty()
+
+    /** "chapter" where the book has chapters (#31), else "part". */
+    val noun: String get() = AudiobookContents.noun(contents)
+
+    /**
+     * What the line under the title, its two times, the timeline and the time left measure:
+     * the chapter playing, counted across tracks, else the part.
+     */
+    val span: AudiobookContents.Span get() = AudiobookContents.span(contents, part, positionMs, partMs, partsMs)
+
+    /** The chapter playing, for the mini player; null for a book of parts. */
+    val chapter: String? get() = span.title.takeIf { it.isNotBlank() && noun == "chapter" }
+
+    /** The tracks' lengths, the part playing by the player's own. */
+    val lengths: List<Long?> get() = partsMs.toMutableList().also { if (partMs > 0 && part in it.indices) it[part] = partMs }
+
+    /** Left of the chapter (or part) playing, as heard. */
+    val spanLeftMs: Long get() = Listening.heard(span.leftMs, speed)
 }
 
 /**
@@ -169,16 +190,9 @@ object ReadingAudio {
     /** A jump within the book, across parts, by [deltaMs] of recording. */
     fun seekBy(deltaMs: Long) {
         val player = player() ?: return
-        val durations = mutable.value.partsMs
-        var part = player.currentMediaItemIndex
-        var offset = player.currentPosition + deltaMs
-        while (offset < 0 && part > 0) { part--; offset += durations.getOrNull(part) ?: 0L }
-        while (part < player.mediaItemCount - 1) {
-            val length = durations.getOrNull(part)?.takeIf { it > 0 } ?: player.duration.takeIf { part == player.currentMediaItemIndex && it > 0 } ?: break
-            if (offset < length) break
-            offset -= length; part++
-        }
-        player.seekTo(part, offset.coerceAtLeast(0))
+        val (part, offset) = Listening.jump(player.currentMediaItemIndex, player.currentPosition, deltaMs,
+            mutable.value.partsMs, player.duration.takeIf { it > 0 })
+        player.seekTo(part, offset)
         save()
         publish()
     }
@@ -191,13 +205,28 @@ object ReadingAudio {
     }
 
     /**
-     * The entry before (from its own start once three seconds in) or the next:
-     * a chapter where the hub found chapters inside the tracks, else a part.
+     * To [ms] into the chapter (or the part) playing, which is what the line under the title,
+     * its times and the timeline measure: across tracks where a chapter runs on into the next.
+     */
+    fun seekInSpan(ms: Long) {
+        val player = player() ?: return
+        val now = state(player)
+        val (part, offset) = AudiobookContents.place(now.span, ms, now.lengths)
+        player.seekTo(part, offset)
+        save()
+        publish()
+    }
+
+    /**
+     * The entry before (from its own start once three seconds in, counted across the
+     * tracks) or the next: a chapter where the book has chapters (its own can run on into
+     * the next track), else a part.
      */
     fun part(delta: Int) {
         val player = player() ?: return
-        val target = AudiobookContents.step(mutable.value.contents, player.currentMediaItemIndex.coerceAtLeast(0),
-            player.currentPosition.coerceAtLeast(0), delta) ?: return
+        val now = mutable.value
+        val target = AudiobookContents.step(now.contents, player.currentMediaItemIndex.coerceAtLeast(0),
+            player.currentPosition.coerceAtLeast(0), delta, now.partsMs) ?: return
         player.seekTo(target.part, target.startMs)
         save()
         publish()
@@ -211,8 +240,11 @@ object ReadingAudio {
         publish()
     }
 
-    /** Sets the sleep timer, or [choice] null to cancel it. */
-    fun setSleep(choice: SleepChoice?) = runSleep(choice?.let { SleepTimer.start(it, mutable.value.partLeftMs) })
+    /** Sets the sleep timer, or [choice] null to cancel it. The end of the part is the end of the chapter where the book has chapters. */
+    fun setSleep(choice: SleepChoice?) {
+        val now = player()?.let(::state) ?: mutable.value
+        runSleep(choice?.let { SleepTimer.start(it, now.spanLeftMs, now.span.entry) })
+    }
 
     /** Runs [timer] as it stands (a fixture starts one seconds from its end). */
     internal fun runSleep(timer: SleepTimer?) {
@@ -227,9 +259,10 @@ object ReadingAudio {
         val now = mutable.value
         val timer = now.sleep ?: return
         if (!timer.fading) return
-        val next = now.partsMs.getOrNull(now.part + 1)?.let { Listening.heard(it, now.speed) }
+        // The end of the next chapter (or part): its length as heard.
+        val next = now.contents.getOrNull(now.span.entry + 1)?.durationMs?.let { Listening.heard(it, now.speed) }
         player()?.volume = 1f
-        publish(timer.extended(now.partLeftMs, next))
+        publish(timer.extended(now.spanLeftMs, next))
     }
 
     /** Takes the book off the player, its place kept, and lets the service go. */
@@ -339,17 +372,23 @@ object ReadingAudio {
             val player = player()
             val timer = now.sleep
             if (player != null && timer != null && timer.endsWithPart && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
-                // The part ran out under an end-of-part timer: stop, back over what faded at its end.
                 val previous = (player.currentMediaItemIndex - 1).coerceAtLeast(0)
                 val length = now.partsMs.getOrNull(previous) ?: now.partMs
-                player.pause()
-                player.seekTo(previous, SmartRewind.afterSleep(length))
-                player.volume = 1f
-                publish(null)
-                save()
-                return
+                // A chapter that runs on into the next track goes on through the change of track: only an end that
+                // is the track's own is the moment (#31). A part always ends where it does.
+                if (AudiobookContents.endsWithPart(now.contents, previous, length)) {
+                    // The entry ran out under an end-of-part timer: stop, back over what faded at its end.
+                    val (part, offset) = SmartRewind.afterSleep(previous, length, now.partsMs)
+                    player.pause()
+                    player.seekTo(part, offset)
+                    player.volume = 1f
+                    publish(null)
+                    save()
+                    return
+                }
             }
-            publish(timer?.partChanged(Listening.heard(now.partsMs.getOrNull(player?.currentMediaItemIndex ?: 0) ?: 0L, now.speed)))
+            // A timer carried past an end counts to the next one when its entry begins: the tick sees it change.
+            publish()
             save()
             prefetchNext()
         }
@@ -427,11 +466,14 @@ object ReadingAudio {
             var timer = mutable.value.sleep
             if (timer != null && player.isPlaying) {
                 val current = state(player)
-                timer = timer.tick(elapsed, current.partLeftMs)
+                val span = current.span
+                // The end of the chapter, across tracks, or of the part; which it is tells the timer when it ended.
+                timer = timer.tick(elapsed, Listening.heard(span.leftMs, current.speed), span.entry)
                 if (timer.runsOut) {
                     // Asleep: pause, then back over what faded so it is heard again.
+                    val (part, offset) = SmartRewind.afterSleep(player.currentMediaItemIndex, player.currentPosition, current.partsMs)
                     player.pause()
-                    player.seekTo(player.currentMediaItemIndex, SmartRewind.afterSleep(player.currentPosition))
+                    player.seekTo(part, offset)
                     player.volume = 1f
                     timer = null
                     save()
@@ -455,7 +497,23 @@ object ReadingAudio {
     private fun publish(sleep: SleepTimer? = mutable.value.sleep) {
         val player = player() ?: return
         if (mutable.value.book == null) return
-        mutable.value = state(player).copy(sleep = sleep)
+        val next = state(player).copy(sleep = sleep)
+        mutable.value = next
+        nameChapter(player, next)
+    }
+
+    /**
+     * The media notification and the lock screen say what the player's item says: the book, and
+     * under it the part. Where the book has chapters (#31) that is the chapter playing, which
+     * changes inside a track with no event of the player's, so the item's metadata is replaced
+     * when it does: the player takes that without loading the track again.
+     */
+    private fun nameChapter(player: Player, state: ListeningState) {
+        if (state.noun != "chapter" || state.part !in 0 until player.mediaItemCount) return
+        val name = state.span.title.takeIf { it.isNotBlank() } ?: return
+        val item = player.getMediaItemAt(state.part)
+        if (item.mediaMetadata.artist?.toString() == name) return
+        player.replaceMediaItem(state.part, item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setArtist(name).build()).build())
     }
 
     /**
