@@ -263,3 +263,65 @@ public enum ReadAlongGlow {
             + String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), alpha) + ")"
     }
 }
+
+extension ReadAlongTimeline {
+    /// The narrated sentences of `href`, in the order they are read, each
+    /// once: what "Listen from this page" looks for on the page.
+    public func fragments(in href: String) -> [String] {
+        var seen = Set<String>()
+        return tracks.flatMap(\.segments).filter { $0.textHref == href && seen.insert($0.fragment).inserted }.map(\.fragment)
+    }
+}
+
+/// What the page is asked while it reads along (Android's `EpubReaderScreen`):
+/// scripts run in the page's own web view. Ids go in as JSON, so an id with a
+/// quote or a backslash in it cannot break out of its string.
+public enum ReadAlongPageScript {
+    /// True while the element `fragment` is on screen: the page follows the
+    /// voice only when the sentence spoken is not.
+    public static func visible(_ fragment: String) -> String {
+        "(function(){var e=document.getElementById(\(json(fragment)));if(!e)return false;"
+            + "var r=e.getBoundingClientRect();return r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;})()"
+    }
+
+    /// The first of `ids` on screen, or null: where "Listen from this page" starts.
+    public static func firstVisible(_ ids: [String]) -> String {
+        "(function(){var ids=\(json(ids));for(var i=0;i<ids.length;i++){var e=document.getElementById(ids[i]);"
+            + "if(e){var r=e.getBoundingClientRect();if(r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth)return ids[i];}}"
+            + "return null;})()"
+    }
+
+    private static func json(_ value: Any) -> String {
+        guard JSONSerialization.isValidJSONObject([value]),
+              let data = try? JSONSerialization.data(withJSONObject: [value], options: [.withoutEscapingSlashes]),
+              let text = String(data: data, encoding: .utf8) else { return "null" }
+        // The value alone, out of the array it was written in.
+        return String(text.dropFirst().dropLast())
+    }
+}
+
+extension TimeLeft {
+    /// Reading along with the page following the voice (#18, E3): what the
+    /// narration has left to say in the chapter being read (the sentence's
+    /// file) and in the book, at its speed. Nil for a moment the timeline
+    /// does not hold. Android's `TimeLeft.ofNarration`.
+    public static func ofNarration(_ timeline: ReadAlongTimeline, _ position: ReadAlongPosition, speed: Float) -> TimeLeft? {
+        guard timeline.tracks.indices.contains(position.track) else { return nil }
+        let track = timeline.tracks[position.track]
+        let now = track.startMs + max(0, position.offsetMs)
+        guard let chapter = (timeline.active(track: position.track, offsetMs: position.offsetMs)
+            ?? track.segments.first { $0.endMs > now })?.textHref else { return nil }
+        var inChapter: Int64 = 0
+        var inBook: Int64 = 0
+        for (index, value) in timeline.tracks.enumerated() where index >= position.track {
+            for segment in value.segments {
+                let from = index == position.track ? max(segment.beginMs, now) : segment.beginMs
+                let left = segment.endMs - from
+                guard left > 0 else { continue }
+                inBook += left
+                if segment.textHref == chapter { inChapter += left }
+            }
+        }
+        return TimeLeft(chapterMs: Listening.heard(inChapter, speed: speed), bookMs: Listening.heard(inBook, speed: speed))
+    }
+}

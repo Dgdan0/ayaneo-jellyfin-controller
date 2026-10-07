@@ -167,6 +167,47 @@ struct ReadAlongTests {
         #expect(ReadAlongLocation.save(locator, voice, point: at(3, 0), completed: false) == locator)
     }
 
+    // MARK: The page
+
+    @Test func listeningFromThisPageLooksForItsNarratedSentencesInOrderAndOnce() {
+        #expect(timeline.fragments(in: "one.xhtml") == ["s0", "s1", "s2"])
+        #expect(timeline.fragments(in: "two.xhtml") == ["t0", "t1"])
+        #expect(timeline.fragments(in: "front.xhtml").isEmpty)
+    }
+
+    @Test func thePagesScriptsTakeTheIdsAsJsonSoNoneBreaksOut() {
+        let visible = ReadAlongPageScript.visible("s1")
+        #expect(visible.contains(#"document.getElementById("s1")"#))
+        #expect(visible.hasPrefix("(function(){") && visible.hasSuffix("})()"))
+        // A quote or a backslash in an id stays inside its string.
+        #expect(ReadAlongPageScript.visible(#"a"b\c"#).contains(#"getElementById("a\"b\\c")"#))
+        let first = ReadAlongPageScript.firstVisible(["s1", "s2"])
+        #expect(first.contains(#"var ids=["s1","s2"];"#))
+        #expect(first.contains("return null;"))
+        #expect(ReadAlongPageScript.firstVisible([]).contains("var ids=[];"))
+    }
+
+    @Test func readingAlongTheTimeLeftIsWhatTheNarrationHasLeftToSayAtItsSpeed() throws {
+        func seg(_ href: String, _ begin: Int64, _ end: Int64) -> ReadAlongSegment {
+            ReadAlongSegment(textHref: href, fragment: "s\(begin)", audioHref: "a.mp3", beginMs: begin, endMs: end)
+        }
+        let book = ReadAlongTimeline(tracks: [
+            ReadAlongTrack(audioHref: "a.mp3", segments: [seg("one.xhtml", 0, 60_000), seg("one.xhtml", 60_000, 120_000),
+                                                         seg("two.xhtml", 120_000, 300_000)]),
+            ReadAlongTrack(audioHref: "b.mp3", segments: [ReadAlongSegment(textHref: "two.xhtml", fragment: "t", audioHref: "b.mp3",
+                                                                           beginMs: 0, endMs: 600_000)]),
+        ])
+        // 30 s into the first sentence of chapter one, at normal speed.
+        let left = try #require(TimeLeft.ofNarration(book, at(0, 30_000), speed: 1))
+        #expect(left.chapterMs == 90_000)
+        #expect(left.bookMs == 870_000)
+        // Twice as fast, half the time.
+        #expect(TimeLeft.ofNarration(book, at(0, 30_000), speed: 2)?.chapterMs == 45_000)
+        // In chapter two, which runs on into the second part.
+        #expect(TimeLeft.ofNarration(book, at(0, 120_000), speed: 1)?.chapterMs == 780_000)
+        #expect(TimeLeft.ofNarration(book, at(5, 0), speed: 1) == nil)
+    }
+
     // MARK: The session
 
     @Test func reopeningKeepsTheNarrationsPlaceAcrossReadiumsFirstPageCallbacks() {
