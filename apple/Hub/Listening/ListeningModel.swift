@@ -477,8 +477,7 @@ final class ListeningModel {
 
     private func track(_ index: Int) -> ListeningTracks.Track? {
         guard let book else { return nil }
-        return ListeningTracks.track(index, manifest: book.manifest, parts: book.parts, workId: book.workId,
-                                     sourceItemId: book.sourceItemId)
+        return ListeningTracks.track(index, manifest: book.manifest, workId: book.workId, sourceItemId: book.sourceItemId)
     }
 
     /// The part playing kept on the device, then the next fetched ahead: one

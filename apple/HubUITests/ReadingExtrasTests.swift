@@ -414,4 +414,36 @@ final class ReadingExtrasTests: XCTestCase {
         XCTAssertFalse(text(app, containing: "could not be loaded").exists, "the kept page did not show")
         keep(app, "comic-outage")
     }
+
+    /// Read along's narration keeps the audiobook's tracks on the device as
+    /// its player does (one cache, as on the Pocket): Dark Matter read along
+    /// for a moment, its offline copy is megabytes of tones, where its
+    /// read-along edition alone is a few kilobytes.
+    @MainActor
+    func testReadAlongsNarrationKeepsTheAudiobooksTracks() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo"]
+        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_OPEN": "book:rw_demo_darkmatter",
+                                 "HUB_BOOK": "rw_demo_darkmatter/demo-dm", "HUB_BOOK_READALONG": "1", "HUB_BOOK_SCROLL": "0",
+                                 "HUB_BOOK_CHROME": "pinned"]
+        app.launch()
+        let play = app.buttons["readalong-play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 30), "the narration did not come: \(buttons(app))")
+        play.tap()
+        // The track playing, then the next, fetched once it plays.
+        _ = waitUntil(8) { false }
+        app.buttons["Close the book"].firstMatch.tap()
+        var said = ""
+        XCTAssertTrue(waitUntil(20) {
+            said = self.askToRemove(app, title: "Dark Matter")
+            if said.contains("on this device.") { return true }
+            _ = self.waitUntil(2) { false }
+            return false
+        }, "nothing was kept: \(said)")
+        let megabytes = Double(said.components(separatedBy: " MB on this device").first?
+            .components(separatedBy: " · ").last ?? "") ?? 0
+        XCTAssertGreaterThan(megabytes, 1, "the narration's tracks were not kept: \(said)")
+        app.alerts.buttons["Remove from this device"].tap()
+        XCTAssertTrue(text(app, containing: "Offline copy removed").waitForExistence(timeout: 5))
+    }
 }
