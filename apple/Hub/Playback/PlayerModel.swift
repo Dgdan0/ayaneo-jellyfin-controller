@@ -92,6 +92,9 @@ final class PlayerModel {
     private(set) var speed: Float = PlaybackEnhancements.defaultSpeed
     /// The bitrate cap This video chose; 0 is the original.
     private(set) var maxBitrate = 0
+    /// How the picture fills the player, This video › Aspect (#33): Fit
+    /// until changed, for as long as the player is open.
+    private(set) var aspect = PlaybackAspect.standard
     /// The segment a Skip button is for now.
     private(set) var skipSegment: PlaybackSegment?
     /// A track, quality or version change on its way to the hub.
@@ -232,6 +235,7 @@ final class PlayerModel {
         outbox = outbox ?? PlaybackOutbox(hub: app.hub)
         backdrop = request.backdrop
         opens += 1
+        aspect = .standard
         speed = PlaybackEnhancements.defaultSpeed
         player.defaultRate = speed
         startSession()
@@ -501,6 +505,10 @@ final class PlayerModel {
         guard let segment = skipSegment else { return }
         skipSegment = nil
         seek(to: segment.endMillis)
+    }
+
+    func setAspect(_ value: PlaybackAspect) {
+        aspect = value
     }
 
     func setSpeed(_ value: Float) {

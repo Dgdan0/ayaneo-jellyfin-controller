@@ -327,15 +327,6 @@ struct SubtitleLine: View {
     }
 }
 
-/// Where the picture is drawn in a frame of `size`: fitted, letterboxed.
-func letterboxed(_ picture: CGSize, in size: CGSize) -> CGRect {
-    guard picture.width > 0, picture.height > 0, size.width > 0, size.height > 0 else {
-        return CGRect(origin: .zero, size: size)
-    }
-    let scale = min(size.width / picture.width, size.height / picture.height)
-    let width = picture.width * scale, height = picture.height * scale
-    return CGRect(x: (size.width - width) / 2, y: (size.height - height) / 2, width: width, height: height)
-}
 
 /// The notches where chapters start, as a shape: a shape is drawn off the
 /// main thread safely, where a ForEach of rectangles would not be.

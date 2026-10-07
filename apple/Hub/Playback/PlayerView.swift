@@ -98,8 +98,7 @@ struct PlayerView: View {
             ZStack {
                 Color.black
                 standIn
-                VideoSurface(player: player.player, ready: { ready in player.setReadyForDisplay(ready) },
-                             layer: { layer in player.attach(layer) })
+                picture(screen)
                 elsewhere
                 if showsChrome {
                     vignette.transition(.opacity)
@@ -107,7 +106,7 @@ struct PlayerView: View {
                 // Over the vignette, so it never greys them; under the controls.
                 if !player.subtitleLines.isEmpty, !player.pipActive {
                     SubtitleOverlay(lines: player.subtitleLines, look: player.subtitleLook, size: screen,
-                                    picture: letterboxed(player.presentationSize, in: screen),
+                                    picture: player.aspect.visibleRect(video: player.presentationSize, in: screen),
                                     covered: showsChrome && player.plan != nil ? layout.bottom + layout.bottomBarHeight : 0)
                 }
                 Color.clear
@@ -229,6 +228,25 @@ struct PlayerView: View {
                 .transition(.opacity)
                 .allowsHitTesting(false)
         }
+    }
+
+    /// The video, as This video › Aspect says (#33). At its own shape it has a
+    /// frame of that shape, which may be wider than the player; an overlay
+    /// lays it out, so the player keeps its size, and cuts it off at the edges.
+    private func picture(_ screen: CGSize) -> some View {
+        let aspect = player.aspect
+        let frame = aspect == .original ? aspect.pictureRect(video: player.presentationSize, in: screen)
+            : CGRect(origin: .zero, size: screen)
+        return Color.clear
+            .overlay(alignment: .topLeading) {
+                VideoSurface(player: player.player, gravity: aspect.gravity,
+                             ready: { ready in player.setReadyForDisplay(ready) },
+                             layer: { layer in player.attach(layer) })
+                    .frame(width: frame.width, height: frame.height)
+                    .offset(x: frame.minX, y: frame.minY)
+            }
+            .clipped()
+            .allowsHitTesting(false)
     }
 
     /// Where the picture is when it is not here: on an AirPlay receiver, or in

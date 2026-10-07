@@ -1,20 +1,36 @@
 import AVFoundation
 import AVKit
+import HubKit
 import SwiftUI
 
-/// The picture: AVPlayer drawn into an `AVPlayerLayer`, letterboxed, with
-/// nothing of its own on top (the chrome is SwiftUI). `ready` is told when the
+extension PlaybackAspect {
+    /// How AVPlayerLayer draws it: Original keeps the picture's own shape
+    /// inside a frame of that shape (`pictureRect`).
+    var gravity: AVLayerVideoGravity {
+        switch self {
+        case .fit, .original: .resizeAspect
+        case .fill: .resize
+        case .zoom: .resizeAspectFill
+        }
+    }
+}
+
+/// The picture: AVPlayer drawn into an `AVPlayerLayer` as This video › Aspect
+/// says (letterboxed until changed), with nothing of its own on top (the
+/// chrome is SwiftUI). `ready` is told when the
 /// first frame is on screen, so the title's picture standing in can go, and
 /// `layer` is handed the layer, which picture in picture is built on.
 #if os(iOS)
 struct VideoSurface: UIViewRepresentable {
     let player: AVPlayer
+    var gravity = AVLayerVideoGravity.resizeAspect
     let ready: (Bool) -> Void
     let layer: (AVPlayerLayer) -> Void
 
     func makeUIView(context: Context) -> Surface {
         let view = Surface()
         view.playerLayer.player = player
+        view.playerLayer.videoGravity = gravity
         view.onReady = ready
         return view
     }
@@ -22,6 +38,7 @@ struct VideoSurface: UIViewRepresentable {
     func updateUIView(_ view: Surface, context: Context) {
         view.onReady = ready
         if view.playerLayer.player !== player { view.playerLayer.player = player }
+        if view.playerLayer.videoGravity != gravity { view.playerLayer.videoGravity = gravity }
         layer(view.playerLayer)
     }
 
@@ -48,12 +65,14 @@ struct VideoSurface: UIViewRepresentable {
 #else
 struct VideoSurface: NSViewRepresentable {
     let player: AVPlayer
+    var gravity = AVLayerVideoGravity.resizeAspect
     let ready: (Bool) -> Void
     let layer: (AVPlayerLayer) -> Void
 
     func makeNSView(context: Context) -> Surface {
         let view = Surface()
         view.playerLayer.player = player
+        view.playerLayer.videoGravity = gravity
         view.onReady = ready
         return view
     }
@@ -61,6 +80,7 @@ struct VideoSurface: NSViewRepresentable {
     func updateNSView(_ view: Surface, context: Context) {
         view.onReady = ready
         if view.playerLayer.player !== player { view.playerLayer.player = player }
+        if view.playerLayer.videoGravity != gravity { view.playerLayer.videoGravity = gravity }
         layer(view.playerLayer)
     }
 

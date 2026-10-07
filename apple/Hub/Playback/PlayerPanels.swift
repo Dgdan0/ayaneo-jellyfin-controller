@@ -8,7 +8,7 @@ enum PlayerPanel: Hashable {
     /// The three in one list, for a window too narrow for their buttons.
     case choose
     case tracks, video, chapters
-    case timing, look, quality, version, speed, stream
+    case timing, look, quality, version, speed, aspect, stream
 }
 
 /// The player's panels as a glass sheet (GLASS_PLAN.md › Player; the
@@ -158,6 +158,7 @@ struct PlayerSheet: View {
         case .quality: ("Quality", "Lower uses less of your connection; Original plays the file as it is.")
         case .version: ("Version", name)
         case .speed: ("Playback speed", "Changes apply without reloading the video.")
+        case .aspect: ("Aspect", PlayerLabels.aspectNote)
         case .stream: ("Stream", "How this video reaches you.")
         }
     }
@@ -177,6 +178,7 @@ struct PlayerSheet: View {
                 case .quality: quality
                 case .version: versions(plan)
                 case .speed: speeds
+                case .aspect: aspects
                 case .stream: stream(plan)
                 }
             } else {
@@ -252,6 +254,8 @@ struct PlayerSheet: View {
                 SheetRow(title: "Version", value: sourceName(source), chevron: true) { open(.version) }
             }
             SheetRow(title: "Speed", value: PlayerLabels.speed(player.speed), chevron: true) { open(.speed) }
+            SheetRow(title: "Aspect", value: PlayerLabels.aspect(player.aspect), chevron: true) { open(.aspect) }
+                .accessibilityIdentifier("player-aspect")
             SheetRow(title: "Stream", value: PlayerLabels.playMethod(plan.playMethod), chevron: true) { open(.stream) }
         }
         SheetNote(text: "These change only this video.")
@@ -429,6 +433,18 @@ struct PlayerSheet: View {
             ForEach(PlaybackEnhancements.speeds, id: \.self) { value in
                 SheetRow(title: PlayerLabels.speed(value), checked: value == player.speed) {
                     player.setSpeed(value)
+                    back()
+                }
+            }
+        }
+    }
+
+    /// Fit, Fill, Zoom or Original aspect, for this video (#33).
+    @ViewBuilder private var aspects: some View {
+        SheetGroup {
+            ForEach(PlaybackAspect.allCases, id: \.self) { value in
+                SheetRow(title: PlayerLabels.aspect(value), checked: value == player.aspect) {
+                    player.setAspect(value)
                     back()
                 }
             }
