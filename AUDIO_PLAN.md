@@ -187,11 +187,16 @@ differ. No `expected` skips the check. GET returns exactly what the last POST se
   none. The hub lists chapters only for a file with two or more marks (ffprobe `-show_chapters`) or a lone-M4B manifest that has them;
   never from file names. Today that is `chapters: []`. These carry `source: "marks"`.
 - **An aligned book lists the book's own chapters (#31), `source: "book"`.** The read-along edition's table of contents (the EPUB 3 `nav`
-  of `epub:type` `toc`, else the NCX; nested entries flattened parent first) names them, and its SMIL says where each is spoken. An entry
-  begins at the first narrated sentence at or after it: the sentence it names, else the first at or after its anchor in that document, else
-  (nothing of its own document narrated at or after it) the first sentence of the documents after it, up to the next that an entry points at.
-  That last step is measured, not guessed: Dark Matter's chapters ten and eleven are headed by a document of one picture with no sentence, the
-  words are in the next document, and the plain rule loses both. The sentence goes through the narration map of §6 to a track and a moment. Left out:
+  of `epub:type` `toc`, else the NCX; nested entries flattened parent first) names them, and its SMIL says where each is spoken. The first
+  entry into a document begins at that document's first narrated sentence, wherever its anchor is: Mistborn speaks each chapter's epigraph
+  ahead of the heading the contents point at ("2" at 0:58:25.7, its epigraph from 0:58:02), and the epigraph is the chapter's. A later entry
+  into the same document begins at the first sentence at or after the id it names (a sentence, or an anchor placed by looking through that one
+  text document), since what lies between two anchors belongs to the earlier. When nothing in an entry's own document is narrated it begins at
+  the first sentence of the documents after it, up to the next that an entry points at. That last step is measured, not guessed: Dark Matter's
+  chapters ten and eleven are headed by a document of one picture with no sentence, the words are in the next document, and the plain rule
+  loses both. The sentence goes through the narration map of §6 to a track and a moment. The book's titles are dressed once, in the hub, so
+  both apps show the same: a bare number is "Chapter N", a title wholly in capitals is in title case ("PROLOGUE" is "Prologue", a Roman
+  numeral is kept), anything else is as written; a file mark's name is never dressed. Left out:
   entries with no narration (cover, copyright), an entry that begins outside its track, and the entries that are not in the order they are heard
   (Mistborn's front matter is spoken mid-way through the second part, listed among the first entries): the longest run of strictly later places
   stays, so the displaced entry is the one that goes and, of entries at one moment (a part and its first chapter), the first stays. At least two
