@@ -106,10 +106,9 @@ struct BooksHomeView: View {
         }
         .alert("Delete \(deleting?.title ?? "")?", isPresented: Binding(
             get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { list in
-            // The harmless answer first, a plain button that Escape presses: iOS 26 hides a
-            // dialog's cancel role and moves an alert's after the destructive answer.
-            Button("Keep the list") { deleting = nil }
-                .keyboardShortcut(.cancelAction)
+            // The harmless answer has the cancel role: Escape presses it, and iOS 26 shows it
+            // (as the last answer, its own place for it). Without it iOS adds a Cancel of its own.
+            Button("Keep the list", role: .cancel) { deleting = nil }
             Button("Delete list", role: .destructive) {
                 deleting = nil
                 books.updateLists { $0.delete(list.id) }

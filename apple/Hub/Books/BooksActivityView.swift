@@ -60,10 +60,10 @@ struct BooksActivityView: View {
         .task(id: polls) { await poll() }
         .alert("Cancel transfer?", isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } }),
                presenting: cancelling) { item in
-            // The harmless answer first. iOS 26 hides a dialog's cancel role and moves an
-            // alert's after the destructive answer, so it is a plain button that Escape presses.
-            Button("Keep transfer") { cancelling = nil }
-                .keyboardShortcut(.cancelAction)
+            // An alert: iOS 26 hides a dialog's cancel role. The harmless answer has the cancel
+            // role: Escape presses it, and iOS 26 shows it last, its own place for it. A plain
+            // button instead brought a third answer, a Cancel of iOS's own.
+            Button("Keep transfer", role: .cancel) { cancelling = nil }
                 .accessibilityIdentifier("keep-transfer")
             Button("Cancel transfer", role: .destructive) {
                 cancelling = nil

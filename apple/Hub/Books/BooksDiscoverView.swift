@@ -973,10 +973,10 @@ struct ReadingReleasesView: View {
         .task(id: "\(targetIndex)·\(searches)") { await search() }
         .alert(confirming?.title ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
                presenting: confirming) { release in
-            // The harmless answer first, a plain button that Escape presses: iOS 26 hides a
-            // dialog's cancel role, which left a release that cannot be used with no answer at all.
-            Button("Choose another") { confirming = nil }
-                .keyboardShortcut(.cancelAction)
+            // An alert, as iOS 26 hides a dialog's cancel role, which left a release that cannot
+            // be used with no answer at all. The harmless answer has the cancel role: Escape
+            // presses it, and without it iOS adds a Cancel of its own.
+            Button("Choose another", role: .cancel) { confirming = nil }
             if release.canGrab {
                 Button(release.rejected ? "Download anyway" : "Download this release") {
                     confirming = nil
