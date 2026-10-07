@@ -352,6 +352,11 @@ struct MainView: View {
         // Listening places a closed app left unsent go now, and again for
         // another profile; a book of another profile leaves the player.
         .task(id: "\(model.address)\u{0}\(model.userId)") { await listening.flushPending(app: model) }
+        // Downloads (#5): the transfers a previous launch left are found again,
+        // the queue goes on for this profile, and watches made offline are sent.
+        .task(id: "\(model.address)\u{0}\(model.userId)\u{0}\(model.connectionChanges)") {
+            OfflineLibrary.shared.attach(model)
+        }
         .onAppear {
             sounds.pause(.video) { [player] in if player.isPlaying { player.togglePlay() } }
             sounds.pause(.audiobook) { ListeningModel.shared.pause() }

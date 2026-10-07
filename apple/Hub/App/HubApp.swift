@@ -20,6 +20,13 @@ struct HubApp: App {
                 // colour under its blurred picture (GLASS_PLAN.md).
                 .preferredColorScheme(.dark)
         }
+        #if os(iOS)
+        // Downloads finishing while the app was away: the system wakes it to
+        // hand over their files, then waits for the background session's events.
+        .backgroundTask(.urlSession(OfflineDownloader.sessionIdentifier)) {
+            await OfflineLibrary.shared.backgroundEvents()
+        }
+        #endif
         #if os(macOS)
         .defaultSize(Self.windowSize)
         // The Glass page runs to the top of the window, the window buttons over

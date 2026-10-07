@@ -244,8 +244,10 @@ struct PlayerSheet: View {
     @ViewBuilder private func video(_ plan: PlaybackPrepareResponse) -> some View {
         let quality = PlaybackRules.qualities.first { $0.bitrate == player.maxBitrate } ?? PlaybackRules.qualities[0]
         SheetGroup {
-            SheetRow(title: "Quality", value: PlayerLabels.qualityValue(quality.label, height: plan.height, offline: false),
-                     chevron: true) { open(.quality) }
+            // A download plays its own file: there is no other quality to ask for.
+            SheetRow(title: "Quality", value: PlayerLabels.qualityValue(quality.label, height: plan.height,
+                                                                        offline: player.isOffline),
+                     chevron: !player.isOffline) { if !player.isOffline { open(.quality) } }
             if plan.sources.count > 1, let source = currentSource(plan) {
                 SheetRow(title: "Version", value: sourceName(source), chevron: true) { open(.version) }
             }

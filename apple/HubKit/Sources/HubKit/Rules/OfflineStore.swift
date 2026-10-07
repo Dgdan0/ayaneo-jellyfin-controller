@@ -483,6 +483,35 @@ public final class OfflineStore: @unchecked Sendable {
         write(row)
     }
 
+    /// Held back for a reason that is not the download's fault (no Wi-Fi, no
+    /// room, a refused token) until `until`, without counting a failure.
+    public func wait(_ id: String, reason: String, until: Int64, now: Int64) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard var row = rowsById[id] else { return }
+        let reason = String(reason.prefix(300))
+        let persist = row.state != .waiting || row.error != reason
+        row.state = .waiting
+        row.error = reason
+        row.retryAt = until
+        row.speedBytesPerSecond = 0
+        row.updatedAt = now
+        rowsById[id] = row
+        if persist { write(row) }
+    }
+
+    /// Whatever held the waiting downloads back has changed (Wi-Fi is back, a
+    /// new token): they may go now.
+    public func wakeWaiting(userId: String, now: Int64) {
+        lock.lock()
+        defer { lock.unlock() }
+        for var row in rowsById.values where row.userId == userId && row.state == .waiting && row.retryAt > now {
+            row.retryAt = now
+            rowsById[row.id] = row
+            write(row)
+        }
+    }
+
     /// Downloads still marked as moving, or waiting on the PC, that nothing is
     /// carrying (the app was stopped with one under way) go back to the head
     /// of the queue.
@@ -616,6 +645,17 @@ public final class OfflineStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return Array(pending.filter { $0.userId == userId }.sorted { $0.createdAt < $1.createdAt }.prefix(limit).map(\.event))
+    }
+
+    /// The profiles with watches waiting to be sent, each sent as itself.
+    public func outboxUsers() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        var users: [String] = []
+        for entry in pending.sorted(by: { $0.createdAt < $1.createdAt }) where !users.contains(entry.userId) {
+            users.append(entry.userId)
+        }
+        return users
     }
 
     /// The hub took these (or had a later watch): no longer waiting.

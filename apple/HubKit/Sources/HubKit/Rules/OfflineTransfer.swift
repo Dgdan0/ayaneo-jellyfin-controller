@@ -54,6 +54,15 @@ public enum OfflineTransfer {
     }
 
     public static func recovery(_ failure: HubFailure) -> Recovery {
+        // The client's gate refusing to send (no status) says it in its own words.
+        switch failure.kind {
+        case .unauthorized:
+            return .credentials(failure.status == nil ? failure.message : CredentialGate.Block.rejected.message)
+        case .banned:
+            return .credentials(failure.message)
+        default:
+            break
+        }
         let status = failure.status ?? 0
         switch status {
         case 409 where failure.code == "offline_preparing":
@@ -65,8 +74,6 @@ public enum OfflineTransfer {
             return .failed(failure.message)
         case 410:
             return .renew
-        case 401:
-            return .credentials(FailureKind.unauthorized.message)
         case 429 where (failure.retryAfterSeconds ?? 0) >= CredentialGate.banThresholdSeconds:
             return .credentials(FailureKind.banned.message)
         case 404:
@@ -81,7 +88,10 @@ public enum OfflineTransfer {
     static let failedOnThePC = "The PC could not prepare this download"
     static let sourceChanged = "The file changed on the PC. Remove this download and download it again."
     static let gone = "This download is no longer on the hub. Remove it and download it again."
-    static let noScope = "This device's token may not download. Give it the download scope on the hub."
+    public static let noScope = "This device's token may not download. Give it the download scope on the hub."
+    /// While a download waits for Wi-Fi, or for room on the device.
+    public static let waitingForWiFi = "Waiting for Wi-Fi"
+    public static let waitingForRoom = "Not enough free space on this device"
     /// A hub that predates the Apple format answers the original, which AVPlayer cannot play.
     public static let hubTooOld = "The hub needs updating before it can make downloads for this device."
 }

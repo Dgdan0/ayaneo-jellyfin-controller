@@ -132,8 +132,13 @@ struct OfflineAppleTests {
         #expect(recovery(409, "source_changed") == .failed(OfflineTransfer.sourceChanged))
         #expect(recovery(410, "grant_expired") == .renew)
         // A rejected token or a ban holds every download, never counted as the download's failure.
-        #expect(recovery(401) == .credentials(FailureKind.unauthorized.message))
+        #expect(recovery(401) == .credentials(CredentialGate.Block.rejected.message))
         #expect(recovery(429, retryAfter: 900) == .credentials(FailureKind.banned.message))
+        // The client's gate refusing to send says so in its own words.
+        let gate = CredentialGate.Block.banned(untilMillis: 600_000, nowMillis: 0)
+        #expect(OfflineTransfer.recovery(HubFailure(gate.kind, message: gate.message)) == .credentials(gate.message))
+        #expect(OfflineTransfer.recovery(HubFailure(.unauthorized, message: CredentialGate.Block.rejected.message))
+                == .credentials(CredentialGate.Block.rejected.message))
         #expect(recovery(429, retryAfter: 2) == .later("words"))
         #expect(recovery(404) == .failed(OfflineTransfer.gone))
         #expect(recovery(403) == .failed(OfflineTransfer.noScope))
@@ -197,6 +202,31 @@ struct OfflineAppleTests {
         // A paused batch pauses one waiting on the PC too.
         again.setBatchPaused("batch-1", true, now: 6)
         #expect(again.row("episode-1")?.state == .paused)
+    }
+
+    @Test func aDownloadHeldBackWaitsWithoutCountingAFailureUntilWokenOrDue() throws {
+        let root = OfflineTests.folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = OfflineStore(root: root)
+        store.enqueue(title: "Lanterns", seriesId: "l", userId: "u",
+                      manifests: [OfflineTests.manifest("b", "k1", "e1", 1), OfflineTests.manifest("b", "k2", "e2", 2)], now: 1)
+        store.wait("k1", reason: OfflineTransfer.waitingForWiFi, until: 100, now: 2)
+        let held = try #require(store.row("k1"))
+        #expect(held.state == .waiting && held.error == "Waiting for Wi-Fi" && held.attempts == 0)
+        // Until it is due, the next one goes first.
+        #expect(store.nextQueued(userId: "u", now: 50)?.id == "k2")
+        #expect(store.nextRetryAt(userId: "u", now: 50) == 100)
+        // Wi-Fi back: it goes again now, ahead in its order.
+        store.wakeWaiting(userId: "u", now: 60)
+        #expect(store.nextQueued(userId: "u", now: 60)?.id == "k1")
+        // Watches to send, by profile, the oldest first.
+        store.rememberPlayback(userId: "b", itemId: "e1", positionMillis: 1, durationMillis: 10, completed: false, now: 5,
+                               eventKey: "e1-5")
+        store.rememberPlayback(userId: "a", itemId: "e2", positionMillis: 1, durationMillis: 10, completed: false, now: 6,
+                               eventKey: "e2-6")
+        store.rememberPlayback(userId: "b", itemId: "e2", positionMillis: 2, durationMillis: 10, completed: false, now: 7,
+                               eventKey: "e2-7")
+        #expect(store.outboxUsers() == ["b", "a"])
     }
 
     @Test func itsPlaceInThePCsLineReadsAsAPlace() {

@@ -52,6 +52,12 @@ struct UpNextCard: Equatable {
 /// quitting, closing the Mac's window, and on iPhone and iPad going to the
 /// background without picture in picture. So a session is never left for the
 /// hub's 30-minute cleanup to save.
+///
+/// A title downloaded for this profile plays from its file instead, wherever
+/// it is opened (#5; Android's local-first playback): nothing is sent to the
+/// hub for it, its tracks are the file's own and chosen here, and its watch is
+/// kept on the device every fifteen seconds, on a pause and on leaving, then
+/// sent with the offline sync (`OfflineLibrary`).
 @MainActor
 @Observable
 final class PlayerModel {
@@ -113,6 +119,9 @@ final class PlayerModel {
 
     var isOpen: Bool { request != nil }
 
+    /// Playing a download from its file, not a session on the hub.
+    var isOffline: Bool { plan.map { OfflinePlayback.isOffline($0.sessionId) } ?? false }
+
     var durationMillis: Int64 {
         if let plan, plan.durationMillis > 0 { return plan.durationMillis }
         return itemDuration
@@ -170,6 +179,8 @@ final class PlayerModel {
     @ObservationIgnored private var pipObserver: PictureInPictureObserver?
     @ObservationIgnored private var inBackground = false
     @ObservationIgnored private let origin = ContinuousClock.now
+    /// When a download's watch was last kept on the device.
+    @ObservationIgnored private var offlineSavedAt = ContinuousClock.now
     #if os(iOS)
     @ObservationIgnored private var backgroundWork: UIBackgroundTaskIdentifier = .invalid
     #endif
@@ -340,7 +351,14 @@ final class PlayerModel {
             positionMillis = max(0, millis(time))
         }
         player.pause()
-        guard let plan, let outbox else { return }
+        guard let plan else { return }
+        if OfflinePlayback.isOffline(plan.sessionId) {
+            rememberOffline(completed: atEnd)
+            OfflineLibrary.shared.syncSoon()
+            self.plan = nil
+            return
+        }
+        guard let outbox else { return }
         outbox.event(reporter.stop(positionMillis: positionMillis, muted: player.isMuted), session: plan.sessionId, user: user)
         outbox.close(session: plan.sessionId, user: user)
         self.plan = nil
@@ -349,13 +367,26 @@ final class PlayerModel {
     private func prepare(itemId: String, mode: PlaybackStartMode, series: Bool, generation: Int) async {
         guard let hub else { return }
         let user = user
-        do {
+        let offline = OfflineLibrary.shared
+        do throws(HubFailure) {
             var itemId = itemId
             var mode = mode
             if series {
-                let target = try await hub.fetch(HubEndpoints.seriesPlayTarget(seriesId: itemId), as: SeriesPlayTarget.self)
-                itemId = target.item.id
-                mode = DetailLines.startMode(target)
+                do throws(HubFailure) {
+                    let target = try await hub.fetch(HubEndpoints.seriesPlayTarget(seriesId: itemId), as: SeriesPlayTarget.self)
+                    itemId = target.item.id
+                    mode = DetailLines.startMode(target)
+                } catch {
+                    // Away from the hub, a downloaded series goes on from its downloads.
+                    guard error.kind != .cancelled, let local = offline.playTarget(seriesId: itemId, userId: user) else { throw error }
+                    itemId = local.row.itemId
+                    mode = .resume
+                }
+            }
+            // Downloaded for this profile: from its file, with nothing asked of the hub.
+            if let local = offline.localPlan(itemId: itemId, mode: mode, userId: user) {
+                loadOffline(local, generation: generation)
+                return
             }
             let body = PlaybackPrepareBody(startMode: mode, device: PlaybackDeviceInfo.device(),
                                            capabilities: PlaybackDeviceInfo.capabilities())
@@ -384,6 +415,29 @@ final class PlayerModel {
             guard generation == self.generation else { return }
             phase = .failed(error.kind == .notFound ? "This title is no longer in Jellyfin." : error.message)
         }
+    }
+
+    /// Plays a download from its file. This profile's last audio and subtitle
+    /// languages for the series or film are chosen before the first frame, as
+    /// for a stream; the file's own options are selected when it is ready.
+    private func loadOffline(_ local: PlaybackPrepareResponse, generation: Int) {
+        guard generation == self.generation else { return }
+        var plan = local
+        selection = PlaybackMemory.selection(user: user, scope: PlaybackChoices.scope(plan.item))
+        subtitleOffsetMillis = selection.subtitleOffsetMillis
+        if let wanted = PlaybackChoices.wanted(plan, selection) {
+            if let audio = wanted.audio, plan.audioTracks.contains(where: { $0.index == audio }) { plan.selectedAudioIndex = audio }
+            let subtitle = wanted.subtitle ?? -1
+            plan.selectedSubtitleIndex = plan.subtitleTracks.contains { $0.index == subtitle } ? subtitle : nil
+        }
+        self.plan = plan
+        guard let url = URL(string: plan.mediaUrl) else {
+            phase = .failed("This download cannot be found on this device.")
+            return
+        }
+        startedItem = nil
+        failedItem = nil
+        player.replaceCurrentItem(with: AVPlayerItem(url: url))
     }
 
     /// Plays `plan` from a grant's address. A session the person has left in
@@ -462,9 +516,45 @@ final class PlayerModel {
         if atEnd && !PlaybackRules.reachedNaturalEnd(positionMillis: target, durationMillis: durationMillis) {
             atEnd = false
         }
-        outbox.event(reporter.seeked(positionMillis: target, paused: !isPlaying, muted: player.isMuted),
-                     session: plan.sessionId, user: user)
+        if !isOffline {
+            outbox.event(reporter.seeked(positionMillis: target, paused: !isPlaying, muted: player.isMuted),
+                         session: plan.sessionId, user: user)
+        }
         updateUpNext()
+    }
+
+    // MARK: A download's watch
+
+    /// Kept here every fifteen seconds while it plays and on each pause; the
+    /// hub hears of it with the offline sync.
+    private func reportOffline(_ status: AVPlayer.TimeControlStatus) {
+        switch status {
+        case .playing:
+            if !reportedPlaying {
+                reportedPlaying = true
+                offlineSavedAt = .now
+            } else if offlineSavedAt.duration(to: .now) >= .seconds(15) {
+                rememberOffline(completed: false)
+            }
+        case .paused where reportedPlaying:
+            reportedPlaying = false
+            // Reaching the end pauses too; the end keeps itself.
+            if !atEnd { rememberOffline(completed: false) }
+        default:
+            break
+        }
+    }
+
+    /// Where a download is, kept for this profile once it has played.
+    private func rememberOffline(completed: Bool) {
+        guard let plan, OfflinePlayback.isOffline(plan.sessionId), startedItem != nil else { return }
+        offlineSavedAt = .now
+        let duration = durationMillis
+        guard duration > 0 else { return }
+        let position = completed ? duration : positionMillis
+        OfflineLibrary.shared.remember(itemId: plan.item.id, userId: user, positionMillis: position, durationMillis: duration,
+                                       completed: completed || ResumeRules.isFinished(positionMillis: position,
+                                                                                      durationMillis: duration))
     }
 
     /// Four times a second while the player is open: what AVPlayer is doing,
@@ -524,6 +614,7 @@ final class PlayerModel {
         startDebugTour()
         #endif
         applyAudioChoice(to: item)
+        if isOffline { applyLegibleChoice(to: item) }
         let play = playAfterLoad
         playAfterLoad = true
         guard startAt > 0 else {
@@ -549,6 +640,11 @@ final class PlayerModel {
     private func failed(_ error: (any Error)?) {
         guard let plan, let hub else { return }
         let reason = error?.localizedDescription ?? "This video could not be played."
+        guard !isOffline else {
+            // A download has no conversion to fall back on.
+            phase = .failed("This download could not be played. Remove it and download it again. (\(reason))")
+            return
+        }
         guard !fallbackTried, plan.playMethod.lowercased() != "transcode" else {
             phase = .failed(reason)
             return
@@ -571,6 +667,10 @@ final class PlayerModel {
     }
 
     private func report(_ status: AVPlayer.TimeControlStatus) {
+        if isOffline {
+            reportOffline(status)
+            return
+        }
         guard let plan, let outbox else { return }
         let muted = player.isMuted
         let now = elapsedMillis()
@@ -601,8 +701,12 @@ final class PlayerModel {
         atEnd = true
         isPlaying = false
         positionMillis = durationMillis
-        outbox.event(reporter.reachedEnd(durationMillis: durationMillis, muted: player.isMuted),
-                     session: plan.sessionId, user: user)
+        if isOffline {
+            rememberOffline(completed: true)
+        } else {
+            outbox.event(reporter.reachedEnd(durationMillis: durationMillis, muted: player.isMuted),
+                         session: plan.sessionId, user: user)
+        }
         // The card counts down to the next episode, even after Watch credits.
         if let next = plan.nextItem {
             upNextDismissed = false
@@ -649,6 +753,10 @@ final class PlayerModel {
     func chooseAudio(_ track: PlaybackTrack) {
         menu.selectTrackTab("audio")
         guard track.index != plan?.selectedAudioIndex else { return }
+        if isOffline {
+            chooseOffline { $0.selectedAudioIndex = track.index }
+            return
+        }
         change(PlaybackSelectBody(positionMillis: 0, audioStreamIndex: track.index))
     }
 
@@ -656,10 +764,27 @@ final class PlayerModel {
     func chooseSubtitle(_ index: Int) {
         menu.selectTrackTab("subtitles")
         guard index != (plan?.selectedSubtitleIndex ?? -1) else { return }
+        if isOffline {
+            chooseOffline { $0.selectedSubtitleIndex = index < 0 ? nil : index }
+            return
+        }
         change(PlaybackSelectBody(positionMillis: 0, subtitleStreamIndex: index))
     }
 
+    /// A download's tracks are all in its file: chosen there, remembered for
+    /// the series or film, with nothing asked of the hub.
+    private func chooseOffline(_ edit: (inout PlaybackPrepareResponse) -> Void) {
+        guard var next = plan else { return }
+        edit(&next)
+        plan = next
+        remember(next)
+        guard let item = player.currentItem else { return }
+        applyAudioChoice(to: item)
+        applyLegibleChoice(to: item)
+    }
+
     func chooseQuality(_ bitrate: Int) {
+        guard !isOffline else { return }
         guard bitrate != maxBitrate else { return }
         let before = maxBitrate
         maxBitrate = bitrate
@@ -667,7 +792,7 @@ final class PlayerModel {
     }
 
     func chooseSource(_ id: String) {
-        guard id != plan?.selectedMediaSourceId else { return }
+        guard !isOffline, id != plan?.selectedMediaSourceId else { return }
         change(PlaybackSelectBody(positionMillis: 0, mediaSourceId: id))
     }
 
@@ -732,6 +857,38 @@ final class PlayerModel {
             }
             let pick = byLanguage ?? (position < options.count ? options[position] : nil)
             if let pick, self.player.currentItem === item { item.select(pick, in: group) }
+        }
+    }
+
+    /// A download's subtitles are its file's own text tracks, in the order of
+    /// the plan's: the chosen one by its place (its language checked), none
+    /// when subtitles are off, which is how a download starts.
+    private func applyLegibleChoice(to item: AVPlayerItem) {
+        guard let plan else { return }
+        let position = OfflinePlayback.optionPosition(plan.subtitleTracks, index: plan.selectedSubtitleIndex)
+        let chosen = position.map { plan.subtitleTracks[$0] }
+        let asset = item.asset
+        Task {
+            guard let group = try? await asset.loadMediaSelectionGroup(for: .legible) else { return }
+            guard self.player.currentItem === item else { return }
+            guard let position, let chosen else {
+                item.select(nil, in: group)
+                return
+            }
+            // The file's text tracks only: not a forced-only or automatic option.
+            let options = group.options.filter { !$0.hasMediaCharacteristic(.containsOnlyForcedSubtitles) }
+            func code(_ tag: String) -> String? { Locale.Language(identifier: tag).languageCode?.identifier(.alpha2) }
+            let wanted = code(chosen.language)
+            var pick = position < options.count ? options[position] : nil
+            if let wanted, let candidate = pick, let tag = candidate.extendedLanguageTag ?? candidate.locale?.identifier,
+               code(tag) != wanted {
+                // Not the language its place says: the first of that language instead.
+                pick = options.first { option in
+                    guard let tag = option.extendedLanguageTag ?? option.locale?.identifier else { return false }
+                    return code(tag) == wanted
+                } ?? pick
+            }
+            item.select(pick, in: group)
         }
     }
 

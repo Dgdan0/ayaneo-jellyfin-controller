@@ -20,6 +20,9 @@ final class AppModel {
     /// Titles requested on this device this session: cards show it at once,
     /// before the hub's next read does (Android's `RequestedTitles`).
     private(set) var requested = RequestedTitles()
+    /// Counts the connections saved from this device: what holds the token
+    /// outside the client (the downloads' background session) takes the new one.
+    private(set) var connectionChanges = 0
 
     let hub: HubClient
     /// Each artwork's Glass colours, asked of the hub and kept on the device.
@@ -92,6 +95,7 @@ final class AppModel {
         address = normalised
         hasToken = !newToken.isEmpty
         await hub.update(HubCredentials(baseURL: normalised, token: newToken, userId: userId))
+        connectionChanges += 1
     }
 
     func storedToken() -> String {
