@@ -91,12 +91,14 @@ final class ActivityTabTests: XCTestCase {
         XCTAssertTrue(stop.waitForExistence(timeout: 15), "Severance cannot be stopped: \(buttons(app))")
         XCTAssertTrue(reveal(stop, in: app))
         stop.tap()
-        XCTAssertTrue(text(app, containing: "Stopped Severance").waitForExistence(timeout: 10), "the stop was not sent")
+        // The transfer's own state, not the notice, which is gone a few seconds after the answer.
         let start = app.buttons["start-\(severance)"]
-        XCTAssertTrue(start.waitForExistence(timeout: 10), "a stopped transfer offers no Start")
+        XCTAssertTrue(start.waitForExistence(timeout: 15), "the stop was not sent: a stopped transfer offers no Start")
+        XCTAssertFalse(app.buttons["stop-\(severance)"].exists, "the stopped transfer still offers Stop")
+        XCTAssertTrue(reveal(start, in: app))
         start.tap()
-        XCTAssertTrue(text(app, containing: "Started Severance").waitForExistence(timeout: 10), "the start was not sent")
-        XCTAssertTrue(app.buttons["stop-\(severance)"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["stop-\(severance)"].waitForExistence(timeout: 15), "the start was not sent: it offers no Stop")
+        XCTAssertFalse(start.exists, "the started transfer still offers Start")
     }
 
     @MainActor
