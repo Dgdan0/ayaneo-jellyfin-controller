@@ -174,6 +174,7 @@ beside it (Upcoming puts its weeks there instead), then a featured title and Jel
 
 | Behaviour | Owner |
 |---|---|
+| A Library title's cast | A portrait the hub names on TMDB (`people[].tmdbId`, #27) opens `PersonView`, the filmography the request side opens; one it cannot name opens nothing |
 | Where a card leads | `MediaHit.route`: a title in the library (`jellyfinItemId`) opens its library page, with Play, as the prototype's cards do; one you do not have opens `MediaTitleView` on its pipeline. Android opens the request side for both |
 | The availability chip's words and colours | HubKit `Availability` (the Pocket's Glass chip colours); the view is `Discover/DiscoverParts` `AvailabilityChip` on `DiscoverPoster` |
 | The featured title, the facts, the pipeline's chips and summary, polling | HubKit `DiscoverFeature`, `TitleFacts`, `PipelineTone` / `PipelineLines` (`nextPoll`: 4 s while a stage moves, 5/15/30 s after failures) |
@@ -345,8 +346,9 @@ demo hub (`-demo`) and generated fixtures; the real hub is only read.
 - **One sound at a time.** HubKit `AudioArbiter`: the shell pauses the audiobook when a video starts
   and pauses the video when the audiobook starts.
 - **Settings.** The speed is kept per book. The seek step (5, 10, 15 or 30 seconds, 10 by default,
-  Android's `PlaybackSettings.seekSeconds`) is Settings › Playback, so the video player can take it
-  too. The sleep timer offers 5 to 60 minutes or the end of the part, fades over its last 30
+  Android's `PlaybackSettings.seekSeconds`) is Settings › Playback, and the video player takes it
+  too: its ± buttons, the arrow keys, a double tap on the picture and VoiceOver's swipes on the
+  timeline (#33). The sleep timer offers 5 to 60 minutes or the end of the part, fades over its last 30
   seconds, and steps back over what faded; any control while it fades carries on.
 - **The demo hub** plays generated tones from files the app writes on the device, so the UI tests
   and screenshots need no network and never touch a real book.
