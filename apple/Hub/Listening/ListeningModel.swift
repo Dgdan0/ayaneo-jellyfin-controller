@@ -143,6 +143,8 @@ final class ListeningModel {
 
     /// Pauses whatever else plays (the video) when the book starts: set by the shell.
     @ObservationIgnored var onStart: (() -> Void)?
+    /// A place was kept for a book (its work): a mark of read or unread is forgotten (#37).
+    @ObservationIgnored var onKept: ((String) -> Void)?
 
     @ObservationIgnored private let player = AVQueuePlayer()
     @ObservationIgnored private let store = ListeningStore.shared
@@ -668,6 +670,7 @@ final class ListeningModel {
         lastSave = .now
         guard let kept = AudioPlace.kept(book.manifest.tracks, part: part, offsetMs: positionMs, completed: completed),
               (try? store.save(book.key, kept, now: Self.nowMillis())) != nil else { return }
+        onKept?(book.workId)
         scheduleSync()
     }
 

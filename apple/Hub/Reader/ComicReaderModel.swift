@@ -172,6 +172,11 @@ final class ComicReaderModel {
         ReaderPadState(.comic, controlsVisible: controlsVisible, loading: phase != .reading)
     }
 
+    /// The run was marked unread (#37): the first issue opened starts at its first page.
+    @ObservationIgnored var startsFresh = false
+    /// A page was sent: a mark of read or unread is forgotten.
+    @ObservationIgnored var onKept: (() -> Void)?
+
     init(hub: HubClient, work: ReadingWork?, workId: String, publication: ReadingSectionItem) {
         self.hub = hub
         self.work = work
@@ -273,9 +278,12 @@ final class ComicReaderModel {
         outbox = ComicProgressOutbox(saved: manifest.currentPage)
         units = makeUnits(for: manifest)
         slots = Array(repeating: nil, count: units.slotCount)
-        let page = atEnd ? manifest.pageCount - 1 : manifest.startPage
+        let fresh = startsFresh && !atEnd
+        startsFresh = false
+        let page = atEnd ? manifest.pageCount - 1 : fresh ? 0 : manifest.startPage
         let unit = units.unit(containing: page)
         let step = atEnd ? Int.max
+            : fresh ? 0
             : ComicReaderSettings.place(workId: workId)?.stepFor(manifest.sourceItemId, page: units.units[unit].place,
                                                                    steps: steps(unit: unit)) ?? 0
         state = PagedImageState(pageCount: units.units.count, startPage: unit, stepsFor: stepsFor, startStep: step)
@@ -774,6 +782,7 @@ final class ComicReaderModel {
                 conflict = error.status == 409
             }
             guard let self, self.manifest?.sourceItemId == publication else { return }
+            if ok { self.onKept?() }
             self.outbox.answered(ok: ok, conflict: conflict)
             if conflict {
                 self.say("This issue was read on another device since, so your page here was not saved")

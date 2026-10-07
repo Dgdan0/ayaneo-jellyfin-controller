@@ -11,6 +11,7 @@ struct ComicReaderView: View {
     private let workId: String
     private let publication: ReadingSectionItem
     @Environment(AppModel.self) private var model
+    @Environment(\.readingMarks) private var marks
     @State private var reader: ComicReaderModel?
 
     /// The issue `publication` of `work`, the run its page loaded.
@@ -30,6 +31,11 @@ struct ComicReaderView: View {
         .task {
             guard reader == nil else { return }
             let opened = ComicReaderModel(hub: model.hub, work: work, workId: workId, publication: publication)
+            // Marked unread: the issue opens at its first page. A page sent forgets the mark (#37).
+            opened.startsFresh = marks.startsFresh(workId)
+            let keeper = marks.kept
+            let runId = workId
+            opened.onKept = { keeper(runId) }
             #if DEBUG
             opened.controlsPinned = ProcessInfo.processInfo.environment["HUB_READ_CHROME"] == "pinned"
             #endif

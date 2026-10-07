@@ -132,6 +132,10 @@ final class BookReaderModel {
     var controllerActive = false
     /// Set to leave: the screen closes the reader.
     var leaving = false
+    /// The book was marked unread (#37): it opens at its beginning, whatever place was kept.
+    @ObservationIgnored var startsFresh = false
+    /// A place was kept: a mark of read or unread is forgotten.
+    @ObservationIgnored var onKept: (() -> Void)?
     /// The device is in dark mode: system colours follow it.
     var systemDark = false {
         didSet { if oldValue != systemDark && preferences.theme == .system { navigator.submit(rendering) } }
@@ -271,6 +275,12 @@ final class BookReaderModel {
 
     /// Where the keeper says to open, or what it asks first.
     private func opened(_ loaded: BookNavigator.Loaded, _ opening: BookOpening) {
+        if startsFresh {
+            // Marked unread: the beginning, and no question about which place.
+            startsFresh = false
+            show(loaded, at: nil)
+            return
+        }
         switch opening {
         case .at(let locator):
             show(loaded, at: locator)
@@ -448,6 +458,7 @@ final class BookReaderModel {
             guard !Task.isCancelled, let self, let page = self.place?.json, self.readAlong?.canKeepPage != false else { return }
             let json = self.keptPlace(page)
             let places = self.places
+            self.onKept?()
             await places.reached(json)
             await places.flush()
             if await places.conflicted() { self.conflicted() }

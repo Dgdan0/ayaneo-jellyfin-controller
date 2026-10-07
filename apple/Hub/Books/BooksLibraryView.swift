@@ -291,6 +291,7 @@ struct ReadingLibraryView: View {
 /// A library's covers, 60 a page, the next page asked for six covers from the end.
 struct ReadingWorksGrid: View {
     @Environment(AppModel.self) private var model
+    @Environment(BooksModel.self) private var books
     @Environment(\.glassMetrics) private var metrics
     let library: ReadingLibrary
     let sort: SortPreference
@@ -320,7 +321,7 @@ struct ReadingWorksGrid: View {
                       alignment: .leading, spacing: 20) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, work in
                     NavigationLink(value: AppRoute.book(BookRoute(workId: work.id, title: work.title))) {
-                        BookCard(work: work)
+                        BookCard(work: books.project(work))
                     }
                     .buttonStyle(GlassCardStyle())
                     .previewsWhenFocused { lit = work.artwork }

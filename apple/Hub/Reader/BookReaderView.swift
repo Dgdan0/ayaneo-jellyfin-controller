@@ -15,6 +15,7 @@ struct BookReaderView: View {
     let sourceItemId: String
     var readAlong = false
     @Environment(AppModel.self) private var model
+    @Environment(\.readingMarks) private var marks
     #if os(iOS)
     @State private var reader: BookReaderModel?
     #endif
@@ -30,6 +31,11 @@ struct BookReaderView: View {
         .task {
             guard reader == nil else { return }
             let opened = BookReaderModel(app: model, work: work, sourceItemId: sourceItemId, readAlong: readAlong)
+            // Marked unread: from the beginning. A place kept forgets the mark (#37).
+            opened.startsFresh = marks.startsFresh(work.id)
+            let keeper = marks.kept
+            let bookId = work.id
+            opened.onKept = { keeper(bookId) }
             reader = opened
             opened.start()
             #if DEBUG

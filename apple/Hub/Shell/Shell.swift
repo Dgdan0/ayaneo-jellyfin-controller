@@ -350,6 +350,9 @@ struct MainView: View {
             readersClosed += 1
         }))
         .environment(\.readerClosed, readersClosed)
+        // A book marked unread starts again; a place kept forgets the mark (#37).
+        .environment(\.readingMarks, ReadingMarks(startsFresh: { [books] in books.completion.startsAtBeginning($0) },
+                                                   kept: { [books] in books.readerKept($0) }))
         .environment(\.selectSection, SelectSectionAction { target in select(target) })
         .onChange(of: "\(model.address)\u{0}\(model.userId)", initial: true) { _, _ in
             books.use(address: model.address, userId: model.userId)
@@ -366,6 +369,7 @@ struct MainView: View {
             sounds.pause(.video) { [player] in if player.isPlaying { player.togglePlay() } }
             sounds.pause(.audiobook) { ListeningModel.shared.pause() }
             listening.onStart = { [sounds] in sounds.started(.audiobook) }
+            listening.onKept = { [books] workId in books.readerKept(workId) }
         }
         .onChange(of: player.isPlaying) { _, playing in playing ? sounds.started(.video) : sounds.stopped(.video) }
         .onChange(of: listening.playing) { _, playing in playing ? sounds.started(.audiobook) : sounds.stopped(.audiobook) }
