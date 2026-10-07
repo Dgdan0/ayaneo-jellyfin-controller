@@ -82,10 +82,13 @@ final class BooksTests: XCTestCase {
         let tile = button(app, containing: "Books & Audiobooks")
         XCTAssertTrue(tile.waitForExistence(timeout: 15), "the reading libraries did not load: \(buttons(app))")
         tile.tap()
+        // The view chosen stays from one visit to the next, so a run cut short
+        // can leave Authors or Books: Series first, whatever was left.
+        let views = app.otherElements["library-views"]
+        XCTAssertTrue(views.waitForExistence(timeout: 10), "the library has no Series, Authors and Books")
+        views.buttons["Series"].tap()
         XCTAssertTrue(button(app, containing: "Red Rising").waitForExistence(timeout: 10), "the series did not load: \(buttons(app))")
 
-        let views = app.otherElements["library-views"]
-        XCTAssertTrue(views.waitForExistence(timeout: 5), "the library has no Series, Authors and Books")
         views.buttons["Authors"].tap()
         let pierce = button(app, containing: "Pierce Brown")
         XCTAssertTrue(pierce.waitForExistence(timeout: 10), "the authors did not load: \(buttons(app))")
