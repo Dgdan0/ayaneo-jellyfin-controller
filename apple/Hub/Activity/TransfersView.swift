@@ -89,10 +89,9 @@ struct TransfersView: View {
         .alert(confirming.map { $0.choice.label + "?" } ?? "",
                isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
                presenting: confirming) { pending in
-            // The harmless answer first. Given the cancel role, iOS 26 moves it
-            // after the destructive one, so it is a plain button that Escape presses.
-            Button("Cancel") { confirming = nil }
-                .keyboardShortcut(.cancelAction)
+            // The harmless answer has the cancel role: Escape presses it, and iOS 26 shows it
+            // last, its own place for it. A plain one brought a second Cancel, iOS's own.
+            Button("Cancel", role: .cancel) { confirming = nil }
             Button(pending.choice.label, role: .destructive) {
                 confirming = nil
                 Task { await run(pending.choice.id, on: pending.item) }

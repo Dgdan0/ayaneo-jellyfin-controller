@@ -8,8 +8,8 @@ import SwiftUI
 /// either side, where you are, Return to previous place when there is one,
 /// and the book's slider), the page shrunk between them. With a game
 /// controller connected the keys' hints run under the lower bar, and a ring
-/// shows the control the pad is on. Read along's narration will stand in
-/// the lower bar's place (`BookLowerBar`), as on the Pocket (#21).
+/// shows the control the pad is on. Reading along, the narration's dock
+/// (`ReadAlongDock`) stands in the lower bar's place, as on the Pocket (#21).
 struct BookReaderBars: View {
     let reader: BookReaderModel
     let layout: ComicReaderLayout
@@ -30,7 +30,14 @@ struct BookReaderBars: View {
                 }
             Spacer(minLength: 0)
             VStack(spacing: 6) {
-                BookLowerBar(reader: reader, layout: layout)
+                // Reading along, the narration's dock is the lower bar (#21).
+                if let reading = reader.readAlong, let narration = reading.narration {
+                    ReadAlongDock(narration: narration, layout: layout, follow: reading.followLabel,
+                                  focused: reader.controllerActive ? reader.focusedControl.dock : nil,
+                                  onPlay: { reading.togglePlay() }, onFollow: { reading.follow() })
+                } else {
+                    BookLowerBar(reader: reader, layout: layout)
+                }
                 if reader.controllerActive {
                     ReaderHintRow(hints: hints) { reader.pad($0) }
                 }
@@ -198,6 +205,28 @@ struct BookSlider: View {
             @unknown default: break
             }
         }
+    }
+}
+/// Reading along with the menu away (#16, A5): the narration plays, and
+/// where the page stands with it, "Following · 1×". A tap brings the menu
+/// and its dock back.
+struct ReadAlongPill: View {
+    let reading: ReadAlongReader
+    let narration: NarrationModel
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            Label("\(reading.followLabel) · \(PlayerLabels.rate(narration.speed))", systemImage: "play.fill")
+                .font(HubType.body(13, weight: .bold, relativeTo: .footnote))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .glassPanel(Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("readalong-pill")
     }
 }
 #endif

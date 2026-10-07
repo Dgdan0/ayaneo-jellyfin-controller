@@ -29,6 +29,7 @@ public struct DemoTransport: HubTransport {
             ?? DemoPlayback.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoMedia.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoComics.answer(method: method, path: path, query: query, body: request.httpBody)
+            ?? DemoReadAlong.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoBooks.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoReading.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? Self.fixture(method: method, path: path)

@@ -82,7 +82,7 @@ final class ListeningTests: XCTestCase {
         XCTAssertFalse(app.buttons["mini-play"].exists, "the mini player stayed after Stop")
     }
 
-    /// Parts lists the book's chapters by their titles (#31), from the
+    /// The contents list the book's chapters by their titles (#31), from the
     /// manifest's `chapters`: Dark Matter's demo names four across its three tracks.
     @MainActor
     func testPartsListTheBooksChaptersByTitle() {
@@ -91,19 +91,76 @@ final class ListeningTests: XCTestCase {
         let play = app.buttons["listen-play"]
         XCTAssertTrue(play.waitForExistence(timeout: 15), "the audiobook's page did not open: \(buttons(app))")
         XCTAssertTrue(waitUntil(15) { play.isEnabled }, "the audiobook was not put on the player")
-        let parts = app.buttons["Parts"]
-        XCTAssertTrue(parts.waitForExistence(timeout: 5), "the audiobook's page has no Parts: \(buttons(app))")
+        // A book with chapters calls its contents Chapters.
+        let parts = app.buttons["listen-contents"]
+        XCTAssertTrue(parts.waitForExistence(timeout: 5), "the audiobook's page has no contents: \(buttons(app))")
+        XCTAssertEqual(parts.label, "Chapters")
         parts.tap()
         for title in ["One", "Two", "Three", "Four"] {
             let chapter = app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", title, title + " ·"))
                 .firstMatch
-            XCTAssertTrue(chapter.waitForExistence(timeout: 5), "Parts does not list \(title): \(buttons(app))")
+            XCTAssertTrue(chapter.waitForExistence(timeout: 5), "the contents do not list \(title): \(buttons(app))")
         }
         // Chosen, the chapter plays from its start; the book is stopped after.
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Three'")).firstMatch.tap()
         let stop = app.buttons["listen-stop"]
         XCTAssertTrue(stop.waitForExistence(timeout: 5))
         stop.tap()
+    }
+
+    /// An aligned audiobook goes by the book's own chapters (#31): the demo's
+    /// Dark Matter, whose chapters run on from one track into the next, opens
+    /// at its place ten seconds into Three, in its second track.
+    @MainActor
+    func testAnAlignedAudiobookGoesByTheBooksChapters() {
+        let app = launch(open: "listen:rw_demo_darkmatter|demo-dm")
+        let play = app.buttons["listen-play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 15), "the audiobook's page did not open: \(buttons(app))")
+        XCTAssertTrue(waitUntil(15) { play.isEnabled }, "the audiobook was not put on the player")
+        let entry = app.staticTexts["listen-entry"]
+        XCTAssertTrue(waitUntil(10) { entry.exists && entry.label == "Three" }, "not in Three: \(entry.label)")
+        let left = app.staticTexts["listen-time-left"]
+        XCTAssertTrue(left.label.hasPrefix("1 min left in chapter"), "the time left is not the chapter's: \(left.label)")
+
+        // The contents are the book's chapters, by title, the one playing marked.
+        let contents = app.buttons["listen-contents"]
+        XCTAssertEqual(contents.label, "Chapters")
+        contents.tap()
+        XCTAssertTrue(app.staticTexts["Dark Matter · 4 chapters"].waitForExistence(timeout: 5), "the contents have no heading")
+        for title in ["One · 0:52", "Two · 0:58", "Four · 0:45"] {
+            XCTAssertTrue(button(app, containing: title).waitForExistence(timeout: 5), "no \(title) in the contents: \(buttons(app))")
+        }
+        XCTAssertTrue(button(app, containing: "Three").exists)
+        XCTAssertFalse(button(app, containing: "Track 0").exists, "a track is listed among the chapters")
+        // A chapter chosen is where the book goes.
+        button(app, containing: "One · 0:52").tap()
+        XCTAssertTrue(waitUntil(5) { entry.label == "One" }, "choosing One did not go there: \(entry.label)")
+
+        // Next is the next chapter, Three in the next track; back from its start is the one before.
+        app.buttons["Next chapter"].tap()
+        XCTAssertTrue(waitUntil(5) { entry.label == "Two" }, "Next did not go to Two: \(entry.label)")
+        app.buttons["Next chapter"].tap()
+        XCTAssertTrue(waitUntil(5) { entry.label == "Three" }, "Next did not go on to Three: \(entry.label)")
+        app.buttons["Previous chapter"].tap()
+        XCTAssertTrue(waitUntil(5) { entry.label == "Two" }, "Previous did not go back to Two: \(entry.label)")
+
+        // The sleep timer's end is the chapter's.
+        button(app, containing: "Sleep").tap()
+        let endOfChapter = app.buttons["End of this chapter"]
+        XCTAssertTrue(endOfChapter.waitForExistence(timeout: 5), "the sleep timer has no end of chapter: \(buttons(app))")
+        endOfChapter.tap()
+        XCTAssertTrue(button(app, containing: "Sleep · end of chapter").waitForExistence(timeout: 5),
+                      "the sleep timer does not say it ends with the chapter: \(buttons(app))")
+        button(app, containing: "Sleep").tap()
+        app.buttons["Turn off"].tap()
+
+        // Away from its page, the mini player names the chapter under the book.
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Back to'")).firstMatch.tap()
+        let detail = app.staticTexts["mini-detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5), "no mini player away from the book's page: \(buttons(app))")
+        XCTAssertTrue(detail.label.hasPrefix("Two · "), "the mini player does not name the chapter: \(detail.label)")
+        button(app, containing: "Dark Matter, Two, open").tap()
+        app.buttons["listen-stop"].tap()
     }
 
     /// One sound at a time: a video opened while the book plays pauses it.

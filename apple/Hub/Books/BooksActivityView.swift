@@ -58,18 +58,20 @@ struct BooksActivityView: View {
         }
         .refreshable { polls += 1 }
         .task(id: polls) { await poll() }
-        .confirmationDialog("Cancel transfer?", isPresented: Binding(get: { cancelling != nil },
-                                                                     set: { if !$0 { cancelling = nil } }),
-                            titleVisibility: .visible) {
+        .alert("Cancel transfer?", isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } }),
+               presenting: cancelling) { item in
+            // An alert: iOS 26 hides a dialog's cancel role. The harmless answer has the cancel
+            // role: Escape presses it, and iOS 26 shows it last, its own place for it. A plain
+            // button instead brought a third answer, a Cancel of iOS's own.
             Button("Keep transfer", role: .cancel) { cancelling = nil }
                 .accessibilityIdentifier("keep-transfer")
             Button("Cancel transfer", role: .destructive) {
-                if let item = cancelling { Task { await run(.cancel, on: item) } }
                 cancelling = nil
+                Task { await run(.cancel, on: item) }
             }
             .accessibilityIdentifier("confirm-cancel")
-        } message: {
-            if let item = cancelling { Text("\(item.title)\nStop this transfer and delete its incomplete files.") }
+        } message: { item in
+            Text("\(item.title)\nStop this transfer and delete its incomplete files.")
         }
     }
 

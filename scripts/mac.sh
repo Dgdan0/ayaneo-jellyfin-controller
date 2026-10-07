@@ -54,7 +54,8 @@
 # HUB_READ_CHROME=pinned, HUB_READ_PAGE=<n>, HUB_READ_SHEET=display|keys|pages|end,
 # HUB_BOOK=<work id>/<edition id> (the ebook reader, with -demo only: rw_demo_rr6/rr6),
 # HUB_BOOK_CHROME=pinned, HUB_BOOK_AT=<percent>, HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys,
-# HUB_BOOK_SCROLL=1|0 (continuous scrolling on or off, kept as Appearance keeps it) and,
+# HUB_BOOK_SCROLL=1|0 (continuous scrolling on or off, kept as Appearance keeps it), HUB_BOOK_READALONG=1
+# (read along: rw_demo_darkmatter/demo-dm) and,
 # with -demo, HUB_PLAY_FROM_END=<seconds>. SHOT_SIMS="iPad Pro (12.9-inch) (4th generation),iPhone 17 Pro Max"
 # limits sims and shot to those simulators, and HUB_WIDTH=375 lays the app out
 # in a window that wide, as an iPad's Split View would; SHOT_STATE names the screenshots
@@ -188,6 +189,7 @@ launch_sim() {
     SIMCTL_CHILD_HUB_BOOK_SHEET="${HUB_BOOK_SHEET:-}" SIMCTL_CHILD_HUB_BOOK_SCROLL="${HUB_BOOK_SCROLL:-}" \
     SIMCTL_CHILD_HUB_SEEN_DWELL_MS="${HUB_SEEN_DWELL_MS:-}" \
     SIMCTL_CHILD_HUB_HERO="${HUB_HERO:-}" \
+    SIMCTL_CHILD_HUB_BOOK_READALONG="${HUB_BOOK_READALONG:-}" \
     SIMCTL_CHILD_HUB_WIDTH="${HUB_WIDTH:-}" SIMCTL_CHILD_HUB_ORIENT="$(cat "$SHOTS/.turned-$udid" 2>/dev/null)" \
     xcrun simctl launch "$udid" "$BUNDLE_ID" $(launch_args "$@") >/dev/null
 }

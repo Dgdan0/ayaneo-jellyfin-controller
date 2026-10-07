@@ -232,7 +232,7 @@ struct MainView: View {
     /// The audiobook player, one for the app (#25 phase 2).
     @State private var listening = ListeningModel.shared
     /// One sound at a time: the video and an audiobook.
-    @State private var sounds = SoundGuard()
+    @State private var sounds = SoundGuard.shared
     @State private var profilesOpen = false
     @State private var sheetPlaces = false
     /// The Mac's window buttons sit over the page under its hidden title bar:

@@ -18,13 +18,17 @@ public enum DemoReading {
         public let title: String
         public let narrator: String
         public let tracksMs: [Int64]
+        /// Chapter marks inside the tracks.
         public let chapters: [(title: String, startMs: Int64, track: Int)]
+        /// Aligned with its read-along edition (`DemoReadAlong`, #31): the
+        /// hub maps the edition's audio onto the tracks, and the chapters
+        /// are the book's own, placed by their narration.
+        public var aligned = false
     }
 
     public static let audiobooks = [
         Audiobook(workId: "rw_demo_darkmatter", sourceItemId: "demo-dm", title: "Dark Matter", narrator: "Jon Lindstrom",
-                  tracksMs: [90_000, 75_000, 60_000],
-                  chapters: [("One", 0, 0), ("Two", 40_000, 0), ("Three", 0, 1), ("Four", 0, 2)]),
+                  tracksMs: [90_000, 75_000, 60_000], chapters: [], aligned: true),
         Audiobook(workId: "rw_demo_alloy", sourceItemId: "demo-alloy", title: "The Alloy of Law", narrator: "Michael Kramer",
                   tracksMs: [80_000, 80_000], chapters: []),
     ]
@@ -621,6 +625,16 @@ public enum DemoReading {
     }
 
     static func manifestFields(_ book: Audiobook) -> [String: Any] {
+        var fields = plainManifestFields(book)
+        if book.aligned {
+            fields["aligned"] = true
+            fields["alignment"] = DemoReadAlong.alignment()
+            fields["chapters"] = DemoReadAlong.bookChapters()
+        }
+        return fields
+    }
+
+    private static func plainManifestFields(_ book: Audiobook) -> [String: Any] {
         ["workId": book.workId, "sourceItemId": book.sourceItemId, "revision": revision, "narrator": book.narrator,
          "totalMs": book.tracksMs.reduce(0, +), "aligned": false,
          "tracks": book.tracksMs.enumerated().map { index, length in
@@ -628,7 +642,8 @@ public enum DemoReading {
               "durationMs": length, "bytes": DemoAudio.byteCount(milliseconds: length), "mime": "audio/wav",
               "etag": "\"demo\(index)\""] as [String: Any]
          },
-         "chapters": book.chapters.map { ["title": $0.title, "startMs": $0.startMs, "track": $0.track] as [String: Any] },
+         "chapters": book.chapters.map { ["title": $0.title, "startMs": $0.startMs, "track": $0.track,
+                                          "source": ReadingAudioChapter.marks] as [String: Any] },
          "cache": ["hit": false, "ageSeconds": 0]]
     }
 
