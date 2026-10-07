@@ -58,6 +58,13 @@ type alignedOptions struct {
 	epub func(path string)
 	// audioBytes is the size of each audio entry of the edition (2048 by default).
 	audioBytes int
+	// contents, documents and contentsIn are the table of contents of the generated
+	// edition, the documents nothing narrates that it may point at, and where it keeps
+	// them (readingdomain.AlignedEPUBOptions). Left alone, every narrated file is a
+	// chapter called "Part N".
+	contents   []readingdomain.FixtureContent
+	documents  []readingdomain.FixtureDocument
+	contentsIn readingdomain.FixtureContentsIn
 }
 
 // newAlignedTrackedEnv is the tracked book with a read-along edition beside it.
@@ -97,7 +104,10 @@ func newAlignedTrackedEnv(t *testing.T, options alignedOptions) *audioEnv {
 			}
 		}
 		epubPath := filepath.Join(book.Dir, "aligned.epub")
-		fixture, err := readingdomain.GenerateAlignedEPUB(epubPath, readingdomain.AlignedEPUBOptions{PackageDir: "OEBPS", AudioBytes: options.audioBytes, Narrations: narrations})
+		fixture, err := readingdomain.GenerateAlignedEPUB(epubPath, readingdomain.AlignedEPUBOptions{
+			PackageDir: "OEBPS", AudioBytes: options.audioBytes, Narrations: narrations,
+			Contents: options.contents, Documents: options.documents, ContentsIn: options.contentsIn,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -393,6 +403,13 @@ func stripOverlays(t *testing.T, path string) {
 // place and leaves every other entry as it was, in its order.
 func rewriteAlignedEPUB(t *testing.T, path string, change func(opf string) string) {
 	t.Helper()
+	rewriteAlignedEPUBEntry(t, path, "OEBPS/content.opf", change)
+}
+
+// rewriteAlignedEPUBEntry is the same for any one entry, named by its path in the
+// archive.
+func rewriteAlignedEPUBEntry(t *testing.T, path, name string, change func(content string) string) {
+	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -413,7 +430,7 @@ func rewriteAlignedEPUB(t *testing.T, path string, change func(opf string) strin
 		if err != nil {
 			t.Fatal(err)
 		}
-		if entry.Name == "OEBPS/content.opf" {
+		if entry.Name == name {
 			body = []byte(change(string(body)))
 		}
 		target, err := writer.CreateHeader(&zip.FileHeader{Name: entry.Name, Method: entry.Method, Modified: entry.Modified})

@@ -52,7 +52,9 @@ const (
 
 // ReadingAudioManifest is what an app needs to play an audiobook from the hub:
 // its tracks in the order to play them, each with an id that survives a rescan,
-// and the chapters inside them. `revision` names this list of files; a track
+// and the chapters inside them: the marks of its files, or, on a book whose
+// read-along edition is aligned, the chapters of that edition's table of
+// contents (each says which in `source`). `revision` names this list of files; a track
 // request carries it back (`?rev=`) and is refused with 412 audio_changed if
 // the files have changed since, so a rescan cannot play another file under an
 // old index. A book with a read-along edition folds that edition into its
@@ -94,13 +96,23 @@ type ReadingAudioTrack struct {
 	ETag string `json:"etag"`
 }
 
-// ReadingAudioChapter is a chapter mark inside a track. StartMs counts from the
-// start of that track, so a player seeks to it as (track, StartMs).
+// ReadingAudioChapter is a chapter inside the audiobook. StartMs counts from the
+// start of that track, so a player seeks to it as (track, StartMs). Source says
+// where the chapter comes from: "marks" is a chapter mark in a file (ffprobe's,
+// or the chapters Storyteller lists for a lone M4B) and "book" is an entry of the
+// table of contents of the book's read-along edition, placed by its narration
+// (reading_audio_chapters.go). A book has chapters of one source only.
 type ReadingAudioChapter struct {
 	Title   string `json:"title"`
 	StartMs int64  `json:"startMs"`
 	Track   int    `json:"track"`
+	Source  string `json:"source"`
 }
+
+const (
+	chapterSourceMarks = "marks"
+	chapterSourceBook  = "book"
+)
 
 // audioPlan is the hub's reading of one audiobook against the disk: the manifest
 // it answers with and what the bytes route needs to serve a track. It is built
@@ -110,6 +122,8 @@ type audioPlan struct {
 	totalMs  int64
 	revision string
 	tracks   []audioTrack
+	// chapters are the files' own marks, or, once the book's edition is aligned
+	// (alignPlan), the chapters of its table of contents.
 	chapters []ReadingAudioChapter
 	// entries are Storyteller's manifest as it was read, in its order: what a
 	// place is written against and read back from (reading_audio_position.go).
@@ -440,7 +454,7 @@ func (s *Server) planLoneM4B(roots []config.MediaRemovalRoot, folder string, boo
 			if title == "" {
 				title = fmt.Sprintf("Chapter %d", i+1)
 			}
-			chapters = append(chapters, ReadingAudioChapter{Title: title, StartMs: entry.startMs, Track: 0})
+			chapters = append(chapters, ReadingAudioChapter{Title: title, StartMs: entry.startMs, Track: 0, Source: chapterSourceMarks})
 		}
 	}
 	title := strings.TrimSpace(book.Title)
@@ -510,7 +524,7 @@ func (s *Server) planTracks(ctx context.Context, book storyteller.Book, files []
 				if name == "" {
 					name = fmt.Sprintf("Chapter %d", len(chapters)+1)
 				}
-				chapters = append(chapters, ReadingAudioChapter{Title: name, StartMs: mark.StartMs, Track: place})
+				chapters = append(chapters, ReadingAudioChapter{Title: name, StartMs: mark.StartMs, Track: place, Source: chapterSourceMarks})
 			}
 		}
 	}

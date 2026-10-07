@@ -427,7 +427,11 @@ func TestAudioManifestListsChaptersOnlyFromFilesWithTwoOrMoreMarks(t *testing.T)
 	manifest := env.manifest()
 	// The file's place in the served order, not Storyteller's.
 	place := slices.Index(env.namesOf(manifest), second)
-	want := []ReadingAudioChapter{{"One", 0, place}, {"Two", 400000, place}, {"Chapter 3", 800000, place}}
+	want := []ReadingAudioChapter{
+		{Title: "One", StartMs: 0, Track: place, Source: "marks"},
+		{Title: "Two", StartMs: 400000, Track: place, Source: "marks"},
+		{Title: "Chapter 3", StartMs: 800000, Track: place, Source: "marks"},
+	}
 	if !reflect.DeepEqual(manifest.Chapters, want) {
 		t.Fatalf("chapters = %+v, want %+v", manifest.Chapters, want)
 	}
@@ -474,7 +478,11 @@ func TestAudioManifestOfALoneM4BIsOneTrackWithStorytellersChapters(t *testing.T)
 	if manifest.TotalMs != 4200750 {
 		t.Fatalf("total = %d", manifest.TotalMs)
 	}
-	want := []ReadingAudioChapter{{"Opening", 0, 0}, {"The Middle", 1500500, 0}, {"Track 3", 3300750, 0}}
+	want := []ReadingAudioChapter{
+		{Title: "Opening", StartMs: 0, Track: 0, Source: "marks"},
+		{Title: "The Middle", StartMs: 1500500, Track: 0, Source: "marks"},
+		{Title: "Track 3", StartMs: 3300750, Track: 0, Source: "marks"},
+	}
 	if !reflect.DeepEqual(manifest.Chapters, want) {
 		t.Fatalf("chapters = %+v, want %+v", manifest.Chapters, want)
 	}
@@ -849,7 +857,7 @@ func TestAudioManifestHasTheDocumentedFields(t *testing.T) {
 		t.Errorf("track keys = %v, want %v", got, want)
 	}
 	chapter := body["chapters"].([]any)[0].(map[string]any)
-	if got, want := keys(chapter), []string{"startMs", "title", "track"}; !reflect.DeepEqual(got, want) {
+	if got, want := keys(chapter), []string{"source", "startMs", "title", "track"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("chapter keys = %v, want %v", got, want)
 	}
 	if cache := body["cache"].(map[string]any); cache["hit"] != false {

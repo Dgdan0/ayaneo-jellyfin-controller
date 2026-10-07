@@ -202,7 +202,14 @@ func (s *Server) alignPlan(ctx context.Context, book storyteller.Book, plan *aud
 
 	narration, _, err := cache.Fetch(ctx, s.cache, alignmentKey(file), cache.ReadingAlignment,
 		func(fetchCtx context.Context) (*readingdomain.Alignment, error) {
-			return s.readAlignment(contextReaderAt{ReaderAt: file, ctx: fetchCtx}, file.Size)
+			narration, err := s.readAlignment(contextReaderAt{ReaderAt: file, ctx: fetchCtx}, file.Size)
+			if err == nil && fetchCtx.Err() != nil {
+				// The edition's contents are read last and an edition without them is still
+				// an edition, so a read cut short there would succeed without them and be
+				// kept, for hours, as the edition's.
+				return nil, fetchCtx.Err()
+			}
+			return narration, err
 		})
 	if err != nil {
 		if ctx.Err() != nil {
@@ -225,6 +232,11 @@ func (s *Server) alignPlan(ctx context.Context, book storyteller.Book, plan *aud
 	mapped.edition = strconv.FormatInt(file.Size, 10) + "\x00" + strconv.FormatInt(file.ModTime.UnixNano(), 10)
 	plan.alignment = mapped
 	plan.revision = audioRevision(plan.tracks, mapped.edition)
+	// The edition's own table of contents, placed by its narration, is the book's
+	// chapters when it gives enough of them; otherwise the files' own stay.
+	if chapters := mapped.bookChapters(plan.trackLengths()); len(chapters) >= minBookChapters {
+		plan.chapters = chapters
+	}
 	return nil
 }
 
