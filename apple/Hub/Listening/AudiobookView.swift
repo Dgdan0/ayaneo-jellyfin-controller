@@ -27,6 +27,8 @@ struct AudiobookView: View {
     @State private var opening: ListeningModel.Opening?
     @State private var scrub: Double?
     @State private var reloads = 0
+    @State private var showsComfort = false
+    @State private var comfort = ReaderComfort.shared
 
     private var mine: Bool { listening.book?.isSame(workId: workId, sourceItemId: sourceItemId) == true }
     private var seekSeconds: Int { ListeningSettings.seekSeconds }
@@ -49,6 +51,26 @@ struct AudiobookView: View {
             .padding(.bottom, 28)
         }
         .ambientArtwork(work?.artwork ?? "")
+        // Comfort, as in every reader (#37): the page dimmed and warmed.
+        .overlay { ComfortLayer(comfort: comfort.value) }
+        .sheet(isPresented: $showsComfort) {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) { ComfortControls(book: false) }
+                        .padding(16)
+                }
+                .navigationTitle("Comfort")
+                #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #endif
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) { Button("Done") { showsComfort = false } }
+                }
+            }
+            .presentationDetents([.medium])
+            .presentationBackground(.ultraThinMaterial)
+            .environment(\.colorScheme, .dark)
+        }
         .task(id: "\(workId)·\(sourceItemId)·\(reloads)") { await open() }
         .confirmationDialog(opening?.prompt?.title ?? "", isPresented: Binding(
             get: { opening?.prompt != nil }, set: { if !$0 { cancelOpening() } }), titleVisibility: .visible) {
@@ -252,6 +274,13 @@ struct AudiobookView: View {
                 }
                 .menuStyle(.button)
                 .buttonStyle(GlassControlStyle())
+                Button {
+                    showsComfort = true
+                } label: {
+                    Label("Comfort", systemImage: "sun.max")
+                }
+                .buttonStyle(GlassControlStyle())
+                .accessibilityIdentifier("listen-comfort")
                 Button {
                     listening.stop()
                 } label: {

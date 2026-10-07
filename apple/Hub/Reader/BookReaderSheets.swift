@@ -141,8 +141,9 @@ struct BookReaderSheetView: View {
 
 /// Appearance (Android's `EpubAppearancePanel`): Font (the typeface, its
 /// size, one page per screen), Layout (columns, margins, line spacing,
-/// scrolling, the publisher's styling, justified text) and Themes (the page's
-/// colours). Every change shows at once and is kept for every book.
+/// scrolling, the publisher's styling, justified text), Themes (the page's
+/// colours) and Comfort (#37: brightness, warmth, a black page, the screen
+/// kept on while narrating). Every change shows at once and is kept.
 struct BookAppearanceSheet: View {
     let reader: BookReaderModel
 
@@ -153,11 +154,13 @@ struct BookAppearanceSheet: View {
             tab("Font", .font)
             tab("Layout", .layout)
             tab("Themes", .themes)
+            tab("Comfort", .comfort)
         }
         switch reader.appearanceTab {
         case .font: font
         case .layout: layout
         case .themes: themes
+        case .comfort: ComfortControls(book: true)
         }
     }
 

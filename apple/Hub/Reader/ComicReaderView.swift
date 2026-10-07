@@ -56,6 +56,7 @@ struct ComicReaderScreen: View {
     @Environment(\.closeReader) private var closeReader
     @Environment(\.scenePhase) private var scenePhase
     @State private var pad = ReaderPadInput()
+    @State private var comfort = ReaderComfort.shared
     @State private var scrubbing: Int?
     @State private var scrubTrack = CGRect.zero
     @FocusState private var keys: Bool
@@ -105,6 +106,8 @@ struct ComicReaderScreen: View {
                     ComicReaderSheetView(reader: reader, sheet: sheet, layout: layout)
                         .id(sheet)
                 }
+                // Comfort over the whole reader, pages and controls (#37).
+                ComfortLayer(comfort: comfort.value)
                 #if os(macOS)
                 // The hidden title bar's band still moves the window.
                 Color.clear

@@ -87,7 +87,7 @@ final class BookReaderModel {
     }
 
     enum AppearanceTab: Hashable {
-        case font, layout, themes
+        case font, layout, themes, comfort
     }
 
     let workId: String
@@ -138,7 +138,11 @@ final class BookReaderModel {
     @ObservationIgnored var onKept: (() -> Void)?
     /// The device is in dark mode: system colours follow it.
     var systemDark = false {
-        didSet { if oldValue != systemDark && preferences.theme == .system { navigator.submit(rendering) } }
+        didSet {
+            if oldValue != systemDark && preferences.theme == .system && !ReaderComfort.shared.value.blackPage {
+                navigator.submit(rendering)
+            }
+        }
     }
 
     @ObservationIgnored private let hub: HubClient
@@ -244,7 +248,13 @@ final class BookReaderModel {
                        narration: readAlong?.narration != nil, loading: phase != .reading)
     }
 
-    var rendering: EpubRendering { EpubRendering(preferences, systemDark: systemDark) }
+    /// The page as Appearance chose it, black when Comfort asks (#37).
+    var rendering: EpubRendering { EpubRendering(preferences, systemDark: systemDark).comforted(ReaderComfort.shared.value) }
+
+    /// Comfort's black page went on or off: the page is drawn again.
+    func comfortChanged() {
+        navigator.submit(rendering)
+    }
 
     // MARK: Opening
 

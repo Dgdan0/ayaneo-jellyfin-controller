@@ -92,6 +92,7 @@ struct BookReaderScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
     @State private var pad = ReaderPadInput()
+    @State private var comfort = ReaderComfort.shared
     @State private var topBar = CGRect.zero
     @State private var bottomBar = CGRect.zero
     @FocusState private var keys: Bool
@@ -139,6 +140,8 @@ struct BookReaderScreen: View {
                     BookReaderSheetView(reader: reader, sheet: sheet, layout: layout)
                         .id(sheet == .bookmarks ? BookReaderModel.Sheet.contents : sheet)
                 }
+                // Comfort over the whole reader, page and controls (#37).
+                ComfortLayer(comfort: comfort.value)
             }
             .coordinateSpace(.named(Self.space))
             .ignoresSafeArea()
@@ -186,6 +189,12 @@ struct BookReaderScreen: View {
         .onDisappear {
             pad.stop()
             reader.stop()
+            comfort.letSleep()
+        }
+        .onChange(of: comfort.value.blackPage) { _, _ in reader.comfortChanged() }
+        // Reading along, the screen stays awake while the voice reads, as Comfort asks.
+        .onChange(of: "\(reader.readAlong?.narration?.playing == true)·\(comfort.value.awakeWhileNarrating)") { _, _ in
+            comfort.keepAwake(narrating: reader.readAlong?.narration?.playing == true)
         }
         .onChange(of: pad.connected, initial: true) { _, connected in reader.controllerActive = connected }
         .onChange(of: colorScheme) { _, scheme in reader.systemDark = scheme == .dark }
@@ -250,7 +259,7 @@ struct BookReaderScreen: View {
     /// Debug builds, for screenshots: HUB_BOOK_SCROLL=1 (or 0) turns continuous
     /// scrolling on (or off) for every book, as Appearance would and kept as it
     /// keeps it; HUB_BOOK_AT=<percent> goes that far into the book;
-    /// HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys opens the menu
+    /// HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|comfort|keys opens the menu
     /// or a sheet, once the book has opened.
     private func debugTour() async {
         guard reader.phase == .reading else { return }
@@ -271,6 +280,9 @@ struct BookReaderScreen: View {
         case "contents": reader.openSheet(.contents)
         case "bookmarks": reader.openSheet(.bookmarks)
         case "appearance": reader.openSheet(.appearance)
+        case "comfort":
+            reader.appearanceTab = .comfort
+            reader.openSheet(.appearance)
         case "keys": reader.openSheet(.keys)
         default: break
         }
