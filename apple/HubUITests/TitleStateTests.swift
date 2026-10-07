@@ -24,6 +24,28 @@ final class TitleStateTests: XCTestCase {
         return XCTWaiter().wait(for: [enabled], timeout: timeout) == .completed
     }
 
+    /// A cast portrait the hub names on TMDB opens their films and series
+    /// (#27); one it cannot name opens nothing.
+    @MainActor
+    func testACastPortraitOpensTheFilmography() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo"]
+        app.launchEnvironment = ["HUB_SECTION": "library", "HUB_SIDE": "media", "HUB_OPEN": "Movies"]
+        app.launch()
+        let card = poster(app, "Gran Torino")
+        XCTAssertTrue(card.waitForExistence(timeout: 15), "Movies did not load")
+        card.tap()
+        let cast = app.buttons["Cast"]
+        XCTAssertTrue(cast.waitForExistence(timeout: 10), "the title has no Cast tab: " + buttons(app))
+        cast.tap()
+        let named = poster(app, "Rebecca Ferguson")
+        XCTAssertTrue(named.waitForExistence(timeout: 5), "the named portrait is not a button: " + buttons(app))
+        XCTAssertFalse(poster(app, "A Face in the Crowd").exists, "a portrait with no TMDB id offers an action")
+        named.tap()
+        XCTAssertTrue(app.buttons["Back to Gran Torino"].waitForExistence(timeout: 10), "the filmography did not open")
+        XCTAssertTrue(app.staticTexts["Rebecca Ferguson"].waitForExistence(timeout: 10), "the filmography is not theirs")
+    }
+
     @MainActor
     func testWatchedAndFavouriteChangeAndStay() {
         let app = XCUIApplication()

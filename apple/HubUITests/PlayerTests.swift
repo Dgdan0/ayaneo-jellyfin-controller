@@ -18,16 +18,19 @@ final class PlayerTests: XCTestCase {
     /// The app with the player open on the demo's Bleach S1E5, its chrome held
     /// up; `width` lays it out in a window that narrow (`HUB_WIDTH`).
     @MainActor
-    private func launchPlaying(width: Int? = nil, holdingFeedback: Bool = false) -> XCUIApplication {
+    private func launchPlaying(width: Int? = nil, holdingFeedback: Bool = false, seekSeconds: Int? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo"]
+        // Settings › Playback's jump for this launch only: an argument, not a saved setting.
+        if let seekSeconds { app.launchArguments += ["-playback.seekSeconds", String(seekSeconds)] }
         app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "media",
                                  "HUB_PLAY": "demo-e5", "HUB_PLAY_CHROME": "pinned"]
         if let width { app.launchEnvironment["HUB_WIDTH"] = String(width) }
         if holdingFeedback { app.launchEnvironment["HUB_PLAY_FEEDBACK"] = "hold" }
         app.launch()
         XCTAssertTrue(app.buttons["Lock controls"].waitForExistence(timeout: 15), "the player did not open")
-        XCTAssertTrue(app.staticTexts["Bleach"].exists)
+        // The title comes with the plan, a moment after the controls on a busy Mac.
+        XCTAssertTrue(app.staticTexts["Bleach"].waitForExistence(timeout: 10), "the player has no title")
         return app
     }
 
@@ -38,6 +41,17 @@ final class PlayerTests: XCTestCase {
         XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 5), "Back left the player open")
         // The shell is there again, and VoiceOver can reach it.
         XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 5))
+    }
+
+    /// The ± buttons go as far as Settings › Playback says, as an audiobook's do.
+    @MainActor
+    func testTheJumpsGoAsFarAsThePlaybackSetting() {
+        let app = launchPlaying(seekSeconds: 30)
+        XCTAssertTrue(app.buttons["Forward 30 seconds"].waitForExistence(timeout: 5), "the jump forward is not 30 seconds: "
+                      + app.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }.joined(separator: " | "))
+        XCTAssertTrue(app.buttons["Back 30 seconds"].exists, "the jump back is not 30 seconds")
+        app.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 5), "Back left the player open")
     }
 
     /// Without picture in picture (the iPhone simulator has none, and a

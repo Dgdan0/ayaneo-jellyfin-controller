@@ -321,23 +321,28 @@ public struct LibraryPerson: Decodable, Equatable, Sendable, Identifiable {
     /// "Actor", "Director", "Writer", …
     public var type: String
     public var image: String
+    /// Their TMDB id (#27), for the filmography (`GET /v1/person/{id}`); 0
+    /// when Jellyfin knows none, or from a hub that sends none.
+    public var tmdbId: Int
 
     public var id: String { personId.isEmpty ? name + role : personId + role }
 
-    public init(personId: String = "", name: String, role: String = "", type: String = "", image: String = "") {
+    public init(personId: String = "", name: String, role: String = "", type: String = "", image: String = "",
+                tmdbId: Int = 0) {
         self.personId = personId
         self.name = name
         self.role = role
         self.type = type
         self.image = image
+        self.tmdbId = tmdbId
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, role, type, image }
+    enum CodingKeys: String, CodingKey { case id, name, role, type, image, tmdbId }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(personId: c.value(.id, ""), name: c.value(.name, ""), role: c.value(.role, ""),
-                  type: c.value(.type, ""), image: c.value(.image, ""))
+                  type: c.value(.type, ""), image: c.value(.image, ""), tmdbId: max(0, c.value(.tmdbId, 0)))
     }
 }
 
