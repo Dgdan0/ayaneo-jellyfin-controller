@@ -45,6 +45,9 @@ public enum DemoReadAlong {
         let title: String
         let name: String
         let stretches: [Stretch]
+        /// Its text's file: the demo ebook's own (`DemoEpub`), so a place kept in
+        /// the ebook opens in the read-along edition, as one book's do.
+        var file: String { String(format: "chapter-%02ld.xhtml", (DemoReadAlong.chapters.firstIndex { $0.name == name } ?? 0) + 1) }
     }
 
     /// The chapters and where they are spoken. The audiobook's tracks are 90,
@@ -131,10 +134,10 @@ public enum DemoReadAlong {
             ("OEBPS/content.opf", Data(package().utf8)),
             ("OEBPS/nav.xhtml", Data(nav().utf8)),
             ("OEBPS/Styles/book.css", Data(stylesheet.utf8)),
-            ("OEBPS/Text/title.xhtml", Data(titlePage.utf8)),
+            ("OEBPS/about.xhtml", Data(titlePage.utf8)),
         ]
         for index in chapters.indices {
-            entries.append(("OEBPS/Text/\(chapters[index].name).xhtml", Data(page(index).utf8)))
+            entries.append(("OEBPS/" + chapters[index].file, Data(page(index).utf8)))
             entries.append(("OEBPS/Overlays/\(chapters[index].name).smil", Data(overlay(index).utf8)))
         }
         return StoredZip.archive(entries)
@@ -150,9 +153,9 @@ public enum DemoReadAlong {
     private static func package() -> String {
         var items = [#"<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>"#,
                      #"<item id="css" href="Styles/book.css" media-type="text/css"/>"#,
-                     #"<item id="title" href="Text/title.xhtml" media-type="application/xhtml+xml"/>"#]
+                     #"<item id="title" href="about.xhtml" media-type="application/xhtml+xml"/>"#]
         for chapter in chapters {
-            items.append(#"<item id="\#(chapter.name)" href="Text/\#(chapter.name).xhtml" media-type="application/xhtml+xml" media-overlay="\#(chapter.name)-overlay"/>"#)
+            items.append(#"<item id="\#(chapter.name)" href="\#(chapter.file)" media-type="application/xhtml+xml" media-overlay="\#(chapter.name)-overlay"/>"#)
             items.append(#"<item id="\#(chapter.name)-overlay" href="Overlays/\#(chapter.name).smil" media-type="application/smil+xml"/>"#)
         }
         for (index, file) in files.enumerated() {
@@ -182,8 +185,8 @@ public enum DemoReadAlong {
     }
 
     private static func nav() -> String {
-        let links = [#"<li><a href="Text/title.xhtml">Dark Matter</a></li>"#]
-            + chapters.map { #"<li><a href="Text/\#($0.name).xhtml">\#($0.title)</a></li>"# }
+        let links = [#"<li><a href="about.xhtml">Dark Matter</a></li>"#]
+            + chapters.map { #"<li><a href="\#($0.file)">\#($0.title)</a></li>"# }
         return """
             <?xml version="1.0" encoding="UTF-8"?>
             <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="en">
@@ -204,7 +207,7 @@ public enum DemoReadAlong {
     private static let titlePage = """
         <?xml version="1.0" encoding="UTF-8"?>
         <html xmlns="http://www.w3.org/1999/xhtml" lang="en">
-        <head><title>Dark Matter</title><link rel="stylesheet" href="../Styles/book.css"/></head>
+        <head><title>Dark Matter</title><link rel="stylesheet" href="Styles/book.css"/></head>
         <body><h1>Dark Matter</h1><p style="text-align: center">Blake Crouch</p>
         <p style="text-align: center">The demo hub's read-along edition</p></body>
         </html>
@@ -221,7 +224,7 @@ public enum DemoReadAlong {
         return """
             <?xml version="1.0" encoding="UTF-8"?>
             <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="en">
-            <head><title>\(title)</title><link rel="stylesheet" href="../Styles/book.css"/></head>
+            <head><title>\(title)</title><link rel="stylesheet" href="Styles/book.css"/></head>
             <body><section epub:type="chapter"><h1>\(title)</h1>
             \(paragraphs.joined(separator: "\n"))
             </section></body>
@@ -231,15 +234,16 @@ public enum DemoReadAlong {
 
     private static func overlay(_ chapter: Int) -> String {
         let name = chapters[chapter].name
+        let file = chapters[chapter].file
         let pars = sentences(chapter).map { sentence in
             let audio = files[sentence.file].href.replacingOccurrences(of: "OEBPS/", with: "../")
-            return #"<par id="\#(sentence.id)-par"><text src="../Text/\#(name).xhtml#\#(sentence.id)"/>"#
+            return #"<par id="\#(sentence.id)-par"><text src="../\#(file)#\#(sentence.id)"/>"#
                 + #"<audio src="\#(audio)" clipBegin="\#(seconds(sentence.beginMs))" clipEnd="\#(seconds(sentence.endMs))"/></par>"#
         }
         return """
             <?xml version="1.0" encoding="UTF-8"?>
             <smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0">
-            <body><seq id="\(name)-seq" epub:textref="../Text/\(name).xhtml">
+            <body><seq id="\(name)-seq" epub:textref="../\(file)">
             \(pars.joined(separator: "\n"))
             </seq></body>
             </smil>

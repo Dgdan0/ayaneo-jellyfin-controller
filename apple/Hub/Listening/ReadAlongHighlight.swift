@@ -17,15 +17,15 @@ enum ReadAlongHighlight {
     /// The decoration group of the sentence being read.
     static let group: DecorationGroup = "readalong"
 
-    /// The sentence's template, in `tint`.
-    static func templates(tint: UIColor) -> [Decoration.Style.Id: HTMLDecorationTemplate] {
-        [style: HTMLDecorationTemplate(layout: .boxes, width: .wrap, element: ReadAlongGlow.element(tint: rgb(tint)),
+    /// The sentence's template, in `tint` (an accent's colour, 0xAARRGGBB).
+    static func templates(tint: UInt32) -> [Decoration.Style.Id: HTMLDecorationTemplate] {
+        [style: HTMLDecorationTemplate(layout: .boxes, width: .wrap, element: ReadAlongGlow.element(tint: tint),
                                        stylesheet: ReadAlongGlow.stylesheet)]
     }
 
     /// Readium's own templates with the sentence's: what a read-along
     /// navigator is configured with.
-    static func allTemplates(tint: UIColor) -> [Decoration.Style.Id: HTMLDecorationTemplate] {
+    static func allTemplates(tint: UInt32) -> [Decoration.Style.Id: HTMLDecorationTemplate] {
         HTMLDecorationTemplate.defaultTemplates().merging(templates(tint: tint)) { _, sentence in sentence }
     }
 
@@ -43,14 +43,6 @@ enum ReadAlongHighlight {
             return nil
         }
         return try? Locator(jsonString: json)
-    }
-
-    /// `color` as 0xRRGGBB, its alpha left to the glow.
-    static func rgb(_ color: UIColor) -> UInt32 {
-        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
-        guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return 0xE3B341 }
-        func channel(_ value: CGFloat) -> UInt32 { UInt32((min(max(value, 0), 1) * 255).rounded()) }
-        return channel(red) << 16 | channel(green) << 8 | channel(blue)
     }
 }
 #endif

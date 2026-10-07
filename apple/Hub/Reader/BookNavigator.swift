@@ -98,12 +98,16 @@ final class BookNavigator: NSObject {
     }
 
     /// The navigator over `loaded`, at `locator` (JSON) or the beginning,
-    /// drawn as `rendering` says.
-    func makeController(_ loaded: Loaded, at locator: String?, rendering: EpubRendering) throws -> UIViewController {
+    /// drawn as `rendering` says. Reading along, the sentence spoken glows
+    /// in `narration`'s colour (`ReadAlongHighlight`).
+    func makeController(_ loaded: Loaded, at locator: String?, rendering: EpubRendering,
+                        narration: UInt32? = nil) throws -> UIViewController {
         let initial = locator.flatMap { try? Locator(jsonString: $0) }
+        let templates = narration.map(ReadAlongHighlight.allTemplates) ?? HTMLDecorationTemplate.defaultTemplates()
         let navigator = try EPUBNavigatorViewController(
             publication: loaded.publication, initialLocation: initial,
-            config: EPUBNavigatorViewController.Configuration(preferences: Self.preferences(rendering)))
+            config: EPUBNavigatorViewController.Configuration(preferences: Self.preferences(rendering),
+                                                              decorationTemplates: templates))
         navigator.delegate = self
         publication = loaded.publication
         controller = navigator
@@ -129,6 +133,23 @@ final class BookNavigator: NSObject {
     func go(to json: String) async -> Bool {
         guard let controller, let locator = try? Locator(jsonString: json) else { return false }
         return await controller.go(to: locator, options: NavigatorGoOptions(animated: false))
+    }
+
+    // MARK: Read along
+
+    /// The sentence spoken glows, or nothing does.
+    func highlight(_ segment: ReadAlongSegment?) {
+        controller?.apply(decorations: ReadAlongHighlight.decorations(segment), in: ReadAlongHighlight.group)
+    }
+
+    /// A script's answer from the page on screen (`ReadAlongPageScript`), or nil.
+    func evaluate(_ script: String) async -> Any? {
+        guard let controller else { return nil }
+        let answer = await controller.evaluateJavaScript(script)
+        #if DEBUG
+        if case .failure(let error) = answer { NSLog("book: a script on the page failed: %@", String(describing: error)) }
+        #endif
+        return try? answer.get()
     }
 
     /// To the note whose card is open.

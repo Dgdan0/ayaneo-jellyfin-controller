@@ -21,6 +21,8 @@ struct ReadAlongDock: View {
     var follow = ""
     /// The control a game controller is on, for its ring.
     var focused: ReadAlongControl?
+    /// Play and pause; the narration's own toggle unless the reader says otherwise.
+    var onPlay: (() -> Void)?
     let onFollow: () -> Void
 
     private var seekSeconds: Int { ListeningSettings.seekSeconds }
@@ -51,7 +53,9 @@ struct ReadAlongDock: View {
                     }
                     .overlay { ring(.back) }
                     .accessibilityIdentifier("readalong-back")
-                    PlayerPlayDisc(playing: narration.playing, buffering: false, size: layout.round + 8) { narration.toggle() }
+                    PlayerPlayDisc(playing: narration.playing, buffering: false, size: layout.round + 8) {
+                        if let onPlay { onPlay() } else { narration.toggle() }
+                    }
                         .accessibilityLabel(narration.playing ? "Pause narration" : "Play narration")
                         .overlay { ring(.play) }
                         .accessibilityIdentifier("readalong-play")

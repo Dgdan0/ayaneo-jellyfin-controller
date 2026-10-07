@@ -304,7 +304,8 @@ final class NarrationModel {
         let note: String
     }
 
-    static func prepare(app: AppModel, workId: String, sourceItemId: String) async throws(ReadAlongError) -> Opening {
+    static func prepare(app: AppModel, workId: String, sourceItemId: String,
+                        force: Bool = false) async throws(ReadAlongError) -> Opening {
         let answer: Result<ReadingAudioManifest, HubFailure>
         do {
             answer = .success(try await app.hub.fetch(HubEndpoints.readingAudioManifest(workId: workId, sourceItemId: sourceItemId),
@@ -320,7 +321,8 @@ final class NarrationModel {
             return Opening(edition: cache.completeFile(workId: workId, sourceItemId: sourceItemId), narration: nil,
                            note: "The narration needs the hub. You can read this book meanwhile.")
         }
-        let edition = try await ReadAlongEdition.file(app: app, cache: cache, workId: workId, sourceItemId: sourceItemId)
+        let edition = try await ReadAlongEdition.file(app: app, cache: cache, workId: workId, sourceItemId: sourceItemId,
+                                                      force: force)
         guard case .stream(let manifest) = plan else {
             return Opening(edition: edition, narration: nil,
                            note: "The hub cannot stream this book's narration yet. You can read it meanwhile.")

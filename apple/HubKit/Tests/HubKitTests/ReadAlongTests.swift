@@ -505,12 +505,12 @@ struct ReadAlongPackageTests {
         #expect(timeline.tracks.map(\.audioHref) == DemoReadAlong.files.map(\.href))
         #expect(timeline.tracks.map(\.startMs) == [6_000, 0, 0, 0])
         #expect(timeline.tracks.map(\.durationMs) == [84_000, 75_000, 30_000, 28_000])
-        #expect(timeline.narrates("OEBPS/Text/two.xhtml"))
-        #expect(!timeline.narrates("OEBPS/Text/title.xhtml"), "the title page has no narration")
+        #expect(timeline.narrates("OEBPS/chapter-02.xhtml"))
+        #expect(!timeline.narrates("OEBPS/about.xhtml"), "the title page has no narration")
         // Two runs on from the first file into the second.
-        let two = try #require(timeline.find(href: "OEBPS/Text/two.xhtml", fragment: "two-s1"))
+        let two = try #require(timeline.find(href: "OEBPS/chapter-02.xhtml", fragment: "two-s1"))
         #expect(two == ReadAlongPosition(track: 0, offsetMs: 46_000))
-        #expect(timeline.find(href: "OEBPS/Text/two.xhtml", fragment: "two-s9") == ReadAlongPosition(track: 1, offsetMs: 0))
+        #expect(timeline.find(href: "OEBPS/chapter-02.xhtml", fragment: "two-s9") == ReadAlongPosition(track: 1, offsetMs: 0))
 
         // The demo hub's manifest maps each file onto a track: the last two share the third, half a minute apart.
         let data = try JSONSerialization.data(withJSONObject: DemoReading.manifestFields(DemoReading.audiobooks[0]))

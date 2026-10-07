@@ -7,8 +7,9 @@ import SwiftUI
 /// and sets `\.closeReader`; debug builds can open it at launch against the
 /// demo hub (`BookReaderDebugLaunch`). Readium's navigator is UIKit, so it
 /// reads on the iPad and the iPhone; the Mac says ebooks come later.
-/// Read along (`readAlong`) arrives after phase 2: until then the book opens
-/// to be read.
+/// Read along (`readAlong`) opens the read-along edition with its narration
+/// (`ReadAlongReader`): the dock is the menu's lower bar, the sentence spoken
+/// glows, and the page follows the voice.
 struct BookReaderView: View {
     let work: ReadingWork
     let sourceItemId: String
@@ -28,7 +29,7 @@ struct BookReaderView: View {
         }
         .task {
             guard reader == nil else { return }
-            let opened = BookReaderModel(app: model, work: work, sourceItemId: sourceItemId)
+            let opened = BookReaderModel(app: model, work: work, sourceItemId: sourceItemId, readAlong: readAlong)
             reader = opened
             opened.start()
             #if DEBUG
@@ -105,6 +106,14 @@ struct BookReaderScreen: View {
                 BookReaderStatus(reader: reader, leave: leave)
                 if reader.controlsVisible && reader.sheet == nil && reader.phase == .reading {
                     BookReaderBars(reader: reader, layout: layout, leave: leave, topBar: $topBar, bottomBar: $bottomBar)
+                        .transition(.opacity)
+                }
+                if reader.sheet == nil && !reader.controlsVisible, let reading = reader.readAlong,
+                   let narration = reading.narration, narration.playing {
+                    ReadAlongPill(reading: reading, narration: narration) { reader.setControls(true) }
+                        .padding(.horizontal, layout.side + 4)
+                        .padding(.bottom, layout.bottom + 6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                         .transition(.opacity)
                 }
                 if let note = reader.footnote {
