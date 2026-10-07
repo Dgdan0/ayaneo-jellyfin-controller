@@ -398,7 +398,9 @@ final class ReadingExtrasTests: XCTestCase {
         app.launch()
         let page = app.descendants(matching: .any).matching(identifier: "comic-page").firstMatch
         XCTAssertTrue(page.waitForExistence(timeout: 20), "the reader did not open")
-        XCTAssertTrue(waitUntil(15) { (page.value as? String ?? "").contains("Page 2 of 24") }, "issue 51 did not open at its place")
+        // Page 2, or the spread it stands in (2 and 3, named by its last) on a wide window held sideways.
+        let atPlace = { ["Page 2 of 24", "Page 3 of 24"].contains { (page.value as? String ?? "").contains($0) } }
+        XCTAssertTrue(waitUntil(15) { atPlace() }, "issue 51 did not open at its place: \(page.value as? String ?? "")")
         _ = waitUntil(2) { false }
         app.buttons["Close reader"].tap()
         XCTAssertTrue(waitForGone(page, 5), "the reader stayed open")
@@ -408,8 +410,7 @@ final class ReadingExtrasTests: XCTestCase {
         XCTAssertTrue(entry.waitForExistence(timeout: 10), "Fantastic Four's page is not under the reader: \(buttons(app))")
         entry.tap()
         XCTAssertTrue(page.waitForExistence(timeout: 20), "the reader did not open again")
-        XCTAssertTrue(waitUntil(30) { (page.value as? String ?? "").contains("Page 2 of 24") },
-                      "the issue did not reopen from what was kept: \(page.value as? String ?? "")")
+        XCTAssertTrue(waitUntil(30) { atPlace() }, "the issue did not reopen from what was kept: \(page.value as? String ?? "")")
         XCTAssertTrue(text(app, containing: "Using cached pages").waitForExistence(timeout: 5), "the outage was not said")
         XCTAssertFalse(text(app, containing: "could not be loaded").exists, "the kept page did not show")
         keep(app, "comic-outage")

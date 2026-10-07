@@ -37,18 +37,12 @@ struct NotificationsSettingsPane: View {
                     .font(HubType.body(13, weight: .semibold, relativeTo: .footnote))
                     .foregroundStyle(.white.opacity(0.6))
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(NotificationSettings.choices, id: \.self) { choice in
-                        ChoicePill(title: "\(choice) entries", selected: choice == current) {
-                            NotificationSettings.setLimit(choice, for: service)
-                            limits = NotificationSettings.limits()
-                        }
-                        .accessibilityIdentifier("limit-\(service)-\(choice)")
-                    }
-                }
+            // "100 entries" ran past the card on an iPhone: there, the numbers
+            // alone, the heading's "60 entries" saying what they count.
+            ViewThatFits(in: .horizontal) {
+                pills(service, current: current, words: true)
+                pills(service, current: current, words: false)
             }
-            .scrollClipDisabled()
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
@@ -56,5 +50,19 @@ struct NotificationsSettingsPane: View {
         .glassPanel(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(ServiceNames.display(service)) history, \(current) entries")
+    }
+
+    private func pills(_ service: String, current: Int, words: Bool) -> some View {
+        HStack(spacing: 8) {
+            ForEach(NotificationSettings.choices, id: \.self) { choice in
+                ChoicePill(title: words ? "\(choice) entries" : "\(choice)", selected: choice == current) {
+                    NotificationSettings.setLimit(choice, for: service)
+                    limits = NotificationSettings.limits()
+                }
+                .accessibilityLabel("\(choice) entries")
+                .accessibilityIdentifier("limit-\(service)-\(choice)")
+            }
+        }
+        .fixedSize()
     }
 }
