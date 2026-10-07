@@ -126,6 +126,7 @@ final class ListeningTests: XCTestCase {
         let contents = app.buttons["listen-contents"]
         XCTAssertEqual(contents.label, "Chapters")
         contents.tap()
+        XCTAssertTrue(app.staticTexts["Dark Matter · 4 chapters"].waitForExistence(timeout: 5), "the contents have no heading")
         for title in ["One · 0:52", "Two · 0:58", "Four · 0:45"] {
             XCTAssertTrue(button(app, containing: title).waitForExistence(timeout: 5), "no \(title) in the contents: \(buttons(app))")
         }

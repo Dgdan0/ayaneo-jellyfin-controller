@@ -202,14 +202,17 @@ struct AudiobookView: View {
             HStack(spacing: 8) {
                 Menu {
                     let current = currentEntry
-                    ForEach(Array(listening.contents.enumerated()), id: \.offset) { _, entry in
-                        Button {
-                            listening.seek(part: entry.part, offsetMs: entry.startMs)
-                        } label: {
-                            if entry == current {
-                                Label(entry.title, systemImage: "speaker.wave.2")
-                            } else {
-                                Text(entry.durationMs.map { "\(entry.title) · \(Fmt.clock($0))" } ?? entry.title)
+                    // Headed as the Pocket's sheet is: "Dark Matter · 15 chapters" (#31), else parts.
+                    Section(listening.book.map { "\($0.title) · \(listening.contents.count) \(listening.noun)s" } ?? "") {
+                        ForEach(Array(listening.contents.enumerated()), id: \.offset) { _, entry in
+                            Button {
+                                listening.seek(part: entry.part, offsetMs: entry.startMs)
+                            } label: {
+                                if entry == current {
+                                    Label(entry.title, systemImage: "speaker.wave.2")
+                                } else {
+                                    Text(entry.durationMs.map { "\(entry.title) · \(Fmt.clock($0))" } ?? entry.title)
+                                }
                             }
                         }
                     }
