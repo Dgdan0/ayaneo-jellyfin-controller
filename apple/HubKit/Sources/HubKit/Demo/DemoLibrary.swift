@@ -130,7 +130,12 @@ enum DemoLibrary {
                 "overview": "\(title.title), as the demo hub tells it: a title in the library, with nothing real behind it.",
                 "runtimeSeconds": title.minutes * 60, "rating": 8.1, "officialRating": "PG-13", "genres": title.genres,
                 "played": now.played, "favorite": now.favorite,
-                "unplayedCount": title.type == "series" && !now.played ? 3 : 0]
+                "unplayedCount": title.type == "series" && !now.played ? 3 : 0,
+                // One the hub names on TMDB (#27), whose portrait opens the
+                // filmography the demo hub answers, and one it cannot name.
+                "people": [["id": "demo-person-1", "name": "Rebecca Ferguson", "role": "Lead", "type": "Actor",
+                            "tmdbId": 933238],
+                           ["id": "demo-person-2", "name": "A Face in the Crowd", "role": "Extra", "type": "Actor"]]]
     }
 
     private static func item(_ title: Title) -> DemoTransport.Answer { json(["item": itemFields(title)]) }

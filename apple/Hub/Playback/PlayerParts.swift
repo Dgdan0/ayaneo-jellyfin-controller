@@ -150,8 +150,9 @@ struct PlayerTimeline: View {
         .accessibilityValue("\(Fmt.clock(positionMillis)) of \(Fmt.clock(durationMillis))")
         .accessibilityAdjustableAction { direction in
             switch direction {
-            case .increment: adjust(10_000)
-            case .decrement: adjust(-10_000)
+            // VoiceOver's swipes go as far as the jump buttons (Settings › Playback).
+            case .increment: adjust(Int64(ListeningSettings.seekSeconds) * 1_000)
+            case .decrement: adjust(-Int64(ListeningSettings.seekSeconds) * 1_000)
             @unknown default: break
             }
         }

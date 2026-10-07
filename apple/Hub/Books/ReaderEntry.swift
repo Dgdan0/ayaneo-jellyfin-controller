@@ -4,7 +4,7 @@ import SwiftUI
 // Where a book page meets a reader (#25; APPLE_PLAN.md, "The readers"). A page
 // never pushes a reader: it asks `\.read` with a `ReadRequest`, and the shell
 // shows `ReaderHost` over the whole window and its bars, as it shows the video
-// player. Phase 3's comic reader and phase 4's ebook reader go in `ReaderHost`.
+// player: phase 3's comic reader, or phase 4's ebook reader.
 
 /// What a book page asks to read.
 enum ReadRequest: Equatable, Identifiable {
@@ -62,96 +62,12 @@ struct ReaderHost: View {
             // Phase 3: the comic and manga reader, which leaves through `closeReader`.
             ComicReaderView(work: work, publication: publication)
                 .environment(\.closeReader, CloseReaderAction { read.close() })
-        case .ebook(let work, _, let readAlong):
-            ReaderComingView(work: work, artwork: work.artwork, what: readAlong ? "Read along" : "Ebooks",
-                             place: ReadingBookFacts.progress(work) ?? "Not started",
-                             keeper: work.editions.contains { $0.source == "storyteller" } ? "Storyteller" : "Kavita")
+        case .ebook(let work, let sourceItemId, let readAlong):
+            // Phase 4: the ebook reader, Readium on the iPad and the iPhone; the
+            // Mac says it reads them later. Its place goes through the reading
+            // outbox (`CheckpointBookPlaces`), so another device's is never overwritten.
+            BookReaderView(work: work, sourceItemId: sourceItemId, readAlong: readAlong)
+                .environment(\.closeReader, CloseReaderAction { read.close() })
         }
-    }
-}
-
-/// Until a reader is built: the book over its own colours, what comes next,
-/// and where the place is kept, with Close.
-struct ReaderComingView: View {
-    let work: ReadingWork
-    let artwork: String
-    /// "Comics", "Manga", "Ebooks", "Read along".
-    let what: String
-    /// "Issue 51 · 1% read", "49% · page 363 of 735".
-    let place: String
-    /// The server that keeps the place.
-    let keeper: String
-    @Environment(AppModel.self) private var model
-    @Environment(\.read) private var read
-    @Environment(\.horizontalSizeClass) private var sizeClass
-
-    var body: some View {
-        ZStack {
-            AmbientBackground(path: artwork, palette: model.colors.palette(for: artwork))
-                .ignoresSafeArea()
-            // A phone on its side has room across, not down: the cover goes
-            // beside the words there rather than the panel running off the
-            // bottom of the screen.
-            ViewThatFits(in: .vertical) {
-                card(cover: sizeClass == .compact ? 150 : 190)
-                card(cover: 96)
-                wideCard(cover: 104)
-                ScrollView { card(cover: 96) }
-            }
-            .padding(20)
-        }
-        .environment(\.glassPalette, model.colors.palette(for: artwork))
-        .task { model.colors.want([artwork]) }
-        // A container, so Close keeps its own identifier rather than taking this one.
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("reader-coming")
-    }
-
-    private func card(cover: CGFloat) -> some View {
-        VStack(spacing: 14) {
-            coverView(cover)
-            words(alignment: .center)
-        }
-        .multilineTextAlignment(.center)
-        .padding(28)
-        .glassPanel(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .frame(maxWidth: 520)
-    }
-
-    private func wideCard(cover: CGFloat) -> some View {
-        HStack(alignment: .center, spacing: 24) {
-            coverView(cover)
-            VStack(alignment: .leading, spacing: 10) { words(alignment: .leading) }
-        }
-        .multilineTextAlignment(.leading)
-        .padding(24)
-        .glassPanel(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .frame(maxWidth: 600)
-    }
-
-    private func coverView(_ width: CGFloat) -> some View {
-        BookCover(path: artwork, square: work.kind == "audiobook", width: 480)
-            .frame(width: width)
-            .shadow(color: .black.opacity(0.5), radius: 24, y: 24)
-    }
-
-    @ViewBuilder
-    private func words(alignment: HorizontalAlignment) -> some View {
-        Text(ReadingBookFacts.eyebrow(work).uppercased())
-            .font(HubType.body(12, weight: .bold, relativeTo: .caption))
-            .tracking(1.6)
-            .foregroundStyle(.white.opacity(0.7))
-        Text(work.title)
-            .font(HubType.heading(28, weight: .heavy, relativeTo: .title))
-            .foregroundStyle(.white)
-        Text("\(what) open here once the reader is built. Your place is kept on \(keeper): \(place).")
-            .font(HubType.body(15, relativeTo: .body))
-            .foregroundStyle(.white.opacity(0.8))
-            .frame(maxWidth: 420, alignment: alignment == .leading ? .leading : .center)
-        Button("Close") { read.close() }
-            .buttonStyle(PrimaryPillStyle())
-            .keyboardShortcut(.cancelAction)
-            .padding(.top, 6)
-            .accessibilityIdentifier("reader-close")
     }
 }

@@ -176,8 +176,8 @@ struct PlayerView: View {
         .focused($keys)
         .focusEffectDisabled()
         .onKeyPress(.space) { panels.isEmpty ? act { player.togglePlay() } : .ignored }
-        .onKeyPress(.leftArrow) { panels.isEmpty ? act { player.seek(by: -10_000) } : .ignored }
-        .onKeyPress(.rightArrow) { panels.isEmpty ? act { player.seek(by: 10_000) } : .ignored }
+        .onKeyPress(.leftArrow) { panels.isEmpty ? act { player.seek(by: -seekMillis) } : .ignored }
+        .onKeyPress(.rightArrow) { panels.isEmpty ? act { player.seek(by: seekMillis) } : .ignored }
         .onKeyPress(.escape) {
             if panels.isEmpty {
                 player.close()
@@ -388,14 +388,16 @@ struct PlayerView: View {
             }
             .opacity(previous ? 1 : 0)
             .disabled(!previous)
-            PlayerSkipButton(systemImage: nil, text: "\u{2212}10", label: "Back 10 seconds", size: layout.skip) {
-                act { player.seek(by: -10_000) }
+            PlayerSkipButton(systemImage: nil, text: "\u{2212}\(seekSeconds)", label: "Back \(seekSeconds) seconds",
+                             size: layout.skip) {
+                act { player.seek(by: -seekMillis) }
             }
             PlayerPlayDisc(playing: player.isPlaying, buffering: player.isBuffering, size: layout.big) {
                 act { player.togglePlay() }
             }
-            PlayerSkipButton(systemImage: nil, text: "+10", label: "Forward 10 seconds", size: layout.skip) {
-                act { player.seek(by: 10_000) }
+            PlayerSkipButton(systemImage: nil, text: "+\(seekSeconds)", label: "Forward \(seekSeconds) seconds",
+                             size: layout.skip) {
+                act { player.seek(by: seekMillis) }
             }
             PlayerSkipButton(systemImage: "forward.end.fill", text: nil, label: "Next episode", size: layout.skip) {
                 act { player.playNext() }
@@ -560,12 +562,17 @@ struct PlayerView: View {
         }
     }
 
+    /// The jump of the ± buttons, the arrows and a double tap: Settings ›
+    /// Playback's 5, 10, 15 or 30 seconds, as on the Pocket and in an audiobook.
+    private var seekSeconds: Int { ListeningSettings.seekSeconds }
+    private var seekMillis: Int64 { Int64(seekSeconds) * 1_000 }
+
     /// A double tap on the picture: back on the left half, on on the right,
     /// by the step, and the words say where it lands. Locked, or under a
     /// panel, it is a tap.
     private func doubleTapped(at location: CGPoint, width: CGFloat) {
         guard !locked, panels.isEmpty, player.plan != nil else { return tapped() }
-        let delta = PlayerGestures.doubleTapSeek(x: location.x, width: width)
+        let delta = PlayerGestures.doubleTapSeek(x: location.x, width: width, step: seekMillis)
         let target = PlaybackRules.clampSeek(player.positionMillis + delta, durationMillis: player.durationMillis)
         player.seek(by: delta)
         show(seek: PlayerSeekShown(text: PlayerGestures.seekFeedback(deltaMillis: delta, targetMillis: target),

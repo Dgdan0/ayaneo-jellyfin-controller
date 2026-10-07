@@ -12,7 +12,8 @@ struct BookReaderSheetView: View {
 
     var body: some View {
         ReaderSheetFrame(title: title, subtitle: subtitle, size: layout.size, safe: layout.safe,
-                         headingId: "book-sheet-heading", dims: false, close: close) { proxy in
+                         headingId: "book-sheet-heading", dims: false, keepsPage: true, previews: sheet == .appearance,
+                         close: close) { proxy in
             switch sheet {
             case .contents, .bookmarks: navigator(proxy)
             case .appearance: BookAppearanceSheet(reader: reader)
