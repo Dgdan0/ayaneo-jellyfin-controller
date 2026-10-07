@@ -106,31 +106,35 @@ final class SettingsPagesTests: XCTestCase {
     // MARK: Licences
 
     @MainActor
-    func testEveryLicenceOpensItsFullText() {
+    func testEveryLicenceOpensItsFullTextOnAPageOfItsOwn() {
         let app = launch()
         open("licences", in: app)
         let figtree = app.buttons["licence-figtree"]
         XCTAssertTrue(figtree.waitForExistence(timeout: 10), "Fonts and licences is empty")
         XCTAssertTrue(figtree.label.contains("Figtree") && figtree.label.contains("SIL Open Font License"), figtree.label)
-        Thread.sleep(forTimeInterval: 3)
         figtree.tap()
         // The text of the file itself, from the app's own resources. A text that can be selected
-        // is a text view, whose words are its value.
-        let sheet = app.textViews.firstMatch
-        XCTAssertTrue(sheet.waitForExistence(timeout: 10), "the licence did not open: buttons \(app.buttons.allElementsBoundByIndex.map(\.label)), texts \(app.staticTexts.allElementsBoundByIndex.prefix(12).map(\.label)), others \(app.otherElements.allElementsBoundByIndex.prefix(12).map(\.identifier))")
-        let words = (sheet.value as? String) ?? sheet.label
-        XCTAssertTrue(words.contains("This Font Software is licensed under the SIL Open Font License"), String(words.prefix(120)))
-        app.buttons["Close"].firstMatch.tap()
-        XCTAssertTrue(sheet.waitForNonExistence(timeout: 5))
+        // is read by its value or its label, whichever the system gives it.
+        func words() -> String {
+            let found = app.descendants(matching: .any).matching(identifier: "licence-text").firstMatch
+            return (found.value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? found.label
+        }
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "licence-text").firstMatch.waitForExistence(timeout: 10),
+                      "the licence did not open")
+        XCTAssertTrue(words().contains("This Font Software is licensed under the SIL Open Font License"), String(words().prefix(120)))
+        // A page of its own: Back, named for where it goes, returns to the list.
+        let back = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Back to'")).firstMatch
+        XCTAssertTrue(back.exists, "the licence page has no Back")
+        back.tap()
+        XCTAssertTrue(figtree.waitForExistence(timeout: 10), "Back did not return to the list")
 
         // The software ones are on the page too, below the fonts.
         let readium = app.buttons["licence-readium"]
         for _ in 0..<6 where !(readium.exists && readium.isHittable) { app.swipeUp() }
         XCTAssertTrue(readium.exists, "the software is not listed")
         readium.tap()
-        XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 10))
-        let bsd = (app.textViews.firstMatch.value as? String) ?? app.textViews.firstMatch.label
-        XCTAssertTrue(bsd.contains("Redistribution and use in source and binary forms"), "not the BSD text: \(bsd.prefix(120))")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "licence-text").firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(words().contains("Redistribution and use in source and binary forms"), "not the BSD text: \(words().prefix(120))")
     }
 
     // MARK: The controller test

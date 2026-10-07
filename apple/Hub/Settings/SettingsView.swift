@@ -48,14 +48,21 @@ struct SettingsView: View {
                 if metrics.compact {
                     VStack(alignment: .leading, spacing: 14) {
                         PageHeading(title: "Settings") { EmptyView() }
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(Pane.allCases) { place in
-                                    ChoicePill(title: place.title, selected: place == pane, systemImage: place.systemImage) {
-                                        pane = place
+                        // Seven places do not fit a phone: the chosen one is brought into view.
+                        ScrollViewReader { proxy in
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(Pane.allCases) { place in
+                                        ChoicePill(title: place.title, selected: place == pane, systemImage: place.systemImage) {
+                                            pane = place
+                                        }
+                                        .id(place)
+                                        .accessibilityIdentifier("pane-\(place.rawValue)")
                                     }
-                                    .accessibilityIdentifier("pane-\(place.rawValue)")
                                 }
+                            }
+                            .onChange(of: pane, initial: true) { _, chosen in
+                                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(chosen, anchor: .center) }
                             }
                         }
                         content

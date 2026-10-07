@@ -1,12 +1,18 @@
 import HubKit
 import SwiftUI
 
+/// A licence's own page, by the id `Licences` gives it.
+struct LicenceRoute: Hashable {
+    let id: String
+}
+
 /// Settings › Fonts and licences (#38; Android's row of the same name): the
 /// fonts and the software the app is built with, each opening its full licence
-/// text from the app's own files (`Resources/Licenses`). `Licences` holds the
-/// list, and a test keeps it to the folder.
+/// text from the app's own files (`Resources/Licenses`) on a page of its own,
+/// with Back like any page. `Licences` holds the list, and a test keeps it to
+/// the folder.
 struct LicencesSettings: View {
-    @State private var shown: LicenceEntry?
+    @Environment(\.openRoute) private var openRoute
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -17,19 +23,13 @@ struct LicencesSettings: View {
             group("Fonts", Licences.fonts)
             group("Software", Licences.software)
         }
-        .sheet(item: $shown) { entry in
-            LicenceSheet(entry: entry)
-        }
-        .onChange(of: shown?.id) { _, id in NSLog("licence shown now %@", id ?? "nil") }
-        .onAppear { NSLog("licence page appeared") }
-        .onDisappear { NSLog("licence page disappeared") }
         #if DEBUG
         // scripts/mac.sh opens one for a screenshot: HUB_SHEET=licence:figtree.
         .task {
-            // After the page has settled: a sheet asked for while it is being put up is dropped.
+            // After the page has settled, so the push is not lost to the pane's own appearing.
             guard let sheet = ProcessInfo.processInfo.environment["HUB_SHEET"], sheet.hasPrefix("licence:") else { return }
             try? await Task.sleep(for: .milliseconds(700))
-            shown = Licences.all.first { $0.id == String(sheet.dropFirst("licence:".count)) }
+            openRoute(.licence(LicenceRoute(id: String(sheet.dropFirst("licence:".count)))))
         }
         #endif
     }
@@ -39,10 +39,7 @@ struct LicencesSettings: View {
             GlassLabel(text: title).padding(.leading, 4)
             VStack(spacing: 0) {
                 ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                    Button {
-                        NSLog("licence tapped %@", entry.id)
-                        shown = entry
-                    } label: {
+                    NavigationLink(value: AppRoute.licence(LicenceRoute(id: entry.id))) {
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(entry.name)
@@ -79,9 +76,11 @@ struct LicencesSettings: View {
 }
 
 /// One licence's full text, from the bundle.
-struct LicenceSheet: View {
-    let entry: LicenceEntry
-    @Environment(\.dismiss) private var dismiss
+struct LicenceView: View {
+    let route: LicenceRoute
+    @Environment(\.glassMetrics) private var metrics
+
+    private var entry: LicenceEntry? { Licences.all.first { $0.id == route.id } }
 
     /// Where the text is: `Resources/Licenses` is copied flat or as a folder,
     /// depending on how the project was generated, so both are tried.
@@ -92,38 +91,27 @@ struct LicenceSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.name)
-                        .font(HubType.heading(24, weight: .heavy, relativeTo: .title))
-                        .foregroundStyle(.white)
-                    Text(entry.terms)
-                        .font(HubType.body(13.5, relativeTo: .footnote))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                PageHeading(title: entry?.name ?? "Licence") {
+                    Text(entry?.terms ?? "")
+                        .font(HubType.body(14, relativeTo: .subheadline))
                         .foregroundStyle(.white.opacity(0.66))
                 }
-                Spacer(minLength: 8)
-                GlassRoundButton(systemImage: "xmark", label: "Close", size: 40) { dismiss() }
-            }
-            .padding(.horizontal, 22)
-            .padding(.top, 22)
-            .padding(.bottom, 14)
-            ScrollView {
-                Text(Self.text(entry.file) ?? "The licence text is not in this build.")
+                Text(entry.flatMap { Self.text($0.file) } ?? "The licence text is not in this build.")
                     .font(.system(size: 12.5, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.84))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 22)
-                    .padding(.bottom, 28)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 16)
+                    .glassPanel(RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .accessibilityIdentifier("licence-text")
             }
+            .padding(.horizontal, metrics.margin)
+            .padding(.top, 4)
+            .padding(.bottom, 30)
         }
-        .presentationBackground { GlassSheetFill() }
-        .presentationCornerRadius(28)
-        #if os(macOS)
-        .frame(minWidth: 560, minHeight: 520)
-        #endif
-        .preferredColorScheme(.dark)
+        .ambientArtwork("")
     }
 }

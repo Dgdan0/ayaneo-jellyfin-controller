@@ -56,6 +56,8 @@ enum AppRoute: Hashable {
     // Activity (#29).
     case transfers(TransfersRoute)
     case speedLimits
+    /// Settings › Fonts and licences (#38).
+    case licence(LicenceRoute)
 
     /// What the back pill calls this page from the one above it.
     var name: String {
@@ -76,6 +78,7 @@ enum AppRoute: Hashable {
         case .listen(let route): route.title
         case .transfers: "Transfers"
         case .speedLimits: "Speed limits"
+        case .licence(let route): Licences.all.first { $0.id == route.id }?.name ?? "Licence"
         }
     }
 }
@@ -470,6 +473,7 @@ struct MainView: View {
         case .listen(let listen): AudiobookView(workId: listen.workId, sourceItemId: listen.sourceItemId, title: listen.title)
         case .transfers(let transfers): TransfersView(route: transfers)
         case .speedLimits: SpeedLimitsView()
+        case .licence(let licence): LicenceView(route: licence)
         }
     }
 
