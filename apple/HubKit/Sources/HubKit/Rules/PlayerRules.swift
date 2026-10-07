@@ -189,6 +189,25 @@ public enum UpNext {
     public static func skipsAutomatically(_ type: String) -> Bool {
         type.caseInsensitiveCompare("Intro") == .orderedSame || type.caseInsensitiveCompare("Recap") == .orderedSame
     }
+
+    /// The segment to skip by itself now (#33; Android's `updateSegmentSkip`):
+    /// with Settings › Playback › Skip intros automatically, an intro or a recap
+    /// playing is skipped once in the video, so going back into it brings the
+    /// Skip button rather than another jump.
+    public static func autoSkip(_ playing: PlaybackSegment?, enabled: Bool, skipped: Set<String>) -> PlaybackSegment? {
+        guard enabled, let playing, skipsAutomatically(playing.type), !skipped.contains(skipKey(playing)) else { return nil }
+        return playing
+    }
+
+    /// What a segment is remembered by once skipped: its id, else its kind and start.
+    public static func skipKey(_ segment: PlaybackSegment) -> String {
+        segment.id.isEmpty ? "\(segment.type.lowercased())@\(segment.startMillis)" : segment.id
+    }
+
+    /// "Skipped intro", over the picture once it has happened.
+    public static func skippedNotice(_ segment: PlaybackSegment) -> String {
+        "Skipped " + segment.type.lowercased()
+    }
 }
 
 /// Seeking, the end of a video and the quality caps. A port of Android's

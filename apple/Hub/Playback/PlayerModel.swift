@@ -139,8 +139,12 @@ final class PlayerModel {
     /// moved in time; a picture track is burned in by the hub.
     var drawsSubtitles: Bool { plan.flatMap(PlaybackChoices.drawnSubtitle) != nil }
 
-    /// Settings › Playback has no Apple page yet: Android's default.
-    let nextTiming = NextEpisodeTiming.credits
+    /// Settings › Playback (#33), read as each video opens: when the next
+    /// episode's card comes, and whether intros and recaps skip themselves.
+    @ObservationIgnored private var nextTiming = NextEpisodeTiming.credits
+    @ObservationIgnored private var autoSkipIntro = false
+    /// The segments skipped by themselves in this video: going back into one brings its button.
+    @ObservationIgnored private var autoSkipped: Set<String> = []
 
     @ObservationIgnored let player = AVPlayer()
     @ObservationIgnored private var hub: HubClient?
@@ -336,6 +340,9 @@ final class PlayerModel {
         playAfterLoad = true
         maxBitrate = 0
         skipSegment = nil
+        nextTiming = PlaybackSettings.nextTiming
+        autoSkipIntro = PlaybackSettings.autoSkipIntro
+        autoSkipped = []
         applying = false
         subtitleKey = ""
         subtitleTask?.cancel()
@@ -604,6 +611,15 @@ final class PlayerModel {
         if seekTarget == nil, time.isNumeric, max(0, millis(time)) != positionMillis { positionMillis = max(0, millis(time)) }
         let prompt = plan.flatMap { PlaybackEnhancements.skipPrompt($0.segments, positionMillis: positionMillis) }
         if prompt != skipSegment { skipSegment = prompt }
+        // Skip intros automatically (#33): once the video plays from where it
+        // starts, an intro or recap playing skips itself, once.
+        if startedItem == id, seekTarget == nil,
+           let skip = UpNext.autoSkip(prompt, enabled: autoSkipIntro, skipped: autoSkipped) {
+            autoSkipped.insert(UpNext.skipKey(skip))
+            skipSegment = nil
+            seek(to: skip.endMillis)
+            show(notice: UpNext.skippedNotice(skip))
+        }
         report(status)
         updateUpNext()
     }

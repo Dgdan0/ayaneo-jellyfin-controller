@@ -113,6 +113,22 @@ struct UpNextTests {
         #expect(UpNext.skipsAutomatically("Intro"))
         #expect(!UpNext.skipsAutomatically("Preview"))
     }
+
+    /// Skip intros automatically (#33): an intro or a recap once, only when asked.
+    @Test func anIntroSkipsItselfOnceWhenSettingsSaySo() {
+        let intro = segments[0]
+        #expect(UpNext.autoSkip(intro, enabled: true, skipped: []) == intro)
+        #expect(UpNext.autoSkip(intro, enabled: false, skipped: []) == nil)
+        #expect(UpNext.autoSkip(intro, enabled: true, skipped: [UpNext.skipKey(intro)]) == nil)
+        #expect(UpNext.autoSkip(nil, enabled: true, skipped: []) == nil)
+        let preview = PlaybackSegment(id: "pv", type: "Preview", startMillis: 0, endMillis: 30_000)
+        #expect(UpNext.autoSkip(preview, enabled: true, skipped: []) == nil)
+        let recap = PlaybackSegment(type: "Recap", startMillis: 5_000, endMillis: 60_000)
+        #expect(UpNext.skipKey(recap) == "recap@5000")
+        #expect(UpNext.autoSkip(recap, enabled: true, skipped: ["recap@5000"]) == nil)
+        #expect(UpNext.skippedNotice(intro) == "Skipped intro")
+        #expect(NextEpisodeTiming.allCases.map { $0.label } == ["When credits start", "20 s before the end", "Never"])
+    }
 }
 
 /// Android's `PlaybackRulesTest`, case for case.

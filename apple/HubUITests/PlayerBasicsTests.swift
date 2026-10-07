@@ -75,4 +75,81 @@ final class PlayerBasicsTests: XCTestCase {
         app.buttons["Back"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 5))
     }
+
+    // MARK: Skip intro and the next episode's card
+
+    /// Settings › Playback › Skip intros automatically: the intro the demo
+    /// episode opens on skips itself and says so, with no button left for it.
+    @MainActor
+    func testAnIntroSkipsItselfWhenSettingsSaySo() {
+        let app = launchPlaying(["playback.autoSkipIntro": "YES"])
+        let skipped = app.staticTexts["Skipped intro"]
+        XCTAssertTrue(skipped.waitForExistence(timeout: 20), "the intro did not skip itself: \(buttons(app))")
+        XCTAssertFalse(app.buttons["Skip intro"].exists, "the intro still has its button")
+        keep(app, "intro-skipped")
+        app.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 5))
+    }
+
+    /// Without the setting, the intro waits for its button, as before.
+    @MainActor
+    func testAnIntroWaitsForItsButtonUntilAsked() {
+        let app = launchPlaying(["playback.autoSkipIntro": "NO"])
+        XCTAssertTrue(app.buttons["Skip intro"].waitForExistence(timeout: 20), "the intro has no Skip button")
+        XCTAssertFalse(app.staticTexts["Skipped intro"].exists)
+        app.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 5))
+    }
+
+    /// Settings › Playback › Next episode: Never brings no card before the
+    /// end; 20 s before the end brings it then.
+    @MainActor
+    func testTheNextEpisodesCardComesWhenSettingsSay() {
+        let never = launchPlaying(["playback.nextTiming": "never"], environment: ["HUB_PLAY_FROM_END": "40"])
+        XCTAssertFalse(waitUntil(12) { never.buttons["Watch credits"].exists }, "the card came though Settings say never")
+        never.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(never.buttons["Lock controls"].waitForNonExistence(timeout: 5))
+        never.terminate()
+
+        let beforeEnd = launchPlaying(["playback.nextTiming": "beforeEnd"], environment: ["HUB_PLAY_FROM_END": "30"])
+        XCTAssertTrue(beforeEnd.buttons["Watch credits"].waitForExistence(timeout: 25), "the card did not come 20 s before the end")
+        beforeEnd.buttons["Watch credits"].tap()
+        XCTAssertTrue(beforeEnd.buttons["Watch credits"].waitForNonExistence(timeout: 5), "Watch credits kept the card")
+        beforeEnd.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(beforeEnd.buttons["Lock controls"].waitForNonExistence(timeout: 5))
+    }
+
+    /// Settings › Playback keeps both choices from one launch to the next;
+    /// put back as they were after.
+    @MainActor
+    func testSettingsPlaybackKeepsTheNextEpisodeAndTheIntros() {
+        func open() -> XCUIApplication {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demo"]
+            app.launchEnvironment = ["HUB_SECTION": "settings", "HUB_SIDE": "media"]
+            app.launch()
+            let playback = app.buttons.matching(NSPredicate(format: "label == 'Playback'")).firstMatch
+            XCTAssertTrue(playback.waitForExistence(timeout: 15), "Settings has no Playback: \(buttons(app))")
+            playback.tap()
+            XCTAssertTrue(app.buttons["next-never"].waitForExistence(timeout: 5), "Playback has no next-episode choice")
+            return app
+        }
+        var app = open()
+        XCTAssertTrue(app.buttons["next-credits"].isSelected, "the next episode's card does not wait for the credits until chosen")
+        app.buttons["next-never"].tap()
+        let toggle = app.switches["auto-skip-intro"]
+        XCTAssertTrue(toggle.exists, "Playback has no Skip intros automatically")
+        XCTAssertEqual(toggle.value as? String, "0", "intros skip themselves until chosen")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+        XCTAssertTrue(waitUntil(3) { toggle.value as? String == "1" }, "the switch did not turn on")
+        app.terminate()
+
+        app = open()
+        XCTAssertTrue(app.buttons["next-never"].isSelected, "Never was not kept")
+        XCTAssertEqual(app.switches["auto-skip-intro"].value as? String, "1", "Skip intros automatically was not kept")
+        app.buttons["next-credits"].tap()
+        let again = app.switches["auto-skip-intro"]
+        again.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+        XCTAssertTrue(waitUntil(3) { again.value as? String == "0" }, "the switch did not turn off")
+    }
 }
