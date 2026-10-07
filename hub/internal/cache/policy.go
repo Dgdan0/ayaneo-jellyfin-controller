@@ -83,6 +83,12 @@ var (
 	// built once. The key holds the edition's size and modified time. Never stale.
 	ReadingSlimEPUB = Spec{Fresh: 6 * time.Hour, Stale: 0, IfError: 0}
 
+	// What Hardcover says of a book: its readers' rating and its genres (#39). A rating
+	// moves slowly, and the free key is limited to 60 requests a minute, so an answer is
+	// kept three days, and an old one is kept two weeks to serve when Hardcover fails.
+	// Whether it had the book at all is kept as well.
+	ReadingCommunity = Spec{Fresh: 72 * time.Hour, Stale: 0, IfError: 14 * 24 * time.Hour}
+
 	// A reading page scaled to a thumbnail. A chapter's pages do not change
 	// while it is in the library, so it lives as long as any image; an old
 	// copy is still the same page, so stale and if-error match.

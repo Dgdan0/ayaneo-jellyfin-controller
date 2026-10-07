@@ -125,6 +125,13 @@ type ReadingWork struct {
 	Continue     *ReadingContinue   `json:"continue,omitempty"`
 	Partial      []Partial          `json:"partial,omitempty"`
 	Cache        CacheInfo          `json:"cache"`
+	// Community is what readers at large think of a book, and You what this profile
+	// does (#39). Both are only on a book's own detail.
+	Community *ReadingCommunity `json:"community,omitempty"`
+	You       *ReadingYou       `json:"you,omitempty"`
+	// isbns are the ISBN-13s the work's records carry; they ask Hardcover about it and
+	// are not sent.
+	isbns []string
 }
 
 type ReadingLibraryItemsResponse struct {
@@ -484,6 +491,10 @@ func (s *Server) handleReadingWork(w http.ResponseWriter, r *http.Request) {
 	combined.Partial = partial
 	// Storyteller can hold one book twice; the work offers one audiobook of it.
 	combined.Editions = oneAudiobookPerWork(combined.Editions)
+	// What the book page shows of this profile and of readers at large; the response
+	// varies by the profile.
+	s.addPersonalFields(ctx, r, combined)
+	w.Header().Add("Vary", jellyfinUserHeader)
 	writeJSON(w, http.StatusOK, combined)
 }
 
@@ -692,6 +703,9 @@ func (s *Server) kavitaWork(ctx context.Context, workID string, detail *kavita.D
 	}
 	edition := ReadingEdition{ID: editionID("kavita", strconv.Itoa(detail.Series.ID), kind), WorkID: workID, Source: "kavita", SourceItemID: strconv.Itoa(detail.Series.ID), Kind: kind, Format: kavitaFormat(detail.Series.Format), Identifiers: identifiers, PageCount: detail.Series.Pages, Availability: "available"}
 	work := ReadingWork{ID: workID, LibraryID: "kavita:" + strconv.Itoa(detail.Series.LibraryID), Kind: kind, Title: detail.Series.Name, SortTitle: detail.Series.SortName, Authors: authors, Overview: readingDescriptionText(detail.Metadata.Summary), Artwork: "/v1/img/reading/kavita/" + strconv.Itoa(detail.Series.ID), Genres: genres, Year: detail.Metadata.ReleaseYear, Languages: languages, Editions: []ReadingEdition{edition}, Progress: pageProgress(detail.Series.PagesRead, detail.Series.Pages), Availability: []string{kind}, Sections: sections, Partial: []Partial{}}
+	if isbn := readingdomain.ISBN13(identifiers["isbn"]); isbn != "" {
+		work.isbns = []string{isbn}
+	}
 	if detail.Continue.ID > 0 {
 		work.Continue = &ReadingContinue{Source: "kavita", SourceItemID: strconv.Itoa(detail.Continue.ID), Title: kavitaContinueTitle(detail.Continue, detail.Volumes, detail.Series.Name), Number: kavitaChapterNumber(detail.Continue.Number), Percentage: percentage(detail.Continue.PagesRead, detail.Continue.Pages)}
 	}
@@ -723,7 +737,7 @@ func (s *Server) storytellerWork(libraryID string, book storyteller.Book, includ
 		Overview: readingDescriptionText(book.Description), Artwork: "/v1/img/reading/storyteller/" + strconv.FormatInt(book.ID, 10),
 		Genres: []string{}, Languages: []string{}, Editions: []ReadingEdition{},
 		Progress: storytellerProgress(book.Position), Availability: availability, AddedAt: book.CreatedAt,
-		BookCount: 1, Partial: []Partial{},
+		BookCount: 1, Partial: []Partial{}, isbns: storytellerISBNs(book),
 	}
 	if book.Language != "" {
 		work.Languages = []string{book.Language}
@@ -1624,6 +1638,9 @@ func mergeReadingWork(target *ReadingWork, source ReadingWork) {
 	}
 	if len(target.Genres) == 0 {
 		target.Genres = source.Genres
+	}
+	for _, isbn := range source.isbns {
+		target.isbns = appendUnique(target.isbns, isbn)
 	}
 	if len(target.Languages) == 0 {
 		target.Languages = source.Languages

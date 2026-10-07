@@ -2,16 +2,19 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"ayaneohub/internal/adapters/arr"
 	"ayaneohub/internal/adapters/bazarr"
 	"ayaneohub/internal/adapters/bookkeeprr"
+	"ayaneohub/internal/adapters/hardcover"
 	"ayaneohub/internal/adapters/jellyfin"
 	"ayaneohub/internal/adapters/jellyseerr"
 	"ayaneohub/internal/adapters/kavita"
@@ -52,6 +55,8 @@ type Server struct {
 	bookkeeprr  *bookkeeprr.Client
 	kavita      *kavita.Client
 	storyteller *storyteller.Client
+	// hardcover is nil without services.hardcover.api_key: nothing is ever asked of it.
+	hardcover   *hardcover.Client
 	openlibrary *openlibrary.Client
 	wikidata    *wikidata.Client
 	arrs        map[string]*arr.Client
@@ -78,6 +83,12 @@ type Server struct {
 	readingSeriesPreviews *readingSeriesPreviewStore
 	readingAcquisitions   *readingAcquisitionStore
 	readingAlignments     *readingAlignmentStore
+	// What each profile has to say of its books: its Goodreads import and what it set
+	// from an app (#39), and until when Hardcover is left alone, and how long a page
+	// waits for it.
+	readingYou      *readingYouStore
+	hardcoverUntil  atomic.Int64
+	communityBudget time.Duration
 
 	// The MP4s an Apple download is repackaged into (#5): the queue and cache
 	// (made on first use), the encoder conversions use (found once), and three
@@ -150,6 +161,8 @@ func NewServer(cfg *config.Config) *Server {
 		readingSeriesPreviews: newReadingSeriesPreviewStore(250),
 		readingAcquisitions:   newReadingAcquisitionStore(readingAcquisitionPath(cfg.Server.ReadingTransfers)),
 		readingAlignments:     newReadingAlignmentStore(readingAlignmentPath(cfg.Server.ReadingTransfers)),
+		readingYou:            newReadingYouStore(readingYouPath(cfg.Server.OfflineRegistry)),
+		communityBudget:       communityBudget,
 		openlibrary:           openlibrary.New(""),
 		wikidata:              wikidata.New(""),
 		playbackSessions:      make(map[string]*playbackSession),
@@ -259,6 +272,17 @@ func NewServer(cfg *config.Config) *Server {
 			s.storyteller = client
 		}
 	}
+	if svc, ok := cfg.Services["hardcover"]; ok && svc.Enabled {
+		client, err := hardcover.New(svc)
+		switch {
+		case errors.Is(err, hardcover.ErrNoKey):
+			slog.Info("hardcover is enabled with no api_key: the book page has no community ratings or genres from it")
+		case err != nil:
+			slog.Error("hardcover adapter unavailable", "error", err)
+		default:
+			s.hardcover = client
+		}
+	}
 	return s
 }
 
@@ -335,6 +359,10 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/libraries/{libraryId}/authors", s.handleReadingAuthors)
 	authed.HandleFunc("GET /v1/reading/resolve", s.handleReadingResolve)
 	authed.HandleFunc("GET /v1/reading/works/{workId}", s.handleReadingWork)
+	authed.HandleFunc("PATCH /v1/reading/works/{workId}/you", s.handleReadingYou)
+	authed.HandleFunc("POST /v1/reading/import/goodreads", s.handleGoodreadsImport)
+	authed.HandleFunc("GET /v1/reading/import/goodreads", s.handleGoodreadsStatus)
+	authed.HandleFunc("DELETE /v1/reading/import/goodreads", s.handleGoodreadsForget)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}", s.handleReadingPublication)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/pages/{page}", s.handleReadingPublicationPage)
 	authed.HandleFunc("GET /v1/reading/works/{workId}/publications/{sourceItemId}/pages/{page}/thumb", s.handleReadingPageThumb)
