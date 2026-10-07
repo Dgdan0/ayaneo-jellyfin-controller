@@ -4,11 +4,13 @@ import SwiftUI
 /// A book, a series or a comic run (#25; the prototype's `pgBook` and
 /// `pgBSeries`, Android's `ReadingWorkScreen`).
 ///
-/// A book: its cover (square for an audiobook), "Book 6 · Red Rising", its
-/// facts, its author and series as links, the formats with the missing ones
-/// dimmed, how far through, the story, then Read, Listen or Read along in the
-/// accent with Change format, Want to Read and the lists, and "More in" its
-/// series. A series: its fan, Continue · Book 6 and the continue card, its
+/// A book (#39, the owner's layout "1"): right of its cover (square for an
+/// audiobook) "Book 6 · Red Rising", its title, its author and series as
+/// links, "2023 · 735 pages · 4.5 from readers", the formats it has as what
+/// you can do (each opening at your place), Resume with where you are and ⋯
+/// (Finished, Want to read, Add to a list, Remove offline copy), its genres
+/// and story; under the cover what is about you: your stars, when you
+/// finished and your shelves. Then "More in" its series. A series: its fan, Continue · Book 6 and the continue card, its
 /// books in reading order. A comic run: Continue · Issue 51, its volumes as
 /// pills and each volume's issues, which open the comic reader.
 struct BookView: View {
@@ -42,6 +44,12 @@ struct BookView: View {
     @State private var lit: String?
     /// Shown before: coming back to the page (from the audiobook's) reads it again.
     @State private var appeared = false
+    /// When did you finish?, open (#39).
+    @State private var finishing = false
+    /// Marked finished on this visit: what was there before, for Undo finished.
+    @State private var finishUndo: (you: ReadingYou?, wasRead: Bool)?
+    /// The chapter the ebook was left at, when it was read last: the Resume button says it.
+    @State private var chapter: String?
 
     private var work: ReadingWork? { loaded.map(books.project) }
 
@@ -82,6 +90,9 @@ struct BookView: View {
             appeared = true
         }
         .onDisappear { completionSession.leave() }
+        .sheet(isPresented: $finishing) {
+            if let work { FinishedPanel { date in markFinished(work, on: date) } }
+        }
         .alert("New reading list", isPresented: $naming) {
             TextField("List name", text: $listName)
             Button("Cancel", role: .cancel) {}
@@ -106,15 +117,32 @@ struct BookView: View {
     @ViewBuilder private func header(_ work: ReadingWork) -> some View {
         if metrics.centred {
             VStack(alignment: .leading, spacing: 18) {
-                cover(work).frame(maxWidth: .infinity)
+                VStack(spacing: 14) {
+                    cover(work)
+                    if isBook(work) { you(work) }
+                }
+                .frame(maxWidth: .infinity)
                 words(work)
             }
         } else {
             HStack(alignment: .top, spacing: metrics.short ? 22 : 34) {
-                cover(work)
+                VStack(alignment: .leading, spacing: 16) {
+                    cover(work)
+                    if isBook(work) { you(work) }
+                }
                 words(work)
             }
         }
+    }
+
+    /// A book of its own: not a series, not a comic run.
+    private func isBook(_ work: ReadingWork) -> Bool {
+        !work.isSeries && ReadingBookFacts.kindTag(work.kind) == nil
+    }
+
+    /// Under the cover, what is about you (#39).
+    private func you(_ work: ReadingWork) -> some View {
+        BookYouBlock(you: work.you) { star in rate(work, star) }
     }
 
     @ViewBuilder private func cover(_ work: ReadingWork) -> some View {
@@ -132,7 +160,54 @@ struct BookView: View {
         }
     }
 
-    private func words(_ work: ReadingWork) -> some View {
+    @ViewBuilder private func words(_ work: ReadingWork) -> some View {
+        if isBook(work) { bookWords(work) } else { workWords(work) }
+    }
+
+    /// A book (#39): the eyebrow, title and author, the facts, the formats,
+    /// Resume and ⋯, the genres, then the story.
+    private func bookWords(_ work: ReadingWork) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(ReadingBookFacts.eyebrow(work, library: books.libraryNames.name(of: work.libraryId) ?? "").uppercased())
+                .font(HubType.body(12.5, weight: .bold, relativeTo: .caption))
+                .tracking(1.75)
+                .foregroundStyle(.white.opacity(0.72))
+            Text(work.title)
+                .font(HubType.heading(metrics.heroTitle, weight: .heavy))
+                .tracking(-0.02 * metrics.heroTitle)
+                .foregroundStyle(.white)
+                .lineLimit(3)
+                .minimumScaleFactor(0.55)
+            links(work)
+            let facts = BookPage.facts(work)
+            if !facts.isEmpty {
+                Text(facts)
+                    .font(HubType.body(14.5, relativeTo: .subheadline))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .accessibilityIdentifier("book-facts")
+            }
+            let formats = BookPage.formats(work)
+            if !formats.isEmpty {
+                BookFormatsRow(formats: formats) { format in openFormat(work, format) }
+                    .padding(.top, 2)
+            }
+            actions(work).padding(.top, 4)
+            let genres = BookPage.genres(work)
+            if !genres.isEmpty {
+                Text(genres)
+                    .font(HubType.body(13.5, relativeTo: .footnote))
+                    .foregroundStyle(.white.opacity(0.56))
+                    .accessibilityLabel("Genres: " + genres)
+                    .accessibilityIdentifier("book-genres")
+            }
+            if !work.overview.isEmpty { overview(work.overview).padding(.top, 4) }
+        }
+        .frame(maxWidth: 760, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// A series or a comic run, as before.
+    private func workWords(_ work: ReadingWork) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(ReadingBookFacts.eyebrow(work, library: books.libraryNames.name(of: work.libraryId) ?? "").uppercased())
                 .font(HubType.body(12.5, weight: .bold, relativeTo: .caption))
@@ -257,10 +332,14 @@ struct BookView: View {
         } else {
             let remembered = books.entryPreference(work.id)
             let menu = ReadingFormatMenu.forWork(work, remembered: remembered)
-            // The words of Change format give way to its mark where the row would not fit.
-            ViewThatFits(in: .horizontal) {
-                actionRow(work, menu: menu, remembered: remembered, compact: false)
-                actionRow(work, menu: menu, remembered: remembered, compact: true)
+            if isBook(work) {
+                bookRow(work, menu: menu, remembered: remembered)
+            } else {
+                // The words of Change format give way to its mark where the row would not fit.
+                ViewThatFits(in: .horizontal) {
+                    actionRow(work, menu: menu, remembered: remembered, compact: false)
+                    actionRow(work, menu: menu, remembered: remembered, compact: true)
+                }
             }
         }
     }
@@ -337,6 +416,68 @@ struct BookView: View {
                     askRemoveOffline(work)
                 } label: {
                     Label("Remove offline copy", systemImage: "trash")
+                }
+                // Last, and in its own words: a preview and a confirmation follow (#34).
+                Divider()
+                Button(role: .destructive) {
+                    openRoute(.removal(RemovalRoute(kind: "reading", id: work.id, title: work.title)))
+                } label: {
+                    Label(RemovalLines.heading, systemImage: "trash")
+                }
+                .accessibilityIdentifier("book-delete")
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .glassPanel(Circle())
+                    .contentShape(Circle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .accessibilityLabel("More actions for \(work.title)")
+        }
+    }
+
+    /// A book's row (#39): Resume with where you are, and ⋯. The formats
+    /// above it change the way it opens; Change format is theirs now.
+    private func bookRow(_ work: ReadingWork, menu: ReadingFormatMenu, remembered: ReadingEntryPreference?) -> some View {
+        HStack(spacing: metrics.small ? 8 : 10) {
+            if let choice = menu.defaultChoice {
+                Button {
+                    launch(work, choice, remembered: remembered)
+                } label: {
+                    Label(BookPage.resume(work, chapter: chapter) ?? menu.entryLabel(choice, remembered: remembered != nil, preview: nil),
+                          systemImage: Self.icon(choice.mode))
+                        .lineLimit(1)
+                }
+                .buttonStyle(PrimaryPillStyle(accent: accent))
+                .accessibilityIdentifier("book-entry")
+            }
+            Menu {
+                if finishUndo != nil {
+                    Button { undoFinished(work) } label: { Label("Undo finished", systemImage: "arrow.uturn.backward") }
+                } else {
+                    Button { finishing = true } label: { Label("Finished", systemImage: "checkmark.circle") }
+                }
+                if work.progress?.completed == true && finishUndo == nil {
+                    // #37's unread: the next read starts at the beginning.
+                    Button { toggleRead(work) } label: { Label("Mark unread", systemImage: "circle") }
+                }
+                let wanted = books.isWanted(work.id)
+                Button {
+                    notice = books.toggleWanted(work) ? "Added to Want to Read" : "Removed from Want to Read"
+                } label: {
+                    Label("Want to read", systemImage: wanted ? "checkmark" : "bookmark")
+                }
+                ReadingListsMenu(work: work) {
+                    listName = ""
+                    naming = true
+                }
+                Button {
+                    askRemoveOffline(work)
+                } label: {
+                    Label("Remove offline copy", systemImage: "arrow.down.circle")
                 }
                 // Last, and in its own words: a preview and a confirmation follow (#34).
                 Divider()
@@ -478,6 +619,7 @@ struct BookView: View {
             let scope = ReadingCheckpointKey.scope(address: model.address, userId: model.userId)
             let response = ReadingProgressPresentation.project(fetched, pending: ListeningStore.shared.pending(scope: scope))
             if response != loaded { loaded = response }
+            chapter = Self.chapter(response, scope: scope, address: model.address, userId: model.userId)
             books.observe([response])
             model.colors.want([response.artwork])
             status = StatusText.caveat(response.cache, unavailable: response.partial.map(\.service))
@@ -540,6 +682,101 @@ struct BookView: View {
         let remembered = books.entryPreference(work.id)
         guard let choice = ReadingFormatMenu.forWork(work, remembered: remembered).defaultChoice else { return }
         launch(work, choice, remembered: remembered)
+    }
+
+    // MARK: Formats, your rating and Finished (#39)
+
+    /// A format tapped: it opens at your place, wherever you last were, as
+    /// its reader or player asks the hub; a grey one says why, and a missing
+    /// ebook can be found to request.
+    private func openFormat(_ work: ReadingWork, _ format: BookPage.Format) {
+        guard format.opens else {
+            if format.kind == "ebook" && format.readiness == .missing {
+                openRoute(.missingBook(MissingBookRoute(item: ReadingSectionItem(
+                    workId: work.id, title: work.title, number: work.seriesNumber, artwork: work.artwork, authors: work.authors),
+                    lacking: "ebook")))
+            } else {
+                notice = BookPage.unavailable(format)
+            }
+            return
+        }
+        let remembered = books.entryPreference(work.id)
+        let mode: ReadingEntryMode = format.kind == "audiobook" ? .listen : format.kind == "readaloud" ? .readAlong : .read
+        let options = ReadingFormatMenu.forWork(work, remembered: remembered).options.filter { $0.choice.mode == mode }
+        let narration = remembered?.audioSourceItemId ?? ""
+        let option = options.first { ($0.choice.aligned ?? $0.choice.audio)?.sourceItemId == narration } ?? options.first
+        guard let option else {
+            notice = BookPage.unavailable(format)
+            return
+        }
+        launch(work, option.choice, remembered: remembered)
+    }
+
+    /// A star: that rating, or none for the star already given; shown at once, sent to the hub.
+    private func rate(_ work: ReadingWork, _ star: Int) {
+        let change = ReadingYouChange(rating: BookPage.rating(tapping: star, current: work.you?.rating))
+        saveYou(work, change, failure: "Your rating could not be saved")
+    }
+
+    /// Mark finished: the month on the hub, one more read if it was read
+    /// before, and the book read on this device as #37's read does.
+    private func markFinished(_ work: ReadingWork, on date: BookPage.FinishDate) {
+        let wasRead = work.progress?.completed == true
+        finishUndo = (work.you, wasRead)
+        if !wasRead {
+            var session = completionSession
+            books.updateCompletion { session.markRead($0, work.id) }
+            completionSession = session
+        }
+        saveYou(work, BookPage.finishing(work.you, on: date), failure: "Your finish could not be saved")
+        notice = "Marked finished · " + (BookPage.finishedLabel(date.value)?.replacingOccurrences(of: "Finished ", with: "") ?? date.value)
+    }
+
+    /// Undone on the same visit: the finish and the read as they were, the place back.
+    private func undoFinished(_ work: ReadingWork) {
+        guard let undo = finishUndo else { return }
+        finishUndo = nil
+        if !undo.wasRead {
+            var session = completionSession
+            books.updateCompletion { session.unmark($0, work.id) }
+            completionSession = session
+            notice = books.completion.notice(work.id)
+        } else {
+            notice = "Finish undone"
+        }
+        saveYou(work, BookPage.undoing(undo.you), failure: "The finish could not be undone")
+    }
+
+    /// Shown at once as the hub will make it; the hub's own answer then, or
+    /// back as it was with a word on why.
+    private func saveYou(_ work: ReadingWork, _ change: ReadingYouChange, failure: String) {
+        guard !change.isEmpty, var shown = loaded, shown.id == work.id else { return }
+        let before = shown.you
+        shown.you = change.applied(to: before)
+        loaded = shown
+        let request = HubEndpoints.readingYou(work.id, change)
+        Task {
+            do throws(HubFailure) {
+                let answer = try await model.hub.fetch(request, as: ReadingYouResponse.self)
+                if loaded?.id == work.id { loaded?.you = answer.you }
+            } catch {
+                guard error.kind != .cancelled, loaded?.id == work.id else { return }
+                loaded?.you = before
+                notice = failure
+            }
+        }
+    }
+
+    /// The chapter the ebook was left at, when that is where the book was
+    /// read last: its kept place names it (Readium's locator title).
+    private static func chapter(_ work: ReadingWork, scope: String, address: String, userId: String) -> String? {
+        let ids = Set(work.editions.map(\.sourceItemId).filter { !$0.isEmpty })
+        let store = ListeningStore.shared
+        let ebook = ids.compactMap { try? store.read(CheckpointBookPlaces.key(address: address, userId: userId, workId: work.id,
+                                                                                sourceItemId: $0)) }
+        let audio = ids.compactMap { try? store.read(ReadingCheckpointKey(scope: scope, workId: work.id, sourceItemId: $0,
+                                                                          kind: AudioPlace.kind)) }
+        return BookPage.chapter(ebook: ebook, audio: audio)
     }
 
     private func createList() {

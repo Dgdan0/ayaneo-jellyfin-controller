@@ -71,6 +71,17 @@ public enum BookPage {
             .compactMap { $0 }.joined(separator: " · ")
     }
 
+    /// The chapter the ebook was left at, for the Resume button: the title
+    /// of the latest ebook place this device kept (Readium's locator names
+    /// it), when no audiobook place came after it; nil otherwise.
+    public static func chapter(ebook: [ReadingCheckpoint], audio: [ReadingCheckpoint]) -> String? {
+        guard let latest = ebook.max(by: { $0.updatedAt < $1.updatedAt }),
+              latest.updatedAt >= (audio.map(\.updatedAt).max() ?? 0),
+              case .string(let title)? = (latest.local ?? latest.remote)?.locator?["title"] else { return nil }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     // MARK: Under the cover, you
 
     /// "Finished Sep 2025 · 2nd time", "Finished Oct 2026 · rate it?", "2nd

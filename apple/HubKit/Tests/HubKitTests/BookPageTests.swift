@@ -177,4 +177,20 @@ struct BookPageTests {
             try await hub.send(HubEndpoints.readingYou("rw_nope", ReadingYouChange(rating: .set(2))))
         }
     }
+
+    @Test func resumeNamesTheChapterTheEbookWasLeftAtWhenItWasReadLast() {
+        func place(_ kind: String, at: Int64, title: String?) -> ReadingCheckpoint {
+            let key = ReadingCheckpointKey(scope: "s", workId: "w", sourceItemId: "e", kind: kind)
+            var locator: [String: JSONValue] = ["href": .string("ch14.xhtml")]
+            if let title { locator["title"] = .string(title) }
+            return ReadingCheckpoint(key: key, local: ReadingLocation(locator: locator), updatedAt: at)
+        }
+        let ebook = [place("epub", at: 10, title: "Chapter 13"), place("epub", at: 20, title: "Chapter 14")]
+        #expect(BookPage.chapter(ebook: ebook, audio: []) == "Chapter 14")
+        #expect(BookPage.chapter(ebook: ebook, audio: [place("audio", at: 15, title: nil)]) == "Chapter 14")
+        // Listened to since: the ebook's chapter is not where you are.
+        #expect(BookPage.chapter(ebook: ebook, audio: [place("audio", at: 30, title: nil)]) == nil)
+        #expect(BookPage.chapter(ebook: [place("epub", at: 5, title: " ")], audio: []) == nil)
+        #expect(BookPage.chapter(ebook: [], audio: []) == nil)
+    }
 }

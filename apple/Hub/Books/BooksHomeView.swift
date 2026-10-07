@@ -619,7 +619,7 @@ struct ReadingListsMenu: View {
                 Label("New list", systemImage: "plus")
             }
         } label: {
-            Label("Reading lists", systemImage: "list.bullet")
+            Label("Add to a list", systemImage: "list.bullet")
         }
     }
 }
