@@ -11,8 +11,13 @@ public struct DemoTransport: HubTransport {
 
     public init() {}
 
+    /// How long each answer takes: a moment, as a hub does. HUB_DEMO_DELAY_MS
+    /// makes it longer, for a screen's state while it waits (the last answer
+    /// kept, #38).
+    static let delay: Duration = .milliseconds(ProcessInfo.processInfo.environment["HUB_DEMO_DELAY_MS"].flatMap(Int.init) ?? 250)
+
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        try await Task.sleep(for: .milliseconds(250))
+        try await Task.sleep(for: Self.delay)
         let path = request.url?.path ?? ""
         let method = request.httpMethod ?? "GET"
         let query = request.url?.query ?? ""
