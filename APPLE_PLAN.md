@@ -478,6 +478,31 @@ Pages grid or the end card. The demo hub draws every page (`DemoComics`), with p
 spread in the middle of each issue. `scripts/mac.sh build-tests` compiles the UI tests without a
 simulator.
 
+### The page curl (#32)
+
+On the iPhone and the iPad a page turns like paper, as in Apple Books: `UIPageViewController` with
+`.pageCurl`, double-sided, under the reader's own page (`Reader/ComicCurlView`, the model's side in
+`ComicReaderCurl`, the rules in HubKit `ComicCurl`). The canvas stays on top and keeps every touch
+but the outer edges, an eighth of the page's width (44 to 80 points), while a curl may start there:
+reading, nothing over the page, at its normal size, in thirds only from the last step going on or
+the first going back, and only with a decoded page on that side. A zoomed page pans instead, and past
+the first and last page the edges are the canvas's again, so a swipe still reaches the end card. The
+curl's own tap is off; taps at the edges read on and back as `ComicTouch` says, and the system's
+edge swipes are deferred while reading. A curl hides the canvas until it ends; a finished one turns
+the reading as a swipe would, and the keys and a controller play the same curl for a turn to the
+page next door. The back of a page is the page itself, mirrored and faint on paper.
+
+Two pages side by side turn as a book, the spine in the middle (`.mid`), each spread's halves a leaf.
+A curl knows only left to right (it ignores the view's direction, and its right-hand spine `.max`
+turned a left-edge drag to the page before the first, which stops the app), so right to left the
+book is drawn mirrored and each leaf mirrored back inside it: a manga's page lifts at the left edge
+and turns over to the right. The book's drag must also start moving in from its edge, since a drag
+that finds no page to turn to throws. The Mac keeps its own turn.
+
+Checked on the simulators with pictures of a curl held half way: a page alone on the iPhone, a
+manga page from the left, and spreads on the iPad Pro sideways both ways. Just after a turn, until
+the next page is decoded, the edge is the canvas's, so a quick second drag turns as a swipe does.
+
 Differences from Android, for now: two pages side by side are new; no Comfort layer; the sheets
 are not walked with the D-pad (Ⓑ closes them); no reading lists.
 

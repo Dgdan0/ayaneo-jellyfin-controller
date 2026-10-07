@@ -13,7 +13,9 @@ final class ComicReaderTests: XCTestCase {
     private func launchReading(_ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo"]
-        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_READ": "rw_demo_ff/rw_demo_ff-51"]
+        // Thirds, the reader's own way, unless a test reads the whole page: a run's way is kept.
+        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_READ": "rw_demo_ff/rw_demo_ff-51",
+                                 "HUB_READ_FIT": "thirds"]
             .merging(environment) { $1 }
         app.launch()
         XCTAssertTrue(page(app).waitForExistence(timeout: 15), "the reader did not open")
@@ -35,18 +37,79 @@ final class ComicReaderTests: XCTestCase {
         let reader = page(app)
         XCTAssertEqual(reader.label, "Fantastic Four")
         let opened = Self.value(of: reader)
-        XCTAssertTrue(opened.contains("Issue 51") && opened.contains("Page 2 of 24"), "it opened at \(opened)")
+        // Page 2, or the spread it stands in (2 and 3) on a wide window held sideways.
+        XCTAssertTrue(opened.contains("Issue 51") && [2, 3].contains(Self.pageNumber(opened)), "it opened at \(opened)")
         XCTAssertTrue(app.buttons["Close reader"].waitForNonExistence(timeout: 8), "the controls stayed over the page")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.5)).tap()
         XCTAssertTrue(waitUntil(5) { Self.value(of: reader) != opened }, "a tap on the right third did nothing")
         let moved = Self.value(of: reader)
-        XCTAssertTrue(moved.contains("Part 2 of") || moved.contains("Page 3 of 24"), "it read on to \(moved)")
+        XCTAssertTrue(moved.contains("Part 2 of") || Self.pageNumber(moved) > Self.pageNumber(opened), "it read on to \(moved)")
         // The left third goes back.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.5)).tap()
         XCTAssertTrue(waitUntil(5) { Self.value(of: reader) == opened }, "a tap on the left third did not go back")
     }
 
-    /// Pages: every page as a thumbnail; one tapped opens.
+    /// A keyboard reads on and back (`ReaderKeyboard`): Space a step on, as Ⓐ
+    /// does, and ← a step back at the page's fit. (XCUITest's Delete reaches no
+    /// view without text input, so Ⓑ's key is not tried here.)
+    @MainActor
+    func testTheKeyboardReadsOnAndBack() {
+        let app = launchReading()
+        let reader = page(app)
+        XCTAssertTrue(app.buttons["Close reader"].waitForNonExistence(timeout: 8), "the controls stayed over the page")
+        let opened = Self.value(of: reader)
+        app.typeKey(" ", modifierFlags: [])
+        XCTAssertTrue(waitUntil(5) { Self.value(of: reader) != opened }, "Space did not read on")
+        app.typeKey(.leftArrow, modifierFlags: [])
+        XCTAssertTrue(waitUntil(5) { Self.value(of: reader) == opened }, "← did not go back: \(Self.value(of: reader))")
+    }
+
+    /// A drag from the page's outer edge curls it over like paper to the next
+    /// page, and one from the other edge back (#32). The middle of the page
+    /// keeps its own drag, so only the curl can turn from an edge.
+    @MainActor
+    func testADragFromTheEdgeCurlsThePageOnAndBack() {
+        let app = launchReading(["HUB_READ_FIT": "whole"])
+        let reader = page(app)
+        XCTAssertTrue(app.buttons["Close reader"].waitForNonExistence(timeout: 8), "the controls stayed over the page")
+        let opened = Self.value(of: reader)
+        let openedPage = Self.pageNumber(opened)
+        XCTAssertTrue([2, 3].contains(openedPage), "it opened at \(opened)")
+        let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.985, dy: 0.55))
+        edge.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)),
+                   withVelocity: .default, thenHoldForDuration: 0.2)
+        XCTAssertTrue(waitUntil(5) { Self.pageNumber(Self.value(of: reader)) > openedPage },
+                      "the curl did not turn on: \(Self.value(of: reader))")
+        // The page beyond is decoded ahead before the edge is the curl's again.
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        let back = app.coordinate(withNormalizedOffset: CGVector(dx: 0.015, dy: 0.55))
+        back.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)),
+                   withVelocity: .default, thenHoldForDuration: 0.2)
+        XCTAssertTrue(waitUntil(5) { Self.pageNumber(Self.value(of: reader)) == openedPage },
+                      "the curl did not turn back: \(Self.value(of: reader))")
+    }
+
+    /// The keyboard plays the same curl: Space reads down the page in thirds
+    /// and, from the last third, turns it over as the edge's curl does; the
+    /// page is the reader's again once it has turned.
+    @MainActor
+    func testTheKeyboardTurnsThePageWithTheCurl() {
+        let app = launchReading()
+        let reader = page(app)
+        XCTAssertTrue(app.buttons["Close reader"].waitForNonExistence(timeout: 8), "the controls stayed over the page")
+        let openedPage = Self.pageNumber(Self.value(of: reader))
+        let turned = { Self.pageNumber(Self.value(of: reader)) > openedPage }
+        for _ in 0..<6 where !turned() {
+            app.typeKey(" ", modifierFlags: [])
+            // Long enough for a curl to finish and the page to come back.
+            _ = waitUntil(2) { turned() }
+        }
+        XCTAssertTrue(turned(), "Space did not turn on: \(Self.value(of: reader))")
+        // A tap in the middle still brings the controls: the page is the reader's again.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(app.buttons["Close reader"].waitForExistence(timeout: 5), "the page did not come back after the curl")
+    }
+
     @MainActor
     func testThePagesGridOpensAPage() {
         let app = launchReading(["HUB_READ_CHROME": "pinned"])
@@ -54,7 +117,9 @@ final class ComicReaderTests: XCTestCase {
         let tenth = app.buttons["Page 10"].firstMatch
         XCTAssertTrue(tenth.waitForExistence(timeout: 5), "the grid did not open")
         tenth.tap()
-        XCTAssertTrue(waitUntil(8) { Self.value(of: self.page(app)).contains("Page 10 of 24") }, "page 10 did not open")
+        // Page 10, or the spread it stands in.
+        XCTAssertTrue(waitUntil(8) { (10...11).contains(Self.pageNumber(Self.value(of: self.page(app)))) },
+                      "page 10 did not open: \(Self.value(of: page(app)))")
         XCTAssertFalse(app.buttons["Page 10"].exists, "the grid stayed open")
     }
 
@@ -123,4 +188,10 @@ final class ComicReaderTests: XCTestCase {
 
     @MainActor
     private static func value(of element: XCUIElement) -> String { element.value as? String ?? "" }
+
+    /// The page in "Issue 51, Page 3 of 24": a spread's last page, as the reader names it; 0 when none.
+    private static func pageNumber(_ value: String) -> Int {
+        guard let range = value.range(of: #"Page \d+ of"#, options: .regularExpression) else { return 0 }
+        return Int(value[range].dropFirst(5).dropLast(3)) ?? 0
+    }
 }

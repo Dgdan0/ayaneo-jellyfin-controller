@@ -26,7 +26,11 @@ struct ComicPageCanvas: View {
             }
             .frame(width: size.width, height: size.height)
             .clipped()
-            .contentShape(Rectangle())
+            // While a curl may start at an outer edge, the edge is the curl's (#32).
+            .contentShape(ComicCanvasTouch(left: curlEdge(.left, width: size.width),
+                                           right: curlEdge(.right, width: size.width)))
+            // Under a curl, the page shown is the curl's.
+            .opacity(reader.curling ? 0 : 1)
             .onTapGesture(count: 2, coordinateSpace: .local) { point in reader.doubleTapped(at: point) }
             .onTapGesture(count: 1, coordinateSpace: .local) { point in reader.tapped(x: point.x) }
             .gesture(SimultaneousGesture(pinch, drag))
@@ -54,6 +58,21 @@ struct ComicPageCanvas: View {
         .accessibilityAction(named: reader.controlsVisible ? "Hide controls" : "Show controls") {
             reader.setControls(!reader.controlsVisible)
         }
+    }
+
+    private enum Side { case left, right }
+
+    /// How much of the page's `side` edge belongs to the curl now: its zone
+    /// while a curl may start there, else none.
+    private func curlEdge(_ side: Side, width: CGFloat) -> CGFloat {
+        #if os(iOS)
+        guard reader.curlAvailable else { return 0 }
+        // Right to left, the next page is on the left.
+        let edge: ComicCurl.Edge = (side == .right) != reader.rtl ? .forward : .backward
+        return reader.curlAllowed(edge) ? ComicCurl.zoneWidth(width) : 0
+        #else
+        return 0
+        #endif
     }
 
     /// Each page at its place in the unit, scaled and moved by the camera.
@@ -107,5 +126,15 @@ struct ComicThumb: View {
                 withAnimation(.easeOut(duration: 0.15)) { image = loaded }
             }
             .accessibilityHidden(true)
+    }
+}
+
+/// The page's touches, less the outer edges a curl starts from.
+struct ComicCanvasTouch: Shape {
+    var left: CGFloat
+    var right: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        Path(CGRect(x: rect.minX + left, y: rect.minY, width: max(0, rect.width - left - right), height: rect.height))
     }
 }

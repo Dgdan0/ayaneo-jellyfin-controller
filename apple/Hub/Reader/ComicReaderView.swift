@@ -62,6 +62,12 @@ struct ComicReaderScreen: View {
             let layout = ComicReaderLayout(size: screen, safe: safe)
             ZStack {
                 Color.black
+                #if os(iOS)
+                // Under the page: the curl, which the page lets reach its outer edges (#32).
+                if let snapshot = curlSnapshot {
+                    ComicCurlView(reader: reader, snapshot: snapshot)
+                }
+                #endif
                 ComicPageCanvas(reader: reader)
                 ComicReaderStatus(reader: reader, leave: leave)
                 hints(layout)
@@ -127,6 +133,8 @@ struct ComicReaderScreen: View {
         #if os(iOS)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
+        // The edges are the curl's (#32): the system's own edge swipes wait for a second one.
+        .defersSystemGestures(on: .all)
         #endif
         .focusable()
         .focused($keys)
@@ -146,12 +154,15 @@ struct ComicReaderScreen: View {
         }
         .onAppear {
             keys = true
-            pad.start { action in reader.pad(action) }
+            pad.start { action in reader.padWithCurl(action) }
         }
         .onDisappear {
             pad.stop()
             reader.stop()
         }
+        // The page keeps the keyboard as the controls come and go: on an iPad
+        // the bars' going left the focus nowhere, and the next key was lost.
+        .onChange(of: reader.controlsVisible) { _, _ in keys = true }
         .onChange(of: pad.connected, initial: true) { _, connected in reader.controllerActive = connected }
         .onChange(of: reader.leaving) { _, leaving in
             if leaving { leave() }
@@ -164,6 +175,17 @@ struct ComicReaderScreen: View {
         #endif
         .accessibilityAddTraits(.isModal)
     }
+
+    #if os(iOS)
+    /// What the curl shows, read here so a change to any of it reaches the curl.
+    private var curlSnapshot: ComicCurlSnapshot? {
+        guard let shown = reader.shown, let unit = reader.units.units.firstIndex(of: shown.unit) else { return nil }
+        return ComicCurlSnapshot(publication: shown.publication, unit: unit, unitCount: reader.units.units.count,
+                                 spreads: reader.units.widest > 1, rtl: reader.rtl, size: reader.viewSize,
+                                 camera: reader.camera, fit: reader.view.fit, decoded: reader.images.count,
+                                 turn: reader.curlTurn)
+    }
+    #endif
 
     /// "Part 2 of 3" at the foot and the page's map in a corner, for a moment
     /// after a step or a pan, while the controls are out of the way.
@@ -216,14 +238,19 @@ struct ComicReaderScreen: View {
     }
 
     #if DEBUG
-    /// Debug builds, for screenshots: HUB_READ_PAGE=<n> opens that page,
-    /// HUB_READ_SHEET=display|keys|pages|end opens a sheet, the Pages grid
-    /// or the end card once the issue has opened.
+    /// Debug builds, for screenshots: HUB_READ_FIT=whole|width|thirds reads
+    /// the run that way (kept, as Display keeps it), HUB_READ_PAGE=<n> opens
+    /// that page, HUB_READ_SHEET=display|keys|pages|end opens a sheet, the
+    /// Pages grid or the end card once the issue has opened.
     private func debugTour() async {
         guard reader.phase == .reading else { return }
         let environment = ProcessInfo.processInfo.environment
         try? await Task.sleep(for: .milliseconds(600))
         guard !Task.isCancelled else { return }
+        if let fit = environment["HUB_READ_FIT"].flatMap(ComicFit.init(rawValue:)), fit != reader.view.fit {
+            reader.setFit(fit)
+            try? await Task.sleep(for: .milliseconds(300))
+        }
         if let page = environment["HUB_READ_PAGE"].flatMap(Int.init) { reader.jump(to: max(0, page - 1)) }
         switch environment["HUB_READ_SHEET"] {
         case "display": reader.sheet = .display

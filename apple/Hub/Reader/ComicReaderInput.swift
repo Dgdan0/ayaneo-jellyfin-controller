@@ -74,7 +74,7 @@ extension ComicReaderModel {
     /// leaves; the rest stand for the controller's keys (`ReaderKeyboard`).
     func key(_ key: ReaderKey) {
         guard key == .escape else {
-            if let action = ReaderKeyboard.action(key) { pad(action) }
+            if let action = ReaderKeyboard.action(key) { padWithCurl(action) }
             return
         }
         if sheet != nil {

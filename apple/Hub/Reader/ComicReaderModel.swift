@@ -167,6 +167,15 @@ final class ComicReaderModel {
     /// Debug builds: HUB_READ_CHROME=pinned keeps the controls up.
     @ObservationIgnored var controlsPinned = false
 
+    // The page curl (#32, `ComicReaderCurl`): iOS's, while its view is there.
+    /// The curl's view is on screen and may turn the page.
+    var curlAvailable = false
+    /// A curl is under way: the page under it is the curl's, not the canvas's.
+    var curling = false
+    /// The turn the keys or a controller asked the curl to play.
+    var curlTurn: CurlTurn?
+    @ObservationIgnored var curlTurns = 0
+
     /// What VoiceOver, the UI tests and the hint row read off the reader.
     var padState: ReaderPadState {
         ReaderPadState(.comic, controlsVisible: controlsVisible, loading: phase != .reading)
