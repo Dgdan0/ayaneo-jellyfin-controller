@@ -142,6 +142,16 @@ services:
     username: "pocketds"
     password: "${env:STORYTELLER_PASSWORD}"
 
+  # Optional: what readers at large think of a book (a rating) and its genres, for
+  # the book page. A free key is on hardcover.app > Settings > API (paste it with or
+  # without the "Bearer " it is shown with) and belongs in hub.secrets.yaml as
+  # services.hardcover.api_key. With no key the hub asks Hardcover nothing, and the page
+  # falls back to the average rating in the Goodreads export, if one was imported.
+  # It is not probed by /v1/health, and a failure of it never fails a page.
+  # hardcover:
+  #   enabled: true
+  #   api_key: "${env:HARDCOVER_API_KEY}"
+
   sonarr:
     enabled: true
     base_url: "http://127.0.0.1:8989"

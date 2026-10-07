@@ -224,6 +224,22 @@ var KnownServices = []string{
 	"bookkeeprr", "kavita", "storyteller",
 }
 
+// ExternalServices are hosted services the hub may use when it is given a key, and does
+// without when it is not: they are accepted in the config, but are not probed by
+// /v1/health, need no base_url and, enabled with no api_key, are simply off. Hardcover
+// (hardcover.app) gives the book page its community rating and genres (#39).
+var ExternalServices = []string{"hardcover"}
+
+// IsExternalService says whether a name is one of ExternalServices.
+func IsExternalService(name string) bool {
+	for _, external := range ExternalServices {
+		if external == name {
+			return true
+		}
+	}
+	return false
+}
+
 var envPattern = regexp.MustCompile(`\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 // Load reads the config, merges any sibling secrets file, expands ${env:NAME},

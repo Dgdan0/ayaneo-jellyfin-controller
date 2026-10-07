@@ -192,3 +192,27 @@ func TestReadingCatalogPathDefaultsAndResolvesBesideConfig(t *testing.T) {
 		t.Fatalf("relative reading catalog = %q, want %q", cfg.Server.ReadingCatalog, want)
 	}
 }
+
+// The key goes in the secrets file beside a service that is enabled in hub.yaml, as every
+// other service's does; Hardcover needs nothing else.
+func TestHardcoverKeyComesFromTheSecretsFile(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Replace(mainYAML, "%s", HashToken(goodToken), 1) + "  hardcover:\n    enabled: true\n"
+	path := writeFile(t, dir, "hub.yaml", body)
+	writeFile(t, dir, "hub.secrets.yaml", `
+services:
+  radarr:
+    api_key: "r"
+  sonarr:
+    api_key: "s"
+  hardcover:
+    api_key: "Bearer hardcover-token"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if svc := cfg.Services["hardcover"]; !svc.Enabled || svc.APIKey.Reveal() != "Bearer hardcover-token" || svc.BaseURL != "" {
+		t.Fatalf("hardcover = %+v", svc)
+	}
+}

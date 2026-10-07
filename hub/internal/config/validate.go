@@ -237,13 +237,16 @@ func (c *Config) validateServices() error {
 	for _, name := range KnownServices {
 		known[name] = true
 	}
+	for _, name := range ExternalServices {
+		known[name] = true
+	}
 
 	for name, svc := range c.Services {
 		if !known[name] {
 			return &Error{
 				Path:    "services." + name,
 				Problem: "is not a service this hub understands",
-				Fix:     "one of: " + strings.Join(KnownServices, ", "),
+				Fix:     "one of: " + strings.Join(append(append([]string(nil), KnownServices...), ExternalServices...), ", "),
 			}
 		}
 		if svc.WebURL != "" {
@@ -269,6 +272,20 @@ func (c *Config) validateServices() error {
 		}
 
 		path := "services." + name
+		if IsExternalService(name) {
+			// A hosted service: its own address is built in, and with no api_key it is
+			// off. Only an address that was given must be one.
+			if svc.BaseURL != "" {
+				if parsed, err := url.Parse(svc.BaseURL); err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+					return &Error{
+						Path:    path + ".base_url",
+						Problem: fmt.Sprintf("%q is not an absolute http(s) URL", svc.BaseURL),
+						Fix:     "leave it out to use the service's own address",
+					}
+				}
+			}
+			continue
+		}
 		if svc.BaseURL == "" {
 			return &Error{
 				Path:    path + ".base_url",

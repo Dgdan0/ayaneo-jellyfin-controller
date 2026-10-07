@@ -377,3 +377,37 @@ func TestAcceptsEveryKnownScope(t *testing.T) {
 	c.Auth.Tokens = []TokenConfig{{Label: "x", SHA256: HashToken(goodToken), Scopes: KnownScopes}}
 	wantOK(t, c)
 }
+
+// Hardcover is a hosted service the hub uses when it has a key and does without when it
+// has none (#39): it is accepted, needs no address, and is not one of the services the
+// hub probes.
+func TestAcceptsHardcoverWithOrWithoutAKeyOrAnAddress(t *testing.T) {
+	for name, svc := range map[string]ServiceConfig{
+		"disabled":                 {Enabled: false},
+		"enabled, no key":          {Enabled: true},
+		"enabled with a key":       {Enabled: true, APIKey: "token"},
+		"a test address":           {Enabled: true, APIKey: "token", BaseURL: "http://127.0.0.1:9999"},
+		"a web address of its own": {Enabled: true, WebURL: "https://hardcover.app"},
+	} {
+		c := base()
+		c.Services["hardcover"] = svc
+		if err := c.Validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	c := base()
+	c.Services["hardcover"] = ServiceConfig{Enabled: true, APIKey: "token", BaseURL: "not a url"}
+	wantError(t, c, "services.hardcover.base_url")
+	for _, name := range KnownServices {
+		if name == "hardcover" {
+			t.Error("Hardcover is a service the hub probes: it would show on /v1/health with no probe")
+		}
+	}
+	if !IsExternalService("hardcover") || IsExternalService("radarr") {
+		t.Error("IsExternalService is wrong")
+	}
+	// Anything else unknown is still refused, and says what is understood.
+	c = base()
+	c.Services["goodreads"] = ServiceConfig{Enabled: true}
+	wantError(t, c, "hardcover")
+}
