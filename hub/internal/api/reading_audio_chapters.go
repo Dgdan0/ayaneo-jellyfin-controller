@@ -14,8 +14,12 @@ package api
 // order they are heard, and an entry that cannot be both is left out.
 
 import (
+	"cmp"
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
+	"unicode"
 )
 
 // minBookChapters is how many chapters a book's contents must give for them to
@@ -40,7 +44,7 @@ func (a *audioAlignment) bookChapters(trackMs []int64) []ReadingAudioChapter {
 		if place.track < 0 || place.track >= len(trackMs) || start >= trackMs[place.track] {
 			continue
 		}
-		chapters = append(chapters, ReadingAudioChapter{Title: chapter.Title, StartMs: start, Track: place.track, Source: chapterSourceBook})
+		chapters = append(chapters, ReadingAudioChapter{Title: dressChapterTitle(chapter.Title), StartMs: start, Track: place.track, Source: chapterSourceBook})
 	}
 	chapters = inListeningOrder(chapters)
 	for i := range chapters {
@@ -49,6 +53,43 @@ func (a *audioAlignment) bookChapters(trackMs []int64) []ReadingAudioChapter {
 		}
 	}
 	return chapters
+}
+
+// A word of a title (letters and digits, and an apostrophe inside it), and the
+// numerals that are not words to be given a capital and small letters.
+var (
+	titleWord    = regexp.MustCompile(`[\pL\pN]+(?:['\x{2019}][\pL\pN]+)*`)
+	romanNumeral = regexp.MustCompile(`^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$`)
+)
+
+// dressChapterTitle is a chapter's title as both apps show it, so that they show
+// the same: a bare number is "Chapter N" ("1" is "Chapter 1"), a title written
+// entirely in capitals is in title case ("PROLOGUE" is "Prologue", with a capital
+// for every word) and anything else is as the book wrote it ("Chapter One"). It is
+// only for the book's own titles: the names of file marks are as their files say.
+// Mistborn's contents name its chapters "PROLOGUE", "1" … "38" and "EPILOGUE". A
+// Roman numeral is no word to be written "Ii", so "PART II" is "Part II".
+func dressChapterTitle(title string) string {
+	number, upper, lower := title != "", false, false
+	for _, r := range title {
+		number = number && r >= '0' && r <= '9'
+		upper = upper || unicode.IsUpper(r)
+		lower = lower || unicode.IsLower(r)
+	}
+	switch {
+	case number:
+		return "Chapter " + cmp.Or(strings.TrimLeft(title, "0"), "0")
+	case upper && !lower:
+		return titleWord.ReplaceAllStringFunc(title, func(word string) string {
+			if romanNumeral.MatchString(word) {
+				return word
+			}
+			letters := []rune(strings.ToLower(word))
+			letters[0] = unicode.ToUpper(letters[0])
+			return string(letters)
+		})
+	}
+	return title
 }
 
 // heardBefore says whether one place of the audiobook comes before another.

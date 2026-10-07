@@ -16,48 +16,50 @@ import (
 	readingdomain "ayaneohub/internal/reading"
 )
 
-// A book of seven chapters across the five tracks of the tracked fixture, which the
+// A book of eight chapters across the five tracks of the tracked fixture, which the
 // narration of each file is 12 ms short of, as the real ones are:
 //
 //	track 0  chapters 1 and 2: six sentences of 768.440 s, three to each
 //	track 1  chapter 3
 //	track 2  chapter 4, then chapter 5 from 666.666 s on; Storyteller cut the file in
 //	         two, and the second chunk starts 1000 s in, at chapter 5's second sentence
-//	track 3  chapter 6
-//	track 4  chapter 7
+//	track 3  chapter 6, then chapter 7 from 999.994 s on
+//	track 4  chapter 8
 func chapteredNarrations() map[string]readingdomain.FixtureNarration {
 	return map[string]readingdomain.FixtureNarration{
 		"Fixture Odyssey.mp3":                                 {ChunkMs: []int64{4_610_640}, Sentences: []int{6}, Chapters: []int{3, 3}},
 		"Fixture Odyssey (1).mp3":                             {ChunkMs: []int64{1_000_488}, Sentences: []int{4}},
 		"Fixture Odyssey (2).mp3":                             {ChunkMs: []int64{1_000_000, 1_000_738}, Sentences: []int{3, 3}, Chapters: []int{2, 4}},
-		"Fixture Odyssey (3).MP3":                             {ChunkMs: []int64{2_499_988}, Sentences: []int{5}},
+		"Fixture Odyssey (3).MP3":                             {ChunkMs: []int64{2_499_988}, Sentences: []int{5}, Chapters: []int{2, 3}},
 		"Part 5 - 100% Pure & Co., It's #5 [Ünïcode] פרק.mp3": {ChunkMs: []int64{3_000_238}, Sentences: []int{5}},
 	}
 }
 
-// The contents of that book as its edition lists them: a cover and a copyright page
-// that nothing narrates; a dedication that is listed among them and spoken in the
-// middle of the sixth chapter; parts with their chapters inside, a part beginning
-// with the chapter it opens; a chapter listed again from the middle of the file it
-// is in, in each chunk; one with no title; an epilogue.
+// The contents of that book as its edition lists them, with the titles as a book
+// prints them: a cover and a copyright page that nothing narrates; a dedication that
+// is listed among them and is the seventh chapter's document, spoken in the middle of
+// the fourth track; parts in capitals with their chapters inside, some of them bare
+// numbers, a part beginning with the chapter it opens; a chapter listed again from
+// the middle of the file it is in, in each chunk; one with no title; an epilogue in
+// capitals.
 func chapteredContents() ([]readingdomain.FixtureContent, []readingdomain.FixtureDocument) {
 	return []readingdomain.FixtureContent{
 		{Title: "Cover", Document: "cover.xhtml"},
 		{Title: "Copyright", Document: "copyright.xhtml"},
-		{Title: "Dedication", Chapter: 6, Fragment: "id6-s2"},
-		{Title: "Part One", Chapter: 1, Children: []readingdomain.FixtureContent{
+		{Title: "Dedication", Chapter: 7},
+		{Title: "PART ONE", Chapter: 1, Children: []readingdomain.FixtureContent{
 			{Title: "Chapter 1", Chapter: 1},
-			{Title: "Chapter 2", Chapter: 2},
-			{Title: "Chapter 3", Chapter: 3},
+			{Title: "2", Chapter: 2},
+			{Title: "3", Chapter: 3},
 		}},
-		{Title: "Part Two", Chapter: 4, Children: []readingdomain.FixtureContent{
+		{Title: "PART TWO", Chapter: 4, Children: []readingdomain.FixtureContent{
 			{Title: "Chapter 4", Chapter: 4},
 			{Title: "Chapter 5", Chapter: 5},
 			{Title: "The second half", Chapter: 5, Fragment: "id5-s1"},
 			{Title: "", Chapter: 5, Fragment: "id5-s3"},
 		}},
 		{Title: "Chapter 6", Chapter: 6},
-		{Title: "Epilogue", Chapter: 7},
+		{Title: "EPILOGUE", Chapter: 8},
 	}, []readingdomain.FixtureDocument{
 		{Name: "cover.xhtml", Before: 0},
 		{Name: "copyright.xhtml", Before: 0},
@@ -200,9 +202,10 @@ func TestAudioManifestChaptersOfAnEPUB2EditionComeFromItsNCX(t *testing.T) {
 			if len(manifest.Chapters) != 9 || manifest.Chapters[0] != bookChapter("Part One", 0, 0) || manifest.Chapters[3] != bookChapter("Part Two", 2, 0) {
 				t.Fatalf("chapters = %+v", manifest.Chapters)
 			}
-			// With both, the navigation document is the one that is read.
+			// With both, the navigation document is the one that is read: the generated NCX
+			// calls its entries "NCX ...", which the titles' capitals are cased down from.
 			for _, chapter := range manifest.Chapters {
-				if strings.HasPrefix(chapter.Title, "NCX ") {
+				if strings.Contains(strings.ToLower(chapter.Title), "ncx") {
 					t.Fatalf("chapter %+v is from the NCX though there is a navigation document", chapter)
 				}
 			}
@@ -412,5 +415,50 @@ func TestAudioPlanKeepsNoEditionReadWhileItsRequestEnded(t *testing.T) {
 	plan, err := env.server.buildAudioPlan(context.Background(), book)
 	if err != nil || reads.Load() != 2 || len(plan.chapters) != 9 {
 		t.Fatalf("the edition was read %d times; the next plan has %d chapters, %v", reads.Load(), len(plan.chapters), err)
+	}
+}
+
+func TestDressChapterTitleNumbersCapitalsAndNothingElse(t *testing.T) {
+	for title, want := range map[string]string{
+		// A bare number is a chapter.
+		"1": "Chapter 1", "38": "Chapter 38", "01": "Chapter 1", "0": "Chapter 0", "000": "Chapter 0",
+		// A title in capitals is in title case, a capital to every word.
+		"PROLOGUE": "Prologue", "EPILOGUE": "Epilogue", "ÉPILOGUE": "Épilogue",
+		"THE END OF PART ONE":         "The End Of Part One",
+		"CHAPTER 12":                  "Chapter 12",
+		"CHAPTER 1: THE BEGINNING":    "Chapter 1: The Beginning",
+		"PART ONE (REVISED)":          "Part One (Revised)",
+		"DON'T PANIC":                 "Don't Panic",
+		"DON’T PANIC":                 "Don’t Panic",
+		"WELL-KNOWN":                  "Well-Known",
+		"2ND ACT":                     "2nd Act",
+		"REBELS BENEATH A SKY OF ASH": "Rebels Beneath A Sky Of Ash",
+		// A Roman numeral is no word: it stays a numeral, alone or among words.
+		"PART II": "Part II", "ACT IV: THE FALL": "Act IV: The Fall", "XIV": "XIV", "I": "I", "A": "A",
+		// Anything else is as the book wrote it.
+		"Chapter One": "Chapter One", "Chapter 1": "Chapter 1", "Prologue": "Prologue", "The Final Empire": "The Final Empire",
+		"PROLOGUE: a note": "PROLOGUE: a note", "iPhone": "iPhone", "McDonald": "McDonald",
+		"1.": "1.", "1984:": "1984:", "No. 5": "No. 5", "***": "***", "": "",
+		// Without capitals to speak of, there is nothing to cast down; and a digit that is
+		// not one of 0 to 9 is no bare number here.
+		"פרק 1": "פרק 1", "פרק ראשון": "פרק ראשון", "٣": "٣",
+	} {
+		if got := dressChapterTitle(title); got != want {
+			t.Errorf("dressChapterTitle(%q) = %q, want %q", title, got, want)
+		}
+	}
+}
+
+// What a file says its chapters are called is not the book's to dress: a mark named
+// "PROLOGUE" or "1" is as its file wrote it.
+func TestAudioManifestLeavesTheTitlesOfFileMarksAsTheyAre(t *testing.T) {
+	env := newTrackedAudioEnv(t)
+	second := "Fixture Odyssey (1).mp3"
+	env.mu.Lock()
+	env.chapters[second] = []probedChapter{{"PROLOGUE", 0, 400000}, {"1", 400000, 800000}}
+	env.mu.Unlock()
+	manifest := env.manifest()
+	if len(manifest.Chapters) != 2 || manifest.Chapters[0].Title != "PROLOGUE" || manifest.Chapters[1].Title != "1" || manifest.Chapters[0].Source != "marks" {
+		t.Fatalf("chapters = %+v", manifest.Chapters)
 	}
 }
