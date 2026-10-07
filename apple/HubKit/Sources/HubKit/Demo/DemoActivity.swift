@@ -386,7 +386,12 @@ enum DemoActivity {
             film,
             series(136_315, "The Bear", 6, "04:00", 5, 1, "Doors", has: false),
         ]
-        return json(["start": start, "end": end, "timezone": zone.identifier, "items": items, "partial": [Any]()])
+        // The hub answers only the days asked for: [start, end).
+        let asked = items.filter { item in
+            guard let date = item["date"] as? String else { return false }
+            return date >= start && date < end
+        }
+        return json(["start": start, "end": end, "timezone": zone.identifier, "items": asked, "partial": [Any]()])
     }
 
     // MARK: Plumbing
