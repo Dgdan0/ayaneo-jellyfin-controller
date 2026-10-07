@@ -734,3 +734,24 @@ Differences from Android, on purpose: the bell and Notifications count what is u
 own three columns; a column shows its newest eight and Show all opens the rest; Settings › Home moves a row with arrows, not
 with X and Y; there is no Classic look or theme (Glass is always dark); local alerts for finished downloads and new subtitles
 are later.
+
+## Library upkeep: subtitles, release searches and deleting from the server (#34)
+
+| Behaviour | Owner |
+|---|---|
+| Which pages offer subtitles, a release search, deleting; a series' release key; an episode's heading | HubKit `LibraryUpkeep` (`offersSubtitles`, `offersReleases`, `releaseKey`, `offersDeleting`, `pageTitle`, `episodeHeading`); `LibraryItem.mediaKey` is the hub's TMDB key for a film or series |
+| The subtitle page's words (a language in English, flags, a candidate's line, a record's line, what a download says) | HubKit `SubtitleLines`, drawn by `Library/SubtitlesView` (`SubtitlesRoute`) |
+| The deletion page's words, the alert's title and message | HubKit `RemovalLines`, drawn by `Library/RemovalView` (`RemovalRoute`); the preview and the one-use ticket are `HubEndpoints.removalPreview` / `removeMedia`, each sent once |
+| A season's or an episode's release search from a Library series | `ReleaseTargetsRoute` (`startSeason`) and `ReleasesRoute`, the pages the request side already uses; entered from the title page's More menu, a season pill's menu and an episode's menu |
+| Going back past a page that finished its work | `OpenRouteAction.pop(count)` (a deletion pops its own page and the title's) |
+| Pages that list titles reading again after a deletion | `AppModel.libraryChanges` / `libraryChanged()`, read by `LibraryGrid`, Home, a title's page and the Books grids |
+
+The demo hub's subtitles and deletions (`DemoUpkeep`, `DemoLibrary.remove`) keep the hub's rules: a ticket per search
+candidate that a download spends (a second use is 409), a same-language-and-type subtitle replaces the old one, a deletion
+is previewed first and confirmed by a ticket good once, and a confirmed one only takes the title out of the demo for the
+run. A subtitle downloaded for an item is in the tracks its player lists. Debug launches also take `HUB_TITLE=<item id>`,
+which opens that library title on the first section's stack.
+
+Differences from Android, on purpose: no per-subtitle rating kept on the device and no offline subtitle copy (those wait for
+Downloads' subtitle sync); a result opens in place under its row rather than in a side panel; the deletion's confirmation is
+a native alert whose Cancel has the cancel role (iOS 26 places it last), with Cancel first on the page itself.

@@ -50,18 +50,28 @@ public enum LibraryUpkeep {
         item.type == "movie" || item.type == "episode"
     }
 
-    /// A series the hub can name on TMDB can have its seasons and episodes
-    /// searched for releases, to finish one that is only partly here.
-    public static func offersReleases(_ item: LibraryItem) -> Bool {
-        item.type == "series" && !item.mediaKey.isEmpty
-    }
+    /// A series can have its seasons and episodes searched for releases, to
+    /// finish one that is only partly here.
+    public static func offersReleases(_ item: LibraryItem) -> Bool { item.type == "series" }
 
-    /// A series with no TMDB match cannot be linked to Sonarr safely.
+    /// What the search is asked by: the series on TMDB. Nil when the hub could
+    /// not name it, or is an older hub that does not say.
+    public static func releaseKey(_ item: LibraryItem) -> String? { item.mediaKey.isEmpty ? nil : item.mediaKey }
+
+    /// What to say instead of searching for a series with no TMDB match: it
+    /// cannot be linked to Sonarr safely.
     public static let noMatchWords = "This series has no TMDB match, so Sonarr releases cannot be linked safely"
 
     /// Films, series, seasons and episodes are "video" to the hub.
     public static func offersDeleting(_ item: LibraryItem) -> Bool {
         ["movie", "series", "season", "episode"].contains(item.type)
+    }
+
+    /// What a page of upkeep calls the title it is for: an episode under its
+    /// series' name ("Last Seen · S1E4 · Gone"), anything else by its own.
+    public static func pageTitle(_ item: LibraryItem) -> String {
+        guard item.type == "episode", !item.seriesTitle.isEmpty else { return item.title }
+        return episodeHeading(series: item.seriesTitle, season: item.seasonNumber, episode: item.indexNumber, title: item.title)
     }
 
     /// "Last Seen · S1E4 · Gone": an episode's release search heading.
@@ -122,6 +132,11 @@ public enum SubtitleLines {
         record.score.isEmpty ? "Match score unavailable" : "\(record.score) match"
     }
 
+    /// When it was saved and what it was made for: the rest of a track's row.
+    public static func recordDetail(_ record: SubtitleRecord) -> String {
+        [record.date, record.description].filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.joined(separator: " · ")
+    }
+
     public static func installed(_ state: SubtitleState) -> [SubtitleRecord] { state.records.filter(\.installed) }
     public static func history(_ state: SubtitleState) -> [SubtitleRecord] { state.records.filter { !$0.installed } }
 
@@ -146,6 +161,11 @@ public enum SubtitleLines {
     public static let searching = "Searching the subtitle providers. This can take a minute."
     public static let overwrite = "Downloading may replace an external subtitle with the same language and type. Embedded tracks are kept."
     public static let legend = "Match score: how well it fits this release"
+    public static let noInstalled = "No indexed subtitle tracks."
+    public static let noHistory = "No recorded subtitle downloads."
+    public static let downloading = "Downloading the subtitle…"
+    public static let refreshing = "Asking Jellyfin to refresh this title's subtitles…"
+    public static let refreshed = "Jellyfin is refreshing this title's tracks, and the player will list any new subtitle"
 
     /// What to tell a person once a download is done: the hub's warning, or
     /// that Jellyfin did not take the refresh, or what is happening.
@@ -164,9 +184,6 @@ public enum RemovalLines {
     /// "1 server file", "7 server files".
     public static func files(_ count: Int) -> String { "\(count) server file" + (count == 1 ? "" : "s") }
 
-    /// "Thor" over "1 server file".
-    public static func summary(_ preview: RemovalPreview) -> String { "\(preview.title)\n\(files(preview.fileCount))" }
-
     /// The question, in the alert's own title.
     public static func confirmTitle(_ preview: RemovalPreview) -> String { "Permanently delete \(preview.title)?" }
 
@@ -180,4 +197,8 @@ public enum RemovalLines {
     public static let deleted = "Deleted from the server · copies on this device kept"
     public static let heading = "Delete from server"
     public static let filesIncluded = "Files included"
+    public static let loading = "Checking what would be deleted…"
+    /// After a failed deletion some files may be gone: the way on is to look again, or leave.
+    public static let review = "Review again"
+    public static let backToLibrary = "Back to library"
 }

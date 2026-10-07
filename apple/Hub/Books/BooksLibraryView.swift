@@ -194,10 +194,10 @@ struct ReadingLibraryView: View {
                 if ready {
                     if view == .authors {
                         AuthorsGrid(libraryId: library.id, ascending: sort.ascending)
-                            .id("authors·\(sort.ascending)·\(model.userId)")
+                            .id("authors·\(sort.ascending)·\(model.userId)·\(model.libraryChanges)")
                     } else {
                         ReadingWorksGrid(library: library, sort: sort, works: view == .books)
-                            .id("\(view.rawValue)·\(sort.encoded)·\(model.userId)")
+                            .id("\(view.rawValue)·\(sort.encoded)·\(model.userId)·\(model.libraryChanges)")
                     }
                 }
             }

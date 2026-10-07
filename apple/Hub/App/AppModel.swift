@@ -17,6 +17,9 @@ final class AppModel {
     /// Counts the library orders saved from this device (#15): a page that drew
     /// the libraries reads them again when it changes.
     private(set) var libraryOrderChanges = 0
+    /// Counts the times the library lost something from here (#34): a title or
+    /// a book deleted from the server. The pages that list titles read again.
+    private(set) var libraryChanges = 0
     /// Titles requested on this device this session: cards show it at once,
     /// before the hub's next read does (Android's `RequestedTitles`).
     private(set) var requested = RequestedTitles()
@@ -114,6 +117,10 @@ final class AppModel {
 
     func libraryOrderChanged() {
         libraryOrderChanges += 1
+    }
+
+    func libraryChanged() {
+        libraryChanges += 1
     }
 
     func recordRequest(key: String, availability: String, requestId: Int) {

@@ -77,6 +77,12 @@ enum DemoUpkeep {
         return nil
     }
 
+    /// The external subtitles downloaded for an item in this run, for the
+    /// player's plan to list beside the ones every item has.
+    static func downloadedTracks(for item: String) -> [(code: String, forced: Bool, hi: Bool)] {
+        state.withLock { $0.added[item] ?? [] }.map { ($0.code, $0.forced, $0.hi) }
+    }
+
     // MARK: Subtitles
 
     private static func subtitles(method: String, item: String, action: String, body: Data?) -> DemoTransport.Answer {

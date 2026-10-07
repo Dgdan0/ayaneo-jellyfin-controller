@@ -12,12 +12,18 @@ struct LibraryUpkeepRulesTests {
     @Test func subtitlesAreForFilmsAndEpisodesAndReleasesForSeriesTheHubCanName() {
         #expect(LibraryUpkeep.offersSubtitles(item("movie")) && LibraryUpkeep.offersSubtitles(item("episode")))
         #expect(!LibraryUpkeep.offersSubtitles(item("series")) && !LibraryUpkeep.offersSubtitles(item("season")))
-        #expect(LibraryUpkeep.offersReleases(item("series", key: "tmdb:series:1")))
-        #expect(!LibraryUpkeep.offersReleases(item("series")), "no TMDB match, no safe link to Sonarr")
+        #expect(LibraryUpkeep.offersReleases(item("series", key: "tmdb:series:1")) && LibraryUpkeep.offersReleases(item("series")))
         #expect(!LibraryUpkeep.offersReleases(item("movie", key: "tmdb:movie:1")))
+        #expect(LibraryUpkeep.releaseKey(item("series", key: "tmdb:series:1")) == "tmdb:series:1")
+        #expect(LibraryUpkeep.releaseKey(item("series")) == nil, "no TMDB match, no safe link to Sonarr")
+        #expect(LibraryUpkeep.noMatchWords.hasPrefix("This series has no TMDB match"))
         #expect(["movie", "series", "season", "episode"].allSatisfy { LibraryUpkeep.offersDeleting(item($0)) })
         #expect(!LibraryUpkeep.offersDeleting(item("person")))
         #expect(LibraryUpkeep.episodeHeading(series: "Last Seen", season: 1, episode: 4, title: "Gone") == "Last Seen · S1E4 · Gone")
+        let episode = LibraryItem(id: "e", type: "episode", title: "Gone", seriesTitle: "Last Seen", indexNumber: 4, seasonNumber: 1)
+        #expect(LibraryUpkeep.pageTitle(episode) == "Last Seen · S1E4 · Gone")
+        #expect(LibraryUpkeep.pageTitle(LibraryItem(id: "e", type: "episode", title: "Gone")) == "Gone", "no series, no heading")
+        #expect(LibraryUpkeep.pageTitle(item("movie")) == "T")
     }
 
     @Test func aSeriesItemCarriesItsMediaKeyAndAnOlderHubsHasNone() throws {
@@ -67,6 +73,8 @@ struct LibraryUpkeepRulesTests {
         #expect(SubtitleLines.recordTitle(SubtitleRecord(id: "y", language: "Arabic")) == "Arabic · External")
         #expect(SubtitleLines.recordScore(external) == "88% match" && SubtitleLines.recordScore(embedded) == "Match score unavailable")
         #expect(SubtitleLines.library(installed: 1) == "Library · 1 installed subtitle track")
+        #expect(SubtitleLines.recordDetail(external).isEmpty)
+        #expect(SubtitleLines.recordDetail(SubtitleRecord(id: "z", date: "2026-10-01", description: "WEB-DL")) == "2026-10-01 · WEB-DL")
         #expect(SubtitleLines.library(installed: 2) == "Library · 2 installed subtitle tracks")
     }
 
@@ -90,7 +98,6 @@ struct LibraryUpkeepRulesTests {
     @Test func theDeletionIsPlainAboutWhatGoesAndWhatStays() {
         let preview = RemovalPreview(ticket: "t", title: "Thor", description: "d", files: ["Thor.mkv"], fileCount: 1)
         #expect(RemovalLines.files(1) == "1 server file" && RemovalLines.files(7) == "7 server files")
-        #expect(RemovalLines.summary(preview) == "Thor\n1 server file")
         #expect(RemovalLines.confirmTitle(preview) == "Permanently delete Thor?")
         #expect(RemovalLines.confirmMessage(preview)
             == "1 server file will be deleted from the media server. This cannot be undone. Copies saved on this device stay.")
@@ -125,6 +132,7 @@ struct DemoUpkeepTests {
         let ack = try await hub.fetch(HubEndpoints.downloadSubtitle(itemId: item, ticket: hebrew.ticket), as: SubtitleDownloadAck.self)
         #expect(ack.ok && ack.jellyfinRefreshStarted)
         let after = try await hub.fetch(HubEndpoints.subtitles(itemId: item), as: SubtitleState.self)
+        #expect(DemoUpkeep.downloadedTracks(for: item).contains { $0.code == "he" && !$0.forced && !$0.hi }, "the player lists what was downloaded")
         #expect(after.records.contains { $0.language == "Hebrew" && !$0.embedded && $0.provider == "OpenSubtitles" })
         #expect(after.records.contains { $0.embedded }, "an embedded track is kept")
 
@@ -156,7 +164,7 @@ struct DemoUpkeepTests {
         await #expect(throws: HubFailure.self) {
             _ = try await hub.fetch(HubEndpoints.downloadSubtitle(itemId: item, ticket: "short"), as: SubtitleDownloadAck.self)
         }
-        _ = try await hub.fetch(HubEndpoints.refreshSubtitles(itemId: item), as: SubtitleDownloadAck.self)
+        _ = try await hub.fetch(HubEndpoints.refreshSubtitles(itemId: item), as: ActionAck.self)
     }
 
     @Test func aDeletionIsPreviewedThenConfirmedOnceAndTheTitleIsGone() async throws {
@@ -166,17 +174,22 @@ struct DemoUpkeepTests {
         #expect(preview.title == "Thor" && preview.fileCount == 1 && preview.files == ["Thor (2011).mkv"])
         #expect(preview.ticket.count == 64)
         #expect(preview.description.contains("Saved copies on this device remain"))
-        // Nothing is deleted by looking.
+        // Nothing is deleted by looking: Thor is still on the server, and among Home's recently added.
         _ = try await hub.fetch(HubEndpoints.libraryItem(thor.id), as: LibraryItemResponse.self)
+        func recentlyAdded() async throws -> [String] {
+            try await hub.fetch(HubEndpoints.home, as: HomeResponse.self).rows.first { $0.id == "latest" }?.items.map(\.media.title) ?? []
+        }
+        #expect(try await recentlyAdded().contains("Thor"))
 
-        let ack = try await hub.fetch(HubEndpoints.removeMedia(ticket: preview.ticket), as: SubtitleDownloadAck.self)
+        let ack = try await hub.fetch(HubEndpoints.removeMedia(ticket: preview.ticket), as: ActionAck.self)
         #expect(ack.ok)
         await #expect(throws: HubFailure.self) { _ = try await hub.fetch(HubEndpoints.libraryItem(thor.id), as: LibraryItemResponse.self) }
+        #expect(try await !recentlyAdded().contains("Thor"), "Home stops offering what was deleted")
         let folder = try await hub.fetch(HubEndpoints.libraryItems(viewId: thor.folder), as: LibraryPage.self)
         #expect(!folder.items.contains { $0.media.title == "Thor" })
 
         // The ticket was one use: a second confirmation finds nothing.
-        await #expect(throws: HubFailure.self) { _ = try await hub.fetch(HubEndpoints.removeMedia(ticket: preview.ticket), as: SubtitleDownloadAck.self) }
+        await #expect(throws: HubFailure.self) { _ = try await hub.fetch(HubEndpoints.removeMedia(ticket: preview.ticket), as: ActionAck.self) }
     }
 
     @Test func aSeriesPreviewListsEveryEpisodeAndAnEpisodeJustItsOwn() async throws {
@@ -195,12 +208,12 @@ struct DemoUpkeepTests {
             await #expect(throws: HubFailure.self) { _ = try await hub.fetch(body, as: RemovalPreview.self) }
         }
         await #expect(throws: HubFailure.self) {
-            _ = try await hub.fetch(HubEndpoints.removeMedia(ticket: String(repeating: "a", count: 64)), as: SubtitleDownloadAck.self)
+            _ = try await hub.fetch(HubEndpoints.removeMedia(ticket: String(repeating: "a", count: 64)), as: ActionAck.self)
         }
         let bleach = try #require(DemoLibrary.titles.first { $0.title == "Bleach" })
         let preview = try await hub.fetch(HubEndpoints.removalPreview(kind: "video", id: bleach.id), as: RemovalPreview.self)
         let unconfirmed = HubRequest("/v1/media/remove", method: .post, body: Data(#"{"ticket":"\#(preview.ticket)"}"#.utf8))
-        await #expect(throws: HubFailure.self) { _ = try await hub.fetch(unconfirmed, as: SubtitleDownloadAck.self) }
+        await #expect(throws: HubFailure.self) { _ = try await hub.fetch(unconfirmed, as: ActionAck.self) }
         // Still there, and its ticket still good.
         _ = try await hub.fetch(HubEndpoints.libraryItem(bleach.id), as: LibraryItemResponse.self)
     }
@@ -208,16 +221,16 @@ struct DemoUpkeepTests {
     @Test func aBookIsPreviewedAndConfirmedWithoutLeavingTheDemoLibrary() async throws {
         let preview = try await hub.fetch(HubEndpoints.removalPreview(kind: "reading", id: "rw_demo_rr2"), as: RemovalPreview.self)
         #expect(preview.title == "Golden Son" && preview.fileCount == 1 && preview.description.contains("editions/issues"))
-        let ack = try await hub.fetch(HubEndpoints.removeMedia(ticket: preview.ticket), as: SubtitleDownloadAck.self)
+        let ack = try await hub.fetch(HubEndpoints.removeMedia(ticket: preview.ticket), as: ActionAck.self)
         #expect(ack.ok)
     }
 
     @Test func aSeriesPageNamesItsReleaseSearch() async throws {
         let bleach = try #require(DemoLibrary.titles.first { $0.title == "Bleach" })
         let series = try await hub.fetch(HubEndpoints.libraryItem(bleach.id), as: LibraryItemResponse.self)
-        #expect(series.item.mediaKey.hasPrefix("tmdb:series:") && LibraryUpkeep.offersReleases(series.item))
+        #expect(LibraryUpkeep.releaseKey(series.item)?.hasPrefix("tmdb:series:") == true && LibraryUpkeep.offersReleases(series.item))
         let matrix = try #require(DemoLibrary.titles.first { $0.title == "The Matrix" })
         let film = try await hub.fetch(HubEndpoints.libraryItem(matrix.id), as: LibraryItemResponse.self)
-        #expect(film.item.mediaKey.isEmpty && !LibraryUpkeep.offersReleases(film.item))
+        #expect(LibraryUpkeep.releaseKey(film.item) == nil && !LibraryUpkeep.offersReleases(film.item))
     }
 }

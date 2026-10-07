@@ -104,18 +104,20 @@ struct HomeView: View {
         }
         #endif
         // Back from the player: the rows read again in place, the hero on the
-        // same card with its new progress.
-        .onChange(of: playbackClosed) { _, _ in
-            Task {
-                await load()
-                if let pick = selection {
-                    selection = rows.first { $0.id == pick.rowId }
-                        .flatMap { row in
-                            row.items.first { $0.id == pick.hit.id }
-                                .map { HeroPick(rowId: row.id, rowTitle: row.title, hit: $0) }
-                        }
+        // same card with its new progress. A title deleted from the server
+        // (#34) goes the same way, and the hero moves off it if it was there.
+        .onChange(of: playbackClosed) { _, _ in Task { await reloadInPlace() } }
+        .onChange(of: model.libraryChanges) { _, _ in Task { await reloadInPlace() } }
+    }
+
+    private func reloadInPlace() async {
+        await load()
+        if let pick = selection {
+            selection = rows.first { $0.id == pick.rowId }
+                .flatMap { row in
+                    row.items.first { $0.id == pick.hit.id }
+                        .map { HeroPick(rowId: row.id, rowTitle: row.title, hit: $0) }
                 }
-            }
         }
     }
 
