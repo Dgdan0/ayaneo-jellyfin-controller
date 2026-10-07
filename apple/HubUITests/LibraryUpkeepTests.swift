@@ -170,7 +170,8 @@ final class LibraryUpkeepTests: XCTestCase {
     @MainActor
     func testAnEpisodesMenuOffersItsReleaseSearchAndItsSubtitles() {
         let app = launch(title: bleach)
-        let card = button(app, containing: "A Second Look")
+        // The strip's card ("2. A Second Look"), not Home's Continue card for the same episode under the page.
+        let card = button(app, containing: "2. A Second Look")
         XCTAssertTrue(card.waitForExistence(timeout: 20), "the episodes did not load: \(buttons(app))")
         card.press(forDuration: 1.2)
         let subtitles = app.buttons["Find subtitles"].firstMatch

@@ -503,8 +503,8 @@ Checked on the simulators with pictures of a curl held half way: a page alone on
 manga page from the left, and spreads on the iPad Pro sideways both ways. Just after a turn, until
 the next page is decoded, the edge is the canvas's, so a quick second drag turns as a swipe does.
 
-Differences from Android, for now: two pages side by side are new; no Comfort layer; the sheets
-are not walked with the D-pad (Ⓑ closes them); no reading lists.
+Differences from Android, for now: two pages side by side and the page curl are new; the sheets
+are not walked with the D-pad (Ⓑ closes them). Comfort and Kavita's reading lists came with #37.
 
 ## The ebook reader (#25, phase 4)
 
@@ -590,9 +590,9 @@ Appearance keeps it (every UI test launches with 0, so a test cut short leaves n
 (`DemoEpub`): made-up words, eight chapters of 9 to 18 KB, a footnote in One, a link on to Five in
 Two, an endnote in Three, a link out of the book in Four and a second part in Eight's contents.
 
-Differences from Android, for now: no search, no Comfort layer, no dictionary, Appearance and the
-Keys sheet are not walked with the D-pad (Ⓑ closes them), the edges of the page turn nothing on a tap
-(Android's too), and no Mac reader.
+Differences from Android, for now: Appearance and the Keys sheet are not walked with the D-pad
+(Ⓑ closes them), the edges of the page turn nothing on a tap (Android's too), and no Mac reader.
+Search, Look Up and Comfort came with #37.
 
 ## Working on the Mac
 

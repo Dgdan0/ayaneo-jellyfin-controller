@@ -174,8 +174,10 @@ final class SettingsPagesTests: XCTestCase {
         let line = text(second, containing: "Showing the last answer, from ")
         XCTAssertTrue(line.waitForExistence(timeout: 2), "the last answer is not said to be one")
         XCTAssertTrue(line.label.hasSuffix("· updating"), line.label)
-        // The new answer lands and the words go.
-        XCTAssertTrue(line.waitForNonExistence(timeout: 20), "the line stayed after the new answer")
+        // The new answer lands and the words go. A token not yet accepted sends
+        // one request at a time, six seconds each here, and the shell's own
+        // reads at launch (the bell's notifications, the profiles) go first.
+        XCTAssertTrue(line.waitForNonExistence(timeout: 50), "the line stayed after the new answer")
         XCTAssertTrue(second.buttons["Dune: Part Two"].firstMatch.exists)
     }
 }

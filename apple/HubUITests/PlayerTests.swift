@@ -61,7 +61,7 @@ final class PlayerTests: XCTestCase {
         let app = launchPlaying()
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(app.wait(for: .runningBackgroundSuspended, timeout: 15)
-                      || app.state == .runningBackground, "the app did not go to the background")
+                      || app.state == .runningBackground, "the app did not go to the background: state \(app.state.rawValue)")
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 5))

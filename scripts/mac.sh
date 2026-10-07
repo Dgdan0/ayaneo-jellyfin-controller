@@ -12,7 +12,7 @@
 #                                   turn the simulators' Reduce transparency on or off
 #   scripts/mac.sh build-tests      compile the UI tests for the iOS Simulator, running none
 #   scripts/mac.sh uitest           the UI tests on the iPhone simulator, against -demo
-#                                   (UITEST_ONLY=<Class>[/<test>] runs one alone,
+#                                   (UITEST_ONLY=<Class>[/<test>][,…] runs those alone,
 #                                   UITEST_SIM=<simulator> runs them on another)
 #   scripts/mac.sh quit             end JellyHub on the simulators (SHOT_SIMS, or all three)
 #                                   and the Mac's Debug build, and nothing else
@@ -272,9 +272,13 @@ uitest() {
   local udid
   udid="$(udid_of "${UITEST_SIM:-iPhone 17 Pro Max}")"
   xcrun simctl boot "$udid" >/dev/null 2>&1 || true
-  # UITEST_ONLY=LibraryArrangeTests runs one class (or Class/testMethod) alone.
-  local only=()
-  [[ -n "${UITEST_ONLY:-}" ]] && only=(-only-testing:"HubUITests/$UITEST_ONLY")
+  # UITEST_ONLY=LibraryArrangeTests runs one class (or Class/testMethod) alone, and a
+  # comma-separated list runs those: a few classes, not the whole suite, on a shared Mac.
+  local only=() picked=() one
+  if [[ -n "${UITEST_ONLY:-}" ]]; then
+    IFS=',' read -ra picked <<<"$UITEST_ONLY"
+    for one in "${picked[@]}"; do only+=(-only-testing:"HubUITests/$one"); done
+  fi
   xcodebuild -project "$APPLE/Hub.xcodeproj" -scheme Hub -configuration Debug \
     -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$DERIVED" ${only[@]+"${only[@]}"} test 2>&1 |
     grep -E "Test Case|Test Suite|error:|failed|passed|TEST (SUCCEEDED|FAILED)|\*\*" || true
