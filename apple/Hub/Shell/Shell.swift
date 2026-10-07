@@ -368,6 +368,17 @@ struct MainView: View {
             listening.onStart = { [sounds] in sounds.started(.audiobook) }
         }
         .onChange(of: player.isPlaying) { _, playing in playing ? sounds.started(.video) : sounds.stopped(.video) }
+        #if DEBUG
+        .overlay(alignment: .bottomLeading) {
+            if ProcessInfo.processInfo.environment["HUB_DEBUG_NOW_PLAYING"] == "1" {
+                Text(NowPlaying.shared.summary)
+                    .font(.caption2)
+                    .opacity(0.02)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("debug-now-playing")
+            }
+        }
+        #endif
         .onChange(of: listening.playing) { _, playing in playing ? sounds.started(.audiobook) : sounds.stopped(.audiobook) }
         .environment(\.glassPalette, model.colors.palette(for: ambient.displayed))
         .environment(\.glassAccent, AccentPreset.defaultFor(side))

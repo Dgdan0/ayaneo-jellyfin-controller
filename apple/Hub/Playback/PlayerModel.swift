@@ -1,6 +1,7 @@
 import AVFoundation
 import AVKit
 import HubKit
+import MediaPlayer
 import Observation
 import SwiftUI
 #if os(iOS)
@@ -185,6 +186,9 @@ final class PlayerModel {
     @ObservationIgnored private var pip: AVPictureInPictureController?
     @ObservationIgnored private var pipObserver: PictureInPictureObserver?
     @ObservationIgnored private var inBackground = false
+    /// The lock screen's picture of what plays (#33).
+    @ObservationIgnored private var nowPlayingArt: MPMediaItemArtwork?
+    @ObservationIgnored private var nowPlayingArtPath = ""
     @ObservationIgnored private let origin = ContinuousClock.now
     /// When a download's watch was last kept on the device.
     @ObservationIgnored private var offlineSavedAt = ContinuousClock.now
@@ -220,6 +224,7 @@ final class PlayerModel {
             let millis = time.isNumeric ? Int64((CMTimeGetSeconds(time) * 1_000).rounded()) : 0
             MainActor.assumeIsolated { self?.showSubtitles(at: millis) }
         }
+        NowPlaying.shared.register(.video, self)
     }
 
     // MARK: Opening and leaving
@@ -244,6 +249,8 @@ final class PlayerModel {
         player.defaultRate = speed
         startSession()
         activateAudio()
+        // The lock screen, Control Center and the media keys are the video's while it is open (#33).
+        NowPlaying.shared.take(.video, commands: nowPlayingCommands)
         poll = Task { [weak self] in
             while !Task.isCancelled {
                 self?.step()
@@ -278,6 +285,9 @@ final class PlayerModel {
         endSession()
         player.replaceCurrentItem(with: nil)
         request = nil
+        nowPlayingArt = nil
+        nowPlayingArtPath = ""
+        NowPlaying.shared.release(.video)
         deactivateAudio()
         let pending = outbox?.tail
         beginBackgroundWork()
@@ -442,6 +452,7 @@ final class PlayerModel {
             plan.selectedSubtitleIndex = plan.subtitleTracks.contains { $0.index == subtitle } ? subtitle : nil
         }
         self.plan = plan
+        planShown()
         guard let url = URL(string: plan.mediaUrl) else {
             phase = .failed("This download cannot be found on this device.")
             return
@@ -471,6 +482,7 @@ final class PlayerModel {
             return
         }
         self.plan = plan
+        planShown()
         guard let url = URL(string: grant.address(base: baseURL)) else {
             throw HubFailure(.badResponse, message: "The hub sent an address that cannot be played")
         }
@@ -491,7 +503,10 @@ final class PlayerModel {
             if atEnd { seek(to: 0) }
             player.play()
             isPlaying = true
+            // Played again after the audiobook: the lock screen is the video's again.
+            NowPlaying.shared.take(.video, commands: nowPlayingCommands)
         }
+        updateNowPlaying()
     }
 
     func seek(by deltaMillis: Int64) { seek(to: positionMillis + deltaMillis) }
@@ -522,6 +537,7 @@ final class PlayerModel {
         speed = value
         player.defaultRate = value
         if isPlaying { player.rate = value }
+        updateNowPlaying()
     }
 
     private func seekFinished(at target: Int64, finished: Bool) {
@@ -606,6 +622,7 @@ final class PlayerModel {
         }
         let status = player.timeControlStatus
         if (status == .waitingToPlayAtSpecifiedRate) != isBuffering { isBuffering = status == .waitingToPlayAtSpecifiedRate }
+        let wasPlaying = isPlaying
         if (status == .playing) != isPlaying { isPlaying = status == .playing }
         let time = player.currentTime()
         if seekTarget == nil, time.isNumeric, max(0, millis(time)) != positionMillis { positionMillis = max(0, millis(time)) }
@@ -622,11 +639,18 @@ final class PlayerModel {
         }
         report(status)
         updateUpNext()
+        if isPlaying != wasPlaying {
+            updateNowPlaying()
+        } else {
+            NowPlaying.shared.publishPosition(.video, elapsedSeconds: Double(positionMillis) / 1_000,
+                                              rate: isPlaying ? Double(speed) : 0)
+        }
     }
 
     /// The item is ready: to its start position, then playing.
     private func start(_ item: AVPlayerItem) {
         phase = .playing
+        defer { updateNowPlaying() }
         var startAt = startOverride ?? plan?.positionMillis ?? 0
         startOverride = nil
         #if DEBUG
@@ -736,6 +760,52 @@ final class PlayerModel {
             upNextDismissed = false
             if upNext == nil { upNext = UpNextCard(item: next, fraction: 0) }
             startCountdown()
+        }
+    }
+
+    // MARK: The lock screen, Control Center, AirPods and the media keys (#33)
+
+    /// Next and previous only where the plan has them.
+    private var nowPlayingCommands: NowPlaying.Commands {
+        NowPlaying.Commands(next: plan?.nextItem != nil, previous: plan?.previousItem != nil)
+    }
+
+    /// A new plan: its episode's neighbours for the commands, its title, and its picture.
+    private func planShown() {
+        NowPlaying.shared.update(.video, commands: nowPlayingCommands)
+        updateNowPlaying()
+        loadNowPlayingArt()
+    }
+
+    /// What plays, for the lock screen: an episode's code and name over its
+    /// series, a film's name; how long, where, how fast; and its picture.
+    private func updateNowPlaying() {
+        guard let plan else { return }
+        let name = PlayerLabels.title(plan.item)
+        let episode = PlayerLabels.subtitle(plan.item)
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: episode.isEmpty ? name : episode,
+            MPMediaItemPropertyArtist: episode.isEmpty ? "" : name,
+            MPMediaItemPropertyPlaybackDuration: Double(durationMillis) / 1_000,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: Double(positionMillis) / 1_000,
+            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? Double(speed) : 0,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: Double(speed),
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.video.rawValue,
+        ]
+        if let nowPlayingArt { info[MPMediaItemPropertyArtwork] = nowPlayingArt }
+        NowPlaying.shared.publish(.video, info: info, playing: isPlaying)
+    }
+
+    /// The title's wide picture, as the player shows it while it opens.
+    private func loadNowPlayingArt() {
+        guard let hub, !backdrop.isEmpty, backdrop != nowPlayingArtPath else { return }
+        let path = backdrop
+        nowPlayingArtPath = path
+        Task {
+            guard let data = try? await hub.image(HubEndpoints.sized(path, width: 640)),
+                  nowPlayingArtPath == path, let art = NowPlaying.artwork(data) else { return }
+            nowPlayingArt = art
+            updateNowPlaying()
         }
     }
 
@@ -1222,6 +1292,21 @@ final class PlayerModel {
         PlaybackChoices.wanted(plan, selection)
     }
     #endif
+}
+
+extension PlayerModel: NowPlayingClient {
+    func remote(_ command: RemoteCommand) {
+        switch command {
+        case .play: if !isPlaying { togglePlay() }
+        case .pause: if isPlaying || player.timeControlStatus == .waitingToPlayAtSpecifiedRate { togglePlay() }
+        case .toggle: togglePlay()
+        case .skip(let forward): seek(by: (forward ? 1 : -1) * Int64(ListeningSettings.seekSeconds) * 1_000)
+        case .step(let delta): delta > 0 ? playNext() : playPrevious()
+        case .seek(let millis): seek(to: millis)
+        }
+    }
+
+    func publishNowPlaying() { updateNowPlaying() }
 }
 
 /// Picture in picture's news, carried to the model on the main actor.

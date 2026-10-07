@@ -152,4 +152,45 @@ final class PlayerBasicsTests: XCTestCase {
         again.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
         XCTAssertTrue(waitUntil(3) { again.value as? String == "0" }, "the switch did not turn off")
     }
+
+    // MARK: Now Playing (the lock screen, Control Center, AirPods, the media keys)
+
+    /// The video has the lock screen while it is open, under its episode's
+    /// code and name, and nobody has it once it closes. Read from debug builds'
+    /// summary (`HUB_DEBUG_NOW_PLAYING`): a UI test cannot see the lock screen.
+    @MainActor
+    func testTheLockScreenIsTheVideosWhileItIsOpen() {
+        let app = launchPlaying(environment: ["HUB_DEBUG_NOW_PLAYING": "1"])
+        let summary = app.staticTexts["debug-now-playing"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10), "no Now Playing summary")
+        XCTAssertTrue(waitUntil(10) { summary.label == "video · S1E5 · Beat the Invisible Enemy!" },
+                      "the lock screen shows \(summary.label)")
+        app.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(waitUntil(5) { summary.label == "none" }, "the lock screen kept the video: \(summary.label)")
+    }
+
+    /// An audiobook put on the player has the lock screen, under its title,
+    /// until it leaves the player.
+    @MainActor
+    func testTheLockScreenIsTheAudiobooksWhileItIsOnThePlayer() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo"]
+        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_OPEN": "book:rw_demo_alloy",
+                                 "HUB_DEBUG_NOW_PLAYING": "1"]
+        app.launch()
+        let entry = app.buttons["book-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 15), "the audiobook's page did not open: \(buttons(app))")
+        let summary = app.staticTexts["debug-now-playing"]
+        XCTAssertEqual(summary.label, "none")
+        entry.tap()
+        XCTAssertTrue(waitUntil(15) { summary.label == "audiobook · The Alloy of Law" }, "the lock screen shows \(summary.label)")
+        let stop = app.buttons["listen-stop"]
+        for _ in 0..<4 where !stop.isHittable {
+            let window = app.windows.firstMatch.frame
+            let row = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: window.width * 0.85, dy: stop.frame.midY))
+            row.press(forDuration: 0.05, thenDragTo: row.withOffset(CGVector(dx: -window.width * 0.6, dy: 0)))
+        }
+        stop.tap()
+        XCTAssertTrue(waitUntil(5) { summary.label == "none" }, "the lock screen kept the audiobook: \(summary.label)")
+    }
 }

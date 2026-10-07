@@ -163,7 +163,7 @@ final class ListeningModel {
             MainActor.assumeIsolated { if began { self?.interrupted() } }
         })
         #endif
-        setUpRemoteCommands()
+        NowPlaying.shared.register(.audiobook, self)
     }
 
     // MARK: Opening a book
@@ -296,6 +296,8 @@ final class ListeningModel {
         touched()
         activateSession()
         onStart?()
+        // Played again after a video: the lock screen is the book's again (#33).
+        enableCommands(true)
         if finished {
             // Finished: the next listen starts the book again.
             finished = false
@@ -395,7 +397,6 @@ final class ListeningModel {
         conflicted = false
         nowPlayingArt = nil
         enableCommands(false)
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         deactivateSession()
     }
 
@@ -723,69 +724,23 @@ final class ListeningModel {
 
     // MARK: The lock screen and the audio session
 
-    private func setUpRemoteCommands() {
-        let center = MPRemoteCommandCenter.shared()
-        center.playCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.play() }
-            return .success
-        }
-        center.pauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.pause() }
-            return .success
-        }
-        center.togglePlayPauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.toggle() }
-            return .success
-        }
-        center.skipForwardCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.seek(by: Int64(ListeningSettings.seekSeconds) * 1_000) }
-            return .success
-        }
-        center.skipBackwardCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.seek(by: -Int64(ListeningSettings.seekSeconds) * 1_000) }
-            return .success
-        }
-        center.nextTrackCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.step(1) }
-            return .success
-        }
-        center.previousTrackCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.step(-1) }
-            return .success
-        }
-        center.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
-            let target = Int64(event.positionTime * 1_000)
-            Task { @MainActor in
-                guard let self else { return }
-                self.seek(part: self.part, offsetMs: target)
-            }
-            return .success
-        }
-        enableCommands(false)
-    }
-
+    /// The book on the player is in front of the lock screen (`NowPlaying`,
+    /// shared with the video player, #33), or no longer has anything there.
     private func enableCommands(_ on: Bool) {
-        let center = MPRemoteCommandCenter.shared()
-        let interval = [NSNumber(value: ListeningSettings.seekSeconds)]
-        center.skipForwardCommand.preferredIntervals = interval
-        center.skipBackwardCommand.preferredIntervals = interval
-        for command in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand, center.skipForwardCommand,
-                        center.skipBackwardCommand, center.nextTrackCommand, center.previousTrackCommand,
-                        center.changePlaybackPositionCommand] {
-            command.isEnabled = on
+        if on {
+            NowPlaying.shared.take(.audiobook, commands: NowPlaying.Commands(next: true, previous: true))
+        } else {
+            NowPlaying.shared.release(.audiobook)
         }
     }
 
     /// Now Playing: the book, its author, the part, the cover, and where in the part.
     private func updateNowPlaying(position: Bool = false) {
         guard let book else { return }
-        let center = MPNowPlayingInfoCenter.default()
-        if position, var info = center.nowPlayingInfo {
+        if position {
             // Four times a second only the moment changes.
-            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(positionMs) / 1_000
-            info[MPNowPlayingInfoPropertyPlaybackRate] = playing ? Double(speed) : 0
-            center.nowPlayingInfo = info
+            NowPlaying.shared.publishPosition(.audiobook, elapsedSeconds: Double(positionMs) / 1_000,
+                                              rate: playing ? Double(speed) : 0)
             return
         }
         var info: [String: Any] = [
@@ -801,10 +756,7 @@ final class ListeningModel {
             MPNowPlayingInfoPropertyChapterCount: book.parts.count,
         ]
         if let nowPlayingArt { info[MPMediaItemPropertyArtwork] = nowPlayingArt }
-        center.nowPlayingInfo = info
-        #if os(macOS)
-        center.playbackState = playing ? .playing : .paused
-        #endif
+        NowPlaying.shared.publish(.audiobook, info: info, playing: playing)
     }
 
     private func loadArtwork() {
@@ -812,22 +764,13 @@ final class ListeningModel {
         let path = book.artwork
         Task {
             guard let data = try? await hub.image(path), self.book?.artwork == path,
-                  let art = Self.artwork(data) else { return }
+                  let art = NowPlaying.artwork(data) else { return }
             nowPlayingArt = art
             updateNowPlaying()
         }
     }
 
-    /// Made away from the main actor: the lock screen asks for the picture
-    /// on a queue of its own.
-    nonisolated private static func artwork(_ data: Data) -> MPMediaItemArtwork? {
-        #if os(iOS)
-        guard let image = UIImage(data: data) else { return nil }
-        #else
-        guard let image = NSImage(data: data) else { return nil }
-        #endif
-        return MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-    }
+
 
     private func activateSession() {
         #if os(iOS)
@@ -850,4 +793,19 @@ final class ListeningModel {
 
     /// A clock that only moves forward, for the throttle.
     private static func uptimeMillis() -> Int64 { Int64(ProcessInfo.processInfo.systemUptime * 1_000) }
+}
+
+extension ListeningModel: NowPlayingClient {
+    func remote(_ command: RemoteCommand) {
+        switch command {
+        case .play: play()
+        case .pause: pause()
+        case .toggle: toggle()
+        case .skip(let forward): seek(by: (forward ? 1 : -1) * Int64(ListeningSettings.seekSeconds) * 1_000)
+        case .step(let delta): step(delta)
+        case .seek(let millis): seek(part: part, offsetMs: millis)
+        }
+    }
+
+    func publishNowPlaying() { updateNowPlaying() }
 }
