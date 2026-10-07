@@ -37,6 +37,11 @@ extension HubEndpoints {
         HubRequest("/v1/reading/works/" + encode(workId))
     }
 
+    /// This profile's rating, finish date or read count for a book (#39).
+    public static func readingYou(_ workId: String, _ change: ReadingYouChange) -> HubRequest {
+        HubRequest("/v1/reading/works/" + encode(workId) + "/you", method: .patch, body: change.body())
+    }
+
     /// The library's own work for a title Discover found, if it has one.
     public static func readingResolve(source: String, sourceId: String, isbn: String) -> HubRequest {
         HubRequest("/v1/reading/resolve?source=" + encode(source) + "&sourceId=" + encode(sourceId) + "&isbn=" + encode(isbn))

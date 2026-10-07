@@ -287,6 +287,11 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
     public var continueAt: ReadingContinue?
     public var partial: [Partial]
     public var cache: CacheInfo
+    /// What readers make of it (#39); only on the book's own page, nil when nothing is known.
+    public var community: ReadingCommunity?
+    /// This profile's rating, finish date, read count, status and shelves (#39);
+    /// only on the book's own page, nil when there is nothing to say.
+    public var you: ReadingYou?
 
     public init(id: String = "", libraryId: String = "", entityType: String = "work", kind: String = "book", title: String = "",
                 sortTitle: String = "", authors: [String] = [], series: String = "", seriesIndex: Double = 0,
@@ -294,7 +299,7 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
                 genres: [String] = [], year: Int = 0, addedAt: String = "", bookCount: Int = 0, languages: [String] = [],
                 editions: [ReadingEdition] = [], progress: ReadingProgress? = nil, availability: [String] = [],
                 sections: [ReadingSection] = [], continueAt: ReadingContinue? = nil, partial: [Partial] = [],
-                cache: CacheInfo = CacheInfo()) {
+                cache: CacheInfo = CacheInfo(), community: ReadingCommunity? = nil, you: ReadingYou? = nil) {
         self.id = id
         self.libraryId = libraryId
         self.entityType = entityType
@@ -320,6 +325,8 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
         self.continueAt = continueAt
         self.partial = partial
         self.cache = cache
+        self.community = community
+        self.you = you
     }
 
     public var isSeries: Bool { entityType == "collection" }
@@ -353,7 +360,8 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, libraryId, entityType, kind, title, sortTitle, authors, series, seriesIndex, seriesId, authorRefs, overview,
-             artwork, genres, year, addedAt, bookCount, languages, editions, progress, availability, sections, partial, cache
+             artwork, genres, year, addedAt, bookCount, languages, editions, progress, availability, sections, partial, cache,
+             community, you
         case continueAt = "continue"
     }
 
@@ -368,7 +376,139 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
             addedAt: c.value(.addedAt, ""), bookCount: c.value(.bookCount, 0), languages: c.value(.languages, []),
             editions: c.value(.editions, []), progress: c.optional(.progress), availability: c.value(.availability, []),
             sections: c.value(.sections, []), continueAt: c.optional(.continueAt), partial: c.value(.partial, []),
-            cache: c.value(.cache, CacheInfo()))
+            cache: c.value(.cache, CacheInfo()), community: c.optional(.community), you: c.optional(.you))
+    }
+}
+
+/// What readers make of a book (#39): its average rating, 0 to 5, how many
+/// rated it when the source says, and where that came from ("hardcover", or
+/// "goodreads" when only the profile's export knows it).
+public struct ReadingCommunity: Decodable, Equatable, Sendable {
+    public var rating: Double
+    public var count: Int?
+    public var source: String
+
+    public init(rating: Double, count: Int? = nil, source: String = "") {
+        self.rating = rating
+        self.count = count
+        self.source = source
+    }
+
+    enum CodingKeys: String, CodingKey { case rating, count, source }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(rating: c.value(.rating, 0), count: c.optional(.count), source: c.value(.source, ""))
+    }
+}
+
+/// A profile's own reading of a book (#39): from its Goodreads export, or
+/// set in an app, which wins and stays won.
+public struct ReadingYou: Decodable, Equatable, Sendable {
+    /// 1 to 5; nil is not rated.
+    public var rating: Int?
+    /// "2025-09"; nil is not known.
+    public var finished: String?
+    /// 1 or more; nil is not known.
+    public var readCount: Int?
+    /// Goodreads shelves in the export's order, never the three statuses.
+    public var shelves: [String]
+    /// "read", "to-read" or "currently-reading".
+    public var status: String?
+    /// "app" once anything was set from an app, else "goodreads".
+    public var source: String
+
+    public init(rating: Int? = nil, finished: String? = nil, readCount: Int? = nil, shelves: [String] = [],
+                status: String? = nil, source: String = "app") {
+        self.rating = rating
+        self.finished = finished
+        self.readCount = readCount
+        self.shelves = shelves
+        self.status = status
+        self.source = source
+    }
+
+    enum CodingKeys: String, CodingKey { case rating, finished, readCount, shelves, status, source }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(rating: c.optional(.rating), finished: c.optional(.finished), readCount: c.optional(.readCount),
+                  shelves: c.value(.shelves, []), status: c.optional(.status), source: c.value(.source, ""))
+    }
+}
+
+/// `PATCH /v1/reading/works/{id}/you`'s answer: what is left to say, or nil.
+public struct ReadingYouResponse: Decodable, Equatable, Sendable {
+    public var workId: String
+    public var you: ReadingYou?
+
+    enum CodingKeys: String, CodingKey { case workId, you }
+
+    public init(workId: String, you: ReadingYou?) {
+        self.workId = workId
+        self.you = you
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(workId: c.value(.workId, ""), you: c.optional(.you))
+    }
+}
+
+/// A change to a profile's rating, finish date or read count (#39): a key
+/// set sends its value, cleared sends null, kept sends nothing, as the hub
+/// reads it.
+public struct ReadingYouChange: Equatable, Sendable {
+    public enum Value<T: Equatable & Sendable>: Equatable, Sendable {
+        case keep, set(T), clear
+    }
+
+    public var rating: Value<Int> = .keep
+    public var finished: Value<String> = .keep
+    public var readCount: Value<Int> = .keep
+
+    public init(rating: Value<Int> = .keep, finished: Value<String> = .keep, readCount: Value<Int> = .keep) {
+        self.rating = rating
+        self.finished = finished
+        self.readCount = readCount
+    }
+
+    public var isEmpty: Bool { rating == .keep && finished == .keep && readCount == .keep }
+
+    /// The body: only the keys that change, null for a cleared one.
+    public func body() -> Data {
+        var fields: [String: Any] = [:]
+        func put<T: Equatable & Sendable>(_ key: String, _ value: Value<T>) {
+            switch value {
+            case .keep: break
+            case .set(let v): fields[key] = v
+            case .clear: fields[key] = NSNull()
+            }
+        }
+        put("rating", rating)
+        put("finished", finished)
+        put("readCount", readCount)
+        return (try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
+
+    /// `you` as the hub will make it, for the page to show at once.
+    public func applied(to you: ReadingYou?) -> ReadingYou? {
+        var next = you ?? ReadingYou(source: "app")
+        switch rating { case .keep: break; case .set(let v): next.rating = v; case .clear: next.rating = nil }
+        switch readCount { case .keep: break; case .set(let v): next.readCount = v; case .clear: next.readCount = nil }
+        switch finished {
+        case .keep: break
+        case .set(let v):
+            next.finished = v
+            if readCount == .keep && next.readCount == nil { next.readCount = 1 }
+            if next.status != "currently-reading" { next.status = "read" }
+        case .clear:
+            next.finished = nil
+            if next.status == "read" { next.status = nil }
+        }
+        if !isEmpty { next.source = "app" }
+        let empty = next.rating == nil && next.finished == nil && next.readCount == nil && next.status == nil && next.shelves.isEmpty
+        return empty ? nil : next
     }
 }
 
