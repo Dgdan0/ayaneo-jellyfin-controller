@@ -62,7 +62,8 @@ struct LibraryModelTests {
                  "overview":"Walt and Jesse…","runtimeSeconds":2820,"rating":8.1,"officialRating":"TV-MA",
                  "genres":["Drama"],"studios":["AMC"],
                  "people":[{"id":"p1","name":"Bryan Cranston","role":"Walter White","type":"Actor",
-                            "image":"/v1/img/jf/p1/Primary"}],
+                            "image":"/v1/img/jf/p1/Primary","tmdbId":17419},
+                           {"id":"p2","name":"Someone Unknown","role":"Guard","type":"Actor"}],
                  "mediaVersions":[{"id":"mv","container":"mkv","tracks":[]}],
                  "played":false,"favorite":true,"progress":0.25,"positionSeconds":705,"lastPlayedAt":1759500000000,
                  "poster":"/v1/img/jf/s1/Primary","thumb":"/v1/img/jf/e1/Primary","backdrop":"/v1/img/jf/s1/Backdrop",
@@ -77,6 +78,8 @@ struct LibraryModelTests {
         #expect(item.runtimeSeconds == 2820 && item.positionSeconds == 705)
         #expect(item.people.first?.role == "Walter White")
         #expect(item.people.first?.id == "p1Walter White")
+        // The TMDB id the filmography needs (#27); absent is 0, which opens nothing.
+        #expect(item.people.map(\.tmdbId) == [17419, 0])
         #expect(item.favorite && !item.played)
         #expect(item.thumb == "/v1/img/jf/e1/Primary")
     }

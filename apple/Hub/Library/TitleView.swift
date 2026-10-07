@@ -343,12 +343,22 @@ struct TitleView: View {
         }
     }
 
-    /// The prototype's `.people`: a round portrait for each, name and part under it.
+    /// The prototype's `.people`: a round portrait for each, name and part
+    /// under it. One the hub names on TMDB opens their films and series, as
+    /// the request-side page's cast does (#27); one it cannot name offers nothing.
     private func castTab(_ item: HubKit.LibraryItem) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: 18) {
                 ForEach(DetailLines.cast(item)) { person in
-                    PersonCard(person: person)
+                    if person.tmdbId > 0 {
+                        NavigationLink(value: AppRoute.person(PersonRoute(id: person.tmdbId, name: person.name))) {
+                            PersonCard(person: person)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens their films and series")
+                    } else {
+                        PersonCard(person: person)
+                    }
                 }
             }
             .padding(.horizontal, metrics.margin)
