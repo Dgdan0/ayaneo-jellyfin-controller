@@ -220,6 +220,8 @@ struct MainView: View {
     @State private var player = PlayerModel()
     /// The Books side's lists, ways and orders (#25).
     @State private var books = BooksModel()
+    /// The accent each side wears, chosen in Settings (#38).
+    @State private var accents = AccentModel.shared
     /// A book being read, over the whole window (#25 phases 3 and 4).
     @State private var reading: ReadRequest?
     /// Counts the readers closed, so pages read their progress again.
@@ -349,6 +351,7 @@ struct MainView: View {
         .environment(\.playbackClosed, player.closedCount)
         .environment(books)
         .environment(shell.notifications)
+        .environment(accents)
         .environment(\.appSide, side)
         .environment(\.read, ReadAction(open: { request in reading = request }, close: {
             reading = nil
@@ -358,6 +361,7 @@ struct MainView: View {
         .environment(\.selectSection, SelectSectionAction { target in select(target) })
         .onChange(of: "\(model.address)\u{0}\(model.userId)", initial: true) { _, _ in
             books.use(address: model.address, userId: model.userId)
+            accents.use(address: model.address, userId: model.userId, demo: model.isDemo)
         }
         // Listening places a closed app left unsent go now, and again for
         // another profile; a book of another profile leaves the player.
@@ -375,7 +379,7 @@ struct MainView: View {
         .onChange(of: player.isPlaying) { _, playing in playing ? sounds.started(.video) : sounds.stopped(.video) }
         .onChange(of: listening.playing) { _, playing in playing ? sounds.started(.audiobook) : sounds.stopped(.audiobook) }
         .environment(\.glassPalette, model.colors.palette(for: ambient.displayed))
-        .environment(\.glassAccent, AccentPreset.defaultFor(side))
+        .environment(\.glassAccent, accents.accent(side))
         .onChange(of: key, initial: true) { _, latest in open(latest) }
         .onChange(of: ambient.displayed, initial: true) { _, path in model.colors.want([path]) }
         // Closing the window (the Mac's, or an iPad's in the app switcher)
@@ -396,7 +400,7 @@ struct MainView: View {
                 profilesOpen = false
                 select(place)
             }
-            .environment(\.glassAccent, AccentPreset.defaultFor(side))
+            .environment(\.glassAccent, accents.accent(side))
             .environment(\.glassPalette, model.colors.palette(for: ambient.displayed))
         }
         #if DEBUG

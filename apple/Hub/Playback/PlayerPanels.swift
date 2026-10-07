@@ -357,8 +357,7 @@ struct PlayerSheet: View {
         SheetLabel(text: "Style")
         SheetGroup {
             ForEach(SubtitleStyle.allCases, id: \.self) { style in
-                SheetRow(title: PlayerLabels.subtitleStyle(style),
-                         detail: style == .outline ? "White words with a black edge" : "White words on a dark box",
+                SheetRow(title: SubtitleLookWords.style(style), detail: SubtitleLookWords.styleDetail(style),
                          checked: current.style == style) {
                     var next = current
                     next.style = style
@@ -369,7 +368,7 @@ struct PlayerSheet: View {
         SheetLabel(text: "Size")
         SheetGroup {
             ForEach(SubtitleSize.allCases, id: \.self) { size in
-                SheetRow(title: PlayerLabels.subtitleSize(size), checked: current.size == size) {
+                SheetRow(title: SubtitleLookWords.size(size), checked: current.size == size) {
                     var next = current
                     next.size = size
                     player.setSubtitleLook(next)
@@ -383,9 +382,9 @@ struct PlayerSheet: View {
                 player.setSubtitleLook(next)
             })) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Above the controls")
+                    Text(SubtitleLookWords.liftTitle)
                         .font(HubType.body(15, weight: .semibold, relativeTo: .body))
-                    Text("Moves up while the timeline shows")
+                    Text(SubtitleLookWords.liftDetail)
                         .font(HubType.body(12.5, relativeTo: .caption))
                         .foregroundStyle(.white.opacity(0.6))
                 }

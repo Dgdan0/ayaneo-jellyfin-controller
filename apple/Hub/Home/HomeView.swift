@@ -13,6 +13,8 @@ struct HomeView: View {
     @Environment(\.playbackClosed) private var playbackClosed
 
     @State private var rows: [HomeRow] = []
+    /// The profile the rows belong to.
+    @State private var rowsOwner: String?
     @State private var status = StatusMessage("")
     @State private var loading = false
     @State private var selection: HeroPick?
@@ -66,6 +68,9 @@ struct HomeView: View {
         .task(id: model.userId) {
             details = [:]
             selection = nil
+            // Another profile's rows are not this one's to show while it loads.
+            if let owner = rowsOwner, owner != model.userId { rows = [] }
+            rowsOwner = model.userId
             await load()
         }
         .task(id: hero?.itemId) { await loadHeroDetail() }
@@ -90,8 +95,18 @@ struct HomeView: View {
         loading = true
         defer { loading = false }
         status = StatusText.loading("Home", refreshing: !rows.isEmpty)
+        // The last answer for this profile first, while the new one is asked for (#38).
+        if rows.isEmpty, let kept = await model.hub.lastAnswer(HubEndpoints.home, as: HomeResponse.self, keeper: model.answers) {
+            rows = HomeHero.ordered(kept.value.rows)
+            model.colors.want(rows.flatMap { row in
+                row.items.map { HomeHero.from(rowId: row.id, rowTitle: row.title, hit: $0).backdrop }
+            })
+            status = LastAnswer.status(ageSeconds: kept.ageSeconds)
+        }
         do {
-            let home = try await model.hub.fetch(HubEndpoints.home, as: HomeResponse.self)
+            let home = try await model.hub.fetchKept(HubEndpoints.home, as: HomeResponse.self, keeper: model.answers) {
+                LastAnswer.worthKeeping(rows: $0.rows.count, unavailable: $0.partial.count)
+            }
             rows = HomeHero.ordered(home.rows)
             // Any card can become the hero, so ask for every hero's colours
             // now: the page re-tints the moment a card is chosen.

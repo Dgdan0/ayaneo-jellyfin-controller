@@ -27,6 +27,16 @@ final class AppModel {
     let hub: HubClient
     /// Each artwork's Glass colours, asked of the hub and kept on the device.
     let colors: ArtworkColors
+    /// The last answers Home and Discover opened with (#38). The demo hub keeps
+    /// its own, apart from a real hub's, and forgets them at launch when a
+    /// debug run asks (HUB_FORGET_ANSWERS=1).
+    @ObservationIgnored private(set) lazy var answers: AnswerKeeper = {
+        let keeper = isDemo ? AnswerKeeper.standard(named: "last-answers-demo") : AnswerKeeper.standard()
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["HUB_FORGET_ANSWERS"] == "1" { keeper.removeAll() }
+        #endif
+        return keeper
+    }()
     @ObservationIgnored private let defaults: UserDefaults
 
     var isConfigured: Bool { !address.isEmpty && hasToken }

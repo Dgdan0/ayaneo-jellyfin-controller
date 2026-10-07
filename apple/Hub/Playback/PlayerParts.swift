@@ -266,7 +266,7 @@ struct SubtitleOverlay: View {
     let covered: CGFloat
 
     var body: some View {
-        let fontSize = max(12, min(size.width, size.height) * look.size.textFraction)
+        let fontSize = CGFloat(SubtitleLookWords.fontSize(look, shortSide: Double(min(size.width, size.height))))
         // One text for the cue, its lines broken where the file breaks them.
         let words = lines.flatMap { $0.components(separatedBy: "\n") }.filter { !$0.isEmpty }.joined(separator: "\n")
         let text = SubtitleLine(text: words, style: look.style, fontSize: fontSize)

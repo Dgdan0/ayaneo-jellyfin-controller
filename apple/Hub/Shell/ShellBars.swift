@@ -132,12 +132,13 @@ private struct CapsuleTab: View {
 struct SidePicker: View {
     @Binding var side: AppSide
     var compact = false
+    @Environment(AccentModel.self) private var accents
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(AppSide.allCases, id: \.self) { mode in
                 let on = mode == side
-                let accent = AccentPreset.defaultFor(mode)
+                let accent = accents.accent(mode)
                 Button {
                     side = mode
                 } label: {

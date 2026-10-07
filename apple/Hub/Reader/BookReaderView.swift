@@ -135,7 +135,7 @@ struct BookReaderScreen: View {
         // its cover, and the accent is Books' gold.
         .environment(\.glassPalette, model.colors.palette(for: reader.cover))
         .environment(\.glassOverVideo, true)
-        .environment(\.glassAccent, AccentPreset.defaultFor(.books))
+        .environment(\.glassAccent, AccentModel.shared.books)
         .onChange(of: reader.cover, initial: true) { _, path in
             if !path.isEmpty { model.colors.want([path]) }
         }

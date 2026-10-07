@@ -232,6 +232,8 @@ final class PlayerModel {
         outbox = outbox ?? PlaybackOutbox(hub: app.hub)
         backdrop = request.backdrop
         opens += 1
+        // Settings › Subtitles may have changed it since the window began.
+        subtitleLook = PlaybackMemory.look()
         speed = PlaybackEnhancements.defaultSpeed
         player.defaultRate = speed
         startSession()
