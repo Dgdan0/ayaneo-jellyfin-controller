@@ -3,7 +3,7 @@ import Foundation
 /// A request reduced to plain values, so "which path, which query, how is it
 /// encoded" is a pure function pinned by tests. Mirrors Android's `HubRequest`.
 public struct HubRequest: Equatable, Sendable {
-    public enum Method: String, Sendable { case get = "GET", post = "POST", put = "PUT", delete = "DELETE" }
+    public enum Method: String, Sendable { case get = "GET", post = "POST", put = "PUT", patch = "PATCH", delete = "DELETE" }
 
     /// The path and query, relative to the hub address ("/v1/health").
     public let path: String

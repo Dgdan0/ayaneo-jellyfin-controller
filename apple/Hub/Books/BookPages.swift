@@ -16,6 +16,8 @@ struct MissingBookView: View {
     @State private var status = StatusMessage("")
 
     private var item: ReadingSectionItem { route.item }
+    /// The book is in the library; only its ebook is missing (#39).
+    private var ebookOnly: Bool { route.lacking == "ebook" }
 
     var body: some View {
         ScrollView {
@@ -61,7 +63,8 @@ struct MissingBookView: View {
                 .frame(maxWidth: metrics.centred ? .infinity : nil)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 10) {
-                Text(([item.number.isEmpty ? nil : "Book \(item.number)", "Not in your library"] as [String?])
+                Text((ebookOnly ? ["Ebook", "Not in your library"] as [String?]
+                      : [item.number.isEmpty ? nil : "Book \(item.number)", "Not in your library"] as [String?])
                     .compactMap { $0 }.joined(separator: " · ").uppercased())
                     .font(HubType.body(12.5, weight: .bold, relativeTo: .caption))
                     .tracking(1.75)
@@ -77,7 +80,9 @@ struct MissingBookView: View {
                         .font(HubType.body(15, relativeTo: .subheadline))
                         .foregroundStyle(.white.opacity(0.82))
                 }
-                Text("This book is part of the series but is not in your library. Search for an edition to see its details and request it.")
+                Text(ebookOnly
+                     ? "Your library has this book without an ebook. Search for an edition to see its details and request it."
+                     : "This book is part of the series but is not in your library. Search for an edition to see its details and request it.")
                     .font(HubType.body(15, relativeTo: .body))
                     .foregroundStyle(.white.opacity(0.82))
                     .frame(maxWidth: 560, alignment: .leading)

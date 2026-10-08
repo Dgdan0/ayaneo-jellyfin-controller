@@ -63,6 +63,8 @@ public enum DemoReading {
             return authors(parts[3], query: query)
         case ("GET", 4, "works"):
             return work(parts[3])
+        case ("PATCH", 5, "works") where parts[4] == "you":
+            return DemoBookPage.patch(workId: parts[3], body: body, known: findWork(parts[3]) != nil)
         case (_, _, "works") where parts.count >= 7 && parts[4] == "publications" && parts[6] == "audio":
             return audio(method: method, parts: parts, body: body)
         case ("GET", 3, "resolve"):
@@ -288,7 +290,8 @@ public enum DemoReading {
 
     private static func work(_ id: String) -> DemoTransport.Answer {
         guard let work = findWork(id) else { return failure(404, "not_found", "No such book") }
-        return json(detailFields(work))
+        // The book page's community, you and genres (#39): on this route only.
+        return json(DemoBookPage.decorate(detailFields(work), workId: work.id))
     }
 
     private static func progressFields(_ percentage: Double, updatedAt: String, completed: Bool = false) -> [String: Any] {

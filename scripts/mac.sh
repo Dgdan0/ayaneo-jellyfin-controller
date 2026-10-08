@@ -61,6 +61,7 @@
 # HUB_SUBTITLES=search searches and opens the first result, and HUB_REMOVAL=confirm asks the alert.
 # HUB_DOWNLOAD=<item id> downloads that film or episode at launch (an MP4 the PC makes first), and
 # HUB_DOWNLOAD=remove:<item id> takes it off the simulator again.
+# With -demo, HUB_OPEN=book:<work id> HUB_SHEET=finished opens that book's When did you finish?.
 # SHOT_SIMS="iPad Pro (12.9-inch) (4th generation),iPhone 17 Pro Max"
 # limits sims and shot to those simulators, and HUB_WIDTH=375 lays the app out
 # in a window that wide, as an iPad's Split View would; SHOT_STATE names the screenshots

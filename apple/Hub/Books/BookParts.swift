@@ -36,6 +36,8 @@ struct AuthorRoute: Hashable {
 /// A book of a series the library does not have.
 struct MissingBookRoute: Hashable {
     let item: ReadingSectionItem
+    /// "ebook" when the library has the book without one (#39): only the ebook is missing.
+    var lacking = ""
 }
 
 /// A title BookKeeprr knows, to request.

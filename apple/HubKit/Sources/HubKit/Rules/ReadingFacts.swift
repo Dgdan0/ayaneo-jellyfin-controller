@@ -245,7 +245,7 @@ public enum ReadingBookFacts {
         }
     }
 
-    private static func textPages(_ work: ReadingWork) -> Int {
+    static func textPages(_ work: ReadingWork) -> Int {
         work.editions.filter { $0.kind != "audiobook" }.map(\.pageCount).max() ?? 0
     }
 
