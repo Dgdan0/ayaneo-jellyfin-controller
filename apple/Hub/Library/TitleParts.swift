@@ -18,16 +18,23 @@ struct TitlePage<Backdrop: View, Header: View, Below: View>: View {
     /// bottom (groups and items: "actions", "tabs", "seasons", "episodes").
     let pad: String?
     let padColumn: [String]
+    /// Ⓑ and Escape, before they go back: what the page is busy with ends first (select mode).
+    let padBack: (() -> Void)?
+    /// A bar over the page's foot (select mode's Download), inside the page a controller moves on.
+    let bottom: AnyView?
     let header: (GlassMetrics) -> Header
     let below: Below
     /// Each time this changes the page scrolls to what is below the header (select mode starts there).
     let scrollToBelow: Int
 
-    init(backdrop: Backdrop, pad: String? = nil, padColumn: [String] = [], scrollToBelow: Int = 0,
+    init(backdrop: Backdrop, pad: String? = nil, padColumn: [String] = [], padBack: (() -> Void)? = nil,
+         bottom: AnyView? = nil, scrollToBelow: Int = 0,
          @ViewBuilder header: @escaping (GlassMetrics) -> Header, @ViewBuilder below: () -> Below) {
         self.backdrop = backdrop
         self.pad = pad
         self.padColumn = padColumn
+        self.padBack = padBack
+        self.bottom = bottom
         self.scrollToBelow = scrollToBelow
         self.header = header
         self.below = below()
@@ -62,7 +69,10 @@ struct TitlePage<Backdrop: View, Header: View, Below: View>: View {
                 .padding(.bottom, 28)
             }
             .ignoresSafeArea(edges: .top)
-            .modifier(TitlePadPage(key: pad))
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let bottom { bottom }
+            }
+            .modifier(TitlePadPage(key: pad, back: padBack))
             .onChange(of: scrollToBelow) { _, _ in
                 withAnimation(.snappy) { scroller.scrollTo("title-below", anchor: .top) }
             }
@@ -74,9 +84,10 @@ struct TitlePage<Backdrop: View, Header: View, Below: View>: View {
 /// The page a controller moves on, when the page has a key.
 private struct TitlePadPage: ViewModifier {
     let key: String?
+    let back: (() -> Void)?
 
     func body(content: Content) -> some View {
-        if let key { content.padPage(key) } else { content }
+        if let key { content.padPage(key, back: back) } else { content }
     }
 }
 
@@ -181,13 +192,16 @@ struct SeasonPills<Menu: View, Trailing: View>: View {
     let pills: [SeasonPill]
     let choose: (String) -> Void
     let menu: (String) -> Menu
+    /// The pad ids of what `trailing` holds, after the pills in the row (#46).
+    let trailingPads: [String]
     let trailing: Trailing
 
     init(_ pills: [SeasonPill], choose: @escaping (String) -> Void, @ViewBuilder menu: @escaping (String) -> Menu,
-         @ViewBuilder trailing: () -> Trailing) {
+         trailingPads: [String] = [], @ViewBuilder trailing: () -> Trailing) {
         self.pills = pills
         self.choose = choose
         self.menu = menu
+        self.trailingPads = trailingPads
         self.trailing = trailing()
     }
 
@@ -213,7 +227,7 @@ struct SeasonPills<Menu: View, Trailing: View>: View {
             }
         }
         // A controller goes along the seasons (#46).
-        .padGroup("seasons", .row, members: pills.map(\.id), strip: true)
+        .padGroup("seasons", .row, members: pills.map(\.id) + trailingPads, strip: true)
     }
 }
 
@@ -280,6 +294,8 @@ struct EpisodeStrip<Item: Identifiable, Card: View, Menu: View, Overlay: View>: 
     let menu: (Item) -> Menu
     let overlay: (Item) -> Overlay
     @State private var revealed = ""
+    /// The card whose actions a controller's Ⓨ asked for.
+    @State private var holding: String?
 
     init(_ items: [Item], reveal: String?, play: @escaping (Item) -> Void, hint: @escaping (Item) -> String,
          identifier: @escaping (Item) -> String = { _ in "" }, reached: @escaping (Int) -> Void = { _ in },
@@ -314,14 +330,20 @@ struct EpisodeStrip<Item: Identifiable, Card: View, Menu: View, Overlay: View>: 
                             .accessibilityIdentifier(identifier(item))
                             .modifier(CardActionsModifier(actions: actions(item)))
                             .contextMenu { menu(item) }
+                            // Ⓐ plays it, as a press does; Ⓨ asks what else, as a hold does (#46).
+                            .padFocusable(item.id, ring: .card,
+                                          hold: actions(item).isEmpty ? nil : { holding = item.id }) { play(item) }
+                            .confirmationDialog("", isPresented: Binding(get: { holding == item.id },
+                                                                         set: { if !$0 { holding = nil } }),
+                                                titleVisibility: .hidden) {
+                                CardActionButtons(actions: actions(item))
+                            }
                             // In the corner of the still, outside the press: its own button.
                             overlay(item)
                                 .padding(4)
                                 .frame(width: metrics.episode, height: metrics.episode * 9 / 16, alignment: .bottomTrailing)
                         }
                         .onAppear { reached(index) }
-                        // Ⓐ plays it, as a press does (#46).
-                        .padFocusable(item.id, ring: .card) { play(item) }
                     }
                 }
                 .padding(.top, 12)

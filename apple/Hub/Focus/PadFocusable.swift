@@ -50,7 +50,8 @@ enum PadRing: Equatable {
 extension View {
     /// The page a controller moves on: once, round the page's own scroll view
     /// (which it scrolls), with the key its focus is remembered by. `modal`
-    /// for a sheet, which has the keys while it shows.
+    /// for a sheet, which has the keys while it shows. `back` is a sheet's Ⓑ
+    /// and Escape (it closes), or a page's own before Back (select mode ends).
     func padPage(_ key: String, modal: Bool = false, back: (() -> Void)? = nil) -> some View {
         modifier(PadPageModifier(key: key, modal: modal, back: back))
     }
@@ -128,6 +129,8 @@ private struct PadPageModifier: ViewModifier {
                 }
                 .onDisappear { PadFocusCenter.shared.disappeared(page) }
                 .onChange(of: key) { _, latest in page.key = latest }
+                // A page's Ⓑ comes and goes with what it is busy with (a title's select mode).
+                .onChange(of: back == nil) { _, _ in page.back = back }
         }
     }
 }

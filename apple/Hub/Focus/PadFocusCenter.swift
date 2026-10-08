@@ -34,7 +34,8 @@ final class PadPage {
     let modal: Bool
     /// The shell's bars: reached up (or down) from a page, left with Down, Up or Ⓑ.
     let isBar: Bool
-    /// A sheet's Ⓑ and Escape: what closes it.
+    /// A sheet's Ⓑ and Escape: what closes it. On a page, what it is busy
+    /// with ends first (select mode), set only while it is.
     var back: (() -> Void)?
 
     /// Each item's frame, in the window (`.global`), so the bar and a page can
@@ -237,8 +238,9 @@ final class PadFocusCenter {
                 returnFocus(to: target)
                 return true
             }
-            // A sheet closes.
-            if let sheet = activePage, sheet.modal, let back = sheet.back {
+            // A sheet closes; a page busy with something of its own ends it
+            // (a title's select mode) before Back takes the page away.
+            if let page = activePage, let back = page.back {
                 back()
                 return true
             }

@@ -50,6 +50,10 @@ struct SeriesDownloadPanel: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("keep-ready-off")
+                        .padFocusable("keep-off", ring: .rounded(8)) {
+                            downloads.turnOffKeepReady()
+                            close()
+                        }
                         Text("The episodes already downloaded stay on this device.")
                             .font(HubType.body(12, relativeTo: .caption))
                             .foregroundStyle(.white.opacity(0.55))
@@ -63,8 +67,20 @@ struct SeriesDownloadPanel: View {
             .scrollBounceBehavior(.basedOnSize)
             footer(chosen, keepOn: keepOn)
         }
+        // A controller goes down the panel: Close, the choices (Keep ready's
+        // with its minus and plus), Choose episodes, then Download (#46).
+        .padGroup("panel", .column, members: padColumn(choices, keepOn: keepOn), prefix: false)
+        .padPage("series-downloads", modal: true) { close() }
         .foregroundStyle(.white)
         .onAppear { count = downloads.keepReadyCount ?? KeepReady.defaultCount }
+    }
+
+    private func padColumn(_ choices: [SeriesDownloads.Choice], keepOn: Int?) -> [String] {
+        let rows = choices.map { choice -> String in
+            if case .keepReady = choice.kind { return "keep" }
+            return "choice-" + choice.id
+        }
+        return ["close"] + rows + ["choose", "keep-off", "go"]
     }
 
     // MARK: Parts
@@ -83,7 +99,7 @@ struct SeriesDownloadPanel: View {
                 }
             }
             Spacer(minLength: 8)
-            GlassRoundButton(systemImage: "xmark", label: "Close", size: 38, action: close)
+            GlassRoundButton(systemImage: "xmark", label: "Close", size: 38, pad: "close", action: close)
                 .accessibilityIdentifier("download-panel-close")
         }
         .padding(.horizontal, 20)
@@ -131,18 +147,25 @@ struct SeriesDownloadPanel: View {
             }
         }
         .opacity(usable ? 1 : 0.5)
+        .padFocusable(usable ? (isKeepReady ? "choice" : "choice-" + choice.id) : nil, ring: .rounded(18)) {
+            picked = choice.id
+        }
+        // Keep ready's row: its choice, then minus and plus along it.
+        .padGroup(isKeepReady ? "keep" : nil, .row, members: ["choice", "minus", "plus"])
     }
 
     /// 1 to 10, one at a time: minus, the number, plus.
     private var stepper: some View {
         HStack(spacing: 0) {
-            stepButton("minus", label: "One fewer", enabled: count > KeepReady.range.lowerBound, id: "keep-ready-minus") { count -= 1 }
+            stepButton("minus", label: "One fewer", enabled: count > KeepReady.range.lowerBound, id: "keep-ready-minus",
+                       pad: "minus") { count -= 1 }
             Text("\(count)")
                 .font(HubType.body(16, weight: .bold, relativeTo: .body))
                 .monospacedDigit()
                 .frame(minWidth: 26)
                 .accessibilityIdentifier("keep-ready-count")
-            stepButton("plus", label: "One more", enabled: count < KeepReady.range.upperBound, id: "keep-ready-plus") { count += 1 }
+            stepButton("plus", label: "One more", enabled: count < KeepReady.range.upperBound, id: "keep-ready-plus",
+                       pad: "plus") { count += 1 }
         }
         .background(Capsule().fill(.white.opacity(0.1)))
         .fixedSize()
@@ -159,7 +182,8 @@ struct SeriesDownloadPanel: View {
         }
     }
 
-    private func stepButton(_ symbol: String, label: String, enabled: Bool, id: String, action: @escaping () -> Void) -> some View {
+    private func stepButton(_ symbol: String, label: String, enabled: Bool, id: String, pad: String,
+                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .bold))
@@ -171,6 +195,8 @@ struct SeriesDownloadPanel: View {
         .opacity(enabled ? 1 : 0.35)
         .accessibilityLabel(label)
         .accessibilityIdentifier(id)
+        // Always a stop, so the row keeps its shape at 1 and at 10; Ⓐ does nothing at the end.
+        .padFocusable(pad, ring: .circle) { if enabled { action() } }
     }
 
     private func subtitle(_ choice: SeriesDownloads.Choice, isKeepReady: Bool, keepOn: Int?) -> String {
@@ -198,6 +224,7 @@ struct SeriesDownloadPanel: View {
         .buttonStyle(.plain)
         .disabled(!downloads.isLoaded)
         .accessibilityIdentifier("choose-episodes")
+        .padFocusable(downloads.isLoaded ? "choose" : nil, ring: .rounded(18)) { chooseEpisodes() }
     }
 
     private func footer(_ chosen: SeriesDownloads.Choice, keepOn: Int?) -> some View {
@@ -219,6 +246,8 @@ struct SeriesDownloadPanel: View {
             .buttonStyle(PrimaryPillStyle())
             .disabled(!downloads.isLoaded || started || disabledAction(chosen, isKeepReady: isKeepReady, keepOn: keepOn))
             .accessibilityIdentifier("download-panel-go")
+            .padFocusable(!downloads.isLoaded || started || disabledAction(chosen, isKeepReady: isKeepReady, keepOn: keepOn)
+                          ? nil : "go", scrolls: false) { go(chosen, isKeepReady: isKeepReady) }
             .padding(.top, 4)
         }
         .padding(.horizontal, 20)

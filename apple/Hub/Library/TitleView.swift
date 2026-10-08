@@ -62,7 +62,9 @@ struct TitleView: View {
 
     var body: some View {
         TitlePage(backdrop: FadedArtwork.title(backdropPath), pad: "title:\(route.itemId)", padColumn: padColumn,
-                  scrollToBelow: scrollBelow) { page in
+                  // Ⓑ in select mode ends it, before Back (#46).
+                  padBack: downloads.selecting ? { withAnimation(.snappy) { downloads.cancelSelecting() } } : nil,
+                  bottom: AnyView(selectBottomBar), scrollToBelow: scrollBelow) { page in
             header(page)
         } below: {
             StatusLine(message: status) { Task { await load() } }
@@ -89,16 +91,6 @@ struct TitleView: View {
             if let item { moreChoices(item) }
         }
         .ambientArtwork(backdropPath)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if downloads.selecting {
-                SelectBottomBar(total: SeriesDownloads.total(downloads.ticked, among: downloads.episodes),
-                                bytes: SeriesDownloads.size(downloads.tickedEpisodes),
-                                canDownload: !downloads.ticked.isEmpty) {
-                    withAnimation(.snappy) { downloads.downloadTicked() }
-                }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
         // A download started shows how far it is, and how full the device is, until a few seconds after it ends.
         .downloadBar(scope: route.itemId, suppressed: downloads.selecting)
         .overlay { sidePanel }
@@ -159,13 +151,30 @@ struct TitleView: View {
         }
     }
 
+    /// Select mode's foot: the total, the storage bar previewing it, and Download.
+    @ViewBuilder private var selectBottomBar: some View {
+        if downloads.selecting {
+            SelectBottomBar(total: SeriesDownloads.total(downloads.ticked, among: downloads.episodes),
+                            bytes: SeriesDownloads.size(downloads.tickedEpisodes),
+                            canDownload: !downloads.ticked.isEmpty) {
+                withAnimation(.snappy) { downloads.downloadTicked() }
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
     /// The page's lines for a controller, top to bottom (#46).
     private var padColumn: [String] {
         guard let item else { return [] }
         var lines: [String] = []
         if item.type == "episode", !item.seriesTitle.isEmpty, !item.seriesId.isEmpty { lines.append("series") }
         if !item.overview.isEmpty { lines.append("read-more") }
-        lines += ["actions", "tabs"]
+        lines.append("actions")
+        if downloads.selecting {
+            // Select mode: Cancel and Select season, the seasons, the episodes, then Download at the foot.
+            return lines + ["select", "seasons", "episodes", "select-download"]
+        }
+        lines.append("tabs")
         switch tab {
         case .episodes: lines += ["seasons", "episodes"]
         case .similar: lines.append("similar")
@@ -393,7 +402,7 @@ struct TitleView: View {
                             Task { await loadEpisodes(reset: true) }
                         }, menu: { id in
                             if let season = seasons.first(where: { $0.id == id }) { seasonMenu(season) }
-                        }, trailing: {
+                        }, trailingPads: seasonButtonShows ? ["season-download"] : [], trailing: {
                             seasonButton
                         })
             if episodes.isEmpty && !loadingEpisodes && !seasons.isEmpty {
@@ -432,6 +441,13 @@ struct TitleView: View {
         }
     }
 
+    /// Whether the season's button is there to be focused: not while the hub's listing is on its way,
+    /// in select mode, or once the whole season is here.
+    private var seasonButtonShows: Bool {
+        downloads.isLoaded && !downloads.selecting && seasons.contains { $0.id == seasonId }
+            && !downloads.missing(season: seasonId).isEmpty
+    }
+
     /// The button after the season pills: "Season 2 · 4.9 GB", or "Season 2 on this iPad".
     @ViewBuilder private var seasonButton: some View {
         if !downloads.isLoaded, !downloads.selecting, !seasons.isEmpty, sizeClass == .compact {
@@ -440,7 +456,7 @@ struct TitleView: View {
         } else if downloads.isLoaded, !downloads.selecting, let season = seasons.first(where: { $0.id == seasonId }) {
             let name = season.title.isEmpty ? EpisodeLabel.season(season.indexNumber) : season.title
             SeasonDownloadButton(words: downloads.seasonButton(season.id, name: name),
-                                 done: downloads.missing(season: season.id).isEmpty) {
+                                 done: downloads.missing(season: season.id).isEmpty, pad: "season-download") {
                 downloads.downloadSeason(season.id)
             }
         }

@@ -288,6 +288,8 @@ extension View {
 struct SeasonDownloadButton: View {
     let words: String
     let done: Bool
+    /// Its id for a controller's focus (#46); none once the season is here.
+    var pad: String?
     let action: () -> Void
 
     var body: some View {
@@ -311,6 +313,7 @@ struct SeasonDownloadButton: View {
         #endif
         .accessibilityLabel(words)
         .accessibilityIdentifier("download-season")
+        .padFocusable(done ? nil : pad) { action() }
     }
 }
 
@@ -326,7 +329,7 @@ struct SelectTopBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ChoicePill(title: "Cancel", selected: false, action: cancel)
+            ChoicePill(title: "Cancel", selected: false, pad: "cancel", action: cancel)
                 .accessibilityIdentifier("select-cancel")
             Spacer(minLength: 6)
             Text(SeriesDownloads.selectedWords(count))
@@ -335,9 +338,12 @@ struct SelectTopBar: View {
                 .monospacedDigit()
                 .accessibilityIdentifier("select-count")
             Spacer(minLength: 6)
-            ChoicePill(title: seasonAllTicked ? "Unselect season" : "Select season", selected: false, action: toggleSeason)
+            ChoicePill(title: seasonAllTicked ? "Unselect season" : "Select season", selected: false, pad: "season",
+                       action: toggleSeason)
                 .accessibilityIdentifier("select-season")
         }
+        // A controller goes from Cancel to Select season (#46).
+        .padGroup("select", .row, members: ["cancel", "season"])
     }
 }
 
@@ -370,6 +376,8 @@ struct SelectBottomBar: View {
                 .buttonStyle(PrimaryPillStyle())
                 .disabled(!canDownload)
                 .accessibilityIdentifier("select-download")
+                // At the foot, under the episodes for a controller, once something is ticked (#46).
+                .padFocusable(canDownload ? "select-download" : nil, scrolls: false) { download() }
             }
             StorageBarView(bar: offline.storageBar(adding: bytes))
         }
