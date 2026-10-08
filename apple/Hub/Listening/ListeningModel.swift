@@ -153,6 +153,8 @@ final class ListeningModel {
     @ObservationIgnored private var indexes: [ObjectIdentifier: Int] = [:]
     @ObservationIgnored private var hub: HubClient?
     @ObservationIgnored private var address = ""
+    /// The profile the book is kept for (#43).
+    @ObservationIgnored private var userId = ""
     @ObservationIgnored private var token = ""
     @ObservationIgnored private var demo = false
     @ObservationIgnored private var poll: Task<Void, Never>?
@@ -270,6 +272,10 @@ final class ListeningModel {
         }
         if book != nil { stop() }
         book = opening.book
+        // Its tracks are kept as they play: listed with the books kept on this device (#43).
+        ReadingOffline.kept(address: address, userId: userId, workId: opening.book.workId,
+                            title: opening.book.title, artwork: opening.book.artwork, kind: "audiobook",
+                            sourceItemId: opening.book.sourceItemId)
         contents = Self.contents(of: opening.book)
         problem = ""
         conflicted = false
@@ -775,6 +781,7 @@ final class ListeningModel {
     private func connect(_ app: AppModel) {
         hub = app.hub
         address = app.address
+        userId = app.userId
         token = app.storedToken()
         demo = app.isDemo
     }

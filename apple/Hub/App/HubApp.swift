@@ -10,6 +10,11 @@ import UIKit
 struct HubApp: App {
     @State private var model = AppModel()
 
+    init() {
+        // A finished download's notification shows while the app is open too; nothing is asked here (#43).
+        DownloadAlerts.shared.start()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

@@ -373,6 +373,9 @@ final class BookReaderModel {
             return
         }
         guard !Task.isCancelled else { return }
+        // Listed with the books kept on this device (#43).
+        ReadingOffline.kept(address: app.address, userId: app.userId, workId: workId, title: title, artwork: cover,
+                            kind: readAlong == nil ? "ebook" : "readalong", sourceItemId: sourceItemId)
         let opening = await places.opening()
         guard !Task.isCancelled else { return }
         opened(loaded, opening)

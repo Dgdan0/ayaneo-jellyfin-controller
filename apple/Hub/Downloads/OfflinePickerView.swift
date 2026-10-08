@@ -28,6 +28,7 @@ struct OfflinePickerView: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 PageHeading(title: "Download episodes") {
@@ -48,10 +49,17 @@ struct OfflinePickerView: View {
                         seasonCard(season)
                             .padding(.horizontal, metrics.margin)
                             .padding(.top, 18)
+                            .id(season.season.id)
                     }
                 }
             }
             .padding(.bottom, 120)
+        }
+        // Download season: that season in view once the episodes come.
+        .onChange(of: selection?.seasons.count) { _, _ in
+            guard !route.seasonId.isEmpty else { return }
+            Task { @MainActor in proxy.scrollTo(route.seasonId, anchor: .top) }
+        }
         }
         .safeAreaInset(edge: .bottom) {
             if selection != nil { footer }
@@ -72,6 +80,12 @@ struct OfflinePickerView: View {
         do {
             selection = try await model.hub.fetch(HubEndpoints.offlineSelection(seriesId: route.seriesId, format: OfflineFormat.apple),
                                                   as: OfflineSelectionResponse.self)
+            // Download season: its episodes not yet here or coming, ticked.
+            if !route.seasonId.isEmpty, chosen.isEmpty {
+                let season = seasons.first { $0.season.id == route.seasonId }
+                let free = Set(selectable.map(\.item.id))
+                chosen = Set((season?.episodes ?? []).map(\.item.id).filter(free.contains))
+            }
             status = StatusMessage(OfflineSelection.available(seasons).isEmpty ? "No episode here can be downloaded." : "")
         } catch {
             if error.kind == .cancelled { return }

@@ -8,10 +8,12 @@ struct OfflineTitleRoute: Hashable {
     let title: String
 }
 
-/// The episodes of a series to download.
+/// The episodes of a series to download; from a season's Download season,
+/// that season's episodes ticked (#43).
 struct OfflinePickerRoute: Hashable {
     let seriesId: String
     let title: String
+    var seasonId = ""
 }
 
 /// The Media side's Downloads tab (#5; Android's offline screen): what is on
@@ -27,12 +29,17 @@ struct DownloadsView: View {
     @State private var offline = OfflineLibrary.shared
     @State private var tab: Tab
     @State private var removing: OfflineRemoval?
+    /// The Books side's (#43): the books kept here first, the films and series beside them.
+    private let books: Bool
+    @State private var booksSummary = ""
 
-    enum Tab: Hashable { case device, queue }
+    enum Tab: Hashable { case books, device, queue }
 
-    /// On this device, or the queue when a title's Download button opens it.
-    init(startOn tab: Tab = .device) {
-        _tab = State(initialValue: tab)
+    /// On this device, or the queue when a title's Download button opens it;
+    /// on the Books side, its books first.
+    init(startOn tab: Tab = .device, books: Bool = false) {
+        self.books = books
+        _tab = State(initialValue: books && tab == .device ? .books : tab)
     }
 
     var body: some View {
@@ -47,7 +54,11 @@ struct DownloadsView: View {
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 4)
                 HStack(spacing: 8) {
-                    ChoicePill(title: "On this device", selected: tab == .device) { tab = .device }
+                    if books {
+                        ChoicePill(title: "Books", selected: tab == .books) { tab = .books }
+                            .accessibilityIdentifier("downloads-books")
+                    }
+                    ChoicePill(title: books ? "Films and TV" : "On this device", selected: tab == .device) { tab = .device }
                         .accessibilityIdentifier("downloads-device")
                     ChoicePill(title: offline.coming > 0 ? "Queue · \(offline.coming)" : "Queue", selected: tab == .queue) {
                         tab = .queue
@@ -57,6 +68,7 @@ struct DownloadsView: View {
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 14)
                 switch tab {
+                case .books: KeptBooksView(summary: $booksSummary)
                 case .device: catalog
                 case .queue: queue
                 }
@@ -67,8 +79,11 @@ struct DownloadsView: View {
         .offlineRemoval($removing)
     }
 
-    /// "4 titles · 6.2 GB on this device · 120 GB free".
+    /// "4 titles · 6.2 GB on this device · 120 GB free"; on the Books tab, its books.
     private var summary: String {
+        if tab == .books {
+            return [booksSummary, "\(Fmt.bytes(offline.freeBytes)) free"].filter { !$0.isEmpty }.joined(separator: " · ")
+        }
         let titles = offline.titles.count
         var parts: [String] = []
         if titles > 0 { parts.append(titles == 1 ? "1 title" : "\(titles) titles") }

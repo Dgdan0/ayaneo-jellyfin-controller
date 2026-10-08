@@ -530,6 +530,7 @@ struct MainView: View {
         case (.media?, .library): LibraryView()
         case (.media?, .activity): ActivityView()
         case (.media?, .downloads): DownloadsView()
+        case (.books?, .downloads): DownloadsView(books: true)
         case (.books?, .home): BooksHomeView()
         case (.books?, .discover): BooksDiscoverView()
         case (.books?, .library): BooksLibraryView()

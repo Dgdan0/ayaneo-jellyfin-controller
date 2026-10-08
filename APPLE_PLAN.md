@@ -827,5 +827,21 @@ Debug launches take `HUB_DOWNLOAD=<item id>` (downloads it at launch) and
 (converted) in eight; Dune fails once until it is retried, and Inception has a French picture
 subtitle that is left out.
 
+The Books side's Downloads tab (#43) has Books first: the books, audiobooks and comics kept on the
+device (#37's caches), newest first, from HubKit's `ReadingKeptShelf` (a small JSON file beside the
+caches, recorded as the ebook reader opens an edition, the player takes an audiobook and the comic
+reader opens an issue), each with what is kept and its room, a book's page on a tap and Remove
+offline copy on a hold (`Downloads/KeptBooksView`); a book the system has cleared from the caches
+leaves the list. Films and TV and the queue are the tabs beside it.
+
+A season's menu on a series page has Download season (#43): the picker opens with that season's
+episodes ticked (`OfflinePickerRoute.seasonId`).
+
+A download that finishes or fails says so in a notification (#43, `Downloads/DownloadAlerts`; the
+outcomes and words are HubKit's `OfflineAlerts`): one per download and outcome, a batch's grouped,
+shown while the app is open too. Permission is asked when the first download starts, never at launch;
+the demo hub asks only with `HUB_ALERTS=1`, so the UI tests are not interrupted.
+
 Differences from Android, on purpose: the hub's MP4, not the original file; no storage location to
-choose (the app's own Application Support, kept out of backups); Books' offline copies are #37's.
+choose (the app's own Application Support, kept out of backups); no alerts for the server's own
+transfers and subtitles.

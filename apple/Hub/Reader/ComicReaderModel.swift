@@ -192,6 +192,8 @@ final class ComicReaderModel {
 
     /// Where the issues' page lists are kept for an outage, and whose (#37): set by the view.
     @ObservationIgnored var manifests: ReadingManifestCache?
+    /// The books kept on this device (#43): an issue opened is one of them.
+    @ObservationIgnored var keptShelf: ReadingKeptShelf?
     @ObservationIgnored var scope = ""
     /// The issue was opened from the page list kept on this device: its pages
     /// come from the device first.
@@ -249,6 +251,13 @@ final class ComicReaderModel {
         issue.artwork.isEmpty ? IssueCover.path(issue.sourceItemId) ?? "" : issue.artwork
     }
 
+    /// The run on the shelf of books kept here, this issue among its issues (#43).
+    private func keepOnShelf(_ sourceItemId: String, _ manifest: ReadingPublicationManifest) {
+        let kind = (manifest.kind.isEmpty ? (work?.kind ?? issue.kind) : manifest.kind) == "manga" ? "manga" : "comic"
+        keptShelf?.record(workId: workId, title: work?.title ?? manifest.seriesTitle, artwork: work?.artwork ?? cover,
+                          kind: kind, sourceItemId: sourceItemId, now: Int64(Date().timeIntervalSince1970 * 1_000))
+    }
+
     // MARK: Opening
 
     func start() {
@@ -287,8 +296,9 @@ final class ComicReaderModel {
                     throw HubFailure(.badResponse)
                 }
                 guard !Task.isCancelled else { return }
-                // Kept to reopen the issue in an outage (#37).
+                // Kept to reopen the issue in an outage (#37), and listed with the books kept here (#43).
                 try? manifests?.save(key, answer: answer)
+                self?.keepOnShelf(sourceItemId, manifest)
                 self?.offline = false
                 self?.apply(manifest, atEnd: atEnd, moving: moving)
             } catch {
