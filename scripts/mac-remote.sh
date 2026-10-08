@@ -138,7 +138,7 @@ run() {
     HUB_HERO=$(printf '%q' "${HUB_HERO:-}") \
     HUB_TITLE=$(printf '%q' "${HUB_TITLE:-}") HUB_SUBTITLES=$(printf '%q' "${HUB_SUBTITLES:-}") \
     HUB_REMOVAL=$(printf '%q' "${HUB_REMOVAL:-}") HUB_DOWNLOAD=$(printf '%q' "${HUB_DOWNLOAD:-}") \
-    HUB_CAST=$(printf '%q' "${HUB_CAST:-}") HUB_OFFLINE_TITLE=$(printf '%q' "${HUB_OFFLINE_TITLE:-}") HUB_OFFLINE_WATCH=$(printf '%q' "${HUB_OFFLINE_WATCH:-}") \
+    HUB_CAST=$(printf '%q' "${HUB_CAST:-}") HUB_OFFLINE_TITLE=$(printf '%q' "${HUB_OFFLINE_TITLE:-}") HUB_OFFLINE_WATCH=$(printf '%q' "${HUB_OFFLINE_WATCH:-}") HUB_SERIES_DOWNLOADS=$(printf '%q' "${HUB_SERIES_DOWNLOADS:-}") \
     HUB_BOOK_THEME=$(printf '%q' "${HUB_BOOK_THEME:-}") HUB_BOOK_COLUMNS=$(printf '%q' "${HUB_BOOK_COLUMNS:-}") \
     HUB_BOOK_FONT=$(printf '%q' "${HUB_BOOK_FONT:-}") HUB_BOOK_SIZE=$(printf '%q' "${HUB_BOOK_SIZE:-}") \
     HUB_BOOK_TABLET=$(printf '%q' "${HUB_BOOK_TABLET:-}") \

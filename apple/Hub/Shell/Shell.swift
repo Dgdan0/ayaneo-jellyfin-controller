@@ -65,7 +65,6 @@ enum AppRoute: Hashable {
     case removal(RemovalRoute)
     // Downloads for watching away from the hub (#5).
     case offlineTitle(OfflineTitleRoute)
-    case offlinePicker(OfflinePickerRoute)
     /// The Downloads page on its queue, from a title's Download button.
     case offlineQueue
 
@@ -93,7 +92,6 @@ enum AppRoute: Hashable {
         case .subtitles: "Subtitles"
         case .removal: RemovalLines.heading
         case .offlineTitle(let route): route.title
-        case .offlinePicker: "Download episodes"
         case .offlineQueue: "Downloads"
         }
     }
@@ -614,7 +612,6 @@ struct MainView: View {
         case .subtitles(let subtitles): SubtitlesView(route: subtitles)
         case .removal(let removal): RemovalView(route: removal)
         case .offlineTitle(let offline): OfflineTitleView(route: offline)
-        case .offlinePicker(let picker): OfflinePickerView(route: picker)
         case .offlineQueue: DownloadsView(startOn: .queue)
         }
     }

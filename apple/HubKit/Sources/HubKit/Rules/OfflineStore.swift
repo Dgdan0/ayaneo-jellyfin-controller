@@ -184,6 +184,8 @@ public final class OfflineStore: @unchecked Sendable {
     public let root: URL
     /// What a downloaded series' own page says of it, kept beside its artwork (`OfflineSeriesSnapshot`).
     public let series: OfflineSeriesStore
+    /// The series that keep the next episodes ready, and what that downloaded itself (`KeepReady`).
+    public let keepReady: KeepReadyStore
     private let lock = NSLock()
     private var batchRecords: [String: OfflineBatchRecord] = [:]
     private var rowsById: [String: OfflineRow] = [:]
@@ -193,6 +195,8 @@ public final class OfflineStore: @unchecked Sendable {
     public init(root: URL) {
         self.root = root
         series = OfflineSeriesStore(folder: root.appendingPathComponent("series", isDirectory: true))
+        keepReady = KeepReadyStore(file: root.appendingPathComponent("state", isDirectory: true)
+            .appendingPathComponent("keep-ready.json"))
         let manager = FileManager.default
         for folder in [root, mediaFolder, subtitleFolder, artworkFolder, resumeFolder, rowFolder] {
             try? manager.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -326,6 +330,8 @@ public final class OfflineStore: @unchecked Sendable {
             writeBatches()
         }
         var added = 0
+        // After what a batch already holds, so a later tap's episode waits its turn behind the earlier ones.
+        let base = (rowsById.values.filter { $0.batchId == batchId }.map(\.sortOrder).max() ?? -1) + 1
         for (index, entry) in manifests.enumerated() {
             let manifest = entry.manifest
             let id = manifest.clientItemKey.isEmpty ? "\(batchId)-\(manifest.item.id)" : manifest.clientItemKey
@@ -334,7 +340,7 @@ public final class OfflineStore: @unchecked Sendable {
             }
             if duplicate { continue }
             let row = OfflineRow(id: id, batchId: batchId, userId: userId, manifest: manifest, manifestJSON: entry.json,
-                                 fileName: Self.safe(id) + "." + Self.safe(manifest.container), sortOrder: index, updatedAt: now)
+                                 fileName: Self.safe(id) + "." + Self.safe(manifest.container), sortOrder: base + index, updatedAt: now)
             rowsById[id] = row
             write(row)
             added += 1

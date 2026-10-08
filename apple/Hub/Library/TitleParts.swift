@@ -16,9 +16,13 @@ struct TitlePage<Backdrop: View, Header: View, Below: View>: View {
     let backdrop: Backdrop
     let header: (GlassMetrics) -> Header
     let below: Below
+    /// Each time this changes the page scrolls to what is below the header (select mode starts there).
+    let scrollToBelow: Int
 
-    init(backdrop: Backdrop, @ViewBuilder header: @escaping (GlassMetrics) -> Header, @ViewBuilder below: () -> Below) {
+    init(backdrop: Backdrop, scrollToBelow: Int = 0, @ViewBuilder header: @escaping (GlassMetrics) -> Header,
+         @ViewBuilder below: () -> Below) {
         self.backdrop = backdrop
+        self.scrollToBelow = scrollToBelow
         self.header = header
         self.below = below()
     }
@@ -27,6 +31,7 @@ struct TitlePage<Backdrop: View, Header: View, Below: View>: View {
         GeometryReader { proxy in
             // A small Mac window lays the words out as a phone turned sideways does.
             let page = metrics.forTitlePage(size: proxy.size, safe: proxy.safeAreaInsets)
+            ScrollViewReader { scroller in
             ScrollView {
                 ZStack(alignment: .top) {
                     // The prototype's `.dart`: 590 tall on an iPad, 470 on an
@@ -43,12 +48,16 @@ struct TitlePage<Backdrop: View, Header: View, Below: View>: View {
                             .padding(.top, page.short ? proxy.safeAreaInsets.top + 10
                                      : max(page.compact ? 290 : 236, proxy.safeAreaInsets.top + 120))
                             .padding(.horizontal, metrics.margin)
-                        below
+                        below.id("title-below")
                     }
                 }
                 .padding(.bottom, 28)
             }
             .ignoresSafeArea(edges: .top)
+            .onChange(of: scrollToBelow) { _, _ in
+                withAnimation(.snappy) { scroller.scrollTo("title-below", anchor: .top) }
+            }
+            }
         }
     }
 }
@@ -140,6 +149,8 @@ struct SeasonPill: Identifiable, Equatable {
     let id: String
     let title: String
     let selected: Bool
+    /// How much of the season is ticked, 0 to 1, in select mode; nil outside it.
+    var ring: Double?
 }
 
 /// The prototype's `.pills`: one glass pill per season, a long press asking
@@ -147,6 +158,7 @@ struct SeasonPill: Identifiable, Equatable {
 /// that belongs to the row (a page's download actions).
 struct SeasonPills<Menu: View, Trailing: View>: View {
     @Environment(\.glassMetrics) private var metrics
+    @Environment(\.horizontalSizeClass) private var sizeClass
     let pills: [SeasonPill]
     let choose: (String) -> Void
     let menu: (String) -> Menu
@@ -161,17 +173,25 @@ struct SeasonPills<Menu: View, Trailing: View>: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(pills) { pill in
-                    ChoicePill(title: pill.title, selected: pill.selected) { choose(pill.id) }
-                        .contextMenu { menu(pill.id) }
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(pills) { pill in
+                        ChoicePill(title: pill.title, selected: pill.selected, ring: pill.ring) { choose(pill.id) }
+                            .contextMenu { menu(pill.id) }
+                    }
+                    // After the last pill where there is room; under them on a phone, where it would be scrolled out of sight.
+                    if sizeClass != .compact { trailing }
                 }
-                trailing
+                .padding(.horizontal, metrics.margin)
+                .padding(.top, 14)
+                .padding(.bottom, 2)
             }
-            .padding(.horizontal, metrics.margin)
-            .padding(.top, 14)
-            .padding(.bottom, 2)
+            if sizeClass == .compact {
+                trailing
+                    .padding(.horizontal, metrics.margin)
+                    .padding(.top, 8)
+            }
         }
     }
 }
@@ -182,11 +202,46 @@ extension SeasonPills where Trailing == EmptyView {
     }
 }
 
+/// What a card offers on a press and hold (Ⓨ on a pad), as plain values: the
+/// context menu, VoiceOver's actions and a controller's buttons all read one
+/// list, so the page says once what a card can do.
+struct CardAction: Identifiable {
+    let id: String
+    let title: String
+    let systemImage: String
+    var destructive = false
+    let run: () -> Void
+
+    init(_ id: String, _ title: String, systemImage: String, destructive: Bool = false, run: @escaping () -> Void) {
+        self.id = id
+        self.title = title
+        self.systemImage = systemImage
+        self.destructive = destructive
+        self.run = run
+    }
+}
+
+/// A list of card actions as menu buttons.
+struct CardActionButtons: View {
+    let actions: [CardAction]
+
+    var body: some View {
+        ForEach(actions) { action in
+            Button(role: action.destructive ? .destructive : nil, action: action.run) {
+                Label(action.title, systemImage: action.systemImage)
+            }
+        }
+    }
+}
+
 /// A season's episodes in a strip of cards, as the prototype's and Android's:
 /// a press plays, a long press asks what else, and the strip opens at the
 /// episode Play starts (`reveal`) rather than at episode 1 of a half-watched
 /// season. The cards are plain buttons in the card style, each its own stop.
-struct EpisodeStrip<Item: Identifiable, Card: View, Menu: View>: View where Item.ID == String {
+/// A page may put a control over the corner of a card's still (`overlay`: a
+/// download's state), outside the press so it is a button of its own, and say
+/// what the card offers on a hold (`actions`).
+struct EpisodeStrip<Item: Identifiable, Card: View, Menu: View, Overlay: View>: View where Item.ID == String {
     @Environment(\.glassMetrics) private var metrics
     let items: [Item]
     /// The episode the strip opens at; nil opens at the first.
@@ -198,21 +253,28 @@ struct EpisodeStrip<Item: Identifiable, Card: View, Menu: View>: View where Item
     let identifier: (Item) -> String
     /// A card scrolled into view, by its place: a longer season asks for its next page.
     let reached: (Int) -> Void
+    /// What a card offers on a hold, for VoiceOver and a controller; the menu draws its own.
+    let actions: (Item) -> [CardAction]
     let card: (Item) -> Card
     let menu: (Item) -> Menu
+    let overlay: (Item) -> Overlay
     @State private var revealed = ""
 
     init(_ items: [Item], reveal: String?, play: @escaping (Item) -> Void, hint: @escaping (Item) -> String,
          identifier: @escaping (Item) -> String = { _ in "" }, reached: @escaping (Int) -> Void = { _ in },
-         @ViewBuilder card: @escaping (Item) -> Card, @ViewBuilder menu: @escaping (Item) -> Menu) {
+         actions: @escaping (Item) -> [CardAction] = { _ in [] },
+         @ViewBuilder card: @escaping (Item) -> Card, @ViewBuilder menu: @escaping (Item) -> Menu,
+         @ViewBuilder overlay: @escaping (Item) -> Overlay) {
         self.items = items
         self.reveal = reveal
         self.play = play
         self.hint = hint
         self.identifier = identifier
         self.reached = reached
+        self.actions = actions
         self.card = card
         self.menu = menu
+        self.overlay = overlay
     }
 
     var body: some View {
@@ -220,15 +282,22 @@ struct EpisodeStrip<Item: Identifiable, Card: View, Menu: View>: View where Item
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: metrics.gap) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        Button {
-                            play(item)
-                        } label: {
-                            card(item).frame(width: metrics.episode)
+                        ZStack(alignment: .topLeading) {
+                            Button {
+                                play(item)
+                            } label: {
+                                card(item).frame(width: metrics.episode)
+                            }
+                            .buttonStyle(GlassCardStyle())
+                            .accessibilityHint(hint(item))
+                            .accessibilityIdentifier(identifier(item))
+                            .modifier(CardActionsModifier(actions: actions(item)))
+                            .contextMenu { menu(item) }
+                            // In the corner of the still, outside the press: its own button.
+                            overlay(item)
+                                .padding(4)
+                                .frame(width: metrics.episode, height: metrics.episode * 9 / 16, alignment: .bottomTrailing)
                         }
-                        .buttonStyle(GlassCardStyle())
-                        .accessibilityHint(hint(item))
-                        .accessibilityIdentifier(identifier(item))
-                        .contextMenu { menu(item) }
                         .onAppear { reached(index) }
                     }
                 }
@@ -243,6 +312,27 @@ struct EpisodeStrip<Item: Identifiable, Card: View, Menu: View>: View where Item
                 revealed = id
                 reader.scrollTo(id, anchor: .leading)
             }
+        }
+    }
+}
+
+extension EpisodeStrip where Overlay == EmptyView {
+    init(_ items: [Item], reveal: String?, play: @escaping (Item) -> Void, hint: @escaping (Item) -> String,
+         identifier: @escaping (Item) -> String = { _ in "" }, reached: @escaping (Int) -> Void = { _ in },
+         actions: @escaping (Item) -> [CardAction] = { _ in [] },
+         @ViewBuilder card: @escaping (Item) -> Card, @ViewBuilder menu: @escaping (Item) -> Menu) {
+        self.init(items, reveal: reveal, play: play, hint: hint, identifier: identifier, reached: reached, actions: actions,
+                  card: card, menu: menu, overlay: { _ in EmptyView() })
+    }
+}
+
+/// A card's actions as VoiceOver's custom actions.
+private struct CardActionsModifier: ViewModifier {
+    let actions: [CardAction]
+
+    func body(content: Content) -> some View {
+        actions.reduce(AnyView(content)) { view, action in
+            AnyView(view.accessibilityAction(named: Text(action.title)) { action.run() })
         }
     }
 }
@@ -264,17 +354,20 @@ struct EpisodeCard<Still: View, Badge: View>: View {
     let progress: Double
     let upNext: Bool
     let selected: Bool
+    /// Not to be chosen now: an episode already here or on its way, while episodes are being ticked.
+    let dimmed: Bool
     let still: Still
     let badge: Badge
 
     init(title: String, detail: String, played: Bool, progress: Double, upNext: Bool, selected: Bool = false,
-         @ViewBuilder still: () -> Still, @ViewBuilder badge: () -> Badge) {
+         dimmed: Bool = false, @ViewBuilder still: () -> Still, @ViewBuilder badge: () -> Badge) {
         self.title = title
         self.detail = detail
         self.played = played
         self.progress = progress
         self.upNext = upNext
         self.selected = selected
+        self.dimmed = dimmed
         self.still = still()
         self.badge = badge()
     }
@@ -307,6 +400,7 @@ struct EpisodeCard<Still: View, Badge: View>: View {
                 .litArtwork(corner: metrics.radius)
             CardCaption(title: title, detail: detail)
         }
+        .opacity(dimmed ? 0.42 : 1)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -315,17 +409,17 @@ struct EpisodeCard<Still: View, Badge: View>: View {
 
 extension EpisodeCard where Badge == EmptyView {
     init(title: String, detail: String, played: Bool, progress: Double, upNext: Bool, selected: Bool = false,
-         @ViewBuilder still: () -> Still) {
+         dimmed: Bool = false, @ViewBuilder still: () -> Still) {
         self.init(title: title, detail: detail, played: played, progress: progress, upNext: upNext, selected: selected,
-                  still: still, badge: { EmptyView() })
+                  dimmed: dimmed, still: still, badge: { EmptyView() })
     }
 }
 
 extension EpisodeCard where Still == ArtworkView, Badge == EmptyView {
     /// An episode of the library, its still from the hub.
-    init(episode: HubKit.LibraryItem, upNext: Bool) {
+    init(episode: HubKit.LibraryItem, upNext: Bool, selected: Bool = false, dimmed: Bool = false) {
         self.init(title: DetailLines.episodeTitle(episode), detail: DetailLines.episodeMeta(episode), played: episode.played,
-                  progress: episode.progress, upNext: upNext) {
+                  progress: episode.progress, upNext: upNext, selected: selected, dimmed: dimmed) {
             ArtworkView(path: episode.thumb.isEmpty ? episode.poster : episode.thumb, width: 480)
         }
     }

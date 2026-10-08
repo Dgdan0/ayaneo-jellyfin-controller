@@ -234,6 +234,9 @@ struct OfflineTitleView: View {
         return EpisodeCard(title: DetailLines.episodeTitle(item), detail: episodeLine(row, saved: saved),
                            played: saved?.isComplete == true, progress: part, upNext: upNext) {
             OfflineArtwork(file: offline.store.artworkFile(row, kind: "thumb"), fallback: item.thumb, width: 480)
+        } badge: {
+            // On this device, as the library's page draws it: the download mark, never a tick (a tick is watched).
+            DownloadedMark(size: 26)
         }
     }
 

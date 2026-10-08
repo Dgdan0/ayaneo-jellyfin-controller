@@ -16,6 +16,8 @@ enum DemoLibrary {
         let year: Int
         let minutes: Int
         let genres: [String]
+        /// A series' episodes in each season; most have the one season of three.
+        var seasons: [Int] = [3]
     }
 
     /// What a profile has done to a title in this run.
@@ -51,7 +53,9 @@ enum DemoLibrary {
         Title(id: id(15), folder: movies, type: "movie", title: "The Matrix", year: 1999, minutes: 136, genres: ["Action", "Sci-Fi"]),
         Title(id: id(16), folder: shows, type: "series", title: "The Mentalist", year: 2008, minutes: 43, genres: ["Crime", "Drama"]),
         Title(id: id(17), folder: shows, type: "series", title: "Dark Matter", year: 2024, minutes: 55, genres: ["Sci-Fi", "Drama"]),
-        Title(id: id(18), folder: shows, type: "series", title: "Slow Horses", year: 2022, minutes: 50, genres: ["Drama", "Thriller"]),
+        // Two seasons, so a series page has Season 2 to choose, tick and download.
+        Title(id: id(18), folder: shows, type: "series", title: "Slow Horses", year: 2022, minutes: 50, genres: ["Drama", "Thriller"],
+              seasons: [3, 4]),
         Title(id: id(19), folder: shows, type: "series", title: "Ted Lasso", year: 2020, minutes: 33, genres: ["Comedy", "Drama"]),
     ]
 
@@ -95,6 +99,41 @@ enum DemoLibrary {
     }
 
     private static let episodeNames = ["The Beginning", "A Second Look", "Third Time Lucky"]
+    private static let laterNames = ["Back in Business", "Slow Burn", "Hot Desk", "Last Orders"]
+
+    private static func episodeName(season: Int, number: Int) -> String {
+        season == 1 ? episodeNames[(number - 1) % 3] : laterNames[(number - 1) % 4]
+    }
+
+    /// "<series>-e2" in the first season, "<series>-s2e1" in a later one.
+    private static func episodeId(_ title: Title, season: Int, number: Int) -> String {
+        season == 1 ? "\(title.id)-e\(number)" : "\(title.id)-s\(season)e\(number)"
+    }
+
+    /// Every episode of the series, in order, as (season, number).
+    private static func episodeKeys(_ title: Title) -> [(season: Int, number: Int)] {
+        title.seasons.enumerated().flatMap { index, count in (1...count).map { (index + 1, $0) } }
+    }
+
+    /// The season and number an episode id names, if the series has it.
+    private static func episodeKey(_ suffix: Substring, of title: Title) -> (season: Int, number: Int)? {
+        let body = suffix.dropFirst()
+        if body.hasPrefix("e"), let number = Int(body.dropFirst()) {
+            return episodeKeys(title).contains { $0.season == 1 && $0.number == number } ? (1, number) : nil
+        }
+        if body.hasPrefix("s") {
+            let pair = body.dropFirst().split(separator: "e").compactMap { Int($0) }
+            if pair.count == 2, episodeKeys(title).contains(where: { $0.season == pair[0] && $0.number == pair[1] }) {
+                return (pair[0], pair[1])
+            }
+        }
+        return nil
+    }
+
+    /// The first episode not watched: where Play starts.
+    private static func playTarget(_ title: Title) -> (season: Int, number: Int) {
+        episodeKeys(title).first { !state(episodeId(title, season: $0.season, number: $0.number)).played } ?? (1, 1)
+    }
 
     static func answer(method: String, path: String, query: String, body: Data?) -> DemoTransport.Answer? {
         let parts = path.split(separator: "/").map(String.init)
@@ -127,15 +166,24 @@ enum DemoLibrary {
             return change(parts[3], body: body)
         case ("GET", 5, "series") where parts[4] == "seasons":
             guard let title = title(parts[3]), title.type == "series" else { return failure(404, "not_found", "No such series") }
-            let season: [String: Any] = ["id": title.id + "-s1", "type": "season", "title": "Season 1", "seriesTitle": title.title,
-                                         "seriesId": title.id, "indexNumber": 1, "unplayedCount": 3]
-            return json(["page": 1, "totalPages": 1, "items": [season]])
+            let seasons = title.seasons.indices.map { index -> [String: Any] in
+                let unplayed = (1...title.seasons[index]).filter {
+                    !state(episodeId(title, season: index + 1, number: $0)).played
+                }.count
+                return ["id": title.id + "-s\(index + 1)", "type": "season", "title": "Season \(index + 1)",
+                        "seriesTitle": title.title, "seriesId": title.id, "indexNumber": index + 1, "unplayedCount": unplayed]
+            }
+            return json(["page": 1, "totalPages": 1, "items": seasons])
         case ("GET", 5, "series") where parts[4] == "episodes":
             guard let title = title(parts[3]), title.type == "series" else { return failure(404, "not_found", "No such series") }
-            return json(["page": 1, "totalPages": 1, "items": (1...3).map { episodeFields(title, number: $0) }])
+            // One season's when it is asked for, else every season's.
+            let seasonId = value("seasonId", in: query)
+            let keys = episodeKeys(title).filter { seasonId.isEmpty || title.id + "-s\($0.season)" == seasonId }
+            return json(["page": 1, "totalPages": 1, "items": keys.map { episodeFields(title, season: $0.season, number: $0.number) }])
         case ("GET", 5, "series") where parts[4] == "play-target":
             guard let title = title(parts[3]), title.type == "series" else { return failure(404, "not_found", "No such series") }
-            return json(["kind": "start", "item": episodeFields(title, number: 1)])
+            let target = playTarget(title)
+            return json(["kind": "start", "item": episodeFields(title, season: target.season, number: target.number)])
         default:
             return nil
         }
@@ -215,27 +263,37 @@ enum DemoLibrary {
 
     /// "<series id>-e2": the second episode of that series' only season.
     private static func episodeFields(_ title: Title, number: Int) -> [String: Any] {
-        ["id": "\(title.id)-e\(number)", "type": "episode", "title": episodeNames[number - 1],
-         "subtitle": "S1E\(number) · \(episodeNames[number - 1])", "seriesTitle": title.title, "seriesId": title.id,
-         "seasonId": title.id + "-s1", "year": title.year, "indexNumber": number, "seasonNumber": 1,
-         "overview": "Episode \(number) of \(title.title) in the demo hub.", "runtimeSeconds": title.minutes * 60,
-         "thumb": "/v1/img/jf/\(title.id)-e\(number)/Primary", "poster": "/v1/img/jf/\(title.id)/Primary",
-         "backdrop": "/v1/img/jf/\(title.id)/Backdrop"]
+        episodeFields(title, season: 1, number: number)
+    }
+
+    private static func episodeFields(_ title: Title, season: Int, number: Int) -> [String: Any] {
+        let id = episodeId(title, season: season, number: number)
+        let name = episodeName(season: season, number: number)
+        return ["id": id, "type": "episode", "title": name,
+                "subtitle": "S\(season)E\(number) · \(name)", "seriesTitle": title.title, "seriesId": title.id,
+                "seasonId": title.id + "-s\(season)", "year": title.year, "indexNumber": number, "seasonNumber": season,
+                "overview": "Episode \(number) of \(title.title) in the demo hub.", "runtimeSeconds": title.minutes * 60,
+                "played": state(id).played,
+                "thumb": "/v1/img/jf/\(id)/Primary", "poster": "/v1/img/jf/\(title.id)/Primary",
+                "backdrop": "/v1/img/jf/\(title.id)/Backdrop"]
+    }
+
+    /// An episode by its id: "<series>-e2", or "<series>-s2e1" past the first season.
+    private static func episodeParts(_ id: String) -> (series: Title, season: Int, number: Int)? {
+        guard id.count > 33, let series = title(String(id.prefix(32))),
+              let key = episodeKey(id.dropFirst(32), of: series) else { return nil }
+        return (series, key.season, key.number)
     }
 
     private static func episode(_ id: String) -> DemoTransport.Answer {
-        let pieces = id.split(separator: "-")
-        guard pieces.count == 2, let series = title(String(pieces[0])), pieces[1].hasPrefix("e"),
-              let number = Int(pieces[1].dropFirst()), (1...3).contains(number) else {
-            return failure(404, "not_found", "No such title")
-        }
-        return json(["item": episodeFields(series, number: number)])
+        guard let found = episodeParts(id) else { return failure(404, "not_found", "No such title") }
+        return json(["item": episodeFields(found.series, season: found.season, number: found.number)])
     }
 
     /// The hub's rule: exactly one of `played` and `favorite`, a true or a
     /// false, then the title as Jellyfin now has it.
     private static func change(_ id: String, body: Data?) -> DemoTransport.Answer {
-        guard let title = title(id) else { return failure(404, "not_found", "No such title") }
+        guard let title = title(id) ?? episodeParts(id)?.series else { return failure(404, "not_found", "No such title") }
         guard let body, let fields = try? JSONSerialization.jsonObject(with: body) as? [String: Any], fields.count == 1,
               let key = fields.keys.first, key == "played" || key == "favorite",
               let number = fields[key] as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
@@ -246,7 +304,7 @@ enum DemoLibrary {
             if key == "played" { now.played = number.boolValue } else { now.favorite = number.boolValue }
             all[id] = now
         }
-        return item(title)
+        return title.id == id ? item(title) : episode(id)
     }
 
     // MARK: Plumbing
