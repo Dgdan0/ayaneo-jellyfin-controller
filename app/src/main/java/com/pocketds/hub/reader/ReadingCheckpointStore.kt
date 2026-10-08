@@ -52,7 +52,8 @@ data class ReadingCheckpoint(
 )
 
 sealed interface RemoteReadingPosition {
-    data class Available(val location: ReadingLocation?) : RemoteReadingPosition
+    /** [resetAt] is when the hub last started the book over (#60), 0 when never. */
+    data class Available(val location: ReadingLocation?, val resetAt: Long = 0) : RemoteReadingPosition
     data object Unavailable : RemoteReadingPosition
 }
 
@@ -74,6 +75,28 @@ class ReadingCheckpointStore(private val root: File) {
         .mapNotNull { runCatching { json.decodeFromString<ReadingCheckpoint>(it.readText()) }.getOrNull() }
         .filter { it.key.scope == scope && it.pending }
         .sortedBy { it.updatedAt }
+
+    /** Whether this device keeps a place of [workId] in any format: one that was read or is waiting to be sent. */
+    @Synchronized fun hasPlace(scope: String, workId: String): Boolean = checkpointsOf(scope, workId).any { it.local != null }
+
+    /**
+     * Forgets every place this device keeps of [workId] under [scope], whatever its format and edition: the
+     * checkpoint is also the outbox, so a place waiting to be sent goes with it (#60). Returns how many went.
+     */
+    @Synchronized fun dropWork(scope: String, workId: String): Int {
+        var dropped = 0
+        for (file in root.listFiles().orEmpty()) {
+            if (file.extension != "json") continue
+            val checkpoint = runCatching { json.decodeFromString<ReadingCheckpoint>(file.readText()) }.getOrNull() ?: continue
+            if (checkpoint.key.scope == scope && checkpoint.key.workId == workId && file.delete()) dropped++
+        }
+        return dropped
+    }
+
+    private fun checkpointsOf(scope: String, workId: String): List<ReadingCheckpoint> = root.listFiles().orEmpty()
+        .filter { it.extension == "json" }
+        .mapNotNull { runCatching { json.decodeFromString<ReadingCheckpoint>(it.readText()) }.getOrNull() }
+        .filter { it.key.scope == scope && it.key.workId == workId }
 
     @Synchronized fun save(key: ReadingCheckpointKey, location: ReadingLocation, now: Long): ReadingCheckpoint {
         val previous = read(key) ?: ReadingCheckpoint(key)

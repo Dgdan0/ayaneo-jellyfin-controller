@@ -47,7 +47,8 @@ func (s *Server) storytellerBooks(ctx context.Context) ([]storyteller.Book, cach
 	if err == nil && !meta.FromError {
 		s.followStorytellerList(books)
 	}
-	return books, meta, err
+	// A place in a book that was started over since it was written is no place (#60).
+	return s.hideResetPlaces(books), meta, err
 }
 
 // storytellerStamp is what in a list entry changes the record built from the same
@@ -175,13 +176,18 @@ func (s *Server) storytellerBookRecord(ctx context.Context, id int64) (*storytel
 			spec = cache.ReadingBookActive
 		}
 	}
-	return cache.Fetch(ctx, s.cache, storytellerWorkKey(strconv.FormatInt(id, 10)), spec, func(fetchCtx context.Context) (*storyteller.Book, error) {
+	record, meta, err := cache.Fetch(ctx, s.cache, storytellerWorkKey(strconv.FormatInt(id, 10)), spec, func(fetchCtx context.Context) (*storyteller.Book, error) {
 		book, err := s.storyteller.Book(fetchCtx, id)
 		if err == nil {
 			s.rememberStorytellerStamp(id, stamp)
 		}
 		return book, err
 	})
+	if err == nil && record != nil {
+		shown := s.hideResetPlace(record)
+		record = &shown
+	}
+	return record, meta, err
 }
 
 func storytellerWorkKey(sourceItemID string) string {

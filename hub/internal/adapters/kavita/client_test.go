@@ -228,3 +228,31 @@ func TestReaderMethodsRejectInvalidCoordinatesWithoutCallingKavita(t *testing.T)
 		t.Fatalf("invalid requests reached Kavita %d times", calls)
 	}
 }
+
+// Start over (#60) uses Kavita's own mark-unread for the whole series, with the API key and the
+// series id in the body and nothing else; an invalid id is refused before Kavita is called.
+func TestMarkSeriesUnreadUsesKavitasOwnRouteForTheWholeSeries(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("X-Api-Key") != "kavita-key" || r.Method != http.MethodPost || r.URL.Path != "/api/Reader/mark-unread" {
+			t.Fatalf("request = %s %s key=%q", r.Method, r.URL.Path, r.Header.Get("X-Api-Key"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body) != 1 || body["seriesId"] != float64(9) {
+			t.Fatalf("body = %v, %v", body, err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	client, err := New(config.ServiceConfig{BaseURL: upstream.URL, APIKey: config.Secret("kavita-key")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.MarkSeriesUnread(context.Background(), 9); err != nil || calls != 1 {
+		t.Fatalf("MarkSeriesUnread = %v after %d calls", err, calls)
+	}
+	if err := client.MarkSeriesUnread(context.Background(), 0); err == nil || calls != 1 {
+		t.Fatalf("a bad series id reached Kavita: %v, %d calls", err, calls)
+	}
+}

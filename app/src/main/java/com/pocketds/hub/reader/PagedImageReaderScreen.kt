@@ -172,7 +172,7 @@ class PagedImageReaderScreen(
         val context = host.viewContext
         progress = ReadingProgress.get(context)
         readingSession = progress.session()
-        manifestCache = ReadingManifestCache(java.io.File(context.cacheDir, "reading-manifests"))
+        manifestCache = ReadingManifestCache.at(context)
         colors = Theme.colors(context)
         reading = DomainPreferences.comicView(context, workId)
         repository = (api as? HubClient)?.let { ReaderPageRepository(context, readingSession.api, readingSession.identity) }

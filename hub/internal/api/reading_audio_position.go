@@ -51,6 +51,8 @@ type ReadingAudioPositionResponse struct {
 	WorkID       string                `json:"workId"`
 	SourceItemID string                `json:"sourceItemId"`
 	Position     *ReadingAudioPosition `json:"position"`
+	// ResetAt is when the book was last started over (#60); absent when it never was.
+	ResetAt int64 `json:"resetAt,omitempty"`
 }
 
 // ReadingAudioPosition is a moment of a track of the manifest. GlobalMs is the
@@ -393,7 +395,8 @@ func (s *Server) handleReadingAudioPosition(w http.ResponseWriter, r *http.Reque
 			writeUpstreamError(w, r, "storyteller", err)
 			return
 		}
-		writeJSON(w, http.StatusOK, ReadingAudioPositionResponse{WorkID: workID, SourceItemID: sourceItemID, Position: plan.position(record)})
+		writeJSON(w, http.StatusOK, ReadingAudioPositionResponse{WorkID: workID, SourceItemID: sourceItemID, Position: plan.position(record),
+			ResetAt: s.readingResets.source("storyteller", strconv.FormatInt(book.ID, 10))})
 		return
 	}
 
@@ -405,6 +408,8 @@ func (s *Server) handleReadingAudioPosition(w http.ResponseWriter, r *http.Reque
 		Completed bool            `json:"completed"`
 		Timestamp json.RawMessage `json:"timestamp"`
 		Expected  json.RawMessage `json:"expected"`
+		// ResetSeen is the start over this device last knew of, when it sends one (#60).
+		ResetSeen *int64 `json:"resetSeen"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	decoder.DisallowUnknownFields()
@@ -434,9 +439,15 @@ func (s *Server) handleReadingAudioPosition(w http.ResponseWriter, r *http.Reque
 	// queue rather than race.
 	unlock := lockReadingCheckpoint("storyteller", strconv.FormatInt(book.ID, 10))
 	defer unlock()
-	current, err := s.currentStorytellerPosition(ctx, book.ID)
+	current, held, err := s.storytellerPlace(ctx, book.ID)
 	if err != nil {
 		writeUpstreamError(w, r, "storyteller", err)
+		return
+	}
+	if s.staleAfterReset("storyteller", strconv.FormatInt(book.ID, 10), body.ResetSeen, held, func() bool {
+		return expectation.check && !expectation.nothing && expectation.holds(plan, held)
+	}) {
+		writePositionReset(w, r)
 		return
 	}
 	if !expectation.holds(plan, current) {
@@ -444,7 +455,7 @@ func (s *Server) handleReadingAudioPosition(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// The hub stamps the write once the check has passed, as the EPUB route does.
-	stamp := s.nextPositionStamp(current)
+	stamp := s.stampAfterReset(book.ID, held)
 	if err := s.storyteller.SavePosition(ctx, book.ID, locator, stamp); err != nil {
 		var upstream *httpx.Error
 		if errors.As(err, &upstream) && upstream.Status == http.StatusConflict {

@@ -212,6 +212,10 @@ object HubEndpoints {
     fun readingYou(base: String, workId: String): HubRequest =
         HubRequest(join(base, "/v1/reading/works/" + encode(workId) + "/you"), method = "PATCH")
 
+    /** Start over (#60): the whole book back to not started, in every format. One POST for the work. */
+    fun readingStartOver(base: String, workId: String): HubRequest =
+        HubRequest(join(base, "/v1/reading/works/" + encode(workId) + "/start-over"), method = "POST")
+
     fun readingPublication(base: String, workId: String, sourceItemId: String): HubRequest =
         HubRequest(
             join(base, "/v1/reading/works/" + encode(workId) +

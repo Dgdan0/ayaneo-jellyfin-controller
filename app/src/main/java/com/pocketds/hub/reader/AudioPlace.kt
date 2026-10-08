@@ -154,9 +154,12 @@ data class AudioPlace(val trackId: String, val offsetMs: Long, val completed: Bo
         }
 
         /** The write for an `audio` checkpoint in the outbox, or null for one that holds no place. */
-        fun body(checkpoint: ReadingCheckpoint): JsonObject? {
+        fun body(checkpoint: ReadingCheckpoint, resetSeen: Long? = null): JsonObject? {
             val local = of(checkpoint.local) ?: return null
-            return body(local, of(checkpoint.base), checkpoint.baseKnown)
+            val place = body(local, of(checkpoint.base), checkpoint.baseKnown)
+            if (resetSeen == null) return place
+            // The start over of this book this device last knew of (#60): the hub refuses a place written from before one.
+            return JsonObject(place + ("resetSeen" to JsonPrimitive(resetSeen)))
         }
 
         /** A place in words for the choose-which sheet: "Part 3 of 8 · 1:02:13", "Finished". */

@@ -36,17 +36,26 @@ class ReadingCompletionStateTest {
         assertEquals(original, session.unmark(session.markRead(original, book.id), book.id))
     }
 
-    @Test fun `unmarking after leaving detail resets progress to beginning`() {
+    @Test fun `unmarking after leaving detail takes the finish away and leaves the place where it was (#60)`() {
         val session = ReadingCompletionSession()
         val read = session.markRead(ReadingCompletionState(), book.id)
         session.leave()
-        val reset = session.unmark(read, book.id)
-        assertEquals(0.0, reset.project(book).progress!!.percentage, 0.0)
-        assertNull(reset.project(book).continueAt)
-        assertTrue(reset.shouldStartAtBeginning(book.id))
-        assertNull(reset.ebookResume(book.id, ReadingResume(ReadingLocation(pageIndex = 8))).location)
-        assertEquals(0, reset.pageResume(book.id, 8))
-        assertEquals(reset, ReadingCompletionState.decode(reset.encode()))
+        val unmarked = session.unmark(read, book.id)
+        // Not a reset: the book is as far through as the hub says, and a reader opens where it was.
+        assertEquals(book, unmarked.project(book))
+        assertFalse(unmarked.isRead(book.id))
+        assertFalse(unmarked.shouldStartAtBeginning(book.id))
+        val place = ReadingResume(ReadingLocation(pageIndex = 8))
+        assertEquals(place, unmarked.ebookResume(book.id, place))
+        assertEquals(8, unmarked.pageResume(book.id, 8))
+        assertEquals(unmarked, ReadingCompletionState.decode(unmarked.encode()))
+    }
+
+    @Test fun `a reset written by an earlier build still starts at the beginning until a reader saves a place`() {
+        val old = ReadingCompletionState().reset(book.id, at = 5L)
+        assertTrue(old.shouldStartAtBeginning(book.id))
+        assertEquals(0, old.pageResume(book.id, 8))
+        assertEquals(old, ReadingCompletionState.decode(old.encode()))
     }
 
     @Test fun `collection marks only targeted book and never other children`() {

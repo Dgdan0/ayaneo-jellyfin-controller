@@ -465,6 +465,16 @@ source said it would.
 
 ### Upstream quirks worth remembering
 
+- **Storyteller cannot lose a position** (read in its container, 2026-10): `/api/v2/books/{id}/positions` is a
+  GET and a POST only. The POST replaces the one row of an account and a book (`position`, unique on user and book)
+  with a locator and a timestamp, and refuses a timestamp older than the one held (409), or equal with another
+  locator; its `locator` column is NOT NULL. There is no DELETE anywhere; its status route (`PUT …/status`) does not
+  touch positions, and only deleting the user or the book removes one. A write also moves the book's own status
+  ("To read" to "Reading" below 98%, to "Read" at 98% or more). So **Start over records a stamp in the hub**
+  (`reading-resets.json`) and every reader of a place treats one older than it as gone; Storyteller's own apps still
+  show the old place and its status, and nothing is ever written to it for a reset. Kavita has its own
+  `POST /api/Reader/mark-unread {seriesId}`, which the hub calls.
+
 - **Jellyseerr answers 500, not 404,** for a TMDB id it cannot find, with the body
   `{"message":"Unable to retrieve movie."}`. The hub translates that to a 404 — passing it
   through tells the app a service is broken when the title simply does not exist.
@@ -760,6 +770,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Hub: the order libraries are listed in | `arrangeLibraries` (saved first, then A to Z) with `libraryOrderStore` (`library-order.json`, per Jellyfin profile and side), written by `PUT /v1/library/order`; `GET /v1/library` and `/v1/reading/libraries` come back in it with `order` |
 | Hub: a service's own error sentence | `upstreamText` / `upstreamMessage` / `serviceOf` |
 | Hub: a title's request state changed | `invalidateTitle` (search, Discover, detail) |
+| A book back to not started, in every format and on every device (#60) | Pocket: `reader/ReadingStartOver` (when Start over is offered, the question and its words, `applyLocal`) and `reader/ReadingResets` (the drop rule: `apply` once per stamp, `seen`, `legacyAudioKeys`), reached through `ReadingProgress.noticeReset`, which every read of a place and every work page makes. It drops the checkpoints (the outbox is the same record), the listening and read-along resume, a cached copy's page (`ReadingManifestCache.dropPlace`), an audiobook's own place out of its ZIP and a finish marked here. A write carries `resetSeen`; the hub refuses one from before a start over as `reading_position_reset`, which `ReadingProgress.sent` answers by reading the book again, not by asking. **Mark unread** is only the undo of a finish that was marked (`ReadingCompletionSession.unmark`, the place stays), offered when `isRead`; a finish by reading is taken back by Start over alone. Hub: `POST /v1/reading/works/{id}/start-over` (`reading_startover.go`), `readingResetStore.gone` and the readers that go through it (`storytellerPlace`, `hideResetPlaces`, `stampAfterReset`, `staleAfterReset`) |
 | An artwork's Glass colours on the Pocket | `ui/glass/ArtworkColors.shared(context, api)`: `prefetch` what a screen shows, `request` what is in focus, `peek`; when to ask again is `ArtworkColorBook` |
 | A Glass panel, bar and page | `ui/glass/GlassColors` (`panel`, `bar`, `sheet` for a side sheet or dialog over a screen's own words, `over`, `contrast`; the words on the page by loudness: `EYEBROW`, `FACTS`, `QUIET`, and `TRACK` under a bar), `GlassPanelDrawable` (`attach(view, radius)`: a view's background that follows the page; `retint`; `edge(color)` for an edge that says something, such as amber), `AmbientLayerView` (`show(path, palette)`) |
 | A Glass search field | `ui/glass/GlassSearchField.style`: a pill of the page's glass inside a taller target, ringed on focus (Discover, the Library) |

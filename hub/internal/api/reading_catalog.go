@@ -132,6 +132,9 @@ type ReadingWork struct {
 	// does (#39). Both are only on a book's own detail.
 	Community *ReadingCommunity `json:"community,omitempty"`
 	You       *ReadingYou       `json:"you,omitempty"`
+	// ResetAt is when the work was last started over (the hub's milliseconds), on a work's own page:
+	// a device that has not seen it drops the place it kept (#60).
+	ResetAt int64 `json:"resetAt,omitempty"`
 	// isbns are the ISBN-13s the work's records carry; they ask Hardcover about it and
 	// are not sent.
 	isbns []string
@@ -504,6 +507,7 @@ func (s *Server) handleReadingWork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	combined.ID = workID
+	combined.ResetAt = s.readingResets.work(workID)
 	combined.Partial = partial
 	// Storyteller can hold one book twice; the work offers one audiobook of it.
 	combined.Editions = oneAudiobookPerWork(combined.Editions)

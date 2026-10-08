@@ -195,6 +195,12 @@ interface HubApi {
      */
     suspend fun updateReadingYou(workId: String, patch: com.pocketds.hub.model.ReadingYouPatch): HubResult<com.pocketds.hub.model.ReadingYouResponse> =
         HubResult.Failed(FailureKind.UNKNOWN, "Your ratings are unavailable")
+    /**
+     * Takes a book back to not started in every format, for every device (#60): the hub forgets the place,
+     * takes away this profile's finish and keeps the rest. A hub from before it answers 404/405.
+     */
+    suspend fun startOverReading(workId: String): HubResult<com.pocketds.hub.model.ReadingStartOverResponse> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Start over is unavailable")
     suspend fun readingPublication(
         workId: String,
         sourceItemId: String
@@ -938,6 +944,12 @@ class HubClient(private val context: Context, private val connection: HubConnect
     override suspend fun updateReadingYou(workId: String, patch: com.pocketds.hub.model.ReadingYouPatch): HubResult<com.pocketds.hub.model.ReadingYouResponse> =
         postOnce(HubEndpoints.readingYou(base(), workId), patch.toJson()) {
             json.decodeFromString<com.pocketds.hub.model.ReadingYouResponse>(it)
+        }
+
+    // Once: a write that timed out may have landed, and starting over again is harmless.
+    override suspend fun startOverReading(workId: String): HubResult<com.pocketds.hub.model.ReadingStartOverResponse> =
+        postOnce(HubEndpoints.readingStartOver(base(), workId), "") {
+            json.decodeFromString<com.pocketds.hub.model.ReadingStartOverResponse>(it)
         }
 
     override suspend fun readingPublication(

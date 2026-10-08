@@ -52,6 +52,20 @@ class StandInHub(
     val youWrites = CopyOnWriteArrayList<JSONObject>()
     /** A status and a code the patch answers instead (a hub that cannot save). */
     @Volatile var youRefused: Pair<Int, String>? = null
+    /**
+     * Start over (#60), as the hub does it: `POST …/start-over` forgets the place (the listening place here, the page's
+     * progress), takes away this profile's finish and answers a stamp, which the work's page and both position reads
+     * repeat as `resetAt`; a place written with a `resetSeen` older than it is refused as `reading_position_reset`.
+     * Nothing else of "you" changes.
+     */
+    @Volatile var resetAt = 0L
+    val startOvers = CopyOnWriteArrayList<Long>()
+    /** The hub starts the book over right after it answers the next read of the listening place: the read was true when it was made. */
+    @Volatile var startOverAfterNextRead = false
+    private var clock = 1_764_000_100_000L
+    /** What a device that is not told of the reset writes: places it was refused. */
+    val refusedAsReset = CopyOnWriteArrayList<JSONObject>()
+
     /** A generated cover, served at `/v1/img/fixture/cover`. */
     @Volatile var cover: ByteArray? = null
     val writes = CopyOnWriteArrayList<Pair<JSONObject, Long>>()
@@ -84,7 +98,8 @@ class StandInHub(
         val path = url.encodedPath
         return when {
             path == "/v1/reading/works/$work" && request.method == "GET" ->
-                page?.let { json(JSONObject(it.toString()).put("you", JSONObject(you.toString()))) } ?: error(404, "not_found")
+                page?.let { json(JSONObject(it.toString()).put("you", JSONObject(you.toString())).apply { if (resetAt > 0) put("resetAt", resetAt) }) } ?: error(404, "not_found")
+            path == "/v1/reading/works/$work/start-over" && request.method == "POST" -> startOver()
             path == "/v1/reading/works/$work/you" && request.method == "PATCH" -> patchYou(request.body.readUtf8())
             path == "/v1/img/fixture/cover" -> cover?.let { MockResponse().setHeader("Content-Type", "image/jpeg").setBody(Buffer().write(it)) }
                 ?: MockResponse().setResponseCode(404)
@@ -97,10 +112,35 @@ class StandInHub(
             path == "$publication/file" -> whole?.let { MockResponse().setHeader("Content-Type", "application/epub+zip").setBody(Buffer().write(it)) }
                 ?: MockResponse().setResponseCode(404)
             // A reader's place in the text: none kept, and a write taken (the stand-in keeps no text places).
-            path == "$publication/position" && request.method == "GET" -> json(JSONObject().put("locator", JSONObject.NULL))
-            path == "$publication/position" -> json(JSONObject().put("ok", true))
+            path == "$publication/position" && request.method == "GET" -> json(JSONObject().put("locator", JSONObject.NULL).withReset())
+            path == "$publication/position" -> {
+                val body = runCatching { JSONObject(request.body.readUtf8()) }.getOrDefault(JSONObject())
+                if (staleWrite(body)) { refusedAsReset += body; error(409, "reading_position_reset") } else json(JSONObject().put("ok", true))
+            }
             else -> json(JSONObject(), 404)
         }
+    }
+
+    /** The stamp on a read of a place. */
+    private fun JSONObject.withReset(): JSONObject {
+        if (resetAt > 0) put("resetAt", resetAt)
+        return this
+    }
+
+    /** The start over, as another device asks it. */
+    fun startOverNow(): Long { startOver(); return resetAt }
+
+    /** A write that carries the reset it last saw, older than the hub's, is made from a place that went away. */
+    private fun staleWrite(body: JSONObject) = resetAt > 0 && body.has("resetSeen") && body.getLong("resetSeen") < resetAt
+
+    private fun startOver(): MockResponse {
+        resetAt = ++clock
+        startOvers += resetAt
+        held = null
+        page?.remove("progress")
+        you.remove("finished"); you.put("status", "")
+        return json(JSONObject().put("ok", true).put("action", "start_over").put("workId", work).put("resetAt", resetAt)
+            .put("you", JSONObject(you.toString())))
     }
 
     /** `PATCH …/works/{id}/you`, with the hub's rules. */
@@ -160,11 +200,14 @@ class StandInHub(
             JSONObject().put("trackId", place.trackId).put("track", track).put("offsetMs", place.offsetMs)
                 .put("globalMs", tracks.take(track).sumOf { it.durationMs } + place.offsetMs).put("completed", place.completed)
                 .put("exact", place.exact).put("form", if (place.exact) "audio" else "text").put("timestamp", 1_764_000_000_000L)
-        } ?: JSONObject.NULL))
+        } ?: JSONObject.NULL).withReset()).also {
+        if (startOverAfterNextRead) { startOverAfterNextRead = false; startOver() }
+    }
 
     /** The hub's write: checked against `expected`, then kept as the hub reads it back. */
     private fun write(body: JSONObject): MockResponse {
         writes += body to System.currentTimeMillis()
+        if (staleWrite(body)) { refusedAsReset += body; return error(409, "reading_position_reset") }
         if (body.has("expected")) {
             val expected = body.opt("expected")
             val holds = if (expected == null || expected == JSONObject.NULL) held == null else {

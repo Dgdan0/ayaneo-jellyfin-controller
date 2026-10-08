@@ -92,6 +92,8 @@ type Server struct {
 	// from an app (#39), and until when Hardcover is left alone, and how long a page
 	// waits for it.
 	readingYou      *readingYouStore
+	// readingResets is when each book was last started over (#60).
+	readingResets *readingResetStore
 	hardcoverUntil  atomic.Int64
 	communityBudget time.Duration
 	// How far apart series lookups are (zero is a second and a tenth; negative is none, for a test), and
@@ -172,6 +174,7 @@ func NewServer(cfg *config.Config) *Server {
 		readingAcquisitions:   newReadingAcquisitionStore(readingAcquisitionPath(cfg.Server.ReadingTransfers)),
 		readingAlignments:     newReadingAlignmentStore(readingAlignmentPath(cfg.Server.ReadingTransfers)),
 		readingYou:            newReadingYouStore(readingYouPath(cfg.Server.OfflineRegistry)),
+		readingResets:         newReadingResetStore(readingResetPath(cfg.Server.OfflineRegistry)),
 		communityBudget:       communityBudget,
 		openlibrary:           openlibrary.New(""),
 		wikidata:              wikidata.New(""),
@@ -373,6 +376,7 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/reading/resolve", s.handleReadingResolve)
 	authed.HandleFunc("GET /v1/reading/works/{workId}", s.handleReadingWork)
 	authed.HandleFunc("PATCH /v1/reading/works/{workId}/you", s.handleReadingYou)
+	authed.HandleFunc("POST /v1/reading/works/{workId}/start-over", s.handleReadingStartOver)
 	authed.HandleFunc("POST /v1/reading/import/goodreads", s.handleGoodreadsImport)
 	authed.HandleFunc("GET /v1/reading/import/goodreads", s.handleGoodreadsStatus)
 	authed.HandleFunc("DELETE /v1/reading/import/goodreads", s.handleGoodreadsForget)

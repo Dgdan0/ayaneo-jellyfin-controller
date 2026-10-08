@@ -98,6 +98,11 @@ class HubEndpointsTest {
             HubRequest("$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef/you", method = "PATCH"),
             HubEndpoints.readingYou(base, "rw_0123456789abcdef0123456789abcdef")
         )
+        // Start over (#60) is one POST for the whole work.
+        assertEquals(
+            HubRequest("$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef/start-over", method = "POST"),
+            HubEndpoints.readingStartOver(base, "rw_0123456789abcdef0123456789abcdef")
+        )
         assertEquals(
             "$base/v1/reading/works/rw_0123456789abcdef0123456789abcdef/publications/6",
             HubEndpoints.readingPublication(base, "rw_0123456789abcdef0123456789abcdef", "6").url

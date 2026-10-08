@@ -309,12 +309,30 @@ class ReadingBookPageTest {
         assertEquals("Choose narration", entries[1].label)
     }
 
-    @Test fun `a finished book can be marked unread, and a wanted one taken off the list`() {
-        val entries = ReadingMoreMenu.entries(ReadingYou(finished = "2025-09"), finished = true, wanted = true)
-        assertEquals(listOf("finished", "unread", "want", "lists", "offline-remove", "server-remove"), entries.map { it.id })
+    @Test fun `a finish you marked can be taken away, a finished book can be started over, and a wanted one taken off the list`() {
+        val entries = ReadingMoreMenu.entries(ReadingYou(finished = "2025-09"), finished = true, wanted = true, markedFinished = true)
+        assertEquals(listOf("finished", "unread", "start-over", "want", "lists", "offline-remove", "server-remove"), entries.map { it.id })
         assertEquals("Finished Sep 2025 · change the date", entries[0].detail)
         assertEquals("Mark unread", entries[1].label)
-        assertEquals("Remove from Want to read", entries[2].label)
+        // Honest: it takes the finish away, and says the place stays (#60).
+        assertEquals("Take away the finish; your place stays", entries[1].detail)
+        assertEquals("Start over", entries[2].label)
+        assertEquals("Forget your place and start again", entries[2].detail)
+        assertEquals("Remove from Want to read", entries[3].label)
         assertNotNull(entries.firstOrNull { it.id == "lists" })
+    }
+
+    @Test fun `a book finished by reading to the end cannot be marked unread, only started over (#60)`() {
+        val entries = ReadingMoreMenu.entries(null, finished = true, wanted = false)
+        assertEquals(listOf("finished", "start-over", "want", "lists", "offline-remove", "server-remove"), entries.map { it.id })
+    }
+
+    @Test fun `a book with a place offers Start over, one never opened does not`() {
+        assertEquals("start-over", ReadingMoreMenu.entries(null, finished = false, wanted = false, hasPlace = true)[1].id)
+        assertFalse(ReadingMoreMenu.entries(null, finished = false, wanted = false).any { it.id == "start-over" })
+    }
+
+    @Test fun `Start over is not a danger row because it asks first`() {
+        assertFalse(ReadingMoreMenu.entries(null, finished = true, wanted = false).first { it.id == "start-over" }.danger)
     }
 }

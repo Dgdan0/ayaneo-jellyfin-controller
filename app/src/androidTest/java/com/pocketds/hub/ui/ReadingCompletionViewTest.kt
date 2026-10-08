@@ -77,10 +77,13 @@ class ReadingCompletionViewTest {
             }
             instrumentation.waitForIdleSync()
             instrumentation.runOnMainSync {
+                // A finish marked on an earlier visit is taken away and the place stays where it was (#60): Mark
+                // unread no longer starts the book over on this device alone; only Start over does, for every device.
                 chooseReadAction(screen, root, "Mark unread")
                 val completion = ReadingCompletionRepository.get(activity)
-                assertEquals(0.0, completion.project(work).progress!!.percentage, 0.0)
-                assertTrue(completion.shouldStartAtBeginning(work.id))
+                assertEquals(.5, completion.project(work).progress!!.percentage, 0.0)
+                assertFalse(completion.isRead(work.id))
+                assertFalse(completion.shouldStartAtBeginning(work.id))
             }
         } finally {
             instrumentation.runOnMainSync { screen.onHide(); screen.onDestroyView(); activity.finish() }
