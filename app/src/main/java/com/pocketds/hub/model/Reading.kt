@@ -356,7 +356,9 @@ data class ReadingWork(
     /** How readers rate it (#39); absent when nothing is known. Only a book's own page carries it. */
     val community: ReadingCommunity? = null,
     /** What this profile has to say about it (#39); absent when there is nothing to say. */
-    val you: ReadingYou? = null
+    val you: ReadingYou? = null,
+    /** When the hub last started this work over (its milliseconds), 0 when never (#60): older than this, a place kept here is gone. */
+    val resetAt: Long = 0
 ) {
     val byline: String get() = authors.joinToString(", ")
 
@@ -431,6 +433,19 @@ data class ReadingYou(
 @Serializable
 data class ReadingYouResponse(val workId: String = "", val you: ReadingYou? = null)
 
+/**
+ * The answer to `POST /v1/reading/works/{id}/start-over` (#60): [resetAt] is the hub's stamp for it, which a device
+ * compares with the last it applied, and [you] what this profile has of the book now (its finish taken away).
+ */
+@Serializable
+data class ReadingStartOverResponse(
+    val ok: Boolean = false,
+    val action: String = "",
+    val workId: String = "",
+    val resetAt: Long = 0,
+    val you: ReadingYou? = null
+)
+
 @Serializable
 data class ReadingLibraryItemsResponse(
     val libraryId: String = "",
@@ -467,14 +482,18 @@ data class ReadingPublicationManifest(
     val pages: List<ReadingPublicationPage> = emptyList(),
     val doublePairs: Map<String, Int> = emptyMap(),
     val previousSourceItemId: String = "",
-    val nextSourceItemId: String = ""
+    val nextSourceItemId: String = "",
+    /** When the hub last started this series over, 0 when never (#60). */
+    val resetAt: Long = 0
 ) {
     val positionLabel: String
         get() = if (pageCount <= 0) "" else "Page ${(currentPage + 1).coerceAtMost(pageCount)} of $pageCount"
 }
 
 @Serializable
-data class ReadingPublicationProgressBody(val pageIndex: Int, val expectedPage: Int? = null)
+data class ReadingPublicationProgressBody(val pageIndex: Int, val expectedPage: Int? = null,
+    /** The start over of this series this device last knew of (#60); the hub refuses a page written from before one. */
+    val resetSeen: Long? = null)
 
 @Serializable
 data class EpubPositionResponse(
@@ -482,7 +501,9 @@ data class EpubPositionResponse(
     val sourceItemId: String = "",
     val locator: JsonObject? = null,
     val timestamp: Long = 0,
-    val updatedAt: String = ""
+    val updatedAt: String = "",
+    /** When the hub last started this book over, 0 when never (#60). */
+    val resetAt: Long = 0
 )
 
 @Serializable
@@ -490,7 +511,9 @@ data class EpubPositionBody(
     val locator: JsonObject,
     val timestamp: Long,
     val checkBase: Boolean = false,
-    val expectedLocator: JsonObject? = null
+    val expectedLocator: JsonObject? = null,
+    /** The start over of this book this device last knew of (#60); the hub refuses a place written from before one. */
+    val resetSeen: Long? = null
 )
 
 /**
@@ -559,7 +582,9 @@ data class ReadingAlignedAudio(val href: String = "", val track: Int = 0, val st
 data class ReadingAudioPositionResponse(
     val workId: String = "",
     val sourceItemId: String = "",
-    val position: ReadingAudioPosition? = null
+    val position: ReadingAudioPosition? = null,
+    /** When the hub last started this book over, 0 when never (#60). */
+    val resetAt: Long = 0
 )
 
 /**

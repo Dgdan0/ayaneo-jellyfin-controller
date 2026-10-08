@@ -805,7 +805,11 @@ class ReadingWorkScreen(
         status.showStatus(StatusText.loading("details", refreshing = force), colors)
         loadJob = scope.launch {
             when (val result = api.readingWork(workId)) {
-                is HubResult.Ok -> render(result.value)
+                is HubResult.Ok -> {
+                    // Started over on another device (#60): what this one kept of the place goes before it is counted.
+                    host?.let { com.pocketds.hub.reader.ReadingStartOver.applyLocal(it.viewContext, result.value, result.value.resetAt) }
+                    render(result.value)
+                }
                 is HubResult.Failed ->
                     status.showStatus(StatusText.failed(result.message, result.kind, hasData = force), colors)
             }
@@ -1066,13 +1070,20 @@ class ReadingWorkScreen(
                     attachActionFocus(this)
                     activateOnTap {
                         listOverlay.show("More actions", work.title, buildList {
-                            add(ChoiceOverlay.Choice("read", read.contentDescription.toString()))
+                            // A finish by reading to the end is taken back by Start over alone (#60).
+                            if (work.progress?.completed != true || ReadingCompletionRepository.get(context).isRead(work.id))
+                                add(ChoiceOverlay.Choice("read", read.contentDescription.toString()))
+                            if (com.pocketds.hub.reader.ReadingStartOver.offered(
+                                    com.pocketds.hub.reader.ReadingStartOver.hasPlace(work, com.pocketds.hub.reader.ReadingStartOver.keptHere(context, work)),
+                                    work.progress?.completed == true))
+                                add(ChoiceOverlay.Choice(ReadingMoreMenu.START_OVER, "Start over", "Forget your place and start again"))
                             add(ChoiceOverlay.Choice("lists", "Reading lists"))
                             add(ChoiceOverlay.Choice("offline-remove", "Remove offline copy", "Only this device; keep server files and progress"))
                             add(ChoiceOverlay.Choice("server-remove", "Delete from server…", "Review the files before confirming", danger = true))
                         }, onCancel = { actionViews["list:more"]?.requestFocus(); host?.refreshHints() }) { selected ->
                             when (selected) {
                                 "read" -> read.performClick()
+                                ReadingMoreMenu.START_OVER -> confirmStartOver(work)
                                 "lists" -> lists.performClick()
                                 "offline-remove" -> removeOfflineReading(requireNotNull(host),listOverlay,work,scope)
                                 "server-remove" -> { refreshOnShow=true;host?.push(MediaRemovalScreen(api,"reading",work.id,ringVisible)) }
@@ -1241,14 +1252,17 @@ class ReadingWorkScreen(
         val finished = work.progress?.completed == true
         val wanted = ReadingListsRepository.get(context).wantToRead.any { it.workId == work.id }
         val narrations = ReadingWorkPresentation.audiobooks(work).size > 1 || ReadingWorkPresentation.readAlongEditions(work).size > 1
+        val hasPlace = com.pocketds.hub.reader.ReadingStartOver.hasPlace(work, com.pocketds.hub.reader.ReadingStartOver.keptHere(context, work))
+        val markedFinished = ReadingCompletionRepository.get(context).isRead(work.id)
         listOverlay.show("More actions", work.title,
-            ReadingMoreMenu.entries(you, finished, wanted, narrations).map {
+            ReadingMoreMenu.entries(you, finished, wanted, narrations, hasPlace, markedFinished).map {
                 ChoiceOverlay.Choice(it.id, it.label, it.detail, danger = it.danger)
             },
             onCancel = { actionViews["list:more"]?.requestFocus(); host?.refreshHints() }) { id ->
             when (id) {
                 ReadingMoreMenu.FINISHED -> showFinished(work, finished)
                 ReadingMoreMenu.UNREAD -> markUnread(work)
+                ReadingMoreMenu.START_OVER -> confirmStartOver(work)
                 ReadingMoreMenu.NARRATION -> showFormatMenu(work, ReadingFormatMenu.forWork(work, ReadingEntryPreferences.get(context, work.id)))
                 ReadingMoreMenu.WANT -> toggleWant(work)
                 ReadingMoreMenu.LISTS -> showReadingLists(work)
@@ -1309,7 +1323,11 @@ class ReadingWorkScreen(
         host?.notify("Marked finished · ${ReadingBookPage.monthLabel(month.toString())}")
     }
 
-    /** Mark unread: starts again from the beginning here, and undoes the finish this visit made, if it made one. */
+    /**
+     * Mark unread: takes away a finish that was marked, and leaves the place where it was (#60). This visit's
+     * finish goes back to what the page had; one marked on an earlier visit loses its month. The book is not
+     * taken back to the beginning: only Start over does that, on every device and in every format.
+     */
     private fun markUnread(work: ReadingWork) {
         if (finishedMarked) {
             val from = finishedFrom
@@ -1320,9 +1338,48 @@ class ReadingWorkScreen(
             }
             finishedMarked = false
             finishedFrom = null
+        } else lastWork?.you?.takeIf { it.finished.isNotBlank() }?.let { you ->
+            setYou(you.copy(finished = "", status = if (you.status == "read") "" else you.status))
+            saveYou(work.id, ReadingYouPatch(finished = YouEdit.Clear), "The date you finished")
         }
         lastActionKey = "list:more"
         toggleRead(work)
+    }
+
+    /**
+     * Start over (#60): asks first, the harmless answer first and under the cursor, then has the hub forget the
+     * book's place in every format and take away this profile's finish, and forgets what this device kept.
+     */
+    private fun confirmStartOver(work: ReadingWork) {
+        listOverlay.confirm(
+            com.pocketds.hub.reader.ReadingStartOver.confirmTitle(work), com.pocketds.hub.reader.ReadingStartOver.confirmDetail(work),
+            action = com.pocketds.hub.reader.ReadingStartOver.ACTION, keep = com.pocketds.hub.reader.ReadingStartOver.KEEP,
+            onCancel = { actionViews["list:more"]?.requestFocus(); host?.refreshHints() }
+        ) { startOver(work) }
+        host?.refreshHints()
+    }
+
+    private fun startOver(work: ReadingWork) {
+        val context = requireNotNull(host).viewContext
+        // Not the page's own job: leaving straight after must not lose it (as a rating does not, #39).
+        saves.launch {
+            when (val result = api.startOverReading(work.id)) {
+                is HubResult.Ok -> {
+                    com.pocketds.hub.reader.ReadingStartOver.applyLocal(context, work, result.value.resetAt)
+                    // What this visit marked is no longer there to undo.
+                    finishedMarked = false
+                    finishedFrom = null
+                    completionSession.leave()
+                    lastWork = lastWork?.copy(you = result.value.you, resetAt = result.value.resetAt)
+                    refreshOnShow = true
+                    host?.notify(com.pocketds.hub.reader.ReadingStartOver.done())
+                    if (visible) { loadJob?.cancel(); loadJob = null; load(force = true) }
+                }
+                is HubResult.Failed -> host?.notify(com.pocketds.hub.reader.ReadingStartOver.failed(result.message))
+            }
+            actionViews["list:more"]?.requestFocus()
+            host?.refreshHints()
+        }
     }
 
     /** Marks the book read on this device, or unread again: the hub has no route for it. */
@@ -1338,12 +1395,18 @@ class ReadingWorkScreen(
     }
 
     private fun toggleRead(work: ReadingWork) {
+        // A book finished by reading to the end is not a finish that was marked: nothing here can take it away but
+        // Start over, so that is what is asked (#60), rather than a mark unread that left the place where it was.
+        if (work.progress?.completed == true && !ReadingCompletionRepository.get(requireNotNull(host).viewContext).isRead(work.id)) {
+            confirmStartOver(work)
+            return
+        }
         val changed = markReadHere(work, read = work.progress?.completed != true)
         render(requireNotNull(lastWork))
         host?.notify(when {
             changed.isRead(work.id) -> "Marked as read"
             changed.shouldStartAtBeginning(work.id) -> "Marked unread · next read starts at the beginning"
-            else -> "Previous reading position restored"
+            else -> "Marked unread · your place stays"
         })
     }
 

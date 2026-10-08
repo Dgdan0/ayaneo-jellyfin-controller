@@ -23,6 +23,8 @@ import kotlinx.coroutines.sync.withLock
 /** Process-wide durable outbox. Credentials stay in settings, never in checkpoint files or jobs. */
 class ReadingProgress private constructor(private val context: Context) {
     val store=ReadingCheckpointStore(File(context.filesDir,"reading-checkpoints"))
+    /** What this device has applied of the hub's start-overs (#60). */
+    val resets=ReadingResets(PrefsResetLedger(context),store)
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
     private val mutex=Mutex()
     private var scheduled:Job?=null
@@ -60,6 +62,30 @@ class ReadingProgress private constructor(private val context: Context) {
     fun lastAudioPosition(key:ReadingCheckpointKey):ReadingAudioPosition? = audioPositions[key]
     private val audioPositions=java.util.concurrent.ConcurrentHashMap<ReadingCheckpointKey,ReadingAudioPosition>()
 
+    /**
+     * The hub says [workId] was started over at [resetAt] (#60). When this device has not applied that, every
+     * place it kept of the book goes: its checkpoints and outbox, the listening and read-along resume, what a
+     * cached copy of its pages remembers, the legacy place of an audiobook out of its ZIP ([sourceItemIds] names
+     * the editions it may be kept for), and a finish marked here. True when it was news.
+     */
+    fun noticeReset(scope:String,workId:String,resetAt:Long,sourceItemIds:List<String> = emptyList()):Boolean =
+        resets.apply(scope,workId,resetAt) {
+            audioPositions.keys.removeAll { it.scope==scope && it.workId==workId }
+            runCatching { ReadingManifestCache.at(context).dropPlace(workId) }
+            val legacy=ReadingResets.legacyAudioKeys(scope,workId,sourceItemIds)
+            if (legacy.isNotEmpty()) ReadingAudio.positions(context).edit().apply { legacy.forEach(::remove) }.apply()
+            ReadingCompletionRepository.update(context) { it.clear(workId) }
+            ReadingListsRepository.update(context) { it.recordProgress(workId,0.0) }
+        }
+
+    /** What a refused write was refused for: the book was started over since the place it was made from (#60). */
+    private suspend fun sent(bound:Session,key:ReadingCheckpointKey,result:HubResult<*>):Boolean {
+        if (result is HubResult.Ok) return true
+        // Read the book again: that is what applies the start over and drops this place, which is not retried.
+        if (result is HubResult.Failed && result.code==RESET_CODE) fetch(bound,key)
+        return false
+    }
+
     @Synchronized fun requestSync(immediate:Boolean=false) {
         scheduleBackground()
         scheduled?.cancel()
@@ -72,20 +98,28 @@ class ReadingProgress private constructor(private val context: Context) {
 
     suspend fun fetch(session:Session,key:ReadingCheckpointKey):RemoteReadingPosition = when(key.kind) {
         "epub" -> when(val response=session.api.readingEpubPosition(key.workId,key.sourceItemId)) {
-            is HubResult.Ok -> RemoteReadingPosition.Available(response.value.locator?.let { ReadingLocation(locator=it) })
+            is HubResult.Ok -> {
+                noticeReset(session.identity,key.workId,response.value.resetAt,listOf(key.sourceItemId))
+                RemoteReadingPosition.Available(response.value.locator?.let { ReadingLocation(locator=it) },response.value.resetAt)
+            }
             is HubResult.Failed -> RemoteReadingPosition.Unavailable
         }
         // The place as the hub reads it, never its clock (#19): the hub stamps every write itself.
         AudioPlace.KIND -> when(val response=session.api.readingAudioPosition(key.workId,key.sourceItemId)) {
             is HubResult.Ok -> {
+                noticeReset(session.identity,key.workId,response.value.resetAt,listOf(key.sourceItemId))
                 val position=response.value.position
                 if (position==null) audioPositions.remove(key) else audioPositions[key]=position
-                RemoteReadingPosition.Available(position?.let(AudioPlace::fromServer)?.location())
+                RemoteReadingPosition.Available(position?.let(AudioPlace::fromServer)?.location(),response.value.resetAt)
             }
             is HubResult.Failed -> RemoteReadingPosition.Unavailable
         }
         else -> when(val response=session.api.readingPublication(key.workId,key.sourceItemId)) {
-            is HubResult.Ok -> RemoteReadingPosition.Available(ReadingLocation(pageIndex=response.value.currentPage))
+            is HubResult.Ok -> {
+                noticeReset(session.identity,key.workId,response.value.resetAt,listOf(key.sourceItemId))
+                // A series started over reads as page 0 here: its place is the hub's, which Kavita has cleared.
+                RemoteReadingPosition.Available(ReadingLocation(pageIndex=response.value.currentPage),response.value.resetAt)
+            }
             is HubResult.Failed -> RemoteReadingPosition.Unavailable
         }
     }
@@ -101,15 +135,17 @@ class ReadingProgress private constructor(private val context: Context) {
             val synchronizer=ReadingCheckpointSync(store,{ fetch(bound,it) },{ checkpoint ->
                 if (session().identity != bound.identity) false
                 else when(checkpoint.key.kind) {
-                    "epub" -> bound.api.saveReadingEpubPosition(checkpoint.key.workId,checkpoint.key.sourceItemId,
+                    "epub" -> sent(bound,checkpoint.key,bound.api.saveReadingEpubPosition(checkpoint.key.workId,checkpoint.key.sourceItemId,
                         EpubPositionBody(requireNotNull(checkpoint.local?.locator),checkpoint.updatedAt,
-                            checkBase=true,expectedLocator=checkpoint.base?.locator)) is HubResult.Ok
+                            checkBase=true,expectedLocator=checkpoint.base?.locator,
+                            resetSeen=resets.seen(bound.identity,checkpoint.key.workId))))
                     // Checked against the place last read (`expected`); a refusal is retried, and the
                     // next pass reads the place again and asks the person when it moved.
-                    AudioPlace.KIND -> bound.api.saveReadingAudioPosition(checkpoint.key.workId,checkpoint.key.sourceItemId,
-                        requireNotNull(AudioPlace.body(checkpoint))) is HubResult.Ok
-                    else -> bound.api.saveReadingPublicationCheckpoint(checkpoint.key.workId,checkpoint.key.sourceItemId,
-                        ReadingPublicationProgressBody(requireNotNull(checkpoint.local?.pageIndex),checkpoint.base?.pageIndex)) is HubResult.Ok
+                    AudioPlace.KIND -> sent(bound,checkpoint.key,bound.api.saveReadingAudioPosition(checkpoint.key.workId,checkpoint.key.sourceItemId,
+                        requireNotNull(AudioPlace.body(checkpoint,resetSeen=resets.seen(bound.identity,checkpoint.key.workId)))))
+                    else -> sent(bound,checkpoint.key,bound.api.saveReadingPublicationCheckpoint(checkpoint.key.workId,checkpoint.key.sourceItemId,
+                        ReadingPublicationProgressBody(requireNotNull(checkpoint.local?.pageIndex),checkpoint.base?.pageIndex,
+                            resetSeen=resets.seen(bound.identity,checkpoint.key.workId))))
                 }
             })
             var retry=false
@@ -130,6 +166,8 @@ class ReadingProgress private constructor(private val context: Context) {
     }
 
     companion object {
+        /** The hub's code for a write made from a book since started over (#60). */
+        const val RESET_CODE="reading_position_reset"
         private const val JOB_ID=8142
         @Volatile private var instance:ReadingProgress?=null
         fun get(context:Context):ReadingProgress=instance ?: synchronized(this) {

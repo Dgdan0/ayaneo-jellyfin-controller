@@ -12,6 +12,30 @@ class ReadingCheckpointStoreTest {
     private fun page(n: Int) = ReadingLocation(pageIndex = n)
     private fun store() = ReadingCheckpointStore(directory.root)
 
+    @Test fun `a work's places can be dropped, every format of it and nobody else's (#60)`() {
+        val s = store()
+        val ebook = key.copy(kind = "epub", sourceItemId = "ebook")
+        val audio = key.copy(kind = AudioPlace.KIND, sourceItemId = "audio")
+        val elsewhere = key.copy(workId = "another")
+        val someoneElse = key.copy(scope = "someone else")
+        listOf(key, ebook, audio, elsewhere, someoneElse).forEach { s.save(it, page(3), 100) }
+        assertTrue(s.hasPlace(key.scope, key.workId))
+        assertEquals(3, s.dropWork(key.scope, key.workId))
+        listOf(key, ebook, audio).forEach { assertNull(s.read(it)) }
+        assertNotNull(s.read(elsewhere))
+        assertNotNull(s.read(someoneElse))
+        assertFalse(s.hasPlace(key.scope, key.workId))
+        assertTrue(s.hasPlace(key.scope, "another"))
+        assertEquals("nothing left to drop", 0, s.dropWork(key.scope, key.workId))
+    }
+
+    @Test fun `a book that was only opened has no place to start over from`() {
+        val s = store()
+        s.reconcile(key, RemoteReadingPosition.Available(null))
+        assertNotNull(s.read(key))
+        assertFalse(s.hasPlace(key.scope, key.workId))
+    }
+
     @Test fun `settled location survives recreation before any network request`() {
         val original = store()
         original.reconcile(key, RemoteReadingPosition.Available(page(2)))

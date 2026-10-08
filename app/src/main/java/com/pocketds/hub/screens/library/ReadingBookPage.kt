@@ -290,6 +290,7 @@ object ReadingResumeLabel {
 object ReadingMoreMenu {
     const val FINISHED = "finished"
     const val UNREAD = "unread"
+    const val START_OVER = "start-over"
     const val NARRATION = "narration"
     const val WANT = "want"
     const val LISTS = "lists"
@@ -298,10 +299,19 @@ object ReadingMoreMenu {
 
     data class Entry(val id: String, val label: String, val detail: String = "", val danger: Boolean = false)
 
-    /** [narrations]: the book has more than one reader of its audiobook (or of its read-along), so there is a choice to make. */
-    fun entries(you: ReadingYou?, finished: Boolean, wanted: Boolean, narrations: Boolean = false): List<Entry> = buildList {
+    /**
+     * [narrations]: the book has more than one reader of its audiobook (or of its read-along), so there is a choice to make.
+     * [markedFinished]: the finish is one that was marked, which Mark unread can take away and leave the place where it was;
+     * a book finished by reading to the end has no such finish, and only Start over (#60) takes it back to the beginning.
+     * [hasPlace]: the book has a place to forget; Start over is offered with one, or once finished.
+     */
+    fun entries(
+        you: ReadingYou?, finished: Boolean, wanted: Boolean, narrations: Boolean = false,
+        hasPlace: Boolean = false, markedFinished: Boolean = false
+    ): List<Entry> = buildList {
         add(Entry(FINISHED, "Finished", ReadingBookPage.monthLabel(you?.finished.orEmpty())?.let { "Finished $it · change the date" } ?: "Say when you finished it"))
-        if (finished) add(Entry(UNREAD, "Mark unread", "Start again from the beginning"))
+        if (markedFinished) add(Entry(UNREAD, "Mark unread", "Take away the finish; your place stays"))
+        if (com.pocketds.hub.reader.ReadingStartOver.offered(hasPlace, finished)) add(Entry(START_OVER, "Start over", "Forget your place and start again"))
         if (narrations) add(Entry(NARRATION, "Choose narration", "Another reader of this book"))
         add(Entry(WANT, if (wanted) "Remove from Want to read" else "Want to read"))
         add(Entry(LISTS, "Add to a list"))

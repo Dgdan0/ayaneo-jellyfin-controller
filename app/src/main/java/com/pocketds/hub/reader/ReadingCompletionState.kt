@@ -11,7 +11,11 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-/** Per-profile manual reading status. A reset stays visible until a reader saves a new position. */
+/**
+ * Per-profile manual reading status: a book marked read here. [RESET] is what Mark unread used to leave, a book that
+ * starts at the beginning on this device alone; nothing writes it now (Start over, #60, is the hub's and every
+ * device's), and one an earlier build wrote stays visible until a reader saves a new position.
+ */
 @Serializable
 data class ReadingCompletionState(
     val states: Map<String, String> = emptyMap(),
@@ -71,9 +75,14 @@ class ReadingCompletionSession {
         return state.markRead(id)
     }
 
+    /**
+     * Mark unread: back to what the state was before this visit marked the book read, else the finish is
+     * simply gone. It is not a reset any more (#60): taking the finish away leaves the place where it was,
+     * and only Start over, which the hub does for every device, takes a place away.
+     */
     fun unmark(state: ReadingCompletionState, id: String): ReadingCompletionState {
-        if (!previous.containsKey(id)) return state.reset(id)
-        val (prior, time) = previous.remove(id) ?: return state.reset(id)
+        if (!previous.containsKey(id)) return state.clear(id)
+        val (prior, time) = previous.remove(id) ?: return state.clear(id)
         return if (prior == null) state.clear(id) else state.copy(
             states = state.states + (id to prior),
             updatedAt = if (time == null) state.updatedAt - id else state.updatedAt + (id to time)
