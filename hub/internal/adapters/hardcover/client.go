@@ -226,6 +226,124 @@ func (c *Client) ByTitle(ctx context.Context, title string) ([]Book, error) {
 	return books, nil
 }
 
+// Series is a Hardcover series with its main entries, for a library's fan of a series' books (#54).
+type Series struct {
+	ID   int
+	Name string
+	// Authors are the names the series is credited to (one, as Hardcover keeps it).
+	Authors []string
+	// Primary is how many books Hardcover counts as the series' own, novellas and omnibuses aside.
+	Primary int
+	// Entries are the featured, canonical books of the series in order of their place in it, one for each place.
+	Entries []SeriesEntry
+}
+
+// SeriesEntry is one book of a series.
+type SeriesEntry struct {
+	// Position is its place in the series: 3, or 2.5 for a novella between two books.
+	Position float64
+	// Main is a numbered book of the series, as against a novella or a part: its place is a whole number
+	// and Hardcover's own note for it (`details`) says that number or nothing.
+	Main  bool
+	Title string
+	Slug  string
+	// ReleasedOn is "2024-10-01", or "" for a book with no date: it is not out.
+	ReleasedOn string
+	// Cover is the https address of its cover, or "".
+	Cover string
+}
+
+// The entries asked for are the series' own: featured, not a compilation, the canonical book of its place
+// (Hardcover keeps a "duplicate" for every translation, and each of them takes the series' place too, which
+// is why position 1 of the Red Rising Saga is eleven rows until they are filtered out). Measured on
+// 2026-10-09: Red Rising Saga is 11 rows of which 4.1, 4.2, 5.1 and 5.2 are the parts of two books;
+// The Stormlight Archive is 32 rows with the dramatised adaptations among them; `_ilike` is refused with a
+// 403 here as for titles, so the name is matched exactly and asked in several spellings.
+const seriesQuery = `query ($names: [String!]!) {
+  series(where: {name: {_in: $names}, state: {_eq: "active"}}, order_by: {primary_books_count: desc}, limit: 6) {
+    id name primary_books_count author { name }
+    book_series(where: {featured: {_eq: true}, position: {_gte: 1}, compilation: {_eq: false},
+                        book: {state: {_eq: "normalized"}, compilation: {_eq: false}, canonical_id: {_is_null: true}}},
+                order_by: [{position: asc}, {book: {users_count: desc}}]) {
+      position details book { id title slug release_date cached_image }
+    }
+  }
+}`
+
+// SeriesByName is the series that go by any of names (see TitleSpellings), the largest first, each with its
+// entries. Which of them is the one wanted is the caller's to say, by author and by the books it has.
+func (c *Client) SeriesByName(ctx context.Context, names []string) ([]Series, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	var out struct {
+		Data struct {
+			Series []struct {
+				ID      flexNumber `json:"id"`
+				Name    string     `json:"name"`
+				Primary flexNumber `json:"primary_books_count"`
+				Author  *struct {
+					Name string `json:"name"`
+				} `json:"author"`
+				BookSeries []struct {
+					Position flexNumber `json:"position"`
+					Details  string     `json:"details"`
+					Book     struct {
+						Title       string          `json:"title"`
+						Slug        string          `json:"slug"`
+						ReleaseDate string          `json:"release_date"`
+						CachedImage json.RawMessage `json:"cached_image"`
+					} `json:"book"`
+				} `json:"book_series"`
+			} `json:"series"`
+		} `json:"data"`
+		Errors []graphQLError `json:"errors"`
+	}
+	if err := c.query(ctx, seriesQuery, map[string]any{"names": names}, &out); err != nil {
+		return nil, err
+	}
+	if err := firstError(out.Errors); err != nil {
+		return nil, err
+	}
+	series := make([]Series, 0, len(out.Data.Series))
+	for _, candidate := range out.Data.Series {
+		entry := Series{ID: int(candidate.ID), Name: candidate.Name, Primary: int(candidate.Primary)}
+		if candidate.Author != nil && strings.TrimSpace(candidate.Author.Name) != "" {
+			entry.Authors = []string{strings.TrimSpace(candidate.Author.Name)}
+		}
+		seen := map[string]bool{}
+		for _, row := range candidate.BookSeries {
+			position := float64(row.Position)
+			// The most read book of a place is first (the query's order), and is the one kept.
+			key := strconv.FormatFloat(position, 'f', -1, 64)
+			if position < 1 || seen[key] || strings.TrimSpace(row.Book.Title) == "" {
+				continue
+			}
+			seen[key] = true
+			whole := position == float64(int(position))
+			details := strings.TrimSpace(row.Details)
+			entry.Entries = append(entry.Entries, SeriesEntry{
+				Position: position, Title: strings.TrimSpace(row.Book.Title), Slug: row.Book.Slug,
+				Main:       whole && (details == "" || details == key),
+				ReleasedOn: strings.TrimSpace(row.Book.ReleaseDate), Cover: coverOf(row.Book.CachedImage),
+			})
+		}
+		series = append(series, entry)
+	}
+	return series, nil
+}
+
+// coverOf is the address in a book's cached_image, `{"url": "https://..."}` or `{}`.
+func coverOf(raw json.RawMessage) string {
+	var image struct {
+		URL string `json:"url"`
+	}
+	if !decodeLoose(raw, &image) {
+		return ""
+	}
+	return strings.TrimSpace(image.URL)
+}
+
 func (c *Client) query(ctx context.Context, document string, variables map[string]any, out any) error {
 	return c.base.PostJSON(ctx, graphQLPath, map[string]any{"query": document, "variables": variables}, out)
 }

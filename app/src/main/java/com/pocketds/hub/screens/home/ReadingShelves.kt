@@ -211,10 +211,8 @@ object ReadingShelves {
             val on = onNumber(series)
             val covers = fanCovers(series)
             val count = series.bookCount.takeIf { it > 0 } ?: books.size
-            val line = listOfNotNull(
-                "$count ${if (count == 1) "book" else "books"}".takeIf { count > 0 },
-                on.takeIf(String::isNotBlank)?.let { "on #$it" }
-            ).joinToString(" · ")
+            // "6 books · on #6": the Series view's caption too, so it is made in one place (#54).
+            val line = com.pocketds.hub.screens.library.SeriesFan.caption(count, on, finished = false)
             val last = books.maxOfOrNull { timestamp(it.progress?.updatedAt) } ?: timestamp(series.progress?.updatedAt)
             last to SeriesShelfItem(series.id, series.title, covers, line)
         }

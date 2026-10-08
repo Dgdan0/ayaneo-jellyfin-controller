@@ -164,6 +164,11 @@ class ConsolidationGuardTest {
         Rule(Regex("""squareCover\s*=\s*[^\n]*ReadingType\.AUDIOBOOK|ReadingType\.AUDIOBOOK\)\s*(1f|CARD_DP)"""),
             "ReadingBookFacts.coverShape / formatMark, and ui/FormatMark for the mark: what a book's cover says of its formats (tall, " +
                 "square, or tall with a small round mark) is decided once, for the grid, Home's rows, a series' row and an author's (#54)"),
+        Rule(Regex("""\"on #\$"""),
+            "SeriesFan.caption: \"6 books · on #6\" is made in one place, for Books Home's series and the library's Series view (#54)",
+            setOf("screens/library/SeriesFan.kt")),
+        Rule(Regex("""ThemeGradientDrawable\.oval\([^\n]*accent\)[^\n]*(?:CHECK|check)"""),
+            "ui/FinishedTick: the accent's circle with its check on a cover, for a book in a series' row and a finished series' fan (#54)"),
         Rule(Regex("""Style\.Highlight\(colors\.accent"""),
             "ReadAlongGlow.wash: the sentence's tint is the accent let into the page, opaque and behind the words; the bare accent, " +
                 "translucent and over them, washed the words out and spilled on the sentences round it (#52)"),

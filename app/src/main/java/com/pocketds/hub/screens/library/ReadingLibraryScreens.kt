@@ -1,6 +1,7 @@
 package com.pocketds.hub.screens.library
 
 import com.pocketds.hub.ui.CoverFanView
+import com.pocketds.hub.ui.SeriesFanCardView
 
 import com.pocketds.hub.ui.textWeight
 
@@ -197,7 +198,14 @@ class ReadingLibraryGridScreen(
             addView(toolbar)
             addView(summary); addView(status)
             grid = RecyclerView(context).apply {
-                layoutManager = GridLayoutManager(context, MAX_COLUMNS)
+                // A cover takes four units of the row and a series' fan as many as the covers a row holds, so a row is four
+                // fans or the covers it always was (#54).
+                layoutManager = GridLayoutManager(context, MAX_COLUMNS * UNITS).apply {
+                    spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
+                        override fun getSpanSize(position: Int) =
+                            if (this@ReadingLibraryGridScreen.adapter.isFan(position)) spanCount / FAN_COLUMNS else UNITS
+                    }
+                }
                 adapter = this@ReadingLibraryGridScreen.adapter
                 setItemViewCacheSize(MAX_COLUMNS * 3)
                 clipToPadding = false
@@ -225,7 +233,7 @@ class ReadingLibraryGridScreen(
                         maxColumns = MAX_COLUMNS
                     )
                     val manager = layoutManager as GridLayoutManager
-                    if (manager.spanCount != columns) manager.spanCount = columns
+                    if (manager.spanCount != columns * UNITS) manager.spanCount = columns * UNITS
                 }
             }
             val shelfArea=FrameLayout(context)
@@ -479,6 +487,17 @@ class ReadingLibraryGridScreen(
         host?.push(ReadingWorkScreen(api, work.id, work.title, ringVisible))
     }
 
+    /** A series' fan: its page, at the book you are on; or, when the front book is one you do not have, that book's request page (#54). */
+    private fun openFan(work: ReadingWork, target: SeriesFan.Target) {
+        focusState.pin(focusedPosition().coerceAtLeast(0), work.id)
+        when (target) {
+            is SeriesFan.Target.OpenSeries -> host?.push(ReadingWorkScreen(api, work.id, work.title, ringVisible, startNumber = target.number))
+            is SeriesFan.Target.Request -> host?.push(MissingReadingItemScreen(api, ReadingSectionItem(
+                title = target.book.title, number = target.book.number, kind = target.book.kind, artwork = target.book.cover,
+                authors = work.authors, availability = "missing"), ringVisible))
+        }
+    }
+
     private inner class WorkAdapter : RecyclerView.Adapter<WorkHolder>() {
         private val values = mutableListOf<ReadingWork>()
         fun at(position: Int): ReadingWork? = values.getOrNull(position)
@@ -497,7 +516,25 @@ class ReadingLibraryGridScreen(
         }
         override fun getItemCount() = values.size
 
+        /** A series that carries its books is a fan; anything else is a cover. */
+        fun isFan(position: Int): Boolean = values.getOrNull(position)?.let(SeriesFan::hasFan) == true
+        override fun getItemViewType(position: Int) = if (isFan(position)) TYPE_FAN else TYPE_COVER
+
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): WorkHolder {
+            if (viewType == TYPE_FAN) return WorkHolder(SeriesFanCardView(parent.context, colors, ringVisible).apply {
+                layoutParams = RecyclerView.LayoutParams(MATCH, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(dp(5), dp(6), dp(5), dp(6))
+                }
+                onFocus = { focused ->
+                    if (focused) {
+                        val position = grid.getChildAdapterPosition(this)
+                        val itemId = (getTag(TAG_WORK) as? ReadingWork)?.id.orEmpty()
+                        focusState.confirmRestored(position, itemId)
+                        host?.refreshHints()
+                    }
+                }
+                activateOnTap { (getTag(TAG_WORK) as? ReadingWork)?.let { openFan(it, target) } }
+            })
             val card = PosterCardView(parent.context, colors).apply {
                 // Seven columns of covers filling their cells, as the media grid's.
                 layoutParams = RecyclerView.LayoutParams(MATCH, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -519,6 +556,11 @@ class ReadingLibraryGridScreen(
 
         override fun onBindViewHolder(holder: WorkHolder, position: Int) {
             val work = values[position]
+            (holder.itemView as? SeriesFanCardView)?.let { fan ->
+                fan.setTag(TAG_WORK, work)
+                SeriesFan.plan(work)?.let { fan.bind(work, it, Artwork.loader(api, fan.context), api::imageUrl) }
+                return
+            }
             val card = holder.itemView as PosterCardView
             card.setTag(TAG_WORK, work)
             card.bindReadingWork(
@@ -535,6 +577,11 @@ class ReadingLibraryGridScreen(
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         const val MAX_COLUMNS = 7
+        /** A cover is this many units wide in the grid's rows; a fan as many as the row's covers, so four fit. */
+        const val UNITS = 4
+        const val FAN_COLUMNS = 4
+        const val TYPE_COVER = 0
+        const val TYPE_FAN = 1
         const val PREFETCH_AHEAD = 6
         /** The prototype's Pocket grid, 22dp edges. */
         const val EDGE_DP = 22
@@ -552,8 +599,13 @@ class ReadingWorkScreen(
     initialTitle: String,
     private val ringVisible: () -> Boolean,
     /** Resume reading from Home: open the reader as the page arrives, as its main button would. Back returns here. */
-    private val openReader: Boolean = false
+    private val openReader: Boolean = false,
+    /** A series opened from its fan in the library (#54): the book numbered this, the one you are on, has the cursor. */
+    startNumber: String? = null
 ) : Screen {
+    private var pendingStart: String? = startNumber
+    /** The action the page first focuses once, when it was opened at a book (#54). */
+    private var startKey: String? = null
     private var readerOpened = false
     override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val title = initialTitle
@@ -849,7 +901,9 @@ class ReadingWorkScreen(
         content.post {
             if (visible) {
                 scroll.scrollTo(0, previousScrollY)
-                (issueKey?.let { content.findViewWithTag<View>(it) } ?: actionViews[preferredSource])?.requestFocus()
+                // Opened from a series' fan: the book you are on first, once (#54).
+                val opened = startKey?.let(actionViews::get)?.also { startKey = null }
+                (opened ?: issueKey?.let { content.findViewWithTag<View>(it) } ?: actionViews[preferredSource])?.requestFocus()
                 if (openReader && !readerOpened) {
                     readerOpened = true
                     actionViews["entry"]?.performClick()
@@ -1566,6 +1620,7 @@ class ReadingWorkScreen(
             if (ReadingWorkPresentation.canOpen(item)) {
                 val key = "book:${item.workId}"
                 actionViews[key] = card
+                if (pendingStart != null && item.number == pendingStart) { startKey = key; pendingStart = null }
                 FocusDecorator.listen(card, ringVisible) { _, focused ->
                     if (focused) { lastActionKey = key; host?.refreshHints() }
                 }
