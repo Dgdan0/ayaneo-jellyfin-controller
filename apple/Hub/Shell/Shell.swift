@@ -252,6 +252,7 @@ struct MainView: View {
     @State private var listening = ListeningModel.shared
     /// One sound at a time: the video and an audiobook.
     @State private var sounds = SoundGuard.shared
+    @State private var alertTaps = DownloadAlertTaps.shared
     @State private var profilesOpen = false
     @State private var sheetPlaces = false
     /// The Mac's window buttons sit over the page under its hidden title bar:
@@ -464,6 +465,14 @@ struct MainView: View {
         .environment(\.glassPalette, model.colors.palette(for: ambient.displayed))
         .environment(\.glassAccent, accents.accent(side))
         .onChange(of: key, initial: true) { _, latest in open(latest) }
+        // A download's notification tapped (#43): Downloads, at its first page, on this side.
+        .onChange(of: alertTaps.request) { _, request in
+            guard let request else { return }
+            let target = StackKey(side: side, section: .downloads)
+            paths[target] = []
+            section = .downloads
+            alertTaps.open(stack: target.id, failed: request.failed)
+        }
         .onChange(of: ambient.displayed, initial: true) { _, path in model.colors.want([path]) }
         // Closing the window (the Mac's, or an iPad's in the app switcher)
         // ends what plays in it, as Back would; minimising it does not.
@@ -530,6 +539,7 @@ struct MainView: View {
         case (.media?, .library): LibraryView()
         case (.media?, .activity): ActivityView()
         case (.media?, .downloads): DownloadsView()
+        case (.books?, .downloads): DownloadsView(books: true)
         case (.books?, .home): BooksHomeView()
         case (.books?, .discover): BooksDiscoverView()
         case (.books?, .library): BooksLibraryView()

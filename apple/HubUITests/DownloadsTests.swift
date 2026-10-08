@@ -13,12 +13,15 @@ final class DownloadsTests: XCTestCase {
     /// left out) and Bleach (a series): Jellyfin ids are 32 hex characters.
     private let inception = "000000000000000000000000deb0000e"
     private let bleach = "000000000000000000000000deb00003"
+    /// The demo's Dune fails on the pretend PC until it is retried.
+    private let dune = "000000000000000000000000deb0000d"
 
     @MainActor
     private func launch(title: String, environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo"]
-        app.launchEnvironment = ["HUB_SECTION": "library", "HUB_SIDE": "media", "HUB_TITLE": title]
+        // The player's controls stay up, so its Back is there to press.
+        app.launchEnvironment = ["HUB_SECTION": "library", "HUB_SIDE": "media", "HUB_TITLE": title, "HUB_PLAY_CHROME": "pinned"]
             .merging(environment) { _, given in given }
         app.launch()
         return app
@@ -179,6 +182,109 @@ final class DownloadsTests: XCTestCase {
         XCTAssertTrue(text(app, containing: "Bleach").waitForExistence(timeout: 5), "the queue has no Bleach batch")
         let words = app.staticTexts.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }.joined(separator: " | ")
         XCTAssertTrue(text(app, containing: "/3 complete").exists, "the batch does not count its three: \(words)")
+    }
+
+    /// A download that finishes says so in a notification (#43). The demo
+    /// asks for permission only with HUB_ALERTS=1, at the first download.
+    @MainActor
+    func testAFinishedDownloadSaysSoInANotification() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo"]
+        app.launchEnvironment = ["HUB_SECTION": "library", "HUB_SIDE": "media", "HUB_TITLE": inception, "HUB_ALERTS": "1"]
+        app.launch()
+        let download = element(app, "title-download")
+        XCTAssertTrue(download.waitForExistence(timeout: 20), "the film's page has no Download: \(buttons(app))")
+        download.tap()
+        let ask = app.alerts.firstMatch
+        XCTAssertTrue(ask.waitForExistence(timeout: 5), "Download did not ask first")
+        ask.buttons["Download"].tap()
+        // The question about notifications, the first time only.
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = springboard.alerts.buttons["Allow"]
+        if allow.waitForExistence(timeout: 8) { allow.tap() }
+        let banner = springboard.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "Inception is ready to watch offline")).firstMatch
+        XCTAssertTrue(banner.waitForExistence(timeout: 60), "no notification said the download finished")
+    }
+
+    /// A download the PC could not prepare (#43): its notification says so
+    /// and opens the queue, which says why, and Retry makes it again there.
+    @MainActor
+    func testAFailedDownloadSaysWhyAndRetryBringsIt() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo"]
+        app.launchEnvironment = ["HUB_SECTION": "library", "HUB_SIDE": "media", "HUB_TITLE": dune, "HUB_ALERTS": "1"]
+        app.launch()
+        let download = element(app, "title-download")
+        XCTAssertTrue(download.waitForExistence(timeout: 20), "the film's page has no Download: \(buttons(app))")
+        download.tap()
+        let ask = app.alerts.firstMatch
+        XCTAssertTrue(ask.waitForExistence(timeout: 5), "Download did not ask first")
+        ask.buttons["Download"].tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = springboard.alerts.buttons["Allow"]
+        if allow.waitForExistence(timeout: 8) { allow.tap() }
+        let banner = springboard.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "could not make this download")).firstMatch
+        XCTAssertTrue(banner.waitForExistence(timeout: 60), "no notification said the download failed")
+        banner.tap()
+
+        let retry = app.buttons["Retry"].firstMatch
+        XCTAssertTrue(retry.waitForExistence(timeout: 10), "the notification did not open the queue with Retry: \(buttons(app))")
+        XCTAssertTrue(text(app, containing: "could not make this download's MP4").exists, "the queue does not say why it failed")
+        retry.tap()
+        element(app, "downloads-device").tap()
+        let poster = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Dune'")).firstMatch
+        XCTAssertTrue(poster.waitForExistence(timeout: 40), "Dune did not come after Retry: \(buttons(app))")
+    }
+
+    /// Download season (#43): a season's menu opens the picker with that
+    /// season's episodes ticked, ready for one question.
+    @MainActor
+    func testDownloadSeasonTicksTheSeasonsEpisodes() {
+        let app = launch(title: bleach)
+        let season = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Season 1")).firstMatch
+        XCTAssertTrue(season.waitForExistence(timeout: 20), "the series has no season: \(buttons(app))")
+        season.press(forDuration: 1.2)
+        let download = app.buttons["Download season"].firstMatch
+        XCTAssertTrue(download.waitForExistence(timeout: 5), "the season's menu has no Download season: \(buttons(app))")
+        download.tap()
+        let counter = element(app, "pick-counter")
+        XCTAssertTrue(counter.waitForExistence(timeout: 15), "the picker did not open")
+        XCTAssertTrue(waitUntil(10) { counter.label.hasPrefix("3 selected") }, "the season's episodes are not ticked: \(counter.label)")
+    }
+
+    /// The Books side's Downloads (#43): a book opened is kept on the device
+    /// and listed there with what is kept; Remove offline copy asks, then it goes.
+    @MainActor
+    func testABookOpenedIsKeptAndListedOnTheBooksDownloads() {
+        // Open Recursion once: its EPUB is kept on the device.
+        let reading = XCUIApplication()
+        reading.launchArguments = ["-demo"]
+        reading.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books",
+                                     "HUB_BOOK": "rw_demo_recursion/demo-rw_demo_recursion", "HUB_BOOK_SCROLL": "0"]
+        reading.launch()
+        let page = reading.descendants(matching: .any).matching(identifier: "book-page").firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 20), "the book did not open")
+        reading.terminate()
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo"]
+        app.launchEnvironment = ["HUB_SECTION": "downloads", "HUB_SIDE": "books"]
+        app.launch()
+        XCTAssertTrue(element(app, "downloads-books").waitForExistence(timeout: 15), "the Books side's Downloads has no Books")
+        XCTAssertTrue(element(app, "downloads-device").exists, "the films and series are not beside the books")
+        let kept = element(app, "kept-book-rw_demo_recursion")
+        XCTAssertTrue(kept.waitForExistence(timeout: 15), "Recursion is not listed as kept: \(buttons(app))")
+        XCTAssertTrue(kept.label.contains("Ebook"), "the kept book does not say what is kept: \(kept.label)")
+        kept.press(forDuration: 1.2)
+        let remove = app.buttons["Remove offline copy"].firstMatch
+        XCTAssertTrue(remove.waitForExistence(timeout: 5), "holding the book offers no Remove offline copy")
+        remove.tap()
+        let ask = app.alerts.firstMatch
+        XCTAssertTrue(ask.waitForExistence(timeout: 5), "removing did not ask first")
+        ask.buttons["Remove from this device"].tap()
+        XCTAssertTrue(kept.waitForNonExistence(timeout: 10), "Recursion stayed after its offline copy was removed")
     }
 
     /// Asks `condition` every quarter of a second until it holds or `seconds` pass.

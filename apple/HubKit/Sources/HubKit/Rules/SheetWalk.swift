@@ -155,6 +155,8 @@ public enum BookAppearanceLine: Hashable, Sendable {
     case tabs
     case typeface, size, onePage
     case columns, margins, spacing, automaticColumns, scroll, publisher, justified, hyphenation
+    /// Reset text style (#42): the defaults' typography in one press.
+    case resetTextStyle
     /// Page info (#42): the corners' clock and percentage, and what the bottom left says.
     case clock, percentage, place(PageInfoPlace)
     /// The page colours in rows of two.
@@ -175,7 +177,7 @@ public enum BookAppearanceLine: Hashable, Sendable {
         case .font: body = [.typeface, .size, .onePage]
         case .layout:
             body = [.columns, .margins, .spacing, .automaticColumns, .scroll, .publisher, .justified, .hyphenation,
-                    .clock, .percentage] + PageInfoPlace.allCases.map { .place($0) }
+                    .resetTextStyle, .clock, .percentage] + PageInfoPlace.allCases.map { .place($0) }
         case .themes: body = themeRows.indices.map { .themes($0) } + [.systemColours]
         case .comfort: body = ComfortLine.lines(book: true).map { .comfort($0) }
         }
@@ -192,8 +194,8 @@ public enum BookAppearanceLine: Hashable, Sendable {
         case .themes(let row): .choices(Self.themeRows.indices.contains(row) ? Self.themeRows[row].count : 1)
         case .size: .value
         case .comfort(let line): line.shape
-        case .onePage, .automaticColumns, .scroll, .publisher, .justified, .hyphenation, .systemColours,
-             .clock, .percentage, .place: .row
+        case .onePage, .automaticColumns, .scroll, .publisher, .justified, .hyphenation, .resetTextStyle,
+             .systemColours, .clock, .percentage, .place: .row
         }
     }
 
@@ -228,6 +230,8 @@ public enum BookAppearanceLine: Hashable, Sendable {
             return EpubAppearance.justified(value)
         case .hyphenation:
             return EpubAppearance.hyphenated(value)
+        case .resetTextStyle:
+            return EpubAppearance.resetTextStyle(value)
         case .themes(let row):
             guard Self.themeRows.indices.contains(row), Self.themeRows[row].indices.contains(column) else { return nil }
             var next = value

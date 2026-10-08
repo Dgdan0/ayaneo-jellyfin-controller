@@ -10,6 +10,13 @@ import UIKit
 struct HubApp: App {
     @State private var model = AppModel()
 
+    init() {
+        // A finished download's notification shows while the app is open too; nothing is asked here (#43).
+        DownloadAlerts.shared.start()
+        // Google Cast on an iPhone and an iPad (#44); the stand-in TV with the demo hub.
+        CastCenter.shared.start(demo: ProcessInfo.processInfo.arguments.contains("-demo"))
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

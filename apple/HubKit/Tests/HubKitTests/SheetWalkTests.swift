@@ -82,8 +82,12 @@ struct SheetWalkTests {
         #expect(BookAppearanceLine.systemColours.press(value)?.theme == .system)
         // Hyphenation, and Page info's rows, are lines a controller reaches on Layout (#42).
         let layout = BookAppearanceLine.lines(.layout)
-        #expect(Array(layout.suffix(8)) == [.hyphenation, .clock, .percentage, .place(.pageInBook), .place(.pageInChapter),
-                                            .place(.chapterTimeLeft), .place(.bookTimeLeft), .place(.none)])
+        #expect(Array(layout.suffix(9)) == [.hyphenation, .resetTextStyle, .clock, .percentage, .place(.pageInBook),
+                                            .place(.pageInChapter), .place(.chapterTimeLeft), .place(.bookTimeLeft),
+                                            .place(.none)])
+        #expect(BookAppearanceLine.resetTextStyle.shape == .row)
+        #expect(BookAppearanceLine.resetTextStyle.press(value) == EpubAppearance.resetTextStyle(value))
+        #expect(BookAppearanceLine.resetTextStyle.press(PageInfoPreferences()) == nil)
         #expect(BookAppearanceLine.hyphenation.press(value)?.hyphens == !value.hyphens)
         #expect(BookAppearanceLine.clock.press(value) == nil && BookAppearanceLine.clock.shape == .row)
         let info = PageInfoPreferences()

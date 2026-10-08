@@ -7,8 +7,8 @@ import AppKit
 /// The player, over everything (GLASS_PLAN.md › Player; the prototype's
 /// `.pl`; Android `playback/PlayerChrome`): the picture, and over it the Glass
 /// chrome. At the top a round Back, the title over its episode, glass pills
-/// for Audio & subtitles, Chapters and This video, then AirPlay, Lock and
-/// picture in picture; in the middle Previous, −10, a white Play disc, +10
+/// for Audio & subtitles, Chapters and This video, then Cast (#44), AirPlay,
+/// Lock and picture in picture; in the middle Previous, −10, a white Play disc, +10
 /// and Next; at the foot the timeline in a frosted bar, "5:34 · Part A" under
 /// its start and "−22:53" under its end, a notch where each chapter starts.
 ///
@@ -97,7 +97,7 @@ struct PlayerView: View {
             let safe = proxy.safeAreaInsets
             let screen = CGSize(width: proxy.size.width + safe.leading + safe.trailing,
                                 height: proxy.size.height + safe.top + safe.bottom)
-            let layout = PlayerLayout(size: screen, safe: safe)
+            let layout = PlayerLayout(size: screen, safe: safe, cast: CastCenter.shared.offered)
             ZStack {
                 Color.black
                 standIn
@@ -213,6 +213,10 @@ struct PlayerView: View {
         .onChange(of: panels.isEmpty) { _, closed in
             if closed { poke() } else { hiding?.cancel() }
         }
+        // A TV connected while the player is open: the video moves there (#44).
+        .onChange(of: CastCenter.shared.connection) { _, connection in
+            player.castConnectionChanged(connection)
+        }
         #if os(iOS)
         .onChange(of: scenePhase) { _, phase in
             // Leaving the app ends playback unless picture in picture carries
@@ -267,7 +271,20 @@ struct PlayerView: View {
     /// Where the picture is when it is not here: on an AirPlay receiver, or in
     /// the small picture-in-picture window.
     @ViewBuilder private var elsewhere: some View {
-        if player.pipActive || player.externalActive {
+        if player.casting {
+            // One line under the middle row, which stays the TV's remote: clear
+            // of the Play disc upright and of the timeline turned sideways.
+            HStack(spacing: 8) {
+                Image(systemName: "tv")
+                    .font(.system(size: 17, weight: .semibold))
+                Text(CastPresentation.playingOn(CastPlayback.shared.deviceName))
+                    .font(HubType.body(15, weight: .semibold, relativeTo: .subheadline))
+            }
+            .foregroundStyle(.white.opacity(0.75))
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("player-casting")
+            .offset(y: 84)
+        } else if player.pipActive || player.externalActive {
             VStack(spacing: 10) {
                 Image(systemName: player.pipActive ? "pip" : "airplayvideo")
                     .font(.system(size: 40, weight: .regular))
@@ -384,9 +401,12 @@ struct PlayerView: View {
         }
     }
 
-    /// AirPlay, Lock (iPhone and iPad) and picture in picture.
+    /// Cast (iPhone and iPad), AirPlay, Lock (iPhone and iPad) and picture in picture.
     private func tools(_ layout: PlayerLayout) -> some View {
         HStack(spacing: 8) {
+            if layout.cast {
+                CastButton(size: layout.round)
+            }
             ZStack {
                 Circle().fill(.clear).glassPanel(Circle())
                 Image(systemName: "airplayvideo")
@@ -401,7 +421,7 @@ struct PlayerView: View {
             #if os(iOS)
             GlassRoundButton(systemImage: "lock", label: "Lock controls", size: layout.round) { lock() }
             #endif
-            if player.pipSupported {
+            if player.pipSupported && !player.casting {
                 GlassRoundButton(systemImage: player.pipActive ? "pip.exit" : "pip.enter",
                                  label: player.pipActive ? "Leave picture in picture" : "Picture in picture",
                                  size: layout.round) { player.togglePictureInPicture() }
@@ -545,10 +565,12 @@ struct PlayerView: View {
     /// A change on its way to the hub, or one that did not work, in a small
     /// glass capsule under the top bar.
     @ViewBuilder private func messages(_ layout: PlayerLayout) -> some View {
-        let text = player.notice ?? (player.applying && panels.isEmpty ? "Changing playback…" : nil)
+        let preparing = CastPlayback.shared.preparing
+        let text = preparing ? CastPresentation.preparing
+            : player.notice ?? (player.applying && panels.isEmpty ? "Changing playback…" : nil)
         if let text {
             HStack(spacing: 10) {
-                if player.notice == nil { ProgressView().controlSize(.small).tint(.white) }
+                if player.notice == nil || preparing { ProgressView().controlSize(.small).tint(.white) }
                 Text(text)
                     .font(HubType.body(14, weight: .semibold, relativeTo: .subheadline))
                     .lineLimit(2)
@@ -869,6 +891,8 @@ struct PlayerLayout {
 
     let size: CGSize
     let safe: EdgeInsets
+    /// The Cast button is in the row (#44): a TV has been found.
+    var cast = false
 
     var phone: Bool { min(size.width, size.height) < 500 }
     var side: CGFloat { max(phone ? 16 : 26, max(safe.leading, safe.trailing) + 4) }
@@ -885,11 +909,12 @@ struct PlayerLayout {
     var bottom: CGFloat { max(24, safe.bottom) }
     var round: CGFloat { phone ? 42 : 46 }
 
-    /// AirPlay, Lock where there is one, and picture in picture (counted
-    /// even where the device has none, so the layout is the same everywhere).
+    /// Cast once a TV is found, AirPlay, Lock where there is one, and picture
+    /// in picture (counted even where the device has none, so the layout is
+    /// the same everywhere).
     private var tools: CGFloat {
         #if os(iOS)
-        3 * round + 2 * 8
+        cast ? 4 * round + 3 * 8 : 3 * round + 2 * 8
         #else
         2 * round + 8
         #endif

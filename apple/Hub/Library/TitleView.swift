@@ -349,6 +349,15 @@ struct TitleView: View {
                             Task { await loadEpisodes(reset: true) }
                         }
                         .contextMenu {
+                            if let item {
+                                // The season's episodes, ticked in the picker (#43).
+                                Button {
+                                    openRoute(.offlinePicker(OfflinePickerRoute(seriesId: item.id, title: item.title,
+                                                                                seasonId: season.id)))
+                                } label: {
+                                    Label("Download season", systemImage: "arrow.down.circle")
+                                }
+                            }
                             if let item, LibraryUpkeep.offersReleases(item) {
                                 Button {
                                     findRelease(item, season: season.indexNumber)

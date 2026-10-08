@@ -222,7 +222,7 @@ struct PlayerSheet: View {
         SheetGroup {
             SheetRow(title: "Off", checked: (plan.selectedSubtitleIndex ?? -1) < 0) { player.chooseSubtitle(-1) }
                 .id("subtitles--1")
-            ForEach(plan.subtitleTracks, id: \.index) { track in
+            ForEach(player.casting ? CastPlan.textSubtitles(plan) : plan.subtitleTracks, id: \.index) { track in
                 let shown = TrackPresentation.of(track)
                 SheetRow(title: shown.title, detail: shown.detail, checked: track.index == plan.selectedSubtitleIndex) {
                     player.chooseSubtitle(track.index)
@@ -231,6 +231,9 @@ struct PlayerSheet: View {
             }
         }
         .disabled(player.applying)
+        if player.casting {
+            SheetNote(text: "The TV shows subtitles kept as text files (SRT and WebVTT). Another audio track moves the video to the TV again, from where it is.")
+        } else {
         SheetGroup {
             // Only subtitles the app draws can move in time; a picture track
             // is burned into the video (Android shows the row the same way).
@@ -241,9 +244,44 @@ struct PlayerSheet: View {
             SheetRow(title: "How subtitles look", value: PlayerLabels.subtitleLook(player.subtitleLook),
                      chevron: true) { open(.look) }
         }
+        }
     }
 
     @ViewBuilder private func video(_ plan: PlaybackPrepareResponse) -> some View {
+        if player.casting {
+            cast
+        } else {
+            device(plan)
+        }
+    }
+
+    /// Playing on the TV (#44): back to this device where it is, or stop there.
+    @ViewBuilder private var cast: some View {
+        SheetLabel(text: CastPresentation.playingOn(CastPlayback.shared.deviceName))
+        SheetGroup {
+            SheetRow(title: CastPresentation.moveHere(pad: Self.onPad), detail: "Goes on here from the TV's place") {
+                close()
+                player.moveHere()
+            }
+            .accessibilityIdentifier("player-cast-here")
+            SheetRow(title: "Stop on TV", detail: "Ends playback on the TV") {
+                close()
+                player.stopOnTV()
+            }
+            .accessibilityIdentifier("player-cast-stop")
+        }
+        SheetNote(text: "The TV plays a stream made for it: H.264 and AAC, up to 20 Mbps.")
+    }
+
+    private static var onPad: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        false
+        #endif
+    }
+
+    @ViewBuilder private func device(_ plan: PlaybackPrepareResponse) -> some View {
         let quality = PlaybackRules.qualities.first { $0.bitrate == player.maxBitrate } ?? PlaybackRules.qualities[0]
         SheetGroup {
             // A download plays its own file: there is no other quality to ask for.

@@ -12,6 +12,10 @@ final class AppModel {
     private(set) var hasToken: Bool
     private(set) var userId: String
     private(set) var userName: String
+    /// The public HTTPS hub address a TV fetches what it casts from (#44; the
+    /// Pocket's "public HTTPS Hub address for TV playback"): the TV is not on
+    /// the tailnet. Empty: the hub's own address.
+    private(set) var tvAddress: String
     /// Running against fixtures (`-demo`), not a real hub.
     let isDemo: Bool
     /// Counts the library orders saved from this device (#15): a page that drew
@@ -47,6 +51,7 @@ final class AppModel {
     private static let addressKey = "hub.address"
     private static let userIdKey = "hub.userId"
     private static let userNameKey = "hub.userName"
+    private static let tvAddressKey = "hub.tvAddress"
 
     init(defaults: UserDefaults = .standard, environment: [String: String] = ProcessInfo.processInfo.environment,
          arguments: [String] = ProcessInfo.processInfo.arguments) {
@@ -57,6 +62,7 @@ final class AppModel {
             hasToken = true
             userId = ""
             userName = ""
+            tvAddress = ""
             hub = HubClient(credentials: HubCredentials(baseURL: DemoTransport.address, token: DemoTransport.token),
                             screens: DemoTransport())
             colors = ArtworkColors(hub: hub, file: nil)
@@ -84,6 +90,7 @@ final class AppModel {
         hasToken = !token.isEmpty
         userId = storedUser
         userName = defaults.string(forKey: Self.userNameKey) ?? ""
+        tvAddress = defaults.string(forKey: Self.tvAddressKey) ?? ""
         hub = HubClient(
             credentials: HubCredentials(baseURL: storedAddress, token: token, userId: storedUser),
             screens: URLSessionTransport.screens(),
@@ -109,6 +116,14 @@ final class AppModel {
         hasToken = !newToken.isEmpty
         await hub.update(HubCredentials(baseURL: normalised, token: newToken, userId: userId))
         connectionChanges += 1
+    }
+
+    /// The address for TV playback, kept on this device; empty uses the hub's.
+    func saveTVAddress(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalised = trimmed.isEmpty ? "" : HubEndpoints.normaliseBase(trimmed)
+        if !isDemo { defaults.set(normalised, forKey: Self.tvAddressKey) }
+        tvAddress = normalised
     }
 
     func storedToken() -> String {

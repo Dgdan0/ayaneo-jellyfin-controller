@@ -298,6 +298,8 @@ struct BookAppearanceSheet: View {
             row(.publisher, "Publisher styling", value: value.publisherStyles ? "On" : "Off")
             row(.justified, "Justified text", value: value.textAlignment == "justify" ? "On" : "Off")
             row(.hyphenation, "Hyphenation", detail: "Long words broken at the line's end", value: value.hyphens ? "On" : "Off")
+            // A look kept from before #42 gets the new one in a press; the size and the rest stay.
+            row(.resetTextStyle, "Reset text style", detail: EpubAppearance.resetTextStyleDetail)
         }
         pageInfo
     }

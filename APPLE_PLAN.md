@@ -220,6 +220,7 @@ hub (`-demo`) answers every one of these calls, for the UI tests.
 | Subtitles the app draws | HubKit `SubtitleParser` (SRT, WebVTT, ASS as text; a broken block is skipped) and `SubtitleTimeline`; drawn by `SubtitleOverlay`; the delay is `SubtitleTimingPolicy` |
 | Chapters, Skip intro, where subtitles sit | HubKit `PlaybackEnhancements` (Android's, with its tests); the notches are `ChapterNotches` |
 | Picture in picture, AirPlay | `PlayerModel.attach` (`AVPictureInPictureController` on the surface's layer), `RoutePicker` under the round Cast icon |
+| Google Cast to the TV (#44; iPhone and iPad, the Mac keeps AirPlay): the address the TV reaches, the TV's session, its subtitles, the button's states | HubKit `CastAddress`, `CastPlan`, `CastPresentation` (`Rules/Cast`); `CastCenter` (the SDK, or the stand-in TV with `HUB_CAST=standin`), `CastPlayback` (the TV's session and its reports, through `PlaybackReporter`), `CastButton`; the player is the remote while `PlayerModel.casting` |
 
 A session is prepared, then streamed, reported (started, paused and unpaused, seeks, progress
 every ten seconds of play, stopped) and deleted. Leaving is the only way out, and Back, the next
@@ -538,6 +539,7 @@ speaks Readium (`@preconcurrency` imports; the EPUB opened off the main actor an
 | How a book looks: theme, typeface, size, spacing, margins, columns, scrolling | HubKit `EpubReaderPreferences`, `EpubLayoutPolicy`, `EpubChromePolicy`, `EpubPreferenceState`, `EpubPagePalette`, `EpubRendering`, `EpubAppearance`, `EpubAppearanceStore` (`Rules/EpubAppearance`) |
 | A place as Readium's locator JSON: its label, its anchor, the same place | HubKit `BookLocator` |
 | Kindle's corners while reading: the clock, where you are (the hub's pages, else Readium's positions; the time left), the percentage; which show, kept on the device; a tap or L3 for the next (#42) | HubKit `PageInfo`, `PageInfoPlace`, `PageInfoPreferences`, `PageInfoStore` (`Rules/PageInfo`); drawn by `BookReaderCorners` in the strips `PageInfo.strip` keeps |
+| Reset text style in Appearance › Layout: a look kept from before gets the defaults' typography in one press (justified, hyphenated, 1.5 spacing, the book's styling off), its size, typeface, theme, margins, columns and Page info left as they are; a line the controller walks to (#42) | HubKit `EpubAppearance.resetTextStyle` and `resetTextStyleDetail` (from `EpubReaderPreferences()`'s defaults), `BookAppearanceLine.resetTextStyle` |
 | The EPUB kept on the device, a partial download never opened | HubKit `EpubPackageCache` |
 | A kept EPUB or read-along edition checked with the hub as it opens: its ETag kept beside it, `If-None-Match`, 304 opens it, 200 replaces it, an outage opens it at once (#41) | HubKit `EpubPackageCache.open` with the rule `EpubFreshness` and `HubClient.file` |
 | Bookmarks per hub, profile and edition | HubKit `EpubBookmarks` (named as phase 2's `ReadingCheckpointKey` names records) |
@@ -829,5 +831,24 @@ Debug launches take `HUB_DOWNLOAD=<item id>` (downloads it at launch) and
 (converted) in eight; Dune fails once until it is retried, and Inception has a French picture
 subtitle that is left out.
 
+The Books side's Downloads tab (#43) has Books first: the books, audiobooks and comics kept on the
+device (#37's caches), newest first, from HubKit's `ReadingKeptShelf` (a small JSON file beside the
+caches, recorded as the ebook reader opens an edition, the player takes an audiobook and the comic
+reader opens an issue), each with what is kept and its room, a book's page on a tap and Remove
+offline copy on a hold (`Downloads/KeptBooksView`); a book the system has cleared from the caches
+leaves the list. Films and TV and the queue are the tabs beside it.
+
+A season's menu on a series page has Download season (#43): the picker opens with that season's
+episodes ticked (`OfflinePickerRoute.seasonId`).
+
+A download that finishes or fails says so in a notification (#43, `Downloads/DownloadAlerts`; the
+outcomes and words are HubKit's `OfflineAlerts`): one per download and outcome, a batch's grouped,
+shown while the app is open too. A tap on one opens Downloads (`DownloadAlertTaps`): the queue for a
+failure, which says why and has Retry (it asks the hub to make the MP4 again, then fetches it), and
+what is on the device for one that finished. Permission is asked when the first download starts, never
+at launch; the demo hub neither asks nor posts without `HUB_ALERTS=1`, so a permission given in one UI
+test never puts a banner over the next.
+
 Differences from Android, on purpose: the hub's MP4, not the original file; no storage location to
-choose (the app's own Application Support, kept out of backups); Books' offline copies are #37's.
+choose (the app's own Application Support, kept out of backups); no alerts for the server's own
+transfers and subtitles.
