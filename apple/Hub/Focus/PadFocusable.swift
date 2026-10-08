@@ -80,11 +80,12 @@ extension View {
 
     /// An item a controller or a keyboard can focus: Ⓐ or Return runs `press`,
     /// Ⓨ `hold` (its menu). `scroll` is what its scroll view knows it by when
-    /// that is not `id` (it then keeps its own `.id`). Nil `id` leaves the view
-    /// as it is.
-    func padFocusable(_ id: String?, ring: PadRing = .capsule, scroll: AnyHashable? = nil,
+    /// that is not `id`; `scrolls: false` for an item no scroll view holds (a
+    /// sheet's picker, a toolbar's button), which then keeps its identity. Nil
+    /// `id` leaves the view as it is.
+    func padFocusable(_ id: String?, ring: PadRing = .capsule, scroll: AnyHashable? = nil, scrolls: Bool = true,
                       hold: (() -> Void)? = nil, press: (() -> Void)?) -> some View {
-        modifier(PadFocusableModifier(id: id, ring: ring, scroll: scroll,
+        modifier(PadFocusableModifier(id: id, ring: ring, scroll: scroll, scrolls: scrolls,
                                       actions: PadItemActions(press: press, hold: hold)))
     }
 }
@@ -186,6 +187,7 @@ private struct PadFocusableModifier: ViewModifier {
     let id: String?
     let ring: PadRing
     let scroll: AnyHashable?
+    let scrolls: Bool
     let actions: PadItemActions
     @Environment(\.padPage) private var page
     @Environment(\.padGroup) private var group
@@ -196,19 +198,26 @@ private struct PadFocusableModifier: ViewModifier {
             let lit = PadFocusCenter.shared.lit(padId, on: page)
             let _ = page.actions[padId] = actions
             let _ = scroll.map { page.scrollIds[padId] = $0 }
-            content
-                .environment(\.padLit, lit)
-                .overlay { PadRingView(ring: ring, lit: lit) }
-                .id(scroll ?? AnyHashable(id))
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
-                    page.frames[padId] = frame
-                }
-                .onDisappear {
-                    page.frames[padId] = nil
-                }
+            if scrolls {
+                registered(content.id(scroll ?? AnyHashable(id)), page: page, padId: padId, lit: lit)
+            } else {
+                registered(content, page: page, padId: padId, lit: lit)
+            }
         } else {
             content
         }
+    }
+
+    private func registered(_ view: some View, page: PadPage, padId: String, lit: Bool) -> some View {
+        view
+            .environment(\.padLit, lit)
+            .overlay { PadRingView(ring: ring, lit: lit) }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                page.frames[padId] = frame
+            }
+            .onDisappear {
+                page.frames[padId] = nil
+            }
     }
 }
 

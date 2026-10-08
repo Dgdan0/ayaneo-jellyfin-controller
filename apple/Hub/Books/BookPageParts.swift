@@ -122,62 +122,47 @@ struct FinishedPanel: View {
                         }
                     }
                     .accessibilityIdentifier("finish-month")
-                    .padFocusable("month") { choosing = .month }
+                    .padFocusable("month", scrolls: false) { choosing = .month }
                     Picker("Year", selection: $date.year) {
                         ForEach(BookPage.FinishDate.years(now: now), id: \.self) { year in
                             Text(String(year)).tag(year)
                         }
                     }
                     .accessibilityIdentifier("finish-year")
-                    .padFocusable("year") { choosing = .year }
+                    .padFocusable("year", scrolls: false) { choosing = .year }
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
                 #if os(iOS)
                 .tint(.white)
                 #endif
-                #if os(macOS)
-                // A Mac sheet's toolbar is the window's own (white boxes on the
-                // glass): its answers are the app's pills, the harmless one first.
+                // The answers are the app's pills, the harmless one first: a Mac
+                // sheet's toolbar is the window's own (white boxes on the glass),
+                // and a controller reaches what is in the sheet, not its bar (#46).
+                // On the iPad and iPhone Return presses what the ring is on, and
+                // Escape is the sheet's Back (`padPage`), so neither is a shortcut there.
                 HStack(spacing: 10) {
                     Button("Cancel") { dismiss() }
                         .buttonStyle(GlassPillStyle())
+                        #if os(macOS)
                         .keyboardShortcut(.cancelAction)
+                        #endif
+                        .padFocusable("cancel", scrolls: false) { dismiss() }
                     Button("Mark finished") { markFinished() }
                         .buttonStyle(PrimaryPillStyle())
+                        #if os(macOS)
                         .keyboardShortcut(.defaultAction)
+                        #endif
                         .accessibilityIdentifier("finish-confirm")
-                        .padFocusable("finish") { markFinished() }
+                        .padFocusable("finish", scrolls: false) { markFinished() }
                 }
                 .padding(.top, 6)
-                #else
-                // A controller's way to the answer the bar holds (#46).
-                Button {
-                    markFinished()
-                } label: {
-                    Label("Mark finished", systemImage: "checkmark")
-                }
-                .buttonStyle(PrimaryPillStyle())
-                .accessibilityIdentifier("finish-mark")
-                .padFocusable("finish") { markFinished() }
-                #endif
             }
-            #if os(macOS)
             .padding(.top, 18)
-            #endif
             .frame(maxWidth: .infinity)
             .frame(maxHeight: .infinity, alignment: .top)
             #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Mark finished") { markFinished() }
-                        .accessibilityIdentifier("finish-confirm")
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             #endif
         }
         .onChange(of: date.year) { _, _ in date = date.clamped(to: now) }
@@ -197,7 +182,7 @@ struct FinishedPanel: View {
         }
         // The app's sheets are glass (the request form, the profiles).
         .presentationBackground { GlassSheetFill() }
-        .presentationDetents([.height(270)])
+        .presentationDetents([.height(250)])
         #if os(macOS)
         .frame(minWidth: 360, minHeight: 170)
         #endif

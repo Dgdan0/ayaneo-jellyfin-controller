@@ -125,7 +125,7 @@ final class PadFocusCenter {
         didSet { if shownStack != oldValue { settleSoon() } }
     }
     /// The player or a reader is over everything: they read their own keys.
-    @ObservationIgnored var covered = false
+    var covered = false
     /// Every press this does not take: the shell's Back and sections (#46, A).
     @ObservationIgnored var unhandled: (PadAction) -> Void = { _ in }
     @ObservationIgnored private var settling: Task<Void, Never>?
@@ -164,9 +164,20 @@ final class PadFocusCenter {
         settleSoon()
     }
 
-    /// The pointer was used: the ring goes until the next press.
+    /// The pointer was used: the ring goes until the next press. Written only
+    /// on a change: a touch rewriting the same mode redrew every item under the
+    /// finger, and a context menu's choice was lost (the simulator).
     func pointerUsed() {
+        guard input.mode != .pointer else { return }
         input.pointer()
+    }
+
+    /// A controller or keyboard press: the ring shows. Whether it was hidden.
+    @discardableResult
+    private func pressed() -> Bool {
+        guard input.mode != .directional else { return false }
+        input.directional()
+        return true
     }
 
     /// After a page appears, Back, or another section: the ring lands on the
@@ -206,7 +217,7 @@ final class PadFocusCenter {
             return true
         case .activate:
             let showing = input.showsRing
-            input.directional()
+            pressed()
             guard let (page, id) = current() else {
                 // Nothing focused yet: the first press says where focus is.
                 return settleNow()
@@ -257,7 +268,7 @@ final class PadFocusCenter {
 
     private func move(_ direction: PadDirection) {
         let showing = input.showsRing
-        input.directional()
+        pressed()
         guard let (page, id) = current() else {
             settleNow()
             return
@@ -281,7 +292,8 @@ final class PadFocusCenter {
             if page.isBar {
                 // Down from the top bar, up from the tab bar: back to the page.
                 if let target = activePage, direction == .down || direction == .up { returnFocus(to: target) }
-            } else if let bar, let source = page.frames[id] {
+            } else if !page.modal, let bar, let source = page.frames[id] {
+                // Never to the bars under a sheet.
                 enterBar(bar, from: source, direction)
             }
         }

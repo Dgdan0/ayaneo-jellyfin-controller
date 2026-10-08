@@ -155,28 +155,32 @@ final class PadFocusTests: XCTestCase {
         XCTAssertTrue(focus(app).hasPrefix("ring library:storyteller:books views/"), "up did not come back to the views: \(focus(app))")
     }
 
-    /// Downloads: its three pills in a row, one chosen with Return and one with
-    /// Space, Ⓐ's other key.
+    /// Downloads: its three pills in a row, each chosen with Return.
     @MainActor
-    func testDownloadsPillsAreChosenWithReturnAndSpace() {
+    func testDownloadsPillsAreChosenWithReturn() {
         let app = launch(side: "books", section: "downloads")
         XCTAssertTrue(app.buttons["downloads-books"].waitForExistence(timeout: 20))
+        // This side's pills: the other side's Downloads, kept out of sight, has its own.
+        func pill(_ id: String) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "identifier == %@ AND enabled == true", id)).firstMatch
+        }
         press(app, .downArrow)
         XCTAssertEqual(focus(app), "ring downloads-books tabs/books")
         press(app, .rightArrow)
         XCTAssertEqual(focus(app), "ring downloads-books tabs/device")
         pressReturn(app)
-        XCTAssertTrue(app.buttons["downloads-device"].firstMatch.wait(for: \.isSelected, toEqual: true, timeout: 5),
+        XCTAssertTrue(pill("downloads-device").wait(for: \.isSelected, toEqual: true, timeout: 5),
                       "Return did not choose Films and TV")
         press(app, .rightArrow)
         XCTAssertEqual(focus(app), "ring downloads-books tabs/queue")
-        // A second typed Return on this page reaches nothing in the simulator; Space does.
-        app.typeKey(" ", modifierFlags: [])
-        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        XCTAssertTrue(app.buttons["downloads-queue"].firstMatch.wait(for: \.isSelected, toEqual: true, timeout: 5),
-                      "Space did not choose the queue: \(focus(app))")
+        pressReturn(app)
+        XCTAssertTrue(pill("downloads-queue").wait(for: \.isSelected, toEqual: true, timeout: 5),
+                      "Return did not choose the queue: \(focus(app))")
         press(app, .rightArrow)
         XCTAssertEqual(focus(app), "ring downloads-books tabs/queue", "right went past the last pill")
+        press(app, .leftArrow, times: 2)
+        app.typeKey(" ", modifierFlags: [])
+        XCTAssertTrue(pill("downloads-books").wait(for: \.isSelected, toEqual: true, timeout: 5), "Space did not choose Books")
     }
 
     /// A book's page: down to ⋯, whose Return opens its choices as a dialog;
@@ -203,10 +207,14 @@ final class PadFocusTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["When did you finish?"].waitForExistence(timeout: 5), "Finished did not open its panel")
         press(app, .downArrow)
         XCTAssertTrue(waitFor(app) { $0.hasPrefix("ring finished ") }, "the panel did not take the ring: \(focus(app))")
+        // Under the month and the year, its answers; Cancel is on the left.
         press(app, .downArrow)
-        XCTAssertEqual(focus(app), "ring finished finish", "down did not reach Mark finished")
-        app.buttons["Cancel"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["When did you finish?"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(["ring finished finish", "ring finished cancel"].contains(focus(app)), "down did not reach the answers: \(focus(app))")
+        press(app, .leftArrow)
+        XCTAssertEqual(focus(app), "ring finished cancel")
+        pressReturn(app)
+        XCTAssertTrue(app.staticTexts["When did you finish?"].waitForNonExistence(timeout: 5), "Return on Cancel did not close the panel")
+        XCTAssertFalse(app.staticTexts["book-you-line"].exists, "Cancel marked the book finished")
     }
 
     /// Notifications and Activity: down their rows by looking, Return opening a notice.

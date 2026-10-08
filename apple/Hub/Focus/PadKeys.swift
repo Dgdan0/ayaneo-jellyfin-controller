@@ -10,16 +10,15 @@ import AppKit
 /// press (Ⓐ), Escape is Ⓑ, each through `PadFocusCenter.route`, as the
 /// controller's are (#46, A).
 ///
-/// On the iPad and iPhone the keys are UIKit key commands with priority over
-/// the system's own keyboard focus, which otherwise takes them: on iOS 26 it
-/// moved with the arrows beside the ring and Return pressed whatever it was on,
-/// and no SwiftUI shortcut or key handler heard Return or Escape at all (the
-/// simulator; there XCUITest's Return arrives only typed as a newline, and
-/// its Escape never arrives at all, by any path). They step aside while the player
-/// or a reader is open (they read
-/// their own keys), while a text field is being typed in, and while an alert
-/// shows (its Return and Escape are its own). A sheet keeps them: it is a page
-/// of its own (`padPage(modal:)`).
+/// On the iPad and iPhone the arrows, Return and Space are UIKit key commands
+/// with priority over the system's own keyboard behaviour: no SwiftUI shortcut
+/// or key handler heard Return at all (the simulator, iOS 26; there XCUITest's
+/// Return arrives only typed as a newline). Escape reaches no key command; a
+/// focused view's key handler hears it, as the player's does (XCUITest's Escape
+/// arrives nowhere). The commands step aside while the player or a reader is
+/// open (they read their own keys), while a text field is being typed in, and
+/// while an alert shows (its Return and Escape are its own). A sheet keeps
+/// them: it is a page of its own (`padPage(modal:)`).
 ///
 /// On the Mac a key goes to the window's first responder, so a monitor reads
 /// it first and leaves it alone while a text field is being edited.
@@ -29,16 +28,35 @@ import AppKit
 struct PadKeys: View {
     #if os(macOS)
     @State private var monitors: [Any] = []
+    #else
+    /// Escape reaches no key command on the iPad or iPhone; a focused view's
+    /// key handler does (the player's has since #33). This one holds the
+    /// keyboard focus while the ring moves, never under the player or a
+    /// reader, which read their own.
+    @FocusState private var escape: Bool
+    private var center: PadFocusCenter { PadFocusCenter.shared }
     #endif
 
     var body: some View {
         #if os(iOS)
         ZStack {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .focusable(!center.covered)
+                .focusEffectDisabled()
+                .focused($escape)
+                .onKeyPress(.escape) {
+                    center.route(.back)
+                    return .handled
+                }
+                .accessibilityHidden(true)
             #if DEBUG
             PadFocusProbe()
             #endif
         }
         .background { WindowProbe() }
+        .onAppear { escape = true }
+        .onChange(of: center.focus) { _, _ in if !center.covered { escape = true } }
         #else
         ZStack {
             Color.clear
@@ -188,13 +206,23 @@ private struct WindowProbe: UIViewRepresentable {
         override func didMoveToWindow() {
             super.didMoveToWindow()
             guard let window else { return }
+            #if DEBUG
+            let off = ProcessInfo.processInfo.environment["HUB_PAD_OFF"] ?? ""
+            if !off.contains("keys") { SystemKeys.shared.attach(to: window) }
+            guard !off.contains("watch") else { return }
+            #else
             SystemKeys.shared.attach(to: window)
+            #endif
             guard watcher.view !== window else { return }
             watcher.view?.removeGestureRecognizer(watcher)
             window.addGestureRecognizer(watcher)
         }
     }
 
+    /// Hears each touch as UIKit offers it and declines it, so it never takes
+    /// part in recognising anything: a recogniser that took the touches and
+    /// failed still upset a menu's (a picker's menu chose the wrong year, and a
+    /// context menu's choice presented nothing after it; the simulator).
     final class TouchWatcher: UIGestureRecognizer, UIGestureRecognizerDelegate {
         init() {
             super.init(target: nil, action: nil)
@@ -204,13 +232,10 @@ private struct WindowProbe: UIViewRepresentable {
             delegate = self
         }
 
-        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-            MainActor.assumeIsolated { PadFocusCenter.shared.pointerUsed() }
-            state = .failed
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            PadFocusCenter.shared.pointerUsed()
+            return false
         }
-
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
-                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
     }
 }
 #endif
