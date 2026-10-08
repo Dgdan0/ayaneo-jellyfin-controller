@@ -11,10 +11,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -436,24 +434,9 @@ func (s *Server) appleBuildFailure(err error, sourcePath, out string) error {
 // was (a Hebrew SRT is commonly Windows-1255), which is why it is asked for rather
 // than read from disk.
 func (s *Server) fetchAppleSubtitle(ctx context.Context, client *jellyfin.Client, grant offlineGrant, index int, dir string) (string, error) {
-	resource := fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/0/Stream.srt", grant.ItemID, url.PathEscape(grant.MediaSourceID), index)
-	if !validPlaybackResource(resource, grant.ItemID) {
-		return "", errors.New("the subtitle resource is invalid")
-	}
-	response, err := client.OpenResource(ctx, http.MethodGet, resource, nil)
+	body, err := readSubtitleText(ctx, client, grant.ItemID, grant.MediaSourceID, index, "srt")
 	if err != nil {
 		return "", err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("jellyfin answered %d", response.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxSubtitleSidecarBytes+1))
-	if err != nil {
-		return "", err
-	}
-	if len(body) > maxSubtitleSidecarBytes {
-		return "", errors.New("the subtitle is too large")
 	}
 	if strings.TrimSpace(string(body)) == "" {
 		// A subtitle with nothing in it still has to be a track, as the manifest
