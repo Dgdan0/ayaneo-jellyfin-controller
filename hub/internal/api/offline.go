@@ -512,10 +512,19 @@ func (s *Server) handleOfflineRenew(w http.ResponseWriter, r *http.Request) {
 	}
 	renewed, err := makeGrant(previous.Format, previous.Owner, previous.UserID, previous.BatchKey,
 		previous.ClientItemKey, *item, previous.MediaSourceID)
-	if err != nil || renewed.Manifest.Source.SizeBytes != previous.Manifest.Source.SizeBytes ||
-		renewed.PlanSignature != previous.PlanSignature {
+	if err != nil || renewed.Manifest.Source.SizeBytes != previous.Manifest.Source.SizeBytes {
 		writeError(w, r, http.StatusConflict, Error{Code: "source_changed", Message: "the Jellyfin media source changed; restart this item"})
 		return
+	}
+	if renewed.PlanSignature != previous.PlanSignature {
+		// The plan also lists the sidecar subtitles, which Bazarr adds and removes after
+		// the MP4 was made. That does not make the file another one, so a plan that
+		// differs only there keeps the plan the MP4 was made for (#45).
+		if !appleSameMedia(previous, renewed) {
+			writeError(w, r, http.StatusConflict, Error{Code: "source_changed", Message: "the Jellyfin media source changed; restart this item"})
+			return
+		}
+		renewed = keepPlannedMedia(previous, renewed)
 	}
 	// Keep the stable grant URL so an in-flight queue row needs only an expiry update.
 	renewed.ID = previous.ID

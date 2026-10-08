@@ -196,6 +196,74 @@ func appleManifestOf(grantID string, plan repackage.Plan) *OfflineApple {
 	return out
 }
 
+// appleSameMedia says whether a renewed grant would make the same MP4 as the one
+// the app downloaded, apart from the sidecar subtitles. It compares what the plan
+// decides about the file: the container (the size is compared by the caller), the
+// video, every audio track and the subtitles that live inside the file. The
+// sidecars beside it are left out, since Bazarr adds, replaces and removes them for
+// as long as the download is kept, which does not make it another file (#45).
+// Labels, sizes and the picture's width are not what the plan signs either.
+func appleSameMedia(previous, renewed offlineGrant) bool {
+	if previous.Format != offlineFormatApple || renewed.Format != offlineFormatApple ||
+		previous.Manifest.Apple == nil || renewed.Manifest.Apple == nil ||
+		previous.Manifest.Source.Container != renewed.Manifest.Source.Container {
+		return false
+	}
+	before, after := previous.Manifest.Apple, renewed.Manifest.Apple
+	if before.Container != after.Container ||
+		before.Video.SourceIndex != after.Video.SourceIndex || before.Video.OutputCodec != after.Video.OutputCodec ||
+		before.Video.Tag != after.Video.Tag || before.Video.Converted != after.Video.Converted ||
+		len(before.Audio) != len(after.Audio) {
+		return false
+	}
+	for at, track := range before.Audio {
+		other := after.Audio[at]
+		if track.SourceIndex != other.SourceIndex || track.Language != other.Language || track.OutputCodec != other.OutputCodec ||
+			track.OutputChannels != other.OutputChannels || track.Converted != other.Converted || track.Default != other.Default {
+			return false
+		}
+	}
+	inside := func(tracks []OfflineAppleSubtitle) []OfflineAppleSubtitle {
+		var kept []OfflineAppleSubtitle
+		for _, track := range tracks {
+			if !track.External {
+				kept = append(kept, track)
+			}
+		}
+		return kept
+	}
+	left, right := inside(before.Subtitles), inside(after.Subtitles)
+	if len(left) != len(right) {
+		return false
+	}
+	for at, track := range left {
+		other := right[at]
+		if track.SourceIndex != other.SourceIndex || track.Language != other.Language || track.Available != other.Available ||
+			track.Forced != other.Forced || track.HearingImpaired != other.HearingImpaired {
+			return false
+		}
+	}
+	return true
+}
+
+// keepPlannedMedia is a renewal of a grant whose sidecars changed since its MP4 was
+// made: the grant stays as it was planned (its plan signature, its manifest and its
+// source description, so that the track indexes in the manifest still mean what they
+// meant and a file is only ever built or served for the plan it was promised), with
+// the new expiry and the item as it is now.
+func keepPlannedMedia(previous, renewed offlineGrant) offlineGrant {
+	kept := previous
+	kept.ExpiresAt = renewed.ExpiresAt
+	kept.Manifest.ExpiresAt = renewed.ExpiresAt
+	library := previous.Manifest.Item.Library
+	kept.Manifest.Item = renewed.Manifest.Item
+	kept.Manifest.Item.Library = library
+	// A copy, so that the renewal's edits to the manifest never touch the stored one.
+	apple := *previous.Manifest.Apple
+	kept.Manifest.Apple = &apple
+	return kept
+}
+
 func appleSummaryOf(plan repackage.Plan) *OfflineAppleSummary {
 	summary := &OfflineAppleSummary{EstimatedSizeBytes: plan.EstimatedBytes, VideoConverted: plan.Video.Converted}
 	for _, track := range plan.Audio {
