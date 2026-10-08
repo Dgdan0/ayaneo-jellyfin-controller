@@ -6,12 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -98,6 +100,8 @@ type appleUpstream struct {
 	subtitleCalls   []string
 	subtitleToken   []string
 	subtitleMissing bool
+	// sidecars are the subtitle files beside the film, by Jellyfin's index for them.
+	sidecars map[int]string
 	// hidePaths is a profile that is not an administrator's: its own reads of an
 	// item leave out the files' paths, and only a read with no user has them.
 	hidePaths   bool
@@ -106,7 +110,7 @@ type appleUpstream struct {
 
 func newAppleUpstream(t *testing.T, sample appleSample) *appleUpstream {
 	t.Helper()
-	u := &appleUpstream{t: t, sample: sample, itemType: "Movie"}
+	u := &appleUpstream{t: t, sample: sample, itemType: "Movie", sidecars: map[int]string{5: hebrewSidecar}}
 	u.source = u.defaultSource()
 	u.server = httptest.NewServer(http.HandlerFunc(u.serve))
 	t.Cleanup(u.server.Close)
@@ -129,6 +133,42 @@ func (u *appleUpstream) defaultSource() map[string]any {
 		},
 	}
 }
+
+// appleSubtitlePath is a request for any item's subtitle: the fake serves the same
+// sidecars for the three films it holds.
+var appleSubtitlePath = regexp.MustCompile(`/Subtitles/(\d+)/0/Stream\.([a-z]+)$`)
+
+const hebrewSidecar = "1\n00:00:00,500 --> 00:00:02,000\nשלום עולם\n"
+
+// withSidecars renumbers the film the way Jellyfin 10.11 does: the subtitle files
+// beside it come first (index 0, 1, …) and the file's own streams follow, so the
+// video that is stream 0 of the MKV is stream 1 or 2 to Jellyfin. The first is
+// listed first; the film's own streams are the default ones, shifted.
+func (u *appleUpstream) withSidecars(files ...appleSidecar) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	streams := []any{}
+	u.sidecars = map[int]string{}
+	for at, file := range files {
+		u.sidecars[at] = file.text
+		streams = append(streams, map[string]any{"Index": at, "Type": "Subtitle", "Codec": "subrip", "Language": file.language,
+			"DisplayTitle": file.language + " - SubRip", "IsExternal": true,
+			"DeliveryUrl": fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/0/Stream.srt", offlineItemID, offlineSourceID, at)})
+	}
+	shift := len(files)
+	for _, stream := range u.defaultSource()["MediaStreams"].([]any) {
+		stream := stream.(map[string]any)
+		if external, _ := stream["IsExternal"].(bool); external {
+			continue
+		}
+		stream["Index"] = stream["Index"].(int) + shift
+		streams = append(streams, stream)
+	}
+	u.source["MediaStreams"] = streams
+	u.source["DefaultAudioStreamIndex"] = 2 + shift
+}
+
+type appleSidecar struct{ language, text string }
 
 // change edits the media source Jellyfin reports.
 func (u *appleUpstream) change(edit func(source map[string]any)) {
@@ -189,17 +229,20 @@ func (u *appleUpstream) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"Items":[`+u.itemJSON(offlineItemID)+`]}`)
 	case r.Method == http.MethodGet && r.URL.Path == "/Shows/NextUp":
 		_, _ = io.WriteString(w, `{"Items":[{"Id":"`+offlineItemID+`"}]}`)
-	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/Subtitles/5/0/Stream.srt"):
+	case r.Method == http.MethodGet && appleSubtitlePath.MatchString(r.URL.Path):
+		match := appleSubtitlePath.FindStringSubmatch(r.URL.Path)
+		index, _ := strconv.Atoi(match[1])
 		u.mu.Lock()
 		u.subtitleCalls = append(u.subtitleCalls, r.URL.Path)
 		u.subtitleToken = append(u.subtitleToken, r.Header.Get("X-Emby-Token")+"|"+r.URL.RawQuery)
 		missing := u.subtitleMissing
+		body, found := u.sidecars[index]
 		u.mu.Unlock()
-		if missing {
+		if missing || !found || match[2] != "srt" {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = io.WriteString(w, "1\n00:00:00,500 --> 00:00:02,000\nשלום עולם\n")
+		_, _ = io.WriteString(w, body)
 	default:
 		http.NotFound(w, r)
 	}

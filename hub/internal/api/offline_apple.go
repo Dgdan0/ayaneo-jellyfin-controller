@@ -203,6 +203,12 @@ func appleManifestOf(grantID string, plan repackage.Plan) *OfflineApple {
 // sidecars beside it are left out, since Bazarr adds, replaces and removes them for
 // as long as the download is kept, which does not make it another file (#45).
 // Labels, sizes and the picture's width are not what the plan signs either.
+//
+// Streams are compared by where they sit inside the file, not by Jellyfin's number
+// for them: Jellyfin numbers a file's sidecar subtitles first, so every stream of
+// the file moves up by one when Bazarr adds a sidecar, and moves down when it
+// removes one. Each manifest's own source description says which of its tracks were
+// sidecars (repackage.FileIndexes).
 func appleSameMedia(previous, renewed offlineGrant) bool {
 	if previous.Format != offlineFormatApple || renewed.Format != offlineFormatApple ||
 		previous.Manifest.Apple == nil || renewed.Manifest.Apple == nil ||
@@ -210,16 +216,19 @@ func appleSameMedia(previous, renewed offlineGrant) bool {
 		return false
 	}
 	before, after := previous.Manifest.Apple, renewed.Manifest.Apple
+	beforeAt, afterAt := sourceFileIndexes(previous.Manifest.Source.Tracks), sourceFileIndexes(renewed.Manifest.Source.Tracks)
 	if before.Container != after.Container ||
-		before.Video.SourceIndex != after.Video.SourceIndex || before.Video.OutputCodec != after.Video.OutputCodec ||
+		inFile(beforeAt, before.Video.SourceIndex) != inFile(afterAt, after.Video.SourceIndex) ||
+		before.Video.OutputCodec != after.Video.OutputCodec ||
 		before.Video.Tag != after.Video.Tag || before.Video.Converted != after.Video.Converted ||
 		len(before.Audio) != len(after.Audio) {
 		return false
 	}
 	for at, track := range before.Audio {
 		other := after.Audio[at]
-		if track.SourceIndex != other.SourceIndex || track.Language != other.Language || track.OutputCodec != other.OutputCodec ||
-			track.OutputChannels != other.OutputChannels || track.Converted != other.Converted || track.Default != other.Default {
+		if inFile(beforeAt, track.SourceIndex) != inFile(afterAt, other.SourceIndex) || track.Language != other.Language ||
+			track.OutputCodec != other.OutputCodec || track.OutputChannels != other.OutputChannels ||
+			track.Converted != other.Converted || track.Default != other.Default {
 			return false
 		}
 	}
@@ -238,7 +247,7 @@ func appleSameMedia(previous, renewed offlineGrant) bool {
 	}
 	for at, track := range left {
 		other := right[at]
-		if track.SourceIndex != other.SourceIndex || track.Language != other.Language || track.Available != other.Available ||
+		if inFile(beforeAt, track.SourceIndex) != inFile(afterAt, other.SourceIndex) || track.Language != other.Language || track.Available != other.Available ||
 			track.Forced != other.Forced || track.HearingImpaired != other.HearingImpaired {
 			return false
 		}

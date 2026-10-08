@@ -12,6 +12,10 @@ import (
 // Renewing an Apple grant when only the sidecar subtitles changed (#45). Bazarr adds,
 // replaces and removes sidecars for as long as a download is kept, and that does not
 // make the MP4 another file; a real change to the file still does.
+//
+// Jellyfin 10.11 numbers the sidecars first, so a sidecar added or removed moves every
+// stream of the film, the video and the audio too. The fake numbers them that way (and
+// as older Jellyfins did, last, where a test says so).
 
 func (r *subtitleRig) expire() {
 	r.t.Helper()
@@ -41,29 +45,23 @@ func (r *subtitleRig) renewed(t *testing.T) OfflineManifest {
 	return manifest
 }
 
-func TestASidecarAddedAfterTheDownloadStillRenewsAndItsSubtitlesCanBeRefreshed(t *testing.T) {
+func TestASidecarAddedInFrontOfTheFilesStreamsStillRenewsAndItsSubtitlesCanBeRefreshed(t *testing.T) {
 	rig := newSubtitleRig(t)
 	planned, _ := rig.server.offline.get(rig.grant.ID)
+	before := rig.list()
 	rig.expire()
 	// The grant has expired, so the app cannot list its subtitles until it renews.
 	if got := rig.get(rig.listPath()); got.Code != http.StatusGone {
 		t.Fatalf("list on an expired grant = %d", got.Code)
 	}
 
-	// Bazarr finds French, and Jellyfin numbers it before the Hebrew sidecar.
-	rig.upstream.change(func(source map[string]any) {
-		source["MediaStreams"] = []any{
-			map[string]any{"Index": 0, "Type": "Video", "Codec": "h264", "Width": 1920, "Height": 1080, "PixelFormat": "yuv420p"},
-			map[string]any{"Index": 1, "Type": "Audio", "Codec": "aac", "Language": "eng", "Channels": 2, "IsDefault": true},
-			subStream(2, "subrip", "eng", "Dialogue", "default"),
-			subStream(3, "ass", "eng", "Signs", "forced"),
-			subStream(4, "hdmv_pgs_subtitle", "fre", ""),
-			subStream(5, "subrip", "fra", "", "external"),
-			subStream(6, "subrip", "heb", "", "external"),
-		}
-	})
-	rig.upstream.setFile(6, rig.upstream.files[5])
-	rig.upstream.setFile(5, subtitleFile{text: "1\n00:00:01,000 --> 00:00:02,000\nBonjour\n"})
+	// Bazarr finds French, and Jellyfin numbers it before the Hebrew sidecar: the video,
+	// the audio and every subtitle of the file move up by one.
+	videoWas := rig.upstream.index("video")
+	rig.upstream.addSidecar(0, sidecar("fra", "subrip", "fra", "", subtitleFile{text: "1\n00:00:01,000 --> 00:00:02,000\nBonjour\n"}))
+	if rig.upstream.index("video") != videoWas+1 {
+		t.Fatal("the fake did not number the sidecar first")
+	}
 
 	manifest := rig.renewed(t)
 	if manifest.GrantID != rig.grant.ID || manifest.Format != "apple" || manifest.Apple == nil ||
@@ -71,12 +69,13 @@ func TestASidecarAddedAfterTheDownloadStillRenewsAndItsSubtitlesCanBeRefreshed(t
 		manifest.ExpiresAt <= time.Now().UnixMilli() || len(manifest.Subtitles) != 0 {
 		t.Fatalf("renewed = %+v", manifest)
 	}
-	// The manifest is still the one the MP4 was promised under: its subtitle options
-	// and the indexes they name are those of the file the app has.
+	// The manifest is still the one the MP4 was promised under: its subtitle options and
+	// the indexes they name are those of the file the app has, the video still the
+	// source's stream 1.
 	if len(manifest.Apple.Subtitles) != len(planned.Manifest.Apple.Subtitles) ||
-		manifest.Apple.Subtitles[3].SourceIndex != 5 || manifest.Apple.Subtitles[3].Language != "heb" ||
-		manifest.Source.Tracks[5].Language != "heb" {
-		t.Errorf("the renewed manifest was rewritten: %+v", manifest.Apple.Subtitles)
+		manifest.Apple.Subtitles[0].SourceIndex != 0 || manifest.Apple.Subtitles[0].Language != "heb" ||
+		manifest.Apple.Video.SourceIndex != videoWas || manifest.Source.Tracks[0].Language != "heb" || !manifest.Source.Tracks[0].External {
+		t.Errorf("the renewed manifest was rewritten: %+v", manifest.Apple)
 	}
 
 	// The plan the build checks a file against is the one stored, untouched.
@@ -85,13 +84,17 @@ func TestASidecarAddedAfterTheDownloadStillRenewsAndItsSubtitlesCanBeRefreshed(t
 		t.Errorf("stored plan %q, want %q, and a new expiry (%d)", stored.PlanSignature, planned.PlanSignature, stored.ExpiresAt)
 	}
 
-	// And the subtitles can be refreshed: French is there, Hebrew has kept its place.
+	// And the subtitles can be refreshed: French is there, and the tracks already kept
+	// have their keys, their signatures and their places in the MP4.
 	list := rig.list()
-	if got := keysOf(list); !slices.Equal(got, []string{"emb-2", "emb-3", "ext-fra", "ext-heb"}) {
+	if got := keysOf(list); !slices.Equal(got, []string{"ext-fra", "ext-heb", "emb-2", "emb-3"}) {
 		t.Fatalf("keys after the renewal = %v", got)
 	}
-	if hebrew := rig.mustTrack(list, "ext-heb"); hebrew.MP4Index == nil || *hebrew.MP4Index != 2 {
-		t.Errorf("hebrew = %+v", hebrew)
+	for _, key := range keysOf(before) {
+		now, was := rig.mustTrack(list, key), rig.mustTrack(before, key)
+		if now.Signature != was.Signature || *now.MP4Index != *was.MP4Index {
+			t.Errorf("%s was %+v and is %+v", key, was, now)
+		}
 	}
 	if rig.mustTrack(list, "ext-fra").MP4Index != nil {
 		t.Error("French is not in the MP4 the app has")
@@ -99,33 +102,53 @@ func TestASidecarAddedAfterTheDownloadStillRenewsAndItsSubtitlesCanBeRefreshed(t
 }
 
 func TestASidecarRemovedOrReplacedAfterTheDownloadStillRenews(t *testing.T) {
-	t.Run("removed", func(t *testing.T) {
+	t.Run("removed, so every stream of the film moves down", func(t *testing.T) {
 		rig := newSubtitleRig(t)
+		before := rig.list()
 		rig.expire()
-		rig.upstream.change(func(source map[string]any) {
-			streams := source["MediaStreams"].([]any)
-			source["MediaStreams"] = streams[:len(streams)-1]
-		})
+		rig.upstream.dropSidecar("heb")
 		rig.renewed(t)
-		if got := keysOf(rig.list()); !slices.Equal(got, []string{"emb-2", "emb-3"}) {
+		list := rig.list()
+		if got := keysOf(list); !slices.Equal(got, []string{"emb-2", "emb-3"}) {
 			t.Errorf("keys = %v", got)
+		}
+		for _, key := range keysOf(list) {
+			if rig.mustTrack(list, key).Signature != rig.mustTrack(before, key).Signature {
+				t.Errorf("%s changed because a sidecar went", key)
+			}
 		}
 	})
 	t.Run("replaced", func(t *testing.T) {
 		rig := newSubtitleRig(t)
 		rig.expire()
-		rig.upstream.setFile(5, subtitleFile{text: "1\n00:00:01,000 --> 00:00:02,000\nמתוקן\n"})
+		rig.upstream.setFile("heb", subtitleFile{text: "1\n00:00:01,000 --> 00:00:02,000\nמתוקן\n"})
 		rig.renewed(t)
 	})
 	t.Run("a sidecar of another kind in its place", func(t *testing.T) {
 		rig := newSubtitleRig(t)
 		rig.expire()
-		rig.upstream.change(func(source map[string]any) {
-			streams := source["MediaStreams"].([]any)
-			streams[len(streams)-1] = subStream(5, "ass", "heb", "", "external", "forced")
-		})
+		rig.upstream.dropSidecar("heb")
+		rig.upstream.addSidecar(0, sidecar("heb", "ass", "heb", "", subtitleFile{text: assEnglish}, "forced"))
 		rig.renewed(t)
 	})
+	t.Run("one taken away and another put in front", func(t *testing.T) {
+		rig := newSubtitleRig(t)
+		rig.expire()
+		rig.upstream.dropSidecar("heb")
+		rig.upstream.addSidecar(0, sidecar("fra", "subrip", "fra", "", subtitleFile{text: srtEnglish}))
+		rig.upstream.addSidecar(1, sidecar("spa", "subrip", "spa", "", subtitleFile{text: srtEnglish}))
+		rig.renewed(t)
+	})
+}
+
+func TestAJellyfinThatNumbersSidecarsLastStillRenewsPastANewSidecar(t *testing.T) {
+	rig := newNumberedSubtitleRig(t, true)
+	rig.expire()
+	rig.upstream.addSidecar(-1, sidecar("fra", "subrip", "fra", "", subtitleFile{text: srtEnglish}))
+	rig.renewed(t)
+	if got := keysOf(rig.list()); !slices.Equal(got, []string{"emb-2", "emb-3", "ext-heb", "ext-fra"}) {
+		t.Errorf("keys = %v", got)
+	}
 }
 
 func TestARenewalOfAnUnchangedGrantKeepsItsPlan(t *testing.T) {
@@ -134,78 +157,86 @@ func TestARenewalOfAnUnchangedGrantKeepsItsPlan(t *testing.T) {
 	before, _ := rig.server.offline.get(rig.grant.ID)
 	manifest := rig.renewed(t)
 	after, _ := rig.server.offline.get(rig.grant.ID)
-	if after.PlanSignature != before.PlanSignature || manifest.Apple == nil || manifest.Apple.Subtitles[3].Language != "heb" {
+	if after.PlanSignature != before.PlanSignature || manifest.Apple == nil || manifest.Apple.Subtitles[0].Language != "heb" {
 		t.Errorf("renewed = %+v", manifest)
 	}
 }
 
-func TestARealChangeToTheFileStillRefusesTheRenewal(t *testing.T) {
-	cases := map[string]func(source map[string]any){
-		"the file is another size": func(source map[string]any) { source["Size"] = 999 },
-		"another audio track": func(source map[string]any) {
-			source["MediaStreams"] = append(source["MediaStreams"].([]any),
-				map[string]any{"Index": 6, "Type": "Audio", "Codec": "ac3", "Language": "heb", "Channels": 2})
+func TestARealChangeToTheFileStillRefusesTheRenewalEvenWhenSidecarsMoveEveryIndex(t *testing.T) {
+	cases := map[string]func(u *subtitleUpstream){
+		"the file is another size": func(u *subtitleUpstream) { u.source["Size"] = 999 },
+		"another audio track": func(u *subtitleUpstream) {
+			u.inside = append(u.inside, filePart("audio2", map[string]any{"Type": "Audio", "Codec": "ac3", "Language": "heb", "Channels": 2}))
 		},
-		"an audio track is gone": func(source map[string]any) {
-			streams := source["MediaStreams"].([]any)
-			source["MediaStreams"] = append(append([]any{}, streams[:1]...), streams[2:]...)
+		"an audio track is gone": func(u *subtitleUpstream) { u.inside = slices.Delete(u.inside, 1, 2) },
+		"an audio track is converted differently": func(u *subtitleUpstream) {
+			u.inside[1].info["Codec"] = "dts"
 		},
-		"an audio track is converted differently": func(source map[string]any) {
-			source["MediaStreams"].([]any)[1].(map[string]any)["Codec"] = "dts"
+		"another default audio track": func(u *subtitleUpstream) {
+			u.inside[1].info["IsDefault"] = false
+			u.inside = append(u.inside, filePart("audio2", map[string]any{"Type": "Audio", "Codec": "aac", "Language": "heb", "Channels": 2, "IsDefault": true}))
 		},
-		"another default audio track": func(source map[string]any) {
-			source["MediaStreams"] = append(source["MediaStreams"].([]any),
-				map[string]any{"Index": 6, "Type": "Audio", "Codec": "aac", "Language": "heb", "Channels": 2})
-			source["DefaultAudioStreamIndex"] = 6
+		"a stream was added ahead of the audio": func(u *subtitleUpstream) {
+			u.inside = slices.Insert(u.inside, 1, filePart("font", map[string]any{"Type": "Attachment", "Codec": "ttf"}))
 		},
-		"the video is another codec": func(source map[string]any) {
-			source["MediaStreams"].([]any)[0].(map[string]any)["Codec"] = "mpeg4"
+		"the audio track moved in the file": func(u *subtitleUpstream) {
+			u.inside[0], u.inside[1] = u.inside[1], u.inside[0]
 		},
-		"the video needs converting": func(source map[string]any) {
-			source["MediaStreams"].([]any)[0].(map[string]any)["PixelFormat"] = "yuv420p10le"
+		"the video is another codec": func(u *subtitleUpstream) { u.inside[0].info["Codec"] = "mpeg4" },
+		"the video needs converting": func(u *subtitleUpstream) { u.inside[0].info["PixelFormat"] = "yuv420p10le" },
+		"another container":          func(u *subtitleUpstream) { u.source["Container"] = "avi" },
+		"a subtitle inside the file is added": func(u *subtitleUpstream) {
+			u.inside = append(u.inside, embedded("spa", "subrip", "spa", "", subtitleFile{text: srtEnglish}))
 		},
-		"another container": func(source map[string]any) { source["Container"] = "avi" },
-		"a subtitle inside the file is added": func(source map[string]any) {
-			source["MediaStreams"] = append(source["MediaStreams"].([]any), subStream(6, "subrip", "spa", ""))
+		"a subtitle inside the file is gone": func(u *subtitleUpstream) { u.inside = slices.Delete(u.inside, 3, 4) },
+		"a subtitle inside the file is forced now": func(u *subtitleUpstream) {
+			u.inside[2].info["IsForced"] = true
 		},
-		"a subtitle inside the file is gone": func(source map[string]any) {
-			streams := source["MediaStreams"].([]any)
-			source["MediaStreams"] = append(append([]any{}, streams[:3]...), streams[4:]...)
-		},
-		"a subtitle inside the file is forced now": func(source map[string]any) {
-			source["MediaStreams"].([]any)[2].(map[string]any)["IsForced"] = true
-		},
-		"the version it was made from is not there": func(source map[string]any) { source["Id"] = "another-version" },
+		"the version it was made from is not there": func(u *subtitleUpstream) { u.source["Id"] = "another-version" },
 	}
 	for name, change := range cases {
-		t.Run(name, func(t *testing.T) {
-			rig := newSubtitleRig(t)
-			rig.expire()
-			stored, _ := rig.server.offline.get(rig.grant.ID)
-			rig.upstream.change(change)
-			response := rig.renew()
-			failure := rig.errorOf(response)
-			if response.Code != http.StatusConflict || failure.Code != "source_changed" {
-				t.Fatalf("renew = %d %+v, want 409 source_changed", response.Code, failure)
+		for _, withSidecar := range []bool{false, true} {
+			label := name
+			if withSidecar {
+				label += ", and a sidecar arrived as well"
 			}
-			after, _ := rig.server.offline.get(rig.grant.ID)
-			if after.ExpiresAt != stored.ExpiresAt || after.PlanSignature != stored.PlanSignature {
-				t.Error("a refused renewal changed the grant")
-			}
-		})
+			t.Run(label, func(t *testing.T) {
+				rig := newSubtitleRig(t)
+				rig.expire()
+				stored, _ := rig.server.offline.get(rig.grant.ID)
+				rig.upstream.edit(change)
+				if withSidecar {
+					rig.upstream.addSidecar(0, sidecar("fra", "subrip", "fra", "", subtitleFile{text: srtEnglish}))
+				}
+				response := rig.renew()
+				failure := rig.errorOf(response)
+				if response.Code != http.StatusConflict || failure.Code != "source_changed" {
+					t.Fatalf("renew = %d %+v, want 409 source_changed", response.Code, failure)
+				}
+				after, _ := rig.server.offline.get(rig.grant.ID)
+				if after.ExpiresAt != stored.ExpiresAt || after.PlanSignature != stored.PlanSignature {
+					t.Error("a refused renewal changed the grant")
+				}
+			})
+		}
 	}
 }
 
-func TestASidecarChangeDoesNotHideARealChangeMadeAtTheSameTime(t *testing.T) {
+func TestAStreamAddedAheadOfTheAudioRefusesTheRenewalEvenWhenNoSubtitleMovesWithIt(t *testing.T) {
 	rig := newSubtitleRig(t)
+	// A film with no subtitle inside its file, so that the audio is all that can move.
+	rig.upstream.edit(func(u *subtitleUpstream) { u.inside = u.inside[:2] })
+	rig.grant = rig.makeGrant(offlineFormatApple, "movie-without-embedded-subtitles")
 	rig.expire()
-	rig.upstream.addStream(subStream(6, "subrip", "fra", "", "external"), subtitleFile{text: srtEnglish})
-	rig.upstream.change(func(source map[string]any) {
-		source["MediaStreams"] = append(source["MediaStreams"].([]any),
-			map[string]any{"Index": 7, "Type": "Audio", "Codec": "ac3", "Language": "heb", "Channels": 2})
+	rig.upstream.addSidecar(0, sidecar("fra", "subrip", "fra", "", subtitleFile{text: srtEnglish}))
+	rig.renewed(t) // a sidecar in front moves every stream, and that alone is not a change
+
+	rig.upstream.edit(func(u *subtitleUpstream) {
+		u.inside = slices.Insert(u.inside, 1, filePart("font", map[string]any{"Type": "Attachment", "Codec": "ttf"}))
 	})
+	rig.expire()
 	if response := rig.renew(); response.Code != http.StatusConflict {
-		t.Errorf("renew = %d, want 409", response.Code)
+		t.Errorf("renew after a stream was added ahead of the audio = %d, want 409", response.Code)
 	}
 }
 
@@ -226,9 +257,10 @@ func TestAnOriginalGrantRenewsAsItAlwaysDid(t *testing.T) {
 	}
 }
 
-// On a real download: a sidecar arrives after the MP4 was made, the grant renews, and
-// the file the hub holds is still the one that was made (nothing is rebuilt, since
-// the plan the build checks against is the one stored), while a rebuild would refuse.
+// On a real download numbered the old way (the sidecar last): a sidecar arrives after
+// the MP4 was made, the grant renews, and the file the hub holds is still the one that
+// was made (nothing is rebuilt, since the plan the build checks against is the one
+// stored).
 func TestAfterARealDownloadASidecarAddedLaterRenewsAndTheMP4IsKept(t *testing.T) {
 	rig := newAppleRig(t, nil)
 	manifest, ready := rig.ready(t)

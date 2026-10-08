@@ -23,9 +23,14 @@ import (
 	"ayaneohub/internal/webvtt"
 )
 
-// An Apple download's kept subtitles (#45). These tests need no ffmpeg: a grant is
-// made the way a prepare makes it, over a small file on disk, and the fake Jellyfin
-// holds the subtitle files and says what it was asked for.
+// An Apple download's kept subtitles (#45). These tests need no ffmpeg except where
+// they say so: a grant is made the way a prepare makes it, over a small file on disk,
+// and the fake Jellyfin holds the subtitle files and says what it was asked for.
+//
+// The fake numbers streams as Jellyfin 10.11 does: the sidecar subtitles come first
+// (0, 1, …) and the file's own streams follow, so adding a sidecar moves every stream
+// of the file up by one. (Measured on a Drake & Josh episode: subtitle 0 and 1 are
+// the .srt files beside it, video 2, audio 3, where the MP4 holds the video at 0.)
 
 const (
 	hebrewWords = "שלום עולם"
@@ -70,36 +75,37 @@ type subtitleFile struct {
 	refuses []string
 }
 
-type subtitleUpstream struct {
-	t      *testing.T
-	server *httptest.Server
-
-	mu       sync.Mutex
-	source   map[string]any
-	files    map[int]subtitleFile
-	asked    []string // "index:format", in order
-	itemGone bool
-	delay    time.Duration
-	inFlight int
-	peak     int
+// fakeStream is one stream of the film. Its name is what a test calls it and what
+// the fake records when Jellyfin is asked for its text.
+type fakeStream struct {
+	name string
+	info map[string]any // Jellyfin's fields, without the index
+	file subtitleFile
 }
 
-func subStream(index int, codec, language, title string, flags ...string) map[string]any {
-	stream := map[string]any{"Index": index, "Type": "Subtitle", "Codec": codec, "Language": language, "Title": title,
+func filePart(name string, info map[string]any) fakeStream { return fakeStream{name: name, info: info} }
+
+// embedded is a subtitle inside the film's file; sidecar is one beside it.
+func embedded(name, codec, language, title string, file subtitleFile, flags ...string) fakeStream {
+	info := map[string]any{"Type": "Subtitle", "Codec": codec, "Language": language, "Title": title,
 		"DisplayTitle": strings.TrimSpace(language + " - " + codec)}
 	for _, flag := range flags {
 		switch flag {
 		case "external":
-			stream["IsExternal"] = true
+			info["IsExternal"] = true
 		case "forced":
-			stream["IsForced"] = true
+			info["IsForced"] = true
 		case "default":
-			stream["IsDefault"] = true
+			info["IsDefault"] = true
 		case "hi":
-			stream["IsHearingImpaired"] = true
+			info["IsHearingImpaired"] = true
 		}
 	}
-	return stream
+	return fakeStream{name: name, info: info, file: file}
+}
+
+func sidecar(name, codec, language, title string, file subtitleFile, flags ...string) fakeStream {
+	return embedded(name, codec, language, title, file, append([]string{"external"}, flags...)...)
 }
 
 const srtEnglish = "1\n00:00:01,000 --> 00:00:02,000\nHello there\n"
@@ -109,30 +115,80 @@ const assEnglish = "[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer
 
 const vttEnglish = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nAlready WebVTT\n"
 
-// newSubtitleUpstream is a Jellyfin whose film has an English SRT inside the file
-// (2), a forced ASS track inside it (3), a French picture subtitle (4) and a Hebrew
-// SRT beside it (5), which holds Windows-1255 bytes on its disk.
-func newSubtitleUpstream(t *testing.T, path string) *subtitleUpstream {
+func hebrewFile() subtitleFile {
+	return subtitleFile{raw: windows1255("1\n00:00:00,500 --> 00:00:02,000\n" + hebrewWords + "\n")}
+}
+
+type subtitleUpstream struct {
+	t      *testing.T
+	server *httptest.Server
+
+	mu     sync.Mutex
+	source map[string]any
+	// sidecars are the subtitle files beside the film; inside are the streams of the
+	// file itself. Jellyfin 10.11 numbers the sidecars first; sidecarsLast is the
+	// older numbering.
+	sidecars     []fakeStream
+	inside       []fakeStream
+	sidecarsLast bool
+	asked        []string // "name:format", in order
+	itemGone     bool
+	delay        time.Duration
+	inFlight     int
+	peak         int
+}
+
+// newSubtitleUpstream is a Jellyfin whose film has a Hebrew SRT beside it (which holds
+// Windows-1255 bytes on its disk) and, inside the file, the video, an AAC track, an
+// English SRT, a forced ASS track and a French picture subtitle. Numbered as 10.11
+// does, they are: Hebrew 0, video 1, audio 2, English 3, signs 4, French 5. Inside the
+// file they are video 0, audio 1, English 2, signs 3, French 4.
+func newSubtitleUpstream(t *testing.T, path string, sidecarsLast bool) *subtitleUpstream {
 	t.Helper()
-	u := &subtitleUpstream{t: t, files: map[int]subtitleFile{}}
+	u := &subtitleUpstream{t: t, sidecarsLast: sidecarsLast}
 	u.source = map[string]any{
 		"Id": offlineSourceID, "Name": "Original 1080p", "Path": path, "Container": "mkv", "Size": 123456,
-		"Bitrate": 8_000_000, "RunTimeTicks": int64(3 * 10_000_000), "DefaultAudioStreamIndex": 1,
-		"MediaStreams": []any{
-			map[string]any{"Index": 0, "Type": "Video", "Codec": "h264", "Width": 1920, "Height": 1080, "PixelFormat": "yuv420p"},
-			map[string]any{"Index": 1, "Type": "Audio", "Codec": "aac", "Language": "eng", "Channels": 2, "IsDefault": true},
-			subStream(2, "subrip", "eng", "Dialogue", "default"),
-			subStream(3, "ass", "eng", "Signs", "forced"),
-			subStream(4, "hdmv_pgs_subtitle", "fre", ""),
-			subStream(5, "subrip", "heb", "", "external"),
-		},
+		"Bitrate": 8_000_000, "RunTimeTicks": int64(3 * 10_000_000),
 	}
-	u.files[2] = subtitleFile{text: srtEnglish}
-	u.files[3] = subtitleFile{text: assEnglish}
-	u.files[5] = subtitleFile{raw: windows1255("1\n00:00:00,500 --> 00:00:02,000\n" + hebrewWords + "\n")}
+	u.sidecars = []fakeStream{sidecar("heb", "subrip", "heb", "", hebrewFile())}
+	u.inside = []fakeStream{
+		filePart("video", map[string]any{"Type": "Video", "Codec": "h264", "Width": 1920, "Height": 1080, "PixelFormat": "yuv420p"}),
+		filePart("audio", map[string]any{"Type": "Audio", "Codec": "aac", "Language": "eng", "Channels": 2, "IsDefault": true}),
+		embedded("eng", "subrip", "eng", "Dialogue", subtitleFile{text: srtEnglish}, "default"),
+		embedded("signs", "ass", "eng", "Signs", subtitleFile{text: assEnglish}, "forced"),
+		embedded("fre", "hdmv_pgs_subtitle", "fre", "", subtitleFile{}),
+	}
 	u.server = httptest.NewServer(http.HandlerFunc(u.serve))
 	t.Cleanup(u.server.Close)
 	return u
+}
+
+// streams is the film's streams in Jellyfin's order. The caller holds the lock.
+func (u *subtitleUpstream) streams() []fakeStream {
+	if u.sidecarsLast {
+		return append(slices.Clone(u.inside), u.sidecars...)
+	}
+	return append(slices.Clone(u.sidecars), u.inside...)
+}
+
+// index is Jellyfin's number for a stream today.
+func (u *subtitleUpstream) index(name string) int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for at, stream := range u.streams() {
+		if stream.name == name {
+			return at
+		}
+	}
+	u.t.Fatalf("the fake film has no stream called %q", name)
+	return -1
+}
+
+// edit changes the film under the lock; it must not call the locking methods.
+func (u *subtitleUpstream) edit(change func(u *subtitleUpstream)) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	change(u)
 }
 
 func (u *subtitleUpstream) change(edit func(source map[string]any)) {
@@ -141,27 +197,64 @@ func (u *subtitleUpstream) change(edit func(source map[string]any)) {
 	edit(u.source)
 }
 
-// addStream puts a subtitle stream into the source at its index.
-func (u *subtitleUpstream) addStream(stream map[string]any, file subtitleFile) {
+// addSidecar puts a subtitle file beside the film at a place in the order Jellyfin
+// numbers them (negative: after the others).
+func (u *subtitleUpstream) addSidecar(at int, stream fakeStream) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	streams := u.source["MediaStreams"].([]any)
-	u.source["MediaStreams"] = append(streams, stream)
-	u.files[stream["Index"].(int)] = file
+	if at < 0 || at > len(u.sidecars) {
+		at = len(u.sidecars)
+	}
+	u.sidecars = slices.Insert(u.sidecars, at, stream)
 }
 
-func (u *subtitleUpstream) setFile(index int, file subtitleFile) {
+func (u *subtitleUpstream) dropSidecar(name string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.files[index] = file
+	u.sidecars = slices.DeleteFunc(u.sidecars, func(stream fakeStream) bool { return stream.name == name })
+}
+
+func (u *subtitleUpstream) setFile(name string, file subtitleFile) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for _, list := range [][]fakeStream{u.sidecars, u.inside} {
+		for at := range list {
+			if list[at].name == name {
+				list[at].file = file
+				return
+			}
+		}
+	}
+	u.t.Fatalf("the fake film has no stream called %q", name)
 }
 
 func (u *subtitleUpstream) itemJSON() string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	streams := u.streams()
+	list := make([]any, 0, len(streams))
+	defaultAudio := -1
+	for at, stream := range streams {
+		info := map[string]any{"Index": at}
+		for key, value := range stream.info {
+			info[key] = value
+		}
+		if stream.info["Type"] == "Audio" && stream.info["IsDefault"] == true && defaultAudio < 0 {
+			defaultAudio = at
+		}
+		list = append(list, info)
+	}
+	source := map[string]any{}
+	for key, value := range u.source {
+		source[key] = value
+	}
+	source["MediaStreams"] = list
+	if defaultAudio >= 0 {
+		source["DefaultAudioStreamIndex"] = defaultAudio
+	}
 	document := map[string]any{
 		"Id": offlineItemID, "Name": "Film", "Type": "Movie", "RunTimeTicks": int64(3 * 10_000_000),
-		"MediaSources": []any{u.source},
+		"MediaSources": []any{source},
 	}
 	body, err := json.Marshal(document)
 	if err != nil {
@@ -194,8 +287,15 @@ func (u *subtitleUpstream) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	index, _ := strconv.Atoi(match[1])
 	u.mu.Lock()
-	u.asked = append(u.asked, match[1]+":"+match[2])
-	file, found := u.files[index]
+	streams := u.streams()
+	found := index >= 0 && index < len(streams) && streams[index].info["Type"] == "Subtitle"
+	var stream fakeStream
+	if found {
+		stream = streams[index]
+		u.asked = append(u.asked, stream.name+":"+match[2])
+	} else {
+		u.asked = append(u.asked, match[1]+"?:"+match[2])
+	}
 	delay := u.delay
 	u.inFlight++
 	u.peak = max(u.peak, u.inFlight)
@@ -208,6 +308,7 @@ func (u *subtitleUpstream) serve(w http.ResponseWriter, r *http.Request) {
 	if delay > 0 {
 		time.Sleep(delay)
 	}
+	file := stream.file
 	switch {
 	case !found:
 		http.NotFound(w, r)
@@ -228,12 +329,6 @@ func (u *subtitleUpstream) askedFor() []string {
 	return append([]string(nil), u.asked...)
 }
 
-func (u *subtitleUpstream) forget() {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.asked = nil
-}
-
 type subtitleRig struct {
 	t        *testing.T
 	dir      string
@@ -244,7 +339,9 @@ type subtitleRig struct {
 	grant    offlineGrant
 }
 
-func newSubtitleRig(t *testing.T) *subtitleRig {
+func newSubtitleRig(t *testing.T) *subtitleRig { return newNumberedSubtitleRig(t, false) }
+
+func newNumberedSubtitleRig(t *testing.T, sidecarsLast bool) *subtitleRig {
 	t.Helper()
 	dir := t.TempDir()
 	library := filepath.Join(dir, "library")
@@ -255,7 +352,7 @@ func newSubtitleRig(t *testing.T) *subtitleRig {
 	if err := os.WriteFile(path, []byte("not really a film"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rig := &subtitleRig{t: t, dir: dir, path: path, upstream: newSubtitleUpstream(t, path)}
+	rig := &subtitleRig{t: t, dir: dir, path: path, upstream: newSubtitleUpstream(t, path, sidecarsLast)}
 	cfg := offlineConfig(rig.upstream.server.URL, filepath.Join(dir, "registry.json"))
 	cfg.Auth.Tokens = append(cfg.Auth.Tokens, config.TokenConfig{
 		Label: "other", Raw: config.Secret("a-different-strong-token-with-more-than-32-characters"),
@@ -332,6 +429,17 @@ func keysOf(list AppleSubtitleList) []string {
 	return keys
 }
 
+// omittedAt is the omitted entry for a stream of the fake film.
+func (r *subtitleRig) omittedAt(list AppleSubtitleList, name string) *AppleSubtitleOmitted {
+	index := r.upstream.index(name)
+	for at := range list.Omitted {
+		if list.Omitted[at].SourceIndex == index {
+			return &list.Omitted[at]
+		}
+	}
+	return nil
+}
+
 // noLeak fails when a response names a file, a folder or a credential.
 func (r *subtitleRig) noLeak(body string) {
 	r.t.Helper()
@@ -366,22 +474,24 @@ func TestTheListNamesEveryTextSubtitleWithAKeyASignatureAndWhereItSitsInTheMP4(t
 	if list.GrantID != rig.grant.ID || list.Format != "apple" {
 		t.Fatalf("list = %+v", list)
 	}
-	if got := keysOf(list); !slices.Equal(got, []string{"emb-2", "emb-3", "ext-heb"}) {
-		t.Fatalf("keys = %v, want the two embedded text tracks and the Hebrew sidecar, in source order", got)
+	// Jellyfin's order: the sidecar is numbered first. The keys are those of the file's
+	// own indexes (the English track is the file's stream 2), whatever Jellyfin says.
+	if got := keysOf(list); !slices.Equal(got, []string{"ext-heb", "emb-2", "emb-3"}) {
+		t.Fatalf("keys = %v, want the Hebrew sidecar and the two embedded text tracks, in Jellyfin's order", got)
 	}
 
 	english := rig.mustTrack(list, "emb-2")
-	if english.SourceIndex != 2 || english.Language != "eng" || english.Title != "Dialogue" || english.Label != "eng - subrip" ||
+	if english.SourceIndex != 3 || english.Language != "eng" || english.Title != "Dialogue" || english.Label != "eng - subrip" ||
 		english.Codec != "subrip" || english.External || !english.Default || english.Forced || english.HearingImpaired || english.RTL ||
-		english.URL != subtitleDir+rig.grant.ID+"/subtitle-tracks/emb-2" || english.MP4Index == nil || *english.MP4Index != 0 {
-		t.Errorf("english = %+v", english)
+		english.URL != subtitleDir+rig.grant.ID+"/subtitle-tracks/emb-2" || english.MP4Index == nil || *english.MP4Index != 1 {
+		t.Errorf("english = %+v: Jellyfin's index for it is 3 (the sidecar is 0, the video 1, the audio 2), the file's is 2", english)
 	}
 	signs := rig.mustTrack(list, "emb-3")
-	if signs.Codec != "ass" || !signs.Forced || signs.Default || signs.MP4Index == nil || *signs.MP4Index != 1 {
+	if signs.SourceIndex != 4 || signs.Codec != "ass" || !signs.Forced || signs.Default || signs.MP4Index == nil || *signs.MP4Index != 2 {
 		t.Errorf("signs = %+v", signs)
 	}
 	hebrew := rig.mustTrack(list, "ext-heb")
-	if hebrew.SourceIndex != 5 || hebrew.Language != "heb" || !hebrew.External || !hebrew.RTL || hebrew.MP4Index == nil || *hebrew.MP4Index != 2 {
+	if hebrew.SourceIndex != 0 || hebrew.Language != "heb" || !hebrew.External || !hebrew.RTL || hebrew.MP4Index == nil || *hebrew.MP4Index != 0 {
 		t.Errorf("hebrew = %+v", hebrew)
 	}
 	seen := map[string]bool{}
@@ -396,7 +506,7 @@ func TestTheListNamesEveryTextSubtitleWithAKeyASignatureAndWhereItSitsInTheMP4(t
 	if len(list.Omitted) != 1 {
 		t.Fatalf("omitted = %+v", list.Omitted)
 	}
-	if french := list.Omitted[0]; french.SourceIndex != 4 || french.Language != "fra" || french.Codec != "hdmv_pgs_subtitle" ||
+	if french := list.Omitted[0]; french.SourceIndex != 5 || french.Language != "fra" || french.Codec != "hdmv_pgs_subtitle" ||
 		french.Reason != "picture_subtitle" || french.Key != "" || french.External {
 		t.Errorf("french = %+v", french)
 	}
@@ -406,7 +516,7 @@ func TestTheListNamesEveryTextSubtitleWithAKeyASignatureAndWhereItSitsInTheMP4(t
 
 	// Only the sidecar was read: an embedded track is signed without being asked for,
 	// or a film with 39 subtitle tracks would make Jellyfin extract them all.
-	if asked := rig.upstream.askedFor(); !slices.Equal(asked, []string{"5:srt"}) {
+	if asked := rig.upstream.askedFor(); !slices.Equal(asked, []string{"heb:srt"}) {
 		t.Errorf("Jellyfin was asked for %v, want only the sidecar", asked)
 	}
 }
@@ -437,6 +547,10 @@ func TestATrackIsServedAsWebVTTWithItsSignatureAsTheETag(t *testing.T) {
 	if body := rig.get(subtitleDir + rig.grant.ID + "/subtitle-tracks/emb-2").Body.String(); body != "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello there\n\n" {
 		t.Errorf("english = %q", body)
 	}
+	// The embedded track was asked of Jellyfin by Jellyfin's number for it.
+	if asked := rig.upstream.askedFor(); !slices.Contains(asked, "eng:srt") || !slices.Contains(asked, "signs:ass") {
+		t.Errorf("Jellyfin was asked for %v", asked)
+	}
 
 	// An app that holds the signature is told nothing changed, and HEAD has no body.
 	hebrew := rig.mustTrack(list, "ext-heb")
@@ -459,7 +573,7 @@ func TestAWindows1255HebrewSRTReachesTheAppAsUTF8HebrewInTheOrderItWasWritten(t 
 	rig := newSubtitleRig(t)
 	// The file on the PC's disk is not UTF-8 at all; the hub has to take what Jellyfin
 	// hands over rather than read it, and must not damage it on the way.
-	raw := rig.upstream.files[5].raw
+	raw := rig.upstream.sidecars[0].file.raw
 	if len(raw) == 0 || bytes.Contains(raw, []byte(hebrewWords)) {
 		t.Fatalf("the sidecar should be held in Windows-1255, not UTF-8: %x", raw)
 	}
@@ -479,7 +593,7 @@ func TestAWindows1255HebrewSRTReachesTheAppAsUTF8HebrewInTheOrderItWasWritten(t 
 func TestAReplacedSidecarKeepsItsKeyAndChangesItsSignatureAndNothingElseMoves(t *testing.T) {
 	rig := newSubtitleRig(t)
 	before := rig.list()
-	rig.upstream.setFile(5, subtitleFile{raw: windows1255("1\n00:00:00,500 --> 00:00:02,000\nשלום עולם, מתוקן\n")})
+	rig.upstream.setFile("heb", subtitleFile{raw: windows1255("1\n00:00:00,500 --> 00:00:02,000\nשלום עולם, מתוקן\n")})
 	after := rig.list()
 	if !slices.Equal(keysOf(before), keysOf(after)) {
 		t.Fatalf("the keys changed: %v to %v", keysOf(before), keysOf(after))
@@ -504,28 +618,17 @@ func TestAReplacedSidecarKeepsItsKeyAndChangesItsSignatureAndNothingElseMoves(t 
 	}
 }
 
-func TestANewLanguageIsANewKeyThatLeavesTheOthersAloneEvenWhenIndexesMove(t *testing.T) {
+func TestANewLanguageIsANewKeyAndAnEmbeddedTrackKeepsItsKeyAndSignatureWhenJellyfinMovesItsIndex(t *testing.T) {
 	rig := newSubtitleRig(t)
 	before := rig.list()
+	englishWas := rig.mustTrack(before, "emb-2").SourceIndex
 
-	// Bazarr adds French, and Jellyfin numbers it before the Hebrew one: the Hebrew
-	// sidecar is now at index 6.
-	rig.upstream.change(func(source map[string]any) {
-		source["MediaStreams"] = []any{
-			map[string]any{"Index": 0, "Type": "Video", "Codec": "h264", "Width": 1920, "Height": 1080, "PixelFormat": "yuv420p"},
-			map[string]any{"Index": 1, "Type": "Audio", "Codec": "aac", "Language": "eng", "Channels": 2, "IsDefault": true},
-			subStream(2, "subrip", "eng", "Dialogue", "default"),
-			subStream(3, "ass", "eng", "Signs", "forced"),
-			subStream(4, "hdmv_pgs_subtitle", "fre", ""),
-			subStream(5, "subrip", "fra", "", "external"),
-			subStream(6, "subrip", "heb", "", "external"),
-		}
-	})
-	rig.upstream.setFile(6, rig.upstream.files[5])
-	rig.upstream.setFile(5, subtitleFile{text: "1\n00:00:01,000 --> 00:00:02,000\nBonjour\n"})
+	// Bazarr adds French, and Jellyfin numbers it before the Hebrew one: every stream
+	// of the file, the video and the audio included, moves up by one.
+	rig.upstream.addSidecar(0, sidecar("fra", "subrip", "fra", "", subtitleFile{text: "1\n00:00:01,000 --> 00:00:02,000\nBonjour\n"}))
 	after := rig.list()
 
-	if got := keysOf(after); !slices.Equal(got, []string{"emb-2", "emb-3", "ext-fra", "ext-heb"}) {
+	if got := keysOf(after); !slices.Equal(got, []string{"ext-fra", "ext-heb", "emb-2", "emb-3"}) {
 		t.Fatalf("keys = %v", got)
 	}
 	for _, key := range keysOf(before) {
@@ -533,11 +636,15 @@ func TestANewLanguageIsANewKeyThatLeavesTheOthersAloneEvenWhenIndexesMove(t *tes
 			t.Errorf("%s changed because another language arrived", key)
 		}
 	}
-	if moved := rig.mustTrack(after, "ext-heb"); moved.SourceIndex != 6 || moved.MP4Index == nil || *moved.MP4Index != 2 {
-		t.Errorf("the Hebrew sidecar = %+v, want index 6 and still the MP4's third subtitle", moved)
+	english := rig.mustTrack(after, "emb-2")
+	if english.SourceIndex != englishWas+1 || english.MP4Index == nil || *english.MP4Index != 1 {
+		t.Errorf("english = %+v, want Jellyfin's index %d and still the MP4's second subtitle", english, englishWas+1)
+	}
+	if moved := rig.mustTrack(after, "ext-heb"); moved.SourceIndex != 1 || moved.MP4Index == nil || *moved.MP4Index != 0 {
+		t.Errorf("the Hebrew sidecar = %+v, want index 1 and still the MP4's first subtitle", moved)
 	}
 	french := rig.mustTrack(after, "ext-fra")
-	if french.MP4Index != nil || french.Language != "fra" || french.SourceIndex != 5 {
+	if french.MP4Index != nil || french.Language != "fra" || french.SourceIndex != 0 {
 		t.Errorf("french = %+v: it arrived after the MP4 was made, so it has no place in it", french)
 	}
 	// The fetch finds the track by its key, wherever Jellyfin has put it.
@@ -547,20 +654,71 @@ func TestANewLanguageIsANewKeyThatLeavesTheOthersAloneEvenWhenIndexesMove(t *tes
 	if body := rig.get(french.URL).Body.String(); !strings.Contains(body, "Bonjour") {
 		t.Errorf("french = %q", body)
 	}
+	if body := rig.get(english.URL).Body.String(); !strings.Contains(body, "Hello there") {
+		t.Errorf("english = %q: it is asked of Jellyfin by Jellyfin's number for it, which moved", body)
+	}
+	asked := rig.upstream.askedFor()
+	if asked[len(asked)-1] != "eng:srt" {
+		t.Errorf("Jellyfin was last asked for %v", asked)
+	}
 }
 
-func TestATrackThatDisappearsIsNotListedAndItsKeyIsNotServed(t *testing.T) {
+func TestATrackThatDisappearsIsNotListedAndItsKeyIsNotServedAndNothingElseMoves(t *testing.T) {
 	rig := newSubtitleRig(t)
-	rig.upstream.change(func(source map[string]any) {
-		streams := source["MediaStreams"].([]any)
-		source["MediaStreams"] = streams[:len(streams)-1]
-	})
+	before := rig.list()
+	rig.upstream.dropSidecar("heb")
 	list := rig.list()
 	if got := keysOf(list); !slices.Equal(got, []string{"emb-2", "emb-3"}) {
 		t.Fatalf("keys = %v", got)
 	}
+	for _, key := range keysOf(list) {
+		if rig.mustTrack(before, key).Signature != rig.mustTrack(list, key).Signature {
+			t.Errorf("%s changed because a sidecar went", key)
+		}
+	}
 	if got := rig.get(subtitleDir + rig.grant.ID + "/subtitle-tracks/ext-heb"); got.Code != http.StatusNotFound {
 		t.Errorf("a gone track = %d, want 404", got.Code)
+	}
+}
+
+func TestAnOlderJellyfinThatNumbersSidecarsLastGivesTheSameKeysSignaturesAndPlaces(t *testing.T) {
+	first, last := newSubtitleRig(t), newNumberedSubtitleRig(t, true)
+	a, b := first.list(), last.list()
+	if len(a.Tracks) != 3 || len(b.Tracks) != 3 {
+		t.Fatalf("keys %v and %v", keysOf(a), keysOf(b))
+	}
+	for _, track := range a.Tracks {
+		other := last.mustTrack(b, track.Key)
+		if other.Signature != track.Signature || other.Language != track.Language || other.External != track.External {
+			t.Errorf("%s differs: %+v and %+v", track.Key, track, other)
+		}
+	}
+	// The MP4 holds its subtitles in the plan's order, which is Jellyfin's, so the
+	// places differ between the two numberings; each is a place in a file of three.
+	for _, list := range []AppleSubtitleList{a, b} {
+		places := []int{}
+		for _, track := range list.Tracks {
+			if track.MP4Index == nil {
+				t.Fatalf("%+v has no place in the MP4", track)
+			}
+			places = append(places, *track.MP4Index)
+		}
+		slices.Sort(places)
+		if !slices.Equal(places, []int{0, 1, 2}) {
+			t.Errorf("places = %v", places)
+		}
+	}
+	// Numbered last, the Hebrew sidecar is stream 5 and the English one is stream 2.
+	if hebrew := last.mustTrack(b, "ext-heb"); hebrew.SourceIndex != 5 || last.mustTrack(b, "emb-2").SourceIndex != 2 {
+		t.Errorf("hebrew %+v", hebrew)
+	}
+	// And a sidecar added there moves nothing.
+	last.upstream.addSidecar(-1, sidecar("fra", "subrip", "fra", "", subtitleFile{text: srtEnglish}))
+	after := last.list()
+	for _, key := range []string{"emb-2", "emb-3", "ext-heb"} {
+		if last.mustTrack(b, key).Signature != last.mustTrack(after, key).Signature || last.mustTrack(after, key).SourceIndex != last.mustTrack(b, key).SourceIndex {
+			t.Errorf("%s moved though the sidecar was added last", key)
+		}
 	}
 }
 
@@ -594,13 +752,26 @@ func TestKeysNameTracksByWhatTheyAreAndNumberTheOnesThatWouldShareAName(t *testi
 	}
 }
 
+func TestSourceFileIndexesCountOnlyTheSidecarsNumberedBeforeAStream(t *testing.T) {
+	tracks := []PlaybackTrack{
+		{Index: 0, External: true}, {Index: 1, External: true}, {Index: 2}, {Index: 3}, {Index: 4}, {Index: 5, External: true},
+	}
+	got := sourceFileIndexes(tracks)
+	if got[2] != 0 || got[3] != 1 || got[4] != 2 || len(got) != 3 {
+		t.Errorf("file indexes = %v, want Jellyfin's 2, 3, 4 at 0, 1, 2 (the sidecars are not in the file)", got)
+	}
+	if inFile(got, 3) != 1 || inFile(got, 99) != 99 {
+		t.Errorf("inFile = %d and %d", inFile(got, 3), inFile(got, 99))
+	}
+}
+
 func TestSeveralSidecarsOfOneLanguageAreListedUnderNumberedKeys(t *testing.T) {
 	rig := newSubtitleRig(t)
-	rig.upstream.addStream(subStream(6, "subrip", "heb", "", "external", "forced"), subtitleFile{text: "1\n00:00:01,000 --> 00:00:02,000\nמוכרח\n"})
-	rig.upstream.addStream(subStream(7, "subrip", "heb", "", "external", "hi"), subtitleFile{text: "1\n00:00:01,000 --> 00:00:02,000\nלכבדי שמיעה\n"})
-	rig.upstream.addStream(subStream(8, "subrip", "heb", "Second", "external"), subtitleFile{text: "1\n00:00:01,000 --> 00:00:02,000\nשני\n"})
+	rig.upstream.addSidecar(-1, sidecar("forced", "subrip", "heb", "", subtitleFile{text: "1\n00:00:01,000 --> 00:00:02,000\nמוכרח\n"}, "forced"))
+	rig.upstream.addSidecar(-1, sidecar("hi", "subrip", "heb", "", subtitleFile{text: "1\n00:00:01,000 --> 00:00:02,000\nלכבדי שמיעה\n"}, "hi"))
+	rig.upstream.addSidecar(-1, sidecar("second", "subrip", "heb", "Second", subtitleFile{text: "1\n00:00:01,000 --> 00:00:02,000\nשני\n"}))
 	list := rig.list()
-	want := []string{"emb-2", "emb-3", "ext-heb", "ext-heb-forced", "ext-heb-sdh", "ext-heb-2"}
+	want := []string{"ext-heb", "ext-heb-forced", "ext-heb-sdh", "ext-heb-2", "emb-2", "emb-3"}
 	if got := keysOf(list); !slices.Equal(got, want) {
 		t.Fatalf("keys = %v, want %v", got, want)
 	}
@@ -611,17 +782,17 @@ func TestSeveralSidecarsOfOneLanguageAreListedUnderNumberedKeys(t *testing.T) {
 
 func TestEachFormatIsAskedOfJellyfinAsItIsAndTheOthersAsSRT(t *testing.T) {
 	rig := newSubtitleRig(t)
-	rig.upstream.addStream(subStream(6, "ass", "eng", "Styled", "external"), subtitleFile{text: assEnglish})
-	rig.upstream.addStream(subStream(7, "webvtt", "spa", "", "external"), subtitleFile{text: vttEnglish})
-	rig.upstream.addStream(subStream(8, "mov_text", "ita", "", "external"), subtitleFile{text: srtEnglish})
-	rig.upstream.addStream(subStream(9, "ssa", "deu", "", "external"), subtitleFile{text: assEnglish})
+	rig.upstream.addSidecar(-1, sidecar("styled", "ass", "eng", "Styled", subtitleFile{text: assEnglish}))
+	rig.upstream.addSidecar(-1, sidecar("spa", "webvtt", "spa", "", subtitleFile{text: vttEnglish}))
+	rig.upstream.addSidecar(-1, sidecar("ita", "mov_text", "ita", "", subtitleFile{text: srtEnglish}))
+	rig.upstream.addSidecar(-1, sidecar("deu", "ssa", "deu", "", subtitleFile{text: assEnglish}))
 	list := rig.list()
 	if len(list.Tracks) != 7 {
 		t.Fatalf("keys = %v", keysOf(list))
 	}
 	asked := rig.upstream.askedFor()
 	slices.Sort(asked)
-	if want := []string{"5:srt", "6:ass", "7:vtt", "8:srt", "9:ass"}; !slices.Equal(asked, want) {
+	if want := []string{"deu:ass", "heb:srt", "ita:srt", "spa:vtt", "styled:ass"}; !slices.Equal(asked, want) {
 		t.Errorf("Jellyfin was asked for %v, want %v", asked, want)
 	}
 	if body := rig.get(rig.mustTrack(list, "ext-spa").URL).Body.String(); body != vttEnglish {
@@ -634,52 +805,53 @@ func TestEachFormatIsAskedOfJellyfinAsItIsAndTheOthersAsSRT(t *testing.T) {
 
 func TestAJellyfinThatWillNotGiveATrackInItsOwnFormatIsAskedForSRT(t *testing.T) {
 	rig := newSubtitleRig(t)
-	rig.upstream.addStream(subStream(6, "ass", "eng", "Styled", "external"), subtitleFile{text: srtEnglish, refuses: []string{"ass"}})
-	rig.upstream.addStream(subStream(7, "webvtt", "spa", "", "external"), subtitleFile{text: srtEnglish, refuses: []string{"vtt", "srt"}})
+	rig.upstream.addSidecar(-1, sidecar("styled", "ass", "eng", "Styled", subtitleFile{text: srtEnglish, refuses: []string{"ass"}}))
+	rig.upstream.addSidecar(-1, sidecar("spa", "webvtt", "spa", "", subtitleFile{text: srtEnglish, refuses: []string{"vtt", "srt"}}))
 	list := rig.list()
 	asked := rig.upstream.askedFor()
 	slices.Sort(asked)
-	if want := []string{"5:srt", "6:ass", "6:srt", "7:srt", "7:vtt"}; !slices.Equal(asked, want) {
+	if want := []string{"heb:srt", "spa:srt", "spa:vtt", "styled:ass", "styled:srt"}; !slices.Equal(asked, want) {
 		t.Errorf("Jellyfin was asked for %v, want %v", asked, want)
 	}
-	if got := keysOf(list); !slices.Equal(got, []string{"emb-2", "emb-3", "ext-heb", "ext-eng"}) {
+	if got := keysOf(list); !slices.Equal(got, []string{"ext-heb", "ext-eng", "emb-2", "emb-3"}) {
 		t.Errorf("keys = %v: the ASS sidecar should be listed from its SRT, and the one Jellyfin refuses in both formats should not", got)
 	}
 	if body := rig.get(rig.mustTrack(list, "ext-eng").URL).Body.String(); !strings.Contains(body, "Hello there") {
 		t.Errorf("styled = %q", body)
 	}
-	var refused *AppleSubtitleOmitted
-	for at := range list.Omitted {
-		if list.Omitted[at].SourceIndex == 7 {
-			refused = &list.Omitted[at]
-		}
-	}
-	if refused == nil || refused.Key != "ext-spa" || refused.Reason != "unreadable" {
+	if refused := rig.omittedAt(list, "spa"); refused == nil || refused.Key != "ext-spa" || refused.Reason != "unreadable" {
 		t.Errorf("omitted = %+v", list.Omitted)
 	}
 }
 
 func TestAnUnsupportedTextFormatAndAPictureAreOmittedWithTheirReasonsAndCannotBeFetched(t *testing.T) {
 	rig := newSubtitleRig(t)
-	rig.upstream.addStream(subStream(6, "dvdsub", "ger", "", "external"), subtitleFile{})
-	rig.upstream.addStream(subStream(7, "mystery_format", "jpn", ""), subtitleFile{})
+	rig.upstream.addSidecar(-1, sidecar("ger", "dvdsub", "ger", "", subtitleFile{}))
+	rig.upstream.edit(func(u *subtitleUpstream) {
+		u.inside = append(u.inside, embedded("jpn", "mystery_format", "jpn", "", subtitleFile{}))
+	})
 	list := rig.list()
-	reasons := map[int]string{}
-	for _, omitted := range list.Omitted {
-		reasons[omitted.SourceIndex] = omitted.Reason
+	reasons := map[string]string{}
+	for _, name := range []string{"fre", "ger", "jpn"} {
+		omitted := rig.omittedAt(list, name)
+		if omitted == nil {
+			t.Fatalf("%s is not omitted: %+v", name, list.Omitted)
+		}
+		reasons[name] = omitted.Reason
 		if omitted.Key != "" {
 			t.Errorf("%+v has a key though nothing can be fetched", omitted)
 		}
 	}
-	if reasons[4] != "picture_subtitle" || reasons[6] != "picture_subtitle" || reasons[7] != "unsupported_format" || len(reasons) != 3 {
+	if reasons["fre"] != "picture_subtitle" || reasons["ger"] != "picture_subtitle" || reasons["jpn"] != "unsupported_format" || len(list.Omitted) != 3 {
 		t.Errorf("omitted = %+v", list.Omitted)
 	}
-	for _, key := range []string{"emb-4", "ext-ger", "emb-7"} {
+	// The picture inside the file is the file's stream 4, the unsupported one stream 5.
+	for _, key := range []string{"emb-4", "ext-ger", "emb-5"} {
 		if got := rig.get(subtitleDir + rig.grant.ID + "/subtitle-tracks/" + key); got.Code != http.StatusNotFound {
 			t.Errorf("%s = %d, want 404", key, got.Code)
 		}
 	}
-	if asked := rig.upstream.askedFor(); slices.Contains(asked, "6:srt") || slices.Contains(asked, "4:srt") {
+	if asked := rig.upstream.askedFor(); slices.Contains(asked, "ger:srt") || slices.Contains(asked, "fre:srt") {
 		t.Errorf("Jellyfin was asked for a picture subtitle: %v", asked)
 	}
 }
@@ -693,19 +865,14 @@ func TestASidecarJellyfinCannotHandOverIsOmittedWithItsKeyAndTheRestIsStillListe
 	} {
 		t.Run(name, func(t *testing.T) {
 			rig := newSubtitleRig(t)
-			rig.upstream.setFile(5, file)
+			rig.upstream.setFile("heb", file)
 			list := rig.list()
 			if got := keysOf(list); !slices.Equal(got, []string{"emb-2", "emb-3"}) {
 				t.Fatalf("keys = %v", got)
 			}
-			var hebrew *AppleSubtitleOmitted
-			for at := range list.Omitted {
-				if list.Omitted[at].SourceIndex == 5 {
-					hebrew = &list.Omitted[at]
-				}
-			}
 			// The key stays in `omitted`: the track has not gone, so the app must keep
 			// the file it already has rather than delete it.
+			hebrew := rig.omittedAt(list, "heb")
 			if hebrew == nil || hebrew.Key != "ext-heb" || hebrew.Reason != "unreadable" || hebrew.Language != "heb" || !hebrew.External {
 				t.Fatalf("omitted = %+v", list.Omitted)
 			}
@@ -722,7 +889,7 @@ func TestAJellyfinThatCannotAnswerFailsTheWholeListSoNoGoodFileIsDeleted(t *test
 		"it turns the hub's credential away": http.StatusUnauthorized, "it is too busy": http.StatusTooManyRequests} {
 		t.Run(name, func(t *testing.T) {
 			rig := newSubtitleRig(t)
-			rig.upstream.setFile(5, subtitleFile{status: status})
+			rig.upstream.setFile("heb", subtitleFile{status: status})
 			response := rig.get(rig.listPath())
 			// Leaving the track out would tell the app it had gone, and the app would
 			// delete a good file because Jellyfin had a bad moment.
@@ -730,8 +897,8 @@ func TestAJellyfinThatCannotAnswerFailsTheWholeListSoNoGoodFileIsDeleted(t *test
 				t.Fatalf("list = %d %+v: a track that could not be asked about must not be reported as gone", response.Code, failure)
 			}
 			// Asked again once Jellyfin is back, the whole list is there.
-			rig.upstream.setFile(5, subtitleFile{text: srtEnglish})
-			if got := keysOf(rig.list()); !slices.Equal(got, []string{"emb-2", "emb-3", "ext-heb"}) {
+			rig.upstream.setFile("heb", subtitleFile{text: srtEnglish})
+			if got := keysOf(rig.list()); !slices.Equal(got, []string{"ext-heb", "emb-2", "emb-3"}) {
 				t.Errorf("keys = %v", got)
 			}
 		})
@@ -764,14 +931,10 @@ func TestSubtitlesOfAVideoThatIsNotTheDownloadedOneAreNotOffered(t *testing.T) {
 			r.upstream.change(func(source map[string]any) { source["Id"] = "another-version" })
 		}, "source_missing"},
 		"the item is not there": {func(r *subtitleRig) {
-			r.upstream.mu.Lock()
-			r.upstream.itemGone = true
-			r.upstream.mu.Unlock()
+			r.upstream.edit(func(u *subtitleUpstream) { u.itemGone = true })
 		}, "source_missing"},
 		"it has no picture": {func(r *subtitleRig) {
-			r.upstream.change(func(source map[string]any) {
-				source["MediaStreams"] = source["MediaStreams"].([]any)[1:]
-			})
+			r.upstream.edit(func(u *subtitleUpstream) { u.inside = u.inside[1:] })
 		}, "source_differs"},
 	}
 	for name, test := range cases {
@@ -835,19 +998,14 @@ func TestTheSubtitleRoutesAreScopedLikeEveryOfflineGrant(t *testing.T) {
 		t.Errorf("a refused request still asked Jellyfin for subtitles: %v", asked)
 	}
 	// Nothing above changed what the grant lists.
-	if got := keysOf(rig.list()); !slices.Equal(got, []string{"emb-2", "emb-3", "ext-heb"}) {
+	if got := keysOf(rig.list()); !slices.Equal(got, []string{"ext-heb", "emb-2", "emb-3"}) {
 		t.Errorf("keys = %v", got)
 	}
 }
 
 func TestAnExpiredGrantNoLongerListsOrServesItsSubtitles(t *testing.T) {
 	rig := newSubtitleRig(t)
-	grant, _ := rig.server.offline.get(rig.grant.ID)
-	grant.ExpiresAt = time.Now().Add(-time.Minute).UnixMilli()
-	grant.Manifest.ExpiresAt = grant.ExpiresAt
-	if err := rig.server.offline.put(grant); err != nil {
-		t.Fatal(err)
-	}
+	rig.expire()
 	for _, path := range []string{rig.listPath(), rig.listPath() + "/emb-2", rig.listPath() + "/ext-heb"} {
 		response := rig.get(path)
 		if failure := rig.errorOf(response); response.Code != http.StatusGone || failure.Code != "grant_expired" {
@@ -887,14 +1045,14 @@ func TestAnOriginalDownloadHasNoSubtitleListToRefresh(t *testing.T) {
 
 func TestTheListWorksAfterTheAppReleasedTheMP4AndTheOldRoutesAreAsTheyWere(t *testing.T) {
 	rig := newSubtitleRig(t)
-	if got := rig.get(subtitleDir + rig.grant.ID + "/subtitles/5"); got.Code != http.StatusNotFound {
+	if got := rig.get(subtitleDir + rig.grant.ID + "/subtitles/0"); got.Code != http.StatusNotFound {
 		t.Errorf("the original subtitle route for an Apple grant = %d, want the 404 it always was", got.Code)
 	}
 	release := playbackRequest(rig.handler, http.MethodDelete, subtitleDir+rig.grant.ID+"/media", "", playbackUserID)
 	if release.Code != http.StatusNoContent {
 		t.Fatalf("release = %d", release.Code)
 	}
-	if got := keysOf(rig.list()); !slices.Equal(got, []string{"emb-2", "emb-3", "ext-heb"}) {
+	if got := keysOf(rig.list()); !slices.Equal(got, []string{"ext-heb", "emb-2", "emb-3"}) {
 		t.Errorf("after the MP4 was released the keys are %v", got)
 	}
 	// The manifest an older app reads is what it was: no new field, the sidecar list empty.
@@ -915,12 +1073,9 @@ func TestTheListWorksAfterTheAppReleasedTheMP4AndTheOldRoutesAreAsTheyWere(t *te
 func TestTooManySidecarsAreCappedAndReadFourAtATime(t *testing.T) {
 	rig := newSubtitleRig(t)
 	rig.upstream.delay = 15 * time.Millisecond
-	languages := []string{}
 	for _, first := range "abcdefghijklmnopqrstuvwxyz" {
-		languages = append(languages, "q"+string(first)+"z")
-	}
-	for at, language := range languages {
-		rig.upstream.addStream(subStream(10+at, "subrip", language, "", "external"), subtitleFile{text: srtEnglish})
+		language := "q" + string(first) + "z"
+		rig.upstream.addSidecar(-1, sidecar(language, "subrip", language, "", subtitleFile{text: srtEnglish}))
 	}
 	list := rig.list()
 	externals, tooMany := 0, 0
@@ -956,10 +1111,10 @@ func TestTheLogNamesNoPathAndNoCredentialWhenSubtitlesFail(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
 	rig := newSubtitleRig(t)
-	rig.upstream.setFile(5, subtitleFile{status: http.StatusNotFound})
+	rig.upstream.setFile("heb", subtitleFile{status: http.StatusNotFound})
 	rig.list()
 	rig.get(subtitleDir + rig.grant.ID + "/subtitle-tracks/ext-heb")
-	rig.upstream.setFile(5, subtitleFile{status: http.StatusInternalServerError})
+	rig.upstream.setFile("heb", subtitleFile{status: http.StatusInternalServerError})
 	rig.get(rig.listPath())
 	rig.get(subtitleDir + rig.grant.ID + "/subtitle-tracks/ext-heb")
 	if logged.Len() == 0 {
@@ -974,9 +1129,9 @@ func TestTheLogNamesNoPathAndNoCredentialWhenSubtitlesFail(t *testing.T) {
 
 func TestATrackNameThatIsAPathIsNotShown(t *testing.T) {
 	rig := newSubtitleRig(t)
-	rig.upstream.addStream(subStream(6, "subrip", "eng", rig.path, "external"), subtitleFile{text: srtEnglish})
-	rig.upstream.addStream(subStream(7, "subrip", "spa", "Signs/Songs\n  and   more", "external"), subtitleFile{text: srtEnglish})
-	rig.upstream.addStream(subStream(8, "subrip", "ita", strings.Repeat("long ", 80), "external"), subtitleFile{text: srtEnglish})
+	rig.upstream.addSidecar(-1, sidecar("eng", "subrip", "eng", rig.path, subtitleFile{text: srtEnglish}))
+	rig.upstream.addSidecar(-1, sidecar("spa", "subrip", "spa", "Signs/Songs\n  and   more", subtitleFile{text: srtEnglish}))
+	rig.upstream.addSidecar(-1, sidecar("ita", "subrip", "ita", strings.Repeat("long ", 80), subtitleFile{text: srtEnglish}))
 	list := rig.list() // list() fails a response that names the path or its folder
 	if title := rig.mustTrack(list, "ext-eng").Title; title != "" {
 		t.Errorf("a path was shown as a title: %q", title)
@@ -994,33 +1149,33 @@ func TestTheHubKeepsNothingBetweenTwoLists(t *testing.T) {
 	rig := newSubtitleRig(t)
 	rig.list()
 	rig.list()
-	if asked := rig.upstream.askedFor(); !slices.Equal(asked, []string{"5:srt", "5:srt"}) {
+	if asked := rig.upstream.askedFor(); !slices.Equal(asked, []string{"heb:srt", "heb:srt"}) {
 		t.Errorf("two lists read the sidecar as %v, want it twice", asked)
 	}
 }
 
 func TestAnEmbeddedSignatureIsBoundToTheSourceTheTrackAndTheConvertersVersion(t *testing.T) {
 	rig := newSubtitleRig(t)
-	var stream jellyfin.MediaStream
-	data, _ := json.Marshal(subStream(2, "subrip", "eng", ""))
-	if err := json.Unmarshal(data, &stream); err != nil {
-		t.Fatal(err)
-	}
-	base := embeddedSubtitleSignature(rig.grant, stream)
-	if again := embeddedSubtitleSignature(rig.grant, stream); again != base {
+	stream := jellyfin.MediaStream{Index: 3, Type: "Subtitle", Codec: "subrip", Language: "eng"}
+	base := embeddedSubtitleSignature(rig.grant, stream, 2)
+	if again := embeddedSubtitleSignature(rig.grant, stream, 2); again != base {
 		t.Error("the same track signs differently twice")
+	}
+	// Jellyfin's number for it is not in the signature: it moves when a sidecar is added.
+	moved := stream
+	moved.Index = 9
+	if embeddedSubtitleSignature(rig.grant, moved, 2) != base {
+		t.Error("the signature follows Jellyfin's index, which moves when a sidecar is added")
 	}
 	otherSource := rig.grant
 	otherSource.MediaSourceID = "another"
 	otherSize := rig.grant
 	otherSize.Manifest.Source.SizeBytes++
-	otherTrack := stream
-	otherTrack.Index++
 	otherLanguage := stream
 	otherLanguage.Language = "fre"
 	for name, other := range map[string]string{
-		"source": embeddedSubtitleSignature(otherSource, stream), "size": embeddedSubtitleSignature(otherSize, stream),
-		"index": embeddedSubtitleSignature(rig.grant, otherTrack), "language": embeddedSubtitleSignature(rig.grant, otherLanguage),
+		"source": embeddedSubtitleSignature(otherSource, stream, 2), "size": embeddedSubtitleSignature(otherSize, stream, 2),
+		"place in the file": embeddedSubtitleSignature(rig.grant, stream, 3), "language": embeddedSubtitleSignature(rig.grant, otherLanguage, 2),
 	} {
 		if other == base {
 			t.Errorf("the signature ignores the %s", name)
@@ -1035,37 +1190,17 @@ func TestAnEmbeddedSignatureIsBoundToTheSourceTheTrackAndTheConvertersVersion(t 
 }
 
 // The whole path on a real file: the MP4 the hub made, the subtitle options inside
-// it, and the list that was made from the same plan.
+// it, and the list that was made from the same plan. This film is numbered the old
+// way, with its sidecar last.
 func TestARealAppleDownloadsSubtitleListMatchesItsMP4AndSurvivesTheRelease(t *testing.T) {
 	rig := newAppleRig(t, nil)
 	manifest, ready := rig.ready(t)
-
-	served := rig.request(http.MethodGet, manifest.MediaURL, "")
-	if served.Code != http.StatusOK || int64(served.Body.Len()) != ready.SizeBytes {
-		t.Fatalf("media = %d", served.Code)
-	}
-	out := filepath.Join(t.TempDir(), "served.mp4")
-	if err := os.WriteFile(out, served.Body.Bytes(), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var inFile []string
-	for _, stream := range probeMP4(t, out) {
-		if stream.CodecType == "subtitle" {
-			inFile = append(inFile, stream.Language)
-		}
-	}
+	inFile := rig.subtitleLanguagesInTheMP4(t, manifest, ready)
 
 	if release := rig.request(http.MethodDelete, manifest.MediaURL, ""); release.Code != http.StatusNoContent {
 		t.Fatalf("release = %d", release.Code)
 	}
-	response := rig.request(http.MethodGet, subtitleDir+manifest.GrantID+"/subtitle-tracks", "")
-	if response.Code != http.StatusOK {
-		t.Fatalf("list after the release = %d: %s", response.Code, response.Body.String())
-	}
-	var list AppleSubtitleList
-	if err := json.Unmarshal(response.Body.Bytes(), &list); err != nil {
-		t.Fatal(err)
-	}
+	list := rig.subtitleList(t, manifest)
 	if got := keysOf(list); !slices.Equal(got, []string{"emb-3", "ext-heb"}) {
 		t.Fatalf("keys = %v", got)
 	}
@@ -1086,5 +1221,118 @@ func TestARealAppleDownloadsSubtitleListMatchesItsMP4AndSurvivesTheRelease(t *te
 	if hebrew.Code != http.StatusOK || !strings.Contains(hebrew.Body.String(), "שלום עולם") ||
 		hebrew.Header().Get("ETag") != `"`+list.Tracks[1].Signature+`"` {
 		t.Errorf("hebrew = %d %q %v", hebrew.Code, hebrew.Body.String(), hebrew.Header())
+	}
+}
+
+// subtitleLanguagesInTheMP4 downloads the finished MP4 and says which languages its
+// subtitle options are, in the order the file holds them.
+func (r *appleRig) subtitleLanguagesInTheMP4(t *testing.T, manifest OfflineManifest, ready OfflineStatus) []string {
+	t.Helper()
+	served := r.request(http.MethodGet, manifest.MediaURL, "")
+	if served.Code != http.StatusOK || int64(served.Body.Len()) != ready.SizeBytes {
+		t.Fatalf("media = %d", served.Code)
+	}
+	out := filepath.Join(t.TempDir(), "served.mp4")
+	if err := os.WriteFile(out, served.Body.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var languages []string
+	for _, stream := range probeMP4(t, out) {
+		if stream.CodecType == "subtitle" {
+			languages = append(languages, stream.Language)
+		}
+	}
+	return languages
+}
+
+func (r *appleRig) subtitleList(t *testing.T, manifest OfflineManifest) AppleSubtitleList {
+	t.Helper()
+	response := r.request(http.MethodGet, subtitleDir+manifest.GrantID+"/subtitle-tracks", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("list = %d: %s", response.Code, response.Body.String())
+	}
+	var list AppleSubtitleList
+	if err := json.Unmarshal(response.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	return list
+}
+
+// A film Jellyfin 10.11 numbers the way it numbered a Drake & Josh episode: the
+// sidecar is stream 0, the video 1. The MP4 is built (it failed on "Stream map '0:2'
+// matches no streams" when the hub mapped by Jellyfin's numbers), its subtitle
+// options are those the list names, and when Bazarr adds a sidecar in front of
+// everything the grant still renews, the file the hub holds is kept, and the tracks
+// already kept have the same keys and signatures.
+func TestARealDownloadNumberedSidecarFirstIsBuiltListedAndRenewedPastANewSidecarInFrontOfIt(t *testing.T) {
+	rig := newAppleRig(t, nil)
+	rig.upstream.withSidecars(appleSidecar{"heb", hebrewSidecar})
+	manifest, ready := rig.ready(t)
+
+	if got := rig.subtitleLanguagesInTheMP4(t, manifest, ready); !slices.Equal(got, []string{"heb", "eng"}) {
+		t.Fatalf("the MP4's subtitles are %v, want the sidecar's first and then the file's own, as the plan has them", got)
+	}
+	before := rig.subtitleList(t, manifest)
+	if got := keysOf(before); !slices.Equal(got, []string{"ext-heb", "emb-3"}) {
+		t.Fatalf("keys = %v", got)
+	}
+	hebrewBefore, englishBefore := before.Tracks[0], before.Tracks[1]
+	if hebrewBefore.SourceIndex != 0 || englishBefore.SourceIndex != 4 || hebrewBefore.MP4Index == nil || *hebrewBefore.MP4Index != 0 ||
+		englishBefore.MP4Index == nil || *englishBefore.MP4Index != 1 {
+		t.Errorf("hebrew %+v english %+v", hebrewBefore, englishBefore)
+	}
+
+	// Bazarr adds French. Jellyfin numbers it 0, the Hebrew sidecar becomes 1, and the
+	// film's streams all move up again. A month goes by.
+	planned, _ := rig.server.offline.get(manifest.GrantID)
+	expired := planned
+	expired.ExpiresAt = time.Now().Add(-time.Minute).UnixMilli()
+	expired.Manifest.ExpiresAt = expired.ExpiresAt
+	if err := rig.server.offline.put(expired); err != nil {
+		t.Fatal(err)
+	}
+	rig.upstream.withSidecars(appleSidecar{"fra", "1\n00:00:01,000 --> 00:00:02,000\nBonjour\n"}, appleSidecar{"heb", hebrewSidecar})
+	if got := rig.request(http.MethodGet, subtitleDir+manifest.GrantID+"/subtitle-tracks", ""); got.Code != http.StatusGone {
+		t.Fatalf("list on an expired grant = %d", got.Code)
+	}
+
+	renewed := rig.request(http.MethodPost, subtitleDir+manifest.GrantID+"/renew", `{}`)
+	if renewed.Code != http.StatusOK {
+		t.Fatalf("renew = %d: %s", renewed.Code, renewed.Body.String())
+	}
+	stored, _ := rig.server.offline.get(manifest.GrantID)
+	if stored.PlanSignature != planned.PlanSignature {
+		t.Errorf("the stored plan changed from %q to %q", planned.PlanSignature, stored.PlanSignature)
+	}
+	if status := rig.status(manifest.GrantID); status.State != "ready" || status.ETag != ready.ETag {
+		t.Errorf("after the renewal the file is %+v, want the one it was (%s)", status, ready.ETag)
+	}
+
+	after := rig.subtitleList(t, manifest)
+	if got := keysOf(after); !slices.Equal(got, []string{"ext-fra", "ext-heb", "emb-3"}) {
+		t.Fatalf("keys after French arrived = %v", got)
+	}
+	for _, track := range before.Tracks {
+		var now AppleSubtitleTrack
+		for _, candidate := range after.Tracks {
+			if candidate.Key == track.Key {
+				now = candidate
+			}
+		}
+		if now.Signature != track.Signature {
+			t.Errorf("%s changed from %s to %s because another language arrived", track.Key, track.Signature, now.Signature)
+		}
+		if now.MP4Index == nil || *now.MP4Index != *track.MP4Index {
+			t.Errorf("%s moved in the MP4: %v and %v", track.Key, track.MP4Index, now.MP4Index)
+		}
+	}
+	if english := after.Tracks[2]; english.SourceIndex != englishBefore.SourceIndex+1 {
+		t.Errorf("english = %+v: Jellyfin's number for it should have moved up by one", english)
+	}
+	if french := after.Tracks[0]; french.MP4Index != nil || french.SourceIndex != 0 {
+		t.Errorf("french = %+v", french)
+	}
+	if bonjour := rig.request(http.MethodGet, after.Tracks[0].URL, ""); bonjour.Code != http.StatusOK || !strings.Contains(bonjour.Body.String(), "Bonjour") {
+		t.Errorf("french = %d %q", bonjour.Code, bonjour.Body.String())
 	}
 }

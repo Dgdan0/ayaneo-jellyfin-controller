@@ -53,7 +53,7 @@ var appleSubtitleKeyPattern = regexp.MustCompile(`^[a-z0-9-]{1,48}$`)
 type AppleSubtitleTrack struct {
 	// Key names the track for as long as it exists: the app stores its file under it.
 	Key string `json:"key"`
-	// SourceIndex is Jellyfin's index now; an external track's can move.
+	// SourceIndex is Jellyfin's index now, which moves when a sidecar is added; the app never keys on it.
 	SourceIndex     int    `json:"sourceIndex"`
 	Language        string `json:"language"`
 	Title           string `json:"title"`
@@ -99,6 +99,10 @@ type appleSubtitle struct {
 	key    string
 	stream jellyfin.MediaStream
 	plan   repackage.Subtitle
+	// fileIndex is where a track inside the file sits in it, which Jellyfin's index is
+	// not: Jellyfin numbers the sidecar subtitles first, so every stream of the file
+	// moves up by one when Bazarr adds one (repackage.FileIndexes).
+	fileIndex int
 }
 
 type appleSubtitleSet struct {
@@ -122,6 +126,8 @@ func (e *subtitleUnreadable) Error() string { return "the subtitle cannot be rea
 // appleKeyInput is what names a track, taken the same way from a stream of the
 // source today and from an entry of the manifest made when it was downloaded.
 type appleKeyInput struct {
+	// Index is where an embedded track sits inside the file; an external track has
+	// none, and its Jellyfin index is never used.
 	Index           int
 	External        bool
 	Language        string
@@ -129,14 +135,33 @@ type appleKeyInput struct {
 	HearingImpaired bool
 }
 
+// sourceFileIndexes is where each stream inside a file sits in it, by Jellyfin's
+// index, from a manifest's description of the source.
+func sourceFileIndexes(tracks []PlaybackTrack) map[int]int {
+	streams := make([]repackage.Stream, 0, len(tracks))
+	for _, track := range tracks {
+		streams = append(streams, repackage.Stream{Index: track.Index, External: track.External})
+	}
+	return repackage.FileIndexes(streams)
+}
+
+// inFile is the index inside the file of a stream of the source, by Jellyfin's.
+func inFile(fileIndexes map[int]int, index int) int {
+	if at, found := fileIndexes[index]; found {
+		return at
+	}
+	return index
+}
+
 // appleSubtitleKeys names a source's text subtitles, in the order given.
 //
-// An embedded track is emb-<index>: its index inside the file does not move. An
-// external one is ext-<language>, then -forced and -sdh, then -2, -3 for a second
-// and third that would otherwise share it. So Bazarr replacing a file in place
-// keeps its key (only the signature moves), and a new language is a new key that
-// leaves the others alone. An external track's index is never used: it moves when
-// a file is added.
+// An embedded track is emb-<index inside the file>: that index does not move, where
+// Jellyfin's own number of it moves up by one whenever a sidecar is added, since
+// Jellyfin numbers the sidecars first. An external one is ext-<language>, then
+// -forced and -sdh, then -2, -3 for a second and third that would otherwise share
+// it. So Bazarr replacing a file in place keeps its key (only the signature moves),
+// and a new language is a new key that leaves the others alone. An external track's
+// index is never used: it moves when a file is added.
 func appleSubtitleKeys(tracks []appleKeyInput) []string {
 	keys := make([]string, len(tracks))
 	seen := map[string]int{}
@@ -162,17 +187,20 @@ func appleSubtitleKeys(tracks []appleKeyInput) []string {
 }
 
 // appleMP4Positions says where each of the manifest's text subtitles sits among the
-// MP4's subtitle options: the nth entry that was available, from 0.
-func appleMP4Positions(apple *OfflineApple) map[string]int {
+// MP4's subtitle options: the nth entry that was available, from 0. The manifest's
+// indexes are Jellyfin's of the day it was made, so an embedded track is keyed by its
+// place inside the file as that manifest's own source description gives it.
+func appleMP4Positions(manifest OfflineManifest) map[string]int {
 	positions := map[string]int{}
-	if apple == nil {
+	if manifest.Apple == nil {
 		return positions
 	}
+	fileIndexes := sourceFileIndexes(manifest.Source.Tracks)
 	var inputs []appleKeyInput
-	for _, track := range apple.Subtitles {
+	for _, track := range manifest.Apple.Subtitles {
 		if track.Available {
 			inputs = append(inputs, appleKeyInput{
-				Index: track.SourceIndex, External: track.External, Language: track.Language,
+				Index: inFile(fileIndexes, track.SourceIndex), External: track.External, Language: track.Language,
 				Forced: track.Forced, HearingImpaired: track.HearingImpaired,
 			})
 		}
@@ -203,10 +231,12 @@ func (s *Server) appleSubtitleSet(ctx context.Context, client *jellyfin.Client, 
 		return appleSubtitleSet{}, &appleSourceChanged{"source_differs"}
 	}
 	// The plan is how the MP4 decides what is text, so the two cannot disagree.
-	plan, err := repackage.PlanApple(planSourceFrom(source, *item))
+	planned := planSourceFrom(source, *item)
+	plan, err := repackage.PlanApple(planned)
 	if err != nil {
 		return appleSubtitleSet{}, &appleSourceChanged{"source_differs"}
 	}
+	fileIndexes := repackage.FileIndexes(planned.Streams)
 	streams := map[int]jellyfin.MediaStream{}
 	for _, stream := range source.MediaStreams {
 		streams[stream.Index] = stream
@@ -232,9 +262,10 @@ func (s *Server) appleSubtitleSet(ctx context.Context, client *jellyfin.Client, 
 				continue
 			}
 		}
-		set.tracks = append(set.tracks, appleSubtitle{stream: streams[track.SourceIndex], plan: track})
+		at := inFile(fileIndexes, track.SourceIndex)
+		set.tracks = append(set.tracks, appleSubtitle{stream: streams[track.SourceIndex], plan: track, fileIndex: at})
 		inputs = append(inputs, appleKeyInput{
-			Index: track.SourceIndex, External: track.External, Language: track.Language,
+			Index: at, External: track.External, Language: track.Language,
 			Forced: track.Forced, HearingImpaired: track.HearingImpaired,
 		})
 	}
@@ -343,9 +374,11 @@ func signatureOf(text string) string {
 // embeddedSubtitleSignature signs a track that lives inside the video's file without
 // reading it: the file cannot change while the source is the one that was downloaded,
 // so what identifies the track and the converter's rules are all that can.
-func embeddedSubtitleSignature(grant offlineGrant, stream jellyfin.MediaStream) string {
+func embeddedSubtitleSignature(grant offlineGrant, stream jellyfin.MediaStream, fileIndex int) string {
+	// The index is the track's place inside the file, not Jellyfin's number, which
+	// moves when a sidecar is added and would make every app fetch every track again.
 	text := fmt.Sprintf("embedded|webvtt%d|%s|%d|%d|%s|%s", webvtt.Version, grant.MediaSourceID,
-		grant.Manifest.Source.SizeBytes, stream.Index, strings.ToLower(stream.Codec), repackage.NormalizeLanguage(stream.Language))
+		grant.Manifest.Source.SizeBytes, fileIndex, strings.ToLower(stream.Codec), repackage.NormalizeLanguage(stream.Language))
 	return signatureOf(text)
 }
 
@@ -435,7 +468,7 @@ func (s *Server) handleOfflineSubtitleTracks(w http.ResponseWriter, r *http.Requ
 	slots := make(chan struct{}, appleSubtitleWorkers)
 	for at, track := range set.tracks {
 		if !track.plan.External {
-			signatures[at] = embeddedSubtitleSignature(grant, track.stream)
+			signatures[at] = embeddedSubtitleSignature(grant, track.stream, track.fileIndex)
 			continue
 		}
 		group.Add(1)
@@ -453,7 +486,7 @@ func (s *Server) handleOfflineSubtitleTracks(w http.ResponseWriter, r *http.Requ
 	}
 	group.Wait()
 
-	positions := appleMP4Positions(grant.Manifest.Apple)
+	positions := appleMP4Positions(grant.Manifest)
 	list := AppleSubtitleList{GrantID: grant.ID, Format: offlineFormatApple, Tracks: []AppleSubtitleTrack{}, Omitted: set.omitted}
 	for at, track := range set.tracks {
 		if failures[at] != nil {
@@ -532,7 +565,7 @@ func (s *Server) handleOfflineSubtitleTrack(w http.ResponseWriter, r *http.Reque
 	// not a hash of the text, but the text is a function of what it hashes.
 	signature := signatureOf(result.Text)
 	if !track.plan.External {
-		signature = embeddedSubtitleSignature(grant, track.stream)
+		signature = embeddedSubtitleSignature(grant, track.stream, track.fileIndex)
 	}
 	header := w.Header()
 	header.Set("Content-Type", "text/vtt; charset=utf-8")
