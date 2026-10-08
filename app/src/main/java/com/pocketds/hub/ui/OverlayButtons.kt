@@ -142,6 +142,27 @@ object OverlayButtons {
             activateOnTap(onTap)
         }
 
+    /**
+     * A round control that carries its icon as a compound drawable (the book reader's bars; its bookmark swaps the icon
+     * in place): [iconDp] square in the middle of a [discDp] disc. A disc's face replaces a view's padding with its own
+     * inset ([dressDisc]: `View.setBackground` takes the background's padding), so the room that centres the icon is
+     * set after the face, never before. Set before, the icon sat at the inset and was drawn 8dp left of centre (#53).
+     */
+    fun iconDisc(view: TextView, icon: AppIcon, ring: Int, iconDp: Float = ICON_DP, discDp: Float = DISC_DP) {
+        view.gravity = Gravity.CENTER_VERTICAL
+        setDiscIcon(view, icon, iconDp)
+        dressDisc(view, ring)
+        view.setPadding(Styler.dpInt(view.context, (discDp - iconDp) / 2f), 0, 0, 0)
+    }
+
+    /** Changes the icon on a control made by [iconDisc], keeping its size and place. */
+    fun setDiscIcon(view: TextView, icon: AppIcon, iconDp: Float = ICON_DP) {
+        val size = Styler.dpInt(view.context, iconDp)
+        view.setCompoundDrawables(AppIconDrawable(icon, Color.WHITE).apply { setBounds(0, 0, size, size) }, null, null, null)
+    }
+
     /** The room between a control and its focus ring. */
     private const val RING_GAP_DP = 4f
+    private const val ICON_DP = 20f
+    private const val DISC_DP = 44f
 }

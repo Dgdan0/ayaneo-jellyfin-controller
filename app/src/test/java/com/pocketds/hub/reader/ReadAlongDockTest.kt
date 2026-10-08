@@ -1,7 +1,6 @@
 package com.pocketds.hub.reader
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -22,25 +21,5 @@ class ReadAlongDockTest {
         assertEquals(0.5, ReadAlongDockText.fraction(ReadAlongPosition(0, 30_000), timeline(60)), 0.001)
         assertEquals(1.0, ReadAlongDockText.fraction(ReadAlongPosition(0, 90_000), timeline(60)), 0.001)
         assertEquals(0.0, ReadAlongDockText.fraction(ReadAlongPosition(3, 0), timeline(60)), 0.001)
-    }
-
-    @Test fun `the sentence glows in the accent it is given`() {
-        val gold = 0xFFE3B341.toInt()
-        assertEquals("rgb(227, 179, 65)", ReadAlongGlow.rgb(gold))
-        val element = ReadAlongGlow.element(gold)
-        assertTrue(element, element.startsWith("<div class=\"pocket-narration\""))
-        assertTrue(element, "box-shadow: 0 0 0 3px rgb(227, 179, 65), 0 0 14px 4px rgb(227, 179, 65)" in element)
-        assertTrue(ReadAlongGlow.STYLESHEET.startsWith(".pocket-narration {"))
-    }
-
-    /** #52: a sentence over several lines has a box for each, and translucent boxes add up where they meet. */
-    @Test fun `the boxes are solid and the sentence is made see-through once, as a whole`() {
-        val element = ReadAlongGlow.element(0xFF3DDBC6.toInt())
-        // Nothing in a box has an alpha of its own: overlapping solids are one colour, never a darker band.
-        assertFalse(element, "rgba" in element || "opacity" in element)
-        // The transparency is applied once, to Readium's container of the whole group.
-        assertTrue(ReadAlongGlow.STYLESHEET, "[data-group=\"${ReadAlongGlow.GROUP}\"] { opacity: ${ReadAlongGlow.OPACITY} !important; }" in ReadAlongGlow.STYLESHEET)
-        assertEquals("readalong", ReadAlongGlow.GROUP)
-        assertEquals(1, Regex("opacity").findAll(ReadAlongGlow.STYLESHEET).count())
     }
 }

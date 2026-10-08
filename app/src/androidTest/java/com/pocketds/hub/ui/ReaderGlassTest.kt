@@ -15,12 +15,14 @@ import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.reader.ComicFit
 import com.pocketds.hub.reader.EpubAppearanceStore
+import com.pocketds.hub.reader.EpubPagePalette
 import com.pocketds.hub.reader.EpubReaderPreferences
 import com.pocketds.hub.reader.EpubReaderScreen
 import com.pocketds.hub.reader.PageSurface
 import com.pocketds.hub.reader.PagedImageReaderScreen
 import com.pocketds.hub.reader.PagedImageState
 import com.pocketds.hub.reader.ReadAlongDock
+import com.pocketds.hub.reader.ReadAlongGlow
 import com.pocketds.hub.reader.ReaderBars
 import com.pocketds.hub.settings.ComfortSettings
 import com.pocketds.hub.settings.DomainPreferences
@@ -333,21 +335,24 @@ class ReaderGlassTest {
                 assertEquals("The dock takes the lower bar's place", View.GONE, bars.bottomRow.visibility)
                 assertTrue(bars.keys.isShown)
             }
-            // Play: the sentence being read glows in the accent, and the screen stays on.
+            // Play: the sentence being read is washed with the accent let into the page (#52), and the screen stays on.
             withContext(Dispatchers.Main) { all(root).first { it.contentDescription == "Play narration" && it.isShown }.performClick() }
             val accent = withContext(Dispatchers.Main) { Theme.colors(activity).accent }
-            val rgb = "${(accent shr 16) and 0xFF}, ${(accent shr 8) and 0xFF}, ${accent and 0xFF}"
+            val night = (android.content.res.Resources.getSystem().configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+            val (page, ink) = EpubPagePalette.of(EpubReaderPreferences().theme, night)
+            val rgb = ReadAlongGlow.rgb(ReadAlongGlow.wash(accent, page, ink))
             var glow = ""
             try {
                 withTimeout(15_000) {
-                    while (!glow.contains(rgb)) {
+                    while (glow != rgb) {
                         delay(150)
                         glow = withContext(Dispatchers.Main) {
-                            reader()?.evaluateJavascript("(function(){var e=document.querySelector('.pocket-narration');return e?getComputedStyle(e).boxShadow:'';})()")
-                        }.orEmpty()
+                            reader()?.evaluateJavascript("(function(){var e=document.querySelector('.pocket-narration');return e?getComputedStyle(e).backgroundColor:'';})()")
+                        }.orEmpty().trim('"')
                     }
                 }
-            } catch (e: Exception) { throw AssertionError("The sentence never glowed in $rgb: $glow", e) }
+            } catch (e: Exception) { throw AssertionError("The sentence never took its wash, $rgb: $glow", e) }
             withContext(Dispatchers.Main) { assertTrue("The screen stays on while narrating", root.keepScreenOn) }
             delay(300)
             shot(activity, "08-read-along-glow")
