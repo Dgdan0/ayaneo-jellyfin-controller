@@ -175,7 +175,7 @@ final class MediaFocusTests: XCTestCase {
         XCTAssertTrue(element(app, "title-download").exists, "Ⓑ left the page instead of ending select mode")
     }
 
-    /// The choices panel is walked with the controller: down from Close to Keep ready, and Ⓑ closes it.
+    /// The choices panel is walked with the controller: down from Close into Keep ready's row, and Ⓑ closes it.
     @MainActor
     func testTheDownloadChoicesAreWalkedWithTheController() {
         // The presses start 40 seconds in, once the choices have long been open; Ⓑ waits five seconds more.
@@ -183,7 +183,8 @@ final class MediaFocusTests: XCTestCase {
                               "HUB_PAD_DELAY": "40"])
         let panel = element(app, "download-panel")
         XCTAssertTrue(panel.waitForExistence(timeout: 35), "the choices did not open before the presses")
-        XCTAssertTrue(waitUntil(50) { focus(app) == "ring series-downloads keep/choice" },
+        // Into Keep ready's row at the item nearest Close, which sits at the right: its plus.
+        XCTAssertTrue(waitUntil(50) { focus(app).hasPrefix("ring series-downloads keep/") },
                       "down did not walk from Close to Keep ready: \(focus(app))")
         XCTAssertTrue(waitUntil(15) { !panel.exists }, "Ⓑ did not close the choices")
         XCTAssertTrue(element(app, "title-download").exists, "Ⓑ left the page instead of closing the choices")
