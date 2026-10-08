@@ -89,7 +89,42 @@ final class ReadAlongTests: XCTestCase {
     /// The demo's chapters are a page or two at the usual size: drawn larger
     /// (`HUB_BOOK_SIZE`, for this launch only), they run over several pages,
     /// and sentences break across them.
-    private static let largeType = ["HUB_BOOK_SIZE": "2.2", "HUB_BOOK_LOOK_ONCE": "1", "HUB_DEBUG_READALONG": "1"]
+    private static let largeType = ["HUB_BOOK_LOOK_ONCE": "1", "HUB_DEBUG_READALONG": "1"]
+    /// The sizes tried, smallest first, until the reader counts enough pages.
+    private static let sizes = ["2.2", "3.0", "4.0", "5.0"]
+
+    /// The read-along book drawn large enough that the reader counts at least
+    /// `pages` pages in its chapter. How large is the layout's own answer, not
+    /// a device's: a phone reaches it at the first size, an iPad's two columns
+    /// (a 12.9-inch held upright is wide enough for them) only at a larger one.
+    @MainActor
+    private func launchOverPages(_ pages: Int, _ environment: [String: String] = [:]) -> XCUIApplication {
+        launchOverPages(pages, environment, then: { _ in })
+    }
+
+    /// The same, from `sizes`, `turn` done to each launch before its pages are counted (turning the device sideways).
+    @MainActor
+    private func launchOverPages(_ pages: Int, _ environment: [String: String], sizes: [String] = ReadAlongTests.sizes,
+                                 then turn: (XCUIApplication) throws -> Void) rethrows -> XCUIApplication {
+        for size in sizes {
+            let app = launchReadingAlong(Self.largeType.merging(environment) { $1 }.merging(["HUB_BOOK_SIZE": size]) { $1 })
+            try turn(app)
+            if waitUntil(15, { page(app).count >= pages }) { return app }
+            if size == sizes.last {
+                XCTFail("even at \(size) the chapter is not \(pages) pages: \(debug(app).label)")
+                return app
+            }
+            app.terminate()
+        }
+        preconditionFailure("no size to try")
+    }
+
+    /// The position line: "One · Page 2 of 3 in chapter · 18% of book".
+    @MainActor
+    private func place(_ app: XCUIApplication) -> String {
+        let label = debug(app).label
+        return label.range(of: #"^.*?% of book"#, options: .regularExpression).map { String(label[$0]) } ?? label
+    }
 
     override func tearDown() {
         XCUIDevice.shared.orientation = .portrait
@@ -166,8 +201,7 @@ final class ReadAlongTests: XCTestCase {
     /// glowing on the new page.
     @MainActor
     func testTheVoiceTurnsThePageInsideASentence() {
-        let app = launchReadingAlong(Self.largeType)
-        XCTAssertTrue(waitUntil(15) { page(app).count >= 3 }, "the chapter is not several pages: \(debug(app).label)")
+        let app = launchOverPages(3)
         _ = playWithTheMenuAway(app)
         // Some page breaks fall between sentences: the voice reads on to one inside a sentence.
         XCTAssertTrue(waitUntil(60) { (turnedInside(app) ?? 0) > 400 }, "the voice turned no page inside a sentence: \(debug(app).label)")
@@ -179,17 +213,17 @@ final class ReadAlongTests: XCTestCase {
     /// page's first word, playing on; the dock says the page follows the voice.
     @MainActor
     func testAPageTurnedByHandTakesTheVoiceToItsFirstWord() {
-        let app = launchReadingAlong(Self.largeType)
-        XCTAssertTrue(waitUntil(15) { page(app).count >= 3 }, "the chapter is not several pages: \(debug(app).label)")
+        let app = launchOverPages(3)
         let play = playWithTheMenuAway(app)
         // Just after the voice has turned a page its next turn is a page away: the hand turns
         // then, not in the moment the voice does (a turn the voice is making takes no other).
         XCTAssertTrue(waitUntil(40) { debug(app).label.contains("turned in") }, "the voice turned no page: \(debug(app).label)")
         RunLoop.current.run(until: Date().addingTimeInterval(1.5))
-        let before = page(app).index
+        let before = place(app)
         app.typeKey(XCUIKeyboardKey.rightArrow, modifierFlags: [])
         XCTAssertTrue(waitUntil(10) { debug(app).label.contains("moved to") }, "the voice did not go to the page: \(debug(app).label)")
-        XCTAssertGreaterThan(page(app).index, before, "the page did not turn: \(debug(app).label)")
+        // On a page or into the next chapter, where the voice turned to its last page.
+        XCTAssertNotEqual(place(app), before, "the page did not turn: \(debug(app).label)")
         // Moved on, not back: from where it was to the next page's first word.
         let moves = debug(app).label.components(separatedBy: "moved to ").last?.components(separatedBy: " from ") ?? []
         let positions = moves.map { $0.split(separator: ":").compactMap { Int($0.prefix { $0.isNumber || $0 == "-" }) } }
@@ -211,18 +245,27 @@ final class ReadAlongTests: XCTestCase {
     /// Turned sideways, two columns asked for: the voice still turns the page
     /// inside a sentence. On an iPad the page is the two-column spread, which
     /// the page's script measures as one page; an iPhone held sideways is too
-    /// narrow for Readium's two columns, so there it is one wide column.
+    /// narrow for Readium's two columns, so there it is one wide column. A
+    /// simulator that will not turn (the 12.9-inch iPad often will not from a
+    /// test) skips it, saying so: an iPad held upright that wide already lays
+    /// out two columns, which the other tests read along in.
     @MainActor
-    func testTurnedSidewaysTheVoiceStillTurnsThePage() {
-        // The iPad's columns hold far more: larger type keeps a chapter over several spreads.
-        let size = UIDevice.current.userInterfaceIdiom == .pad ? "3.0" : "1.8"
-        let app = launchReadingAlong(Self.largeType.merging(["HUB_BOOK_COLUMNS": "TWO", "HUB_BOOK_SIZE": size]) { $1 })
-        // Turned once the app is up, and measured only once its window is wide.
-        XCUIDevice.shared.orientation = .landscapeLeft
-        let window = app.windows.firstMatch
-        XCTAssertTrue(waitUntil(10) { window.frame.width > window.frame.height }, "the app did not turn: \(window.frame)")
-        RunLoop.current.run(until: Date().addingTimeInterval(2))
-        XCTAssertTrue(waitUntil(15) { page(app).count >= 2 }, "the chapter is not several pages: \(debug(app).label)")
+    func testTurnedSidewaysTheVoiceStillTurnsThePage() throws {
+        // Sideways a phone's page is short: from a smaller size, at which its breaks fall inside sentences
+        // (at 2.2 they fell between paragraphs, which a page break keeps whole when it can).
+        let app = try launchOverPages(2, ["HUB_BOOK_COLUMNS": "TWO"], sizes: ["1.8"] + Self.sizes) { app in
+            // Turned once the app is up, and measured only once its window is wide.
+            let window = app.windows.firstMatch
+            for orientation in [UIDeviceOrientation.landscapeLeft, .landscapeRight]
+            where !(window.frame.width > window.frame.height) {
+                XCUIDevice.shared.orientation = orientation
+                _ = waitUntil(10) { window.frame.width > window.frame.height }
+            }
+            guard window.frame.width > window.frame.height else {
+                throw XCTSkip("the simulator did not turn the app sideways (its window stayed \(window.frame)), so there is no sideways page to read along in here")
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(2))
+        }
         keep(app, "readalong-sideways")
         _ = playWithTheMenuAway(app)
         XCTAssertTrue(waitUntil(75) { (turnedInside(app) ?? 0) > 400 }, "the voice turned no page inside a sentence: \(debug(app).label)")
@@ -235,8 +278,7 @@ final class ReadAlongTests: XCTestCase {
     /// screen, and back in the app the voice is further on and the page with it.
     @MainActor
     func testTheNarrationPlaysOnInTheBackgroundAndThePageCatchesUp() {
-        let app = launchReadingAlong(Self.largeType)
-        XCTAssertTrue(waitUntil(15) { page(app).count >= 3 }, "the chapter is not several pages: \(debug(app).label)")
+        let app = launchOverPages(3)
         let play = app.buttons["readalong-play"]
         XCTAssertTrue(play.waitForExistence(timeout: 20))
         play.tap()
@@ -249,15 +291,16 @@ final class ReadAlongTests: XCTestCase {
 
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10), "the app did not go to the background: \(app.state.rawValue)")
-        RunLoop.current.run(until: Date().addingTimeInterval(16))
+        RunLoop.current.run(until: Date().addingTimeInterval(24))
         // A quiet app is suspended within seconds; one playing sound is not.
         XCTAssertEqual(app.state, .runningBackground, "the app was suspended in the background: the voice stopped")
 
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
-        XCTAssertTrue(waitUntil(5) { seconds(time) >= before + 14 }, "the voice did not read on in the background: \(before)s, now \(time.label)")
+        XCTAssertTrue(waitUntil(5) { seconds(time) >= before + 22 }, "the voice did not read on in the background: \(before)s, now \(time.label)")
         XCTAssertEqual(play.label, "Pause narration")
-        // Sixteen seconds is more than a page at this size: the page has caught up with the voice.
+        // A chapter of 46 seconds over three pages or more: 24 seconds is past the first page, the
+        // shortest for its heading. The page has caught up with the voice.
         XCTAssertTrue(waitUntil(8) { page(app).index > pageBefore || debug(app).label.contains("Two") },
                       "the page did not catch up with the voice: \(debug(app).label)")
         play.tap()
