@@ -10,6 +10,11 @@ final class ReaderTypographyTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    override func tearDown() {
+        // The simulator keeps the way it was turned; later tests expect it upright.
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     private static let recursion = "rw_demo_recursion/demo-rw_demo_recursion"
 
     @MainActor

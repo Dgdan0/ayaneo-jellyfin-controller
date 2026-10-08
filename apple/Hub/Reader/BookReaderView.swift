@@ -287,6 +287,19 @@ struct BookReaderScreen: View {
             reader.setPreferences(EpubLayoutPolicy.selectScroll(reader.preferences, scroll == "1"))
             try? await Task.sleep(for: .milliseconds(900))
         }
+        // HUB_BOOK_THEME=SEPIA|DARK|BLACK|LIGHT|BLUE, HUB_BOOK_COLUMNS=ONE|TWO|AUTO, HUB_BOOK_FONT=<typeface id> and
+        // HUB_BOOK_SIZE=1.3 set the look first, as Appearance would, and keep it as it keeps it (#47).
+        var look = reader.preferences
+        if let theme = environment["HUB_BOOK_THEME"].flatMap(EpubTheme.init(rawValue:)) { look.theme = theme }
+        if let columns = environment["HUB_BOOK_COLUMNS"].flatMap(EpubColumns.init(rawValue:)) {
+            look = EpubLayoutPolicy.selectColumns(look, columns)
+        }
+        if let face = environment["HUB_BOOK_FONT"], EpubTypefaces.typeface(face) != nil { look = EpubAppearance.typeface(look, face) }
+        if let size = environment["HUB_BOOK_SIZE"].flatMap(Double.init) { look.fontScale = size }
+        if look != reader.preferences {
+            reader.setPreferences(look)
+            try? await Task.sleep(for: .milliseconds(900))
+        }
         if let percent = environment["HUB_BOOK_AT"].flatMap(Double.init) {
             reader.seek(percent / 100)
             try? await Task.sleep(for: .milliseconds(900))

@@ -871,3 +871,20 @@ engine: whether the ring shows) is another thing.
 Escape is not a way back on the iPad yet: a SwiftUI shortcut for it never arrives, since iPadOS keeps
 the key for its own focus system. The keyboard joins through key commands that take priority over
 the system's (`wantsPriorityOverSystemBehavior`), with #46's engine.
+
+## The reader's Kindle look: colours, margins, corners, typefaces and the menu (#47)
+
+| Behaviour | Owner |
+|---|---|
+| The page colours (Paper, Sepia `#FCF0D9`/`#5A4931`, Dim = the old `DARK` with ink `#C8C8C2`, Dark = `BLACK` `#000000`/`#AFAFAF`, Blue) and system colours at night | HubKit `EpubPagePalette` / `EpubRendering` (`EpubTheme.black`); a device that had Comfort's black page moves to Dark in `EpubAppearanceStore.migrate` (Comfort's `ComfortStore.takeBlackPage`) |
+| What a new device starts with (Literata, 130% on a tablet and 120% on a phone, spacing 1.5) and the one-time switch of a kept look to Literata | `EpubReaderPreferences` (`tabletScale`, `phoneScale`), `EpubAppearanceStore.load(startingScale:)` / `migrate`; Reset text style sets the typeface too |
+| The typefaces (Original, Literata, Charter, Georgia, Iowan, Atkinson Hyperlegible), their CSS names and the bundled files | HubKit `EpubTypefaces`; the files are `Hub/Resources/Fonts` (in `UIAppFonts`), declared to Readium by `BookNavigator.fontFamilies`; their licences are in `Licenses` and `Licences` |
+| Where the text sits: the gutter Readium keeps (half the gap), the outer margin, the inset of the page view | HubKit `EpubGeometry` (iPad 90 pt and a 48 pt gap, iPhone 24 pt and 24); `BookNavigator.gutter` is given with the navigator, `BookKeysController.sideInset` paints the margin and turns the page on a tap or swipe in it (`BookReaderModel.insetTapped`) |
+| The strips and the corners' baselines | `PageInfo.strip(compactHeight:tablet:)` (84 and 96 on an iPad), `PageInfo.baselines`, `PageInfo.title`; drawn by `BookReaderCorners` (13 pt, the page's full ink, the title in small capitals top centre, the time top right) |
+| The size slider (14 marks), Spacing (a page of Font's: line spacing 1.3/1.5/1.8 and margins) and brightness at the foot of every page | `EpubAppearance.sizeMarks`, `BookAppearancePage.spacing` / `BookAppearanceLine.spacingPage` / `.back`, `BookAppearanceLine.brightness`; `SizeSlider`, `BrightnessBar` and `ReaderSheetFrame.footer`; the model's `appearancePage` and `leaveSpacing` |
+
+Debug launches also take `HUB_BOOK_THEME`, `HUB_BOOK_COLUMNS`, `HUB_BOOK_FONT`, `HUB_BOOK_SIZE` (the ebook's look, kept as Appearance
+keeps it), `HUB_BOOK_SHEET=spacing`, and `HUB_BOOK_TABLET=1`, which lays a phone's reader out with an iPad's margins and strips.
+
+The ebook reader is iOS only, so the iPad is measured on a phone simulator: its margins and gap are the unit-tested arithmetic
+of `EpubGeometry` and, in the screenshots, 90 points outside and 48 between two columns.

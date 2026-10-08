@@ -28,7 +28,7 @@ struct BookReaderCorners: View {
 
     var body: some View {
         let tablet = BookNavigator.isTablet
-        let strip = PageInfo.strip(compactHeight: vertical == .compact, tablet: tablet)
+        let strip = PageInfo.strip(compactHeight: vertical == .compact && !BookNavigator.forcedTablet, tablet: tablet)
         // As Readium takes them: the window's safe area can make a strip deeper.
         let top = max(layout.safe.top, strip.top)
         let bottom = max(layout.safe.bottom, strip.bottom)

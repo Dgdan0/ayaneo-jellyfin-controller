@@ -58,7 +58,17 @@ final class BookNavigator: NSObject {
     var onFailure: (String) -> Void = { _ in }
 
     /// An iPad (or the Mac's wide window): Kindle's wide margins and strips (#47).
-    static var isTablet: Bool { UIDevice.current.userInterfaceIdiom != .phone }
+    static var isTablet: Bool { forcedTablet || UIDevice.current.userInterfaceIdiom != .phone }
+
+    /// scripts/mac.sh: HUB_BOOK_TABLET=1 lays a phone's reader out as an iPad's, its strips and margins too,
+    /// for screenshots of Kindle's page. Debug builds only.
+    static var forcedTablet: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["HUB_BOOK_TABLET"] == "1"
+        #else
+        return false
+        #endif
+    }
 
     /// Readium's page gutter in CSS pixels: half the gap between two columns.
     /// Given once, as the navigator is made, so it holds while this one lives
@@ -252,8 +262,8 @@ final class BookNavigator: NSObject {
     /// The strips kept at the top and bottom of the page, off the text: the
     /// corners sit there (#42, `PageInfo.strip`, which the corners read too).
     private static var strips: [UIUserInterfaceSizeClass: EPUBContentInsets] {
-        let compact = PageInfo.strip(compactHeight: true, tablet: isTablet)
         let regular = PageInfo.strip(compactHeight: false, tablet: isTablet)
+        let compact = forcedTablet ? regular : PageInfo.strip(compactHeight: true, tablet: isTablet)
         return [.compact: (top: CGFloat(compact.top), bottom: CGFloat(compact.bottom)),
                 .regular: (top: CGFloat(regular.top), bottom: CGFloat(regular.bottom))]
     }

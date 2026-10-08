@@ -157,6 +157,9 @@ struct PageInfoTests {
         #expect(PageInfo.strip(compactHeight: true, tablet: true) == compact)
         let baselines = PageInfo.baselines(tablet: true, strip: pad)
         #expect([baselines.top, baselines.bottom] == [50, 61])
+        // Too short for the deep strips, an iPad's corners sit in the middle of the shallower ones.
+        let short = PageInfo.baselines(tablet: true, strip: compact)
+        #expect(short.top > 17 && short.top < 24 && short.top == short.bottom)
         let phone = PageInfo.baselines(tablet: false, strip: regular)
         #expect(phone.top > 31 && phone.top < 40 && phone.top == phone.bottom, "in the middle of the strip, a little below it")
         #expect(PageInfo.cornerSize == 13)

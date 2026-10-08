@@ -203,10 +203,12 @@ public enum PageInfo {
     public static let cornerSize = 13.0
 
     /// How far from the top and the bottom of the screen the corners' baselines
-    /// sit: Kindle's 50 and 61 points on an iPad, the middle of the strip on a
-    /// phone, whose top strip is the status bar's.
+    /// sit: Kindle's 50 and 61 points on an iPad, in its deep strips; the middle
+    /// of the strip on a phone, whose top strip is the status bar's, and on an
+    /// iPad whose window is too short for the deep ones.
     public static func baselines(tablet: Bool, strip: (top: Double, bottom: Double)) -> (top: Double, bottom: Double) {
-        tablet ? (50, 61) : (strip.top / 2 + cornerSize * 0.35, strip.bottom / 2 + cornerSize * 0.35)
+        if tablet && strip.top >= 84 && strip.bottom >= 96 { return (50, 61) }
+        return (strip.top / 2 + cornerSize * 0.35, strip.bottom / 2 + cornerSize * 0.35)
     }
 
     /// The book's title for the top centre, small capitals in the view: its

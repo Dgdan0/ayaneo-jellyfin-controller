@@ -210,8 +210,9 @@ struct BookAppearanceSheet: View {
 
     /// A choice among a line's tiles, pressed through the model as Ⓐ presses it.
     private func tile<Sample: View>(_ line: BookAppearanceLine, _ column: Int, _ label: String, selected: Bool,
-                                    labelLines: Int = 1, @ViewBuilder sample: () -> Sample) -> some View {
-        AppearanceTile(label: label, selected: selected, labelLines: labelLines) {
+                                    labelLines: Int = 1, sampleHeight: CGFloat = 50,
+                                    @ViewBuilder sample: () -> Sample) -> some View {
+        AppearanceTile(label: label, selected: selected, labelLines: labelLines, sampleHeight: sampleHeight) {
             reader.pressAppearance(line, column: column)
         } sample: { sample() }
             .readerRing(isRinged(line, column), corner: 14)
@@ -229,13 +230,32 @@ struct BookAppearanceSheet: View {
 
     @ViewBuilder private var font: some View {
         SheetLabel(text: "Typeface")
-        // Three across, "Aa" in the face itself: what the tile shows is what the page will use.
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: 3), spacing: 8) {
-            ForEach(Array(EpubTypefaces.all.enumerated()), id: \.element.id) { column, face in
-                tile(.typeface, column, face.label, selected: value.fontFamily == face.id, labelLines: 2) {
-                    Text("Aa")
-                        .font(face.sample.map { Font.custom($0, size: 26) } ?? .system(size: 26, weight: .regular, design: .serif))
+        // A row that scrolls across, as Kindle's does, "Aa" in the face itself: what the tile shows is what the page will use.
+        ScrollViewReader { row in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(Array(EpubTypefaces.all.enumerated()), id: \.element.id) { column, face in
+                        tile(.typeface, column, face.label, selected: value.fontFamily == face.id, labelLines: 2, sampleHeight: 38) {
+                            Text("Aa")
+                                .font(face.sample.map { Font.custom($0, size: 26) } ?? .system(size: 26, weight: .regular, design: .serif))
+                        }
+                        .frame(width: 104)
+                        .id("typeface-\(column)")
+                    }
                 }
+            }
+            // The row runs to the sheet's edges, with the sheet's own margin before its first tile.
+            .padding(.horizontal, -20)
+            .contentMargins(.horizontal, 20, for: .scrollContent)
+            .scrollClipDisabled()
+            .onAppear {
+                let chosen = EpubTypefaces.all.firstIndex { $0.id == value.fontFamily } ?? 0
+                row.scrollTo("typeface-\(chosen)", anchor: .center)
+            }
+            // A controller's ring moving along the row keeps its tile in view.
+            .onChange(of: ringed?.column) { _, column in
+                guard ringed?.line == .typeface, let column else { return }
+                withAnimation(.easeOut(duration: 0.15)) { row.scrollTo("typeface-\(column)", anchor: .center) }
             }
         }
         .id(Self.id(.typeface))
@@ -423,6 +443,8 @@ struct AppearanceTile<Sample: View>: View {
     let selected: Bool
     /// Lines the name may take: a long one ("Atkinson Hyperlegible") wraps rather than cuts.
     var labelLines = 1
+    /// How tall its picture is: a typeface's "Aa" needs less than a page of lines.
+    var sampleHeight: CGFloat = 50
     let action: () -> Void
     @ViewBuilder let sample: Sample
     @Environment(\.glassAccent) private var accent
@@ -431,7 +453,7 @@ struct AppearanceTile<Sample: View>: View {
         Button(action: action) {
             VStack(spacing: 6) {
                 sample
-                    .frame(height: 50)
+                    .frame(height: sampleHeight)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 Text(label)
