@@ -183,14 +183,17 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     }
     fun tabs(values:List<Pair<String,String>>,selected:String,onPick:(String)->Unit) = tabs(values, selected, false, onPick)
 
-    /** Two or three views of one menu, as the app's pick-one pill. [dividers] is no longer drawn; the pill separates them. */
+    /**
+     * Two to four views of one menu, as the app's pick-one pill; a fourth tightens each label's padding so the pill
+     * stays inside the panel. [dividers] is no longer drawn; the pill separates them.
+     */
     @Suppress("UNUSED_PARAMETER")
     fun tabs(values:List<Pair<String,String>>,selected:String,dividers:Boolean,onPick:(String)->Unit) {
         tabRow.removeAllViews()
         menuKey="${titleView.text}/$selected"
         val current=selected;val pick=onPick
         tabRow.addView(BlobSegmentedView(context,colors,ringVisible).apply {
-            heightDp=36f;textSp=13f;padXDp=14f
+            heightDp=36f;textSp=13f;padXDp=if(values.size>3)9f else 14f
             setOptions(values.map {(id,label)->BlobSegmentedView.Option(id,label)},current)
             this.onPick={id->if(id!=current)pick(id)}
         },FrameLayout.LayoutParams(-2,-2).apply {bottomMargin=dp(12)})

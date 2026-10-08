@@ -89,7 +89,10 @@ class ReaderPadMapTest {
             assertEquals(ReaderCommand.Ignore, on(state, PadAction.Click(Stick.RIGHT, down = false)))
         }
         assertEquals(ReaderCommand.FollowNarration, on(book.copy(narration = true), PadAction.Click(Stick.LEFT)))
-        assertEquals(ReaderCommand.Ignore, on(book, PadAction.Click(Stick.LEFT)))
+        // A book that is not read along has no voice to follow: L3 moves the page's bottom-left corner on (#42).
+        assertEquals(ReaderCommand.NextPageInfo, on(book, PadAction.Click(Stick.LEFT)))
+        assertEquals(ReaderCommand.Ignore, on(book, PadAction.Click(Stick.LEFT, down = false)))
+        assertEquals("Page info", ReaderPadMap.describe(ReaderKind.BOOK, ReaderCommand.NextPageInfo))
     }
 
     @Test fun `the hint row names only what the keys do now`() {
@@ -101,6 +104,8 @@ class ReaderPadMapTest {
         val bookHints = ReaderPadMap.hints(book.copy(controlsVisible = true)).associate { it.glyph to it.label }
         assertEquals("Leave the book", bookHints[ReaderPadMap.B])
         assertEquals("Back to the page", bookHints[ReaderPadMap.START])
+        assertEquals("Page info", bookHints[ReaderPadMap.L3])
+        assertEquals("Back to the narration", ReaderPadMap.hints(book.copy(controlsVisible = true, narration = true)).associate { it.glyph to it.label }[ReaderPadMap.L3])
         assertEquals("Previous part", ReaderPadMap.hints(audiobook).first { it.glyph == ReaderPadMap.L1 }.label)
         // Each chip does what it says when tapped: the label is its action's.
         listOf(comic.copy(controlsVisible = true), book.copy(controlsVisible = true), audiobook).forEach { state ->
@@ -143,9 +148,9 @@ class ReaderPadMapTest {
         assertEquals("Menu", bookSheet[ReaderPadMap.B])
         assertEquals("Previous page, next page", bookSheet[ReaderPadMap.DPAD_SIDES])
         assertEquals("Menu", bookSheet[ReaderPadMap.DPAD_ENDS])
-        // Paged, the stick and L3 do nothing, so they are not listed.
+        // Paged, the stick does nothing, so it is not listed; L3 moves the corner on (#42).
         assertFalse(ReaderPadMap.RIGHT_STICK in bookSheet)
-        assertFalse(ReaderPadMap.L3 in bookSheet)
+        assertEquals("Page info", bookSheet[ReaderPadMap.L3])
         val scrolling = ReaderPadMap.sheet(ReaderKind.BOOK, book.copy(scrolling = true, narration = true))
             .associate { it.keys.joinToString(" ") to it.does }
         assertEquals("Scroll", scrolling[ReaderPadMap.DPAD_ENDS])

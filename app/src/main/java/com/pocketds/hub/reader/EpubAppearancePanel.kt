@@ -12,13 +12,24 @@ import com.pocketds.hub.ui.*
 class EpubAppearancePanel(context: Context, colors: PocketColors, private val ring: () -> Boolean) : SidePanelView(context, colors, ring) {
     private var value = EpubReaderPreferences()
     private var changed: (EpubReaderPreferences) -> Unit = {}
+    private var pageInfo = PageInfoChoice()
+    private var pageInfoChanged: (PageInfoChoice) -> Unit = {}
     private var section = "font"
-    fun show(initial: EpubReaderPreferences, onChanged: (EpubReaderPreferences) -> Unit, onClose: () -> Unit) {
+
+    /** [pageInfo]: Kindle's corners (#42), changed from the "Page info" tab and handed to [onPageInfoChanged]. */
+    fun show(
+        initial: EpubReaderPreferences, onChanged: (EpubReaderPreferences) -> Unit, onClose: () -> Unit,
+        pageInfo: PageInfoChoice = PageInfoChoice(), onPageInfoChanged: (PageInfoChoice) -> Unit = {}
+    ) {
         value = initial; changed = onChanged
+        this.pageInfo = pageInfo; pageInfoChanged = onPageInfoChanged
         open("Reading appearance", "All books · changes save automatically", onDismiss = onClose); render()
     }
     private fun update(next: EpubReaderPreferences, rebuild: Boolean = true) {
         value = next; changed(value); if (rebuild) render()
+    }
+    private fun updatePageInfo(next: PageInfoChoice) {
+        pageInfo = next; pageInfoChanged(next); render()
     }
     private fun heading(label: String) { body.addView(TextView(context).apply {
         text = label; textSize = 12f; setTextColor(colors.mutedText); setPadding(dp(4), dp(10), dp(4), dp(5))
@@ -50,8 +61,20 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
     private fun render() {
         val focusKey = findFocus()?.tag
         resetBody()
-        tabs(listOf("font" to "Font", "layout" to "Layout", "themes" to "Themes"), section, dividers = true) { section = it; render() }
+        tabs(listOf("font" to "Font", "layout" to "Layout", "themes" to "Themes", "info" to "Page info"), section, dividers = true) { section = it; render() }
         when (section) {
+            "info" -> {
+                // Kindle's corners (#42): each can be turned off, and a tap on the bottom left moves to the next.
+                heading("Top right")
+                choice("Clock", if (pageInfo.clock) "On" else "Off", pageInfo.clock) { updatePageInfo(pageInfo.copy(clock = !pageInfo.clock)) }.tag = "info:clock"
+                heading("Bottom left")
+                PageInfoCorner.entries.forEach { corner ->
+                    choice(corner.choice, selected = pageInfo.corner == corner) { updatePageInfo(pageInfo.copy(corner = corner)) }.tag = "info:${corner.name}"
+                }
+                heading("Bottom right")
+                choice("Percentage", if (pageInfo.percentage) "On" else "Off", pageInfo.percentage) { updatePageInfo(pageInfo.copy(percentage = !pageInfo.percentage)) }.tag = "info:percentage"
+                note("A tap on the bottom left moves to the next choice. The corners are hidden while the menu is open.")
+            }
             "themes" -> {
                 heading("Page colour")
                 val tiles = listOf(EpubTheme.LIGHT to "Paper", EpubTheme.SEPIA to "Sepia", EpubTheme.DARK to "Night", EpubTheme.BLUE to "Blue").map { (theme, label) ->
@@ -66,12 +89,14 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
             }
             "font" -> {
                 heading("Typeface")
+                // A typeface of the reader's own needs the reader's typography; the book's own face does not
+                // take the book's whole look with it: "Publisher styling" is that switch (#42, Part 3).
                 row(*listOf("publisher" to "Publisher", "serif" to "Serif", "sans-serif" to "Sans").map { (id, label) ->
                     sample(label, "font:$id", value.fontFamily == id, TextView(context).apply {
                         text = "Aa"; textSize = 25f; gravity = Gravity.CENTER
                         typeface = if (id == "sans-serif") Typeface.SANS_SERIF else Typeface.SERIF
                         setTextColor(colors.primaryText); importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-                    }) { update(value.copy(fontFamily = id, publisherStyles = id == "publisher")) }
+                    }) { update(value.copy(fontFamily = id, publisherStyles = if (id == "publisher") value.publisherStyles else false)) }
                 }.toTypedArray())
                 body.addView(ValueAdjusterView(context, colors, "Font size", ValueRange(.7f, 2f, .1f), value.fontScale, { "${(it * 100).toInt()}%" }) {
                     update(value.copy(fontScale = it), rebuild = false)
@@ -107,6 +132,10 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
                 choice("Justified text", if (value.textAlignment == "justify") "On" else "Off", value.textAlignment == "justify") {
                     update(value.copy(textAlignment = if (value.textAlignment == "justify") "start" else "justify", publisherStyles = false))
                 }.tag = "alignment"
+                // Words break at their syllables, which keeps justified lines even. The book's own styling ignores it.
+                choice("Hyphenation", if (value.hyphenation) "On" else "Off", value.hyphenation) {
+                    update(value.copy(hyphenation = !value.hyphenation, publisherStyles = if (value.hyphenation) value.publisherStyles else false))
+                }.tag = "hyphenation"
             }
         }
         focusBody(getFocusables(FOCUS_FORWARD).firstOrNull { focusKey != null && it.tag == focusKey })

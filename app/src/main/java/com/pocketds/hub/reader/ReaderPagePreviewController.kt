@@ -22,7 +22,13 @@ class ReaderPagePreviewController(
     private val bottomBar: View,
     private val panels: List<SidePanelView>,
     private val animate: Boolean = true,
-    private val makesRoom: Boolean = true
+    private val makesRoom: Boolean = true,
+    /**
+     * A book's page-info corners (#42): they lie over the page, so they move and shrink with it, and the
+     * bars replace them (the bars show their own details). With a panel open they stay, so the sheet that
+     * changes them shows the change live. A comic has none.
+     */
+    private val corners: View? = null
 ) {
     private var controlsVisible = false
     private var target: ReaderPageTransform? = null
@@ -51,6 +57,7 @@ class ReaderPagePreviewController(
         val showBars = controlsVisible && active.isEmpty()
         topBar.visibility = if (showBars) View.VISIBLE else View.GONE
         bottomBar.visibility = if (showBars) View.VISIBLE else View.GONE
+        corners?.visibility = if (showBars) View.GONE else View.VISIBLE
         val margin = if (controlsVisible || active.isNotEmpty()) Styler.dpInt(root.context, 12f) else 0
         val result = if (!makesRoom) ReaderPageTransform(1f, 0f, 0f) else ReaderPagePreview.fit(
             root.width, root.height,

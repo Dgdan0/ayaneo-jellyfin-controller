@@ -112,8 +112,15 @@ data class ReadingPace(val positions: Double = 0.0, val minutes: Double = 0.0) {
  */
 data class TimeLeft(val chapterMs: Long, val bookMs: Long) {
     /** "12 min left in chapter · 4h 10m in book"; a minute at least, as the audiobook's line. */
-    fun label(): String =
-        "${Fmt.runtime((chapterMs / 1_000).coerceAtLeast(60))} left in chapter · ${Fmt.runtime((bookMs / 1_000).coerceAtLeast(60))} in book"
+    fun label(): String = "${chapterLabel()} · ${runtime(bookMs)} in book"
+
+    /** "12 min left in chapter": the menu's line and a page's corner say it the same way (#42). */
+    fun chapterLabel(): String = "${runtime(chapterMs)} left in chapter"
+
+    /** "4h 10m left in book". */
+    fun bookLabel(): String = "${runtime(bookMs)} left in book"
+
+    private fun runtime(ms: Long): String = Fmt.runtime((ms / 1_000).coerceAtLeast(60))
 
     companion object {
         /**

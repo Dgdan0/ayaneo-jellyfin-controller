@@ -86,6 +86,16 @@ class ReadingPaceTest {
         assertEquals("12 min left in chapter · 4h 10m in book", TimeLeft(12 * 60_000L, 250 * 60_000L).label())
     }
 
+    @Test fun `each half of the line stands alone for a page's corner (#42)`() {
+        val left = TimeLeft(12 * 60_000L, 250 * 60_000L)
+        assertEquals("12 min left in chapter", left.chapterLabel())
+        assertEquals("4h 10m left in book", left.bookLabel())
+        assertEquals("1 min left in chapter", TimeLeft(5_000, 30_000).chapterLabel())
+        assertEquals("1 min left in book", TimeLeft(5_000, 30_000).bookLabel())
+        // The menu's line is the same words, joined.
+        assertTrue(left.label().startsWith(left.chapterLabel()))
+    }
+
     @Test fun `reading along, what the narration has left to say, at its speed`() {
         fun seg(href: String, begin: Long, end: Long) = ReadAlongSegment(href, "s$begin", "a.mp3", begin, end)
         val timeline = ReadAlongTimeline(listOf(
