@@ -414,6 +414,7 @@ mac_shot() {
     HUB_READ="${HUB_READ:-}" HUB_READ_CHROME="${HUB_READ_CHROME:-}" HUB_READ_PAGE="${HUB_READ_PAGE:-}" \
     HUB_READ_SHEET="${HUB_READ_SHEET:-}" HUB_BOOK="${HUB_BOOK:-}" HUB_BOOK_CHROME="${HUB_BOOK_CHROME:-}" \
     HUB_BOOK_AT="${HUB_BOOK_AT:-}" HUB_BOOK_SHEET="${HUB_BOOK_SHEET:-}" HUB_BOOK_SCROLL="${HUB_BOOK_SCROLL:-}" \
+    HUB_BOOK_READALONG="${HUB_BOOK_READALONG:-}" \
     HUB_SEEN_DWELL_MS="${HUB_SEEN_DWELL_MS:-}" \
     HUB_HERO="${HUB_HERO:-}" \
     nohup "$app" -ApplePersistenceIgnoreState YES $(launch_args "$@") > "$DERIVED/mac-app.log" 2>&1 < /dev/null &

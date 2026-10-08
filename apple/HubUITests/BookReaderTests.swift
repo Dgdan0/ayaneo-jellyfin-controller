@@ -81,7 +81,12 @@ final class BookReaderTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.6))
         reference.tap()
         let note = app.staticTexts["book-footnote"]
-        XCTAssertTrue(note.waitForExistence(timeout: 5), "the note did not open as a card")
+        // On a loaded Mac the iPad Pro's two columns can still be settling, and
+        // the tap is lost (the class's suite, 2026-10-07 and 08; alone it passed):
+        // once more, then it must open.
+        if !note.waitForExistence(timeout: 5), reference.isHittable { reference.tap() }
+        XCTAssertTrue(note.waitForExistence(timeout: 5), "the note did not open as a card: frame \(reference.frame) in \(app.windows.firstMatch.frame); "
+                      + app.staticTexts.allElementsBoundByIndex.prefix(12).map(\.label).joined(separator: " | "))
         XCTAssertTrue(note.label.contains("harbour office"), "the card reads \(note.label)")
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(note.waitForNonExistence(timeout: 5), "the card stayed")
@@ -102,6 +107,30 @@ final class BookReaderTests: XCTestCase {
         // As every other test reads it.
         app.buttons["Sepia"].tap()
         XCTAssertTrue(waitUntil(5) { app.buttons["Sepia"].isSelected })
+    }
+
+    /// Appearance walked with the keys, as a controller walks it (#25): right
+    /// on the tabs goes to Layout, down to the columns, right and Return
+    /// choose Two pages; down to Automatic columns and Return put it back.
+    @MainActor
+    func testAppearanceIsWalkedWithTheKeys() {
+        let app = launchReading(Self.recursion, ["HUB_BOOK_SHEET": "appearance"])
+        let layout = app.buttons["Layout"]
+        XCTAssertTrue(layout.waitForExistence(timeout: 15), "Appearance did not open")
+        app.typeKey(.rightArrow, modifierFlags: [])
+        XCTAssertTrue(waitUntil(5) { layout.isSelected }, "right on the tabs did not go to Layout")
+        app.typeKey(.downArrow, modifierFlags: [])
+        app.typeKey(.rightArrow, modifierFlags: [])
+        app.typeKey(" ", modifierFlags: [])
+        let two = app.buttons["Two pages"]
+        XCTAssertTrue(waitUntil(5) { two.isSelected }, "Return did not choose Two pages")
+        // Back to automatic columns, as the other tests read the book.
+        app.typeKey(.leftArrow, modifierFlags: [])
+        for _ in 0..<3 { app.typeKey(.downArrow, modifierFlags: []) }
+        app.typeKey(" ", modifierFlags: [])
+        let automatic = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Automatic columns")).firstMatch
+        XCTAssertTrue(waitUntil(5) { automatic.isSelected },
+                      "Return did not choose Automatic columns")
     }
 
     /// Keys lists what each key does in a book; Ⓑ on the open menu leaves it.

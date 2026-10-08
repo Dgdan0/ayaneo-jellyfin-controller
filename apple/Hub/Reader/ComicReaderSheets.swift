@@ -12,9 +12,54 @@ struct ComicReaderSheetView: View {
     var body: some View {
         ReaderSheetFrame(title: sheet == .display ? "Reading options" : "Keys",
                          subtitle: sheet == .display ? reader.heading : "What the keys do while you read a comic",
-                         size: layout.size, safe: layout.safe, headingId: "comic-sheet-heading", close: close) { _ in
-            if sheet == .display { display } else { keys }
+                         size: layout.size, safe: layout.safe, headingId: "comic-sheet-heading", close: close) { proxy in
+            if sheet == .display {
+                display
+                    .onAppear { openDisplay() }
+                    .onChange(of: layout.tier) { _, _ in reader.displayNarrow = layout.tier == .narrow }
+                    .onChange(of: reader.displayWalk) { _, walk in
+                        let lines = reader.displayLines
+                        let line = lines[walk.clamped(to: lines.map(\.shape)).line]
+                        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(Self.id(line), anchor: .center) }
+                    }
+            } else {
+                keys
+                    .onAppear { reader.keysPart = 0 }
+                    .onChange(of: reader.keysPart) { _, part in
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            proxy.scrollTo(ReaderKeysPart(rawValue: part)?.id ?? "", anchor: .top)
+                        }
+                    }
+            }
         }
+    }
+
+    /// The ring starts on the fit this series reads with.
+    private func openDisplay() {
+        reader.displayNarrow = layout.tier == .narrow
+        let lines = reader.displayLines
+        reader.displayWalk = SheetWalk(line: lines.firstIndex(of: .fit(reader.view.fit)) ?? 0)
+    }
+
+    /// The line the controller's ring is on, when a controller is in use.
+    private var ringed: ComicDisplayLine? {
+        guard reader.controllerActive else { return nil }
+        let lines = reader.displayLines
+        return lines[reader.displayWalk.clamped(to: lines.map(\.shape)).line]
+    }
+
+    /// Where the sheet scrolls to bring `line` into view.
+    static func id(_ line: ComicDisplayLine) -> String {
+        if case .comfort(let comfort) = line { return ComfortControls.id(comfort) }
+        return "comic-option-\(line)"
+    }
+
+    /// A row of Reading options: pressed through the model, as Ⓐ presses it.
+    private func row(_ line: ComicDisplayLine, _ title: String, detail: String = "", checked: Bool = false,
+                     chevron: Bool = false) -> some View {
+        SheetRow(title: title, detail: detail, checked: checked, chevron: chevron) { reader.pressDisplay(line) }
+            .readerRing(ringed == line)
+            .id(Self.id(line))
     }
 
     // MARK: Display
@@ -24,55 +69,51 @@ struct ComicReaderSheetView: View {
         SheetLabel(text: "This series")
         SheetGroup {
             ForEach(ComicFit.allCases, id: \.self) { fit in
-                SheetRow(title: fit.label, checked: view.fit == fit) { reader.setFit(fit) }
+                row(.fit(fit), fit.label, checked: view.fit == fit)
             }
         }
         SheetGroup {
-            SheetRow(title: "Trim margins", detail: "Leave the paper round each page out, so the page reads larger",
-                     checked: view.trim) { reader.setTrim(!view.trim) }
+            row(.trim, "Trim margins", detail: "Leave the paper round each page out, so the page reads larger",
+                checked: view.trim)
         }
         SheetLabel(text: "Reading direction")
         SheetGroup {
-            SheetRow(title: "As the library reads",
-                     detail: reader.manifest?.direction == "rtl" ? "Right to left" : "Left to right",
-                     checked: view.direction == nil) { reader.setDirection(nil) }
-            SheetRow(title: "Left to right", checked: view.direction == "ltr") { reader.setDirection("ltr") }
-            SheetRow(title: "Right to left", checked: view.direction == "rtl") { reader.setDirection("rtl") }
+            row(.direction(nil), "As the library reads",
+                detail: reader.manifest?.direction == "rtl" ? "Right to left" : "Left to right", checked: view.direction == nil)
+            row(.direction("ltr"), "Left to right", checked: view.direction == "ltr")
+            row(.direction("rtl"), "Right to left", checked: view.direction == "rtl")
         }
         SheetLabel(text: "Every series")
         SheetGroup {
             let every = ComicReaderSettings.defaultFit
-            SheetRow(title: "Open every series this way", detail: "New series open as \(every.label.lowercased())",
-                     checked: every == view.fit) { reader.openEverySeriesThisWay() }
+            row(.everySeries, "Open every series this way", detail: "New series open as \(every.label.lowercased())",
+                checked: every == view.fit)
         }
         if layout.tier == .narrow {
             // The narrow bar leaves these out.
             SheetLabel(text: "This issue")
             SheetGroup {
-                SheetRow(title: "Previous issue", chevron: true) {
-                    reader.sheet = nil
-                    reader.movePublication(-1)
-                }
-                SheetRow(title: "Next issue", chevron: true) {
-                    reader.sheet = nil
-                    reader.movePublication(1)
-                }
-                SheetRow(title: "Keys", chevron: true) { reader.sheet = .keys }
+                row(.previousIssue, "Previous issue", chevron: true)
+                row(.nextIssue, "Next issue", chevron: true)
+                row(.keys, "Keys", chevron: true)
             }
         }
         // Brightness and warmth, for every reader (#37).
-        ComfortControls(book: false, heading: true)
+        ComfortControls(book: false, heading: true, ring: {
+            if case .comfort(let line) = ringed { return line }
+            return nil
+        }())
     }
 
     // MARK: Keys
 
     @ViewBuilder private var keys: some View {
-        SheetLabel(text: "Game controller")
+        SheetLabel(text: "Game controller").id(ReaderKeysPart.controller.id)
         ReaderKeyLines(lines: ReaderPadMap.sheet(.comic))
         SheetNote(text: "With the controls open, A presses the control in focus and B closes them. Select always leaves.")
-        SheetLabel(text: "Keyboard")
+        SheetLabel(text: "Keyboard").id(ReaderKeysPart.keyboard.id)
         ReaderKeyLines(lines: ReaderKeyboard.sheet(.comic))
-        SheetLabel(text: "Touch")
+        SheetLabel(text: "Touch").id(ReaderKeysPart.touch.id)
         ReaderKeyLines(lines: touch)
     }
 

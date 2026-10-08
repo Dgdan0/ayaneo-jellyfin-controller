@@ -17,8 +17,15 @@ struct BookReaderSheetView: View {
             switch sheet {
             case .contents, .bookmarks: navigator(proxy)
             case .search: BookSearchSheet(reader: reader, proxy: proxy)
-            case .appearance: BookAppearanceSheet(reader: reader)
-            case .keys: keys
+            case .appearance: BookAppearanceSheet(reader: reader, proxy: proxy)
+            case .keys:
+                keys
+                    .onAppear { reader.keysPart = 0 }
+                    .onChange(of: reader.keysPart) { _, part in
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            proxy.scrollTo(ReaderKeysPart(rawValue: part)?.id ?? "", anchor: .top)
+                        }
+                    }
             }
         }
     }
@@ -116,24 +123,19 @@ struct BookReaderSheetView: View {
     }
 
     /// The line the controller is on.
-    @ViewBuilder private func cursor(_ index: Int) -> some View {
-        if reader.controllerActive && index == reader.sheetCursor {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(.white, lineWidth: 2)
-                .padding(2)
-                .allowsHitTesting(false)
-        }
+    private func cursor(_ index: Int) -> some View {
+        Color.clear.readerRing(reader.controllerActive && index == reader.sheetCursor)
     }
 
     // MARK: Keys
 
     @ViewBuilder private var keys: some View {
-        SheetLabel(text: "Game controller")
+        SheetLabel(text: "Game controller").id(ReaderKeysPart.controller.id)
         ReaderKeyLines(lines: ReaderPadMap.sheet(.book, state: reader.padState))
         SheetNote(text: "With the menu open, A presses the control in focus and B leaves the book.")
-        SheetLabel(text: "Keyboard")
+        SheetLabel(text: "Keyboard").id(ReaderKeysPart.keyboard.id)
         ReaderKeyLines(lines: ReaderKeyboard.sheet(.book, state: reader.padState))
-        SheetLabel(text: "Touch")
+        SheetLabel(text: "Touch").id(ReaderKeysPart.touch.id)
         ReaderKeyLines(lines: [
             ReaderKeyLine(["Swipe across"], reader.preferences.scrolls ? "The next part" : "Turn the page"),
             ReaderKeyLine(["Middle"], "Menu"),
@@ -149,6 +151,7 @@ struct BookReaderSheetView: View {
 /// kept on while narrating). Every change shows at once and is kept.
 struct BookAppearanceSheet: View {
     let reader: BookReaderModel
+    let proxy: ScrollViewProxy
 
     private var value: EpubReaderPreferences { reader.preferences }
 
@@ -159,39 +162,82 @@ struct BookAppearanceSheet: View {
             tab("Themes", .themes)
             tab("Comfort", .comfort)
         }
+        .id(Self.id(.tabs))
         switch reader.appearanceTab {
         case .font: font
         case .layout: layout
         case .themes: themes
-        case .comfort: ComfortControls(book: true)
+        case .comfort: ComfortControls(book: true, ring: {
+            if case .comfort(let line) = ringed?.line { return line }
+            return nil
+        }())
         }
+        Color.clear.frame(height: 0)
+            .onAppear { reader.appearanceWalk = SheetWalk() }
+            .onChange(of: reader.appearanceWalk) { _, _ in
+                guard let line = ringed?.line else { return }
+                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(Self.id(line), anchor: .center) }
+            }
     }
 
     private func tab(_ title: String, _ id: BookReaderModel.AppearanceTab) -> some View {
-        ChoicePill(title: title, selected: reader.appearanceTab == id) { reader.appearanceTab = id }
+        let column = BookReaderModel.AppearanceTab.allCases.firstIndex(of: id) ?? 0
+        return ChoicePill(title: title, selected: reader.appearanceTab == id) { reader.pressAppearance(.tabs, column: column) }
+            .readerRing(isRinged(.tabs, column), corner: 20)
     }
 
-    private func set(_ next: EpubReaderPreferences) { reader.setPreferences(next) }
+    /// The line and choice a controller's ring is on, when a controller is in use (#25).
+    private var ringed: (line: BookAppearanceLine, column: Int)? {
+        guard reader.controllerActive else { return nil }
+        let lines = BookAppearanceLine.lines(reader.appearanceTab.page)
+        let walk = reader.appearanceWalk.clamped(to: lines.map(\.shape))
+        return (lines[walk.line], walk.column)
+    }
+
+    private func isRinged(_ line: BookAppearanceLine, _ column: Int) -> Bool {
+        guard let ringed else { return false }
+        return ringed.line == line && ringed.column == column
+    }
+
+    /// Where the sheet scrolls to bring `line` into view.
+    static func id(_ line: BookAppearanceLine) -> String {
+        if case .comfort(let comfort) = line { return ComfortControls.id(comfort) }
+        return "appearance-\(line)"
+    }
+
+    /// A choice among a line's tiles, pressed through the model as Ⓐ presses it.
+    private func tile<Sample: View>(_ line: BookAppearanceLine, _ column: Int, _ label: String, selected: Bool,
+                                    @ViewBuilder sample: () -> Sample) -> some View {
+        AppearanceTile(label: label, selected: selected) { reader.pressAppearance(line, column: column) } sample: { sample() }
+            .readerRing(isRinged(line, column), corner: 14)
+    }
+
+    /// A row of Appearance, pressed through the model.
+    private func row(_ line: BookAppearanceLine, _ title: String, detail: String = "", value: String = "",
+                     checked: Bool = false) -> some View {
+        SheetRow(title: title, detail: detail, value: value, checked: checked) { reader.pressAppearance(line) }
+            .readerRing(ringed?.line == line)
+            .id(Self.id(line))
+    }
 
     // MARK: Font
 
     @ViewBuilder private var font: some View {
         SheetLabel(text: "Typeface")
         HStack(spacing: 8) {
-            ForEach(EpubAppearance.typefaces, id: \.id) { face in
-                AppearanceTile(label: face.label, selected: value.fontFamily == face.id) {
-                    set(EpubAppearance.typeface(value, face.id))
-                } sample: {
+            ForEach(Array(EpubAppearance.typefaces.enumerated()), id: \.element.id) { column, face in
+                tile(.typeface, column, face.label, selected: value.fontFamily == face.id) {
                     Text("Aa")
                         .font(.system(size: 26, weight: .regular, design: face.id == "sans-serif" ? .default : .serif))
                 }
             }
         }
+        .id(Self.id(.typeface))
         SheetLabel(text: "Size")
         SheetGroup {
             HStack(spacing: 12) {
                 GlassRoundButton(systemImage: "textformat.size.smaller", label: "Smaller", size: 40) {
-                    set(EpubAppearance.fontSize(value, steps: -1))
+                    reader.adjustAppearance(.size, by: -1)
                 }
                 .disabled(value.fontScale <= EpubAppearance.fontScales.lowerBound)
                 Text(EpubAppearance.fontSizeLabel(value.fontScale))
@@ -200,16 +246,16 @@ struct BookAppearanceSheet: View {
                     .frame(maxWidth: .infinity)
                     .accessibilityLabel("Font size \(EpubAppearance.fontSizeLabel(value.fontScale))")
                 GlassRoundButton(systemImage: "textformat.size.larger", label: "Larger", size: 40) {
-                    set(EpubAppearance.fontSize(value, steps: 1))
+                    reader.adjustAppearance(.size, by: 1)
                 }
                 .disabled(value.fontScale >= EpubAppearance.fontScales.upperBound)
             }
             .padding(10)
+            .readerRing(ringed?.line == .size)
         }
+        .id(Self.id(.size))
         SheetGroup {
-            SheetRow(title: "One full page per screen", detail: "One column, no scrolling", checked: value.onePagePerScreen) {
-                set(EpubLayoutPolicy.selectOnePage(value, !value.onePagePerScreen))
-            }
+            row(.onePage, "One full page per screen", detail: "One column, no scrolling", checked: value.onePagePerScreen)
         }
         SheetNote(text: "An ebook's pages follow its font and the screen: they are not the printed book's page numbers.")
     }
@@ -219,54 +265,39 @@ struct BookAppearanceSheet: View {
     @ViewBuilder private var layout: some View {
         SheetLabel(text: "Columns")
         HStack(spacing: 8) {
-            ForEach([(EpubColumns.one, "One page"), (EpubColumns.two, "Two pages")], id: \.0) { columns, label in
-                AppearanceTile(label: label, selected: value.columns == columns) {
-                    set(EpubLayoutPolicy.selectColumns(value, columns))
-                } sample: {
-                    PageSample(columns: columns == .two ? 2 : 1)
+            ForEach(Array([(EpubColumns.one, "One page"), (EpubColumns.two, "Two pages")].enumerated()), id: \.offset) {
+                column, choice in
+                tile(.columns, column, choice.1, selected: value.columns == choice.0) {
+                    PageSample(columns: choice.0 == .two ? 2 : 1)
                 }
             }
         }
+        .id(Self.id(.columns))
         SheetLabel(text: "Margins")
         HStack(spacing: 8) {
-            ForEach(EpubAppearance.margins, id: \.label) { margin in
-                AppearanceTile(label: margin.label, selected: EpubAppearance.same(value.pageMargins, margin.amount)) {
-                    var next = value
-                    next.pageMargins = margin.amount
-                    set(next)
-                } sample: {
+            ForEach(Array(EpubAppearance.margins.enumerated()), id: \.offset) { column, margin in
+                tile(.margins, column, margin.label, selected: EpubAppearance.same(value.pageMargins, margin.amount)) {
                     PageSample(margin: margin.amount * 0.15)
                 }
             }
         }
+        .id(Self.id(.margins))
         SheetLabel(text: "Line spacing")
         HStack(spacing: 8) {
             ForEach(Array(EpubAppearance.spacing.enumerated()), id: \.offset) { index, spacing in
-                AppearanceTile(label: spacing.label, selected: EpubAppearance.same(value.lineHeight, spacing.amount)) {
-                    set(EpubAppearance.lineSpacing(value, spacing.amount))
-                } sample: {
+                tile(.spacing, index, spacing.label, selected: EpubAppearance.same(value.lineHeight, spacing.amount)) {
                     PageSample(spacing: 5 + Double(index) * 3)
                 }
             }
         }
+        .id(Self.id(.spacing))
         SheetGroup {
-            SheetRow(title: "Automatic columns", detail: "Two side by side where the window is wide",
-                     checked: value.columns == .auto) { set(EpubLayoutPolicy.selectColumns(value, .auto)) }
-            SheetRow(title: "Continuous scrolling", value: value.scroll ? "On" : "Off") {
-                set(EpubLayoutPolicy.selectScroll(value, !value.scroll))
-            }
-            SheetRow(title: "Publisher styling", value: value.publisherStyles ? "On" : "Off") {
-                var next = value
-                next.publisherStyles.toggle()
-                set(next)
-            }
-            SheetRow(title: "Justified text", value: value.textAlignment == "justify" ? "On" : "Off") {
-                set(EpubAppearance.justified(value))
-            }
-            SheetRow(title: "Hyphenation", detail: "Long words broken at the line's end",
-                     value: value.hyphens ? "On" : "Off") {
-                set(EpubAppearance.hyphenated(value))
-            }
+            row(.automaticColumns, "Automatic columns", detail: "Two side by side where the window is wide",
+                checked: value.columns == .auto)
+            row(.scroll, "Continuous scrolling", value: value.scroll ? "On" : "Off")
+            row(.publisher, "Publisher styling", value: value.publisherStyles ? "On" : "Off")
+            row(.justified, "Justified text", value: value.textAlignment == "justify" ? "On" : "Off")
+            row(.hyphenation, "Hyphenation", detail: "Long words broken at the line's end", value: value.hyphens ? "On" : "Off")
         }
         pageInfo
     }
@@ -279,26 +310,14 @@ struct BookAppearanceSheet: View {
         let info = reader.pageInfo
         SheetLabel(text: "Page info")
         SheetGroup {
-            SheetRow(title: "Clock", detail: "The time, top right", value: info.clock ? "On" : "Off") {
-                var next = info
-                next.clock.toggle()
-                reader.setPageInfo(next)
-            }
-            SheetRow(title: "Percentage", detail: "How far through the book, bottom right",
-                     value: info.percentage ? "On" : "Off") {
-                var next = info
-                next.percentage.toggle()
-                reader.setPageInfo(next)
-            }
+            row(.clock, "Clock", detail: "The time, top right", value: info.clock ? "On" : "Off")
+            row(.percentage, "Percentage", detail: "How far through the book, bottom right",
+                value: info.percentage ? "On" : "Off")
         }
         SheetLabel(text: "Bottom left")
         SheetGroup {
             ForEach(PageInfoPlace.allCases, id: \.self) { place in
-                SheetRow(title: place.title, checked: info.place == place) {
-                    var next = info
-                    next.place = place
-                    reader.setPageInfo(next)
-                }
+                row(.place(place), place.title, checked: info.place == place)
             }
         }
         SheetNote(text: "While reading, a tap on the bottom left shows the next of these.")
@@ -308,16 +327,11 @@ struct BookAppearanceSheet: View {
 
     @ViewBuilder private var themes: some View {
         SheetLabel(text: "Page colour")
-        let rows = [Array(EpubAppearance.themes.prefix(2)), Array(EpubAppearance.themes.suffix(2))]
-        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+        ForEach(Array(BookAppearanceLine.themeRows.enumerated()), id: \.offset) { rowIndex, row in
             HStack(spacing: 8) {
-                ForEach(row, id: \.label) { theme in
+                ForEach(Array(row.enumerated()), id: \.element.label) { column, theme in
                     let palette = EpubPagePalette.of(theme.theme) ?? (0xFFFF_FFFF, 0xFF00_0000)
-                    AppearanceTile(label: theme.label, selected: value.theme == theme.theme) {
-                        var next = value
-                        next.theme = theme.theme
-                        set(next)
-                    } sample: {
+                    tile(.themes(rowIndex), column, theme.label, selected: value.theme == theme.theme) {
                         Text("Aa  The story\ncontinues.")
                             .font(.system(size: 14, design: .serif))
                             .multilineTextAlignment(.center)
@@ -327,13 +341,10 @@ struct BookAppearanceSheet: View {
                     }
                 }
             }
+            .id(Self.id(.themes(rowIndex)))
         }
         SheetGroup {
-            SheetRow(title: "Use system colours", detail: "Paper by day, Night in dark mode", checked: value.theme == .system) {
-                var next = value
-                next.theme = .system
-                set(next)
-            }
+            row(.systemColours, "Use system colours", detail: "Paper by day, Night in dark mode", checked: value.theme == .system)
         }
     }
 }

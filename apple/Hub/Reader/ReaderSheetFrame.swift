@@ -151,3 +151,34 @@ struct ReaderKeyLines: View {
         }
     }
 }
+
+/// A Keys sheet's three parts, which a controller's up and down go between (#25).
+enum ReaderKeysPart: Int, CaseIterable {
+    case controller, keyboard, touch
+
+    var id: String { "keys-\(self)" }
+
+    /// The part above or below, while the sheet is open.
+    static func step(_ part: Int, _ direction: PadDirection) -> Int {
+        switch direction {
+        case .up: max(0, part - 1)
+        case .down: min(allCases.count - 1, part + 1)
+        case .left, .right: part
+        }
+    }
+}
+
+extension View {
+    /// The white ring round what a controller is on in a reader's sheet: a
+    /// line of the contents, a row or a choice of the options (#25).
+    func readerRing(_ on: Bool, corner: CGFloat = 12) -> some View {
+        overlay {
+            if on {
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .strokeBorder(.white, lineWidth: 2)
+                    .padding(2)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+}
