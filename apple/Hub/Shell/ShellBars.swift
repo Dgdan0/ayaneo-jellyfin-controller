@@ -27,20 +27,20 @@ struct WideBar: View {
             HStack(spacing: 10) {
                 Group {
                     if let backTitle {
-                        BackPill(title: backTitle, action: back)
+                        BackPill(title: backTitle, pad: "bar-back", action: back)
                     } else {
-                        SidePicker(side: $side)
+                        SidePicker(side: $side, pad: "bar-side")
                     }
                 }
                 .padding(.leading, leadingInset)
                 Spacer(minLength: 0)
                 GlassRoundButton(systemImage: "bell", label: "Notifications", on: section == .notifications,
-                                 size: 44, count: attention) { select(.notifications) }
+                                 size: 44, count: attention, pad: "bar-notifications") { select(.notifications) }
                 GlassRoundButton(systemImage: "server.rack", label: "Services", on: section == .services,
-                                 size: 44) { select(.services) }
+                                 size: 44, pad: "bar-services") { select(.services) }
                 GlassRoundButton(systemImage: "gearshape", label: "Settings", on: section == .settings,
-                                 size: 44) { select(.settings) }
-                AvatarButton(look: avatar, size: 44, action: openProfiles)
+                                 size: 44, pad: "bar-settings") { select(.settings) }
+                AvatarButton(look: avatar, size: 44, pad: "bar-profiles", action: openProfiles)
             }
             SectionCapsule(section: section, select: select)
         }
@@ -62,17 +62,18 @@ struct PhoneBar: View {
     var body: some View {
         HStack(spacing: 10) {
             if let backTitle {
-                GlassRoundButton(systemImage: "chevron.left", label: "Back to \(backTitle)", size: 40, action: back)
+                GlassRoundButton(systemImage: "chevron.left", label: "Back to \(backTitle)", size: 40, pad: "bar-back",
+                                 action: back)
                     .keyboardShortcut("[", modifiers: .command)
             } else {
-                SidePicker(side: $side, compact: true)
+                SidePicker(side: $side, compact: true, pad: "bar-side")
             }
             Spacer(minLength: 0)
             if backTitle == nil {
                 GlassRoundButton(systemImage: "bell", label: "Notifications", on: section == .notifications,
-                                 size: 40, count: attention) { select(.notifications) }
+                                 size: 40, count: attention, pad: "bar-notifications") { select(.notifications) }
             }
-            AvatarButton(look: avatar, size: 40, action: openProfiles)
+            AvatarButton(look: avatar, size: 40, pad: "bar-profiles", action: openProfiles)
         }
     }
 }
@@ -90,6 +91,7 @@ struct SectionCapsule: View {
             ForEach(AppSection.sections, id: \.self) { item in
                 CapsuleTab(title: item.title, on: item == section, pill: pill) { select(item) }
                     .keyboardShortcut(item.shortcut, modifiers: .command)
+                    .padFocusable("bar-section-\(item.rawValue)", ring: .capsule) { select(item) }
             }
         }
         .padding(5)
@@ -132,6 +134,8 @@ private struct CapsuleTab: View {
 struct SidePicker: View {
     @Binding var side: AppSide
     var compact = false
+    /// Its ids' start for a controller's focus (#46): `<pad>-media`, `<pad>-books`.
+    var pad: String?
     @Environment(AccentModel.self) private var accents
 
     var body: some View {
@@ -157,6 +161,7 @@ struct SidePicker: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(mode == .media ? "Movies and TV" : "Books and comics")
                 .accessibilityAddTraits(on ? .isSelected : [])
+                .padFocusable(pad.map { "\($0)-\(mode.rawValue)" }, ring: .capsule) { side = mode }
             }
         }
         .padding(4)
@@ -168,6 +173,8 @@ struct SidePicker: View {
 /// Back, named after the page it goes back to ("‹ Library").
 struct BackPill: View {
     let title: String
+    /// Its id for a controller's focus (#46).
+    var pad: String?
     let action: () -> Void
 
     var body: some View {
@@ -196,6 +203,7 @@ struct BackPill: View {
         #if os(iOS)
         .hoverEffect(.highlight)
         #endif
+        .padFocusable(pad, ring: .capsule, press: action)
     }
 }
 
@@ -227,6 +235,8 @@ struct AvatarLook: Equatable {
 struct AvatarButton: View {
     let look: AvatarLook
     var size: CGFloat = 44
+    /// Its id for a controller's focus (#46).
+    var pad: String?
     let action: () -> Void
 
     var body: some View {
@@ -256,6 +266,7 @@ struct AvatarButton: View {
         #if os(iOS)
         .hoverEffect(.highlight)
         #endif
+        .padFocusable(pad, ring: .circle, press: action)
     }
 }
 
@@ -295,6 +306,7 @@ struct ShellTabBar: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(item.shortcut, modifiers: .command)
+                .padFocusable("tab-\(item.rawValue)", ring: .inside(20)) { select(item) }
                 .frame(maxWidth: .infinity)
                 .accessibilityAddTraits(on ? .isSelected : [])
             }

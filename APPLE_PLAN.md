@@ -876,3 +876,43 @@ engine: whether the ring shows) is another thing.
 Escape is not a way back on the iPad yet: a SwiftUI shortcut for it never arrives, since iPadOS keeps
 the key for its own focus system. The keyboard joins through key commands that take priority over
 the system's (`wantsPriorityOverSystemBehavior`), with #46's engine.
+
+## A controller drives the whole app (#46)
+
+A game controller or a keyboard drives every screen, as the Pocket's pad does. One engine decides
+where a press goes, in HubKit with the Pocket's cases as tests (`PadFocusTests`), and every screen
+shares it. The engine is pure: rectangles and ids, no SwiftUI. A `padFocusable` view registers its
+item; the page asks the engine and moves focus, scrolling, pressing Ⓐ and drawing the ring itself.
+
+| Behaviour | Owner |
+|---|---|
+| Where a press goes on a page | HubKit `PadFocus.step(from:_:in:memory:)` gives a `PadStep`: `.to(id)` (focus that item, scrolling it in first if it is not drawn yet), `.stay` (the page's press, nothing that way: the end of a row) or `.leave` (nothing on the page that way: the host may hand it to the bar). It works on a `PadMap`: each focusable item's frame by id, in one coordinate space (the page's scroll content), and the `PadGroup`s that order them |
+| A row moves by position, a page's rows by row, past an empty one, a grid wraps | `PadLayout`: `.row` (Android's `StripNav`: left and right by position, nothing at the ends unless a row round it goes on), `.column` (`RowStep`: up and down by position, entering a row at the item nearest the one left, or where it was last left when none of it is drawn), `.grid(columns:)` (0 counts them from the frames). A group lists every member, drawn or not, so a lazy stack's next card is still next |
+| Anything outside a group | Looked for the way pressed: up and down the nearest line, at the item nearest across; left and right in the band only, through `PadGuard` (Android's `FocusGuard`, its tests ported). `PadMap.horizontal = .grid` lets them wrap onto the next line |
+| A press with nothing focused | `PadFocus.first`: the top line, from the left; with nothing drawn, the first member of the outermost group |
+| Where Back, a tab and Down from the bar return focus | `PadMemory` (Android's `FocusPlace`): `focused(id, page:, in:)` on every focus change, `returning(to: page, in:)` as a page shows again (its place while the page still has it, else its first item), `forget(page:)` when a page goes for good. Each group also remembers the member it was left on |
+| The ring only while a controller or keyboard is in use | `PadInput` (Android's `InputModeTracker`): `directional()` and `pointer()` report a change once. It starts hidden, because here a touch is the default |
+| How far to scroll to the focused item | `PadReveal.origin(showing:in:margin:above:pin:content:)` (as little as it takes; `above` keeps a row's heading in view, `pin` rests the row at the top as Home's rows do, the row's frame from `PadMap.frame(parent(of:).id)`) and `PadReveal.offset` along one axis |
+
+The app's side (`Hub/Focus`):
+
+| Behaviour | Owner |
+|---|---|
+| Every input's way in | `PadFocusCenter.shared.route(_ action: PadAction)`, called by the shell's `PadClaim` (A's `PadRouter`) and the keyboard: the focus takes `.step`, `.activate` (Ⓐ, Return, Space), `.secondary` (Ⓨ, the item's hold menu) and `.back` (Ⓑ, Escape) out of the bar or a sheet; anything else goes to `PadFocusCenter.shared.unhandled`, the shell's `padPressed` (Ⓑ back, L1/R1). Nothing while the player or a reader is open (`covered`; their claims have the controller) |
+| The keyboard | `Focus/PadKeys`: on the iPad and iPhone the arrows, Return and Space are UIKit key commands on the window's root controller with priority over the system's own keyboard behaviour (no SwiftUI shortcut or key handler heard Return), off while the player or a reader is open, a text field is being typed in or an alert shows; Escape is read by a focused view's `onKeyPress`, as the player's is (no key command hears it). On the Mac a key monitor that leaves a text field alone. A touch, click or scroll hides the ring (`PadInput.pointer`), heard by a recogniser that declines every touch (one that took them upset the menus). In the simulator XCUITest's Return arrives only typed as a newline, and its Escape not at all |
+| A page, a sheet, the bar | `.padPage("key")` round a page's own scroll view (it scrolls it), `.padPage("key", modal: true) { dismiss() }` for a sheet, whose Ⓑ closes it; the bars are one page (`padBar`), reached up (or down to the iPhone's tab bar) from a page and left with Down, Up or Ⓑ |
+| An item | `.padFocusable("id", ring: .card / .capsule / .circle / .rounded(r) / .inside(r) / .none, scroll:, hold:) { press }`: Ⓐ runs `press`, Ⓨ `hold`. `.card` lights the card as a resting pointer does (`GlassCardStyle` reads `padLit`); `.none` for an item that draws its own (`SheetRowStyle`). Shared parts take a `pad:` id: `ChoicePill`, `GlassRoundButton`, `SheetRow`, `BackPill`, `AvatarButton`, `SidePicker`, and `GlassCapsulePicker` and `UnderlineTabs` as a row |
+| Items in order | `.padGroup("id", .row / .column / .grid(columns: 0), members:, prefix:, strip:, scrollIds:)`: an item in a group is `group/id`; `strip: true` on a horizontal scroll view, which it then scrolls; `scrollIds` where its `ForEach` names cards by position. A column keeps only rows that are there |
+| A menu or a picker a controller presses | Its choices as a `confirmationDialog` the press opens (a book's ⋯ and Change format, a library's Sort by, the Finished panel's month and year): a `Menu` cannot be opened from code |
+| Reading focus as it lands | `.onPadFocus { … }` inside the item's `padFocusable` (Notifications marks a row seen) |
+| Where the focus is, for UI tests | Debug builds' `pad-focus` text: "ring books-home hero-resume", "hidden …", "none" |
+
+How a page uses it:
+
+- **Ids.** Each item's id is the one its view carries for scrolling (`ScrollViewReader`), stable
+  across reloads (a title's id, not its position).
+- **Frames.** All in one named coordinate space per page, including a horizontal strip's cards.
+- **Groups.** A strip is a `.row` of its cards; a page's rows and buttons above them a `.column` of
+  those rows; a poster grid a `.grid`. A Back button, the bar's icons and anything else may stay
+  outside groups.
+- **Overlays.** A sheet or overlay is its own page with its own map while it is open.

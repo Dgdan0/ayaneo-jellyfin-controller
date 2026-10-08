@@ -42,6 +42,9 @@ struct NotificationsView: View {
             .padding(.bottom, 28)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         }
+        // A controller goes down a column and across to the next by looking (#46);
+        // a row it lands on is read, as one keyboard focus reaches.
+        .padPage("notifications-\(side.rawValue)")
         .refreshable { await notifications.refresh(model) }
         .task(id: "\(polls)·\(isEnabled)·\(model.address)") {
             guard isEnabled else { return }
@@ -103,8 +106,13 @@ struct NotificationsView: View {
                 }
                 .buttonStyle(GlassControlStyle())
                 .accessibilityIdentifier("mark-all-seen")
+                .padFocusable("mark-all-seen") {
+                    let hadUnread = notifications.unread > 0
+                    notifications.markAllSeen()
+                    flash = NotificationsPresentation.markAllLine(hadUnread: hadUnread)
+                }
             }
-            GlassRoundButton(systemImage: "arrow.clockwise", label: "Refresh", size: 44) {
+            GlassRoundButton(systemImage: "arrow.clockwise", label: "Refresh", size: 44, pad: "refresh") {
                 Task { await notifications.refresh(model) }
             }
             .keyboardShortcut("r", modifiers: .command)
@@ -171,6 +179,9 @@ struct NotificationColumnView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("more-\(column.service)")
+                .padFocusable("more-\(column.service)", ring: .inside(8)) {
+                    withAnimation(.easeOut(duration: 0.2)) { showsAll.toggle() }
+                }
             }
         }
         .padding(10)
@@ -278,6 +289,13 @@ struct NotificationColumnView: View {
         }
         .buttonStyle(DashboardRowStyle())
         .focused(focused, equals: notice.id)
+        .onPadFocus { notifications.markSeen(notice.id) }
+        .padFocusable("notice-\(notice.id)", ring: .inside(10)) {
+            notifications.markSeen(notice.id)
+            withAnimation(.easeOut(duration: 0.2)) {
+                if isOpen { open.remove(notice.id) } else { open.insert(notice.id) }
+            }
+        }
         .onScrollVisibilityChange(threshold: 0.6) { notifications.rowVisible(notice.id, $0) }
         .accessibilityLabel(NotificationsPresentation.spoken(notice, unread: unread, now: now))
         .accessibilityValue([unread ? "Unread" : "", isOpen ? "Expanded" : ""].filter { !$0.isEmpty }.joined(separator: ", "))

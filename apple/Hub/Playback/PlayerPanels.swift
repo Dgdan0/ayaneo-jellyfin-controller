@@ -601,6 +601,8 @@ struct SheetRow<Leading: View>: View {
     var value = ""
     var checked = false
     var chevron = false
+    /// Its id for a controller's focus (#46).
+    var pad: String?
     let action: () -> Void
     @ViewBuilder let leading: Leading
     @Environment(\.glassAccent) private var accent
@@ -643,6 +645,7 @@ struct SheetRow<Leading: View>: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SheetRowStyle())
+        .padFocusable(pad, ring: .none, press: action)
         .sheetDivider()
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(checked ? .isSelected : [])
@@ -651,8 +654,9 @@ struct SheetRow<Leading: View>: View {
 
 extension SheetRow where Leading == EmptyView {
     init(title: String, detail: String = "", value: String = "", checked: Bool = false, chevron: Bool = false,
-         action: @escaping () -> Void) {
-        self.init(title: title, detail: detail, value: value, checked: checked, chevron: chevron, action: action) {
+         pad: String? = nil, action: @escaping () -> Void) {
+        self.init(title: title, detail: detail, value: value, checked: checked, chevron: chevron, pad: pad,
+                  action: action) {
             EmptyView()
         }
     }
@@ -661,11 +665,20 @@ extension SheetRow where Leading == EmptyView {
 /// A row lights up under a finger or the pointer (`.opt:hover`).
 struct SheetRowStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    /// A controller's or keyboard's focus on the row (#46): a ring inside it.
+    @Environment(\.padLit) private var padLit
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(.white)
             .background(configuration.isPressed ? Color.white.opacity(0.07) : .clear)
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(.white, lineWidth: 3)
+                    .padding(3)
+                    .opacity(padLit ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
             .opacity(isEnabled ? 1 : 0.55)
             #if os(iOS)
             .hoverEffect(.highlight)

@@ -253,6 +253,8 @@ struct MainView: View {
     /// One sound at a time: the video and an audiobook.
     @State private var sounds = SoundGuard.shared
     @State private var alertTaps = DownloadAlertTaps.shared
+    /// The bars, as one page for a controller's focus (#46).
+    @State private var padBar = PadPage(bar: true)
     /// A game controller on every page (the player and the readers claim it while open).
     @State private var pad = PadClaim()
     @State private var profilesOpen = false
@@ -307,10 +309,15 @@ struct MainView: View {
                         .disabled(!shown || covered)
                         .accessibilityHidden(!shown || covered)
                 }
+                // The keyboard's arrows, Return and Escape, for the focus (#46).
+                PadKeys()
+                    .disabled(covered)
                 topBar(metrics)
+                    .padBar(padBar)
                     .accessibilityHidden(covered)
                 if !metrics.wide {
                     ShellTabBar(section: section, short: metrics.short, select: select)
+                        .padBar(padBar)
                         // An iPad mini in portrait is wider than a phone: the
                         // bar keeps a phone's proportions, centred.
                         .frame(maxWidth: 520)
@@ -466,8 +473,19 @@ struct MainView: View {
         .onChange(of: listening.playing) { _, playing in playing ? sounds.started(.audiobook) : sounds.stopped(.audiobook) }
         .environment(\.glassPalette, model.colors.palette(for: ambient.displayed))
         .environment(\.glassAccent, accents.accent(side))
-        .onChange(of: key, initial: true) { _, latest in open(latest) }
-        .onAppear { pad.start { action in padPressed(action) } }
+        .onChange(of: key, initial: true) { _, latest in
+            open(latest)
+            PadFocusCenter.shared.shownStack = latest.id
+        }
+        // A controller's and the keyboard's presses go to the focus first (#46):
+        // it moves the ring and presses what it is on; Ⓑ, L1, R1 and the rest
+        // it leaves go on to the shell. Nothing while the player or a reader is
+        // over the pages (their own claims, and keys, have them).
+        .onChange(of: covered, initial: true) { _, now in PadFocusCenter.shared.covered = now }
+        .onAppear {
+            PadFocusCenter.shared.unhandled = { action in padPressed(action) }
+            pad.start { action in PadFocusCenter.shared.route(action) }
+        }
         .onDisappear { pad.stop() }
 
         // A download's notification tapped (#43): Downloads, at its first page, on this side.

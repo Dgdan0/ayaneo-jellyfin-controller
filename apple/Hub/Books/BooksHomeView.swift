@@ -63,10 +63,11 @@ struct BooksHomeView: View {
         let rows = rows
         let reading = rows.first { $0.id == ReadingShelves.currentlyReading }
         let hero = reading?.items.first
+        let shelves = rows.filter { $0.id != ReadingShelves.currentlyReading }
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let reading, let hero {
-                    ContinueReadingHero(work: heroWork(hero)) { lit = hero.artwork }
+                    ContinueReadingHero(work: heroWork(hero), open: { openRoute($0) }) { lit = hero.artwork }
                         .padding(.horizontal, metrics.margin)
                         .padding(.top, 14)
                     let others = Array(reading.items.dropFirst())
@@ -78,7 +79,7 @@ struct BooksHomeView: View {
                     .padding(.horizontal, metrics.margin)
                     .padding(.top, 10)
                 if !series.isEmpty { yourSeries }
-                ForEach(rows.filter { $0.id != ReadingShelves.currentlyReading }) { row in
+                ForEach(shelves) { row in
                     shelf(row)
                 }
                 Button {
@@ -87,12 +88,18 @@ struct BooksHomeView: View {
                     Label("New list", systemImage: "plus")
                 }
                 .buttonStyle(GlassControlStyle())
+                .padFocusable("new-list") { naming = ListNaming(listId: nil, name: "") }
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 14)
                 .accessibilityIdentifier("books-new-list")
             }
+            // A controller goes row by row (#46): the books also being read, your
+            // series, the shelves, then New list; the hero's are above them.
+            .padGroup("rows", .column, members: ["also", "series"]
+                      + shelves.filter { !$0.items.isEmpty }.map { "shelf-\($0.id)" } + ["new-list"], prefix: false)
             .padding(.bottom, 28)
         }
+        .padPage("books-home")
         .ambientArtwork(lit ?? hero?.artwork ?? rows.first?.items.first?.artwork ?? "")
         .refreshable { await load() }
         .task(id: "\(model.userId)·\(readerClosed)·\(returns)") { await load() }
@@ -143,8 +150,10 @@ struct BooksHomeView: View {
                     .buttonStyle(GlassCardStyle())
                     .previewsWhenFocused { lit = work.artwork }
                     .contextMenu { listMenu(work, row: nil) }
+                    .padFocusable(work.id, ring: .card) { openRoute(.book(BookRoute(workId: work.id, title: work.title))) }
                 }
             }
+            .padGroup("also", .grid(columns: 0), members: others.map(\.id))
             .padding(.horizontal, metrics.margin)
             .padding(.top, 10)
         }
@@ -173,12 +182,14 @@ struct BooksHomeView: View {
                         .buttonStyle(GlassCardStyle())
                         .previewsWhenFocused { lit = item.covers.first }
                         .accessibilityLabel("\(item.title), \(item.line)")
+                        .padFocusable(item.id, ring: .card) { openRoute(.book(BookRoute(workId: item.id, title: item.title))) }
                     }
                 }
                 .padding(.horizontal, max(0, metrics.margin - CoverFan.inset(coverWidth: metrics.small ? 80 : 96)))
                 .padding(.top, 18)
                 .padding(.bottom, 18)
             }
+            .padGroup("series", .row, members: series.map(\.id), strip: true)
         }
         .padding(.top, 18)
     }
@@ -215,12 +226,17 @@ struct BooksHomeView: View {
                                 .previewsWhenFocused { lit = work.artwork }
                                 .contextMenu { listMenu(work, row: row) }
                                 .id(index)
+                                .padFocusable("\(index)", ring: .card, scroll: index) {
+                                    openRoute(.book(BookRoute(workId: work.id, title: work.title)))
+                                }
                             }
                         }
                         .padding(.top, 12)
                         .padding(.bottom, 16)
                     }
                     .contentMargins(.horizontal, metrics.margin, for: .scrollContent)
+                    .padGroup("shelf-\(row.id)", .row, members: row.items.indices.map { "\($0)" }, strip: true,
+                              scrollIds: row.items.indices.map { AnyHashable($0) })
                     // A list opens at its next unread book, as on the Pocket.
                     .onAppear { if row.isOwnList && row.nextIndex > 0 { reader.scrollTo(row.nextIndex, anchor: .leading) } }
                 }
@@ -480,6 +496,8 @@ func fetchEach<T: Decodable & Sendable>(_ requests: [HubRequest], hub: HubClient
 /// cover sits over the words, centred.
 struct ContinueReadingHero: View {
     let work: ReadingWork
+    /// A controller's Ⓐ on the cover or a pill (#46): its page.
+    var open: (AppRoute) -> Void = { _ in }
     let preview: () -> Void
     @Environment(\.glassMetrics) private var metrics
     @Environment(\.glassAccent) private var accent
@@ -502,6 +520,7 @@ struct ContinueReadingHero: View {
             .buttonStyle(GlassCardStyle())
             .previewsWhenFocused(preview)
             .accessibilityLabel("Details for \(work.title)")
+            .padFocusable("hero-cover", ring: .card) { open(.book(BookRoute(workId: work.id, title: work.title))) }
             words
         }
         .frame(maxWidth: .infinity, alignment: metrics.centred ? .center : .leading)
@@ -541,10 +560,14 @@ struct ContinueReadingHero: View {
                 }
                 .buttonStyle(PrimaryPillStyle(accent: accent))
                 .accessibilityIdentifier("books-resume")
+                .padFocusable("hero-resume") {
+                    open(.book(BookRoute(workId: work.id, title: work.title, openEntry: true)))
+                }
                 NavigationLink(value: AppRoute.book(BookRoute(workId: work.id, title: work.title))) {
                     Label("Details", systemImage: "info.circle")
                 }
                 .buttonStyle(GlassPillStyle())
+                .padFocusable("hero-details") { open(.book(BookRoute(workId: work.id, title: work.title))) }
             }
             .padding(.top, 4)
         }

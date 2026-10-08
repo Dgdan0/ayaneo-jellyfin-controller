@@ -172,6 +172,7 @@ struct AuthorView: View {
     @State private var shelf = ""
     @State private var status = StatusMessage("")
     @State private var reloads = 0
+    @Environment(\.openRoute) private var openRoute
 
     var body: some View {
         let works = items ?? []
@@ -198,6 +199,9 @@ struct AuthorView: View {
                         }
                         .buttonStyle(LinkPillStyle())
                         .accessibilityLabel("Open series \(collection.title)")
+                        .padFocusable("series-\(collection.id)") {
+                            openRoute(.book(BookRoute(workId: collection.id, title: collection.title)))
+                        }
                         .padding(.horizontal, metrics.margin)
                         if let line = ReadingBookFacts.seriesProgress(collection) {
                             Text(line)
@@ -206,7 +210,8 @@ struct AuthorView: View {
                                 .padding(.horizontal, metrics.margin + 4)
                         }
                         let members = collection.sections.first?.items ?? []
-                        SeriesBookStrip(items: members.isEmpty ? [SeriesBookLabels.item(of: collection)] : members)
+                        SeriesBookStrip(items: members.isEmpty ? [SeriesBookLabels.item(of: collection)] : members,
+                                        pad: "strip-\(collection.id)")
                     }
                     .padding(.top, 18)
                 }
@@ -214,13 +219,18 @@ struct AuthorView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         RowHeading(title: series.isEmpty ? "Books" : "Other books")
                             .padding(.horizontal, metrics.margin)
-                        SeriesBookStrip(items: books.map(SeriesBookLabels.item(of:)))
+                        SeriesBookStrip(items: books.map(SeriesBookLabels.item(of:)), pad: "others")
                     }
                     .padding(.top, 20)
                 }
             }
+            // A controller goes series by series, its link then its books, then the other books (#46).
+            .padGroup("author", .column,
+                      members: series.flatMap { ["series-\($0.id)", "strip-\($0.id)"] } + (books.isEmpty ? [] : ["others"]),
+                      prefix: false)
             .padding(.bottom, 28)
         }
+        .padPage("author:\(route.id)")
         .ambientArtwork(artwork.isEmpty ? (works.first?.artwork ?? "") : artwork)
         .refreshable { reloads += 1 }
         .task(id: "\(route.id)·\(model.userId)·\(readerClosed)·\(reloads)") { await load() }
