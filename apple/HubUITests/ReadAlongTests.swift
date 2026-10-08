@@ -202,6 +202,65 @@ final class ReadAlongTests: XCTestCase {
         play.tap()
     }
 
+    /// Reading along, the page keeps the ebook's strips and corners (#58):
+    /// the same book read alone, then read along paused and playing with the
+    /// dock away, has its corners on the same lines; with the dock up the page
+    /// is shrunk above it, as the menu does, and the corners are away. The
+    /// attachments "strips-ebook", "-paused", "-paused-dock", "-playing-dock"
+    /// and "-playing", which are measured.
+    @MainActor
+    func testTheReadAlongPageHasTheEbooksStripsAndCorners() {
+        let ids = ["book-corner-clock", "book-corner-place", "book-corner-percent"]
+        func lines(_ app: XCUIApplication) -> [String: [Double]] {
+            ids.reduce(into: [:]) { found, id in
+                let corner = app.descendants(matching: .any).matching(identifier: id).firstMatch
+                if corner.waitForExistence(timeout: 5) {
+                    found[id] = [Double(corner.frame.minY), Double(corner.frame.maxY)].map { ($0 * 2).rounded() / 2 }
+                }
+            }
+        }
+        // The same book read alone.
+        let ebook = launchReadingAlong(["HUB_BOOK_READALONG": "0", "HUB_BOOK_CHROME": ""])
+        let alone = lines(ebook)
+        XCTAssertEqual(alone.count, ids.count, "the book read alone does not show its corners: \(alone)")
+        keep(ebook, "strips-ebook")
+        ebook.terminate()
+
+        let app = launchReadingAlong(["HUB_BOOK_CHROME": ""])
+        let page = app.descendants(matching: .any).matching(identifier: "book-page").firstMatch
+        XCTAssertEqual(lines(app), alone, "paused, the corners are not where the book read alone has them")
+        keep(app, "strips-paused")
+        page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let play = app.buttons["readalong-play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 5), "a tap did not bring the dock")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        keep(app, "strips-paused-dock")
+        play.tap()
+        XCTAssertTrue(waitUntil(15) { play.label == "Pause narration" }, "the narration did not play")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        keep(app, "strips-playing-dock")
+        page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(waitUntil(5) { !play.exists }, "the dock did not go away")
+        XCTAssertEqual(lines(app), alone, "playing, the corners are not where the book read alone has them")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        keep(app, "strips-playing")
+        page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(play.waitForExistence(timeout: 5), "a tap did not bring the dock back")
+        play.tap()
+        XCTAssertTrue(waitUntil(5) { play.label == "Play narration" }, "the narration did not pause")
+
+        // The demo's chapters are a page or two: the next pages, paused, the
+        // dock away, for a page that fills to its foot and one that starts at its head.
+        page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(waitUntil(5) { !play.exists }, "the dock did not go away")
+        for turn in 1...4 {
+            app.typeKey(XCUIKeyboardKey.rightArrow, modifierFlags: [])
+            RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+            XCTAssertEqual(lines(app), alone, "turned \(turn), the corners are not where the book read alone has them")
+            keep(app, "strips-paused-page-\(turn)")
+        }
+    }
+
     /// The voice turns the page when it reaches the next page's first word,
     /// inside the sentence the page break cuts, and the sentence goes on
     /// glowing on the new page.
