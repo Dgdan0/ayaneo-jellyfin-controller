@@ -188,6 +188,58 @@ final class DownloadsTests: XCTestCase {
         XCTAssertTrue(text(app, containing: "/3 complete").exists, "the batch does not count its three: \(words)")
     }
 
+    /// A downloaded series' own page has the library page's shape: its name, the series' own
+    /// facts and overview (kept beside its artwork when its first episode was queued), Play
+    /// naming the episode, Remove and more as round buttons, the season's pill and a strip of
+    /// episode cards that say what is on the device. HUB_DOWNLOAD queues the three episodes as
+    /// one batch at launch; the page is opened from Downloads, as a person does.
+    @MainActor
+    func testADownloadedSeriesHasTheLibraryPagesShapeWithItsSeasonsAndEpisodeCards() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo"]
+        app.launchEnvironment = ["HUB_SECTION": "downloads", "HUB_SIDE": "media",
+                                 "HUB_DOWNLOAD": "\(bleach)-e1,\(bleach)-e2,\(bleach)-e3"]
+        app.launch()
+        let device = element(app, "downloads-device")
+        XCTAssertTrue(device.waitForExistence(timeout: 15), "the Downloads page has no On this device: \(buttons(app))")
+        device.tap()
+        let poster = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Bleach'")).firstMatch
+        XCTAssertTrue(poster.waitForExistence(timeout: 40), "Bleach did not arrive on the device: \(buttons(app))")
+        poster.tap()
+
+        // Play names the episode it starts; Remove and more are round buttons beside it.
+        let play = element(app, "offline-play")
+        XCTAssertTrue(play.waitForExistence(timeout: 10), "the downloaded series' page did not open: \(buttons(app))")
+        XCTAssertEqual(play.label, "Play S1E1")
+        XCTAssertTrue(app.buttons["Remove"].firstMatch.exists, "no Remove beside Play: \(buttons(app))")
+        XCTAssertTrue(app.buttons["More actions"].firstMatch.exists, "no more beside Play: \(buttons(app))")
+
+        // The three episodes have all come, so the page says so, and the series' own words are there.
+        XCTAssertTrue(text(app, containing: "On this device · 3 episodes").waitForExistence(timeout: 40),
+                      "the page does not say its three episodes are on the device")
+        XCTAssertTrue(text(app, containing: "as the demo hub tells it").waitForExistence(timeout: 15),
+                      "the series' own overview was not kept beside its artwork")
+
+        // The season's pill, and the episode cards: UP NEXT on the first, what is on the device under each.
+        let season = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Season 1'")).firstMatch
+        XCTAssertTrue(season.waitForExistence(timeout: 10), "the page has no season pill: \(buttons(app))")
+        XCTAssertTrue(season.label.contains("3 episodes"), "the season does not count its episodes: \(season.label)")
+        let first = element(app, "offline-episode-\(bleach)-e1")
+        let second = element(app, "offline-episode-\(bleach)-e2")
+        XCTAssertTrue(first.waitForExistence(timeout: 10), "no card for the first episode: \(buttons(app))")
+        XCTAssertTrue(second.exists, "no card for the second episode: \(buttons(app))")
+        XCTAssertTrue(first.label.contains("The Beginning"), first.label)
+        XCTAssertTrue(first.label.localizedCaseInsensitiveContains("up next"), "the first episode is not up next: \(first.label)")
+        XCTAssertTrue(second.label.contains("A Second Look"), second.label)
+        XCTAssertFalse(second.label.localizedCaseInsensitiveContains("up next"), "the second is up next too: \(second.label)")
+        XCTAssertNotNil(first.label.range(of: #"\d\s?[KMG]?B"#, options: .regularExpression),
+                        "the card does not say its size on the device: \(first.label)")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "offline-series"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     /// A download that finishes says so in a notification (#43). The demo
     /// asks for permission only with HUB_ALERTS=1, at the first download.
     @MainActor

@@ -31,6 +31,8 @@ final class OfflineLibrary {
     @ObservationIgnored private var syncing: Task<Void, Never>?
     /// A refresh of the kept subtitles under way: another waits for it.
     @ObservationIgnored private var refreshing: Task<Bool, Never>?
+    /// The series' own items being asked for, so a page has their facts and overview: one at a time.
+    @ObservationIgnored private var keepingSeries: Task<Void, Never>?
     /// What each download was when last looked at: a change to finished or
     /// failed is a notification (#43). Nil until the first look.
     @ObservationIgnored private var seenStates: [String: OfflineState]?
@@ -73,6 +75,8 @@ final class OfflineLibrary {
         seenStates = OfflineAlerts.states(store.rows(userId: userId))
         revision += 1
         syncSoon()
+        // A series downloaded before its page kept its own words has them now, the first time the hub answers.
+        keepSeriesSoon()
     }
 
     /// A download moved: the pages read again, and one that finished or
@@ -169,6 +173,8 @@ final class OfflineLibrary {
         let added = store.enqueue(title: title, seriesId: seriesId, userId: userId, manifests: manifests, now: now)
         revision += 1
         downloader.kick()
+        // The series' own facts and overview are kept beside its artwork as its first episode is queued.
+        if added > 0, !seriesId.isEmpty { keepSeriesSoon() }
         return added == 0 ? "Already downloaded or on its way" : nil
     }
 
@@ -183,6 +189,43 @@ final class OfflineLibrary {
     /// Every download of a film or a series' episodes gone from this device.
     func removeTitle(_ entry: OfflineCatalogEntry) {
         for row in entry.rows { downloader.remove(row.id) }
+    }
+
+    // MARK: A downloaded series' own page
+
+    /// What was kept of the series itself; nil until the hub has been asked.
+    func seriesSnapshot(_ seriesId: String) -> OfflineSeriesSnapshot? {
+        _ = revision
+        return store.series.snapshot(seriesId)
+    }
+
+    /// The series' items kept for every series on this device that has none, or lacks a picture,
+    /// quietly: nothing is said, and the first answer that does not come stops it for now.
+    func keepSeriesSoon() {
+        guard keepingSeries == nil, hub != nil else { return }
+        keepingSeries = Task { [weak self] in
+            await self?.keepSeries()
+            self?.keepingSeries = nil
+        }
+    }
+
+    private func keepSeries() async {
+        guard let hub else { return }
+        let ids = store.rows(userId: userId).map(\.manifest.item.seriesId)
+        for seriesId in store.series.needing(ids) {
+            guard let item = try? await hub.fetch(HubEndpoints.libraryItem(seriesId), as: LibraryItemResponse.self).item,
+                  !item.id.isEmpty else { return }
+            // Gone from the device while it was asked for: nothing of it is kept.
+            guard store.rows(userId: userId).contains(where: { $0.manifest.item.seriesId == seriesId }) else { continue }
+            store.series.save(OfflineSeriesSnapshot(item, now: OfflineDownloader.now()))
+            for (kind, path, width) in [("backdrop", item.backdrop, 1280), ("poster", item.poster, 480)] where !path.isEmpty {
+                guard !FileManager.default.fileExists(atPath: store.series.artworkFile(seriesId, kind: kind).path) else { continue }
+                if let data = try? await hub.image(HubEndpoints.sized(path, width: width)) {
+                    store.series.writeArtwork(data, seriesId: seriesId, kind: kind)
+                }
+            }
+            revision += 1
+        }
     }
 
     // MARK: Playing

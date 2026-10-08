@@ -127,6 +127,7 @@ The look is `GLASS_PLAN.md`. Its pieces in this app, so each screen uses one own
 | Sizes: margins, tiles, posters, episodes, type | `GlassMetrics` (`\.glassMetrics`), set by the shell: phone sizes (`small`) where the width class is compact or the window is short (`ShellLayout.isShort`, a phone turned sideways, about 400 points tall: heroes fit the height, the tab bar is compact); a hero's words centred only on a phone held upright (`centred`) |
 | A filter or season pill, a capsule of places, a control, tabs, a page heading | `Glass/GlassControls`: `ChoicePill`, `GlassCapsulePicker`, `GlassControlStyle`, `UnderlineTabs`, `PageHeading`, `GlassLabel` |
 | Artwork fading into the page | `FadedArtwork.hero` / `.title` (`Media/Redesign`): a mask with the words' shade inside it, as Android's `FadedImageView` |
+| A title's page as plain parts (the library's `TitleView` and a downloaded title's `OfflineTitleView` are one shape): the backdrop and header placing, the name, facts, state and overview with Read more, the season pills, the strip of episode cards and one card | `Library/TitleParts`: `TitlePage`, `TitleHeader`, `TitleOverview`, `SeasonPills`, `EpisodeStrip` (opens at the episode Play starts), `EpisodeCard` (title, detail, played, progress, up next and a still of the caller's own); a still on the device is `OfflineArtwork`, and `FadedArtwork.titleFade` fades any picture |
 | Panel, sheet and ink colours, accents | HubKit `GlassColors` (`panel`, `sheet`, `ink`, `badge`), `AccentPreset.defaultFor(side)` |
 | The bars, the sections and Media/Books | `Shell/` (`MainView`, `WideBar`, `PhoneBar`, `ShellTabBar`); top capsule or bottom tab bar by width, `ShellLayout.isWide` |
 | Pushing a page, or swapping the top one | `NavigationLink(value: AppRoute…)` or `@Environment(\.openRoute)` (`push`, `replace`); the shell owns every stack and its back pill |
@@ -134,7 +135,7 @@ The look is `GLASS_PLAN.md`. Its pieces in this app, so each screen uses one own
 | A library tile's three fanned posters | HubKit `LibraryFan.posters` (one function, so the choice can move into a hub field) |
 | The libraries' order (#15): moving one, saving, sliding back on a refusal | HubKit `LibraryOrder` and `LibraryOrderQueue`; the app's `Library/LibraryOrderEditor` (one per side), drawn by `Library/LibraryArrange` (`GripMark`, `.jiggle`, `.arrangeable`) on the Library page and in Settings › Libraries |
 | A library's own search (#14), and the Library page's | `GridSource.search(_:viewId:library:)` in `Library/LibraryView` (`HubEndpoints.librarySearch(viewId:)`): the round search on a library's page keeps to it and its count line names it ("2 matches in Anime"); on Favourites and on the Library page it looks everywhere |
-| The demo hub (`-demo`) for UI tests and previews | HubKit `Demo/`: `DemoLibrary` answers the library as the hub does (a search kept to one library, Favourites, title pages, watched and favourite that stay for the run, a change that is not exactly one of the two refused) |
+| The demo hub (`-demo`) for UI tests and previews | HubKit `Demo/`: `DemoLibrary` answers the library as the hub does (a search kept to one library, Favourites, title pages, watched and favourite that stay for the run, a change that is not exactly one of the two refused); `DemoArtwork` draws its pictures (`/v1/img/jf/<id>/<kind>`: a colour for each title, so a backdrop has something to fade and a download keeps real files) |
 
 Debug builds also take `HUB_SIDE=books` and `HUB_SHEET=profiles` (the avatar's sheet) for
 screenshots, beside `HUB_SECTION` and `HUB_OPEN` (a Home row's first title, or with
@@ -823,7 +824,8 @@ contract is in #5), so AVPlayer plays every download and there is one player.
 | What is kept, coming and watched offline, per profile | HubKit `OfflineStore` (files, not SQLite), the app's one `Downloads/OfflineLibrary.shared` with its background `URLSession` (`OfflineDownloader`) |
 | A download's next step, and what a failed request means (409 `offline_preparing` waits on the PC) | HubKit `OfflineTransfer` |
 | The Downloads tab: one poster per film or series under its library, the queue a batch at a time | `Downloads/DownloadsView`; words in HubKit `OfflineCatalog`, `OfflineQueueLabels` ("Preparing on the PC · 40%", "Next on the PC", "2nd in line on the PC") and `OfflineAppleNotes` (what takes longer, what is left out) |
-| A downloaded title's page, played from its files | `Downloads/OfflineTitleView`; seasons from the episodes that arrived (`OfflineCatalog.seasons`), the one to go on with from `playTarget` |
+| A downloaded title's page, played from its files: the library page's shape (faded backdrop, the name and its facts and overview, Play, Remove and more as round buttons, season pills and a strip of episode cards saying what is on the device) | `Downloads/OfflineTitleView` built from the shared title parts (above); seasons from the episodes that arrived (`OfflineCatalog.seasons`), the one to go on with from `playTarget`, a film's from `OfflineCatalog.filmTarget` |
+| A downloaded series' own facts, overview and pictures, kept beside its episodes (queued with its first episode; filled in for earlier downloads the next time the hub answers; with none kept the page is its name and episodes) | HubKit `OfflineSeriesSnapshot` and `OfflineSeriesStore` (`OfflineStore.series`: `snapshot`, `needing`, `artworkFile`, `prune`, which goes with the last episode); the app's `OfflineLibrary.keepSeriesSoon` / `seriesSnapshot` |
 | A series' episodes to download | `Downloads/OfflinePickerView` on `GET /v1/offline/series/{id}/selection?format=apple`; quick choices and words in HubKit `OfflineSelection` |
 | The Download button on a title page and its ring | `Downloads/DownloadButton`, its state and words in HubKit `OfflineTitleState`; an episode's menu has Download episode |
 | Asking before a download leaves the device | `offlineRemoval` (`OfflineRemoval`): Keep in the cancel role, Remove |
@@ -841,8 +843,9 @@ three audio tracks (two English dubs and Japanese) and two text subtitles, the t
 subtitles left out, and AVPlayer's own options matched. Played for under 30 seconds, the episode
 stayed unwatched on the server; the download was then removed.
 
-Debug launches take `HUB_DOWNLOAD=<item id>` (downloads it at launch) and
-`HUB_DOWNLOAD=remove:<item id>`. The demo hub makes each MP4 in a few seconds, The Matrix's
+Debug launches take `HUB_DOWNLOAD=<item id>` (downloads it at launch; `<id>,<id>,<id>` queues a series' episodes as one batch),
+`HUB_DOWNLOAD=remove:<item id>`, `HUB_OFFLINE_TITLE=<film or series id>` (opens that title's page on this device) and
+`HUB_OFFLINE_WATCH=<item id>:<position ms>/<duration ms>[/done],…` (watches made on this device, so the cards say "16:12 left" and "watched"). The demo hub makes each MP4 in a few seconds, The Matrix's
 (converted) in eight; Dune fails once until it is retried, and Inception has a French picture
 subtitle that is left out.
 

@@ -46,6 +46,7 @@ public struct DemoTransport: HubTransport {
             ?? DemoActivity.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoNotifications.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoUpkeep.answer(method: method, path: path, query: query, body: request.httpBody)
+            ?? DemoArtwork.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoPlayback.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoMedia.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoComics.answer(method: method, path: path, query: query, body: request.httpBody)
