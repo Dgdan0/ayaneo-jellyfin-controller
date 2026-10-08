@@ -814,6 +814,7 @@ contract is in #5), so AVPlayer plays every download and there is one player.
 | Asking before a download leaves the device | `offlineRemoval` (`OfflineRemoval`): Keep in the cancel role, Remove |
 | A download played | `PlayerModel` takes `OfflineLibrary.localPlan` before the hub; the file's audio is chosen by place when that is its language (two English dubs are told apart), its text subtitles by place with the language checked |
 | A watch made offline | kept on the device and sent with `POST /v1/offline/progress/sync` as the profile that made it |
+| A download's subtitles kept beside it as WebVTT and refreshed (#45): as it arrives, when Downloads opens and before it plays (1.5 s at most, the rest as it plays); fetched when the signature differs, let go when gone from the list, kept on any error | HubKit `OfflineSubtitleSync` (`plan`, `merged`, `failure`, `refresh`, and `tracks`: the kept files drawn by the app first, the MP4's own options for the rest), files in `OfflineStore` (`keptSubtitleFile`, removed with the download); the app's `OfflineLibrary.refreshSubtitles` |
 
 Each item's key is the batch's and the whole Jellyfin id (`OfflineSelection.itemKey`), not its
 first twelve characters as on Android: ids that start alike were one key, and only one of a series'

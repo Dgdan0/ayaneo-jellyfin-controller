@@ -42,6 +42,10 @@ final class OfflineDownloader {
     static let holdMillis: Int64 = 30_000
     private static let wifiOnlyKey = "offline.wifiOnly"
 
+    /// A download that has just arrived whole: its subtitles are fetched
+    /// beside it while the hub is at hand (#45).
+    var finished: ((OfflineRow) -> Void)?
+
     private let store: OfflineStore
     private let changed: () -> Void
     private var context: Context?
@@ -392,6 +396,7 @@ final class OfflineDownloader {
             let grantId = row.manifest.grantId
             Task { try? await hub.send(HubEndpoints.releaseOffline(grantId: grantId)) }
         }
+        if let done = store.row(id) { finished?(done) }
         Task { await fetchArtwork(row) }
         changed()
         kick()

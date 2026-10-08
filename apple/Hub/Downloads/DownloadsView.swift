@@ -77,7 +77,11 @@ struct DownloadsView: View {
             }
             .padding(.bottom, 28)
         }
-        .task { offline.syncSoon() }
+        .task {
+            offline.syncSoon()
+            // The downloads' subtitles brought up to date with the hub, quietly (#45).
+            await offline.refreshSubtitles()
+        }
         // A download's notification tapped: the queue for a failure, the device for one done (#43).
         .onChange(of: taps.opening, initial: true) { _, _ in
             if let wanted = taps.take(stack: stack) { tab = wanted }
