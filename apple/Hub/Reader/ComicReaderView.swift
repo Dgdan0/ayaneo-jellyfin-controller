@@ -44,6 +44,7 @@ struct ComicReaderView: View {
             opened.list = list
             // The issues' page lists kept for an outage (#37).
             opened.manifests = ReadingOffline.manifests(app: model)
+            opened.keptShelf = ReadingOffline.shelf(app: model)
             opened.scope = ReadingOffline.scope(app: model)
             // Marked unread: the issue opens at its first page. A page sent forgets the mark (#37).
             opened.startsFresh = marks.startsFresh(workId)

@@ -29,6 +29,9 @@ final class OfflineLibrary {
     @ObservationIgnored private var engine: OfflineDownloader?
     @ObservationIgnored private var hub: HubClient?
     @ObservationIgnored private var syncing: Task<Void, Never>?
+    /// What each download was when last looked at: a change to finished or
+    /// failed is a notification (#43). Nil until the first look.
+    @ObservationIgnored private var seenStates: [String: OfflineState]?
 
     init(root: URL) {
         store = OfflineStore(root: root)
@@ -47,7 +50,7 @@ final class OfflineLibrary {
 
     var downloader: OfflineDownloader {
         if let engine { return engine }
-        let made = OfflineDownloader(store: store) { [weak self] in self?.revision += 1 }
+        let made = OfflineDownloader(store: store) { [weak self] in self?.downloadsChanged() }
         engine = made
         return made
     }
@@ -61,8 +64,20 @@ final class OfflineLibrary {
         guard app.isConfigured else { return }
         downloader.attach(OfflineDownloader.Context(hub: app.hub, baseURL: app.address, token: app.storedToken(),
                                                     userId: app.userId, isDemo: app.isDemo))
+        // This profile's downloads as they are now: only what changes after is news.
+        seenStates = OfflineAlerts.states(store.rows(userId: userId))
         revision += 1
         syncSoon()
+    }
+
+    /// A download moved: the pages read again, and one that finished or
+    /// failed says so (#43).
+    private func downloadsChanged() {
+        revision += 1
+        guard !userId.isEmpty || isDemo else { return }
+        let rows = store.rows(userId: userId)
+        DownloadAlerts.shared.post(OfflineAlerts.changes(before: seenStates, rows: rows), demo: isDemo)
+        seenStates = OfflineAlerts.states(rows)
     }
 
     /// The system woke the app for the background session's events (iOS).
@@ -128,6 +143,8 @@ final class OfflineLibrary {
     /// reason otherwise, in words.
     func download(itemIds: [String], title: String, seriesId: String = "") async -> String? {
         guard let hub, !itemIds.isEmpty else { return "Not connected to the hub" }
+        // The first download asks whether the app may say when it is done, never the launch (#43).
+        await DownloadAlerts.shared.askOnce(demo: isDemo)
         let now = OfflineDownloader.now()
         let batchKey = OfflineSelection.batchKey(now: now, for: seriesId.isEmpty ? itemIds[0] : seriesId)
         let body = OfflinePrepareBody(batchKey: batchKey, seriesId: seriesId, format: OfflineFormat.apple,
