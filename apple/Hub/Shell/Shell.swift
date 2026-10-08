@@ -253,6 +253,8 @@ struct MainView: View {
     /// One sound at a time: the video and an audiobook.
     @State private var sounds = SoundGuard.shared
     @State private var alertTaps = DownloadAlertTaps.shared
+    /// A game controller on every page (the player and the readers claim it while open).
+    @State private var pad = PadClaim()
     @State private var profilesOpen = false
     @State private var sheetPlaces = false
     /// The Mac's window buttons sit over the page under its hidden title bar:
@@ -465,6 +467,9 @@ struct MainView: View {
         .environment(\.glassPalette, model.colors.palette(for: ambient.displayed))
         .environment(\.glassAccent, accents.accent(side))
         .onChange(of: key, initial: true) { _, latest in open(latest) }
+        .onAppear { pad.start { action in padPressed(action) } }
+        .onDisappear { pad.stop() }
+
         // A download's notification tapped (#43): Downloads, at its first page, on this side.
         .onChange(of: alertTaps.request) { _, request in
             guard let request else { return }
@@ -666,6 +671,27 @@ struct MainView: View {
         guard var path = paths[key], !path.isEmpty else { return }
         path.removeLast()
         paths[key] = path
+    }
+
+    /// A controller's press with no player or reader open (`ShellPadMap`):
+    /// Ⓑ closes the profile picker or goes back a page, L1 and R1 go round
+    /// the sections. A screen's own sheet or alert is left to be answered.
+    private func padPressed(_ action: PadAction) {
+        guard !covered, let command = ShellPadMap.command(action) else { return }
+        switch command {
+        case .back:
+            if profilesOpen {
+                profilesOpen = false
+            } else if !PresentedOver.any {
+                goBack()
+            }
+        case .section(let delta):
+            guard !profilesOpen, !PresentedOver.any else { return }
+            let sections = AppSection.sections
+            if let next = SectionCycle.next(current: sections.firstIndex(of: section), delta: delta, count: sections.count) {
+                select(sections[next])
+            }
+        }
     }
 
     private func openProfiles(wide: Bool) {

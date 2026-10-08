@@ -2,20 +2,29 @@ import GameController
 import HubKit
 import Observation
 
-/// A game controller in a reader (#25; APPLE_PLAN.md, "Input"): its buttons,
-/// D-pad and sticks as the Pocket's `PadAction`s, for `ReaderPadMap`. Ⓐ Ⓑ Ⓧ
-/// Ⓨ, the shoulders, the triggers, Menu (the Pocket's Start), Options (its
-/// Select) and the sticks pressed in. The D-pad and the left stick repeat
-/// while held, as the Pocket's do; the right stick pans for as long as it is
-/// pushed. Only while a reader is open: nothing else in the app reads a pad.
+/// A game controller, for the whole app (APPLE_PLAN.md, "Input"): its
+/// buttons, D-pad and sticks as the Pocket's `PadAction`s. Ⓐ Ⓑ Ⓧ Ⓨ, the
+/// shoulders, the triggers, Menu (the Pocket's Start), Options (its Select)
+/// and the sticks pressed in. The D-pad and the left stick repeat while held,
+/// as the Pocket's do; the right stick pans for as long as it is pushed.
+///
+/// One per process (`shared`), since a controller's buttons take one handler
+/// each: the screen on top claims the presses (`PadClaim`) and gives them
+/// back when it goes. (HubKit's `PadInput`, the #46 engine's, is another
+/// thing: whether the ring shows.) The shell claims them first and keeps its claim, then
+/// the player and the readers each claim theirs while open.
 @MainActor
 @Observable
-final class ReaderPadInput {
-    /// A controller is connected: the reader shows its cursor and key hints.
+final class PadRouter {
+    static let shared = PadRouter()
+
+    /// A controller is connected: the readers show their cursor and key hints.
     private(set) var connected = false
 
-    @ObservationIgnored private var send: (PadAction) -> Void = { _ in }
+    /// The claims, the last on top: only it is sent a press.
+    @ObservationIgnored private var claims: [(id: UUID, send: (PadAction) -> Void)] = []
     @ObservationIgnored private var observers: [any NSObjectProtocol] = []
+    @ObservationIgnored private var started = false
     @ObservationIgnored private var repeating: Task<Void, Never>?
     @ObservationIgnored private var held: PadDirection?
     @ObservationIgnored private var stick = (x: Float(0), y: Float(0))
@@ -26,8 +35,30 @@ final class ReaderPadInput {
     /// The left stick pushed past this is a D-pad press.
     static let stepAt: Float = 0.5
 
-    func start(_ send: @escaping (PadAction) -> Void) {
-        self.send = send
+    /// Presses go to `send` until the claim is let go; a claim made later
+    /// takes them meanwhile.
+    func claim(_ send: @escaping (PadAction) -> Void) -> UUID {
+        start()
+        let id = UUID()
+        claims.append((id, send))
+        stopRepeating()
+        return id
+    }
+
+    func release(_ id: UUID) {
+        claims.removeAll { $0.id == id }
+        stopRepeating()
+    }
+
+    /// A press, to the claim on top.
+    func dispatch(_ action: PadAction) {
+        claims.last?.send(action)
+    }
+
+    /// The controllers are listened to from the first claim on, for good.
+    private func start() {
+        guard !started else { return }
+        started = true
         attachAll()
         let center = NotificationCenter.default
         // A controller connected: every one connected is given the handlers
@@ -39,16 +70,38 @@ final class ReaderPadInput {
             MainActor.assumeIsolated { self?.refresh() }
         })
         refresh()
+        #if DEBUG
+        playScript()
+        #endif
     }
 
-    func stop() {
-        for controller in GCController.controllers() { detach(controller) }
-        for observer in observers { NotificationCenter.default.removeObserver(observer) }
-        observers = []
+    /// A held direction or a pushed stick belongs to the screen it began on.
+    private func stopRepeating() {
         repeating?.cancel()
-        panning?.cancel()
+        repeating = nil
         held = nil
+        panning?.cancel()
+        panning = nil
+        stick = (0, 0)
     }
+
+    #if DEBUG
+    /// The UI tests have no controller: HUB_PAD="R1,B" presses those, one a
+    /// second, HUB_PAD_DELAY seconds after launch (4 by default).
+    private func playScript() {
+        let environment = ProcessInfo.processInfo.environment
+        let actions = PadScript.actions(environment["HUB_PAD"] ?? "")
+        guard !actions.isEmpty else { return }
+        let delay = Double(environment["HUB_PAD_DELAY"] ?? "") ?? 4
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            for action in actions {
+                self?.dispatch(action)
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+    #endif
 
     private func attachAll() {
         for controller in GCController.controllers() { attach(controller) }
@@ -86,24 +139,10 @@ final class ReaderPadInput {
         refresh()
     }
 
-    private func detach(_ controller: GCController) {
-        guard let pad = controller.extendedGamepad else { return }
-        for button in [pad.buttonA, pad.buttonB, pad.buttonX, pad.buttonY, pad.leftShoulder, pad.rightShoulder,
-                       pad.leftTrigger, pad.rightTrigger, pad.buttonMenu, pad.dpad.up, pad.dpad.down, pad.dpad.left,
-                       pad.dpad.right] {
-            button.pressedChangedHandler = nil
-        }
-        pad.buttonOptions?.pressedChangedHandler = nil
-        pad.leftThumbstickButton?.pressedChangedHandler = nil
-        pad.rightThumbstickButton?.pressedChangedHandler = nil
-        pad.leftThumbstick.valueChangedHandler = nil
-        pad.rightThumbstick.valueChangedHandler = nil
-    }
-
     private func press(_ button: GCControllerButtonInput, _ action: PadAction) {
         button.pressedChangedHandler = { [weak self] _, _, pressed in
             MainActor.assumeIsolated {
-                if pressed { self?.send(action) }
+                if pressed { self?.dispatch(action) }
             }
         }
     }
@@ -111,7 +150,7 @@ final class ReaderPadInput {
     /// A stick pressed in: down and up both, for L3's magnifier while held.
     private func click(_ button: GCControllerButtonInput, _ stick: PadStick) {
         button.pressedChangedHandler = { [weak self] _, _, pressed in
-            MainActor.assumeIsolated { self?.send(.click(stick, down: pressed)) }
+            MainActor.assumeIsolated { self?.dispatch(.click(stick, down: pressed)) }
         }
     }
 
@@ -139,11 +178,11 @@ final class ReaderPadInput {
         repeating?.cancel()
         held = direction
         guard let direction else { return }
-        send(.step(direction))
+        dispatch(.step(direction))
         repeating = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(380))
             while !Task.isCancelled {
-                self?.send(.step(direction))
+                self?.dispatch(.step(direction))
                 try? await Task.sleep(for: .milliseconds(120))
             }
         }
@@ -162,10 +201,31 @@ final class ReaderPadInput {
             let tick = 1.0 / 60
             while !Task.isCancelled, let self, self.stick.x != 0 || self.stick.y != 0 {
                 // A stick's up is the page's up: the view moves towards smaller y.
-                self.send(.pan(dx: Double(self.stick.x) * tick, dy: -Double(self.stick.y) * tick))
+                self.dispatch(.pan(dx: Double(self.stick.x) * tick, dy: -Double(self.stick.y) * tick))
                 try? await Task.sleep(for: .milliseconds(16))
             }
             self?.panning = nil
         }
+    }
+}
+
+/// A screen's hold on the controller while it is open: `start` claims the
+/// presses (sending them to `send`), `stop` gives them back.
+@MainActor
+@Observable
+final class PadClaim {
+    @ObservationIgnored private var id: UUID?
+
+    /// A controller is connected.
+    var connected: Bool { PadRouter.shared.connected }
+
+    func start(_ send: @escaping (PadAction) -> Void) {
+        stop()
+        id = PadRouter.shared.claim(send)
+    }
+
+    func stop() {
+        if let id { PadRouter.shared.release(id) }
+        id = nil
     }
 }

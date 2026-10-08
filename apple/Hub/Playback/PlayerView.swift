@@ -68,6 +68,8 @@ struct PlayerView: View {
     @State private var timelineFrame = CGRect.zero
     @State private var timelineBarTop: CGFloat = 0
     @FocusState private var keys: Bool
+    /// A game controller while the player is open: its buttons are the keys'.
+    @State private var pad = PadClaim()
 
     /// Debug builds: HUB_PLAY_CHROME=pinned keeps the chrome up for screenshots.
     private var pinned: Bool {
@@ -203,7 +205,9 @@ struct PlayerView: View {
         .onAppear {
             keys = true
             scheduleHide()
+            pad.start { action in padPressed(action) }
         }
+        .onDisappear { pad.stop() }
         .onChange(of: player.isPlaying) { _, playing in
             // As on Android: the chrome comes up when playing starts or stops,
             // and goes again only while it plays.
@@ -807,6 +811,27 @@ struct PlayerView: View {
             withAnimation(.easeOut(duration: 0.2)) {
                 seekShown = nil
                 levelShown = nil
+            }
+        }
+    }
+
+    /// A controller's press (`PlayerPadMap`): the keys' commands, Ⓨ for
+    /// Audio & subtitles, Ⓑ closing a panel and then the player, L1 and R1
+    /// the episode before and after, Menu the controls shown or hidden.
+    private func padPressed(_ action: PadAction) {
+        guard let command = PlayerPadMap.command(action, panelOpen: !panels.isEmpty) else { return }
+        switch command {
+        case .key(let key): act { press(key) }
+        case .openTracks: open(.tracks)
+        case .closePanel: panels.removeLast()
+        case .leave: player.close()
+        case .previous: act { player.playPrevious() }
+        case .toggleControls:
+            if chromeShown && !locked {
+                hiding?.cancel()
+                chromeShown = false
+            } else {
+                poke()
             }
         }
     }

@@ -446,7 +446,7 @@ run's issue or a manga volume opens, over the whole window. It leaves through
 | The heading, "Issue 51 · Page 2 of 24", "Part 2 of 3", the end card's words | HubKit `ReaderTitleFormatter`, `EndOfIssue` (`Rules/ComicWords`) |
 | Pages decoded ahead, the Pages grid's cursor, the paper round a page | HubKit `PageSlots`, `PageGrid`, `PageBounds` (`content(ofThumbnail:)` reads the hub's 96-wide thumbnail) |
 | A tap, a swipe | HubKit `ComicTouch` |
-| Every key in every reader, and a keyboard's | HubKit `ReaderPadMap`, `ReaderKeyboard`; a game controller through `Reader/ReaderPadInput` (GameController), the book reader's too |
+| Every key in every reader, and a keyboard's | HubKit `ReaderPadMap`, `ReaderKeyboard`; a game controller through the app's `App/PadRouter` (GameController), claimed by each reader while open (`PadClaim`) |
 | Two pages side by side, where the page goes on screen | HubKit `ComicSpreads` (a window 980 wide or more and 1.25 times as wide as tall), `ComicUnits`, `ComicUnitLayout`, `ComicFrame` and `ComicCamera`: the fit, thirds, kept zoom, pans, pinches and double taps Android keeps in its screen |
 | The issue, its pages and thumbnails, the place sent | HubKit `ReadingPublicationManifest` (`Model/ReadingPages`), `HubEndpoints.readingPublication…` (`Net/ReaderEndpoints`), `ComicProgressOutbox` (`Rules/ComicProgress`) |
 | The reader on screen | `ComicReaderModel` (state, opening, moving, zoom, the place; `ComicReaderPages` the pictures, `ComicReaderInput` the keys), `ComicPageCanvas`, `ComicReaderBars`, `ComicPagesGrid`, `ComicReaderSheetView`, `ComicReaderOverlays` |
@@ -851,3 +851,22 @@ test never puts a banner over the next.
 Differences from Android, on purpose: the hub's MP4, not the original file; no storage location to
 choose (the app's own Application Support, kept out of backups); no alerts for the server's own
 transfers and subtitles.
+
+## A controller on every page: the input, Ⓑ, L1/R1 and the player (#46, parts A and B)
+
+One listener for the whole app, `App/PadRouter` (`shared`): GameController's handlers on every
+controller, the D-pad and the left stick repeating while held, the right stick panning, each press a
+HubKit `PadAction`. The screen on top claims the presses with a `PadClaim` (`start` when it opens,
+`stop` when it goes) and only the latest claim is sent them: the shell claims first and keeps its
+claim, the player and each reader claim theirs over it while open. HubKit's `PadInput` (#46's
+engine: whether the ring shows) is another thing.
+
+| Behaviour | Owner |
+|---|---|
+| Ⓑ closes the profile picker, else goes back a page; L1 and R1 go round Home, Discover, Library, Downloads and Activity, from Notifications, Services or Settings to the first or the last (the Pocket's `switchWithin`) | HubKit `ShellPadMap`, `SectionCycle`; `Shell.padPressed`, which leaves the page alone while a screen's own sheet or alert is up (`App/PresentedOver`) |
+| The player with a controller: Ⓐ play/pause, ←/→ the seek step, ↑/↓ volume, Ⓧ subtitles on/off, Ⓨ Audio & subtitles, Ⓑ closes a panel and then leaves, L1/R1 the episode before and after, L2/R2 slower and faster, Menu the controls shown or hidden, Options skips the intro or credits. A panel open takes Ⓑ only; the lock is against touches, so presses go on through it | HubKit `PlayerPadMap`; `PlayerView.padPressed` with the keys' own `press` |
+| The UI tests' controller | `HUB_PAD="R1,B"` (Debug builds) presses those, one a second, `HUB_PAD_DELAY` seconds after launch (`PadScript`) |
+
+Escape is not a way back on the iPad yet: a SwiftUI shortcut for it never arrives, since iPadOS keeps
+the key for its own focus system. The keyboard joins through key commands that take priority over
+the system's (`wantsPriorityOverSystemBehavior`), with #46's engine.
