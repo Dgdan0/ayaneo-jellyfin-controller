@@ -77,7 +77,6 @@ import org.readium.r2.navigator.epub.css.RsProperties
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.preferences.ColumnCount
-import org.readium.r2.navigator.preferences.FontFamily
 import org.readium.r2.navigator.preferences.TextAlign
 import org.readium.r2.navigator.preferences.Theme as ReadiumTheme
 import org.readium.r2.shared.ExperimentalReadiumApi
@@ -488,6 +487,13 @@ class EpubReaderScreen(
         ComfortSheet.show(overlay, colors, ReaderKind.BOOK, ::applyComfort)
     }
 
+    /** The brightness slider at the foot of Appearance (#47): kept for every reader, as Comfort's own was. */
+    private fun setBrightness(brightness: Float) {
+        val next = comfort.copy(brightness = brightness)
+        ComfortSettings.save(host.viewContext, next)
+        applyComfort(next)
+    }
+
     private fun applyComfort(value: ScreenComfort) {
         comfort = value
         comfortLayer.apply(value)
@@ -701,7 +707,7 @@ class EpubReaderScreen(
                 // Half the gap between two columns, in each column's padding: the rest of the outer margin is the
                 // inset of pageHost (PageGeometry, #47). The CSS pixel is the dp.
                 readiumCssRsProperties = RsProperties(pageGutter = Length.Px(PageGeometry.GUTTER_DP.toDouble()))
-            ),
+            ).also { EpubFontDeclarations.declare(it) },
             paginationListener = object : EpubNavigatorFragment.PaginationListener {
                 override fun onPageChanged(pageIndex: Int, totalPages: Int, locator: Locator) {
                     this@EpubReaderScreen.pageIndex = pageIndex
@@ -1488,7 +1494,8 @@ class EpubReaderScreen(
             applyPreferences()
         }, onClose = {
             host.refreshHints()
-        }, pageInfo = pageChoice, onPageInfoChanged = ::setPageInfo)
+        }, pageInfo = pageChoice, onPageInfoChanged = ::setPageInfo,
+            brightness = comfort.brightness, onBrightness = ::setBrightness)
         host.refreshHints()
     }
 
@@ -1567,12 +1574,8 @@ class EpubReaderScreen(
             EpubColumns.ONE -> ColumnCount.ONE
             EpubColumns.TWO -> ColumnCount.TWO
         },
-        fontFamily = when (value.fontFamily) {
-            "serif" -> FontFamily.SERIF
-            "sans-serif" -> FontFamily.SANS_SERIF
-            "monospace" -> FontFamily.MONOSPACE
-            else -> null
-        },
+        // Literata, Charis, Atkinson Hyperlegible: bundled and declared in attachNavigator; null is the book's own font.
+        fontFamily = EpubFontDeclarations.family(value.fontFamily),
         fontSize = value.fontScale.toDouble(),
         lineHeight = value.lineHeight.toDouble(),
         // Always the same: the margin is chosen by the page's inset (PageGeometry), not by Readium's multiplier.

@@ -20,7 +20,8 @@ enum class EpubColumns { AUTO, ONE, TWO }
 @Serializable
 data class EpubReaderPreferences(
     val theme: EpubTheme = EpubTheme.SEPIA,
-    val fontFamily: String = "publisher",
+    /** The face's stored id ([EpubFonts.Face.id]): Literata for a new device; `publisher` is the book's own font. */
+    val fontFamily: String = EpubFonts.DEFAULT.id,
     val fontScale: Float = 1.3f,
     val lineHeight: Float = 1.5f,
     val pageMargins: Float = 1.0f,
@@ -34,6 +35,12 @@ data class EpubReaderPreferences(
 )
 
 object EpubLayoutPolicy {
+    /** The sizes the slider offers (#47): 70 to 200% in steps of 10, the 14 marks of Kindle's. */
+    val SIZES = com.pocketds.hub.ui.ValueRange(0.7f, 2f, 0.1f)
+
+    /** "130%", for the slider. */
+    fun sizeLabel(scale: Float): String = "${Math.round(scale * 100)}%"
+
     /** The line spacings the sheet offers (#47): 1.5 is the default and, in Literata, Kindle's own spacing. */
     val SPACING: List<Pair<Float, String>> = listOf(1.3f to "Tight", 1.5f to "Relaxed", 1.8f to "Open")
 
@@ -66,9 +73,9 @@ object EpubLayoutPolicy {
     /**
      * "Reset text style" (#42, Part 3): the reader's own typography as a device with nothing stored has it, for a
      * device that changed its look once and so never saw the new default. The four settings of the text's style
-     * (Publisher styling, alignment, hyphenation, line spacing) go back to [EpubReaderPreferences]'s defaults,
-     * read from an instance so a changed default cannot be missed here; the size, typeface, theme, margins and
-     * columns stay as they are.
+     * (Publisher styling, alignment, hyphenation, line spacing) and the typeface (Literata, #47) go back to
+     * [EpubReaderPreferences]'s defaults, read from an instance so a changed default cannot be missed here; the
+     * size, theme, margins and columns stay as they are.
      */
     fun resetTextStyle(value: EpubReaderPreferences): EpubReaderPreferences {
         val defaults = EpubReaderPreferences()
@@ -76,16 +83,22 @@ object EpubLayoutPolicy {
             publisherStyles = defaults.publisherStyles,
             textAlignment = defaults.textAlignment,
             hyphenation = defaults.hyphenation,
-            lineHeight = defaults.lineHeight
+            lineHeight = defaults.lineHeight,
+            fontFamily = defaults.fontFamily
         )
     }
 
-    /** What the reset does, for its row: "Justified, hyphenated, 1.5 spacing", said from the defaults it applies. */
+    /** The Spacing row's line: "1.5 · Balanced margins", from the look it opens (#47). */
+    fun spacingSummary(value: EpubReaderPreferences): String =
+        "${String.format(java.util.Locale.US, "%.1f", value.lineHeight)} · ${PageGeometry.preset(value.pageMargins).label} margins"
+
+    /** What the reset does, for its row: "Literata, justified, hyphenated, 1.5 spacing", said from the defaults it applies. */
     fun textStyleSummary(): String {
         val defaults = EpubReaderPreferences()
         return listOfNotNull(
-            if (defaults.publisherStyles) "The book's own style" else null,
-            when (defaults.textAlignment) { "justify" -> "Justified"; "center" -> "Centred"; else -> null },
+            EpubFonts.face(defaults.fontFamily).label,
+            if (defaults.publisherStyles) "the book's own style" else null,
+            when (defaults.textAlignment) { "justify" -> "justified"; "center" -> "centred"; else -> null },
             if (defaults.hyphenation) "hyphenated" else null,
             String.format(java.util.Locale.US, "%.1f spacing", defaults.lineHeight)
         ).mapIndexed { index, part -> if (index == 0) part.replaceFirstChar { it.uppercase() } else part }.joinToString(", ")

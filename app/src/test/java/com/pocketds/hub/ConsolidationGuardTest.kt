@@ -125,6 +125,9 @@ class ConsolidationGuardTest {
             "ReadingBookFacts.pages / ReadingBookFacts.page: a book's page count and its page, from how far through, in one place, so " +
                 "its page, Resume and the reader's corner say the same page (#42)",
             setOf("screens/library/ReadingBookFacts.kt")),
+        Rule(Regex("""FontFamily\.(SERIF|SANS_SERIF|MONOSPACE|CURSIVE)\b"""),
+            "EpubFonts / EpubFontDeclarations.family: the reader's typefaces are the menu's three and the book's own; a generic " +
+                "serif is Times, whose hairline strokes fade on a screen (#47)"),
         Rule(Regex("""pageMargins\s*=\s*value\.pageMargins"""),
             "PageGeometry.READIUM_MARGIN_FACTOR: Readium is told one margin and the preset chooses the page's side inset, or its " +
                 "gutter moves and the gap between two columns is twice the margin again (#47)"),

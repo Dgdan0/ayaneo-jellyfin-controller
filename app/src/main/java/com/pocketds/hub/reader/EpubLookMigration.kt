@@ -11,4 +11,17 @@ object EpubLookMigration {
      * theme ([EpubTheme.BLACK]) now. One that had it off keeps the theme it chose.
      */
     fun theme(blackPageWasOn: Boolean, theme: EpubTheme): EpubTheme = if (blackPageWasOn) EpubTheme.BLACK else theme
+
+    /**
+     * Every device reads in Literata from the update on (#47): the typeface a device stored before then was
+     * `publisher` (the book's own, which meant Times or Noto Serif), `serif` (the same Times) or `sans-serif`,
+     * and none of them is what the owner chose. The sans moves to the menu's sans, Atkinson Hyperlegible; the
+     * rest to Literata. Once: [alreadyMoved] says it has been, and a face the menu has now (Original too, picked
+     * after the move) is left alone. Null when nothing is to change.
+     */
+    fun fontFamily(stored: String?, alreadyMoved: Boolean): String? = when {
+        alreadyMoved || stored == null -> null
+        stored == "sans-serif" -> EpubFonts.Face.ATKINSON.id
+        else -> EpubFonts.DEFAULT.id
+    }
 }

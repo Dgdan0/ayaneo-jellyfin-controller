@@ -13,8 +13,24 @@ object ReaderLookMigration {
     /** Comfort's black-page switch, which the Dark theme replaced. */
     private const val KEY_BLACK_PAGE = "reader_comfort_black_page"
 
+    /** The typeface moved to Literata once; this marks that it has, in the reader's own settings file. */
+    private const val KEY_FONT_MOVED = "fontMoved47"
+
     fun run(context: Context) {
         blackPage(context)
+        fontFamily(context)
+    }
+
+    /**
+     * The device's typeface becomes Literata once ([EpubLookMigration.fontFamily]); a device with nothing stored
+     * has Literata already and is only marked, so a later choice of Original is never undone.
+     */
+    private fun fontFamily(context: Context) {
+        val store = context.getSharedPreferences("epub-reader", Context.MODE_PRIVATE)
+        val moved = store.getBoolean(KEY_FONT_MOVED, false)
+        if (moved) return
+        val next = EpubLookMigration.fontFamily(store.getString("fontFamily", null), alreadyMoved = false)
+        store.edit().apply { next?.let { putString("fontFamily", it) }; putBoolean(KEY_FONT_MOVED, true) }.apply()
     }
 
     /** A device that read on a black page moves to the Dark theme, and the switch's key goes. */

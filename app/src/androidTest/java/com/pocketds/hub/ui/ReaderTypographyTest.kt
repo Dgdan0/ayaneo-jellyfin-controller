@@ -10,6 +10,7 @@ import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.reader.EpubAppearanceStore
 import com.pocketds.hub.reader.EpubColumns
+import com.pocketds.hub.reader.EpubFonts
 import com.pocketds.hub.reader.EpubPagePalette
 import com.pocketds.hub.reader.EpubReaderPreferences
 import com.pocketds.hub.reader.EpubReaderScreen
@@ -91,6 +92,127 @@ class ReaderTypographyTest {
             }
         }
         return Columns(first, last, bestStart, bestEnd)
+    }
+
+    private fun all(view: View): List<View> = listOf(view) + if (view is android.view.ViewGroup) (0 until view.childCount).flatMap { all(view.getChildAt(it)) } else emptyList()
+
+    /** The appearance sheet as the owner sees it: the faces in their own type, Kindle's size slider, Spacing, brightness at the foot. */
+    @Test fun theAppearanceSheetShowsTheFacesTheSizeSliderSpacingAndBrightness(): Unit = runBlocking {
+        val activity = ins.startActivitySync(Intent(ins.targetContext, ReaderFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ReaderFixtureActivity
+        check(activity.packageName.endsWith(".uitest"))
+        val original = EpubAppearanceStore.load(activity)
+        val oldInfo = PageInfoSettings.load(activity)
+        val oldComfort = ComfortSettings.load(activity)
+        val oldUrl = HubSettings.baseUrl(activity)
+        val oldToken = HubSettings.token(activity)
+        val server = ReaderFixtures.fileServer(ReaderFixtures.epub(aligned = false, twoColumns = true))
+        HubSettings.save(activity, server.url("/").toString(), "fixture")
+        var screen: EpubReaderScreen? = null
+        lateinit var root: View
+        fun reader() = activity.supportFragmentManager.fragments.filterIsInstance<EpubNavigatorFragment>().firstOrNull()
+        fun press(label: String) {
+            var view: View? = all(root).first { it.isShown && (it.contentDescription?.toString()?.startsWith(label) == true || (it is android.widget.TextView && it.text.toString() == label)) }
+            while (view != null && !view.isClickable) view = view.parent as? View
+            view!!.performClick()
+        }
+        try {
+            PageInfoSettings.save(activity, PageInfoChoice())
+            ComfortSettings.save(activity, ScreenComfort())
+            EpubAppearanceStore.save(activity, EpubReaderPreferences(columns = EpubColumns.TWO))
+            withContext(Dispatchers.Main) {
+                screen = EpubReaderScreen(HubClient(activity), "sheet-${System.nanoTime()}", "edition", "Light Bringer", { true }, bookPages = 735)
+                root = screen!!.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); screen!!.onShow()
+            }
+            until("the book") { reader() != null && screen!!.field<View>("loading").visibility != View.VISIBLE }
+            delay(1000)
+            withContext(Dispatchers.Main) { screen!!.onPad(com.pocketds.hub.input.PadAction.Menu) }
+            until("the menu") { screen!!.field<Boolean>("controlsVisible") }
+            withContext(Dispatchers.Main) { press("Reading appearance") }
+            until("the sheet") { all(root).any { it.isShown && it.contentDescription?.toString()?.startsWith("Literata") == true } }
+            ins.waitForIdleSync(); delay(1500)
+            save(activity, "sheet-font", screenshot())
+            withContext(Dispatchers.Main) { press("Spacing") }
+            delay(500)
+            save(activity, "sheet-spacing", screenshot())
+            withContext(Dispatchers.Main) { press("‹ Font"); press("Themes") }
+            delay(500)
+            save(activity, "sheet-themes", screenshot())
+            withContext(Dispatchers.Main) { press("Layout") }
+            delay(500)
+            save(activity, "sheet-layout", screenshot())
+        } finally {
+            withContext(Dispatchers.Main) { runCatching { screen?.onHide(); screen?.onDestroyView() }; activity.finish() }
+            EpubAppearanceStore.save(activity, original)
+            PageInfoSettings.save(activity, oldInfo)
+            ComfortSettings.save(activity, oldComfort)
+            HubSettings.save(activity, oldUrl, oldToken)
+            server.shutdown()
+        }
+    }
+
+    /** Each bundled face is served to the book and drawn in it; the book's own font is left alone. */
+    @Test fun theBundledFacesAreServedToTheBookAndDrawn(): Unit = runBlocking {
+        val activity = ins.startActivitySync(Intent(ins.targetContext, ReaderFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ReaderFixtureActivity
+        check(activity.packageName.endsWith(".uitest"))
+        val original = EpubAppearanceStore.load(activity)
+        val oldInfo = PageInfoSettings.load(activity)
+        val oldComfort = ComfortSettings.load(activity)
+        val oldUrl = HubSettings.baseUrl(activity)
+        val oldToken = HubSettings.token(activity)
+        val server = ReaderFixtures.fileServer(ReaderFixtures.epub(aligned = false))
+        HubSettings.save(activity, server.url("/").toString(), "fixture")
+        var screen: EpubReaderScreen? = null
+        fun reader() = activity.supportFragmentManager.fragments.filterIsInstance<EpubNavigatorFragment>().firstOrNull()
+        try {
+            PageInfoSettings.save(activity, PageInfoChoice())
+            ComfortSettings.save(activity, ScreenComfort())
+            val drawn = mutableMapOf<String, Bitmap>()
+            for (face in EpubFonts.CHOICES) {
+                EpubAppearanceStore.save(activity, EpubReaderPreferences(fontFamily = face.id, columns = EpubColumns.ONE))
+                withContext(Dispatchers.Main) {
+                    screen = EpubReaderScreen(HubClient(activity), "face-${System.nanoTime()}", "edition", "Light Bringer", { true }, bookPages = 735)
+                    val root = screen!!.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); screen!!.onShow()
+                }
+                until("the book") { reader() != null && screen!!.field<View>("loading").visibility != View.VISIBLE }
+                delay(1800)
+                ins.waitForIdleSync()
+                val family = withContext(Dispatchers.Main) { reader()!!.evaluateJavascript("getComputedStyle(document.body).fontFamily") }
+                val loaded = withContext(Dispatchers.Main) {
+                    reader()!!.evaluateJavascript("Array.from(document.fonts).filter(function(f){return f.status==='loaded'}).map(function(f){return f.family}).join(',')")
+                }
+                val css = face.css
+                if (css == null) {
+                    // The book's own font: Readium puts no family of ours on it.
+                    assertTrue("the book's own font: $family / $loaded", EpubFonts.CHOICES.mapNotNull { it.css }.none { family?.contains(it) == true })
+                } else {
+                    assertTrue("$css in $family", family?.contains(css) == true)
+                    assertTrue("$css was loaded from the app's assets: $loaded", loaded?.contains(css) == true)
+                }
+                drawn[face.id] = screenshot()
+                save(activity, "font-${face.id}", drawn.getValue(face.id))
+                withContext(Dispatchers.Main) { screen!!.onHide(); screen!!.onDestroyView() }
+                delay(300)
+            }
+            // Four faces, four different pages: the ink differs between any two.
+            fun differs(a: Bitmap, b: Bitmap): Boolean {
+                val rowA = IntArray(a.width); val rowB = IntArray(b.width)
+                var different = 0
+                for (y in 200 until a.height - 200 step 6) {
+                    a.getPixels(rowA, 0, a.width, 0, y, a.width, 1); b.getPixels(rowB, 0, b.width, 0, y, b.width, 1)
+                    for (x in 0 until a.width step 2) if (rowA[x] != rowB[x]) different++
+                }
+                return different > 2_000
+            }
+            val ids = drawn.keys.toList()
+            for (i in ids.indices) for (j in i + 1 until ids.size) assertTrue("${ids[i]} and ${ids[j]} look alike", differs(drawn.getValue(ids[i]), drawn.getValue(ids[j])))
+        } finally {
+            withContext(Dispatchers.Main) { runCatching { screen?.onHide(); screen?.onDestroyView() }; activity.finish() }
+            EpubAppearanceStore.save(activity, original)
+            PageInfoSettings.save(activity, oldInfo)
+            ComfortSettings.save(activity, oldComfort)
+            HubSettings.save(activity, oldUrl, oldToken)
+            server.shutdown()
+        }
     }
 
     @Test fun kindlesMarginsAndGapOnTheThreeThemes(): Unit = runBlocking {

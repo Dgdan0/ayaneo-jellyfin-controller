@@ -32,6 +32,9 @@ data class ScreenComfort(
 
     companion object {
         const val MIN_BRIGHTNESS = 0.1f
+
+        /** Brightness in steps of 5%, the dimmest [MIN_BRIGHTNESS]: the slider at the foot of a book's appearance sheet and the one a comic's Comfort has. */
+        val BRIGHTNESS_RANGE = ValueRange(MIN_BRIGHTNESS, 1f, 0.05f)
         /** How dark the dimmest is: the player's measure, which lets a little of the picture through. */
         const val MAX_DIM = 0.85f
         const val WHITE: Int = -1
