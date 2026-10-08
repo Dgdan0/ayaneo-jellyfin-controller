@@ -111,5 +111,10 @@ sealed interface HubResult<out T> {
 data class ReadingEpubDownload(
     val bytes: Long,
     val etag: String = "",
-    val contentHash: String = ""
+    val contentHash: String = "",
+    /**
+     * The hub was asked about a book already kept here and it stands (#41): nothing
+     * was written, and [bytes] is zero. [etag] is what the hub answered with.
+     */
+    val keptCopy: Boolean = false
 )

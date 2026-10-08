@@ -113,6 +113,13 @@ class ConsolidationGuardTest {
             "HubEndpoints.readingAudioManifest / readingAudioTrack / readingAudioPosition and readingEpubFile(omitAudio = true), " +
                 "through HubApi.readingAudioTrackUrl: a track URL carries the manifest's revision, and only the hub's builder knows the routes (#19)",
             setOf("net/HubEndpoints.kt")),
+        Rule(Regex("""completeFile\([^)]*\)\.delete\(\)"""),
+            "EpubPackageCache.remove(workId, sourceItemId): the ETag kept beside a book goes with its copy, or the next " +
+                "opening is vouched for by a tag that belongs to other bytes (#41)",
+            setOf("reader/EpubPackageCache.kt")),
+        Rule(Regex("""\bisComplete\([^)]*\)\s*\)\s*return\s+\w+\.completeFile"""),
+            "EpubEdition.open: a book that is kept is asked about when it opens (If-None-Match against the ETag kept), " +
+                "so a copy from before the hub rewrote font sizes is replaced rather than reused for ever (#41)"),
     )
 
     @Test

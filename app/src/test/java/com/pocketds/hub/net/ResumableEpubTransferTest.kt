@@ -5,6 +5,7 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import com.pocketds.hub.reader.CopyState
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -107,6 +108,171 @@ class ResumableEpubTransferTest {
             ResumableEpubTransfer.download(client, request, part)
             assertArrayEquals(fresh, part.readBytes())
         } finally { server.shutdown(); root.deleteRecursively() }
+    }
+
+    // A book already kept here is asked about with the tag kept beside it (#41).
+
+    private fun withBook(block: suspend (server: MockWebServer, part: File, client: OkHttpClient, request: Request) -> Unit) = runBlocking {
+        val server = MockWebServer().also { it.start() }
+        val root = createTempDir(prefix = "epub-revalidate-")
+        try {
+            block(
+                server, File(root, "book.part"),
+                OkHttpClient.Builder().retryOnConnectionFailure(false).build(),
+                Request.Builder().url(server.url("/book.epub")).build()
+            )
+        } finally { server.shutdown(); root.deleteRecursively() }
+    }
+
+    private val kept = CopyState.Tagged("\"edition-a\"")
+
+    @Test fun unchangedBookAnswers304AndWritesNothing() = withBook { server, part, client, request ->
+        server.enqueue(MockResponse().setResponseCode(304).setHeader("ETag", "\"edition-a\""))
+
+        val result = ResumableEpubTransfer.downloadWithRetry(client, request, part, revalidation = EpubRevalidation(kept))
+
+        assertTrue(result.keptCopy)
+        assertEquals(0L, result.bytes)
+        assertFalse(part.exists())
+        val sent = server.takeRequest()
+        assertEquals("\"edition-a\"", sent.getHeader("If-None-Match"))
+        assertNull(sent.getHeader("Range"))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun anotherEditionIsStreamedAndAnnouncedAsItBegins() = withBook { server, part, client, request ->
+        val fresh = epub("edition-b")
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("ETag", "\"edition-b\"")
+            .setHeader("X-Reading-Content-Hash", "sha256:b").setBody(Buffer().write(fresh)))
+        var announced = 0
+
+        val result = ResumableEpubTransfer.downloadWithRetry(client, request, part,
+            revalidation = EpubRevalidation(kept, onReplace = { announced++ }))
+
+        assertFalse(result.keptCopy)
+        assertEquals(1, announced)
+        assertEquals("\"edition-b\"", result.etag)
+        assertEquals("sha256:b", result.contentHash)
+        assertArrayEquals(fresh, part.readBytes())
+        assertEquals("\"edition-a\"", server.takeRequest().getHeader("If-None-Match"))
+    }
+
+    @Test fun serverThatIgnoresTheConditionDoesNotCostTheBook() = withBook { server, part, client, request ->
+        // The hub's pass-through of Storyteller's file ignores If-None-Match and answers 200 with the tag it
+        // always had: the body is left unread and the copy stands.
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("ETag", "\"edition-a\"").setBody(Buffer().write(epub("edition-a"))))
+        var announced = 0
+
+        val result = ResumableEpubTransfer.downloadWithRetry(client, request, part,
+            revalidation = EpubRevalidation(kept, onReplace = { announced++ }))
+
+        assertTrue(result.keptCopy)
+        assertEquals(0, announced)
+        assertFalse(part.exists())
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun hubThatTagsNothingLeavesTheCopyBe() = withBook { server, part, client, request ->
+        server.enqueue(MockResponse().setResponseCode(200).setBody(Buffer().write(epub("edition-a"))))
+
+        val result = ResumableEpubTransfer.downloadWithRetry(client, request, part,
+            revalidation = EpubRevalidation(CopyState.Unrecorded))
+
+        assertTrue(result.keptCopy)
+        assertEquals("", result.etag)
+        assertFalse(part.exists())
+    }
+
+    @Test fun copyWithNoTagKeptIsFetchedOnceTheHubTagsIt() = withBook { server, part, client, request ->
+        val fresh = epub("edition-b")
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("ETag", "\"edition-b\"").setBody(Buffer().write(fresh)))
+
+        val result = ResumableEpubTransfer.downloadWithRetry(client, request, part,
+            revalidation = EpubRevalidation(CopyState.Unrecorded))
+
+        assertFalse(result.keptCopy)
+        assertArrayEquals(fresh, part.readBytes())
+        // There is no tag to match, so no condition goes out.
+        assertNull(server.takeRequest().getHeader("If-None-Match"))
+    }
+
+    @Test fun aDownloadWithNoQuestionSendsNoCondition() = withBook { server, part, client, request ->
+        val fresh = epub("edition-b")
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("ETag", "\"edition-b\"").setBody(Buffer().write(fresh)))
+
+        ResumableEpubTransfer.downloadWithRetry(client, request, part)
+
+        assertNull(server.takeRequest().getHeader("If-None-Match"))
+        assertArrayEquals(fresh, part.readBytes())
+    }
+
+    @Test fun hubThatDoesNotBeginAnsweringIsNotWaitedFor() = withBook { server, part, client, request ->
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        val started = System.nanoTime()
+
+        val failure = runCatching {
+            ResumableEpubTransfer.downloadWithRetry(client, request, part,
+                attempts = 3, retryDelayMs = 0, revalidation = EpubRevalidation(kept, headerTimeoutMs = 300))
+        }.exceptionOrNull()
+
+        assertTrue("$failure", failure is java.net.SocketTimeoutException)
+        assertTrue("took ${(System.nanoTime() - started) / 1_000_000}ms", (System.nanoTime() - started) < 3_000_000_000L)
+        assertEquals("the question is asked once", 1, server.requestCount)
+    }
+
+    @Test fun hubThatFailsTheQuestionIsNotAskedAgain() = withBook { server, part, client, request ->
+        server.enqueue(MockResponse().setResponseCode(503))
+        server.enqueue(MockResponse().setResponseCode(503))
+
+        val failure = runCatching {
+            ResumableEpubTransfer.downloadWithRetry(client, request, part, attempts = 3, retryDelayMs = 0, revalidation = EpubRevalidation(kept))
+        }.exceptionOrNull()
+
+        assertEquals(503, (failure as EpubTransferHttpException).status)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun aDownloadWithNoQuestionStillRetriesAServerError() = withBook { server, part, client, request ->
+        val bytes = epub("edition-b")
+        server.enqueue(MockResponse().setResponseCode(503))
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("ETag", "\"edition-b\"").setBody(Buffer().write(bytes)))
+
+        ResumableEpubTransfer.downloadWithRetry(client, request, part, attempts = 3, retryDelayMs = 0)
+
+        assertEquals(2, server.requestCount)
+        assertArrayEquals(bytes, part.readBytes())
+    }
+
+    @Test fun anotherEditionCutOffPartWayResumesWithoutTheQuestion() = withBook { server, part, client, request ->
+        val fresh = epub("edition-b")
+        // The second answer depends on the Range sent, so a dispatcher computes it.
+        val calls = AtomicInteger()
+        val seen = mutableListOf<RecordedRequest>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                seen += request
+                if (calls.getAndIncrement() == 0) {
+                    return MockResponse().setResponseCode(200).setHeader("ETag", "\"edition-b\"")
+                        .setBody(Buffer().write(fresh)).setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
+                }
+                val start = request.getHeader("Range")!!.removePrefix("bytes=").substringBefore('-').toInt()
+                return MockResponse().setResponseCode(206).setHeader("ETag", "\"edition-b\"")
+                    .setHeader("Content-Range", "bytes $start-${fresh.lastIndex}/${fresh.size}")
+                    .setBody(Buffer().write(fresh, start, fresh.size - start))
+            }
+        }
+        var announced = 0
+
+        val result = ResumableEpubTransfer.downloadWithRetry(client, request, part, attempts = 3, retryDelayMs = 0,
+            revalidation = EpubRevalidation(kept, onReplace = { announced++ }))
+
+        assertFalse(result.keptCopy)
+        assertEquals(1, announced)
+        assertArrayEquals(fresh, part.readBytes())
+        assertEquals(2, calls.get())
+        assertEquals("\"edition-a\"", seen[0].getHeader("If-None-Match"))
+        assertNull("a resumed edition is not asked about again", seen[1].getHeader("If-None-Match"))
+        assertEquals("\"edition-b\"", seen[1].getHeader("If-Range"))
     }
 
     @Test fun transientDisconnectAutomaticallyResumesWithinRetryLimit() = runBlocking {

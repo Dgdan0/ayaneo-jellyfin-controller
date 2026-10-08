@@ -221,13 +221,18 @@ interface HubApi {
         body: EpubPositionBody
     ): HubResult<ActionAck> =
         HubResult.Failed(FailureKind.UNKNOWN, "EPUB position saving is unavailable")
-    /** [omitAudio]: the read-along edition without its audio (#19), whose narration streams from the tracks. */
+    /**
+     * [omitAudio]: the read-along edition without its audio (#19), whose narration streams from the tracks.
+     * [check]: the book is already kept here (#41), and the hub is asked whether it has another edition;
+     * an Ok with [ReadingEpubDownload.keptCopy] says it has not, and nothing was written to [destination].
+     */
     suspend fun downloadReadingEpub(
         workId: String,
         sourceItemId: String,
         destination: File,
         readAlong: Boolean = false,
-        omitAudio: Boolean = false
+        omitAudio: Boolean = false,
+        check: EpubRevalidation? = null
     ): HubResult<ReadingEpubDownload> =
         HubResult.Failed(FailureKind.UNKNOWN, "EPUB downloading is unavailable")
     suspend fun downloadReadingAudiobook(
@@ -987,7 +992,8 @@ class HubClient(private val context: Context, private val connection: HubConnect
         sourceItemId: String,
         destination: File,
         readAlong: Boolean,
-        omitAudio: Boolean
+        omitAudio: Boolean,
+        check: EpubRevalidation?
     ): HubResult<ReadingEpubDownload> {
         connectionFailure()?.let { return it }
         return try {
@@ -997,7 +1003,7 @@ class HubClient(private val context: Context, private val connection: HubConnect
                     .url(HubEndpoints.readingEpubFile(base(), workId, sourceItemId, readAlong, omitAudio))
                     .cacheControl(noStore)
                     .build()
-                HubResult.Ok(ResumableEpubTransfer.downloadWithRetry(offlineHttp, request, destination))
+                HubResult.Ok(ResumableEpubTransfer.downloadWithRetry(offlineHttp, request, destination, revalidation = check))
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
