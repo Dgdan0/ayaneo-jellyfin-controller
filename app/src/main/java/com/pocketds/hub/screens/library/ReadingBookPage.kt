@@ -36,7 +36,7 @@ object ReadingBookPage {
      */
     fun facts(work: ReadingWork): String = buildList {
         work.year.takeIf { it > 0 }?.let { add(it.toString()) }
-        work.editions.filter { it.kind != "audiobook" }.maxOfOrNull { it.pageCount }?.takeIf { it > 0 }?.let { add("$it pages") }
+        ReadingBookFacts.pages(work).takeIf { it > 0 }?.let { add("$it pages") }
         work.editions.firstOrNull { it.kind == "audiobook" }?.let { audio ->
             Fmt.runtime(audio.durationMs / 1000).takeIf { it.isNotBlank() }?.let(::add)
         }

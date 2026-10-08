@@ -1,5 +1,6 @@
 package com.pocketds.hub.reader
 
+import com.pocketds.hub.screens.library.ReadingBookFacts
 import com.pocketds.hub.state.Fmt
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -73,29 +74,58 @@ object PageInfo {
     }
 
     /**
-     * [sectionSizes]: the positions in each part of the book (Readium's, the same the time left is
-     * measured in); [section] and [progression]: the part on screen and how far through it.
-     * [chapterPage] is the screen page counted within the part, [chapterPages] how many it has.
+     * Where the reader is, in the pages the book says it has. [bookPages] is the book's own page count from the
+     * hub ([ReadingBookFacts.pages]), 0 when it has none, and the page is [ReadingBookFacts.page] of [fraction]
+     * (how far through the book): the same count and rounding as "49% · page 363 of 735" on the book's page and
+     * Resume, so every place agrees. The chapter's pages are its share of those: [span] is the chapter's start
+     * and end in the book ([sectionSpan]), and "Page 3 of 18" counts from its first page.
+     *
+     * Without a page count it is Readium's positions, as the time left is measured in: [sectionSizes] (each
+     * part's positions, in reading order), the part on screen ([section]) and how far through it ([progression]).
      */
     fun place(
+        bookPages: Int,
         sectionSizes: List<Int>,
         section: Int,
         progression: Double,
-        chapterPage: Int,
-        chapterPages: Int,
-        timeLeft: TimeLeft?,
-        fraction: Double?
+        span: Pair<Double, Double>?,
+        fraction: Double?,
+        timeLeft: TimeLeft?
     ): PagePlace {
+        if (bookPages > 0) {
+            // How far through is not known: the pages stay blank, rather than say Readium's count of something else.
+            if (fraction == null || !fraction.isFinite()) return PagePlace(timeLeft = timeLeft, fraction = fraction?.takeIf { it.isFinite() })
+            val page = ReadingBookFacts.page(fraction, bookPages)
+            // The chapter's share of the book's pages, counted from the page it starts on, so a book that is one
+            // chapter says the same page in both.
+            val chapter = span?.takeIf { it.second > it.first }?.let { (start, end) ->
+                val count = Math.round((end - start) * bookPages).toInt().coerceAtLeast(1)
+                (page - ReadingBookFacts.page(start, bookPages) + 1).coerceIn(1, count) to count
+            }
+            return PagePlace(page, bookPages, chapter?.first ?: 0, chapter?.second ?: 0, timeLeft, fraction)
+        }
         val total = sectionSizes.sum()
         val position = if (total > 0 && section >= 0) TimeLeft.position(sectionSizes, section, progression) else null
+        val size = sectionSizes.getOrNull(section)?.takeIf { it > 0 }
         return PagePlace(
             bookPage = position?.let { (it.toInt() + 1).coerceIn(1, total) } ?: 0,
             bookPages = if (position != null) total else 0,
-            chapterPage = if (chapterPages > 0) chapterPage.coerceIn(1, chapterPages) else 0,
-            chapterPages = chapterPages.coerceAtLeast(0),
+            chapterPage = size?.let { (Math.floor(progression.coerceIn(0.0, 1.0) * it).toInt() + 1).coerceIn(1, it) } ?: 0,
+            chapterPages = size ?: 0,
             timeLeft = timeLeft,
             fraction = fraction
         )
+    }
+
+    /**
+     * Where a part of the book starts and ends in it, as how far through: [starts] holds each part's
+     * `totalProgression` in reading order (null where Readium has none), and a part ends where the next begins
+     * (the last at 1). Null for a part that is not there or whose start is not known. The menu's percentage and
+     * the corners' chapter pages are both measured from this.
+     */
+    fun sectionSpan(starts: List<Double?>, section: Int): Pair<Double, Double>? {
+        val start = starts.getOrNull(section) ?: return null
+        return start to (starts.getOrNull(section + 1) ?: 1.0)
     }
 
     /** The bottom left's words for [corner]; blank when it is None or the place is not known. */

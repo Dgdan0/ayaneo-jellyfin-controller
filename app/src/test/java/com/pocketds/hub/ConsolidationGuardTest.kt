@@ -121,6 +121,10 @@ class ConsolidationGuardTest {
             "TimeLeft.label / chapterLabel / bookLabel: the menu's line and a page's corner say the time left in one set of words, " +
                 "from the one pace (#42)",
             setOf("reader/ReadingPace.kt")),
+        Rule(Regex("""maxOfOrNull \{ it\.pageCount \}|\(\w+(\.\w+)? \* pages\)\.toInt\(\)"""),
+            "ReadingBookFacts.pages / ReadingBookFacts.page: a book's page count and its page, from how far through, in one place, so " +
+                "its page, Resume and the reader's corner say the same page (#42)",
+            setOf("screens/library/ReadingBookFacts.kt")),
         Rule(Regex("""is24HourFormat"""),
             "PageInfoView with PageInfo.clock: the time on a page's corner follows the device's 12 or 24 hour setting in one place (#42)",
             setOf("reader/PageInfoView.kt")),

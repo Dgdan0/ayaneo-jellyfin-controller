@@ -195,6 +195,81 @@ class ReaderCornersTest {
         }
     }
 
+    /**
+     * "Page in book" counts the book's own pages from the hub, as its page and Resume do, and Readium's positions only
+     * where the hub has none; "Page in chapter" is the chapter's share of the same pages.
+     */
+    @Test fun pagesAreTheBooksOwnWhereTheHubCountedThem(): Unit = runBlocking {
+        val activity = ins.startActivitySync(Intent(ins.targetContext, ReaderFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ReaderFixtureActivity
+        check(activity.packageName.endsWith(".uitest"))
+        val original = EpubAppearanceStore.load(activity)
+        val oldInfo = PageInfoSettings.load(activity)
+        val oldComfort = ComfortSettings.load(activity)
+        val oldUrl = HubSettings.baseUrl(activity)
+        val oldToken = HubSettings.token(activity)
+        val server = ReaderFixtures.fileServer(ReaderFixtures.epub(aligned = false))
+        HubSettings.save(activity, server.url("/").toString(), "fixture")
+        var screen: EpubReaderScreen? = null
+        fun reader() = activity.supportFragmentManager.fragments.filterIsInstance<EpubNavigatorFragment>().firstOrNull()
+        suspend fun open(pages: Int) {
+            withContext(Dispatchers.Main) {
+                screen = EpubReaderScreen(HubClient(activity), "corners-pages-${System.nanoTime()}", "edition", "The Last Observatory", { true }, bookPages = pages)
+                val root = screen!!.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); screen!!.onShow()
+            }
+            until("the book") { reader() != null && screen!!.field<View>("loading").visibility != View.VISIBLE }
+            until("the corners to know the place") { words(screen!!).second.startsWith("Page ") }
+            delay(1000)
+        }
+        suspend fun close() { withContext(Dispatchers.Main) { screen?.onHide(); screen?.onDestroyView() } }
+        try {
+            EpubAppearanceStore.save(activity, EpubReaderPreferences())
+            ComfortSettings.save(activity, com.pocketds.hub.ui.ScreenComfort())
+            PageInfoSettings.save(activity, PageInfoChoice(corner = PageInfoCorner.PAGE_IN_BOOK))
+            open(765)
+            withContext(Dispatchers.Main) { assertEquals("Page 1 of 765", words(screen!!).second) }
+            // A page on: how far through the book it is, times 765, and the percentage beside it says the same.
+            withContext(Dispatchers.Main) { screen!!.onPad(PadAction.Activate) }
+            until("the page to turn") { words(screen!!).second != "Page 1 of 765" }
+            delay(600)
+            val (_, left, right) = withContext(Dispatchers.Main) { words(screen!!) }
+            val page = Regex("""Page (\d+) of 765""").matchEntire(left)?.groupValues?.get(1)?.toInt() ?: throw AssertionError("not a page of 765: $left")
+            val percent = Regex("""(\d+)%""").matchEntire(right)?.groupValues?.get(1)?.toInt() ?: throw AssertionError("not a percentage: $right")
+            assertTrue("page $page of 765 is $percent%", page in (percent * 765 / 100)..((percent + 1) * 765 / 100 + 1))
+            shot(activity, "07-pages-from-the-hub")
+            // The chapter's pages are its share of the same 765: the fixture is one chapter, the whole book.
+            withContext(Dispatchers.Main) { screen!!.onPad(PadAction.Click(Stick.LEFT)) }
+            delay(400)
+            withContext(Dispatchers.Main) {
+                // The fixture is one chapter, so the chapter's page is the book's.
+                assertEquals("Page $page of 765 in chapter", words(screen!!).second)
+            }
+            shot(activity, "08-page-in-chapter")
+            close()
+
+            // The hub has no page count: Readium's positions, a handful in this book.
+            PageInfoSettings.save(activity, PageInfoChoice(corner = PageInfoCorner.PAGE_IN_BOOK))
+            open(0)
+            withContext(Dispatchers.Main) {
+                val total = Regex("""Page 1 of (\d+)""").matchEntire(words(screen!!).second)?.groupValues?.get(1)?.toInt()
+                    ?: throw AssertionError("not a first page: ${words(screen!!).second}")
+                assertTrue("positions, not a hub count: $total", total in 1..40)
+            }
+            shot(activity, "09-pages-from-positions")
+        } catch (failure: Throwable) {
+            File(activity.getExternalFilesDir(null), "reader-corners-pages-failure.png").outputStream().use {
+                ins.uiAutomation.takeScreenshot().compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+            throw failure
+        } finally {
+            withContext(Dispatchers.Main) { screen?.onHide(); screen?.onDestroyView(); activity.finish() }
+            EpubAppearanceStore.save(activity, original)
+            PageInfoSettings.save(activity, oldInfo)
+            ComfortSettings.save(activity, oldComfort)
+            HubSettings.save(activity, oldUrl, oldToken)
+            server.shutdown()
+        }
+    }
+
     @Test fun readingAlongShowsTheCornersToo(): Unit = runBlocking {
         val activity = ins.startActivitySync(Intent(ins.targetContext, ReaderFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ReaderFixtureActivity
         check(activity.packageName.endsWith(".uitest"))

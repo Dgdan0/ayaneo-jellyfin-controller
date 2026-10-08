@@ -127,7 +127,12 @@ class EpubReaderScreen(
     private val readAlongAvailable: Boolean = false,
     private val alignedEditions: List<ReadingEdition> = emptyList(),
     private val audioEditions: List<ReadingEdition> = emptyList(),
-    private val ebookSourceItemId: String = sourceItemId
+    private val ebookSourceItemId: String = sourceItemId,
+    /**
+     * The book's own page count from the hub ([ReadingBookFacts.pages]), 0 when it has none: the corners'
+     * "Page in book" counts those pages, as the book's page and Resume do, and Readium's positions only without (#42).
+     */
+    private val bookPages: Int = 0
 ) : Screen {
     override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val immersive = true
@@ -203,6 +208,8 @@ class EpubReaderScreen(
     private var stepAnimator: ValueAnimator? = null
     /** Time left (E3): the positions in each part, this book's pace, and where it was last measured from. */
     private var sectionSizes: List<Int> = emptyList()
+    /** Where each part of the book starts in it, as how far through ([PageInfo.sectionSpan]). */
+    private var sectionStarts: List<Double?> = emptyList()
     private var pace = ReadingPace()
     private var pacePrior = ReadingPace.DEFAULT_MINUTES_PER_POSITION
     private val paceTracker = ReadingPace.Tracker()
@@ -646,6 +653,7 @@ class EpubReaderScreen(
         bookPositions = withContext(Dispatchers.Default) { opened.positions() }
         bookSections = bookPositions.distinctBy { it.href }
         sectionSizes = bookSections.map { section -> bookPositions.count { it.href == section.href } }
+        sectionStarts = bookSections.map { it.locations.totalProgression }
 
         val factory = EpubNavigatorFactory(opened).createFragmentFactory(
             initialLocator = initialLocator,
@@ -1203,7 +1211,8 @@ class EpubReaderScreen(
         host.back()
         host.push(EpubReaderScreen(api, workId, targetSourceItemId, title, ringVisible,
             onProgressChanged, readAlong = aligned, readAlongAvailable = readAlongAvailable,
-            alignedEditions = alignedEditions, audioEditions = audioEditions, ebookSourceItemId = ebookSourceItemId))
+            alignedEditions = alignedEditions, audioEditions = audioEditions, ebookSourceItemId = ebookSourceItemId,
+            bookPages = bookPages))
     }
 
     private fun locatorJson(locator: Locator): kotlinx.serialization.json.JsonObject =
@@ -1261,10 +1270,8 @@ class EpubReaderScreen(
     // display and scrubber within each resource while leaving saved Readium locators untouched.
     private fun bookProgress(): Double? {
         val current = latestLocator ?: return null
-        val index = bookSections.indexOfFirst { it.href == current.href }
-        if (index < 0) return current.locations.totalProgression
-        val start = bookSections[index].locations.totalProgression ?: return current.locations.totalProgression
-        val end = bookSections.getOrNull(index + 1)?.locations?.totalProgression ?: 1.0
+        val (start, end) = PageInfo.sectionSpan(sectionStarts, bookSections.indexOfFirst { it.href == current.href })
+            ?: return current.locations.totalProgression
         return (start + (end - start) * (current.locations.progression ?: 0.0)).coerceIn(0.0, 1.0)
     }
 
@@ -1466,9 +1473,10 @@ class EpubReaderScreen(
     private fun refreshPageInfo() {
         if (!::pageInfo.isInitialized) return
         val current = latestLocator
+        val section = if (current == null) -1 else bookSections.indexOfFirst { it.href == current.href }
         val place = if (current == null) PagePlace() else PageInfo.place(
-            sectionSizes, bookSections.indexOfFirst { it.href == current.href }, current.locations.progression ?: 0.0,
-            pageIndex + 1, pageCount, currentTimeLeft(), bookProgress()
+            bookPages, sectionSizes, section, current.locations.progression ?: 0.0,
+            PageInfo.sectionSpan(sectionStarts, section), bookProgress(), currentTimeLeft()
         )
         pageInfo.show(pageChoice, place, PageInfo.ink(pageColors().second),
             dp(PageInfo.sideInsetDp(preferences.pageMargins)), dp(PageInfo.STRIP_DP))
