@@ -344,6 +344,9 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /v1/offline/grants/{grantId}/status", s.handleOfflineStatus)
 	authed.HandleFunc("POST /v1/offline/grants/{grantId}/retry", s.handleOfflineRetry)
 	authed.HandleFunc("GET /v1/offline/grants/{grantId}/subtitles/{trackId}", s.handleOfflineSubtitle)
+	// An Apple download's text subtitles as WebVTT, kept beside its MP4 (#45).
+	authed.HandleFunc("GET /v1/offline/grants/{grantId}/subtitle-tracks", s.handleOfflineSubtitleTracks)
+	authed.HandleFunc("GET /v1/offline/grants/{grantId}/subtitle-tracks/{trackKey}", s.handleOfflineSubtitleTrack)
 	authed.HandleFunc("POST /v1/offline/grants/{grantId}/renew", s.handleOfflineRenew)
 	authed.HandleFunc("POST /v1/offline/progress/sync", s.handleOfflineProgressSync)
 	authed.HandleFunc("GET /v1/discover", s.handleDiscover)
