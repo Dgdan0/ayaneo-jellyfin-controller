@@ -14,7 +14,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     # The first TestFlight build; scripts/mac.sh testflight numbers each upload.
-    MARKETING_VERSION: "0.2.0"
+    MARKETING_VERSION: "0.3.0"
     CURRENT_PROJECT_VERSION: "1"
     # Set when the Apple Developer Program enrolment is approved; until then
     # simulator and local Mac builds are signed to run locally.

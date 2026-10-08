@@ -51,7 +51,14 @@ final class CastCenter {
     func start(demo: Bool) {
         guard !started else { return }
         started = true
-        if demo {
+        #if DEBUG
+        // HUB_CAST=google: Google's SDK even with the demo hub, as a real
+        // launch sets it up, so a UI test opens the app the owner opens.
+        let realSDK = ProcessInfo.processInfo.environment["HUB_CAST"] == "google"
+        #else
+        let realSDK = false
+        #endif
+        if demo && !realSDK {
             #if DEBUG
             let asked = ProcessInfo.processInfo.environment["HUB_CAST"] ?? ""
             if asked == "standin" || asked == "connected" {
@@ -64,6 +71,13 @@ final class CastCenter {
             return
         }
         #if canImport(GoogleCast) && os(iOS)
+        // A build number the SDK cannot read stops the app (`CastSDKVersion`):
+        // without Cast, the app still opens.
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        guard CastSDKVersion.accepts(build) else {
+            NSLog("cast: build number %@ is not one Google's SDK reads; Cast is left out", build)
+            return
+        }
         supported = true
         google = GoogleCastLink(center: self)
         #endif

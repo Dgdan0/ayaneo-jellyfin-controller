@@ -8,6 +8,27 @@ import Foundation
 // phone is the remote, and the TV session reports as any playback does
 // (`PlaybackReporter`), so the hub keeps the watch.
 
+/// The build numbers Google's Cast SDK can read. It takes the app's
+/// CFBundleVersion as up to three dot-separated numbers of at most six
+/// digits each (`PHTPhenotypeUtil appVersionAsIntegerWithStandardWidth`) and
+/// stops the app with an assertion otherwise. TestFlight's 2610081022 and
+/// 2610081139 (yyMMddHHmm, one ten-digit number) closed JellyHub two seconds
+/// after it opened, once the SDK had seen a TV on the network: its device
+/// scanner asks for that number on a timer. The uploads now number
+/// yyMMdd.HHmm, and the app sets the SDK up only for a number it reads.
+public enum CastSDKVersion {
+    public static let maxDigits = 6
+    public static let maxParts = 3
+
+    public static func accepts(_ bundleVersion: String) -> Bool {
+        let parts = bundleVersion.split(separator: ".", omittingEmptySubsequences: false)
+        guard (1...maxParts).contains(parts.count) else { return false }
+        return parts.allSatisfy { part in
+            (1...maxDigits).contains(part.count) && part.allSatisfy { ("0"..."9").contains($0) }
+        }
+    }
+}
+
 /// Where the TV fetches what it plays.
 public enum CastAddress {
     /// Google's Default Media Receiver: no registration in the Cast console.
