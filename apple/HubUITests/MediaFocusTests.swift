@@ -144,7 +144,8 @@ final class MediaFocusTests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
-    /// Ⓨ on an episode card asks what it offers, as a long press does; Select episodes there starts select mode.
+    /// Ⓨ on an episode card shows what it offers as the menu panel, as a long press does; Select episodes there
+    /// starts select mode.
     @MainActor
     func testAnEpisodesYAsksWhatItOffers() {
         // Ⓨ is pressed 45 seconds in; the arrows have walked to an episode long before.
@@ -156,9 +157,10 @@ final class MediaFocusTests: XCTestCase {
             steps += 1
         }
         XCTAssertTrue(focus(app).contains(" episodes/"), "down did not reach the episodes: \(focus(app))")
-        let select = app.buttons["Select episodes"].firstMatch
+        // The card's actions as the menu panel the ring walks (`PadMenuPanel`).
+        let select = element(app, "pad-choice-select")
         XCTAssertTrue(select.waitForExistence(timeout: 60), "Ⓨ on the episode asked nothing")
-        XCTAssertTrue(app.buttons["Download"].firstMatch.exists || app.buttons["Remove download"].firstMatch.exists,
+        XCTAssertTrue(element(app, "pad-choice-download").exists || element(app, "pad-choice-remove").exists,
                       "the episode's own download is not among its actions")
         select.tap()
         XCTAssertTrue(element(app, "select-cancel").waitForExistence(timeout: 10), "Select episodes did not start select mode")
