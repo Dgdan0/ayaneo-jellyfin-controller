@@ -67,11 +67,11 @@ func TestFontKeysMatchKnownAnswers(t *testing.T) {
 	adobe, _ := hex.DecodeString("76e01b963b914f3c9a3a34247e47dcb43cb248d1329044b0")
 	idpf, _ := hex.DecodeString("2ad5b31695f2cf96c63ccb188440849ae62657aa6c8bec55")
 
-	got, ok := unscramble(adobe, fontKeys(obfuscationAdobe, []string{"urn:uuid:" + lightBringerUUID}))
+	got, _, ok := unscramble(adobe, fontKeys(obfuscationAdobe, []string{"urn:uuid:" + lightBringerUUID}))
 	if !ok || !bytes.Equal(got, plain) {
 		t.Errorf("adobe: %x, %v", got, ok)
 	}
-	got, ok = unscramble(idpf, fontKeys(obfuscationIDPF, []string{"  urn:isbn:978-0-345-53978-5 \n"}))
+	got, _, ok = unscramble(idpf, fontKeys(obfuscationIDPF, []string{"  urn:isbn:978-0-345-53978-5 \n"}))
 	if !ok || !bytes.Equal(got, plain) {
 		t.Errorf("idpf: %x, %v", got, ok)
 	}
@@ -720,8 +720,8 @@ func (f *failInRangeReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 	return f.ReaderAt.ReadAt(p, offset)
 }
 
-// An entry of the package that is not a UUID cannot make an Adobe key, and a book
-// that lists no identifiers at all is left as it is (nothing to try).
+// A book that lists no identifiers has no key to try, and a font that gives nothing
+// away is left as it is.
 func TestFontsABookWithNoIdentifierIsLeftAlone(t *testing.T) {
 	otf := fakeFont("OTTO", 2000, 20)
 	encryption := encryptionXML(encryptedFont(obfuscationAdobe, "f.otf"))

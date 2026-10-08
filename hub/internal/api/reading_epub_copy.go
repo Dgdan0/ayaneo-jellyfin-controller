@@ -39,7 +39,8 @@ import (
 
 // What the hub will keep in memory of one copy: its headers, the stylesheets and
 // documents it rewrote, and the small entries copied as they were. Measured over
-// the 122 EPUBs of this library, the most any holds is 4.0 MB (Dark Age); Rhythm of
+// the 122 EPUBs of this library, the most any holds is 5.2 MB (Morning Star, whose four
+// FreeSerif fonts are unscrambled and so held; Dark Age is 4.1 MB); Rhythm of
 // War, which is 112 MB of illustrations, holds 1.4 MB, and its pictures are read from
 // the file as they are sent. A copy that would hold more than this is not made, and
 // the file is served as Storyteller has it.
@@ -75,7 +76,7 @@ func (s *Server) epubCopyOf(ctx context.Context, file readingdomain.MediaFile, o
 			}
 			report := plan.Report
 			slog.Info("built a reading copy", "kind", kind, "book", book, "bytes", plan.Size, "held", plan.Held(),
-				"fontSizes", report.FontSizes, "lineHeights", report.LineHeights, "styled", report.Styled, "languages", report.Languages, "fontsDecoded", report.FontsDecoded, "edited", report.Edited,
+				"fontSizes", report.FontSizes, "lineHeights", report.LineHeights, "styled", report.Styled, "languages", report.Languages, "fontsDecoded", report.FontsDecoded, "fontKeysRecovered", report.KeysRecovered, "edited", report.Edited,
 				"omitted", len(report.Omitted), "left", len(report.Left), "fixedLayout", report.FixedLayout)
 			return &epubCopy{plan: plan, hash: hex.EncodeToString(plan.SHA256[:])}, nil
 		})

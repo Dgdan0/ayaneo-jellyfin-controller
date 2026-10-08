@@ -58,6 +58,9 @@ type CopyReport struct {
 	// gone from META-INF/encryption.xml, and the file with them when they were all
 	// it listed.
 	FontsDecoded int
+	// KeysRecovered is how many of those fonts' keys are no identifier of the book and
+	// were worked out from the font itself (epub_fontkey.go).
+	KeysRecovered int
 	// Edited is how many entries have other bytes than they had.
 	Edited int
 	// FixedLayout: the package is pre-paginated, whose pages are laid out by the

@@ -139,13 +139,13 @@ func startsAsFont(head []byte) bool {
 	return false
 }
 
-// unscramble returns data with the first key that makes it a font applied, or false.
-// Only four bytes are looked at to choose a key: a wrong one gives a signature by
-// chance one time in 700 million.
-func unscramble(data []byte, keys []fontKey) ([]byte, bool) {
+// unscramble returns data with the first key that makes it a font applied, and that
+// key, or false. Only four bytes are looked at to choose a key: a wrong one gives a
+// signature by chance one time in 700 million.
+func unscramble(data []byte, keys []fontKey) ([]byte, fontKey, bool) {
 	for _, candidate := range keys {
 		if len(data) < 4 {
-			return nil, false
+			return nil, fontKey{}, false
 		}
 		var head [4]byte
 		for i := range head {
@@ -158,37 +158,57 @@ func unscramble(data []byte, keys []fontKey) ([]byte, bool) {
 		for i := 0; i < min(candidate.mask, len(out)); i++ {
 			out[i] ^= candidate.key[i%len(candidate.key)]
 		}
-		return out, true
+		return out, candidate, true
 	}
-	return nil, false
+	return nil, fontKey{}, false
 }
 
-// readScrambledFont reads a font entry whole and unscrambles it. When it cannot, the
-// second result says why (leftFontKey, leftTooLarge or leftUnread); the error is the
-// source failing to be read.
-func readScrambledFont(entry *zip.File, keys []fontKey) ([]byte, string, error) {
+// scrambledFont is a font entry read and unscrambled, or why it was not.
+type scrambledFont struct {
+	decoded []byte
+	// key is the one that unscrambled it.
+	key fontKey
+	// recovered: no identifier of the book made that key; it was worked out from the
+	// font (epub_fontkey.go).
+	recovered bool
+	// left is why it was not unscrambled (leftFontKey, leftTooLarge or leftUnread), or
+	// empty.
+	left string
+}
+
+// readScrambledFont reads a font entry whole and unscrambles it with one of the
+// keys, or, for Adobe's algorithm, with the key its own header gives away. The error
+// is the source failing to be read.
+func readScrambledFont(entry *zip.File, algorithm string, keys []fontKey) (scrambledFont, error) {
 	if entry.UncompressedSize64 > uint64(maxRestyleBytes) {
-		return nil, leftTooLarge, nil
+		return scrambledFont{left: leftTooLarge}, nil
 	}
 	stream, err := entry.Open()
 	if err != nil {
-		return nil, leftUnread, nil
+		return scrambledFont{left: leftUnread}, nil
 	}
 	data, err := io.ReadAll(io.LimitReader(stream, maxRestyleBytes+1))
 	stream.Close()
 	if err != nil {
 		if isDamagedEntry(err) {
-			return nil, leftUnread, nil
+			return scrambledFont{left: leftUnread}, nil
 		}
-		return nil, "", err
+		return scrambledFont{}, err
 	}
 	if int64(len(data)) > maxRestyleBytes {
-		return nil, leftTooLarge, nil
+		return scrambledFont{left: leftTooLarge}, nil
 	}
-	if decoded, ok := unscramble(data, keys); ok {
-		return decoded, "", nil
+	if decoded, key, ok := unscramble(data, keys); ok {
+		return scrambledFont{decoded: decoded, key: key}, nil
 	}
-	return nil, leftFontKey, nil
+	if algorithm == obfuscationAdobe {
+		if key, ok := recoverAdobeKey(data); ok {
+			if decoded, key, ok := unscramble(data, []fontKey{key}); ok {
+				return scrambledFont{decoded: decoded, key: key, recovered: true}, nil
+			}
+		}
+	}
+	return scrambledFont{left: leftFontKey}, nil
 }
 
 // encryptedData is one entry of encryption.xml: where its element lies in the file,
@@ -300,7 +320,7 @@ func planFonts(archive *zip.Reader, identifiers []string, report *CopyReport) (*
 			listed = entry
 		}
 	}
-	if listed == nil || len(identifiers) == 0 {
+	if listed == nil {
 		return nil, nil
 	}
 	byName := make(map[string]*zip.File, len(archive.File))
@@ -321,6 +341,7 @@ func planFonts(archive *zip.Reader, identifiers []string, report *CopyReport) (*
 
 	plan := &fontPlan{fonts: map[string][]fontKey{}}
 	var removed []encryptedData
+	var recovered []fontKey    // keys worked out from a font, which its book's other fonts share
 	tried := map[string]bool{} // entry name -> decoded
 	for _, item := range listing.entries {
 		if item.algorithm != obfuscationAdobe && item.algorithm != obfuscationIDPF {
@@ -333,16 +354,23 @@ func planFonts(archive *zip.Reader, identifiers []string, report *CopyReport) (*
 		decoded, seen := tried[font.Name]
 		if !seen {
 			keys := fontKeys(item.algorithm, identifiers)
-			_, left, err := readScrambledFont(font, keys)
+			if item.algorithm == obfuscationAdobe {
+				keys = append(keys, recovered...)
+			}
+			read, err := readScrambledFont(font, item.algorithm, keys)
 			if err != nil {
 				return nil, err
 			}
-			decoded = left == ""
+			decoded = read.left == ""
 			tried[font.Name] = decoded
 			if decoded {
-				plan.fonts[font.Name] = keys
+				// Only the key that worked: the copy unscrambles it again as it writes it.
+				plan.fonts[font.Name] = []fontKey{read.key}
+				if read.recovered {
+					recovered = append(recovered, read.key)
+				}
 			} else {
-				report.Left = append(report.Left, LeftAlone{font.Name, left})
+				report.Left = append(report.Left, LeftAlone{font.Name, read.left})
 			}
 		}
 		if decoded {
@@ -366,6 +394,7 @@ func planFonts(archive *zip.Reader, identifiers []string, report *CopyReport) (*
 	} else {
 		plan.encryption = rewritten
 	}
+	report.KeysRecovered += len(recovered)
 	return plan, nil
 }
 
@@ -398,11 +427,11 @@ func (p *fontPlan) write(writer *zip.Writer, entry *zip.File, report *CopyReport
 	if !ok {
 		return false, nil
 	}
-	decoded, left, err := readScrambledFont(entry, keys)
+	read, err := readScrambledFont(entry, "", keys)
 	if err != nil {
 		return false, err
 	}
-	if left != "" {
+	if read.left != "" {
 		// It was a font a moment ago: the file is not what the plan was made from.
 		return false, ErrNotAnEPUB
 	}
@@ -410,7 +439,7 @@ func (p *fontPlan) write(writer *zip.Writer, entry *zip.File, report *CopyReport
 	if entry.Method == zip.Store {
 		method = zip.Store
 	}
-	if err := writeRewritten(writer, entry, method, decoded); err != nil {
+	if err := writeRewritten(writer, entry, method, read.decoded); err != nil {
 		return false, err
 	}
 	report.FontsDecoded++
