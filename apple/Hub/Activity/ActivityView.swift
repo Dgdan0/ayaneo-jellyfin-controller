@@ -59,6 +59,9 @@ struct ActivityView: View {
             .padding(.bottom, 28)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         }
+        // A controller goes through the cards' rows by looking (#46): down a
+        // column, and across to the next column's row beside it.
+        .padPage("activity")
         .refreshable { polls += 1 }
         #if DEBUG
         .onAppear(perform: applyDebugOpen)
@@ -166,11 +169,12 @@ struct ActivityView: View {
             .buttonStyle(DashboardRowStyle())
             .accessibilityLabel("\(item.headline), \(ActivityDashboard.transferLine(item))")
             .accessibilityHint("Opens all transfers")
+            .padFocusable("transfer-\(item.id)", ring: .inside(10)) { openRoute(.transfers(TransfersRoute())) }
         }
         HStack(spacing: 10) {
             if let bandwidth, bandwidth.canControl, bandwidth.modeSwitchSupported {
                 GlassCapsulePicker(items: [.init(id: "normal", title: "Normal speed"), .init(id: "alternative", title: "Quiet")],
-                                   selection: bandwidth.mode) { chosen in Task { await chooseSpeed(chosen) } }
+                                   selection: bandwidth.mode, pad: "speed") { chosen in Task { await chooseSpeed(chosen) } }
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("speed-mode")
             }
@@ -184,6 +188,7 @@ struct ActivityView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("all-transfers")
+            .padFocusable("all-transfers", ring: .rounded(6)) { openRoute(.transfers(TransfersRoute())) }
         }
         .padding(.top, 4)
     }
@@ -253,6 +258,9 @@ struct ActivityView: View {
             NavigationLink(value: AppRoute.media(MediaRoute(key: entry.media.key, title: entry.media.title))) { row }
                 .buttonStyle(DashboardRowStyle())
                 .accessibilityLabel("\(entry.heading), \(entry.media.title), \(entry.line), \(entry.state.label)")
+                .padFocusable("agenda-\(entry.id)", ring: .inside(10)) {
+                    openRoute(.media(MediaRoute(key: entry.media.key, title: entry.media.title)))
+                }
         }
     }
 
@@ -298,6 +306,7 @@ struct ActivityView: View {
                 .accessibilityLabel("\(name), \(meta)")
                 .accessibilityHint("Opens it in the browser")
                 .accessibilityIdentifier("service-\(service.name)")
+                .padFocusable("service-\(service.name)", ring: .inside(10)) { open(service) }
             }
         } else {
             QuietLine(text: "Asking the hub…")
@@ -332,6 +341,7 @@ struct ActivityView: View {
             .buttonStyle(.plain)
             .accessibilityHint("Opens the server monitor")
             .accessibilityIdentifier("storage-card")
+            .padFocusable("storage", ring: .rounded(20)) { openRoute(.monitor) }
         }
     }
 
@@ -444,6 +454,7 @@ struct DashboardCard<Trailing: View, Content: View>: View {
 /// down, disks nearly full. Absent when nothing does.
 struct AttentionCard: View {
     let entries: [ActivityDashboard.Attention]
+    @Environment(\.openRoute) private var openRoute
 
     var body: some View {
         if !entries.isEmpty {
@@ -462,6 +473,9 @@ struct AttentionCard: View {
                                 Text("Why is this stuck?")
                             }
                             .buttonStyle(GlassControlStyle())
+                            .padFocusable("why-\(entry.transferId)") {
+                                openRoute(.transfers(TransfersRoute(target: entry.transferId)))
+                            }
                             .padding(.top, 4)
                             .accessibilityIdentifier("why-\(entry.transferId)")
                         }

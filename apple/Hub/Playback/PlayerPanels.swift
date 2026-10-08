@@ -114,6 +114,9 @@ struct PlayerSheet: View {
         // A sheet from the bottom is as tall as what it holds, up to 84% of
         // the screen; the one at the side runs from top to bottom.
         .frame(height: bottom ? layout.size.height * 0.84 : layout.size.height, alignment: .bottom)
+        // A controller moves down its rows and Ⓑ goes back a page, then closes it (#46).
+        .environment(\.padSheetRows, true)
+        .padPage("player-\(String(describing: panel))", modal: true) { back() }
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
     }
@@ -123,7 +126,7 @@ struct PlayerSheet: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             if panels.count > 1 {
-                GlassRoundButton(systemImage: "chevron.left", label: "Back", size: 38) { back() }
+                GlassRoundButton(systemImage: "chevron.left", label: "Back", size: 38, pad: "panel-back") { back() }
             }
             VStack(alignment: .leading, spacing: 5) {
                 Text(heading.title)
@@ -142,7 +145,7 @@ struct PlayerSheet: View {
             if player.applying {
                 ProgressView().tint(.white).padding(.top, 9).accessibilityLabel("Changing")
             }
-            GlassRoundButton(systemImage: "xmark", label: "Close", size: 38) { close() }
+            GlassRoundButton(systemImage: "xmark", label: "Close", size: 38, pad: "panel-close") { close() }
         }
     }
 
@@ -392,6 +395,10 @@ struct PlayerSheet: View {
         .buttonStyle(SheetRowStyle())
         .clipShape(Capsule())
         .accessibilityLabel(label)
+        .padFocusable("step:\(label)", ring: .capsule) {
+            player.setSubtitleOffset(player.subtitleOffsetMillis + delta)
+            player.commitSubtitleOffset()
+        }
     }
 
     @ViewBuilder private var look: some View {
@@ -601,9 +608,16 @@ struct SheetRow<Leading: View>: View {
     var value = ""
     var checked = false
     var chevron = false
+    /// Its id for a controller's focus (#46).
+    var pad: String?
     let action: () -> Void
     @ViewBuilder let leading: Leading
     @Environment(\.glassAccent) private var accent
+    /// In a sheet whose rows a controller moves through by their words (the player's).
+    @Environment(\.padSheetRows) private var padRows
+
+    /// Its id by its words, where the sheet asks for that and none is given.
+    private var wordsId: String? { pad == nil && padRows ? "row:\(title)·\(detail)" : nil }
 
     var body: some View {
         Button(action: action) {
@@ -646,26 +660,46 @@ struct SheetRow<Leading: View>: View {
         .sheetDivider()
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(checked ? .isSelected : [])
+        // Outside the row's one accessibility element: inside it, the focus's
+        // clear views made the row a button holding its own button, which
+        // VoiceOver and the tests met twice (#46).
+        .padFocusable(pad ?? wordsId, ring: .none, press: action)
     }
 }
 
 extension SheetRow where Leading == EmptyView {
     init(title: String, detail: String = "", value: String = "", checked: Bool = false, chevron: Bool = false,
-         action: @escaping () -> Void) {
-        self.init(title: title, detail: detail, value: value, checked: checked, chevron: chevron, action: action) {
+         pad: String? = nil, action: @escaping () -> Void) {
+        self.init(title: title, detail: detail, value: value, checked: checked, chevron: chevron, pad: pad,
+                  action: action) {
             EmptyView()
         }
     }
 }
 
+extension EnvironmentValues {
+    /// The sheet's rows are focusable by their words (#46): the player's panels,
+    /// where every row is a choice and none is given an id of its own.
+    @Entry var padSheetRows = false
+}
+
 /// A row lights up under a finger or the pointer (`.opt:hover`).
 struct SheetRowStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    /// A controller's or keyboard's focus on the row (#46): a ring inside it.
+    @Environment(\.padLit) private var padLit
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(.white)
             .background(configuration.isPressed ? Color.white.opacity(0.07) : .clear)
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(.white, lineWidth: 3)
+                    .padding(3)
+                    .opacity(padLit ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
             .opacity(isEnabled ? 1 : 0.55)
             #if os(iOS)
             .hoverEffect(.highlight)

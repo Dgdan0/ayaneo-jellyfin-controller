@@ -21,6 +21,10 @@ struct AccountSheet: View {
 
     var body: some View {
         sheet
+            // A controller goes from Close to the profiles (and the places), Ⓐ chooses, Ⓑ closes (#46).
+            .padGroup("sheet", .column, members: ["close", "profiles"]
+                      + (places ? AppSection.places.map { "place-\($0.rawValue)" } : []), prefix: false)
+            .padPage("profiles", modal: true) { dismiss() }
             .presentationBackground { GlassSheetFill() }
             .presentationCornerRadius(places ? 32 : 28)
             #if os(iOS)
@@ -53,6 +57,7 @@ struct AccountSheet: View {
                       alignment: places ? .leading : .center, spacing: 14) {
                 ForEach(Profiles.ordered(shell.users)) { user in tile(user) }
             }
+            .padGroup("profiles", .grid(columns: 0), members: Profiles.ordered(shell.users).map(\.id))
             if !places {
                 Text("Each person has their own Continue watching, Next up and progress.")
                     .font(HubType.body(13, relativeTo: .footnote))
@@ -78,7 +83,7 @@ struct AccountSheet: View {
                         .foregroundStyle(.white.opacity(0.65))
                 }
                 Spacer(minLength: 0)
-                GlassRoundButton(systemImage: "xmark", label: "Close", size: 40) { dismiss() }
+                GlassRoundButton(systemImage: "xmark", label: "Close", size: 40, pad: "close") { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
         } else {
@@ -87,7 +92,7 @@ struct AccountSheet: View {
                     .font(HubType.heading(30, weight: .heavy, relativeTo: .title))
                     .frame(maxWidth: .infinity)
                     .padding(.top, 6)
-                GlassRoundButton(systemImage: "xmark", label: "Close", size: 40) { dismiss() }
+                GlassRoundButton(systemImage: "xmark", label: "Close", size: 40, pad: "close") { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
         }
@@ -129,6 +134,7 @@ struct AccountSheet: View {
         .buttonStyle(.plain)
         .accessibilityLabel(isCurrent ? "\(user.name), watching now" : user.name)
         .accessibilityAddTraits(isCurrent ? .isSelected : [])
+        .padFocusable(user.id, ring: .rounded(radius + 4)) { Task { await choose(user) } }
         #if os(iOS)
         .hoverEffect(.lift)
         #endif
@@ -201,5 +207,6 @@ private struct PlaceRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .padFocusable("place-\(section.rawValue)", ring: .inside(16), press: action)
     }
 }

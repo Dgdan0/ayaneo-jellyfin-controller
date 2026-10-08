@@ -242,12 +242,16 @@ struct SeriesBookStrip: View {
     let items: [ReadingSectionItem]
     /// The book whose page this is: shown, not opened.
     var current = ""
+    /// Its group's id for a controller's focus (#46): a row of its books, by position.
+    var pad: String?
     @Environment(\.glassMetrics) private var metrics
+    @Environment(\.openRoute) private var openRoute
 
     var body: some View {
+        let opened = items.indices.filter { current.isEmpty || items[$0].workId != current }
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: metrics.gap) {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     if !current.isEmpty && item.workId == current {
                         SeriesBookCard(item: item, current: true).frame(width: metrics.poster)
                     } else {
@@ -255,6 +259,7 @@ struct SeriesBookStrip: View {
                             SeriesBookCard(item: item).frame(width: metrics.poster)
                         }
                         .buttonStyle(GlassCardStyle())
+                        .padFocusable(pad == nil ? nil : "\(index)", ring: .card, scroll: index) { openRoute(item.route) }
                     }
                 }
             }
@@ -262,6 +267,7 @@ struct SeriesBookStrip: View {
             .padding(.top, 12)
             .padding(.bottom, 16)
         }
+        .padGroup(pad, .row, members: opened.map { "\($0)" }, strip: true, scrollIds: opened.map { AnyHashable($0) })
     }
 }
 

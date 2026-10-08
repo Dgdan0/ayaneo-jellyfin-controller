@@ -2,14 +2,20 @@ import HubKit
 import SwiftUI
 
 /// The round Download button by a title's Play (#5; Android's download
-/// action): a film or an episode asks once and is queued; a series opens its
-/// episode picker. Its ring fills while the download is on its way; once
-/// here it is filled, and a press offers the page on this device or removing
-/// it. A season has none (its series picks its episodes).
+/// action): a film or an episode asks once and is queued; a series opens the
+/// smart choices (`openChoices`, #48), and carries the number while Keep ready
+/// is on. Its ring fills while the download is on its way; once here it is
+/// filled, and a press offers the page on this device or removing it. A season
+/// has none (its series picks its episodes).
 struct DownloadButton: View {
     let item: HubKit.LibraryItem
     var size: CGFloat = 46
+    /// Its id for a controller's focus (#46).
+    var pad: String?
+    /// A series' press: the panel of choices.
+    var openChoices: (() -> Void)?
     @Environment(\.openRoute) private var openRoute
+    @Environment(\.glassAccent) private var accent
     @State private var offline = OfflineLibrary.shared
     @State private var asking = false
     @State private var choosing = false
@@ -25,7 +31,9 @@ struct DownloadButton: View {
     }
 
     var body: some View {
-        let state = state
+        // A series' button is the way to the choices, never "done": some of its episodes on the device is
+        // not the series on the device.
+        let state = item.type == "series" && state == .downloaded ? OfflineTitleState.none : state
         Button {
             press(state)
         } label: {
@@ -37,20 +45,39 @@ struct DownloadButton: View {
                         .rotationEffect(.degrees(-90))
                         .padding(3)
                 }
-                Image(systemName: icon(state))
-                    .font(.system(size: size * 0.38, weight: .semibold))
-                    .foregroundStyle(state == .downloaded ? .black : .white)
+                if state == .downloaded {
+                    // On the device: the download mark, never a tick (a tick is watched).
+                    DownloadedMark(size: size)
+                } else {
+                    Image(systemName: icon(state))
+                        .font(.system(size: size * 0.38, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
             }
             .frame(width: size, height: size)
-            .background {
-                if state == .downloaded { Circle().fill(.white) }
-            }
             .glassPanel(Circle())
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(state.label)
+        .accessibilityValue(item.type == "series" ? offline.keepReadyCount(item.id).map { "Keeping \($0) ready" } ?? "" : "")
         .accessibilityIdentifier("title-download")
+        .overlay(alignment: .topTrailing) {
+            // Keep ready is on: how many it keeps. Beside the button, so it is read on its own.
+            if item.type == "series", let kept = offline.keepReadyCount(item.id) {
+                Text("\(kept)")
+                    .font(HubType.chrome(10.5, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .frame(minWidth: 19, minHeight: 19)
+                    .background(accent.tint, in: Capsule())
+                    .offset(x: 4, y: -4)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel("\(kept)")
+                    .accessibilityIdentifier("keep-ready-badge")
+            }
+        }
+        .padFocusable(pad, ring: .circle) { press(state) }
         .confirmationDialog(item.title, isPresented: $choosing, titleVisibility: .visible) {
             Button("Show in Downloads") { openDownloads() }
             Button("Remove from this device", role: .destructive) { askRemove() }
@@ -75,13 +102,13 @@ struct DownloadButton: View {
         case .none: "arrow.down"
         case .coming: "arrow.down"
         case .failed: "exclamationmark.arrow.circlepath"
-        case .downloaded: "checkmark"
+        case .downloaded: DownloadedMark.symbol
         }
     }
 
     private func press(_ state: OfflineTitleState) {
         if item.type == "series" {
-            openRoute(.offlinePicker(OfflinePickerRoute(seriesId: item.id, title: item.title)))
+            if let openChoices { openChoices() } else { openRoute(.offlineQueue) }
             return
         }
         switch state {

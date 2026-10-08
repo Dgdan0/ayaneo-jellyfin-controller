@@ -54,13 +54,16 @@ struct HomeSettingsPane: View {
             Spacer(minLength: 6)
             moveButton("chevron.up", "Move \(row.title) up", enabled: row.canMoveUp) { layout.move(row.id, by: -1) }
                 .accessibilityIdentifier("home-up-\(row.id)")
+                .padFocusable("home-up-\(row.id)", ring: .circle) { if row.canMoveUp { layout.move(row.id, by: -1) } }
             moveButton("chevron.down", "Move \(row.title) down", enabled: row.canMoveDown) { layout.move(row.id, by: 1) }
                 .accessibilityIdentifier("home-down-\(row.id)")
+                .padFocusable("home-down-\(row.id)", ring: .circle) { if row.canMoveDown { layout.move(row.id, by: 1) } }
             Toggle(row.title, isOn: Binding(get: { row.shown }, set: { layout.setShown(row.id, $0) }))
                 .labelsHidden()
                 .tint(accent.tint)
                 .accessibilityLabel(row.title)
                 .accessibilityIdentifier("home-row-\(row.id)")
+                .padFocusable("home-row-\(row.id)", ring: .capsule) { layout.setShown(row.id, !row.shown) }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

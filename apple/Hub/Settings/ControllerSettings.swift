@@ -103,6 +103,7 @@ struct ControllerSettings: View {
                     Button("Reset") { watcher.reset() }
                         .buttonStyle(GlassControlStyle())
                         .accessibilityIdentifier("controller-reset")
+                        .padFocusable("controller-reset") { watcher.reset() }
                 }
             }
             .padding(.horizontal, 4)

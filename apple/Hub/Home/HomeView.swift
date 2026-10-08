@@ -71,9 +71,13 @@ struct HomeView: View {
                         }
                     }
                 }
+                // A controller goes row by row (#46); the hero's Play and Details are above them.
+                .padGroup("rows", .column, members: rows.filter { !HomeRowView.focusable($0).isEmpty }.map(HomeRowView.groupId),
+                          prefix: false)
                 .padding(.bottom, 24)
             }
             .ignoresSafeArea(edges: .top)
+            .padPage("home")
         }
         .ambientArtwork(hero?.backdrop ?? "")
         .refreshable {
@@ -228,6 +232,7 @@ struct HeroView: View {
     let play: () -> Void
     @Environment(\.glassMetrics) private var metrics
     @Environment(\.glassAccent) private var accent
+    @Environment(\.openRoute) private var openRoute
 
     /// The prototype's 480 on an iPad and 560 on an iPhone, measured from the
     /// top of the screen, and never so short that the words meet the bar. On
@@ -283,18 +288,23 @@ struct HeroView: View {
                         Label(content.playAction.isEmpty ? content.playLabel : content.playAction, systemImage: "play.fill")
                     }
                     .buttonStyle(PrimaryPillStyle())
+                    .padFocusable("hero-play", press: play)
                 }
                 if !content.itemId.isEmpty {
-                    NavigationLink(value: AppRoute.title(TitleRoute(itemId: content.itemId, title: content.title))) {
+                    let route = AppRoute.title(TitleRoute(itemId: content.itemId, title: content.title))
+                    NavigationLink(value: route) {
                         Label("Details", systemImage: "info.circle")
                     }
                     .buttonStyle(GlassPillStyle())
+                    .padFocusable("hero-details") { openRoute(route) }
                 } else if !content.mediaKey.isEmpty {
                     // Coming up: not in the library, so Details is its request-side page, and the only button.
-                    NavigationLink(value: AppRoute.media(MediaRoute(key: content.mediaKey, title: content.title))) {
+                    let route = AppRoute.media(MediaRoute(key: content.mediaKey, title: content.title))
+                    NavigationLink(value: route) {
                         Label("Details", systemImage: "info.circle")
                     }
                     .buttonStyle(GlassPillStyle())
+                    .padFocusable("hero-details") { openRoute(route) }
                 }
             }
             .padding(.top, 4)
@@ -351,8 +361,19 @@ struct HomeRowView: View {
     let preview: (MediaHit) -> Void
     @Environment(\.glassMetrics) private var metrics
     @Environment(\.play) private var play
+    @Environment(\.openRoute) private var openRoute
 
     private var landscape: Bool { HomeHero.isLandscape(rowId: row.id) }
+
+    /// The row's group for a controller (#46): its cards, a strip moved by position.
+    static func groupId(_ row: HomeRow) -> String { "row-\(row.id)" }
+
+    /// The cards that open something (Coming up's without a page do not).
+    static func focusable(_ row: HomeRow) -> [MediaHit] {
+        row.items.filter { opens($0) }
+    }
+
+    private static func opens(_ hit: MediaHit) -> Bool { !(hit.jellyfinItemId.isEmpty && hit.media.key.isEmpty) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -376,15 +397,17 @@ struct HomeRowView: View {
                             }
                         }
                         .buttonStyle(GlassCardStyle())
-                        .disabled(hit.jellyfinItemId.isEmpty && hit.media.key.isEmpty)
+                        .disabled(!Self.opens(hit))
                         .previewsWhenFocused { preview(hit) }
                         .contextMenu { playMenu(hit) }
+                        .padFocusable(Self.opens(hit) ? hit.id : nil, ring: .card) { openRoute(hit.route) }
                     }
                 }
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 12)
                 .padding(.bottom, 16)
             }
+            .padGroup(Self.groupId(row), .row, members: Self.focusable(row).map(\.id), strip: true)
         }
         .padding(.top, 8)
     }
@@ -418,12 +441,15 @@ struct HomeRowView: View {
 struct PreviewsWhenFocused: ViewModifier {
     let preview: () -> Void
     @FocusState private var focused: Bool
+    /// A controller's or keyboard's focus (#46): `padFocusable` outside this.
+    @Environment(\.padLit) private var padLit
 
     func body(content: Content) -> some View {
         content
             .focused($focused)
             .onHover { inside in if inside { preview() } }
             .onChange(of: focused) { _, now in if now { preview() } }
+            .onChange(of: padLit) { _, now in if now { preview() } }
     }
 }
 

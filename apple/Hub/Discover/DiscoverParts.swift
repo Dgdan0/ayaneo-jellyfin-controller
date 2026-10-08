@@ -108,6 +108,8 @@ struct GlassSearchField: View {
     @Binding var query: String
     var autofocus = false
     var onSubmit: () -> Void = {}
+    /// Its id for a controller's focus (#46): Ⓐ puts the keyboard in it.
+    var pad: String?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -141,6 +143,7 @@ struct GlassSearchField: View {
         .frame(height: 44)
         .frame(maxWidth: 460)
         .glassPanel(Capsule())
+        .padFocusable(pad, ring: .capsule) { focused = true }
     }
 }
 
@@ -148,6 +151,9 @@ struct GlassSearchField: View {
 /// with room above and below for a lit card's lift and ring.
 struct CardRow<Content: View>: View {
     let title: String
+    /// Its group for a controller's focus (#46), and its cards' ids in order.
+    var pad: String?
+    var members: [String] = []
     @ViewBuilder let content: Content
     @Environment(\.glassMetrics) private var metrics
 
@@ -163,6 +169,7 @@ struct CardRow<Content: View>: View {
                     .padding(.top, 12)
                     .padding(.bottom, 16)
             }
+            .padGroup(pad, .row, members: members, strip: true)
         }
         .padding(.top, 8)
     }

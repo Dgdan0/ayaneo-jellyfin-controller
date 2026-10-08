@@ -89,6 +89,7 @@ struct AccentCard: View {
         .accessibilityLabel(preset.label)
         .accessibilityAddTraits(on ? .isSelected : [])
         .accessibilityIdentifier("swatch-\(side.rawValue)-\(preset.rawValue)")
+        .padFocusable("swatch-\(side.rawValue)-\(preset.rawValue)", ring: .circle) { accents.choose(preset, for: side) }
         #if os(iOS)
         .hoverEffect(.lift)
         #endif

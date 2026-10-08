@@ -87,16 +87,18 @@ final class PadRouter {
 
     #if DEBUG
     /// The UI tests have no controller: HUB_PAD="R1,B" presses those, one a
-    /// second, HUB_PAD_DELAY seconds after launch (4 by default).
+    /// second, HUB_PAD_DELAY seconds after launch (4 by default). WAIT is a
+    /// second with no press, for a test to read what a press did before the next.
     private func playScript() {
         let environment = ProcessInfo.processInfo.environment
-        let actions = PadScript.actions(environment["HUB_PAD"] ?? "")
-        guard !actions.isEmpty else { return }
+        let steps = (environment["HUB_PAD"] ?? "").split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard steps.contains(where: { PadScript.action($0) != nil }) else { return }
         let delay = Double(environment["HUB_PAD_DELAY"] ?? "") ?? 4
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
-            for action in actions {
-                self?.dispatch(action)
+            for step in steps {
+                if let action = PadScript.action(step) { self?.dispatch(action) }
                 try? await Task.sleep(for: .seconds(1))
             }
         }

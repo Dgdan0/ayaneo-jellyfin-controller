@@ -166,6 +166,8 @@ struct GlassRoundButton: View {
     var on = false
     var size: CGFloat = 46
     var count = 0
+    /// Its id for a controller's focus (#46).
+    var pad: String?
     let action: () -> Void
 
     var body: some View {
@@ -201,5 +203,6 @@ struct GlassRoundButton: View {
         #if os(iOS)
         .hoverEffect(.highlight)
         #endif
+        .padFocusable(pad, ring: .circle, press: action)
     }
 }

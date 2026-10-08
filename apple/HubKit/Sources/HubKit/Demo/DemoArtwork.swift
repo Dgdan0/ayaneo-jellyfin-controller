@@ -12,7 +12,8 @@ enum DemoArtwork {
         let parts = path.split(separator: "/").map(String.init)
         guard parts.count >= 5 else { return nil }
         let id = parts[3], kind = parts[4].lowercased()
-        let still = id.contains("-e")
+        // "<series>-e2", or "<series>-s2e1" past the first season.
+        let still = id.dropFirst(32).contains("e")
         let size: (width: Int, height: Int) = kind == "backdrop" ? (1280, 720) : (still ? (640, 360) : (400, 600))
         let data = picture(id: id, width: size.width, height: size.height)
         return data.isEmpty ? nil : DemoTransport.Answer(200, data: data, type: "image/jpeg")
@@ -23,7 +24,9 @@ enum DemoArtwork {
     static func picture(id: String, width: Int, height: Int) -> Data {
         // The series' colour, a little different for each of its episodes.
         let title = String(id.prefix(32))
-        let episode = Double(id.range(of: "-e").flatMap { Int(id[$0.upperBound...]) } ?? 0)
+        let suffix = id.dropFirst(32)
+        let season = Double(suffix.hasPrefix("-s") ? Int(suffix.dropFirst(2).prefix { $0.isNumber }) ?? 1 : 1)
+        let episode = Double(suffix.split(separator: "e").last.flatMap { Int($0) } ?? 0) + (season - 1) * 4
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         for byte in title.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3 }
         let hue = (Double(hash % 360) / 360 + episode * 0.025).truncatingRemainder(dividingBy: 1)

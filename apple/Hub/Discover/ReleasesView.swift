@@ -7,6 +7,7 @@ import SwiftUI
 struct ReleaseTargetsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.glassMetrics) private var metrics
+    @Environment(\.openRoute) private var openRoute
     let route: ReleaseTargetsRoute
 
     @State private var season: Int?
@@ -38,7 +39,8 @@ struct ReleaseTargetsView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(route.seasons) { option in
-                                ChoicePill(title: TitleFacts.seasonPill(option), selected: option.number == chosen) {
+                                ChoicePill(title: TitleFacts.seasonPill(option), selected: option.number == chosen,
+                                           pad: "\(option.number)") {
                                     season = option.number
                                 }
                             }
@@ -47,6 +49,7 @@ struct ReleaseTargetsView: View {
                         .padding(.top, 14)
                         .padding(.bottom, 2)
                     }
+                    .padGroup("seasons", .row, members: route.seasons.map { "\($0.number)" }, strip: true)
                 }
                 StatusLine(message: status) { loads += 1 }
                     .padding(.horizontal, metrics.margin)
@@ -63,20 +66,27 @@ struct ReleaseTargetsView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: metrics.small ? 220 : 270), spacing: metrics.gap,
                                                  alignment: .top)], alignment: .leading, spacing: 18) {
                         ForEach(targets.episodes) { target in
-                            NavigationLink(value: AppRoute.releases(ReleasesRoute(
+                            let next = AppRoute.releases(ReleasesRoute(
                                 key: route.key, heading: ReleaseTargetLines.heading(series: route.title, target: target),
-                                season: target.season, episode: target.episode))) {
+                                season: target.season, episode: target.episode))
+                            NavigationLink(value: next) {
                                 TargetEpisodeCard(target: target)
                             }
                             .buttonStyle(GlassCardStyle())
+                            .padFocusable(target.id, ring: .card) { openRoute(next) }
                         }
                     }
+                    .padGroup("episodes", .grid(columns: 0), members: targets.episodes.map(\.id))
                     .padding(.horizontal, metrics.margin)
                     .padding(.top, 12)
                 }
             }
+            // A controller goes down the page (#46): the seasons, the whole season, the episodes.
+            .padGroup("page", .column, members: (route.seasons.count > 1 ? ["seasons"] : []) + ["season-card", "episodes"],
+                      prefix: false)
             .padding(.bottom, 28)
         }
+        .padPage("release-targets:\(route.key)")
         .ambientArtwork(targets?.seasonImage.isEmpty == false ? targets!.seasonImage : route.poster)
         .refreshable { loads += 1 }
         .task(id: "\(chosen)·\(loads)") { await load() }
@@ -111,6 +121,11 @@ struct ReleaseTargetsView: View {
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(GlassCardStyle())
+        .padFocusable("season-card", ring: .card) {
+            openRoute(.releases(ReleasesRoute(
+                key: route.key, heading: ReleaseTargetLines.heading(series: route.title, seasonTitle: seasonTitle),
+                season: chosen)))
+        }
     }
 
     private func load() async {
@@ -202,6 +217,7 @@ struct ReleasesView: View {
                     }
                     .buttonStyle(GlassControlStyle())
                     .disabled(searching || grabbing)
+                    .padFocusable("search-again") { if !searching && !grabbing { searches += 1 } }
                     Button {
                         hideRejected.toggle()
                     } label: {
@@ -210,7 +226,9 @@ struct ReleasesView: View {
                     }
                     .buttonStyle(GlassControlStyle())
                     .disabled(response == nil)
+                    .padFocusable("hide-rejected") { if response != nil { hideRejected.toggle() } }
                 }
+                .padGroup("controls", .row, members: ["search-again", "hide-rejected"], prefix: false)
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 14)
                 LazyVStack(spacing: 8) {
@@ -222,13 +240,22 @@ struct ReleasesView: View {
                         }
                         .buttonStyle(GlassCardStyle())
                         .disabled(grabbing)
+                        // Ⓐ asks before anything is grabbed, as a tap does (#46).
+                        .padFocusable(release.id, ring: .card) {
+                            guard !grabbing else { return }
+                            if release.scopeBlocked { blocked = release } else { confirming = release }
+                        }
                     }
                 }
+                .padGroup("releases", .column, members: shown.map(\.id))
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 14)
             }
+            // A controller goes down the page (#46): the controls, then the releases.
+            .padGroup("page", .column, members: ["controls", "releases"], prefix: false)
             .padding(.bottom, 28)
         }
+        .padPage("releases:\(route.key):\(route.season ?? -1):\(route.episode ?? -1)")
         .ambientArtwork("")
         .task(id: searches) { await search() }
         .alert(blocked.map { _ in ReleaseLines.blockedTitle(season: route.season ?? 0, episode: route.episode ?? 0) } ?? "",

@@ -189,7 +189,8 @@ enum DemoOffline {
     private static func selection(_ seriesId: String, apple: Bool) async -> DemoTransport.Answer {
         guard let series = library("/v1/library/items/" + seriesId)?["item"] as? [String: Any],
               series["type"] as? String == "series" else { return failure(400, "invalid_request", "item is not a series") }
-        let size = Int64(await DemoVideo.data()?.count ?? 0)
+        // A busy machine can fail to make the video once; the listing still says what it would be.
+        let size = Int64(await DemoVideo.data()?.count ?? 215_000)
         let estimate = apple ? estimated(size) : size
         let seasons = (library("/v1/library/series/\(seriesId)/seasons")?["items"] as? [[String: Any]]) ?? []
         let episodes = (library("/v1/library/series/\(seriesId)/episodes")?["items"] as? [[String: Any]]) ?? []
@@ -208,7 +209,8 @@ enum DemoOffline {
         }
         return json(["series": series, "seasons": selectionSeasons, "episodeCount": episodes.count,
                      "estimatedSizeBytes": estimate * Int64(episodes.count),
-                     "playTargetId": episodes.first?["id"] as? String ?? ""])
+                     "playTargetId": episodes.first { ($0["played"] as? Bool) != true }?["id"] as? String
+                         ?? episodes.first?["id"] as? String ?? ""])
     }
 
     private static func prepare(_ body: Data?) async -> DemoTransport.Answer {

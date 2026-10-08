@@ -829,7 +829,10 @@ contract is in #5), so AVPlayer plays every download and there is one player.
 | The Downloads tab: one poster per film or series under its library, the queue a batch at a time | `Downloads/DownloadsView`; words in HubKit `OfflineCatalog`, `OfflineQueueLabels` ("Preparing on the PC · 40%", "Next on the PC", "2nd in line on the PC") and `OfflineAppleNotes` (what takes longer, what is left out) |
 | A downloaded title's page, played from its files: the library page's shape (faded backdrop, the name and its facts and overview, Play, Remove and more as round buttons, season pills and a strip of episode cards saying what is on the device) | `Downloads/OfflineTitleView` built from the shared title parts (above); seasons from the episodes that arrived (`OfflineCatalog.seasons`), the one to go on with from `playTarget`, a film's from `OfflineCatalog.filmTarget` |
 | A downloaded series' own facts, overview and pictures, kept beside its episodes (queued with its first episode; filled in for earlier downloads the next time the hub answers; with none kept the page is its name and episodes) | HubKit `OfflineSeriesSnapshot` and `OfflineSeriesStore` (`OfflineStore.series`: `snapshot`, `needing`, `artworkFile`, `prune`, which goes with the last episode); the app's `OfflineLibrary.keepSeriesSoon` / `seriesSnapshot` |
-| A series' episodes to download | `Downloads/OfflinePickerView` on `GET /v1/offline/series/{id}/selection?format=apple`; quick choices and words in HubKit `OfflineSelection` |
+| A series' episodes to download, on its own page (#48): a tap on a card's corner, "Season 2 · 4.9 GB", the round button's choices, select mode | `Downloads/SeriesDownloadsModel` (one per series page, on `GET /v1/offline/series/{id}/selection?format=apple`); the rules and words are HubKit `SeriesDownloads` (`episodes(from:)`, `badge`, `choices`, `seasonButton`, ticks), `KeepReady` and `StorageBar`; the parts are `Downloads/SeriesDownloadViews` (`DownloadBadgeButton`, `SelectTick`, `StorageBarView`, `DownloadBar`, `SeasonDownloadButton`, `SelectTopBar`, `SelectBottomBar`) and `SeriesDownloadPanel` (a side panel on an iPad and a Mac, a sheet on an iPhone). The old picker page is gone |
+| The storage bar: other apps, JellyHub, what is coming or being added (the theme accent, never under a few points), free; "2 coming · 1 on this iPad" | HubKit `StorageBar` (`widths`, `StorageBarWords`, `StorageBarVisibility`: up while a download is on its way, gone about 3 s after the last); the app's `StorageBarView`, from `OfflineLibrary.storageBar(adding:)` (the device's real capacity and free space; a demo run reports a 256 GB device), and `.downloadBar(scope:)` on a title's page |
+| Keep ready (a series' next N unwatched episodes kept on the device) | HubKit `KeepReady` (the window, and the only time an episode it downloaded goes: once the next one is finished, never during playback, never the person's own) and `KeepReadyStore` (`OfflineStore.keepReady`, per profile and series, with the episodes it downloaded itself); the app's `OfflineLibrary.keepReadyTick` (a page's listing, at launch, after the player is left: `playbackBegan` / `playbackEnded`). "Finished" is the hub's watched state, or a watch made here and not yet sent |
+| What a card offers on a hold (and to VoiceOver, and a controller's Ⓨ): Download / Stop / Remove, Select episodes | `CardAction` lists, one per card, from `EpisodeStrip(actions:)`; the strip also takes a control over the still's corner (`overlay:`), and select mode is `SeriesDownloadsModel.selecting` / `toggle` / `cancelSelecting` |
 | The Download button on a title page and its ring | `Downloads/DownloadButton`, its state and words in HubKit `OfflineTitleState`; an episode's menu has Download episode |
 | Asking before a download leaves the device | `offlineRemoval` (`OfflineRemoval`): Keep in the cancel role, Remove |
 | A download played | `PlayerModel` takes `OfflineLibrary.localPlan` before the hub; the file's audio is chosen by place when that is its language (two English dubs are told apart), its text subtitles by place with the language checked |
@@ -848,7 +851,7 @@ stayed unwatched on the server; the download was then removed.
 
 Debug launches take `HUB_DOWNLOAD=<item id>` (downloads it at launch; `<id>,<id>,<id>` queues a series' episodes as one batch),
 `HUB_DOWNLOAD=remove:<item id>`, `HUB_OFFLINE_TITLE=<film or series id>` (opens that title's page on this device) and
-`HUB_OFFLINE_WATCH=<item id>:<position ms>/<duration ms>[/done],…` (watches made on this device, so the cards say "16:12 left" and "watched"). The demo hub makes each MP4 in a few seconds, The Matrix's
+`HUB_OFFLINE_WATCH=<item id>:<position ms>/<duration ms>[/done],…` (watches made on this device, so the cards say "16:12 left" and "watched"), and `HUB_SERIES_DOWNLOADS=panel` (opens a series page's choices) or `select[:e1,s2e2]` (select mode with those ticked). The demo's Slow Horses has two seasons (3 and 4 episodes, ids `<id>-e1` and `<id>-s2e1`), and its episodes remember being watched. The demo hub makes each MP4 in a few seconds, The Matrix's
 (converted) in eight; Dune fails once until it is retried, and Inception has a French picture
 subtitle that is left out.
 
@@ -892,6 +895,51 @@ engine: whether the ring shows) is another thing.
 Escape is not a way back on the iPad yet: a SwiftUI shortcut for it never arrives, since iPadOS keeps
 the key for its own focus system. The keyboard joins through key commands that take priority over
 the system's (`wantsPriorityOverSystemBehavior`), with #46's engine.
+
+## A controller drives the whole app (#46)
+
+A game controller or a keyboard drives every screen, as the Pocket's pad does. One engine decides
+where a press goes, in HubKit with the Pocket's cases as tests (`PadFocusTests`), and every screen
+shares it. The engine is pure: rectangles and ids, no SwiftUI. A `padFocusable` view registers its
+item; the page asks the engine and moves focus, scrolling, pressing Ⓐ and drawing the ring itself.
+
+| Behaviour | Owner |
+|---|---|
+| Where a press goes on a page | HubKit `PadFocus.step(from:_:in:memory:)` gives a `PadStep`: `.to(id)` (focus that item, scrolling it in first if it is not drawn yet), `.stay` (the page's press, nothing that way: the end of a row) or `.leave` (nothing on the page that way: the host may hand it to the bar). It works on a `PadMap`: each focusable item's frame by id, in one coordinate space (the page's scroll content), and the `PadGroup`s that order them |
+| A row moves by position, a page's rows by row, past an empty one, a grid wraps | `PadLayout`: `.row` (Android's `StripNav`: left and right by position, nothing at the ends unless a row round it goes on), `.column` (`RowStep`: up and down by position, entering a row at the item nearest the one left, or where it was last left when none of it is drawn), `.grid(columns:)` (0 counts them from the frames). A group lists every member, drawn or not, so a lazy stack's next card is still next |
+| Anything outside a group | Looked for the way pressed: up and down the nearest line, at the item nearest across; left and right in the band only, through `PadGuard` (Android's `FocusGuard`, its tests ported). `PadMap.horizontal = .grid` lets them wrap onto the next line |
+| A press with nothing focused | `PadFocus.first`: the top line, from the left; with nothing drawn, the first member of the outermost group |
+| Where Back, a tab and Down from the bar return focus | `PadMemory` (Android's `FocusPlace`): `focused(id, page:, in:)` on every focus change, `returning(to: page, in:)` as a page shows again (its place while the page still has it, else its first item), `forget(page:)` when a page goes for good. Each group also remembers the member it was left on |
+| The ring only while a controller or keyboard is in use | `PadInput` (Android's `InputModeTracker`): `directional()` and `pointer()` report a change once. It starts hidden, because here a touch is the default |
+| How far to scroll to the focused item | `PadReveal.origin(showing:in:margin:above:pin:content:)` (as little as it takes; `above` keeps a row's heading in view, `pin` rests the row at the top as Home's rows do, the row's frame from `PadMap.frame(parent(of:).id)`) and `PadReveal.offset` along one axis |
+
+The app's side (`Hub/Focus`):
+
+| Behaviour | Owner |
+|---|---|
+| Every input's way in | `PadFocusCenter.shared.route(_ action: PadAction)`, called by the shell's `PadClaim` (A's `PadRouter`) and the keyboard: the focus takes `.step`, `.activate` (Ⓐ, Return, Space), `.secondary` (Ⓨ, the item's hold menu) and `.back` (Ⓑ, Escape) out of the bar or a sheet; anything else goes to `PadFocusCenter.shared.unhandled`, the shell's `padPressed` (Ⓑ back, L1/R1). Nothing while the player or a reader is open (`covered`; their claims have the controller) |
+| The keyboard | `Focus/PadKeys`: on the iPad and iPhone the arrows, Return and Space are UIKit key commands on the window's root controller with priority over the system's own keyboard behaviour (no SwiftUI shortcut or key handler heard Return), off while the player or a reader is open, a text field is being typed in or an alert shows; Escape is read by a focused view's `onKeyPress`, as the player's is (no key command hears it). On the Mac a key monitor that leaves a text field alone. A touch, click or scroll hides the ring (`PadInput.pointer`), heard by a recogniser that declines every touch (one that took them upset the menus). In the simulator XCUITest's Return arrives only typed as a newline, and its Escape not at all |
+| A page, a sheet, the bar | `.padPage("key")` round a page's own scroll view (it scrolls it), `.padPage("key", modal: true) { dismiss() }` for a sheet, whose Ⓑ closes it; the bars are one page (`padBar`), reached up (or down to the iPhone's tab bar) from a page and left with Down, Up or Ⓑ |
+| An item | `.padFocusable("id", ring: .card / .capsule / .circle / .rounded(r) / .inside(r) / .none, scroll:, hold:) { press }`: Ⓐ runs `press`, Ⓨ `hold`. `.card` lights the card as a resting pointer does (`GlassCardStyle` reads `padLit`); `.none` for an item that draws its own (`SheetRowStyle`). Shared parts take a `pad:` id: `ChoicePill`, `GlassRoundButton`, `SheetRow`, `BackPill`, `AvatarButton`, `SidePicker`, and `GlassCapsulePicker` and `UnderlineTabs` as a row |
+| Items in order | `.padGroup("id", .row / .column / .grid(columns: 0), members:, prefix:, strip:, scrollIds:)`: an item in a group is `group/id`; `strip: true` on a horizontal scroll view, which it then scrolls; `scrollIds` where its `ForEach` names cards by position. A column keeps only rows that are there |
+| A menu or a picker a controller presses | Its choices as a `confirmationDialog` the press opens (a book's ⋯ and Change format, a library's Sort by, the Finished panel's month and year): a `Menu` cannot be opened from code |
+| A page busy with something of its own | `.padPage("key", back:)` on a page that is not a sheet: while `back` is set, Ⓑ and Escape run it instead of going back (a series' select mode ends first; `TitlePage(padBack:)`). It follows the page as `back` comes and goes |
+| Where `padFocusable` goes | Outside `.accessibilityElement(children: .combine)` (inside it, its clear views made the row a second, nested element, so VoiceOver and the tests found "Chapters" twice in the player's panel). The item itself is never given the id, the frame reader or the ring: a clear `PadAnchor` behind it carries all three, so a `Menu`, a `Toggle` or a text field keeps its taps (wrapping them lost the ⋯ menu's choice and Settings › Home's switches on the iPad) |
+| A card a controller can hold | `EpisodeStrip`'s card button: Ⓐ plays (or ticks in select mode), Ⓨ shows its `CardAction`s as a `confirmationDialog` (Download, Stop, Remove, Select episodes); the corner's download button is reached that way, not as a stop of its own |
+| A bar over a page's foot | `TitlePage(bottom:)` puts it inside the page, so its button is a stop (select mode's Download, last in the column) |
+| The Media screens | Home (`home`: hero, then a column of rows), Library (`media-libraries`, `folder:<id>` with its Sort by dialog, the poster `grid`), a title (`title:<id>`: series, Read more, the actions row with ⋯ as a dialog, tabs, seasons and the Season button, episodes, More like this, Cast; in select mode Cancel and Select season, the seasons, the episodes, Download), the choices panel (`series-downloads`, modal: Close, each choice with Keep ready's minus and plus along its row, Choose episodes, Turn off, Download), Discover (`discover`, Ⓨ on a card asks to Request), the request form (`request`, modal), releases, the profile picker (`profiles`, modal), Settings and its panes, a downloaded title (`offline-title:<key>`) and the player's panels (`player-<panel>`, modal) |
+| Reading focus as it lands | `.onPadFocus { … }` inside the item's `padFocusable` (Notifications marks a row seen) |
+| Where the focus is, for UI tests | Debug builds' `pad-focus` text: "ring books-home hero-resume", "hidden …", "none" |
+
+How a page uses it:
+
+- **Ids.** Each item's id is the one its view carries for scrolling (`ScrollViewReader`), stable
+  across reloads (a title's id, not its position).
+- **Frames.** All in one named coordinate space per page, including a horizontal strip's cards.
+- **Groups.** A strip is a `.row` of its cards; a page's rows and buttons above them a `.column` of
+  those rows; a poster grid a `.grid`. A Back button, the bar's icons and anything else may stay
+  outside groups.
+- **Overlays.** A sheet or overlay is its own page with its own map while it is open.
 
 ## The reader's Kindle look: colours, margins, corners, typefaces and the menu (#47)
 

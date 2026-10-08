@@ -28,7 +28,8 @@ struct SubtitlesSettings: View {
             card("Look", detail: SubtitleLookWords.styleHint(look.style)) {
                 HStack(spacing: 8) {
                     ForEach(SubtitleStyle.allCases, id: \.self) { style in
-                        ChoicePill(title: SubtitleLookWords.style(style), selected: look.style == style) {
+                        ChoicePill(title: SubtitleLookWords.style(style), selected: look.style == style,
+                                   pad: "style-\(style.rawValue)") {
                             change { $0.style = style }
                         }
                         .accessibilityIdentifier("style-\(style.rawValue)")
@@ -38,7 +39,8 @@ struct SubtitlesSettings: View {
             card("Size") {
                 HStack(spacing: 8) {
                     ForEach(SubtitleSize.allCases, id: \.self) { size in
-                        ChoicePill(title: SubtitleLookWords.size(size), selected: look.size == size) {
+                        ChoicePill(title: SubtitleLookWords.size(size), selected: look.size == size,
+                                   pad: "size-\(size.rawValue)") {
                             change { $0.size = size }
                         }
                         .accessibilityIdentifier("size-\(size.rawValue)")
@@ -61,6 +63,7 @@ struct SubtitlesSettings: View {
             .padding(.vertical, 14)
             .glassPanel(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .accessibilityIdentifier("subtitle-lift")
+            .padFocusable("subtitle-lift", ring: .rounded(20)) { change { $0.liftWithControls.toggle() } }
         }
     }
 
@@ -114,6 +117,7 @@ struct SubtitlesSettings: View {
                     .contentShape(Capsule())
             }
             .buttonStyle(.plain)
+            .padFocusable("preview-controls", ring: .capsule) { controls.toggle() }
             .padding(8)
             .accessibilityIdentifier("preview-controls")
         }

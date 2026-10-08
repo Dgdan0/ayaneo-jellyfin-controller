@@ -33,6 +33,10 @@ final class OfflineLibrary {
     @ObservationIgnored private var refreshing: Task<Bool, Never>?
     /// The series' own items being asked for, so a page has their facts and overview: one at a time.
     @ObservationIgnored private var keepingSeries: Task<Void, Never>?
+    /// Keep ready being tidied: one at a time, so nothing is asked for twice.
+    @ObservationIgnored private var keepingReady: Task<Void, Never>?
+    /// Something is playing: nothing Keep ready downloaded is removed until the player is left (#48).
+    @ObservationIgnored var playbackActive = false
     /// What each download was when last looked at: a change to finished or
     /// failed is a notification (#43). Nil until the first look.
     @ObservationIgnored private var seenStates: [String: OfflineState]?
@@ -77,6 +81,8 @@ final class OfflineLibrary {
         syncSoon()
         // A series downloaded before its page kept its own words has them now, the first time the hub answers.
         keepSeriesSoon()
+        // What Keep ready waited to tidy, now the hub can be asked.
+        keepReadyTickAll()
     }
 
     /// A download moved: the pages read again, and one that finished or
@@ -149,13 +155,19 @@ final class OfflineLibrary {
 
     /// Asks the hub for these films or episodes as MP4s for this device, as
     /// one batch, and queues them. Nil when they are on their way; the
-    /// reason otherwise, in words.
-    func download(itemIds: [String], title: String, seriesId: String = "") async -> String? {
+    /// reason otherwise, in words. Episodes of a series join its batch that is
+    /// still under way, so a run of quick taps is one line in the queue. `keepReady`
+    /// says Keep ready asked for them, which is then the only thing that may remove them.
+    func download(itemIds: [String], title: String, seriesId: String = "", keepReady: Bool = false) async -> String? {
         guard let hub, !itemIds.isEmpty else { return "Not connected to the hub" }
         // The first download asks whether the app may say when it is done, never the launch (#43).
         await DownloadAlerts.shared.askOnce(demo: isDemo)
         let now = OfflineDownloader.now()
-        let batchKey = OfflineSelection.batchKey(now: now, for: seriesId.isEmpty ? itemIds[0] : seriesId)
+        let open = seriesId.isEmpty ? nil : store.batches(userId: userId).first { batch in
+            batch.seriesId == seriesId && !batch.paused && batch.jobs.contains { $0.state != .complete && $0.state != .failed }
+        }
+        let batchKey = open?.id ?? OfflineSelection.batchKey(now: now, for: seriesId.isEmpty ? itemIds[0] : seriesId)
+        let fresh = itemIds.filter { store.forItem($0, userId: userId) == nil }
         let body = OfflinePrepareBody(batchKey: batchKey, seriesId: seriesId, format: OfflineFormat.apple,
                                       items: itemIds.map { OfflinePrepareItem(clientItemKey: OfflineSelection.itemKey(batchKey: batchKey, itemId: $0),
                                                                               itemId: $0) })
@@ -171,6 +183,14 @@ final class OfflineLibrary {
         // A hub from before the Apple format sends the original, which this device cannot play.
         guard manifests.allSatisfy(\.manifest.isApple) else { return OfflineTransfer.hubTooOld }
         let added = store.enqueue(title: title, seriesId: seriesId, userId: userId, manifests: manifests, now: now)
+        if added > 0, !seriesId.isEmpty {
+            if keepReady {
+                store.keepReady.mark(userId: userId, seriesId: seriesId, ids: fresh)
+            } else {
+                // Asked for by hand: the person's own now, never Keep ready's to remove.
+                store.keepReady.unmark(userId: userId, ids: fresh)
+            }
+        }
         revision += 1
         downloader.kick()
         // The series' own facts and overview are kept beside its artwork as its first episode is queued.
@@ -182,6 +202,12 @@ final class OfflineLibrary {
     func resume(_ id: String) { downloader.resume(id) }
     func retry(_ id: String) { downloader.retry(id) }
     func remove(_ id: String) { downloader.remove(id) }
+
+    /// One episode's download stopped, or taken off the device: the ring's tap, and Remove.
+    func stop(itemId: String) {
+        guard let row = store.forItem(itemId, userId: userId) else { return }
+        downloader.remove(row.id)
+    }
     func pauseBatch(_ id: String) { downloader.pauseBatch(id) }
     func resumeBatch(_ id: String) { downloader.resumeBatch(id) }
     func cancelBatch(_ id: String, keepFinished: Bool) { downloader.cancelBatch(id, removeCompleted: !keepFinished) }
@@ -226,6 +252,114 @@ final class OfflineLibrary {
             }
             revision += 1
         }
+    }
+
+    // MARK: A series' downloads on its own page (#48)
+
+    /// The device's capacity for the storage bar. A demo run reports a plausible
+    /// device: a simulator would say the Mac's disk, where a few hundred
+    /// kilobytes of demo MP4 are no picture of anything.
+    var barCapacityBytes: Int64 {
+        if isDemo { return 256 << 30 }
+        let values = try? store.root.resourceValues(forKeys: [.volumeTotalCapacityKey])
+        return Int64(values?.volumeTotalCapacity ?? 0)
+    }
+
+    var barFreeBytes: Int64 { isDemo ? 112 << 30 : freeBytes }
+
+    /// This profile's downloads for `scope` (a film's or a series' id), or all of them.
+    func rows(scope: String? = nil) -> [OfflineRow] {
+        _ = revision
+        let rows = store.rows(userId: userId)
+        guard let scope, !scope.isEmpty else { return rows }
+        return rows.filter { $0.itemId == scope || $0.manifest.item.seriesId == scope }
+    }
+
+    /// How many are on their way and how many are on the device, for the bar's words.
+    func counts(scope: String? = nil) -> (coming: Int, onDevice: Int) {
+        let rows = rows(scope: scope)
+        return (rows.filter { $0.state != .complete && $0.state != .failed }.count, rows.filter { $0.state == .complete }.count)
+    }
+
+    /// The bar as the device is now, with `adding` bytes more previewed.
+    func storageBar(adding: Int64 = 0) -> StorageBar {
+        _ = revision
+        let rows = store.rows(userId: userId)
+        let held = rows.reduce(Int64(0)) { $0 + ($1.state == .complete ? $1.totalBytes : $1.bytesDownloaded) }
+        let coming = rows.filter { $0.state != .complete && $0.state != .failed }
+            .reduce(Int64(0)) { $0 + max($1.totalBytes - $1.bytesDownloaded, 0) }
+        let capacity = barCapacityBytes
+        return StorageBar(capacity: capacity > 0 ? capacity : 1, free: barFreeBytes, app: held, coming: coming, adding: adding)
+    }
+
+    func keepReadyCount(_ seriesId: String) -> Int? {
+        _ = revision
+        return store.keepReady.count(userId: userId, seriesId: seriesId)
+    }
+
+    /// Keep ready on for the series with `count`, and the downloads it asks
+    /// for started now from what the hub listed.
+    func setKeepReady(_ selection: OfflineSelectionResponse, count: Int) async {
+        store.keepReady.enable(userId: userId, seriesId: selection.series.id, count: count)
+        revision += 1
+        await keepReadyTick(selection)
+    }
+
+    /// Off: what it downloaded stays, and is the person's now.
+    func turnOffKeepReady(_ seriesId: String) {
+        store.keepReady.disable(userId: userId, seriesId: seriesId)
+        revision += 1
+    }
+
+    /// One series tidied from what the hub says of it: the next episodes
+    /// asked for, and what is finished and past removed (`KeepReady.plan`).
+    func keepReadyTick(_ selection: OfflineSelectionResponse) async {
+        let seriesId = selection.series.id
+        guard let count = store.keepReady.count(userId: userId, seriesId: seriesId) else { return }
+        var episodes = SeriesDownloads.episodes(from: selection)
+        // A watch made here that the hub has not been told of yet counts as finished too.
+        let waiting = Set(store.outbox(userId: userId).filter(\.completed).map(\.itemId))
+        for index in episodes.indices where waiting.contains(episodes[index].id) { episodes[index].played = true }
+        let complete = Set(store.completed(userId: userId).map(\.itemId))
+        let plan = KeepReady.plan(episodes: episodes, playTargetId: selection.playTargetId, count: count,
+                                  have: { [store, userId] in store.forItem($0, userId: userId) != nil },
+                                  complete: complete, managed: store.keepReady.managed(userId: userId, seriesId: seriesId),
+                                  playing: playbackActive)
+        for id in plan.remove { stop(itemId: id) }
+        if !plan.download.isEmpty {
+            _ = await download(itemIds: plan.download.map(\.id), title: selection.series.title, seriesId: seriesId, keepReady: true)
+        }
+        let stored = Set(store.rows(userId: userId).map(\.itemId))
+        store.keepReady.prune(userId: userId, seriesId: seriesId, stored: stored)
+        if !plan.remove.isEmpty { revision += 1 }
+    }
+
+    /// Every series that keeps episodes ready, tidied from the hub: at launch
+    /// and after the player is left. Quiet when the hub cannot be reached.
+    func keepReadyTickAll() {
+        guard keepingReady == nil, hub != nil, !userId.isEmpty || isDemo else { return }
+        keepingReady = Task { [weak self] in
+            await self?.tickAll()
+            self?.keepingReady = nil
+        }
+    }
+
+    private func tickAll() async {
+        guard let hub else { return }
+        for (seriesId, _) in store.keepReady.series(userId: userId) {
+            guard let selection = try? await hub.fetch(HubEndpoints.offlineSelection(seriesId: seriesId, format: OfflineFormat.apple),
+                                                       as: OfflineSelectionResponse.self) else { continue }
+            await keepReadyTick(selection)
+        }
+    }
+
+    /// A player was opened: nothing Keep ready downloaded is removed while it is.
+    func playbackBegan() { playbackActive = true }
+
+    /// The player was left: the tidying that waited for it.
+    func playbackEnded() {
+        playbackActive = false
+        keepReadyTickAll()
     }
 
     // MARK: Playing

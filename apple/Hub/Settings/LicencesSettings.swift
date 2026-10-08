@@ -64,6 +64,7 @@ struct LicencesSettings: View {
                     .accessibilityLabel("\(entry.name), \(entry.line)")
                     .accessibilityHint("Shows the licence")
                     .accessibilityIdentifier("licence-\(entry.id)")
+                    .padFocusable("licence-\(entry.id)", ring: .inside(12)) { openRoute(.licence(LicenceRoute(id: entry.id))) }
                     if index < entries.count - 1 {
                         Rectangle().fill(.white.opacity(0.08)).frame(height: 1).padding(.leading, 16)
                     }

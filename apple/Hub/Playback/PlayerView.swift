@@ -819,6 +819,9 @@ struct PlayerView: View {
     /// Audio & subtitles, Ⓑ closing a panel and then the player, L1 and R1
     /// the episode before and after, Menu the controls shown or hidden.
     private func padPressed(_ action: PadAction) {
+        // A panel's rows are a page of the focus's own (#46): it moves the ring
+        // down them, Ⓐ chooses one and Ⓑ goes back a page; what it leaves, the player has.
+        if !panels.isEmpty, PadFocusCenter.shared.handle(action) { return }
         guard let command = PlayerPadMap.command(action, panelOpen: !panels.isEmpty) else { return }
         switch command {
         case .key(let key): act { press(key) }

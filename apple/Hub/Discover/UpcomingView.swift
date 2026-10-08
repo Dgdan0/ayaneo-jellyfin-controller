@@ -75,10 +75,14 @@ struct UpcomingView: View {
                         }
                         .buttonStyle(GlassCardStyle())
                         .accessibilityHint(previews ? "Shows it beside the days" : "Opens the title")
+                        // A controller's focus shows it beside the days, and Ⓐ opens it (#46).
+                        .onPadFocus { if previews { selectedId = group.id } }
+                        .padFocusable(group.first.media.key.isEmpty ? nil : group.id, ring: .card) { open(group) }
                     }
                 }
             }
         }
+        .padGroup("upcoming", .column, members: groups.filter { !$0.first.media.key.isEmpty }.map(\.id))
     }
 
     /// "Fri 2 Oct", today's in the accent with its Today pill, and "· Nothing

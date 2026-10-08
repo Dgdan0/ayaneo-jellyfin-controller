@@ -65,11 +65,13 @@ struct GlassCardStyle: ButtonStyle {
 private struct GlassCardBody: View {
     let configuration: ButtonStyleConfiguration
     @Environment(\.isFocused) private var focused
+    /// A controller's or keyboard's focus on it (#46, `padFocusable`).
+    @Environment(\.padLit) private var padLit
     @State private var hovering = false
 
     var body: some View {
         configuration.label
-            .environment(\.cardLit, hovering || focused)
+            .environment(\.cardLit, hovering || focused || padLit)
             .opacity(configuration.isPressed ? 0.85 : 1)
             .onHover { hovering = $0 }
     }
