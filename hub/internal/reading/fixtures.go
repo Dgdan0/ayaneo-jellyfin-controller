@@ -573,6 +573,17 @@ type FixtureNarration struct {
 	// all of them. A chapter may begin in one chunk and end in the next, as the
 	// real ones do. Empty is one chapter for the whole narration.
 	Chapters []int
+	// OverrunMs is, for a chunk, how far Storyteller's aligner ran past its end:
+	// the chunk's last sentence is written as ending that far past it, and one more
+	// sentence follows that begins there and ends at the chunk's length, before it
+	// begins (A Clash of Kings, The Will of the Many). Both are written so; the
+	// fixture's Pars hold them as they are to be read, the last ending at the
+	// chunk's length and the one after it left out. Absent or zero is no overrun.
+	OverrunMs []int64
+	// Numbers are the chunks' numbers when they are not 1, 2, 3 …: Storyteller
+	// leaves out a piece with nothing narrated in it (The Dark Forest's first
+	// chapter, 52 s of credits), and the numbers of the others stay.
+	Numbers []int
 }
 
 type AlignedEPUBOptions struct {
@@ -775,6 +786,9 @@ func GenerateAlignedEPUB(path string, options AlignedEPUBOptions) (AlignedEPUBFi
 		var made []*fixtureChapter
 		for chunkIndex, length := range narration.ChunkMs {
 			chunk := chunkIndex + 1
+			if chunkIndex < len(narration.Numbers) {
+				chunk = narration.Numbers[chunkIndex]
+			}
 			audioHref := fmt.Sprintf("Audio/%05d-%05d%s", source, chunk, layout.AudioExt)
 			audioEntry := rel(audioHref)
 			count := narration.Sentences[chunkIndex]
@@ -787,10 +801,15 @@ func GenerateAlignedEPUB(path string, options AlignedEPUBOptions) (AlignedEPUBFi
 				filler[i] = byte(i*13 + source*7 + chunk)
 			}
 			files = append(files, zipFileSpec{name: audioEntry, data: filler, store: true})
+			var overrun int64
+			if chunkIndex < len(narration.OverrunMs) {
+				overrun = narration.OverrunMs[chunkIndex]
+			}
 			for k := 0; k < count; k++ {
 				begin, end := int64(k)*step, int64(k+1)*step
+				written := end
 				if k == count-1 {
-					end = length
+					end, written = length, length+overrun
 				}
 				if current == nil || current.sentences == current.wanted {
 					if nextChapter >= len(sizes) {
@@ -817,9 +836,18 @@ func GenerateAlignedEPUB(path string, options AlignedEPUBOptions) (AlignedEPUBFi
 				fmt.Fprintf(&current.body, `<span id="%s">Sentence %d of part %d.</span> `, fragment, current.sentences, current.number)
 				// From the overlay's folder to the text and to the audio.
 				fmt.Fprintf(&current.smil, `<par id="p%d"><text src="../%s#%s"/><audio src="../%s" clipBegin="%s" clipEnd="%s"/></par>`,
-					parIndex, ref(current.textHref), fragment, ref(audioHref), fixtureClock(begin, parIndex), fixtureClock(end, parIndex+3))
+					parIndex, ref(current.textHref), fragment, ref(audioHref), fixtureClock(begin, parIndex), fixtureClock(written, parIndex+3))
 				parIndex++
 				fixture.Pars = append(fixture.Pars, FixturePar{Text: rel(current.textHref), Fragment: fragment, Audio: audioEntry, BeginMs: begin, EndMs: end})
+			}
+			if overrun > 0 {
+				// Past the end of the audio: it begins where the one before ended and
+				// is given the chunk's length as its end.
+				fragment := fmt.Sprintf("id%d-past%d", current.number, chunk)
+				fmt.Fprintf(&current.body, `<span id="%s">Past the end of part %d.</span> `, fragment, current.number)
+				fmt.Fprintf(&current.smil, `<par id="p%d"><text src="../%s#%s"/><audio src="../%s" clipBegin="%s" clipEnd="%s"/></par>`,
+					parIndex, ref(current.textHref), fragment, ref(audioHref), fixtureClock(length+overrun, parIndex), fixtureClock(length, parIndex+3))
+				parIndex++
 			}
 		}
 		if nextChapter != len(sizes) || (current != nil && current.sentences != current.wanted) {

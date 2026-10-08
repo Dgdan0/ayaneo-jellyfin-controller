@@ -222,9 +222,9 @@ func TestAlignmentSourcesGroupTheChunksOfOneNarratedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []AlignedSource{
-		{Number: 1, Files: []int{0}, ChunkStartMs: []int64{0}, LengthMs: 100_000},
-		{Number: 2, Files: []int{1, 2}, ChunkStartMs: []int64{0, 7_200_000}, LengthMs: 10_500_000},
-		{Number: 3, Files: []int{3}, ChunkStartMs: []int64{0}, LengthMs: 50_000},
+		{Number: 1, Files: []int{0}, Chunks: []int{1}, ChunkStartMs: []int64{0}, LengthMs: 100_000},
+		{Number: 2, Files: []int{1, 2}, Chunks: []int{1, 2}, ChunkStartMs: []int64{0, 7_200_000}, LengthMs: 10_500_000},
+		{Number: 3, Files: []int{3}, Chunks: []int{1}, ChunkStartMs: []int64{0}, LengthMs: 50_000},
 	}
 	if !reflect.DeepEqual(sources, want) {
 		t.Fatalf("sources = %+v\nwant %+v", sources, want)
@@ -466,7 +466,9 @@ func TestReadAlignmentRefusesWhatCouldHarmOrMislead(t *testing.T) {
 		"a query": func(f map[string][]byte, _ *[]string) {
 			replaceIn(f, smil, `src="../Audio/00001-00001.mp3"`, `src="../Audio/00001-00001.mp3?x=1"`)
 		},
-		"a sentence that ends before it begins": func(f map[string][]byte, _ *[]string) {
+		// Its end, 2 s, is where its audio ends (endAudioAt), and its file's other
+		// sentences all begin after that: far more than a few at the end of a file.
+		"a sentence that ends before most of its file begins": func(f map[string][]byte, _ *[]string) {
 			replaceIn(f, smil, `clipBegin="0.000s" clipEnd="12500ms"`, `clipBegin="12.5s" clipEnd="2s"`)
 		},
 		"a sentence that is not a time": func(f map[string][]byte, _ *[]string) {

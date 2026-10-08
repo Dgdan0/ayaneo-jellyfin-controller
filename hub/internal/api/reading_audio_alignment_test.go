@@ -215,7 +215,7 @@ func TestAudioManifestSaysWhyItCannotMapAnAlignment(t *testing.T) {
 		{"the edition narrates nothing", alignedOptions{epub: func(path string) {
 			stripOverlays(t, path)
 		}}, "no_narration"},
-		{"the edition narrates fewer files than the book has", alignedOptions{omit: []string{"Fixture Odyssey (3).MP3"}}, "files_do_not_match"},
+		{"the edition narrates more files than the book has", alignedOptions{order: append(append([]string(nil), trackedTagOrder...), "Fixture Odyssey (1).mp3")}, "files_do_not_match"},
 		{"a narrated file is no length of the book", alignedOptions{narrate: map[string]readingdomain.FixtureNarration{"Fixture Odyssey (1).mp3": shifted("Fixture Odyssey (1).mp3")}}, "lengths_do_not_match"},
 		// Three files 3600.000, 3600.200 and 3600.400 s long, and narrations of 3600.300,
 		// 3600.100 and 3600.200 in the order they are played: the first narration is
@@ -512,18 +512,23 @@ func newAlignedM4BEnv(t *testing.T) *audioEnv { return newAlignedM4BEnvOf(t, cha
 
 func newAlignedM4BEnvOf(t *testing.T, links []audioLink) *audioEnv {
 	t.Helper()
+	return newAlignedM4BEnvWith(t, links, []readingdomain.FixtureNarration{
+		{ChunkMs: []int64{1_500_488}, Sentences: []int{5}},
+		{ChunkMs: []int64{900_000, 900_238}, Sentences: []int{3, 3}},
+		{ChunkMs: []int64{899_988}, Sentences: []int{4}},
+	})
+}
+
+// newAlignedM4BEnvWith is the lone M4B with an edition narrated as given.
+func newAlignedM4BEnvWith(t *testing.T, links []audioLink, narrations []readingdomain.FixtureNarration) *audioEnv {
+	t.Helper()
 	return newAudioEnv(t, audioEnvOptions{}, func(root string) audioBuild {
 		book, err := readingdomain.GenerateM4BAudiobook(root)
 		if err != nil {
 			t.Fatal(err)
 		}
 		fixture, err := readingdomain.GenerateAlignedEPUB(filepath.Join(book.Dir, "aligned.epub"), readingdomain.AlignedEPUBOptions{
-			PackageDir: "OEBPS", AudioBytes: 2048,
-			Narrations: []readingdomain.FixtureNarration{
-				{ChunkMs: []int64{1_500_488}, Sentences: []int{5}},
-				{ChunkMs: []int64{900_000, 900_238}, Sentences: []int{3, 3}},
-				{ChunkMs: []int64{899_988}, Sentences: []int{4}},
-			},
+			PackageDir: "OEBPS", AudioBytes: 2048, Narrations: narrations,
 		})
 		if err != nil {
 			t.Fatal(err)
