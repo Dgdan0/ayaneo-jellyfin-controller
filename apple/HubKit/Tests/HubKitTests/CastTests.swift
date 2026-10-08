@@ -172,4 +172,24 @@ struct CastTests {
         let own = try await hub.fetch(HubEndpoints.playbackGrant(sessionId: here.sessionId, user: ""), as: PlaybackGrant.self)
         #expect(!own.mediaUrl.hasPrefix("/v1/cast/"))
     }
+
+    /// Google's SDK reads CFBundleVersion as at most three numbers of six
+    /// digits and stops the app otherwise: TestFlight's ten-digit numbers
+    /// closed JellyHub on launch (2610081139 on the owner's iPad Pro).
+    @Test func theCastSDKIsSetUpOnlyForABuildNumberItReads() {
+        #expect(!CastSDKVersion.accepts("2610081139"))
+        #expect(!CastSDKVersion.accepts("2610081022"))
+        #expect(CastSDKVersion.accepts("261008.1530"))
+        #expect(CastSDKVersion.accepts("991231.2359"))
+        #expect(CastSDKVersion.accepts("1"))
+        #expect(CastSDKVersion.accepts("4.8.6"))
+        #expect(CastSDKVersion.accepts("999999.999999.999999"))
+        #expect(!CastSDKVersion.accepts("1000000"))
+        #expect(!CastSDKVersion.accepts("1.2.3.4"))
+        #expect(!CastSDKVersion.accepts(""))
+        #expect(!CastSDKVersion.accepts("1..2"))
+        #expect(!CastSDKVersion.accepts("1.2."))
+        #expect(!CastSDKVersion.accepts("0.3.0b"))
+        #expect(!CastSDKVersion.accepts("２６"))
+    }
 }

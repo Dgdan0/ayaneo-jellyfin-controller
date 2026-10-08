@@ -38,6 +38,8 @@
 #   scripts/mac.sh testflight-notes <build>
 #                                   give a build that is already up those notes (NOTES or
 #                                   NOTES_FILE), or show what it says without them
+#   scripts/mac.sh testflight-crashes [id]
+#                                   the crashes testers shared from TestFlight, or one's log
 #
 # A hub address and token in apple/dev.env (gitignored) are passed to Debug
 # builds on launch, the way dev.sh seed does on the Pocket DS:
@@ -599,8 +601,15 @@ tf_notes() {
 testflight() {
   tf_env
   local build version out auth platform installer
-  # Always increasing: the minute of the upload in UTC, yyMMddHHmm.
-  build="${BUILD_NUMBER:-$(date -u +%y%m%d%H%M)}"
+  # Always increasing: the minute of the upload in UTC, yyMMdd.HHmm. Google's
+  # Cast SDK reads CFBundleVersion as at most three numbers of six digits and
+  # stops the app otherwise (HubKit's CastSDKVersion): yyMMddHHmm as one
+  # number closed 2610081022 and 2610081139 on launch wherever a TV was seen.
+  build="${BUILD_NUMBER:-$(date -u +%y%m%d.%H%M)}"
+  if [[ ! "$build" =~ ^[0-9]{1,6}(\.[0-9]{1,6}){0,2}$ ]]; then
+    echo "BUILD_NUMBER $build: at most three numbers of six digits, as Google's Cast SDK reads it (261008.1530)"
+    exit 2
+  fi
   version="$(awk -F'"' '/MARKETING_VERSION:/ {print $2; exit}' "$APPLE/project.yml")"
   out="$APPLE/build/testflight/$build"
   tf_notes "$out/notes.txt"
@@ -677,6 +686,7 @@ case "${1:-build}" in
   mac-shot) shift; mac_shot "$@" ;;
   testflight) testflight ;;
   testflight-notes) shift; testflight_notes "$@" ;;
+  testflight-crashes) shift; tf_env; swift "$APPLE/Tools/asc.swift" crashes "$@" ;;
   logs) xcrun simctl spawn booted log stream --level debug --predicate "subsystem == '$BUNDLE_ID' OR process == 'Hub'" ;;
   *) sed -n '2,62p' "$0"; exit 2 ;;
 esac
