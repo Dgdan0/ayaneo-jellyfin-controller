@@ -55,14 +55,6 @@ extension View {
         modifier(PadPageModifier(key: key, modal: modal, back: back))
     }
 
-    /// A page inside a `ScrollViewReader` of its own, which scrolls it: no
-    /// second reader round it. Round a `ViewThatFits` (a sheet from the
-    /// bottom, sized to its rows), a second reader showed every row twice to
-    /// VoiceOver and the UI tests.
-    func padPage(_ key: String, modal: Bool = false, scrolling proxy: ScrollViewProxy, back: (() -> Void)? = nil) -> some View {
-        modifier(PadPageModifier(key: key, modal: modal, back: back, given: proxy))
-    }
-
     /// The shell's bars: one page for the top bar and the iPhone's tab bar.
     func padBar(_ page: PadPage) -> some View {
         modifier(PadBarModifier(page: page))
@@ -104,63 +96,38 @@ private struct PadPageModifier: ViewModifier {
     let key: String
     let modal: Bool
     let back: (() -> Void)?
-    /// The page's own reader, where it has one.
-    var given: ScrollViewProxy?
     @Environment(\.shellStack) private var stack
     @State private var page: PadPage
 
-    init(key: String, modal: Bool, back: (() -> Void)?, given: ScrollViewProxy? = nil) {
+    init(key: String, modal: Bool, back: (() -> Void)?) {
         self.key = key
         self.modal = modal
         self.back = back
-        self.given = given
         _page = State(initialValue: PadPage(modal: modal))
     }
 
     func body(content: Content) -> some View {
-        if let given {
-            registered(content, proxy: given)
-        } else {
-            ScrollViewReader { proxy in registered(content, proxy: proxy) }
-        }
-    }
-
-    private func registered(_ content: Content, proxy: ScrollViewProxy) -> some View {
-        content
-            .environment(\.padPage, page)
-            .modifier(PadPageVisible(page: page, measures: given == nil))
-            .onAppear {
-                page.key = key
-                page.stack = modal ? "" : stack
-                page.back = back
-                page.proxy = proxy
-                PadFocusCenter.shared.appeared(page)
-            }
-            .onDisappear { PadFocusCenter.shared.disappeared(page) }
-            .onChange(of: key) { _, latest in page.key = latest }
-    }
-}
-
-/// The part of the window a page shows, between the bars, for scrolling an
-/// item into view as little as it takes. Not measured inside a reader of the
-/// page's own (`scrolling:`): there an item is scrolled into view plainly.
-private struct PadPageVisible: ViewModifier {
-    let page: PadPage
-    let measures: Bool
-
-    func body(content: Content) -> some View {
-        if measures {
-            content.onGeometryChange(for: CGRect.self) { geometry in
-                let frame = geometry.frame(in: .global)
-                let safe = geometry.safeAreaInsets
-                return CGRect(x: frame.minX + safe.leading, y: frame.minY + safe.top,
-                              width: max(0, frame.width - safe.leading - safe.trailing),
-                              height: max(0, frame.height - safe.top - safe.bottom))
-            } action: { visible in
-                page.visible = visible
-            }
-        } else {
+        ScrollViewReader { proxy in
             content
+                .environment(\.padPage, page)
+                .onGeometryChange(for: CGRect.self) { geometry in
+                    let frame = geometry.frame(in: .global)
+                    let safe = geometry.safeAreaInsets
+                    return CGRect(x: frame.minX + safe.leading, y: frame.minY + safe.top,
+                                  width: max(0, frame.width - safe.leading - safe.trailing),
+                                  height: max(0, frame.height - safe.top - safe.bottom))
+                } action: { visible in
+                    page.visible = visible
+                }
+                .onAppear {
+                    page.key = key
+                    page.stack = modal ? "" : stack
+                    page.back = back
+                    page.proxy = proxy
+                    PadFocusCenter.shared.appeared(page)
+                }
+                .onDisappear { PadFocusCenter.shared.disappeared(page) }
+                .onChange(of: key) { _, latest in page.key = latest }
         }
     }
 }
