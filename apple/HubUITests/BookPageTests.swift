@@ -81,6 +81,9 @@ final class BookPageTests: XCTestCase {
         XCTAssertTrue(element(app, "book-shelves").label.contains("cosmere · favorites"))
         XCTAssertEqual(app.buttons["book-format-audiobook"].label, "Audiobook, available")
         XCTAssertEqual(app.buttons["book-format-ebook"].label, "Ebook, not available")
+        // Ebook, Audiobook, Read along, in that order (#49).
+        let order = ["ebook", "audiobook", "readaloud"].map { app.buttons["book-format-\($0)"].frame.minX }
+        XCTAssertEqual(order, order.sorted(), "the formats are not Ebook, Audiobook, Read along: \(order)")
         keep(app, "book-page-alloy")
         app.buttons["book-format-ebook"].tap()
         XCTAssertTrue(app.buttons["find-this-book"].waitForExistence(timeout: 10), "a missing ebook offers nothing to find")

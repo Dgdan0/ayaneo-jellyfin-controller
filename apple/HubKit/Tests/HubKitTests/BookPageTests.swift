@@ -74,15 +74,17 @@ struct BookPageTests {
         #expect(BookPage.genreLines(book).isEmpty)
     }
 
-    @Test func theFormatsAreAudiobookEbookAndReadAlongReadyOrNot() {
+    @Test func theFormatsAreEbookAudiobookAndReadAlongReadyOrNot() {
         let book = ReadingWork(id: "rw_1", kind: "book", title: "Dark Matter",
-                               editions: [ReadingEdition(sourceItemId: "dm", kind: "ebook", availability: "available"),
-                                          ReadingEdition(sourceItemId: "dm", kind: "readaloud", availability: "aligning")])
+                               editions: [ReadingEdition(sourceItemId: "dm", kind: "readaloud", availability: "aligning"),
+                                          ReadingEdition(sourceItemId: "dm", kind: "ebook", availability: "available")])
         let formats = BookPage.formats(book)
-        #expect(formats.map(\.kind) == ["audiobook", "ebook", "readaloud"])
-        #expect(formats.map(\.opens) == [false, true, false])
+        // The order every list of formats has (#49), whatever order the hub sends.
+        #expect(formats.map(\.kind) == ["ebook", "audiobook", "readaloud"])
+        #expect(formats.map(\.label) == ["Ebook", "Audiobook", "Read along"])
+        #expect(formats.map(\.opens) == [true, false, false])
         #expect(BookPage.unavailable(formats[2]) == "Read along is still being aligned")
-        #expect(BookPage.unavailable(formats[0]) == "This book has no audiobook")
+        #expect(BookPage.unavailable(formats[1]) == "This book has no audiobook")
         #expect(BookPage.formats(ReadingWork(id: "s", entityType: "collection")).isEmpty)
         #expect(BookPage.formats(ReadingWork(id: "c", kind: "comic")).isEmpty)
     }

@@ -47,7 +47,7 @@ public enum BookPage {
 
     /// A format as the row shows it: its name, and whether it opens.
     public struct Format: Equatable, Sendable, Identifiable {
-        /// "audiobook", "ebook", "readaloud".
+        /// "ebook", "audiobook", "readaloud".
         public let kind: String
         public let label: String
         public let readiness: FormatReadiness
@@ -56,11 +56,12 @@ public enum BookPage {
         public var opens: Bool { readiness == .ready }
     }
 
-    /// Audiobook, Ebook, Read along, in that order; none for a series or a comic.
+    /// Ebook, Audiobook, Read along, in that order, as every list of formats
+    /// has them (#49); none for a series or a comic.
     public static func formats(_ work: ReadingWork) -> [Format] {
         guard !work.isSeries, ReadingBookFacts.kindTag(work.kind) == nil else { return [] }
         let statuses = ReadingFormatStatus.forWork(work)
-        return ["audiobook", "ebook", "readaloud"].compactMap { kind in
+        return ReadingBookFacts.allFormats.compactMap { kind in
             statuses.first { $0.kind == kind }.map { Format(kind: kind, label: $0.label, readiness: $0.readiness) }
         }
     }

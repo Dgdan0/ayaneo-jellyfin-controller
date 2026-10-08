@@ -184,6 +184,8 @@ enum DemoLibrary {
         return ["media": media,
                 "subtitle": "\(title.year)", "availability": "available", "jellyfinItemId": title.id,
                 "played": now.played, "favorite": now.favorite,
+                // Drawn by `DemoArtwork`, so a title's page has a backdrop and a download keeps its pictures.
+                "poster": "/v1/img/jf/\(title.id)/Primary", "backdrop": "/v1/img/jf/\(title.id)/Backdrop",
                 "unplayedCount": title.type == "series" && !now.played ? 3 : 0, "actions": ["play", "detail"]]
     }
 
@@ -197,6 +199,8 @@ enum DemoLibrary {
                 "overview": "\(title.title), as the demo hub tells it: a title in the library, with nothing real behind it.",
                 "runtimeSeconds": title.minutes * 60, "rating": 8.1, "officialRating": "PG-13", "genres": title.genres,
                 "played": now.played, "favorite": now.favorite,
+                // Drawn by `DemoArtwork`: the page's backdrop, and what a download keeps beside its file.
+                "poster": "/v1/img/jf/\(title.id)/Primary", "backdrop": "/v1/img/jf/\(title.id)/Backdrop",
                 "unplayedCount": title.type == "series" && !now.played ? 3 : 0,
                 // A series the hub can name on TMDB has the key its release search is asked by (#34).
                 "mediaKey": title.type == "series" ? "tmdb:series:\(100_000 + (Int(title.id.suffix(4), radix: 16) ?? 0))" : "",
@@ -214,7 +218,9 @@ enum DemoLibrary {
         ["id": "\(title.id)-e\(number)", "type": "episode", "title": episodeNames[number - 1],
          "subtitle": "S1E\(number) · \(episodeNames[number - 1])", "seriesTitle": title.title, "seriesId": title.id,
          "seasonId": title.id + "-s1", "year": title.year, "indexNumber": number, "seasonNumber": 1,
-         "overview": "Episode \(number) of \(title.title) in the demo hub.", "runtimeSeconds": title.minutes * 60]
+         "overview": "Episode \(number) of \(title.title) in the demo hub.", "runtimeSeconds": title.minutes * 60,
+         "thumb": "/v1/img/jf/\(title.id)-e\(number)/Primary", "poster": "/v1/img/jf/\(title.id)/Primary",
+         "backdrop": "/v1/img/jf/\(title.id)/Backdrop"]
     }
 
     private static func episode(_ id: String) -> DemoTransport.Answer {

@@ -10,8 +10,8 @@ import UIKit
 /// ink, lined up with the text's edges, on Kindle's baselines, in the strips
 /// Readium keeps at the top and bottom of the page (`PageInfo.strip`), so
 /// never on the text; the screen shows them only while the bars and sheets are
-/// away. Reading along, the narration's pill sits at the bottom right with the
-/// percentage beside it.
+/// away. Reading along, they are the same while the narration plays (#49): a
+/// tap on the page brings its dock.
 struct BookReaderCorners: View {
     let reader: BookReaderModel
     let layout: ComicReaderLayout
@@ -39,7 +39,6 @@ struct BookReaderCorners: View {
         let ink = Color(argb: EpubPagePalette.argb(rendering.text) ?? 0xFF5A_4931)
         let info = reader.pageInfo
         let corners = reader.corners
-        let pill = playing
         let title = PageInfo.title(reader.title)
         ZStack {
             if reader.preferences.scrolls {
@@ -48,7 +47,7 @@ struct BookReaderCorners: View {
                 VStack(spacing: 0) {
                     page.frame(height: info.clock || !title.isEmpty ? top : 0)
                     Spacer(minLength: 0)
-                    page.frame(height: corners.place != nil || (corners.percent != nil && pill == nil) ? bottom : 0)
+                    page.frame(height: corners.place != nil || corners.percent != nil ? bottom : 0)
                 }
                 .allowsHitTesting(false)
             }
@@ -102,7 +101,7 @@ struct BookReaderCorners: View {
                         }
                     }
                     .overlay(alignment: .topTrailing) {
-                        if pill == nil, let percent = corners.percent {
+                        if let percent = corners.percent {
                             percentLabel(percent)
                                 .offset(y: -Self.ascent)
                         }
@@ -112,26 +111,7 @@ struct BookReaderCorners: View {
             .font(.system(size: PageInfo.cornerSize).monospacedDigit())
             .foregroundStyle(ink)
             .lineLimit(1)
-            if let pill {
-                HStack(spacing: 10) {
-                    if let percent = corners.percent {
-                        percentLabel(percent)
-                            .font(.system(size: PageInfo.cornerSize).monospacedDigit())
-                            .foregroundStyle(ink)
-                    }
-                    ReadAlongPill(reading: pill.reading, narration: pill.narration) { reader.setControls(true) }
-                }
-                .padding(.horizontal, layout.side + 4)
-                .padding(.bottom, layout.bottom + 6)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-            }
         }
-    }
-
-    /// The narration's pill shows while it plays (#19).
-    private var playing: (reading: ReadAlongReader, narration: NarrationModel)? {
-        guard let reading = reader.readAlong, let narration = reading.narration, narration.playing else { return nil }
-        return (reading, narration)
     }
 
     private func percentLabel(_ percent: String) -> some View {

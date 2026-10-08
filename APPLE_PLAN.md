@@ -127,6 +127,7 @@ The look is `GLASS_PLAN.md`. Its pieces in this app, so each screen uses one own
 | Sizes: margins, tiles, posters, episodes, type | `GlassMetrics` (`\.glassMetrics`), set by the shell: phone sizes (`small`) where the width class is compact or the window is short (`ShellLayout.isShort`, a phone turned sideways, about 400 points tall: heroes fit the height, the tab bar is compact); a hero's words centred only on a phone held upright (`centred`) |
 | A filter or season pill, a capsule of places, a control, tabs, a page heading | `Glass/GlassControls`: `ChoicePill`, `GlassCapsulePicker`, `GlassControlStyle`, `UnderlineTabs`, `PageHeading`, `GlassLabel` |
 | Artwork fading into the page | `FadedArtwork.hero` / `.title` (`Media/Redesign`): a mask with the words' shade inside it, as Android's `FadedImageView` |
+| A title's page as plain parts (the library's `TitleView` and a downloaded title's `OfflineTitleView` are one shape): the backdrop and header placing, the name, facts, state and overview with Read more, the season pills, the strip of episode cards and one card | `Library/TitleParts`: `TitlePage`, `TitleHeader`, `TitleOverview`, `SeasonPills`, `EpisodeStrip` (opens at the episode Play starts), `EpisodeCard` (title, detail, played, progress, up next and a still of the caller's own); a still on the device is `OfflineArtwork`, and `FadedArtwork.titleFade` fades any picture |
 | Panel, sheet and ink colours, accents | HubKit `GlassColors` (`panel`, `sheet`, `ink`, `badge`), `AccentPreset.defaultFor(side)` |
 | The bars, the sections and Media/Books | `Shell/` (`MainView`, `WideBar`, `PhoneBar`, `ShellTabBar`); top capsule or bottom tab bar by width, `ShellLayout.isWide` |
 | Pushing a page, or swapping the top one | `NavigationLink(value: AppRoute…)` or `@Environment(\.openRoute)` (`push`, `replace`); the shell owns every stack and its back pill |
@@ -134,7 +135,7 @@ The look is `GLASS_PLAN.md`. Its pieces in this app, so each screen uses one own
 | A library tile's three fanned posters | HubKit `LibraryFan.posters` (one function, so the choice can move into a hub field) |
 | The libraries' order (#15): moving one, saving, sliding back on a refusal | HubKit `LibraryOrder` and `LibraryOrderQueue`; the app's `Library/LibraryOrderEditor` (one per side), drawn by `Library/LibraryArrange` (`GripMark`, `.jiggle`, `.arrangeable`) on the Library page and in Settings › Libraries |
 | A library's own search (#14), and the Library page's | `GridSource.search(_:viewId:library:)` in `Library/LibraryView` (`HubEndpoints.librarySearch(viewId:)`): the round search on a library's page keeps to it and its count line names it ("2 matches in Anime"); on Favourites and on the Library page it looks everywhere |
-| The demo hub (`-demo`) for UI tests and previews | HubKit `Demo/`: `DemoLibrary` answers the library as the hub does (a search kept to one library, Favourites, title pages, watched and favourite that stay for the run, a change that is not exactly one of the two refused) |
+| The demo hub (`-demo`) for UI tests and previews | HubKit `Demo/`: `DemoLibrary` answers the library as the hub does (a search kept to one library, Favourites, title pages, watched and favourite that stay for the run, a change that is not exactly one of the two refused); `DemoArtwork` draws its pictures (`/v1/img/jf/<id>/<kind>`: a colour for each title, so a backdrop has something to fade and a download keeps real files) |
 
 Debug builds also take `HUB_SIDE=books` and `HUB_SHEET=profiles` (the avatar's sheet) for
 screenshots, beside `HUB_SECTION` and `HUB_OPEN` (a Home row's first title, or with
@@ -548,6 +549,8 @@ speaks Readium (`@preconcurrency` imports; the EPUB opened off the main actor an
 | The reader on screen | `BookReaderModel` (opening, the place, the pace, keys and pad, scrolling, bookmarks, appearance), `BookNavigator`, `BookReaderScreen`, `BookReaderBars`, `BookReaderSheetView` with `BookAppearanceSheet`, `FootnoteCard`, `BookReaderStatus` |
 | A reader's sheet and its rows of keys, the keys' hint row | `ReaderSheetFrame`, `ReaderKeyLines`, `ReaderHintRow`: both readers. A book's sheet sits beside the page wherever the page keeps at least half the window (`keepsPage`), and Appearance from the bottom leaves the page above it undimmed (`previews`) |
 | The keyboard while Readium holds it | `BookKeysController`: Readium's navigator inside a controller that takes the first responder after it |
+| Read along's voice and page moving each other (#49): a page's first and last words placed inside their sentences' clips (`clipBegin + share of letters × length`, from the word's start), the turn at the next page's first word, a page turned by hand taking the voice to its first word unless the sentence spoken is still on it | HubKit `ReadAlongWords`, `ReadAlongPageEdges`, `ReadAlongTimeline.span`, `ReadAlongPageSpan`, `ReadAlongPageFollow` (`Rules/ReadAlongPage`); the page only reports offsets (`ReadAlongPageScript.edges`). `ReadAlongReader` runs it, one page job at a time |
+| The narration on the lock screen and in Control Center, playing on in the background (#49) | `NarrationModel` as a `NowPlaying` client (`AudioSource.narration`); its commands go to `ReadAlongReader` |
 
 As on the Pocket: Ⓑ opens the menu and the page shrinks inside it, round with the cover's glass;
 Ⓑ again leaves the book. The top bar has Close, the title over the time left, Contents, Bookmark,
@@ -588,14 +591,22 @@ a hub that cannot be asked offers the beginning, which writes nothing until the 
 **Read along (after phase 2, as on the Pocket, #21)**: the slim edition (`readingEpubFile(format:
 "readaloud", omitAudio: true)`) with its narration streamed from the audiobook's tracks; the
 narration's dock stands in the lower bar's place (`BookLowerBar`), the sentence read lit through
-Readium's decorations, and the time left the narration's own.
+Readium's decorations, and the time left the narration's own. While it plays the voice and the page
+move each other (#49): the voice turns the page at the next page's first word, inside a sentence
+too (in two columns the page is the spread), and a page turned or jumped to by hand takes the voice
+to its first word unless the sentence spoken is still on it; paused, a turn moves nothing and Play
+starts from the page's first word. The corners stay as they are while it plays (no pill). It plays
+on with the screen locked and the app in the background, on the lock screen with the cover, and back
+in the app the page catches up with the voice.
 
 Debug builds take `HUB_BOOK=<work id>/<edition id>` with `-demo` only (the scripts and the app both
 refuse it otherwise, since reading writes the place): `rw_demo_recursion/demo-rw_demo_recursion` is a
 book not started, `rw_demo_rr6/rr6` Light Bringer half read. `HUB_BOOK_CHROME=pinned` opens the menu,
 `HUB_BOOK_AT=<percent>` goes that far in, `HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys`
 opens the menu or a sheet, and `HUB_BOOK_SCROLL=1|0` turns continuous scrolling on or off, kept as
-Appearance keeps it (every UI test launches with 0, so a test cut short leaves no scrolling behind). The demo hub writes a real EPUB 3 for every Books demo work with an ebook
+Appearance keeps it (every UI test launches with 0, so a test cut short leaves no scrolling behind).
+`HUB_BOOK_LOOK_ONCE=1` makes the look switches below (`HUB_BOOK_SIZE`, `HUB_BOOK_COLUMNS`, …) hold for that launch only, and
+`HUB_DEBUG_READALONG=1` puts what the voice and the page last did to each other where UI tests read it. The demo hub writes a real EPUB 3 for every Books demo work with an ebook
 (`DemoEpub`): made-up words, eight chapters of 9 to 18 KB, a footnote in One, a link on to Five in
 Two, an endnote in Three, a link out of the book in Four and a second part in Eight's contents.
 
@@ -813,7 +824,8 @@ contract is in #5), so AVPlayer plays every download and there is one player.
 | What is kept, coming and watched offline, per profile | HubKit `OfflineStore` (files, not SQLite), the app's one `Downloads/OfflineLibrary.shared` with its background `URLSession` (`OfflineDownloader`) |
 | A download's next step, and what a failed request means (409 `offline_preparing` waits on the PC) | HubKit `OfflineTransfer` |
 | The Downloads tab: one poster per film or series under its library, the queue a batch at a time | `Downloads/DownloadsView`; words in HubKit `OfflineCatalog`, `OfflineQueueLabels` ("Preparing on the PC · 40%", "Next on the PC", "2nd in line on the PC") and `OfflineAppleNotes` (what takes longer, what is left out) |
-| A downloaded title's page, played from its files | `Downloads/OfflineTitleView`; seasons from the episodes that arrived (`OfflineCatalog.seasons`), the one to go on with from `playTarget` |
+| A downloaded title's page, played from its files: the library page's shape (faded backdrop, the name and its facts and overview, Play, Remove and more as round buttons, season pills and a strip of episode cards saying what is on the device) | `Downloads/OfflineTitleView` built from the shared title parts (above); seasons from the episodes that arrived (`OfflineCatalog.seasons`), the one to go on with from `playTarget`, a film's from `OfflineCatalog.filmTarget` |
+| A downloaded series' own facts, overview and pictures, kept beside its episodes (queued with its first episode; filled in for earlier downloads the next time the hub answers; with none kept the page is its name and episodes) | HubKit `OfflineSeriesSnapshot` and `OfflineSeriesStore` (`OfflineStore.series`: `snapshot`, `needing`, `artworkFile`, `prune`, which goes with the last episode); the app's `OfflineLibrary.keepSeriesSoon` / `seriesSnapshot` |
 | A series' episodes to download | `Downloads/OfflinePickerView` on `GET /v1/offline/series/{id}/selection?format=apple`; quick choices and words in HubKit `OfflineSelection` |
 | The Download button on a title page and its ring | `Downloads/DownloadButton`, its state and words in HubKit `OfflineTitleState`; an episode's menu has Download episode |
 | Asking before a download leaves the device | `offlineRemoval` (`OfflineRemoval`): Keep in the cancel role, Remove |
@@ -831,8 +843,9 @@ three audio tracks (two English dubs and Japanese) and two text subtitles, the t
 subtitles left out, and AVPlayer's own options matched. Played for under 30 seconds, the episode
 stayed unwatched on the server; the download was then removed.
 
-Debug launches take `HUB_DOWNLOAD=<item id>` (downloads it at launch) and
-`HUB_DOWNLOAD=remove:<item id>`. The demo hub makes each MP4 in a few seconds, The Matrix's
+Debug launches take `HUB_DOWNLOAD=<item id>` (downloads it at launch; `<id>,<id>,<id>` queues a series' episodes as one batch),
+`HUB_DOWNLOAD=remove:<item id>`, `HUB_OFFLINE_TITLE=<film or series id>` (opens that title's page on this device) and
+`HUB_OFFLINE_WATCH=<item id>:<position ms>/<duration ms>[/done],…` (watches made on this device, so the cards say "16:12 left" and "watched"). The demo hub makes each MP4 in a few seconds, The Matrix's
 (converted) in eight; Dune fails once until it is retried, and Inception has a French picture
 subtitle that is left out.
 
@@ -929,7 +942,7 @@ How a page uses it:
 | The size slider (14 marks), Spacing (a page of Font's: line spacing 1.3/1.5/1.8 and margins) and brightness at the foot of every page | `EpubAppearance.sizeMarks`, `BookAppearancePage.spacing` / `BookAppearanceLine.spacingPage` / `.back`, `BookAppearanceLine.brightness`; `SizeSlider`, `BrightnessBar` and `ReaderSheetFrame.footer`; the model's `appearancePage` and `leaveSpacing` |
 
 Debug launches also take `HUB_BOOK_THEME`, `HUB_BOOK_COLUMNS`, `HUB_BOOK_FONT`, `HUB_BOOK_SIZE` (the ebook's look, kept as Appearance
-keeps it), `HUB_BOOK_SHEET=spacing`, and `HUB_BOOK_TABLET=1`, which lays a phone's reader out with an iPad's margins and strips.
+keeps it unless `HUB_BOOK_LOOK_ONCE=1`), `HUB_BOOK_SHEET=spacing`, and `HUB_BOOK_TABLET=1`, which lays a phone's reader out with an iPad's margins and strips.
 
 The ebook reader is iOS only, so the iPad is measured on a phone simulator: its margins and gap are the unit-tested arithmetic
 of `EpubGeometry` and, in the screenshots, 90 points outside and 48 between two columns.
