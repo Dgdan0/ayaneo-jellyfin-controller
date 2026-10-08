@@ -209,12 +209,14 @@ final class ReadAlongTests: XCTestCase {
     }
 
     /// Turned sideways, two columns asked for: the voice still turns the page
-    /// inside a sentence. (An iPhone held sideways is too narrow for Readium's
-    /// two columns, so the page there is one wide column; on an iPad it is the
-    /// spread, which the page's script measures as one page.)
+    /// inside a sentence. On an iPad the page is the two-column spread, which
+    /// the page's script measures as one page; an iPhone held sideways is too
+    /// narrow for Readium's two columns, so there it is one wide column.
     @MainActor
     func testTurnedSidewaysTheVoiceStillTurnsThePage() {
-        let app = launchReadingAlong(Self.largeType.merging(["HUB_BOOK_COLUMNS": "TWO", "HUB_BOOK_SIZE": "1.8"]) { $1 })
+        // The iPad's columns hold far more: larger type keeps a chapter over several spreads.
+        let size = UIDevice.current.userInterfaceIdiom == .pad ? "3.0" : "1.8"
+        let app = launchReadingAlong(Self.largeType.merging(["HUB_BOOK_COLUMNS": "TWO", "HUB_BOOK_SIZE": size]) { $1 })
         // Turned once the app is up, and measured only once its window is wide.
         XCUIDevice.shared.orientation = .landscapeLeft
         let window = app.windows.firstMatch
