@@ -1,6 +1,7 @@
 #if os(iOS)
 import HubKit
 import SwiftUI
+import UIKit
 
 /// Kindle's corners while reading (#42, #47): the book's title at the top
 /// centre in small capitals, the time at the top right, where you are at the
@@ -18,6 +19,12 @@ struct BookReaderCorners: View {
 
     /// Room kept at each side of the title for the clock, so it never reaches it.
     private static let clockRoom: CGFloat = 84
+    /// How far a corner's line reaches above and below its baseline, so a line can be set by its baseline:
+    /// the alignment guide for the baseline answered the line's bottom here.
+    private static let ascent = UIFont.systemFont(ofSize: PageInfo.cornerSize).ascender
+    private static let descent = -UIFont.systemFont(ofSize: PageInfo.cornerSize).descender
+    /// The room round the bottom left's words, which is its tap.
+    private static let tapRoom: CGFloat = 14
 
     var body: some View {
         let tablet = BookNavigator.isTablet
@@ -58,7 +65,8 @@ struct BookReaderCorners: View {
                                 .truncationMode(.tail)
                                 .frame(maxWidth: max(0, layout.size.width - 2 * (margin + (info.clock ? Self.clockRoom : 0))))
                                 .fixedSize(horizontal: false, vertical: true)
-                                .alignmentGuide(.bottom) { $0[.firstTextBaseline] }
+                                // Its bottom is at the strip's: lowered by what hangs below the baseline.
+                                .offset(y: Self.descent)
                                 .allowsHitTesting(false)
                                 .accessibilityLabel("Reading " + title)
                                 .accessibilityIdentifier("book-corner-title")
@@ -71,7 +79,7 @@ struct BookReaderCorners: View {
                                     .accessibilityLabel("Time, " + PageInfo.clock(context.date))
                                     .accessibilityIdentifier("book-corner-clock")
                             }
-                            .alignmentGuide(.bottom) { $0[.firstTextBaseline] }
+                            .offset(y: Self.descent)
                             .allowsHitTesting(false)
                         }
                     }
@@ -83,11 +91,12 @@ struct BookReaderCorners: View {
                         if let place = corners.place {
                             Button { reader.nextPlace() } label: {
                                 Text(place)
-                                    .padding(.vertical, 14)
+                                    .padding(.vertical, Self.tapRoom)
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .alignmentGuide(.top) { $0[.firstTextBaseline] }
+                            // The baseline is at the frame's top: raised by the tap's room and the line's ascent.
+                            .offset(y: -(Self.tapRoom + Self.ascent))
                             .accessibilityIdentifier("book-corner-place")
                             .accessibilityHint("Shows the next way of saying where you are")
                         }
@@ -95,7 +104,7 @@ struct BookReaderCorners: View {
                     .overlay(alignment: .topTrailing) {
                         if pill == nil, let percent = corners.percent {
                             percentLabel(percent)
-                                .alignmentGuide(.top) { $0[.firstTextBaseline] }
+                                .offset(y: -Self.ascent)
                         }
                     }
             }

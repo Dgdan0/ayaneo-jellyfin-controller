@@ -102,7 +102,8 @@ final class ReaderTypographyTests: XCTestCase {
         XCTAssertEqual(width - clock.frame.maxX, 24, accuracy: 3, "the clock is not on the text's edge")
         XCTAssertEqual(place.frame.minX, 24, accuracy: 3, "the bottom left is not on the text's edge")
         XCTAssertLessThan(title.frame.maxY, 62, "the title is in the strip above the text")
-        XCTAssertGreaterThan(place.frame.minY, page(app).frame.height - 62, "the bottom left is in the strip below the text")
+        // Its tap reaches a little above the words, which are in the strip below the text.
+        XCTAssertGreaterThanOrEqual(place.frame.minY, page(app).frame.height - 62 - 8, "the bottom left is in the strip below the text")
 
         // A tap in the margin turns the page, forward at the right edge and back at the left.
         XCTAssertTrue(waitUntil(10) { place.label.hasPrefix("Page 1 of ") }, "the bottom left says \(place.label)")
@@ -115,5 +116,73 @@ final class ReaderTypographyTests: XCTestCase {
         shot.name = "kindle-corners"
         shot.lifetime = .keepAlways
         add(shot)
+    }
+
+    // MARK: The menu
+
+    /// The font sheet: six typefaces with "Aa" drawn in each, a size slider that steps a tenth, a Spacing
+    /// row that opens line spacing and margins and a way back, and brightness fixed at the foot of every page.
+    @MainActor
+    func testTheFontSheetHasTheTypefacesAStepSliderAndASpacingPage() {
+        let app = launchReading(["HUB_BOOK_SHEET": "appearance"],
+                                arguments: ["-epub.fontFamily", "literata", "-epub.fontScale", "1.3", "-epub.lineHeight", "1.5",
+                                            "-epub.pageMargins", "1"])
+        for label in ["Original", "Literata", "Charter", "Georgia", "Iowan", "Atkinson Hyperlegible"] {
+            XCTAssertTrue(app.buttons[label].firstMatch.waitForExistence(timeout: 15), "no \(label) tile")
+        }
+        XCTAssertFalse(app.buttons["Serif"].exists, "Serif, which was Times, is gone")
+        XCTAssertTrue(app.buttons["Literata"].firstMatch.isSelected, "Literata is not the default")
+        app.buttons["Charter"].firstMatch.tap()
+        XCTAssertTrue(waitUntil(5) { app.buttons["Charter"].firstMatch.isSelected && !app.buttons["Literata"].firstMatch.isSelected })
+        app.buttons["Literata"].firstMatch.tap()
+
+        // The size: marks a tenth apart, 70% to 200%; the arrows step it a mark as a controller's left and right do.
+        let size = app.sliders["book-size"]
+        XCTAssertTrue(size.exists, "no size slider")
+        XCTAssertEqual(size.value as? String, "130%")
+        app.typeKey(.downArrow, modifierFlags: [])
+        app.typeKey(.downArrow, modifierFlags: [])
+        app.typeKey(.rightArrow, modifierFlags: [])
+        XCTAssertTrue(waitUntil(5) { (size.value as? String) == "140%" }, "right did not step the size a mark: \(String(describing: size.value))")
+        app.typeKey(.leftArrow, modifierFlags: [])
+        app.typeKey(.leftArrow, modifierFlags: [])
+        XCTAssertTrue(waitUntil(5) { (size.value as? String) == "120%" }, "left did not step the size back: \(String(describing: size.value))")
+        app.typeKey(.rightArrow, modifierFlags: [])
+        XCTAssertTrue(waitUntil(5) { (size.value as? String) == "130%" }, "the size says \(String(describing: size.value))")
+
+        // Brightness is at the foot of this page, and of every other.
+        XCTAssertTrue(app.sliders["comfort-brightness"].exists, "no brightness at the foot of Font")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "font-sheet"
+        shot.lifetime = .keepAlways
+        add(shot)
+
+        // Spacing: line spacing and margins, with a way back.
+        let spacing = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Spacing'")).firstMatch
+        XCTAssertTrue(spacing.exists, "Font has no Spacing")
+        XCTAssertTrue(spacing.label.contains("Relaxed") && spacing.label.contains("Balanced"), "Spacing says \(spacing.label)")
+        spacing.tap()
+        let back = app.buttons["appearance-back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "Spacing has no way back")
+        for label in ["Tight", "Relaxed", "Open", "Narrow", "Balanced", "Wide"] {
+            XCTAssertTrue(app.buttons[label].firstMatch.exists, "Spacing has no \(label)")
+        }
+        XCTAssertTrue(app.buttons["Relaxed"].firstMatch.isSelected && app.buttons["Balanced"].firstMatch.isSelected)
+        XCTAssertTrue(app.sliders["comfort-brightness"].exists, "no brightness at the foot of Spacing")
+        app.buttons["Open"].firstMatch.tap()
+        XCTAssertTrue(waitUntil(5) { app.buttons["Open"].firstMatch.isSelected }, "Open was not chosen")
+        app.buttons["Relaxed"].firstMatch.tap()
+        let spacingShot = XCTAttachment(screenshot: app.screenshot())
+        spacingShot.name = "spacing-sheet"
+        spacingShot.lifetime = .keepAlways
+        add(spacingShot)
+        back.tap()
+        XCTAssertTrue(app.buttons["Themes"].waitForExistence(timeout: 5), "back did not come to Font")
+        for tab in ["Layout", "Themes", "Comfort"] {
+            app.buttons[tab].firstMatch.tap()
+            XCTAssertTrue(app.sliders["comfort-brightness"].waitForExistence(timeout: 5), "no brightness at the foot of \(tab)")
+        }
+        XCTAssertTrue(app.sliders["comfort-warmth"].exists, "warmth stays in Comfort")
+        app.buttons["Font"].firstMatch.tap()
     }
 }

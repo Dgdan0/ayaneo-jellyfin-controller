@@ -308,6 +308,10 @@ struct BookReaderScreen: View {
         case "comfort":
             reader.appearanceTab = .comfort
             reader.openSheet(.appearance)
+        case "spacing":
+            reader.appearanceTab = .font
+            reader.openSheet(.appearance)
+            reader.pressAppearance(.spacingPage)
         case "keys": reader.openSheet(.keys)
         default: break
         }

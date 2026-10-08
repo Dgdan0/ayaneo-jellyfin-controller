@@ -62,11 +62,21 @@ struct SheetWalkTests {
     }
 
     @Test func appearancesTabsAndWhatEachLineDoes() {
-        #expect(BookAppearanceLine.lines(.font) == [.tabs, .typeface, .size, .onePage])
-        #expect(BookAppearanceLine.lines(.comfort).first == .tabs)
-        #expect(BookAppearanceLine.lines(.themes).last == .systemColours)
+        let brightness = BookAppearanceLine.comfort(.brightness)
+        // Brightness is fixed at the bottom of every page (#47); Spacing is a page of Font's, with its own way back.
+        #expect(BookAppearanceLine.lines(.font) == [.tabs, .typeface, .size, .spacingPage, .onePage, brightness])
+        #expect(BookAppearanceLine.lines(.comfort) == [.tabs, .comfort(.warmth), .comfort(.awake), brightness])
+        #expect(BookAppearanceLine.lines(.themes).dropLast().last == .systemColours)
+        #expect(BookAppearanceLine.lines(.spacing) == [.back, .spacing, .margins, brightness])
+        for page in BookAppearancePage.allCases { #expect(BookAppearanceLine.lines(page).last == brightness, "\(page)") }
+        #expect(BookAppearancePage.tabs == [.font, .layout, .themes, .comfort])
         #expect(BookAppearanceLine.tabs.shape == .choices(4))
-        #expect(BookAppearanceLine.size.shape == .value)
+        #expect(BookAppearanceLine.size.shape == .value && brightness.shape == .value)
+        #expect(BookAppearanceLine.spacingPage.shape == .row && BookAppearanceLine.back.shape == .row)
+        #expect(BookAppearanceLine.spacingPage.press(EpubReaderPreferences()) == nil, "the model opens the page")
+        #expect(BookAppearanceLine.typeface.shape == .choices(6))
+        #expect(BookAppearanceLine.typeface.press(EpubReaderPreferences(), column: 2)?.fontFamily == "charter")
+        #expect(BookAppearanceLine.typeface.press(EpubReaderPreferences(), column: 0)?.publisherStyles == true)
         let value = EpubReaderPreferences()
         // Two pages from the columns' second choice, and back to one from the first.
         #expect(BookAppearanceLine.columns.press(value, column: 1)?.columns == .two)
@@ -81,7 +91,8 @@ struct SheetWalkTests {
         #expect(BookAppearanceLine.systemColours.press(value)?.theme == .system)
         // Hyphenation, and Page info's rows, are lines a controller reaches on Layout (#42).
         let layout = BookAppearanceLine.lines(.layout)
-        #expect(Array(layout.suffix(9)) == [.hyphenation, .resetTextStyle, .clock, .percentage, .place(.pageInBook),
+        #expect(!layout.contains(.margins) && !layout.contains(.spacing), "they are Spacing's now")
+        #expect(Array(layout.dropLast().suffix(9)) == [.hyphenation, .resetTextStyle, .clock, .percentage, .place(.pageInBook),
                                             .place(.pageInChapter), .place(.chapterTimeLeft), .place(.bookTimeLeft),
                                             .place(.none)])
         #expect(BookAppearanceLine.resetTextStyle.shape == .row)

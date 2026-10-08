@@ -220,6 +220,20 @@ public enum EpubAppearance {
     public static let fontScales: ClosedRange<Double> = 0.7...2
     public static let fontStep = 0.1
 
+    /// The size slider's marks (#47): 70% to 200% in tenths, fourteen of them,
+    /// each an exact step from the one before.
+    public static let sizeMarks = 14
+
+    /// The mark nearest `scale`, from 0 (70%) to 13 (200%).
+    public static func sizeMark(_ scale: Double) -> Int {
+        min(max(Int(((scale - fontScales.lowerBound) / fontStep).rounded()), 0), sizeMarks - 1)
+    }
+
+    /// The size at a mark: 0 is 70%, 3 is 100%, 13 is 200%.
+    public static func sizeScale(mark: Int) -> Double {
+        (fontScales.lowerBound * 10 + Double(min(max(mark, 0), sizeMarks - 1))).rounded() / 10
+    }
+
     /// "Original" leaves the book's own styles on; another face takes them off.
     public static func typeface(_ value: EpubReaderPreferences, _ id: String) -> EpubReaderPreferences {
         var next = value

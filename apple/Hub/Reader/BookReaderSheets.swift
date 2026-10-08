@@ -13,6 +13,10 @@ struct BookReaderSheetView: View {
     var body: some View {
         ReaderSheetFrame(title: title, subtitle: subtitle, size: layout.size, safe: layout.safe,
                          headingId: "book-sheet-heading", dims: false, keepsPage: true, previews: sheet == .appearance,
+                         // Appearance keeps its brightness at the foot, as Kindle's sheet does (#47).
+                         footer: sheet == .appearance
+                             ? AnyView(BrightnessBar(ringed: reader.appearanceRing?.line == BookAppearanceLine.brightness))
+                             : nil,
                          close: close) { proxy in
             switch sheet {
             case .contents, .bookmarks: navigator(proxy)
@@ -34,7 +38,7 @@ struct BookReaderSheetView: View {
         switch sheet {
         case .contents, .bookmarks: "Contents"
         case .search: "Search this book"
-        case .appearance: "Appearance"
+        case .appearance: reader.appearanceSpacing ? "Spacing" : "Appearance"
         case .keys: "Keys"
         }
     }
@@ -156,21 +160,25 @@ struct BookAppearanceSheet: View {
     private var value: EpubReaderPreferences { reader.preferences }
 
     var body: some View {
-        HStack(spacing: 8) {
-            tab("Font", .font)
-            tab("Layout", .layout)
-            tab("Themes", .themes)
-            tab("Comfort", .comfort)
-        }
-        .id(Self.id(.tabs))
-        switch reader.appearanceTab {
-        case .font: font
-        case .layout: layout
-        case .themes: themes
-        case .comfort: ComfortControls(book: true, ring: {
-            if case .comfort(let line) = ringed?.line { return line }
-            return nil
-        }())
+        if reader.appearanceSpacing {
+            spacingPage
+        } else {
+            HStack(spacing: 8) {
+                tab("Font", .font)
+                tab("Layout", .layout)
+                tab("Themes", .themes)
+                tab("Comfort", .comfort)
+            }
+            .id(Self.id(.tabs))
+            switch reader.appearanceTab {
+            case .font: font
+            case .layout: layout
+            case .themes: themes
+            case .comfort: ComfortControls(book: true, ring: {
+                if case .comfort(let line) = ringed?.line { return line }
+                return nil
+            }())
+            }
         }
         Color.clear.frame(height: 0)
             .onAppear { reader.appearanceWalk = SheetWalk() }
@@ -187,12 +195,7 @@ struct BookAppearanceSheet: View {
     }
 
     /// The line and choice a controller's ring is on, when a controller is in use (#25).
-    private var ringed: (line: BookAppearanceLine, column: Int)? {
-        guard reader.controllerActive else { return nil }
-        let lines = BookAppearanceLine.lines(reader.appearanceTab.page)
-        let walk = reader.appearanceWalk.clamped(to: lines.map(\.shape))
-        return (lines[walk.line], walk.column)
-    }
+    private var ringed: (line: BookAppearanceLine, column: Int)? { reader.appearanceRing }
 
     private func isRinged(_ line: BookAppearanceLine, _ column: Int) -> Bool {
         guard let ringed else { return false }
@@ -216,8 +219,8 @@ struct BookAppearanceSheet: View {
 
     /// A row of Appearance, pressed through the model.
     private func row(_ line: BookAppearanceLine, _ title: String, detail: String = "", value: String = "",
-                     checked: Bool = false) -> some View {
-        SheetRow(title: title, detail: detail, value: value, checked: checked) { reader.pressAppearance(line) }
+                     checked: Bool = false, chevron: Bool = false) -> some View {
+        SheetRow(title: title, detail: detail, value: value, checked: checked, chevron: chevron) { reader.pressAppearance(line) }
             .readerRing(ringed?.line == line)
             .id(Self.id(line))
     }
@@ -236,31 +239,68 @@ struct BookAppearanceSheet: View {
             }
         }
         .id(Self.id(.typeface))
-        SheetLabel(text: "Size")
-        SheetGroup {
-            HStack(spacing: 12) {
-                GlassRoundButton(systemImage: "textformat.size.smaller", label: "Smaller", size: 40) {
-                    reader.adjustAppearance(.size, by: -1)
-                }
-                .disabled(value.fontScale <= EpubAppearance.fontScales.lowerBound)
-                Text(EpubAppearance.fontSizeLabel(value.fontScale))
-                    .font(HubType.body(17, weight: .bold, relativeTo: .body))
-                    .monospacedDigit()
-                    .frame(maxWidth: .infinity)
-                    .accessibilityLabel("Font size \(EpubAppearance.fontSizeLabel(value.fontScale))")
-                GlassRoundButton(systemImage: "textformat.size.larger", label: "Larger", size: 40) {
-                    reader.adjustAppearance(.size, by: 1)
-                }
-                .disabled(value.fontScale >= EpubAppearance.fontScales.upperBound)
-            }
-            .padding(10)
-            .readerRing(ringed?.line == .size)
+        HStack {
+            SheetLabel(text: "Size")
+            Spacer()
+            Text(EpubAppearance.fontSizeLabel(value.fontScale))
+                .font(HubType.body(13, weight: .semibold, relativeTo: .footnote))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.62))
+                .accessibilityHidden(true)
         }
+        // Fourteen marks, 70% to 200%; left and right on a controller move one.
+        SizeSlider(scale: value.fontScale) { mark in
+            var next = value
+            next.fontScale = EpubAppearance.sizeScale(mark: mark)
+            reader.setPreferences(next)
+        }
+        .readerRing(ringed?.line == .size, corner: 14)
         .id(Self.id(.size))
         SheetGroup {
+            row(.spacingPage, "Spacing", detail: "Line spacing and margins",
+                value: "\(Self.label(of: EpubAppearance.spacing, value.lineHeight)) · \(Self.label(of: EpubAppearance.margins, value.pageMargins))",
+                chevron: true)
             row(.onePage, "One full page per screen", detail: "One column, no scrolling", checked: value.onePagePerScreen)
         }
         SheetNote(text: "An ebook's pages follow its font and the screen: they are not the printed book's page numbers.")
+    }
+
+    /// The name of the choice `amount` is, "Relaxed" or "Balanced"; empty between two.
+    private static func label(of choices: [(amount: Double, label: String)], _ amount: Double) -> String {
+        choices.first { EpubAppearance.same($0.amount, amount) }?.label ?? ""
+    }
+
+    // MARK: Spacing (#47)
+
+    /// Line spacing and margins, Kindle's grouping: a page of Font's, with its own way back.
+    @ViewBuilder private var spacingPage: some View {
+        Button {
+            reader.pressAppearance(.back)
+        } label: {
+            Label("Font", systemImage: "chevron.left")
+        }
+        .buttonStyle(GlassControlStyle())
+        .readerRing(ringed?.line == .back, corner: 21)
+        .accessibilityIdentifier("appearance-back")
+        SheetLabel(text: "Line spacing")
+        HStack(spacing: 8) {
+            ForEach(Array(EpubAppearance.spacing.enumerated()), id: \.offset) { index, spacing in
+                tile(.spacing, index, spacing.label, selected: EpubAppearance.same(value.lineHeight, spacing.amount)) {
+                    PageSample(spacing: 5 + Double(index) * 3)
+                }
+            }
+        }
+        .id(Self.id(.spacing))
+        SheetLabel(text: "Margins")
+        HStack(spacing: 8) {
+            ForEach(Array(EpubAppearance.margins.enumerated()), id: \.offset) { column, margin in
+                tile(.margins, column, margin.label, selected: EpubAppearance.same(value.pageMargins, margin.amount)) {
+                    PageSample(margin: margin.amount * 0.15)
+                }
+            }
+        }
+        .id(Self.id(.margins))
+        SheetNote(text: "Margins are the width of the page beside the text: wider on an iPad, narrower on a phone.")
     }
 
     // MARK: Layout
@@ -276,24 +316,6 @@ struct BookAppearanceSheet: View {
             }
         }
         .id(Self.id(.columns))
-        SheetLabel(text: "Margins")
-        HStack(spacing: 8) {
-            ForEach(Array(EpubAppearance.margins.enumerated()), id: \.offset) { column, margin in
-                tile(.margins, column, margin.label, selected: EpubAppearance.same(value.pageMargins, margin.amount)) {
-                    PageSample(margin: margin.amount * 0.15)
-                }
-            }
-        }
-        .id(Self.id(.margins))
-        SheetLabel(text: "Line spacing")
-        HStack(spacing: 8) {
-            ForEach(Array(EpubAppearance.spacing.enumerated()), id: \.offset) { index, spacing in
-                tile(.spacing, index, spacing.label, selected: EpubAppearance.same(value.lineHeight, spacing.amount)) {
-                    PageSample(spacing: 5 + Double(index) * 3)
-                }
-            }
-        }
-        .id(Self.id(.spacing))
         SheetGroup {
             row(.automaticColumns, "Automatic columns", detail: "Two side by side where the window is wide",
                 checked: value.columns == .auto)
@@ -351,6 +373,46 @@ struct BookAppearanceSheet: View {
         SheetGroup {
             row(.systemColours, "Use system colours", detail: "Paper by day, Dark at night", checked: value.theme == .system)
         }
+    }
+}
+
+/// The size slider (#47): a small A, fourteen marks from 70% to 200% with the
+/// thumb on one at a time, and a large A. A swipe or a tap moves it a mark;
+/// VoiceOver adjusts it a mark too.
+struct SizeSlider: View {
+    let scale: Double
+    let choose: (Int) -> Void
+
+    var body: some View {
+        let mark = EpubAppearance.sizeMark(scale)
+        let last = EpubAppearance.sizeMarks - 1
+        HStack(spacing: 12) {
+            Text("A").font(HubType.body(14, weight: .semibold, relativeTo: .caption)).foregroundStyle(.white.opacity(0.7))
+            ZStack {
+                // The marks, under the track's own, as far apart as the thumb steps.
+                Canvas { context, size in
+                    let edge = 14.0
+                    for index in 0...last {
+                        let x = edge + (size.width - 2 * edge) * Double(index) / Double(last)
+                        let rect = CGRect(x: x - 1, y: size.height / 2 + 9, width: 2, height: 6)
+                        context.fill(Path(roundedRect: rect, cornerRadius: 1),
+                                     with: .color(.white.opacity(index <= mark ? 0.75 : 0.3)))
+                    }
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+                Slider(value: Binding(get: { Double(mark) }, set: { choose(Int($0.rounded())) }), in: 0...Double(last), step: 1)
+                    .tint(.white)
+                    .accessibilityLabel("Font size")
+                    .accessibilityValue(EpubAppearance.fontSizeLabel(scale))
+                    .accessibilityIdentifier("book-size")
+            }
+            .frame(height: 44)
+            Text("A").font(HubType.body(26, weight: .semibold, relativeTo: .title2)).foregroundStyle(.white.opacity(0.7))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .glassPanel(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 

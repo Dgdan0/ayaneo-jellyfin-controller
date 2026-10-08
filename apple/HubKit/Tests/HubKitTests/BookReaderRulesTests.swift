@@ -310,6 +310,12 @@ struct BookReaderRulesTests {
         #expect(EpubAppearance.fontSize(start, steps: -9).fontScale == 0.7)
         #expect(EpubAppearance.fontSize(start, steps: 30).fontScale == 2)
         #expect(EpubAppearance.fontSizeLabel(1.2) == "120%")
+        // The size slider's fourteen marks, from 70% to 200% a tenth apart (#47).
+        #expect(EpubAppearance.sizeMarks == 14)
+        #expect(EpubAppearance.sizeScale(mark: 0) == 0.7 && EpubAppearance.sizeScale(mark: 13) == 2)
+        #expect(EpubAppearance.sizeScale(mark: 6) == 1.3, "exactly, not 1.2999999999999998")
+        #expect(EpubAppearance.sizeMark(1.3) == 6 && EpubAppearance.sizeMark(0.1) == 0 && EpubAppearance.sizeMark(9) == 13)
+        #expect((0..<EpubAppearance.sizeMarks).allSatisfy { EpubAppearance.sizeMark(EpubAppearance.sizeScale(mark: $0)) == $0 })
         let spaced = EpubAppearance.lineSpacing(start, 1.5)
         #expect(spaced.lineHeight == 1.5 && !spaced.publisherStyles)
         let publishers = EpubReaderPreferences(publisherStyles: true, textAlignment: "start", hyphens: false)
