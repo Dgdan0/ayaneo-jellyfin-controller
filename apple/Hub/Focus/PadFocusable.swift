@@ -200,15 +200,17 @@ private struct PadFocusableModifier: ViewModifier {
             let lit = PadFocusCenter.shared.lit(padId, on: page)
             let _ = page.actions[padId] = actions
             let _ = scroll.map { page.scrollIds[padId] = $0 }
-            // The item keeps its own identity: its scroll id and its frame are a
-            // clear view's behind it. Given to a Menu, a Toggle or a text field
+            // The item keeps its own identity: its scroll id, its frame and its
+            // ring are a clear view's behind it (the ring stands outside the
+            // item, so it shows). Given to a Menu, a Toggle or a text field
             // itself, they lost a menu's choice and a switch's turn under a
-            // finger (the series' ⋯, Settings › Home's switches).
+            // finger (the series' ⋯; Settings › Home's switches, on the iPad
+            // even with only the ring over them).
             content
                 .environment(\.padLit, lit)
-                .overlay { PadRingView(ring: ring, lit: lit) }
                 .background {
                     PadAnchor(page: page, padId: padId, scrollId: scrolls ? (scroll ?? AnyHashable(id)) : nil)
+                        .overlay { PadRingView(ring: ring, lit: lit) }
                 }
         } else {
             content
