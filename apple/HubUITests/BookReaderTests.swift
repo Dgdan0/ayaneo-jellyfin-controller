@@ -14,9 +14,10 @@ final class BookReaderTests: XCTestCase {
     private static let recursion = "rw_demo_recursion/demo-rw_demo_recursion"
 
     @MainActor
-    private func launchReading(_ book: String = recursion, _ environment: [String: String] = [:]) -> XCUIApplication {
+    private func launchReading(_ book: String = recursion, _ environment: [String: String] = [:],
+                               arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-demo"]
+        app.launchArguments = ["-demo"] + arguments
         // Pages, not continuous scrolling, whatever an earlier test left chosen.
         app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_BOOK": book, "HUB_BOOK_SCROLL": "0"]
             .merging(environment) { $1 }
@@ -212,6 +213,77 @@ final class BookReaderTests: XCTestCase {
         XCTAssertTrue(position.waitForExistence(timeout: 5), "the menu did not come")
         XCTAssertTrue(waitUntil(10) { position.label.contains("% of book") }, "the menu says \(position.label)")
         XCTAssertTrue((40...60).contains(percent(position.label)), "it opened at \(position.label)")
+    }
+
+    /// Kindle's corners (#42): while reading, the time, where you are and
+    /// how far through; a tap on the bottom left shows the next way of
+    /// saying where you are, round to the first; the menu puts them away.
+    @MainActor
+    func testTheCornersShowWhileReadingAndATapShowsTheNextPlace() {
+        // Whatever an earlier run chose, every corner on and the page in the book first.
+        let app = launchReading(Self.recursion, arguments: ["-epub.pageInfo.clock", "YES", "-epub.pageInfo.percentage", "YES",
+                                                            "-epub.pageInfo.place", "pageInBook"])
+        let clock = app.descendants(matching: .any).matching(identifier: "book-corner-clock").firstMatch
+        let place = app.buttons["book-corner-place"]
+        let percent = app.descendants(matching: .any).matching(identifier: "book-corner-percent").firstMatch
+        XCTAssertTrue(clock.waitForExistence(timeout: 10), "no clock while reading")
+        XCTAssertTrue(place.waitForExistence(timeout: 5), "nothing says where the page is")
+        XCTAssertTrue(waitUntil(10) { place.label.hasPrefix("Page 1 of ") && !place.label.contains("chapter") },
+                      "the bottom left says \(place.label)")
+        XCTAssertTrue(percent.exists && percent.label.hasPrefix("0%"), "the bottom right says \(percent.label)")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "corners"
+        shot.lifetime = .keepAlways
+        add(shot)
+
+        // A tap at a time: the page in the chapter, the time left in it and in the book, then round again.
+        for ending in ["in chapter", "left in chapter", "left in book"] {
+            place.tap()
+            XCTAssertTrue(waitUntil(5) { place.label.hasSuffix(ending) }, "after a tap the bottom left says \(place.label)")
+        }
+        XCTAssertTrue(place.label.hasPrefix("Page") == false)
+        place.tap()
+        XCTAssertTrue(waitUntil(5) { place.label.hasPrefix("Page 1 of ") && !place.label.contains("chapter") },
+                      "the tap did not come round: \(place.label)")
+
+        // The menu up, the corners away; the menu down, back.
+        app.typeKey(.upArrow, modifierFlags: [])
+        XCTAssertTrue(app.staticTexts["book-position"].waitForExistence(timeout: 5), "the menu did not come")
+        XCTAssertTrue(clock.waitForNonExistence(timeout: 5), "the clock stayed with the menu up")
+        XCTAssertFalse(place.exists || percent.exists, "a corner stayed with the menu up")
+        page(app).tap()
+        XCTAssertTrue(clock.waitForExistence(timeout: 5), "the corners did not come back with the menu down")
+        XCTAssertTrue(place.exists && percent.exists)
+    }
+
+    /// Appearance › Layout › Page info turns each corner off: the clock,
+    /// then the bottom left (None); the percentage stays.
+    @MainActor
+    func testPageInfoInAppearanceTurnsTheCornersOff() {
+        let app = launchReading(Self.recursion, ["HUB_BOOK_SHEET": "layout"],
+                                arguments: ["-epub.pageInfo.clock", "YES", "-epub.pageInfo.percentage", "YES",
+                                            "-epub.pageInfo.place", "pageInBook"])
+        let clockRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Clock'")).firstMatch
+        XCTAssertTrue(clockRow.waitForExistence(timeout: 15), "Layout has no Page info")
+        XCTAssertTrue(clockRow.label.hasSuffix("On"), "the clock row says \(clockRow.label)")
+        // Far down the sheet: the tap scrolls to it first.
+        clockRow.tap()
+        XCTAssertTrue(waitUntil(5) { clockRow.label.hasSuffix("Off") }, "the clock row says \(clockRow.label)")
+        let none = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'None'")).firstMatch
+        none.tap()
+        XCTAssertTrue(waitUntil(5) { none.isSelected }, "None was not chosen")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "page-info"
+        shot.lifetime = .keepAlways
+        add(shot)
+        // Back to the page: the percentage alone.
+        app.buttons["Close"].firstMatch.tap()
+        let percent = app.descendants(matching: .any).matching(identifier: "book-corner-percent").firstMatch
+        if !percent.waitForExistence(timeout: 3) { page(app).tap() }
+        XCTAssertTrue(percent.waitForExistence(timeout: 5), "the percentage went too")
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "book-corner-clock").firstMatch.exists,
+                       "the clock stayed")
+        XCTAssertFalse(app.buttons["book-corner-place"].exists, "the bottom left stayed")
     }
 
     /// Where the book is, from its menu, which ↑ opens (as Ⓑ and Delete do).

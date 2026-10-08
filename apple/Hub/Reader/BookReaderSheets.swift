@@ -263,7 +263,45 @@ struct BookAppearanceSheet: View {
             SheetRow(title: "Justified text", value: value.textAlignment == "justify" ? "On" : "Off") {
                 set(EpubAppearance.justified(value))
             }
+            SheetRow(title: "Hyphenation", detail: "Long words broken at the line's end",
+                     value: value.hyphens ? "On" : "Off") {
+                set(EpubAppearance.hyphenated(value))
+            }
         }
+        pageInfo
+    }
+
+    // MARK: Page info (#42)
+
+    /// Kindle's corners: the clock, where you are and the percentage, each
+    /// turned off here; kept on this device.
+    @ViewBuilder private var pageInfo: some View {
+        let info = reader.pageInfo
+        SheetLabel(text: "Page info")
+        SheetGroup {
+            SheetRow(title: "Clock", detail: "The time, top right", value: info.clock ? "On" : "Off") {
+                var next = info
+                next.clock.toggle()
+                reader.setPageInfo(next)
+            }
+            SheetRow(title: "Percentage", detail: "How far through the book, bottom right",
+                     value: info.percentage ? "On" : "Off") {
+                var next = info
+                next.percentage.toggle()
+                reader.setPageInfo(next)
+            }
+        }
+        SheetLabel(text: "Bottom left")
+        SheetGroup {
+            ForEach(PageInfoPlace.allCases, id: \.self) { place in
+                SheetRow(title: place.title, checked: info.place == place) {
+                    var next = info
+                    next.place = place
+                    reader.setPageInfo(next)
+                }
+            }
+        }
+        SheetNote(text: "While reading, a tap on the bottom left shows the next of these.")
     }
 
     // MARK: Themes

@@ -32,10 +32,16 @@ public struct EpubReaderPreferences: Equatable, Sendable {
     /// "start" or "justify".
     public var textAlignment: String
     public var onePagePerScreen: Bool
+    /// Words broken at the line's end, so justified lines keep even spaces.
+    public var hyphens: Bool
 
+    /// The reader's own typography to begin with (#42, from the owner's Kindle
+    /// screenshots): justified, hyphenated, a line and a half apart, the
+    /// book's own styling off. Publisher styling brings the book's look back.
     public init(theme: EpubTheme = .sepia, fontFamily: String = "publisher", fontScale: Double = 1,
-                lineHeight: Double = 1.25, pageMargins: Double = 1, columns: EpubColumns = .auto, scroll: Bool = false,
-                publisherStyles: Bool = true, textAlignment: String = "start", onePagePerScreen: Bool = false) {
+                lineHeight: Double = 1.5, pageMargins: Double = 1, columns: EpubColumns = .auto, scroll: Bool = false,
+                publisherStyles: Bool = false, textAlignment: String = "justify", onePagePerScreen: Bool = false,
+                hyphens: Bool = true) {
         self.theme = theme
         self.fontFamily = fontFamily
         self.fontScale = fontScale
@@ -46,6 +52,7 @@ public struct EpubReaderPreferences: Equatable, Sendable {
         self.publisherStyles = publisherStyles
         self.textAlignment = textAlignment
         self.onePagePerScreen = onePagePerScreen
+        self.hyphens = hyphens
     }
 
     /// Scrolling for real: one page per screen turns pages whatever Scroll says.
@@ -164,6 +171,7 @@ public struct EpubRendering: Equatable, Sendable {
     public let scroll: Bool
     /// "start" or "justify".
     public let textAlign: String
+    public let hyphens: Bool
 
     /// System colours follow the device: Paper by day, Night after dark.
     public init(_ value: EpubReaderPreferences, systemDark: Bool) {
@@ -185,6 +193,7 @@ public struct EpubRendering: Equatable, Sendable {
         publisherStyles = value.publisherStyles
         scroll = value.scrolls
         textAlign = value.textAlignment == "justify" ? "justify" : "start"
+        hyphens = value.hyphens
     }
 }
 
@@ -235,6 +244,14 @@ public enum EpubAppearance {
         return next
     }
 
+    /// Hyphenation on or off; like justified text, it is the reader's own typography.
+    public static func hyphenated(_ value: EpubReaderPreferences) -> EpubReaderPreferences {
+        var next = value
+        next.hyphens.toggle()
+        next.publisherStyles = false
+        return next
+    }
+
     /// Whether `amount` is the one chosen: margins and spacing are kept as numbers.
     public static func same(_ left: Double, _ right: Double) -> Bool { abs(left - right) < 0.01 }
 }
@@ -253,17 +270,22 @@ public enum EpubAppearanceStore {
         func flag(_ key: String, _ fallback: Bool) -> Bool {
             defaults.object(forKey: prefix + key) == nil ? fallback : defaults.bool(forKey: prefix + key)
         }
+        // A look kept before (#42) keeps what it had: the defaults are for a
+        // device that never changed it, and such a look had no hyphenation.
+        let kept = defaults.object(forKey: prefix + "publisherStyles") != nil
+        let start = EpubReaderPreferences()
         let value = EpubReaderPreferences(
-            theme: string("theme").flatMap(EpubTheme.init(rawValue:)) ?? .sepia,
-            fontFamily: string("fontFamily") ?? "publisher",
-            fontScale: number("fontScale", 1, 0.7...2),
-            lineHeight: number("lineHeight", 1.25, 1...2),
-            pageMargins: number("pageMargins", 1, 0.5...2),
-            columns: string("columns").flatMap(EpubColumns.init(rawValue:)) ?? .auto,
-            scroll: flag("scroll", false),
-            publisherStyles: flag("publisherStyles", true),
-            textAlignment: string("textAlignment") ?? "start",
-            onePagePerScreen: flag("onePagePerScreen", false))
+            theme: string("theme").flatMap(EpubTheme.init(rawValue:)) ?? start.theme,
+            fontFamily: string("fontFamily") ?? start.fontFamily,
+            fontScale: number("fontScale", start.fontScale, 0.7...2),
+            lineHeight: number("lineHeight", start.lineHeight, 1...2),
+            pageMargins: number("pageMargins", start.pageMargins, 0.5...2),
+            columns: string("columns").flatMap(EpubColumns.init(rawValue:)) ?? start.columns,
+            scroll: flag("scroll", start.scroll),
+            publisherStyles: flag("publisherStyles", start.publisherStyles),
+            textAlignment: string("textAlignment") ?? start.textAlignment,
+            onePagePerScreen: flag("onePagePerScreen", start.onePagePerScreen),
+            hyphens: flag("hyphens", kept ? false : start.hyphens))
         return value.onePagePerScreen ? EpubLayoutPolicy.selectOnePage(value, true) : value
     }
 
@@ -278,5 +300,6 @@ public enum EpubAppearanceStore {
         defaults.set(value.scroll, forKey: prefix + "scroll")
         defaults.set(value.textAlignment, forKey: prefix + "textAlignment")
         defaults.set(value.onePagePerScreen, forKey: prefix + "onePagePerScreen")
+        defaults.set(value.hyphens, forKey: prefix + "hyphens")
     }
 }

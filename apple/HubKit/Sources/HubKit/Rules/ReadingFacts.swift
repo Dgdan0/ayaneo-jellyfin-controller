@@ -249,8 +249,9 @@ public enum ReadingBookFacts {
         work.editions.filter { $0.kind != "audiobook" }.map(\.pageCount).max() ?? 0
     }
 
-    /// The page a fraction of the way through: 1 to `pages`.
-    private static func page(of fraction: Double, pages: Int) -> Int {
+    /// The page a fraction of the way through: 1 to `pages`. The book's page
+    /// and the reader's corners (#42) count the same way.
+    static func page(of fraction: Double, pages: Int) -> Int {
         min(max(Int(fraction * Double(pages)), 1), pages)
     }
 

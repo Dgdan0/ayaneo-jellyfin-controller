@@ -107,6 +107,7 @@ final class BookNavigator: NSObject {
         let navigator = try EPUBNavigatorViewController(
             publication: loaded.publication, initialLocation: initial,
             config: EPUBNavigatorViewController.Configuration(preferences: Self.preferences(rendering),
+                                                              contentInset: Self.strips,
                                                               decorationTemplates: templates))
         navigator.delegate = self
         publication = loaded.publication
@@ -239,6 +240,14 @@ final class BookNavigator: NSObject {
         publication = nil
     }
 
+    /// The strips kept at the top and bottom of the page, off the text: the
+    /// corners sit there (#42, `PageInfo.strip`, which the corners read too).
+    private static var strips: [UIUserInterfaceSizeClass: EPUBContentInsets] {
+        let compact = PageInfo.strip(compactHeight: true), regular = PageInfo.strip(compactHeight: false)
+        return [.compact: (top: CGFloat(compact.top), bottom: CGFloat(compact.bottom)),
+                .regular: (top: CGFloat(regular.top), bottom: CGFloat(regular.bottom))]
+    }
+
     /// The appearance as Readium's preferences.
     private static func preferences(_ rendering: EpubRendering) -> EPUBPreferences {
         EPUBPreferences(
@@ -246,6 +255,7 @@ final class BookNavigator: NSObject {
             columnCount: rendering.columns == .one ? .one : rendering.columns == .two ? .two : .auto,
             fontFamily: rendering.fontFamily.map { FontFamily(rawValue: $0) },
             fontSize: rendering.fontSize,
+            hyphens: rendering.hyphens,
             lineHeight: rendering.lineHeight,
             pageMargins: rendering.pageMargins,
             publisherStyles: rendering.publisherStyles,

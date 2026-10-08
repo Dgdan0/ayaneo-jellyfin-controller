@@ -171,6 +171,7 @@ public enum DemoEpub {
         <head>
         <title>\(escape(title))</title>
         \(stylesheet ? "<link rel=\"stylesheet\" type=\"text/css\" href=\"style.css\"/>" : "")
+        <style type="text/css">\(columnStyle)</style>
         </head>
         <body>
         \(body)
@@ -218,6 +219,16 @@ public enum DemoEpub {
         </rootfiles>
         </container>
         """
+
+    /// What the hub's reading copy puts in every document's head (#41,
+    /// `hub/internal/reading/epub_html.go`): Two pages from 30em, where
+    /// Readium CSS asks for 60em, so a phone sideways reads two columns too.
+    static let columnStyle = "@media screen and (min-width: 30em) { "
+        + ":root[style*=\"--USER__colCount: 2\"], :root[style*=\"--USER__colCount:2\"] { "
+        + "--RS__colWidth: auto !important; "
+        + "-webkit-column-count: 2 !important; column-count: 2 !important; "
+        + "-webkit-column-width: auto !important; column-width: auto !important; "
+        + "} }"
 
     private static let style = """
         body { margin: 0; line-height: 1.5; }

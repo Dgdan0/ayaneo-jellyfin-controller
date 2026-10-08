@@ -138,6 +138,14 @@ final class BookReaderModel {
     /// "Four · Page 3 of 12 in chapter · 49% of book".
     private(set) var positionLine = "Opening…"
     private(set) var bookProgress = 0.0
+    /// Kindle's corners while reading (#42): which show, kept on this device.
+    private(set) var pageInfo: PageInfoPreferences
+    /// What the bottom corners say of the page.
+    private(set) var corners = PageInfoCorners()
+    /// Where the page is, as the corners can say it.
+    @ObservationIgnored private var reading = PageInfo.Reading()
+    /// The book's pages as the hub counts them: this edition's, else the longest text edition's.
+    @ObservationIgnored private let bookPages: Int
     /// The slider dragged, or moved with the pad: where it would go.
     var browsing: Double?
     /// Where a link, the contents or the slider was followed from.
@@ -186,6 +194,9 @@ final class BookReaderModel {
     @ObservationIgnored private var place: BookPlaceOnPage?
     /// The first place drawn: the reading has moved once the page is elsewhere.
     @ObservationIgnored private var firstPlace: BookPlaceOnPage?
+    /// Where the book was opened, until the page says where it is: a jump
+    /// made before then (the contents, at once) still leaves the way back.
+    @ObservationIgnored private var openedAt: String?
     /// The place is kept only once the reading has moved, so opening a book sends nothing.
     @ObservationIgnored private var moved = false
     /// The book opened, waiting for a choice of place.
@@ -212,6 +223,7 @@ final class BookReaderModel {
         self.sourceItemId = sourceItemId
         title = work.title
         cover = work.artwork
+        bookPages = PageInfo.bookPages(work, sourceItemId: sourceItemId)
         // The place goes through the reading outbox, as the listening place
         // does: the demo's in a folder of its own (`ListeningStore`).
         places = CheckpointBookPlaces(hub: app.hub, store: ListeningStore.shared,
@@ -225,6 +237,7 @@ final class BookReaderModel {
         self.defaults = defaults
         let saved = EpubAppearanceStore.load(defaults)
         preferences = saved
+        pageInfo = PageInfoStore.load(defaults)
         preferenceState = EpubPreferenceState(saved)
         paceStore = ReadingPaceStore(defaults: defaults)
         paceKey = ReadingPaceStore.key(workId: work.id, sourceItemId: sourceItemId)
@@ -380,6 +393,7 @@ final class BookReaderModel {
         readingOrder = loaded.readingOrder
         place = nil
         firstPlace = nil
+        openedAt = locator ?? loaded.readingOrder.first.map { Self.locator($0, progression: 0) }
         moved = false
         readAlong?.beginOpen()
         defer { readAlong?.endOpen() }
@@ -468,12 +482,32 @@ final class BookReaderModel {
         // Contents opened before the page said where it is: the cursor goes to it once it does.
         if sheet == .contents, !cursorMoved, let row = currentContentsRow { sheetCursor = row }
         let title = place.title ?? currentContentsRow.map { contents[$0].title }
-        positionLine = BookSections.line(title: title, page: preferences.scrolls ? nil : navigator.pageInPart(),
-                                         progress: progress)
+        let pageInPart = preferences.scrolls ? nil : navigator.pageInPart()
+        positionLine = BookSections.line(title: title, page: pageInPart, progress: progress)
         // Following the voice, the narration's own time left; else the pace's.
-        timeLeft = (readAlong?.timeLeft ?? sections.timeLeft(href: place.href, progression: place.progression,
-                                                             minutesPerPosition: pace.minutesPerPosition(prior: paceStore.prior())))?
-            .label() ?? ""
+        let left = readAlong?.timeLeft ?? sections.timeLeft(href: place.href, progression: place.progression,
+                                                            minutesPerPosition: pace.minutesPerPosition(prior: paceStore.prior()))
+        timeLeft = left?.label() ?? ""
+        reading = PageInfo.Reading(bookPages: bookPages, progress: progress, chapter: sections.span(href: place.href),
+                                   positionInBook: sections.positionInBook(href: place.href, progression: place.progression),
+                                   positionInChapter: sections.positionInChapter(href: place.href, progression: place.progression),
+                                   timeLeft: left)
+        let next = PageInfo.corners(pageInfo, reading)
+        if next != corners { corners = next }
+    }
+
+    // MARK: The corners (#42)
+
+    /// The corners chosen in Appearance, kept on this device.
+    func setPageInfo(_ next: PageInfoPreferences) {
+        pageInfo = next
+        PageInfoStore.save(next, to: defaults)
+        corners = PageInfo.corners(next, reading)
+    }
+
+    /// A tap on the bottom corner: the next way of saying where you are, as on Kindle.
+    func nextPlace() {
+        setPageInfo(PageInfo.next(pageInfo, reading))
     }
 
     /// Once the reading pauses, the place it reached goes to the keeper, which sends it.
@@ -574,6 +608,7 @@ final class BookReaderModel {
         case .glide(_, let dy): glide(dy)
         case .sentence(let delta): readAlong?.stepSentence(delta)
         case .followNarration: readAlong?.follow()
+        case .nextPlace: nextPlace()
         default: break
         }
     }
@@ -632,7 +667,7 @@ final class BookReaderModel {
     /// To a place, leaving "Return to previous place" in the menu when `remember` says so.
     func jump(to json: String, remember: Bool = true, then done: (() -> Void)? = nil) {
         clearFound()
-        let previous = place?.json
+        let previous = place?.json ?? openedAt
         tracker.restart()
         scroll.reset()
         moved = true

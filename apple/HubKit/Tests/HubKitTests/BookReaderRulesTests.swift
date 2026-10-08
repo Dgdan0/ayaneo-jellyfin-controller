@@ -312,9 +312,14 @@ struct BookReaderRulesTests {
         #expect(EpubAppearance.fontSizeLabel(1.2) == "120%")
         let spaced = EpubAppearance.lineSpacing(start, 1.5)
         #expect(spaced.lineHeight == 1.5 && !spaced.publisherStyles)
-        let justified = EpubAppearance.justified(start)
+        let publishers = EpubReaderPreferences(publisherStyles: true, textAlignment: "start", hyphens: false)
+        let justified = EpubAppearance.justified(publishers)
         #expect(justified.textAlignment == "justify" && !justified.publisherStyles)
         #expect(EpubAppearance.justified(justified).textAlignment == "start")
+        // Hyphenation is the reader's own typography too.
+        let hyphenated = EpubAppearance.hyphenated(publishers)
+        #expect(hyphenated.hyphens && !hyphenated.publisherStyles)
+        #expect(!EpubAppearance.hyphenated(hyphenated).hyphens)
         #expect(EpubAppearance.same(1.7, 1.7000001))
     }
 
@@ -356,6 +361,33 @@ struct BookReaderRulesTests {
         #expect(clamped.theme == .sepia)
         // One page per screen read back as it was chosen: one column, no scrolling.
         #expect(clamped.columns == .one && !clamped.scroll)
+    }
+
+    /// The reader's own typography to begin with (#42): justified,
+    /// hyphenated, a line and a half apart, the book's styling off, drawn so.
+    @Test func aNewDeviceReadsJustifiedHyphenatedAndRelaxed() throws {
+        let start = EpubReaderPreferences()
+        #expect(!start.publisherStyles && start.textAlignment == "justify" && start.hyphens && start.lineHeight == 1.5)
+        let drawn = EpubRendering(start, systemDark: false)
+        #expect(!drawn.publisherStyles && drawn.textAlign == "justify" && drawn.hyphens && drawn.lineHeight == 1.5)
+        #expect(EpubAppearance.spacing.contains { EpubAppearance.same($0.amount, start.lineHeight) })
+        let defaults = try #require(UserDefaults(suiteName: "book-appearance-\(UUID().uuidString)"))
+        #expect(EpubAppearanceStore.load(defaults) == start)
+        EpubAppearanceStore.save(EpubReaderPreferences(hyphens: false), to: defaults)
+        #expect(!EpubAppearanceStore.load(defaults).hyphens)
+    }
+
+    /// A look changed before #42 (kept without hyphenation) stays as it was:
+    /// the book's styling, its alignment and spacing, and no hyphenation.
+    @Test func aDeviceThatChangedItsLookKeepsIt() throws {
+        let defaults = try #require(UserDefaults(suiteName: "book-appearance-\(UUID().uuidString)"))
+        let stored: [(String, Any)] = [("theme", "DARK"), ("fontFamily", "publisher"), ("fontScale", 1.2), ("lineHeight", 1.25),
+                                       ("pageMargins", 1.0), ("columns", "AUTO"), ("publisherStyles", true), ("scroll", false),
+                                       ("textAlignment", "start"), ("onePagePerScreen", false)]
+        for (key, value) in stored { defaults.set(value, forKey: "epub." + key) }
+        let kept = EpubAppearanceStore.load(defaults)
+        #expect(kept == EpubReaderPreferences(theme: .dark, fontScale: 1.2, lineHeight: 1.25, publisherStyles: true,
+                                              textAlignment: "start", hyphens: false))
     }
 
     // MARK: The book's parts (BookSections)

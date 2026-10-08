@@ -174,7 +174,7 @@ public struct TimeLeft: Equatable, Sendable {
 
     /// "12 min left in chapter · 4h 10m in book"; a minute at least, as the audiobook's line.
     public func label() -> String {
-        "\(Fmt.runtime(max(chapterMs / 1_000, 60))) left in chapter · \(Fmt.runtime(max(bookMs / 1_000, 60))) in book"
+        "\(Self.span(chapterMs)) left in chapter · \(Self.span(bookMs)) in book"
     }
 
     /// The positions in each part of the book (`sectionSizes`, in reading

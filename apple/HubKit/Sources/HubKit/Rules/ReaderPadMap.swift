@@ -94,6 +94,8 @@ public enum ReaderCommand: Equatable, Sendable {
     case magnifier(Bool)
     /// Read along: back to the sentence being read aloud.
     case followNarration
+    /// Books, L3: the bottom corner says where you are the next way (#42, Kindle's reading progress).
+    case nextPlace
     /// Read along, L1 and R1: the sentence before or after (#16, A5).
     case sentence(Int)
     /// Comics: show or hide the controls. Books: open the menu, or go back to the page.
@@ -202,7 +204,9 @@ public enum ReaderPadMap {
         case .click(let stick, let down):
             if !down { return .ignore }
             if stick == .right { return .keys }
-            return state.narration ? .followNarration : .ignore
+            // L3 is the voice's in read along; else the corner's, on the page.
+            if state.narration { return .followNarration }
+            return state.controlsVisible ? .ignore : .nextPlace
         }
     }
 
@@ -236,6 +240,7 @@ public enum ReaderPadMap {
         case .scroll: "Scroll"
         case .magnifier: "Magnifier, while held"
         case .followNarration: "Back to the narration"
+        case .nextPlace: "Next reading progress"
         case .sentence(let delta): delta > 0 ? "Next sentence" : "Previous sentence"
         case .controls(let visible):
             if kind == .book { visible ? "Menu" : "Back to the page" } else { visible ? "Controls" : "Hide controls" }

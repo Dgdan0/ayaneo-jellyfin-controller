@@ -89,7 +89,10 @@ struct ReaderPadMapTests {
             #expect(on(state, .click(.right, down: false)) == .ignore)
         }
         #expect(on(with(book) { $0.narration = true }, .click(.left)) == .followNarration)
-        #expect(on(book, .click(.left)) == .ignore)
+        // On the page, L3 shows where you are the next way (#42); over the menu, nothing.
+        #expect(on(book, .click(.left)) == .nextPlace)
+        #expect(on(book, .click(.left, down: false)) == .ignore)
+        #expect(on(with(book) { $0.controlsVisible = true }, .click(.left)) == .ignore)
     }
 
     @Test func theHintRowNamesOnlyWhatTheKeysDoNow() {
@@ -131,9 +134,9 @@ struct ReaderPadMapTests {
         #expect(bookSheet[ReaderPadMap.b] == "Menu")
         #expect(bookSheet[ReaderPadMap.dpadSides] == "Previous page, next page")
         #expect(bookSheet[ReaderPadMap.dpadEnds] == "Menu")
-        // Paged, the stick and L3 do nothing, so they are not listed.
+        // Paged, the stick does nothing, so it is not listed; L3 is the corner's.
         #expect(bookSheet[ReaderPadMap.rightStick] == nil)
-        #expect(bookSheet[ReaderPadMap.l3] == nil)
+        #expect(bookSheet[ReaderPadMap.l3] == "Next reading progress")
         let scrolling = lines(.book, ReaderPadState(.book, scrolling: true, narration: true))
         #expect(scrolling[ReaderPadMap.dpadEnds] == "Scroll")
         #expect(scrolling[ReaderPadMap.rightStick] == "Scroll")

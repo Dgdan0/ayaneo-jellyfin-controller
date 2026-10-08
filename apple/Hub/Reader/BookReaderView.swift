@@ -115,12 +115,9 @@ struct BookReaderScreen: View {
                     BookReaderBars(reader: reader, layout: layout, leave: leave, topBar: $topBar, bottomBar: $bottomBar)
                         .transition(.opacity)
                 }
-                if reader.sheet == nil && !reader.controlsVisible, let reading = reader.readAlong,
-                   let narration = reading.narration, narration.playing {
-                    ReadAlongPill(reading: reading, narration: narration) { reader.setControls(true) }
-                        .padding(.horizontal, layout.side + 4)
-                        .padding(.bottom, layout.bottom + 6)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                // Kindle's corners, and reading along the narration's pill, while the bars are away (#42).
+                if reader.sheet == nil && !reader.controlsVisible && reader.phase == .reading {
+                    BookReaderCorners(reader: reader, layout: layout)
                         .transition(.opacity)
                 }
                 if let note = reader.footnote {
@@ -267,7 +264,7 @@ struct BookReaderScreen: View {
     /// Debug builds, for screenshots: HUB_BOOK_SCROLL=1 (or 0) turns continuous
     /// scrolling on (or off) for every book, as Appearance would and kept as it
     /// keeps it; HUB_BOOK_AT=<percent> goes that far into the book;
-    /// HUB_BOOK_SHEET=menu|contents|bookmarks|search|appearance|comfort|keys opens the menu
+    /// HUB_BOOK_SHEET=menu|contents|bookmarks|search|appearance|layout|comfort|keys opens the menu
     /// or a sheet, once the book has opened; HUB_BOOK_SEARCH=<words> searches for them.
     private func debugTour() async {
         guard reader.phase == .reading else { return }
@@ -294,6 +291,9 @@ struct BookReaderScreen: View {
                 reader.runSearch()
             }
         case "appearance": reader.openSheet(.appearance)
+        case "layout":
+            reader.appearanceTab = .layout
+            reader.openSheet(.appearance)
         case "comfort":
             reader.appearanceTab = .comfort
             reader.openSheet(.appearance)
