@@ -834,7 +834,8 @@ subtitles left out, and AVPlayer's own options matched. Played for under 30 seco
 stayed unwatched on the server; the download was then removed.
 
 Debug launches take `HUB_DOWNLOAD=<item id>` (downloads it at launch; `<id>,<id>,<id>` queues a series' episodes as one batch),
-`HUB_DOWNLOAD=remove:<item id>` and `HUB_OFFLINE_TITLE=<film or series id>` (opens that title's page on this device). The demo hub makes each MP4 in a few seconds, The Matrix's
+`HUB_DOWNLOAD=remove:<item id>`, `HUB_OFFLINE_TITLE=<film or series id>` (opens that title's page on this device) and
+`HUB_OFFLINE_WATCH=<item id>:<position ms>/<duration ms>[/done],…` (watches made on this device, so the cards say "16:12 left" and "watched"). The demo hub makes each MP4 in a few seconds, The Matrix's
 (converted) in eight; Dune fails once until it is retried, and Inception has a French picture
 subtitle that is left out.
 

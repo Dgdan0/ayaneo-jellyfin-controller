@@ -199,6 +199,8 @@ enum DemoLibrary {
                 "overview": "\(title.title), as the demo hub tells it: a title in the library, with nothing real behind it.",
                 "runtimeSeconds": title.minutes * 60, "rating": 8.1, "officialRating": "PG-13", "genres": title.genres,
                 "played": now.played, "favorite": now.favorite,
+                // Drawn by `DemoArtwork`: the page's backdrop, and what a download keeps beside its file.
+                "poster": "/v1/img/jf/\(title.id)/Primary", "backdrop": "/v1/img/jf/\(title.id)/Backdrop",
                 "unplayedCount": title.type == "series" && !now.played ? 3 : 0,
                 // A series the hub can name on TMDB has the key its release search is asked by (#34).
                 "mediaKey": title.type == "series" ? "tmdb:series:\(100_000 + (Int(title.id.suffix(4), radix: 16) ?? 0))" : "",
