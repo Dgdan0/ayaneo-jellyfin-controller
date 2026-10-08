@@ -126,6 +126,69 @@ final class MediaFocusTests: XCTestCase {
         XCTAssertTrue(heading.exists, "Ⓐ on a row closed the panel")
     }
 
+    // MARK: A series' downloads (#48)
+
+    /// Slow Horses in the demo: two seasons, and the hub's listing of what can be downloaded.
+    private let series = "000000000000000000000000deb00012"
+
+    @MainActor
+    private func openSeries(_ environment: [String: String]) -> XCUIApplication {
+        let app = launch(["HUB_SECTION": "library", "HUB_TITLE": series].merging(environment) { $1 })
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "title-download").firstMatch
+                          .waitForExistence(timeout: 30), "the series did not open")
+        return app
+    }
+
+    @MainActor
+    private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
+    /// Ⓨ on an episode card asks what it offers, as a long press does; Select episodes there starts select mode.
+    @MainActor
+    func testAnEpisodesYAsksWhatItOffers() {
+        // Ⓨ is pressed 45 seconds in; the arrows have walked to an episode long before.
+        let app = openSeries(["HUB_PAD": "Y", "HUB_PAD_DELAY": "45"])
+        XCTAssertTrue(element(app, "download-season").waitForExistence(timeout: 30), "the hub's listing did not arrive")
+        var steps = 0
+        while !focus(app).contains(" episodes/"), steps < 8 {
+            press(app, .downArrow)
+            steps += 1
+        }
+        XCTAssertTrue(focus(app).contains(" episodes/"), "down did not reach the episodes: \(focus(app))")
+        let select = app.buttons["Select episodes"].firstMatch
+        XCTAssertTrue(select.waitForExistence(timeout: 60), "Ⓨ on the episode asked nothing")
+        XCTAssertTrue(app.buttons["Download"].firstMatch.exists || app.buttons["Remove download"].firstMatch.exists,
+                      "the episode's own download is not among its actions")
+        select.tap()
+        XCTAssertTrue(element(app, "select-cancel").waitForExistence(timeout: 10), "Select episodes did not start select mode")
+    }
+
+    /// Ⓑ in select mode ends it, and the page stays: Back comes after.
+    @MainActor
+    func testBEndsSelectModeBeforeGoingBack() {
+        // Ⓑ is pressed 40 seconds in, once select mode has long started.
+        let app = openSeries(["HUB_SERIES_DOWNLOADS": "select:e1", "HUB_PAD": "B", "HUB_PAD_DELAY": "40"])
+        let cancel = element(app, "select-cancel")
+        XCTAssertTrue(cancel.waitForExistence(timeout: 35), "select mode did not start before Ⓑ")
+        XCTAssertTrue(waitUntil(50) { !cancel.exists }, "Ⓑ did not end select mode")
+        XCTAssertTrue(element(app, "title-download").exists, "Ⓑ left the page instead of ending select mode")
+    }
+
+    /// The choices panel is walked with the controller: down from Close to Keep ready, and Ⓑ closes it.
+    @MainActor
+    func testTheDownloadChoicesAreWalkedWithTheController() {
+        // The presses start 40 seconds in, once the choices have long been open; Ⓑ waits five seconds more.
+        let app = openSeries(["HUB_SERIES_DOWNLOADS": "panel", "HUB_PAD": "DOWN,DOWN,WAIT,WAIT,WAIT,WAIT,WAIT,B",
+                              "HUB_PAD_DELAY": "40"])
+        let panel = element(app, "download-panel")
+        XCTAssertTrue(panel.waitForExistence(timeout: 35), "the choices did not open before the presses")
+        XCTAssertTrue(waitUntil(50) { focus(app) == "ring series-downloads keep/choice" },
+                      "down did not walk from Close to Keep ready: \(focus(app))")
+        XCTAssertTrue(waitUntil(15) { !panel.exists }, "Ⓑ did not close the choices")
+        XCTAssertTrue(element(app, "title-download").exists, "Ⓑ left the page instead of closing the choices")
+    }
+
     /// Asks `condition` every quarter of a second until it holds or `seconds` pass.
     @MainActor
     private func waitUntil(_ seconds: TimeInterval, _ condition: () -> Bool) -> Bool {
