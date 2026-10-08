@@ -29,8 +29,9 @@ type CopyOptions struct {
 	// text), and an app that takes the narration from the hub's tracks wants the
 	// words first.
 	OmitAudio bool
-	// Restyle makes the book's font sizes follow the reader's text size, and puts
-	// two columns within reach of a narrow screen (epub_css.go, epub_html.go).
+	// Restyle makes the book's font sizes follow the reader's text size, puts two
+	// columns within reach of a narrow screen (epub_css.go, epub_html.go) and keeps the
+	// book's own right, centre and end alignment under the reader's (epub_align.go).
 	Restyle bool
 	// MendNarration makes a read-along edition's SMIL say what the hub reads from
 	// it: a sentence past the end of its audio file has no length, and one that runs
@@ -57,6 +58,10 @@ type CopyReport struct {
 	// Languages is how many documents were given the package's language, because
 	// their <html> had neither lang nor xml:lang.
 	Languages int
+	// Aligned is how many paragraphs, list items and bodies were given the alignment
+	// their book gives them (right, centre or end) in their own style attribute, as
+	// `!important`, because the reader's text alignment would have replaced it (#57).
+	Aligned int
 	// FontsDecoded is how many obfuscated fonts were written as the fonts they are,
 	// each under the book's own identifier (see epub_fonts.go). Their entries are
 	// gone from META-INF/encryption.xml, and the file with them when they were all
@@ -259,6 +264,7 @@ func PlanReadingEPUB(src io.ReaderAt, size int64, options CopyOptions) (*EPUBCop
 	var kinds map[string]entryKind
 	var language string
 	var fonts *fontPlan
+	var styles *bookStyles
 	if options.Restyle {
 		facts := classifyEntries(archive)
 		kinds, language, report.FixedLayout = facts.kinds, facts.language, facts.fixedLayout
@@ -267,6 +273,7 @@ func PlanReadingEPUB(src io.ReaderAt, size int64, options CopyOptions) (*EPUBCop
 			if fonts, err = planFonts(archive, facts.identifiers, &report); err != nil {
 				return nil, err
 			}
+			styles = readBookStyles(archive, kinds)
 		}
 	}
 	var mend *narrationMend
@@ -297,7 +304,7 @@ func PlanReadingEPUB(src io.ReaderAt, size int64, options CopyOptions) (*EPUBCop
 			}
 		}
 		if kind := kinds[entry.Name]; kind != kindOther && !report.FixedLayout {
-			done, err := restyleEntry(writer, entry, kind, language, &report)
+			done, err := restyleEntry(writer, entry, kind, language, styles, &report)
 			if err != nil {
 				return nil, err
 			}
@@ -557,7 +564,7 @@ func scanLenientXML(data []byte, visit func(start xml.StartElement, text string)
 // answers false, having written nothing, for an entry that is to be copied as it
 // was: one that holds nothing to change, or that cannot safely be edited (and then
 // the report says why).
-func restyleEntry(writer *zip.Writer, entry *zip.File, kind entryKind, language string, report *CopyReport) (bool, error) {
+func restyleEntry(writer *zip.Writer, entry *zip.File, kind entryKind, language string, styles *bookStyles, report *CopyReport) (bool, error) {
 	if entry.UncompressedSize64 > uint64(maxRestyleBytes) {
 		report.Left = append(report.Left, LeftAlone{entry.Name, leftTooLarge})
 		return false, nil
@@ -586,7 +593,7 @@ func restyleEntry(writer *zip.Writer, entry *zip.File, kind entryKind, language 
 	if kind == kindSheet {
 		rewritten, result = restyleSheet(data)
 	} else {
-		rewritten, result = restyleDocument(data, language)
+		rewritten, result = restyleDocument(data, documentContext{language: language, name: entry.Name, styles: styles})
 	}
 	if result.left != "" {
 		report.Left = append(report.Left, LeftAlone{entry.Name, result.left})
@@ -606,8 +613,33 @@ func restyleEntry(writer *zip.Writer, entry *zip.File, kind entryKind, language 
 	if result.language {
 		report.Languages++
 	}
+	report.Aligned += result.aligned
 	report.Edited++
 	return true, nil
+}
+
+// readBookStyles reads what each stylesheet of the book says about alignment, before
+// any document is rewritten: a document names its stylesheets, which may come after it
+// in the archive. A stylesheet that cannot be read is left out here, and restyleEntry
+// says why when it comes to it. Nothing but the rules about alignment is kept.
+func readBookStyles(archive *zip.Reader, kinds map[string]entryKind) *bookStyles {
+	styles := &bookStyles{sheets: map[string]*sheetAlignment{}}
+	for _, entry := range archive.File {
+		if kinds[entry.Name] != kindSheet || entry.UncompressedSize64 > uint64(maxRestyleBytes) {
+			continue
+		}
+		stream, err := entry.Open()
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(stream, maxRestyleBytes+1))
+		stream.Close()
+		if err != nil || int64(len(data)) > maxRestyleBytes {
+			continue
+		}
+		styles.sheets[entry.Name] = parseAlignSheet(data)
+	}
+	return styles
 }
 
 // writeRewritten writes data as the entry's new content, under the header it had

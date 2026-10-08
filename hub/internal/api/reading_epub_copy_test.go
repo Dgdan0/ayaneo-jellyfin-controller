@@ -172,6 +172,40 @@ func TestEbookIsServedAsTheReadingCopyOfTheFileOnThisPC(t *testing.T) {
 	}
 }
 
+// A book that aligns a paragraph right (Babel's epigraph attribution) is sent with
+// that alignment kept under the reader's Justify (#57), and the tag is the new bytes':
+// an app holding a copy made before is sent this one, and one holding this one is not.
+func TestEbookCopyKeepsTheBooksOwnAlignmentAndTheTagIsThatOfTheNewBytes(t *testing.T) {
+	env := newEbookEnv(t, ebookOptions{})
+	before := env.ebook(nil)
+	if before.Code != http.StatusOK {
+		t.Fatalf("ebook = %d", before.Code)
+	}
+	rewriteAlignedEPUBEntry(t, env.build.epub.Path, "OEBPS/text/part0002.xhtml", func(content string) string {
+		content = strings.Replace(content, "</head>", `<style type="text/css">.epi_at { text-align: right } .in_para { text-align: justify }</style></head>`, 1)
+		return strings.Replace(content, "<p>", `<p class="epi_at">`, 1)
+	})
+	now := env.ebook(nil)
+	if now.Code != http.StatusOK {
+		t.Fatalf("ebook = %d", now.Code)
+	}
+	chapter := zipEntry(t, mustZip(t, now.Body.Bytes()), "OEBPS/text/part0002.xhtml")
+	if !bytes.Contains(chapter, []byte(`<p style="text-align: right !important" class="epi_at">`)) {
+		t.Fatalf("the attribution is not kept on the right:\n%s", chapter)
+	}
+	sum := sha256.Sum256(now.Body.Bytes())
+	etag := now.Header().Get("ETag")
+	if etag != `"`+hex.EncodeToString(sum[:])[:32]+`"` || etag == before.Header().Get("ETag") {
+		t.Fatalf("the tag %q is not that of the new bytes (before: %q)", etag, before.Header().Get("ETag"))
+	}
+	if got := env.ebook(map[string]string{"If-None-Match": before.Header().Get("ETag")}); got.Code != http.StatusOK || !bytes.Equal(got.Body.Bytes(), now.Body.Bytes()) {
+		t.Fatalf("an app holding the earlier copy was sent %d", got.Code)
+	}
+	if got := env.ebook(map[string]string{"If-None-Match": etag}); got.Code != http.StatusNotModified {
+		t.Fatalf("an app holding this copy was sent %d", got.Code)
+	}
+}
+
 func TestEbookCopyAnswersRangesAndConditionsLikeAFile(t *testing.T) {
 	env := newEbookEnv(t, ebookOptions{})
 	whole := env.ebook(nil)

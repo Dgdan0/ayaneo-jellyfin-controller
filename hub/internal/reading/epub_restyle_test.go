@@ -184,7 +184,7 @@ func TestInjectedColumnStyleIsSafeInsideXHTML(t *testing.T) {
 		t.Fatalf("the column style holds a character XML cannot take as text: %s", columnStyle)
 	}
 	doc := `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>x</title></head><body><p>x</p></body></html>`
-	out, result := restyleDocument([]byte(doc), "")
+	out, result := restyleDocument([]byte(doc), documentContext{})
 	if !result.styled || !wellFormed(out) {
 		t.Fatalf("styled %v, well-formed %v:\n%s", result.styled, wellFormed(out), out)
 	}
@@ -235,7 +235,7 @@ func TestRestyleDocumentPutsOneStyleBeforeTheFirstHeadEndOnly(t *testing.T) {
 		"namespace prefixes":        {`<h:html xmlns:h="http://www.w3.org/1999/xhtml"><h:head></h:head><h:body/></h:html>`, false, ``},
 	} {
 		t.Run(name, func(t *testing.T) {
-			out, result := restyleDocument([]byte(test.doc), "")
+			out, result := restyleDocument([]byte(test.doc), documentContext{})
 			if result.styled != test.styled || result.left != "" {
 				t.Fatalf("styled = %v (want %v), left %q", result.styled, test.styled, result.left)
 			}
@@ -254,7 +254,7 @@ func TestRestyleDocumentPutsOneStyleBeforeTheFirstHeadEndOnly(t *testing.T) {
 				t.Fatalf("the document lost something:\n%s", out)
 			}
 			// And once it has it, it does not get a second.
-			again, second := restyleDocument(out, "")
+			again, second := restyleDocument(out, documentContext{})
 			if second.styled || !bytes.Equal(again, out) {
 				t.Fatalf("a second pass changed the document:\n%s", again)
 			}
@@ -278,7 +278,7 @@ func TestRestyleDocumentRewritesInlineStylesAndStyleBlocksAndOnlyThose(t *testin
 		`<math><mtext style="font-size:12px">m</mtext></math>` +
 		`<p style="font-size:small">after the svg</p>` +
 		`</body></html>`
-	out, result := restyleDocument([]byte(doc), "")
+	out, result := restyleDocument([]byte(doc), documentContext{})
 	want := strings.NewReplacer(
 		`<style>p { font-size: medium }</style>`, `<style>p { font-size: 1rem }</style>`,
 		`h1 { font-size: 20pt }`, `h1 { font-size: 1.6667rem }`,
@@ -314,7 +314,7 @@ func TestRestyleDocumentMakesAbsoluteLineHeightsRelativeToo(t *testing.T) {
 		`<p data-style="line-height:18px" title="line-height:18px">e</p>` +
 		`<svg xmlns="http://www.w3.org/2000/svg"><text style="line-height:18px">svg</text></svg>` +
 		`</body></html>`
-	out, result := restyleDocument([]byte(doc), "")
+	out, result := restyleDocument([]byte(doc), documentContext{})
 	want := strings.NewReplacer(
 		`font-size: 80px; line-height: 70px;`, `font-size: 5rem; line-height: 4.375rem;`,
 		`<p style="line-height:18px">a</p>`, `<p style="line-height:1.125rem">a</p>`,
@@ -340,7 +340,7 @@ func TestRestyleDocumentFollowsHTMLThatIsNotXMLAsFarAsItCan(t *testing.T) {
 	doc := `<html><head><style>p { font-size: medium }</style></head><body>` +
 		`<p style=font-size:small>unquoted</p><br><p style="font-size:large">a < b and c<d</p>` +
 		`<img src=x.png style='font-size:12px'><p style="font-size:small`
-	out, result := restyleDocument([]byte(doc), "")
+	out, result := restyleDocument([]byte(doc), documentContext{})
 	want := strings.NewReplacer(
 		`p { font-size: medium }`, `p { font-size: 1rem }`,
 		`style="font-size:large"`, `style="font-size:1.125rem"`,
@@ -375,7 +375,7 @@ func TestRestyleDocumentLeavesAnEncodingItCannotEditAlone(t *testing.T) {
 		"bytes that are not UTF-8":                                    "<html><head><style>p { font-size: medium }</style></head><body><p>caf\xe9</p></body></html>",
 	} {
 		t.Run(name, func(t *testing.T) {
-			out, result := restyleDocument([]byte(doc), "")
+			out, result := restyleDocument([]byte(doc), documentContext{})
 			if result.left != leftEncoding || string(out) != doc || result.fontSizes != 0 || result.styled {
 				t.Fatalf("result = %+v; changed: %v", result, string(out) != doc)
 			}
@@ -393,7 +393,7 @@ func TestRestyleDocumentLeavesAnEncodingItCannotEditAlone(t *testing.T) {
 		"no declaration":                             `<html>` + body,
 	} {
 		t.Run(name, func(t *testing.T) {
-			out, result := restyleDocument([]byte(doc), "")
+			out, result := restyleDocument([]byte(doc), documentContext{})
 			if result.left != "" || result.fontSizes == 0 || !result.styled {
 				t.Fatalf("result = %+v", result)
 			}

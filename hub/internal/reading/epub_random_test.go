@@ -179,7 +179,7 @@ func TestRestyleDocumentKeepsAWellFormedDocumentWellFormed(t *testing.T) {
 		if !wellFormed([]byte(doc)) {
 			t.Fatalf("the generator made a document that is not well-formed:\n%s", doc)
 		}
-		out, result := restyleDocument([]byte(doc), "en-US")
+		out, result := restyleDocument([]byte(doc), documentContext{language: "en-US"})
 		if !wellFormed(out) {
 			t.Fatalf("a well-formed document is not any more:\n%s\n%s", doc, out)
 		}
@@ -200,7 +200,7 @@ func TestRestyleDocumentKeepsAWellFormedDocumentWellFormed(t *testing.T) {
 		if result.fontSizes > 0 {
 			resized++
 		}
-		again, second := restyleDocument(out, "en-US")
+		again, second := restyleDocument(out, documentContext{language: "en-US"})
 		if second.fontSizes != 0 || second.lineHeights != 0 || second.styled || second.language || !bytes.Equal(again, out) {
 			t.Fatalf("a second pass changed the document:\n%s\n%s", out, again)
 		}
