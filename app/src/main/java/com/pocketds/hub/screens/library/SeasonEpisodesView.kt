@@ -47,6 +47,20 @@ class SeasonEpisodesView(
     var onFocusedEpisode: ((LibraryItem) -> Unit)? = null
     /** A season's episode count, once its first page says. */
     var onTotal: ((seasonId: String, total: Int) -> Unit)? = null
+    /** What a card shows of its download and of select mode's tick, asked as it is bound and by [refreshMarks] (#48). */
+    var marks: ((LibraryItem) -> CardMarks)? = null
+    /** The download corner of a card was tapped. */
+    var onDownloadTap: ((LibraryItem) -> Unit)? = null
+    /** A long press or a right click on a card: its menu, as Ⓨ opens it (#48). */
+    var onMenu: ((LibraryItem) -> Unit)? = null
+
+    /** [tick] null is no select mode; [dimmed] an episode that cannot be chosen in it. */
+    data class CardMarks(
+        val download: com.pocketds.hub.offline.EpisodeDownloadMarks.Badge?,
+        val words: String = "",
+        val tick: Boolean? = null,
+        val dimmed: Boolean = false
+    )
 
     private class SeasonState(val paging: PagedLoadState, val items: MutableList<LibraryItem> = mutableListOf()) {
         var selected = -1
@@ -139,6 +153,22 @@ class SeasonEpisodesView(
         }
     }
 
+    /** The download corners and ticks of the cards on screen, redrawn in place as a transfer moves (#48). */
+    fun refreshMarks() {
+        val provider = marks ?: return
+        for (i in 0 until list.childCount) {
+            val holder = list.getChildViewHolder(list.getChildAt(i)) as? EpisodeHolder ?: continue
+            val value = current?.items?.getOrNull(holder.bindingAdapterPosition) ?: continue
+            val shown = provider(value)
+            holder.card.setMarked(shown.tick)
+            holder.card.setDownload(shown.download, shown.words)
+            holder.card.setAvailable(!shown.dimmed)
+        }
+    }
+
+    /** The episodes of the season on show, loaded so far. */
+    val shown: List<LibraryItem> get() = current?.items.orEmpty()
+
     /** Pages loaded so far go; the season reloads from page one. */
     fun reload() {
         val state = current ?: return
@@ -212,6 +242,8 @@ class SeasonEpisodesView(
                 values.getOrNull(position)?.let { onFocusedEpisode?.invoke(it) }
             }
             card.onActivate = { values.getOrNull(holder.bindingAdapterPosition)?.let { onPlay?.invoke(it) } }
+            card.onDownloadTap = { values.getOrNull(holder.bindingAdapterPosition)?.let { onDownloadTap?.invoke(it) } }
+            card.onMenu = { values.getOrNull(holder.bindingAdapterPosition)?.let { onMenu?.invoke(it) } }
             return holder
         }
 
@@ -223,6 +255,7 @@ class SeasonEpisodesView(
                 ResumeRules.watchLabel(value.played, value.progress)?.let(::add)
             }.joinToString(" · ")
             val name = "${value.indexNumber}. ${value.title.ifBlank { EpisodeLabel.code(value.seasonNumber, value.indexNumber) }}"
+            val shown = marks?.invoke(value)
             holder.card.bind(
                 EpisodeCardView.Model(
                     title = name,
@@ -231,7 +264,11 @@ class SeasonEpisodesView(
                     progress = if (watched) 0.0 else value.progress,
                     badge = if (value.id == target && !watched) "UP NEXT" else "",
                     watched = watched,
-                    description = "Episode ${value.indexNumber}, ${value.title}, $meta"
+                    description = "Episode ${value.indexNumber}, ${value.title}, $meta",
+                    marked = shown?.tick,
+                    available = shown?.dimmed != true,
+                    download = shown?.download,
+                    downloadDescription = shown?.words.orEmpty()
                 ),
                 Artwork.loader(api, holder.card.context)
             )

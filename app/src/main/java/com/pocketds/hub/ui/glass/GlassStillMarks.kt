@@ -49,6 +49,13 @@ class GlassStillMarks(context: Context, colors: PocketColors, frame: FrameLayout
         })
     }
 
+    /** The tick makes room for something at the corner, as a download's badge (#48): [offsetPx] further from the edge. */
+    fun shiftTick(offsetPx: Int) {
+        val params = tick.layoutParams as? FrameLayout.LayoutParams ?: return
+        val margin = dp(tick.context, 6) + offsetPx
+        if (params.marginEnd != margin) { params.marginEnd = margin; tick.layoutParams = params }
+    }
+
     /** How far in (nothing for none or finished) and whether it is watched. */
     fun bind(fraction: Double, watched: Boolean) {
         track.fraction = fraction

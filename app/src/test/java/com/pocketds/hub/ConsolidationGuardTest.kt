@@ -145,6 +145,13 @@ class ConsolidationGuardTest {
                 "maths, so the voice turning the page, a page turned by hand and Play from the page all agree on where a page begins " +
                 "and ends, in a sentence too (#49)",
             setOf("reader/ReadAlongPageProbe.kt")),
+        Rule(Regex("""\bOfflineSelectionScreen\b"""),
+            "the series page itself (#48): the corners of its episodes, the Download panel (SeriesDownloadPanel), select mode and " +
+                "the storage bar are SeriesDownloads', and what each choice adds is SeriesDownloadChoices'; there is no page of its own to pick episodes on"),
+        Rule(Regex("""OfflinePrepareBody\("""),
+            "OfflineQueueing.queue: one way onto the persistent queue (a grant per item, the batch named once, the service started), " +
+                "for a film, a quick tap, a season, a choice, select mode and Keep ready (#48)",
+            setOf("offline/OfflineQueueing.kt", "model/Offline.kt")),
         Rule(Regex("""\bnarrationPill\b"""),
             "the dock alone: nothing floats over the page while the voice reads (#49); the corners show and the menu brings the dock"),
         Rule(Regex("""\bisComplete\([^)]*\)\s*\)\s*return\s+\w+\.completeFile"""),

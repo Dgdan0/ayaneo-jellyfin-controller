@@ -170,12 +170,14 @@ object ReaderFixtures {
      * generated silence, in paragraphs of three, so that it runs to many pages and the page breaks fall inside
      * sentences at all sorts of places. Sentence n is the element `s{n}`, and its text begins "Sentence {n+1} ".
      */
-    fun longEpub(sentences: Int = 120, sentenceSeconds: Int = 3, twoColumns: Boolean = false): ByteArray {
+    fun longEpub(sentences: Int = 120, sentenceSeconds: Int = 3, twoColumns: Boolean = false, firstSentenceChars: Int = 0): ByteArray {
         val words = listOf("lantern", "ridge", "pines", "observatory", "quiet", "path", "Mara", "followed", "toward", "night",
             "light", "kept", "through", "morning", "valley", "river", "stone", "bridge", "slowly", "carried")
         val texts = (0 until sentences).map { i ->
+            // [firstSentenceChars] makes the first one as long as that, so it runs over three lines or more (#52).
+            val count = if (i == 0 && firstSentenceChars > 0) firstSentenceChars / 7 else 12 + (i * 7) % 24
             "Sentence ${i + 1} began beyond the old ridge and " +
-                (0 until 12 + (i * 7) % 24).joinToString(" ") { words[(i * 3 + it) % words.size] } + "."
+                (0 until count).joinToString(" ") { words[(i * 3 + it) % words.size] } + "."
         }
         val body = texts.withIndex().chunked(3).joinToString("") { group ->
             "<p>" + group.joinToString(" ") { (i, text) -> "<span id=\"s$i\">$text</span>" } + "</p>"
@@ -188,7 +190,7 @@ object ReaderFixtures {
             "mimetype" to "application/epub+zip".toByteArray(),
             "META-INF/container.xml" to """<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""".toByteArray(),
             "EPUB/package.opf" to """<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">urn:reader-long</dc:identifier><dc:title>The Last Observatory</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-10-05T00:00:00Z</meta></metadata><manifest><item id="one" href="one.xhtml" media-type="application/xhtml+xml" media-overlay="mo1"/><item id="mo1" href="one.smil" media-type="application/smil+xml"/><item id="voice" href="voice.wav" media-type="audio/wav"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest><spine><itemref idref="one"/></spine></package>""".toByteArray(),
-            "EPUB/one.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>A light beyond the ridge</title>$columnRule</head><body><h1>A light beyond the ridge</h1>$body</body></html>""".toByteArray(),
+            "EPUB/one.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>A light beyond the ridge</title>$columnRule</head><body>${if (firstSentenceChars > 0) "" else "<h1>A light beyond the ridge</h1>"}$body</body></html>""".toByteArray(),
             "EPUB/nav.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol><li><a href="one.xhtml">A light beyond the ridge</a></li></ol></nav></body></html>""".toByteArray(),
             "EPUB/one.smil" to """<smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><seq epub:textref="one.xhtml">$pars</seq></body></smil>""".toByteArray(),
             "EPUB/voice.wav" to silence(seconds = sentences * sentenceSeconds)

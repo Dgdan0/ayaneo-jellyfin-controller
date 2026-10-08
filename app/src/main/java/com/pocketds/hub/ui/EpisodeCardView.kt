@@ -58,11 +58,28 @@ class EpisodeCardView(
         /** A word in the corner: "UP NEXT" on the episode Play would start. */
         val badge: String = "",
         /** A small accent tick in the corner, when no badge or picker mark is there. */
-        val watched: Boolean = false
+        val watched: Boolean = false,
+        /** The download corner (#48): an arrow, a ring, waiting or a tick; null shows none. Hidden while a picker's mark is. */
+        val download: com.pocketds.hub.offline.EpisodeDownloadMarks.Badge? = null,
+        /** What a screen reader says of the download corner. */
+        val downloadDescription: String = ""
     )
 
     var onFocused: (() -> Unit)? = null
     var onActivate: (() -> Unit)? = null
+    /** The download corner was tapped with a finger or the trackpad (#48). */
+    var onDownloadTap: (() -> Unit)? = null
+    /**
+     * A long press, or a right click: what Ⓨ does on the pad (#48). The press that opened it is not a tap, so it does not
+     * play the episode when the finger lifts.
+     */
+    var onMenu: (() -> Unit)? = null
+    private var pressCheck: Runnable? = null
+    private var menuOpened = false
+    private var downX = 0f
+    private var downY = 0f
+    private var download: com.pocketds.hub.offline.EpisodeDownloadMarks.Badge? = null
+    private var downloadWords = ""
 
     private val still = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
     private val mark = TextView(context).apply {
@@ -73,6 +90,7 @@ class EpisodeCardView(
         }
         visibility = GONE
     }
+    private val downloadBadge = DownloadBadgeView(context, colors).apply { visibility = GONE }
     private val badge = TextView(context).apply {
         textSize = 10f; textWeight(800); letterSpacing = .08f
         setTextColor(colors.accentText)
@@ -106,6 +124,12 @@ class EpisodeCardView(
         art.addView(mark, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.END).apply {
             topMargin = dp(6); marginEnd = dp(6)
         })
+        // The download's corner, finger-sized so a tap lands; its disc sits where the tick would.
+        art.addView(downloadBadge, FrameLayout.LayoutParams(dp(DownloadBadgeView.TOUCH_DP.toInt()), dp(DownloadBadgeView.TOUCH_DP.toInt()), Gravity.TOP or Gravity.END).apply {
+            topMargin = dp(6) - (dp(DownloadBadgeView.TOUCH_DP.toInt()) - dp(DownloadBadgeView.DISC_DP.toInt())) / 2
+            marginEnd = dp(6) - (dp(DownloadBadgeView.TOUCH_DP.toInt()) - dp(DownloadBadgeView.DISC_DP.toInt())) / 2
+        })
+        downloadBadge.setOnClickListener { onDownloadTap?.invoke() }
         // UP NEXT at the top left, where the prototype has it, clear of the tick.
         art.addView(badge, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.START).apply {
             topMargin = dp(8); marginEnd = dp(6); marginStart = dp(8)
@@ -120,6 +144,38 @@ class EpisodeCardView(
             if (focused) onFocused?.invoke()
         }
         activateOnTap { onActivate?.invoke() }
+    }
+
+    override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (onMenu == null) return super.dispatchTouchEvent(event)
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                menuOpened = false
+                downX = event.x; downY = event.y
+                pressCheck?.let(::removeCallbacks)
+                if (event.buttonState and android.view.MotionEvent.BUTTON_SECONDARY != 0) {
+                    menuOpened = true
+                    onMenu?.invoke()
+                } else {
+                    pressCheck = Runnable {
+                        menuOpened = true
+                        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                        onMenu?.invoke()
+                    }.also { postDelayed(it, android.view.ViewConfiguration.getLongPressTimeout().toLong()) }
+                }
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+                if (Math.abs(event.x - downX) > slop || Math.abs(event.y - downY) > slop) pressCheck?.let(::removeCallbacks)
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> pressCheck?.let(::removeCallbacks)
+        }
+        // The press that opened the menu ends as a cancel: no tap, no play.
+        if (menuOpened && event.actionMasked == android.view.MotionEvent.ACTION_UP) {
+            val cancel = android.view.MotionEvent.obtain(event).apply { action = android.view.MotionEvent.ACTION_CANCEL }
+            return super.dispatchTouchEvent(cancel).also { cancel.recycle() }
+        }
+        return super.dispatchTouchEvent(event)
     }
 
     /**
@@ -141,14 +197,39 @@ class EpisodeCardView(
         // A picker's own mark stays; a watched episode gets the accent tick.
         marks.bind(model.progress, model.watched && model.marked == null)
         setMarked(model.marked)
+        setDownload(model.download, model.downloadDescription)
         contentDescription = model.description.ifBlank { listOf(model.title, model.meta).filter(String::isNotBlank).joinToString(", ") }
         Artwork.bind(still, loader, model.still, opaque = true, placeholderColor = colors.posterPlaceholder)
     }
+
+    /** The download corner alone, as a transfer moves, without binding the card again (#48). */
+    fun setDownload(value: com.pocketds.hub.offline.EpisodeDownloadMarks.Badge?, description: String = "") {
+        download = value
+        downloadWords = description
+        applyDownload()
+    }
+
+    private fun applyDownload() {
+        val value = download
+        val shown = value != null && mark.visibility != VISIBLE
+        downloadBadge.visibility = if (shown) VISIBLE else GONE
+        if (value != null) {
+            downloadBadge.bind(value)
+            downloadBadge.contentDescription = downloadWords
+            downloadBadge.importantForAccessibility = if (downloadWords.isBlank()) IMPORTANT_FOR_ACCESSIBILITY_NO else IMPORTANT_FOR_ACCESSIBILITY_YES
+        }
+        // The watched tick moves over, clear of the corner.
+        marks.shiftTick(if (shown) dp(DownloadBadgeView.DISC_DP.toInt() + 4) else 0)
+    }
+
+    /** An episode that cannot be chosen is dimmed, as a picker's unavailable ones are. */
+    fun setAvailable(available: Boolean) { alpha = if (available) 1f else .45f }
 
     fun setMarked(marked: Boolean?) {
         mark.visibility = if (marked == null) GONE else VISIBLE
         mark.text = if (marked == true) "✓" else "○"
         mark.setTextColor(if (marked == true) colors.accent else colors.mutedText)
+        applyDownload()
     }
 
     private fun text(size: Float, color: Int, lines: Int) = TextView(context).apply {

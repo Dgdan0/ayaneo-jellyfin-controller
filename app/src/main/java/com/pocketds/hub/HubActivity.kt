@@ -53,7 +53,6 @@ import com.pocketds.hub.playback.PlayerScreen
 import com.pocketds.hub.offline.OfflineDownloadService
 import com.pocketds.hub.offline.OfflineCatalogProgress
 import com.pocketds.hub.offline.OfflineRepository
-import com.pocketds.hub.screens.offline.OfflineSelectionScreen
 import com.pocketds.hub.screens.offline.OfflineScreen
 import com.pocketds.hub.screens.downloads.DownloadsScreen
 import com.pocketds.hub.screens.discover.DiscoverScreen
@@ -185,6 +184,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         seedFromIntent()
         api = HubClient.shared(this)
         requestDownloadNotificationPermission()
+        // Keep ready tidies up and fetches the next episodes at launch, when nothing is playing (#48).
+        com.pocketds.hub.offline.KeepReadyRunner.requestRun(this, afterMs = 4_000L)
 
         router = PadEventRouter(triggerHoldContext = {
             (sections.stack().peek() as? Screen)?.takeIf { it.requiresTriggerHold && !trailerMode }
@@ -1027,38 +1028,24 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         push(PlayerScreen(api, plan.item.id, "resume", plan, ::ringVisible))
     }
 
+    /**
+     * A film or an episode, from its own page. A series' episodes are chosen on the series page itself (#48): its
+     * cards' corners, its Download panel and select mode, so there is nothing to push here for one.
+     */
     override fun downloadItem(item: LibraryItem, seasonId: String) {
-        if (item.type == "series") {
-            push(OfflineSelectionScreen(api, item.id, item.title, seasonId, ::ringVisible))
-            return
-        }
         if (item.type != "movie" && item.type != "episode") {
-            notify("Only movies and episodes can be stored offline")
+            notify(if (item.type == "series") "Open the series to choose its episodes" else "Only movies and episodes can be stored offline")
             return
         }
-        if (!OfflineRepository.get(this).selectedStorageAvailable()) {
-            notify("Choose an available download location in Settings")
-            return
-        }
-        val batchKey = "offline-${System.currentTimeMillis()}-${item.id.take(8)}"
         chromeScope.launch {
-            when (val result = api.prepareOffline(OfflinePrepareBody(
-                batchKey = batchKey,
-                seriesId = item.seriesId,
-                items = listOf(OfflinePrepareItem("$batchKey-item", item.id))
-            ))) {
-                is com.pocketds.hub.net.HubResult.Ok -> {
-                    val label = item.seriesTitle.ifBlank { item.title }
-                    val count = OfflineRepository.get(this@HubActivity).enqueue(
-                        label, item.seriesId, result.value.items
-                    )
-                    if (count > 0) {
-                        OfflineDownloadService.start(this@HubActivity)
-                        notify("Added ${item.title} to downloads")
-                    } else notify("${item.title} is already downloaded or queued")
-                }
-                is com.pocketds.hub.net.HubResult.Failed -> notify(result.message)
-            }
+            val result = com.pocketds.hub.offline.OfflineQueueing.queue(
+                this@HubActivity, api, item.seriesTitle.ifBlank { item.title }, item.seriesId, listOf(item.id)
+            )
+            notify(when (result) {
+                is com.pocketds.hub.offline.OfflineQueueing.Result.Queued -> "Added ${item.title} to downloads"
+                com.pocketds.hub.offline.OfflineQueueing.Result.AlreadyThere -> "${item.title} is already downloaded or queued"
+                is com.pocketds.hub.offline.OfflineQueueing.Result.Failed -> result.message
+            })
         }
     }
 
