@@ -58,10 +58,12 @@ public enum ReadAlongPackage {
                 let begin = try clock(beginText.trimmingCharacters(in: .whitespaces).isEmpty ? "0s" : beginText)
                 let end = try clock(audio.attributes["clipEnd"] ?? "")
                 // Word alignment can emit a boundary of no length for a word
-                // it did not match. It has no audio to light; the rest of the
+                // it did not match, and an older aligner a clip that ends
+                // before it begins (the hub mends those it serves now, but an
+                // edition kept from before still has them). Neither has audio
+                // to light: that one sentence is skipped and the rest of the
                 // edition still plays.
-                if end == begin { continue }
-                guard end > begin else { throw ReadAlongError("Invalid narration interval") }
+                if end <= begin { continue }
                 segments.append(ReadAlongSegment(textHref: words.path, fragment: words.fragment, audioHref: audioHref,
                                                  beginMs: begin, endMs: end))
                 guard segments.count <= segmentLimit else { throw ReadAlongError("Narration timeline is too large") }

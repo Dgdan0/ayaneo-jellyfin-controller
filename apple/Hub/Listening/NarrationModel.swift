@@ -437,7 +437,11 @@ final class NarrationModel {
         let tracks = ListeningTracks.tracks(manifest, workId: workId, sourceItemId: sourceItemId)
         do {
             let narration = try await Task.detached(priority: .userInitiated) { () throws -> Narration in
-                let timeline = try ReadAlongPackage.read(edition, requireAudio: false)
+                // A sentence past its file's audio is skipped, not the edition refused.
+                guard let timeline = ReadAlongStream.fitted(try ReadAlongPackage.read(edition, requireAudio: false),
+                                                            manifest: manifest) else {
+                    throw ReadAlongError("This edition has no aligned narration")
+                }
                 let sources = try ReadAlongStream.sources(timeline, manifest: manifest, sourceItemId: sourceItemId) { index in
                     ListeningAudio.trackAddress(index, manifest: manifest, workId: workId, sourceItemId: sourceItemId,
                                                 address: address, demo: tones)
