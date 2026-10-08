@@ -18,7 +18,6 @@ struct TitleView: View {
     @State private var item: HubKit.LibraryItem?
     @State private var status = StatusMessage("")
     @State private var saving = false
-    @State private var expanded = false
     @State private var tab: TitleTab = .episodes
     /// Whether the person has picked a tab: until then the first one shows,
     /// even when More like this arrives after Cast.
@@ -33,7 +32,6 @@ struct TitleView: View {
     @State private var episodePage = 0
     @State private var episodePages = 1
     @State private var loadingEpisodes = false
-    @State private var revealedTarget = ""
     /// An episode held in the strip and chosen to download, waiting for its answer (#5).
     @State private var downloadingEpisode: HubKit.LibraryItem?
     @State private var offline = OfflineLibrary.shared
@@ -53,39 +51,18 @@ struct TitleView: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            // A small Mac window lays the words out as a phone turned sideways does.
-            let page = metrics.forTitlePage(size: proxy.size, safe: proxy.safeAreaInsets)
-            ScrollView {
-                ZStack(alignment: .top) {
-                    // The prototype's `.dart`: 590 tall on an iPad, 470 on an
-                    // iPhone; on a phone turned sideways, what can be seen.
-                    FadedArtwork.title(backdropPath)
-                        .frame(height: page.short ? proxy.size.height + proxy.safeAreaInsets.top
-                               : (page.compact ? 470 : 590))
-                        .frame(maxWidth: .infinity)
-                        .clipped()
-                    VStack(alignment: .leading, spacing: 0) {
-                        // On a short screen the words start under the bars,
-                        // so Play is never below the fold.
-                        header(page)
-                            .padding(.top, page.short ? proxy.safeAreaInsets.top + 10
-                                     : max(page.compact ? 290 : 236, proxy.safeAreaInsets.top + 120))
-                            .padding(.horizontal, metrics.margin)
-                        StatusLine(message: status) { Task { await load() } }
-                            .padding(.horizontal, metrics.margin)
-                            .padding(.top, 8)
-                        if item != nil, !tabs.isEmpty {
-                            UnderlineTabs(tabs: tabs, selection: Binding(get: { tab }, set: { tab = $0; tabChosen = true }))
-                                .padding(.horizontal, metrics.margin)
-                                .padding(.top, 14)
-                            tabContent
-                        }
-                    }
-                }
-                .padding(.bottom, 28)
+        TitlePage(backdrop: FadedArtwork.title(backdropPath)) { page in
+            header(page)
+        } below: {
+            StatusLine(message: status) { Task { await load() } }
+                .padding(.horizontal, metrics.margin)
+                .padding(.top, 8)
+            if item != nil, !tabs.isEmpty {
+                UnderlineTabs(tabs: tabs, selection: Binding(get: { tab }, set: { tab = $0; tabChosen = true }))
+                    .padding(.horizontal, metrics.margin)
+                    .padding(.top, 14)
+                tabContent
             }
-            .ignoresSafeArea(edges: .top)
         }
         .ambientArtwork(backdropPath)
         .refreshable { await load() }
@@ -125,9 +102,11 @@ struct TitleView: View {
         return item.type == "episode" ? item.thumb : item.poster
     }
 
-    /// The prototype's `.dhead`: lines 10 apart, at most 860 wide.
+    /// The prototype's `.dhead`, as `TitleHeader` draws it.
     private func header(_ page: GlassMetrics) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        TitleHeader(title: item?.title ?? route.title, originalTitle: item?.originalTitle ?? "", page: page,
+                    facts: item.map(DetailLines.facts) ?? "", state: item.map(DetailLines.state) ?? "",
+                    overview: item?.overview ?? "") {
             if let item, item.type == "episode", !item.seriesTitle.isEmpty {
                 NavigationLink(value: AppRoute.title(TitleRoute(itemId: item.seriesId, title: item.seriesTitle))) {
                     Text(item.seriesTitle.uppercased())
@@ -138,52 +117,8 @@ struct TitleView: View {
                 .buttonStyle(.plain)
                 .disabled(item.seriesId.isEmpty)
             }
-            Text(item?.title ?? route.title)
-                .font(HubType.heading(page.heroTitle, weight: .heavy))
-                .tracking(-0.02 * page.heroTitle)
-                .foregroundStyle(.white)
-                .lineLimit(2)
-                .minimumScaleFactor(0.6)
-            if let item {
-                if !item.originalTitle.isEmpty,
-                   item.originalTitle.caseInsensitiveCompare(item.title) != .orderedSame {
-                    Text(item.originalTitle)
-                        .font(HubType.body(15, relativeTo: .subheadline))
-                        .foregroundStyle(.white.opacity(0.66))
-                }
-                let facts = DetailLines.facts(item)
-                if !facts.isEmpty {
-                    // Wraps rather than truncates, as the prototype's `.facts` does.
-                    Text(factsLine(facts.components(separatedBy: "  ·  ")))
-                        .font(HubType.body(15, relativeTo: .subheadline))
-                }
-                let state = DetailLines.state(item)
-                if !state.isEmpty {
-                    Text(state)
-                        .font(HubType.body(14, weight: .bold, relativeTo: .subheadline))
-                        .foregroundStyle(accent.tint)
-                }
-                if !item.overview.isEmpty { overview(item.overview) }
-                actions(item).padding(.top, 4)
-            }
-        }
-        .frame(maxWidth: 860, alignment: .leading)
-        // Laid over the backdrop in a stack, the lines were offered one line's
-        // height each and truncated; their own height lets them wrap.
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private func overview(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(text)
-                .font(HubType.body(15, relativeTo: .body))
-                .foregroundStyle(.white.opacity(0.86))
-                .lineLimit(expanded ? nil : 2)
-                .frame(maxWidth: 620, alignment: .leading)
-            Button(expanded ? "Collapse description" : "Read more") { expanded.toggle() }
-                .font(HubType.body(13, weight: .bold, relativeTo: .footnote))
-                .foregroundStyle(.white.opacity(0.7))
-                .buttonStyle(.plain)
+        } actions: {
+            if let item { actions(item).padding(.top, 4) }
         }
     }
 
@@ -339,40 +274,14 @@ struct TitleView: View {
 
     @ViewBuilder private var episodesTab: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // The prototype's `.pills`: one glass pill per season.
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(seasons) { season in
-                        ChoicePill(title: seasonTitle(season), selected: season.id == seasonId) {
-                            guard season.id != seasonId else { return }
-                            seasonId = season.id
+            SeasonPills(seasons.map { SeasonPill(id: $0.id, title: seasonTitle($0), selected: $0.id == seasonId) },
+                        choose: { id in
+                            guard id != seasonId else { return }
+                            seasonId = id
                             Task { await loadEpisodes(reset: true) }
-                        }
-                        .contextMenu {
-                            if let item {
-                                // The season's episodes, ticked in the picker (#43).
-                                Button {
-                                    openRoute(.offlinePicker(OfflinePickerRoute(seriesId: item.id, title: item.title,
-                                                                                seasonId: season.id)))
-                                } label: {
-                                    Label("Download season", systemImage: "arrow.down.circle")
-                                }
-                            }
-                            if let item, LibraryUpkeep.offersReleases(item) {
-                                Button {
-                                    findRelease(item, season: season.indexNumber)
-                                } label: {
-                                    Label("Find release for \(season.title.isEmpty ? EpisodeLabel.season(season.indexNumber) : season.title)",
-                                          systemImage: "magnifyingglass")
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, metrics.margin)
-                .padding(.top, 14)
-                .padding(.bottom, 2)
-            }
+                        }, menu: { id in
+                            if let season = seasons.first(where: { $0.id == id }) { seasonMenu(season) }
+                        })
             if episodes.isEmpty && !loadingEpisodes && !seasons.isEmpty {
                 Text("No episodes in this season yet.")
                     .font(HubType.body(15, relativeTo: .subheadline))
@@ -380,39 +289,34 @@ struct TitleView: View {
                     .padding(.horizontal, metrics.margin)
                     .padding(.top, 14)
             }
-            ScrollViewReader { reader in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: metrics.gap) {
-                        ForEach(Array(episodes.enumerated()), id: \.element.id) { index, episode in
-                            // An episode plays, as the prototype's and Android's
-                            // do; its own page is in the menu.
-                            Button {
-                                play(request(for: episode, mode: DetailLines.startMode(episode)))
-                            } label: {
-                                EpisodeCard(episode: episode, upNext: episode.id == target?.item.id)
-                                    .frame(width: metrics.episode)
-                            }
-                            .buttonStyle(GlassCardStyle())
-                            .accessibilityHint(episode.positionSeconds > 0 ? "Resumes the episode" : "Plays the episode")
-                            .contextMenu { episodeMenu(episode) }
-                            .onAppear {
-                                if index >= episodes.count - 3 { Task { await loadEpisodes(reset: false) } }
-                            }
-                        }
-                    }
-                    .padding(.top, 12)
-                    .padding(.bottom, 16)
-                }
-                // Margins rather than padding, so the episode scrolled to below
-                // stops at the page's margin, not against the screen's edge.
-                .contentMargins(.horizontal, metrics.margin, for: .scrollContent)
-                // The strip opens at the episode Play starts, as Android's does,
-                // rather than at episode 1 of a half-watched season.
-                .onChange(of: episodes.map(\.id)) { _, ids in
-                    guard let id = target?.item.id, ids.contains(id), revealedTarget != id, ids.first != id else { return }
-                    revealedTarget = id
-                    reader.scrollTo(id, anchor: .leading)
-                }
+            // An episode plays, as the prototype's and Android's do; its own page is in the menu.
+            EpisodeStrip(episodes, reveal: target?.item.id,
+                         play: { episode in play(request(for: episode, mode: DetailLines.startMode(episode))) },
+                         hint: { $0.positionSeconds > 0 ? "Resumes the episode" : "Plays the episode" },
+                         reached: { index in
+                             if index >= episodes.count - 3 { Task { await loadEpisodes(reset: false) } }
+                         },
+                         card: { episode in EpisodeCard(episode: episode, upNext: episode.id == target?.item.id) },
+                         menu: { episode in episodeMenu(episode) })
+        }
+    }
+
+    /// A season's pill, held: its episodes to download, and its releases to find.
+    @ViewBuilder private func seasonMenu(_ season: HubKit.LibraryItem) -> some View {
+        if let item {
+            // The season's episodes, ticked in the picker (#43).
+            Button {
+                openRoute(.offlinePicker(OfflinePickerRoute(seriesId: item.id, title: item.title, seasonId: season.id)))
+            } label: {
+                Label("Download season", systemImage: "arrow.down.circle")
+            }
+        }
+        if let item, LibraryUpkeep.offersReleases(item) {
+            Button {
+                findRelease(item, season: season.indexNumber)
+            } label: {
+                Label("Find release for \(season.title.isEmpty ? EpisodeLabel.season(season.indexNumber) : season.title)",
+                      systemImage: "magnifyingglass")
             }
         }
     }
@@ -637,41 +541,6 @@ struct TitleView: View {
             item = before
             status = StatusText.failed(error.message, kind: error.kind, hasData: true, canRetry: false)
         }
-    }
-}
-
-/// One episode in a season's strip (`.card.ep`; Android `ui/EpisodeCardView`):
-/// its 16:9 still with the progress inside, UP NEXT on the one Play starts, a
-/// tick on a watched one, "5. Title" and "22 min · 69% watched" under it.
-struct EpisodeCard: View {
-    let episode: HubKit.LibraryItem
-    let upNext: Bool
-    @Environment(\.glassMetrics) private var metrics
-
-    private var watched: Bool { ResumeRules.showsWatched(played: episode.played, progress: episode.progress) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Color.clear
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .overlay { ArtworkView(path: episode.thumb.isEmpty ? episode.poster : episode.thumb, width: 480) }
-                .overlay { ArtworkProgress(progress: watched ? 0 : episode.progress) }
-                .overlay { PlayDisc() }
-                .clipShape(RoundedRectangle(cornerRadius: metrics.radius, style: .continuous))
-                .overlay(alignment: .topLeading) {
-                    if upNext && !watched { UpNextTag().padding(8) }
-                }
-                .overlay(alignment: .topTrailing) {
-                    if watched {
-                        WatchBadge(played: episode.played, progress: episode.progress, unplayedCount: 0, favorite: false)
-                            .padding(6)
-                    }
-                }
-                .litArtwork(corner: metrics.radius)
-            CardCaption(title: DetailLines.episodeTitle(episode), detail: DetailLines.episodeMeta(episode))
-        }
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
     }
 }
 

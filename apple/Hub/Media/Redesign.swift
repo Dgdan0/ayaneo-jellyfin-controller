@@ -8,7 +8,7 @@ import SwiftUI
 ///
 /// It keeps its picture until the next has loaded and cross-fades, so a hero
 /// following focus never flashes empty.
-struct FadedArtwork: View {
+struct FadedArtwork<Picture: View>: View {
     /// Where the words sit, so the shade darkens that side.
     enum Shade {
         /// From the leading edge: this dark there, gone by `until` across.
@@ -17,27 +17,28 @@ struct FadedArtwork: View {
         case bottom(Double, until: Double)
     }
 
-    let path: String
     /// Solid down to this fraction of the height, gone by `goneBy`.
     let solidUntil: Double
     let goneBy: Double
     let shade: Shade
+    /// The picture: a hub image (`ArtworkView`), or one kept on the device.
+    let picture: Picture
 
-    /// Home's hero: solid to 40% of the way down, gone by 97%, a shade half
-    /// black at the left gone by 62% across (the prototype's `.hero`).
-    static func hero(_ path: String, centred: Bool) -> FadedArtwork {
-        FadedArtwork(path: path, solidUntil: 0.4, goneBy: 0.97,
-                     shade: centred ? .bottom(0.45, until: 0.55) : .leading(0.5, until: 0.62))
+    init(solidUntil: Double, goneBy: Double, shade: Shade, @ViewBuilder picture: () -> Picture) {
+        self.solidUntil = solidUntil
+        self.goneBy = goneBy
+        self.shade = shade
+        self.picture = picture()
     }
 
-    /// A title's page: solid to 30%, gone by 94%, the shade at 60% gone by
-    /// 72% across (`.dart`).
-    static func title(_ path: String) -> FadedArtwork {
-        FadedArtwork(path: path, solidUntil: 0.3, goneBy: 0.94, shade: .leading(0.6, until: 0.72))
+    /// A title's page (`.dart`): solid to 30%, gone by 94%, the shade at 60% gone by
+    /// 72% across.
+    static func titleFade(@ViewBuilder _ picture: () -> Picture) -> FadedArtwork {
+        FadedArtwork(solidUntil: 0.3, goneBy: 0.94, shade: .leading(0.6, until: 0.72), picture: picture)
     }
 
     var body: some View {
-        ArtworkView(path: path, width: 1920, placeholder: .clear, keepsPrevious: true)
+        picture
             .overlay { shadeView }
             .mask {
                 LinearGradient(stops: [.init(color: .black, location: solidUntil), .init(color: .clear, location: goneBy)],
@@ -56,6 +57,23 @@ struct FadedArtwork: View {
             LinearGradient(stops: [.init(color: .black.opacity(opacity), location: 0), .init(color: .clear, location: until)],
                            startPoint: .bottom, endPoint: .top)
         }
+    }
+}
+
+extension FadedArtwork where Picture == ArtworkView {
+    /// Home's hero: solid to 40% of the way down, gone by 97%, a shade half
+    /// black at the left gone by 62% across (the prototype's `.hero`).
+    static func hero(_ path: String, centred: Bool) -> FadedArtwork {
+        FadedArtwork(solidUntil: 0.4, goneBy: 0.97,
+                     shade: centred ? .bottom(0.45, until: 0.55) : .leading(0.5, until: 0.62)) {
+            ArtworkView(path: path, width: 1920, placeholder: .clear, keepsPrevious: true)
+        }
+    }
+
+    /// A title's page: solid to 30%, gone by 94%, the shade at 60% gone by
+    /// 72% across (`.dart`).
+    static func title(_ path: String) -> FadedArtwork {
+        titleFade { ArtworkView(path: path, width: 1920, placeholder: .clear, keepsPrevious: true) }
     }
 }
 
