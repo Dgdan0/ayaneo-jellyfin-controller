@@ -244,6 +244,29 @@ public enum EpubAppearance {
         return next
     }
 
+    /// Reset text style (#42): the reader's own typography as a new device
+    /// starts with it (justified, hyphenated, its line spacing, the book's
+    /// styling off), for a look kept from before. The size, typeface, theme,
+    /// margins and columns stay as they are, and Page info is not a preference.
+    public static func resetTextStyle(_ value: EpubReaderPreferences) -> EpubReaderPreferences {
+        let start = EpubReaderPreferences()
+        var next = value
+        next.publisherStyles = start.publisherStyles
+        next.textAlignment = start.textAlignment
+        next.hyphens = start.hyphens
+        next.lineHeight = start.lineHeight
+        return next
+    }
+
+    /// What Reset text style sets, from the defaults: "Justified, hyphenated, 1.5 spacing".
+    public static var resetTextStyleDetail: String {
+        let start = EpubReaderPreferences()
+        var parts = [start.textAlignment == "justify" ? "Justified" : "Aligned left"]
+        if start.hyphens { parts.append("hyphenated") }
+        parts.append(String(format: "%g spacing", start.lineHeight))
+        return parts.joined(separator: ", ")
+    }
+
     /// Hyphenation on or off; like justified text, it is the reader's own typography.
     public static func hyphenated(_ value: EpubReaderPreferences) -> EpubReaderPreferences {
         var next = value

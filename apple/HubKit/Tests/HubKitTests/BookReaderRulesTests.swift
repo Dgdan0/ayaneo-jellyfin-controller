@@ -390,6 +390,29 @@ struct BookReaderRulesTests {
                                               textAlignment: "start", hyphens: false))
     }
 
+    /// Reset text style (#42): a look kept from before gets the defaults'
+    /// typography, and keeps its size, typeface, theme, margins and columns.
+    @Test func resetTextStyleBringsTheDefaultsTypographyAndKeepsTheRest() throws {
+        let kept = EpubReaderPreferences(theme: .dark, fontFamily: "serif", fontScale: 1.4, lineHeight: 1.1, pageMargins: 1.7,
+                                         columns: .two, scroll: false, publisherStyles: true, textAlignment: "start",
+                                         onePagePerScreen: false, hyphens: false)
+        let reset = EpubAppearance.resetTextStyle(kept)
+        let start = EpubReaderPreferences()
+        #expect(!reset.publisherStyles && reset.textAlignment == "justify" && reset.hyphens && reset.lineHeight == 1.5)
+        #expect(reset.publisherStyles == start.publisherStyles && reset.textAlignment == start.textAlignment
+                && reset.hyphens == start.hyphens && reset.lineHeight == start.lineHeight)
+        #expect(reset.theme == .dark && reset.fontFamily == "serif" && reset.fontScale == 1.4 && reset.pageMargins == 1.7
+                && reset.columns == .two && !reset.scroll && !reset.onePagePerScreen)
+        // Pressed again it changes nothing, and the defaults themselves are left as they are.
+        #expect(EpubAppearance.resetTextStyle(reset) == reset)
+        #expect(EpubAppearance.resetTextStyle(start) == start)
+        #expect(EpubAppearance.resetTextStyleDetail == "Justified, hyphenated, 1.5 spacing")
+        // Kept like any change: read back as set, hyphenation and all.
+        let defaults = try #require(UserDefaults(suiteName: "book-appearance-\(UUID().uuidString)"))
+        EpubAppearanceStore.save(reset, to: defaults)
+        #expect(EpubAppearanceStore.load(defaults) == reset)
+    }
+
     // MARK: The book's parts (BookSections)
 
     private let book = BookSections(positions: [

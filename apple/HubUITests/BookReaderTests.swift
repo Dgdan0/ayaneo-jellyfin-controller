@@ -315,6 +315,30 @@ final class BookReaderTests: XCTestCase {
         XCTAssertFalse(app.buttons["book-corner-place"].exists, "the bottom left stayed")
     }
 
+    /// Reset text style (#42): a look kept from before (the book's styling,
+    /// left-aligned, no hyphenation, tight lines) gets the reader's own
+    /// typography in one press.
+    @MainActor
+    func testResetTextStyleBringsJustifiedHyphenatedText() {
+        let app = launchReading(Self.recursion, ["HUB_BOOK_SHEET": "layout"],
+                                arguments: ["-epub.publisherStyles", "YES", "-epub.textAlignment", "start",
+                                            "-epub.hyphens", "NO", "-epub.lineHeight", "1.1"])
+        let justified = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Justified text'")).firstMatch
+        let hyphenation = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Hyphenation'")).firstMatch
+        let publisher = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Publisher styling'")).firstMatch
+        XCTAssertTrue(justified.waitForExistence(timeout: 15), "Layout has no Justified text")
+        XCTAssertTrue(justified.label.hasSuffix("Off") && hyphenation.label.hasSuffix("Off") && publisher.label.hasSuffix("On"),
+                      "the kept look reads \(justified.label) / \(hyphenation.label) / \(publisher.label)")
+        let reset = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Reset text style'")).firstMatch
+        XCTAssertTrue(reset.exists, "Layout has no Reset text style")
+        XCTAssertTrue(reset.label.contains("Justified, hyphenated, 1.5 spacing"), "Reset text style says \(reset.label)")
+        reset.tap()
+        XCTAssertTrue(waitUntil(5) { justified.label.hasSuffix("On") }, "Justified text says \(justified.label)")
+        XCTAssertTrue(hyphenation.label.hasSuffix("On"), "Hyphenation says \(hyphenation.label)")
+        XCTAssertTrue(publisher.label.hasSuffix("Off"), "Publisher styling says \(publisher.label)")
+        XCTAssertTrue(app.buttons["Relaxed"].firstMatch.isSelected, "the line spacing is not Relaxed (1.5)")
+    }
+
     /// Where the book is, from its menu, which ↑ opens (as Ⓑ and Delete do).
     @MainActor
     private func place(_ app: XCUIApplication) -> String {
