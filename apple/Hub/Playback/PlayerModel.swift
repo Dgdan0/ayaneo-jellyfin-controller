@@ -111,6 +111,9 @@ final class PlayerModel {
     let pipSupported = AVPictureInPictureController.isPictureInPictureSupported()
     /// The video plays on an AirPlay receiver, not in this window.
     private(set) var externalActive = false
+    /// The video plays on a TV through Google Cast (#44): the chrome is its
+    /// remote, and the session is the TV's (`CastPlayback`).
+    private(set) var casting = false
     /// The picture's own size, for where drawn subtitles go when it is
     /// letterboxed (a phone held upright).
     private(set) var presentationSize = CGSize.zero
@@ -153,6 +156,11 @@ final class PlayerModel {
 
     @ObservationIgnored let player = AVPlayer()
     @ObservationIgnored private var hub: HubClient?
+    /// What a move to the TV needs: the hub, the profile, the TV's address.
+    @ObservationIgnored private weak var app: AppModel?
+    /// Moved back here, or stopped on the TV, while the TV stays connected:
+    /// the video is not sent there again until it connects anew.
+    @ObservationIgnored private var stayHere = false
     @ObservationIgnored private var outbox: PlaybackOutbox?
     @ObservationIgnored private var baseURL = ""
     /// The profile that opened the session; every later call is for it.
@@ -241,6 +249,8 @@ final class PlayerModel {
         guard !request.itemId.isEmpty else { return }
         if self.request != nil { close() }
         self.request = request
+        self.app = app
+        stayHere = false
         hub = app.hub
         baseURL = app.address
         user = app.userId
@@ -257,11 +267,18 @@ final class PlayerModel {
         activateAudio()
         // The lock screen, Control Center and the media keys are the video's while it is open (#33).
         NowPlaying.shared.take(.video, commands: nowPlayingCommands)
+        // The TVs on the network, for the Cast button (#44).
+        CastCenter.shared.look()
         poll = Task { [weak self] in
             while !Task.isCancelled {
                 self?.step()
                 try? await Task.sleep(for: .milliseconds(250))
             }
+        }
+        // Playing on the TV already: the player opens as its remote.
+        if let tv = CastPlayback.shared.plan, tv.item.id == request.itemId {
+            becomeRemote(tv)
+            return
         }
         let generation = generation
         Task { await prepare(itemId: request.itemId, mode: request.mode, series: request.series, generation: generation) }
@@ -278,6 +295,11 @@ final class PlayerModel {
         #if DEBUG
         NSLog("playback: close '%@'", plan?.sessionId ?? "no session")
         #endif
+        if casting {
+            // Leaving the remote: the TV plays on, and reports as it plays.
+            casting = false
+            plan = nil
+        }
         poll?.cancel()
         poll = nil
         #if os(iOS)
@@ -323,6 +345,16 @@ final class PlayerModel {
     /// from its beginning, as on Android.
     private func playAdjacent(_ target: PlaybackItem?) {
         guard let target, request != nil else { return }
+        if casting, var tv = CastPlayback.shared.plan {
+            // On the TV, from its beginning, with its own tracks.
+            tv.item = target
+            tv.selectedMediaSourceId = ""
+            tv.selectedAudioIndex = nil
+            tv.selectedSubtitleIndex = nil
+            if !target.seriesId.isEmpty { backdrop = "/v1/img/jf/\(target.seriesId)/Backdrop" }
+            request = PlayRequest(itemId: target.id, mode: .restart, title: PlayerLabels.title(target), backdrop: backdrop)
+            return moveToTV(tv, at: 0, mode: .restart)
+        }
         endSession()
         player.replaceCurrentItem(with: nil)
         startSession()
@@ -503,6 +535,12 @@ final class PlayerModel {
     // MARK: Playing
 
     func togglePlay() {
+        if casting {
+            CastPlayback.shared.togglePlay()
+            isPlaying = CastPlayback.shared.isPlaying
+            updateNowPlaying()
+            return
+        }
         if isPlaying || player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
             player.pause()
             isPlaying = false
@@ -519,6 +557,11 @@ final class PlayerModel {
     func seek(by deltaMillis: Int64) { seek(to: positionMillis + deltaMillis) }
 
     func seek(to target: Int64) {
+        if casting {
+            CastPlayback.shared.seek(to: target)
+            positionMillis = CastPlayback.shared.positionMillis
+            return
+        }
         guard plan != nil, player.currentItem != nil else { return }
         let clamped = PlaybackRules.clampSeek(target, durationMillis: durationMillis)
         positionMillis = clamped
@@ -598,6 +641,7 @@ final class PlayerModel {
     /// Four times a second while the player is open: what AVPlayer is doing,
     /// what the chrome shows, what the hub is told.
     private func step() {
+        if casting { return stepRemote() }
         let possible = pip?.isPictureInPicturePossible ?? false
         if possible != pipPossible {
             pipPossible = possible
@@ -670,6 +714,7 @@ final class PlayerModel {
         #endif
         applyAudioChoice(to: item)
         if isOffline { applyLegibleChoice(to: item) }
+        castIfConnected()
         let play = playAfterLoad
         playAfterLoad = true
         guard startAt > 0 else {
@@ -768,6 +813,131 @@ final class PlayerModel {
             if upNext == nil { upNext = UpNextCard(item: next, fraction: 0) }
             startCountdown()
         }
+    }
+
+    // MARK: Google Cast (#44)
+
+    /// The TV connected, or was already when the video became ready: the
+    /// video moves there at this moment, unless it was just brought back here.
+    func castIfConnected() {
+        guard CastCenter.shared.receiver != nil, !stayHere, !casting, !isOffline, phase == .playing,
+              let plan, !CastPlayback.shared.preparing else { return }
+        moveToTV(plan, at: positionMillis, mode: .resume)
+    }
+
+    /// A new connection: whatever was decided for the last one is forgotten.
+    func castConnectionChanged(_ connection: CastConnection) {
+        if case .connected = connection {
+            stayHere = false
+            castIfConnected()
+        }
+    }
+
+    /// Prepared for the TV and loaded there; once the TV has it, what played
+    /// here (or the TV's earlier session) ends and the player is its remote.
+    private func moveToTV(_ current: PlaybackPrepareResponse, at position: Int64, mode: PlaybackStartMode) {
+        guard let app, !CastPlayback.shared.preparing else { return }
+        show(notice: CastPresentation.preparing)
+        let generation = generation
+        Task {
+            let error = await CastPlayback.shared.transfer(current, positionMillis: position, startMode: mode, app: app)
+            guard request != nil else { return }
+            if let error {
+                show(notice: error)
+                return
+            }
+            guard let tv = CastPlayback.shared.plan else { return }
+            // Left for another title meanwhile: the TV plays on without this player.
+            guard generation == self.generation || casting else { return }
+            becomeRemote(tv)
+            show(notice: CastPresentation.playingOn(CastPlayback.shared.deviceName))
+        }
+    }
+
+    /// The player as the TV's remote: this device's session ends (stopped
+    /// where it was, then closed) and its picture goes.
+    private func becomeRemote(_ tv: PlaybackPrepareResponse) {
+        if !casting {
+            if pipActive { pip?.stopPictureInPicture() }
+            endSession()
+            player.replaceCurrentItem(with: nil)
+        }
+        casting = true
+        plan = tv
+        phase = .playing
+        readyForDisplay = false
+        upNext = nil
+        skipSegment = nil
+        subtitleTask?.cancel()
+        subtitleTimeline = nil
+        subtitleKey = ""
+        subtitleLines = []
+        positionMillis = CastPlayback.shared.positionMillis
+        isPlaying = CastPlayback.shared.isPlaying
+        planShown()
+    }
+
+    /// Four times a second while casting: the TV's place and state for the
+    /// chrome; when the TV stopped (its end, Stop casting, the TV gone), the
+    /// player follows.
+    private func stepRemote() {
+        let cast = CastPlayback.shared
+        guard let tv = cast.plan else { return castEnded() }
+        if tv != plan { plan = tv }
+        if cast.positionMillis != positionMillis { positionMillis = cast.positionMillis }
+        let playing = cast.isPlaying
+        let waiting = CastPresentation.waiting(cast.state)
+        if waiting != isBuffering { isBuffering = waiting }
+        if playing != isPlaying {
+            isPlaying = playing
+            updateNowPlaying()
+        } else {
+            NowPlaying.shared.publishPosition(.video, elapsedSeconds: Double(positionMillis) / 1_000, rate: isPlaying ? 1 : 0)
+        }
+    }
+
+    /// The TV stopped on its own: at the video's end the player closes; let
+    /// go of (Stop casting, the TV turned off), it goes on here, paused where
+    /// the TV was.
+    private func castEnded() {
+        casting = false
+        let ended = CastPlayback.shared.ended
+        guard ended?.finished != true, let itemId = plan?.item.id else {
+            plan = nil
+            close()
+            return
+        }
+        resumeHere(itemId: itemId, at: ended?.positionMillis ?? positionMillis, play: false)
+    }
+
+    /// Move to this iPhone or iPad: the TV stops and the video goes on here where it was.
+    func moveHere() {
+        guard casting, let itemId = plan?.item.id else { return }
+        let at = CastPlayback.shared.positionMillis
+        casting = false
+        CastPlayback.shared.stop()
+        resumeHere(itemId: itemId, at: at, play: true)
+    }
+
+    /// Stop on TV: the TV stops and the player closes.
+    func stopOnTV() {
+        guard casting else { return }
+        casting = false
+        CastPlayback.shared.stop()
+        plan = nil
+        close()
+    }
+
+    private func resumeHere(itemId: String, at position: Int64, play: Bool) {
+        stayHere = true
+        plan = nil
+        startSession()
+        startOverride = position
+        playAfterLoad = play
+        positionMillis = position
+        activateAudio()
+        let generation = generation
+        Task { await prepare(itemId: itemId, mode: .resume, series: false, generation: generation) }
     }
 
     // MARK: The lock screen, Control Center, AirPods and the media keys (#33)
@@ -909,6 +1079,11 @@ final class PlayerModel {
     func chooseAudio(_ track: PlaybackTrack) {
         menu.selectTrackTab("audio")
         guard track.index != plan?.selectedAudioIndex else { return }
+        if casting, var tv = CastPlayback.shared.plan {
+            // The TV stream carries one audio track: it moves again with the other.
+            tv.selectedAudioIndex = track.index
+            return moveToTV(tv, at: positionMillis, mode: .resume)
+        }
         if isOffline {
             chooseOffline { $0.selectedAudioIndex = track.index }
             return
@@ -920,6 +1095,11 @@ final class PlayerModel {
     func chooseSubtitle(_ index: Int) {
         menu.selectTrackTab("subtitles")
         guard index != (plan?.selectedSubtitleIndex ?? -1) else { return }
+        if casting {
+            CastPlayback.shared.selectSubtitle(index < 0 ? nil : index)
+            plan = CastPlayback.shared.plan
+            return
+        }
         if isOffline {
             chooseOffline { $0.selectedSubtitleIndex = index < 0 ? nil : index }
             return
@@ -1090,7 +1270,8 @@ final class PlayerModel {
     }
 
     private func showSubtitles(at millis: Int64) {
-        guard let subtitleTimeline else {
+        // The TV draws its own subtitles (#44).
+        guard let subtitleTimeline, !casting else {
             if !subtitleLines.isEmpty { subtitleLines = [] }
             return
         }
@@ -1230,7 +1411,7 @@ final class PlayerModel {
     func sceneChanged(background: Bool) {
         inBackground = background
         guard background, request != nil else { return }
-        if pipActive { return }
+        if pipActive || casting { return }
         beginBackgroundWork()
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))

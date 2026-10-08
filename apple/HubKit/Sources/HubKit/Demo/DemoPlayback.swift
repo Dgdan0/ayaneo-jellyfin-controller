@@ -48,13 +48,18 @@ enum DemoPlayback {
         let ok = DemoTransport.Answer(200, #"{"ok":true}"#)
         switch (method, parts[2], parts.count >= 5 ? parts[4] : "") {
         case ("POST", "items", "prepare"):
-            guard namesAVPlayer(body) else {
+            // The TV's session (#44) asks for H.264 and AAC, not AVPlayer's containers.
+            let cast = isCast(body)
+            guard namesAVPlayer(body) || cast else {
                 return DemoTransport.Answer(400, #"{"error":{"code":"invalid_request","message":"Name AVPlayer's containers and ask for fMP4 HLS (#2)"}}"#)
             }
             let number = Int(parts[3].split(separator: "e").last ?? "") ?? 5
-            choices.withLock { $0[sessionId(number)] = Choice() }
-            sessionItems.withLock { $0[sessionId(number)] = parts[3] }
-            return DemoTransport.Answer(200, plan(number: number, choice: Choice(), item: parts[3]))
+            var choice = Choice()
+            choice.apply(body)
+            let session = sessionId(number, cast: cast)
+            choices.withLock { $0[session] = choice }
+            sessionItems.withLock { $0[session] = parts[3] }
+            return DemoTransport.Answer(200, plan(number: number, choice: choice, item: parts[3], cast: cast))
         case ("POST", "sessions", "select"):
             guard namesItsVersion(body) else {
                 return DemoTransport.Answer(400, #"{"error":{"code":"invalid_request","message":"Name the version a track belongs to (#24)"}}"#)
@@ -67,7 +72,12 @@ enum DemoPlayback {
                 return choice
             }
             let item = sessionItems.withLock { $0[session] } ?? ""
-            return DemoTransport.Answer(200, plan(number: Int(session.suffix(2)) ?? 5, choice: choice, item: item))
+            return DemoTransport.Answer(200, plan(number: Int(session.suffix(2)) ?? 5, choice: choice, item: item,
+                                                  cast: session.hasPrefix("c")))
+        case ("POST", "sessions", "cast-grant") where parts[3].hasPrefix("c"):
+            // The TV's grant, as the hub's: its own paths, and WebVTT for the text subtitles.
+            let grant = "/v1/cast/demo-grant-" + parts[3]
+            return DemoTransport.Answer(200, #"{"mediaUrl":"\#(grant)/hls/master","mimeType":"application/x-mpegURL","subtitleUrls":{"3":"\#(grant)/subtitles/3","4":"\#(grant)/subtitles/4"}}"#)
         case ("POST", "sessions", "cast-grant"):
             return DemoTransport.Answer(200, #"{"mediaUrl":"\#(stream)","mimeType":"application/x-mpegURL","subtitleUrls":{}}"#)
         case ("GET", "sessions", "subtitles") where parts.count == 6:
@@ -97,6 +107,13 @@ enum DemoPlayback {
             && (capabilities["hlsSegments"] as? String)?.lowercased() == "fmp4"
     }
 
+    /// A prepare for the TV (#44): this device's id with "-cast", converted.
+    static func isCast(_ body: Data?) -> Bool {
+        guard let body, let fields = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let device = fields["device"] as? [String: Any] else { return false }
+        return ((device["id"] as? String) ?? "").hasSuffix("-cast") && fields["forceTranscode"] as? Bool == true
+    }
+
     /// A select changing the audio or the subtitles names the media source
     /// they belong to, as Jellyfin needs to apply them.
     static func namesItsVersion(_ body: Data?) -> Bool {
@@ -107,21 +124,22 @@ enum DemoPlayback {
 
     private static let episodes = [4: "Cursed Parakeet", 5: "Beat the Invisible Enemy!", 6: "Fight to the Death! Ichigo vs. Ichigo"]
 
-    private static func sessionId(_ number: Int) -> String {
-        String(repeating: "d", count: 30) + String(format: "%02d", number % 100)
+    /// The TV's sessions start with "c", this device's with "d".
+    private static func sessionId(_ number: Int, cast: Bool = false) -> String {
+        String(repeating: cast ? "c" : "d", count: 30) + String(format: "%02d", number % 100)
     }
 
-    private static func plan(number: Int, choice: Choice, item itemId: String = "") -> String {
+    private static func plan(number: Int, choice: Choice, item itemId: String = "", cast: Bool = false) -> String {
         func item(_ n: Int) -> String {
             let title = episodes[n] ?? "Episode \(n)"
             return #"{"id":"demo-e\#(n)","type":"episode","title":"\#(title)","seriesTitle":"Bleach","seriesId":"demo-bleach","seasonNumber":1,"episodeNumber":\#(n)}"#
         }
-        let session = sessionId(number)
+        let session = sessionId(number, cast: cast)
         let previous = number > 1 ? #","previousItem":\#(item(number - 1))"# : ""
         let subtitle = choice.subtitle.map { #","selectedSubtitleIndex":\#($0)"# } ?? ""
         // A lower quality is a conversion, with an address of its own, so the
         // player opens it again where it was; the original is played as it is.
-        let converted = choice.bitrate > 0
+        let converted = choice.bitrate > 0 || cast
         let media = converted ? "/v1/playback/sessions/\(session)/hls/demo-\(choice.bitrate)" : "/v1/playback/sessions/\(session)/stream"
         let method = converted ? "Transcode" : "DirectStream"
         let reason = converted ? #","transcodeReason":"ContainerBitrateExceedsLimit""# : ""

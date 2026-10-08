@@ -220,6 +220,7 @@ hub (`-demo`) answers every one of these calls, for the UI tests.
 | Subtitles the app draws | HubKit `SubtitleParser` (SRT, WebVTT, ASS as text; a broken block is skipped) and `SubtitleTimeline`; drawn by `SubtitleOverlay`; the delay is `SubtitleTimingPolicy` |
 | Chapters, Skip intro, where subtitles sit | HubKit `PlaybackEnhancements` (Android's, with its tests); the notches are `ChapterNotches` |
 | Picture in picture, AirPlay | `PlayerModel.attach` (`AVPictureInPictureController` on the surface's layer), `RoutePicker` under the round Cast icon |
+| Google Cast to the TV (#44; iPhone and iPad, the Mac keeps AirPlay): the address the TV reaches, the TV's session, its subtitles, the button's states | HubKit `CastAddress`, `CastPlan`, `CastPresentation` (`Rules/Cast`); `CastCenter` (the SDK, or the stand-in TV with `HUB_CAST=standin`), `CastPlayback` (the TV's session and its reports, through `PlaybackReporter`), `CastButton`; the player is the remote while `PlayerModel.casting` |
 
 A session is prepared, then streamed, reported (started, paused and unpaused, seeks, progress
 every ten seconds of play, stopped) and deleted. Leaving is the only way out, and Back, the next
