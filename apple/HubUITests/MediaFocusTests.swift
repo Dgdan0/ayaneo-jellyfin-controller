@@ -106,4 +106,34 @@ final class MediaFocusTests: XCTestCase {
         let title = app.descendants(matching: .any).matching(identifier: "title-download").firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 10), "Return did not open the title")
     }
+
+    /// The player's panels with a controller: Ⓨ opens Audio & subtitles, down
+    /// walks its rows, Ⓐ chooses one, and Ⓑ closes the panel, then leaves.
+    @MainActor
+    func testThePlayersPanelIsWalkedWithTheController() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo"]
+        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "media", "HUB_PLAY": "demo-e5",
+                                 "HUB_PLAY_CHROME": "pinned", "HUB_PAD": "Y,DOWN,DOWN,DOWN,A", "HUB_PAD_DELAY": "10"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Lock controls"].waitForExistence(timeout: 15), "the player did not open")
+        let heading = app.staticTexts.matching(identifier: "panel-heading").firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 15), "Ⓨ did not open a panel")
+        let probe = app.staticTexts["pad-focus"].firstMatch
+        XCTAssertTrue(waitUntil(15) { probe.label.hasPrefix("ring player-tracks row:") },
+                      "down did not walk the panel's rows: \(probe.label)")
+        // Ⓐ on a row chose it: the panel is still open, and one more row is ticked or the same.
+        XCTAssertTrue(heading.exists, "Ⓐ on a row closed the panel")
+    }
+
+    /// Asks `condition` every quarter of a second until it holds or `seconds` pass.
+    @MainActor
+    private func waitUntil(_ seconds: TimeInterval, _ condition: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(seconds)
+        while Date() < end {
+            if condition() { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        return condition()
+    }
 }

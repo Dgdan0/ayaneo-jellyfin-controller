@@ -90,7 +90,9 @@ final class PlayerTests: XCTestCase {
         }
         menu.tap()
         let chapters = app.buttons["Chapters"]
-        XCTAssertTrue(chapters.waitForExistence(timeout: 5), "the list of the three did not open")
+        XCTAssertTrue(chapters.firstMatch.waitForExistence(timeout: 5), "the list of the three did not open")
+        let found = app.buttons.matching(NSPredicate(format: "label == 'Chapters' OR identifier == 'Chapters'")).allElementsBoundByIndex.map { "\($0.identifier)|\($0.label)|\($0.frame)|\($0.isHittable)" }
+        XCTAssertEqual(found.count, 1, "PROBE: \(found)")
         chapters.tap()
         let heading = app.staticTexts.matching(identifier: "panel-heading").firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 5), "Chapters did not open from the menu")

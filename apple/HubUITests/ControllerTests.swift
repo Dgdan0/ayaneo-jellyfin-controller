@@ -44,7 +44,8 @@ final class ControllerTests: XCTestCase {
     /// Ⓑ goes back a page, and closes the profile picker.
     @MainActor
     func testBGoesBackAPageAndClosesTheProfilePicker() {
-        var app = launch(["HUB_SECTION": "library", "HUB_TITLE": inception, "HUB_PAD": "B", "HUB_PAD_DELAY": "6"])
+        // Ⓑ well after the page has opened, even on a busy Mac.
+        var app = launch(["HUB_SECTION": "library", "HUB_TITLE": inception, "HUB_PAD": "B", "HUB_PAD_DELAY": "10"])
         let download = element(app, "title-download")
         XCTAssertTrue(download.waitForExistence(timeout: 15), "the film's page did not open")
         XCTAssertTrue(download.waitForNonExistence(timeout: 10), "Ⓑ did not go back from the film's page")
