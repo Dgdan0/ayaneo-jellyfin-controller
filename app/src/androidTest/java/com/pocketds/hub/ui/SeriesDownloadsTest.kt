@@ -193,6 +193,13 @@ class SeriesDownloadsTest {
         }
     }
 
+    /** Where the bar's top is on the screen, and how low the lowest episode card reaches. */
+    private fun dockTop(rig: Rig): Int = IntArray(2).also(downloads(rig).dock::getLocationOnScreen)[1]
+    private fun lowestCard(rig: Rig): Int = cards(rig).filter { it.isShown }.maxOf { card -> IntArray(2).also(card::getLocationOnScreen)[1] + card.height }
+
+    /** No card, the one in focus included, is under the bar. */
+    private fun stripClear(rig: Rig): Boolean = lowestCard(rig) <= dockTop(rig)
+
     private fun seasonButton(rig: Rig): TextView? = all(rig.root).filterIsInstance<TextView>().firstOrNull { it.tag == "seasonDownload" && it.visibility == View.VISIBLE }
     private fun cards(rig: Rig) = all(rig.root).filterIsInstance<EpisodeCardView>()
     private fun badges(rig: Rig) = all(rig.root).filterIsInstance<DownloadBadgeView>().filter { it.visibility == View.VISIBLE }
@@ -216,9 +223,12 @@ class SeriesDownloadsTest {
                 all(card).filterIsInstance<DownloadBadgeView>().single().performClick()
             }
             until("the bar to rise") { downloads(this@withSeries).dock.raised }
+            // The page makes room: every card, and its words, ends above the bar (the Pocket's 853 x 456 dp).
+            until("the strip to clear the bar") { downloads(this@withSeries).dock.height > 0 && stripClear(this@withSeries) }
             until("the ring to fill") { repository(this@withSeries).forItem(target)?.let { it.state == OfflineState.DOWNLOADING && it.progress > 0.25f } == true }
             shot(activity, "02-ring-and-bar")
             withContext(Dispatchers.Main) {
+                assertTrue("no card under the bar: the lowest reaches ${lowestCard(this@withSeries)}, the bar starts at ${dockTop(this@withSeries)}", stripClear(this@withSeries))
                 val line = downloads(this@withSeries).dock.storage.line
                 assertTrue("the bar says what is coming: $line", line.startsWith("1 coming"))
                 assertTrue(notes.any { it.startsWith("Added 1 episode") })
@@ -235,6 +245,33 @@ class SeriesDownloadsTest {
             val lingered = System.currentTimeMillis() - finishedAt
             assertTrue("about three seconds after the last finished, not $lingered ms", lingered in 2_500..6_500)
             until("the bar to go") { downloads(this@withSeries).dock.visibility == View.GONE }
+        }
+    }
+
+    @Test fun aWatchedEpisodeThatIsOnTheDeviceShowsTheWatchedTickAndTheDoneMarkApart(): Unit = runBlocking {
+        withSeries {
+            // The second episode is watched. Download it from its corner.
+            withContext(Dispatchers.Main) {
+                val card = cards(this@withSeries).first { it.contentDescription.toString().contains("Episode 2") }
+                all(card).filterIsInstance<DownloadBadgeView>().single().performClick()
+            }
+            val watchedAndHere = series.episodeId(1, 2)
+            until("it to arrive", 30_000) { repository(this@withSeries).forItem(watchedAndHere)?.state == OfflineState.COMPLETE }
+            until("the done mark") { badges(this@withSeries).any { it.contentDescription == "On this device" } }
+            until("the strip clear of the bar") { stripClear(this@withSeries) }
+            withContext(Dispatchers.Main) {
+                val card = cards(this@withSeries).first { it.contentDescription.toString().contains("Episode 2") }
+                val badge = all(card).filterIsInstance<DownloadBadgeView>().single()
+                assertEquals("the corner says it is on the device", EpisodeDownloadMarks.Mark.DONE, badge.field<EpisodeDownloadMarks.Badge>("badge").mark)
+                // The watched tick is still there, and is a different thing: an accent disc with a tick, over to one side.
+                val tick = all(card).filterIsInstance<TextView>().first { it.text == "✓" && it.visibility == View.VISIBLE }
+                assertTrue("the watched tick is beside the download mark, not under it", tick.isShown)
+                val tickAt = IntArray(2).also(tick::getLocationOnScreen)[0]
+                val markAt = IntArray(2).also(badge::getLocationOnScreen)[0]
+                assertTrue("the tick ($tickAt) is left of the mark ($markAt)", tickAt < markAt)
+            }
+            shot(activity, "13-watched-and-downloaded")
+            until("the bar to fade", 10_000) { !downloads(this@withSeries).dock.raised }
         }
     }
 
@@ -313,6 +350,12 @@ class SeriesDownloadsTest {
                 assertEquals(4, downloads(this@withSeries).selection.count)
                 assertTrue("the season's pill counts them: ${rowTexts(this@withSeries)}", rowTexts(this@withSeries).any { it == "Season 1 · 4/4" })
                 assertEquals("4 selected", rowTexts(this@withSeries).first { it.endsWith(" selected") })
+            }
+            until("the strip clear of the select bar") { stripClear(this@withSeries) }
+            withContext(Dispatchers.Main) {
+                val focused = cards(this@withSeries).first { it.hasFocus() }
+                val bottom = IntArray(2).also(focused::getLocationOnScreen)[1] + focused.height
+                assertTrue("the focused card ($bottom) is above the bar (${dockTop(this@withSeries)})", bottom <= dockTop(this@withSeries))
             }
             shot(activity, "07-select-mode")
             // Start downloads them and leaves select mode.
@@ -442,25 +485,28 @@ class SeriesDownloadsTest {
             val d = series.episodeId(2, 1); val e = series.episodeId(2, 2)
             suspend fun run() = withContext(Dispatchers.Main) { KeepReadyRunner.run(activity, hub(this@withSeries)) }
             suspend fun have() = withContext(Dispatchers.Main) { repo.forItems(series.every.map { it.id }).keys }
+            // A removal of a file still arriving goes through the download service, a moment later.
+            suspend fun expect(what: String, expected: Set<String>) = until(what, 30_000) { repo.forItems(series.every.map { it.id }).keys == expected }
             // Turned on at the start: A, B and C.
             run()
-            assertEquals(setOf(a, b, c), have())
+            expect("A, B and C", setOf(a, b, c))
             // A finished: D is fetched, and A stays.
             series.watched += a
             run()
-            assertEquals(setOf(a, b, c, d), have())
+            expect("D fetched and A kept", setOf(a, b, c, d))
             // B finished: E is fetched, and A, the one before it, goes.
             series.watched += b
             run()
-            assertEquals(setOf(b, c, d, e), have())
+            expect("E fetched and A gone", setOf(b, c, d, e))
             // C is finished too, but while something plays nothing is removed; fetching goes on.
             series.watched += c
             withContext(Dispatchers.Main) { KeepReadyRunner.playerOpened() }
             run()
+            delay(1_500)
             assertTrue("B stays while the player is open: ${have()}", b in have())
             withContext(Dispatchers.Main) { KeepReadyRunner.playerClosed() }
             run()
-            assertFalse("B goes once the player is left", b in have())
+            until("B to go once the player is left", 30_000) { b !in repo.forItems(series.every.map { it.id }).keys }
             assertTrue("C, the one just finished, stays", c in have())
         }
     }

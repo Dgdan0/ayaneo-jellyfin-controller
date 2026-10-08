@@ -56,6 +56,8 @@ class SeriesDownloads(
         fun title(): String
         /** Cards, the season's button and the pills' counts are drawn again. */
         fun marksChanged()
+        /** The bar went up or down, or changed height: the page makes room for it, or takes the room back. */
+        fun dockChanged()
         fun hintsChanged()
         fun play(item: LibraryItem)
         fun findReleases(item: LibraryItem)
@@ -96,6 +98,10 @@ class SeriesDownloads(
 
     /** Puts the dock and the sheets on the page, over its content. */
     fun attach(page: ViewGroup, dockMargin: Int) {
+        // The page makes room as the bar takes its height, and again when select mode's row gives it more.
+        dock.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) hooks.dockChanged()
+        }
         page.addView(dock, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.BOTTOM)
             .apply { setMargins(dockMargin, 0, dockMargin, dockMargin) })
         page.addView(panel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -172,7 +178,7 @@ class SeriesDownloads(
         val available = episodes.firstOrNull { it.id == item.id }?.available != false
         val list = EpisodeDownloadMarks.menu(row?.state, item.positionSeconds > 0, available, hooks.canFindReleases())
         menu.show(EpisodeLabel.of(item.seasonNumber, item.indexNumber, item.title).ifBlank { "Episode" }, "",
-            list.map { ChoiceOverlay.Choice(it.id, it.label) }, onCancel = { hooks.hintsChanged() }) { id ->
+            list.map { ChoiceOverlay.Choice(it.id, it.label, icon = menuIcon(it.id)) }, onCancel = { hooks.hintsChanged() }) { id ->
             when (id) {
                 EpisodeDownloadMarks.PLAY -> hooks.play(item)
                 EpisodeDownloadMarks.DOWNLOAD -> if (row?.state == OfflineState.FAILED) cornerTapped(item) else download(listOf(item.id))
@@ -184,6 +190,16 @@ class SeriesDownloads(
             hooks.hintsChanged()
         }
         hooks.hintsChanged()
+    }
+
+    /** A symbol for each of the card menu's rows; Remove download wears the one done mark (a tick would mean watched). */
+    private fun menuIcon(id: String): android.graphics.drawable.Drawable = when (id) {
+        EpisodeDownloadMarks.PLAY -> com.pocketds.hub.ui.MediaActionIconDrawable.of(context, com.pocketds.hub.ui.MediaActionIcon.PLAY, colors)
+        EpisodeDownloadMarks.DOWNLOAD -> com.pocketds.hub.ui.MediaActionIconDrawable.of(context, com.pocketds.hub.ui.MediaActionIcon.DOWNLOAD, colors)
+        EpisodeDownloadMarks.STOP -> com.pocketds.hub.ui.AppIconDrawable(com.pocketds.hub.ui.AppIcon.STOP, colors.primaryText)
+        EpisodeDownloadMarks.REMOVE -> com.pocketds.hub.ui.MediaActionIconDrawable.downloadDone(context, colors)
+        EpisodeDownloadMarks.RELEASES -> com.pocketds.hub.ui.AppIconDrawable(com.pocketds.hub.ui.AppIcon.SEARCH, colors.primaryText)
+        else -> com.pocketds.hub.ui.AppIconDrawable(com.pocketds.hub.ui.AppIcon.CONTENTS, colors.primaryText)
     }
 
     private fun removeDownload(row: OfflineDownload) {
@@ -327,6 +343,7 @@ class SeriesDownloads(
         // Select mode keeps the bar; the choices panel has its own under its rows, so the page's waits behind it.
         val shown = visibility.update(now, totals.comingCount, forced = selecting)
         dock.show(shown && !panel.isOpen)
+        hooks.dockChanged()
         if (shown) {
             val adding = if (selecting) DownloadChoice(selection.ids, selection.bytes(episodes)) else null
             val model = storageModel(adding?.bytes ?: 0L)

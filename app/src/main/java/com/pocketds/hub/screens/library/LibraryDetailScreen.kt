@@ -124,6 +124,8 @@ class LibraryDetailScreen(
     private lateinit var downloads: SeriesDownloads
     /** The season's download button, after the season chips. */
     private lateinit var seasonDownload: TextView
+    /** The room kept under the page's last row: 16dp, and the bar's height while the bar shows. */
+    private lateinit var dockSpace: View
     /** Select mode's top line: Cancel, "N selected" and Select season. */
     private lateinit var selectBar: LinearLayout
     private lateinit var selectCount: TextView
@@ -290,15 +292,17 @@ class LibraryDetailScreen(
                     onFocused = { lastFocusKey = "facts"; host.refreshHints() }
                 }
                 addView(facts, LinearLayout.LayoutParams(MATCH, WRAP))
-                // Room under the last row for the download bar, which rises over the foot of the page (#48).
-                addView(View(context), LinearLayout.LayoutParams(MATCH, dp(DOCK_ROOM_DP)))
+                // Room under the last row for the download bar, which rises over the foot of the page (#48): as tall as the
+                // bar while it shows, so the page can scroll the row clear of it (adjustForDock).
+                dockSpace = View(context)
+                addView(dockSpace, LinearLayout.LayoutParams(MATCH, dp(FOOT_DP)))
             }, ViewGroup.LayoutParams(MATCH, WRAP))
         }
         root.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         downloads = SeriesDownloads(host.viewContext, api, itemId, colors, scope, ringVisible, { this.host }, downloadHooks)
-        downloads.attach(root, dp(12))
+        downloads.attach(root, dp(DOCK_MARGIN_DP))
         overview.onChanged = { host.refreshHints() }
         return root
     }
@@ -506,8 +510,46 @@ class LibraryDetailScreen(
      */
     private fun liftToTabs() {
         if (tabRow.visibility != View.VISIBLE || tabRow.height == 0) return
-        val target = (tabRow.top - dp(TopBarView.HEIGHT_DP.toInt() + 4)).coerceAtLeast(0)
+        // And, while the download bar shows, far enough that what is on the page ends above it (#48).
+        val target = maxOf((tabRow.top - dp(TopBarView.HEIGHT_DP.toInt() + 4)).coerceAtLeast(0), clearOfDock() ?: 0)
         if (scroll.scrollY < target) scroll.post { scroll.smoothScrollTo(0, target) }
+    }
+
+    /** The content of the tab on show: what the bar must not cover. */
+    private fun visibleContent(): View? = when (selectedTab) {
+        TAB_EPISODES -> episodes.takeIf { episodesPanel.visibility == View.VISIBLE }
+        TAB_CAST -> cast
+        TAB_SIMILAR -> similar
+        TAB_DETAILS -> facts
+        else -> null
+    }
+
+    /**
+     * The scroll position at which the tab's content ends above the download bar, or null while the bar is down (#48).
+     * The bar rises over the foot of the page, and on the Pocket's 456dp the episode strip is down there: the page
+     * makes room, so the strip, and the card in focus, are never under it. Never so far that the content's top goes
+     * under the top bar.
+     */
+    private fun clearOfDock(): Int? {
+        if (!::downloads.isInitialized || !downloads.dock.raised) return null
+        val content = visibleContent()?.takeIf { it.height > 0 } ?: return null
+        val rect = android.graphics.Rect(0, 0, content.width, content.height)
+        scroll.offsetDescendantRectToMyCoords(content, rect)
+        val bar = downloads.dock.height + dp(DOCK_MARGIN_DP + DOCK_GAP_DP)
+        val wanted = rect.bottom - (scroll.height - bar)
+        val limit = rect.top - dp(TopBarView.HEIGHT_DP.toInt() + 4)
+        return wanted.coerceAtMost(limit).coerceAtLeast(0)
+    }
+
+    /** The bar went up, down or changed height: the room under the page follows, and the page scrolls the content clear. */
+    private fun adjustForDock() {
+        if (!::dockSpace.isInitialized || !::downloads.isInitialized) return
+        val room = if (downloads.dock.raised) downloads.dock.height + dp(DOCK_MARGIN_DP + DOCK_GAP_DP) else dp(FOOT_DP)
+        (dockSpace.layoutParams as LinearLayout.LayoutParams).let { params ->
+            val wanted = maxOf(room, dp(FOOT_DP))
+            if (params.height != wanted) { params.height = wanted; dockSpace.layoutParams = params }
+        }
+        scroll.post { clearOfDock()?.let { target -> if (scroll.scrollY < target) scroll.smoothScrollTo(0, target) } }
     }
 
     private fun focusPanel(): Boolean = when (selectedTab) {
@@ -1013,6 +1055,7 @@ class LibraryDetailScreen(
             item?.let(::renderDownload)
         }
         override fun hintsChanged() { host?.refreshHints() }
+        override fun dockChanged() { adjustForDock() }
         override fun play(item: LibraryItem) { host?.playItem(item.id, if (item.positionSeconds > 0) "resume" else "restart") }
         override fun findReleases(item: LibraryItem) { selectedSeason()?.let { openReleaseTargets(it, item.indexNumber) } }
         override fun playTargetId() = seriesTarget?.item?.id
@@ -1057,8 +1100,10 @@ class LibraryDetailScreen(
         const val ACTION_FAVORITE = "favorite"
         const val ACTION_DOWNLOAD = "download"
         const val KEY_SEASON_DOWNLOAD = "seasonDownload"
-        /** What a series page keeps free at its foot for the download bar: its two lines and its padding. */
-        const val DOCK_ROOM_DP = 84
+        /** What a page keeps free under its last row, and the bar's own margin and the gap kept between it and the content. */
+        const val FOOT_DP = 16
+        const val DOCK_MARGIN_DP = 12
+        const val DOCK_GAP_DP = 8
         const val TAB_EPISODES = "episodes"
         const val TAB_CAST = "cast"
         const val TAB_DETAILS = "details"

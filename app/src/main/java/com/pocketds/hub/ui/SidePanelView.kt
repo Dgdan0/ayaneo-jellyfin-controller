@@ -218,9 +218,11 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
      * One option. [leading] sits before the words: a chapter's frame. A
      * selected option shows the check mark; there is no "Selected" text.
      */
-    fun choice(label:String,detail:String="",selected:Boolean=false,danger:Boolean=false,leading:View?=null,onPick:()->Unit):View {
+    fun choice(label:String,detail:String="",selected:Boolean=false,danger:Boolean=false,leading:View?=null,icon:android.graphics.drawable.Drawable?=null,onPick:()->Unit):View {
         val row=row(label,detail,selected,danger,onPick)
         leading?.let {row.addView(it,0,LinearLayout.LayoutParams(dp(96),dp(54)).apply {marginEnd=dp(12)})}
+        // A small symbol before the words (#48): the card menu's rows, the done mark on Remove download.
+        icon?.let {row.addView(ImageView(context).apply {setImageDrawable(it);importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO},0,LinearLayout.LayoutParams(dp(22),dp(22)).apply {marginEnd=dp(12)})}
         if(selected)row.addView(ImageView(context).apply {setImageDrawable(AppIconDrawable(AppIcon.CHECK,colors.accent));importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO},LinearLayout.LayoutParams(dp(20),dp(20)).apply{marginStart=dp(8)})
         return row
     }

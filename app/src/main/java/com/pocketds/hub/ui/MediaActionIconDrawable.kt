@@ -58,6 +58,13 @@ class MediaActionIconDrawable(
         fun onGlass(context: Context, icon: MediaActionIcon, colors: PocketColors, progress: Float = 0f) =
             MediaActionIconDrawable(context, icon, if (icon.isOn) com.pocketds.hub.ui.glass.GlassColors.INK else android.graphics.Color.WHITE,
                 progress, colors.accent, 0x4DFFFFFF)
+
+        /**
+         * "On this device" (#48): an accent disc with a solid arrow dropping into a tray, the ink of the accent on it.
+         * It is the one mark for a finished download -- a card's corner, a menu row, the downloaded series' cards -- and it
+         * is never a tick, which already means watched.
+         */
+        fun downloadDone(context: Context, colors: PocketColors): Drawable = DownloadDoneDrawable(context, colors.accent, colors.accentText)
     }
 
     private val size = Styler.dpInt(context, 21f)
@@ -212,6 +219,31 @@ class MediaActionIconDrawable(
     @Deprecated("Deprecated in Android")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
+    override fun getIntrinsicWidth(): Int = size
+    override fun getIntrinsicHeight(): Int = size
+}
+
+/** The accent disc of [MediaActionIconDrawable.downloadDone], square in whatever bounds it is given. */
+class DownloadDoneDrawable(context: Context, disc: Int, ink: Int) : Drawable() {
+    private val face = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = disc }
+    private val glyph = MediaActionIconDrawable(context, MediaActionIcon.DOWNLOADED, ink)
+    private val size = Styler.dpInt(context, 22f)
+
+    override fun draw(canvas: Canvas) {
+        val side = min(bounds.width(), bounds.height())
+        canvas.drawCircle(bounds.exactCenterX(), bounds.exactCenterY(), side / 2f, face)
+        val inset = (side * 0.2f).toInt()
+        val cx = bounds.centerX()
+        val cy = bounds.centerY()
+        val half = side / 2 - inset
+        glyph.setBounds(cx - half, cy - half, cx + half, cy + half)
+        glyph.draw(canvas)
+    }
+
+    override fun setAlpha(alpha: Int) { face.alpha = alpha; glyph.alpha = alpha; invalidateSelf() }
+    override fun setColorFilter(colorFilter: ColorFilter?) { face.colorFilter = colorFilter; glyph.colorFilter = colorFilter; invalidateSelf() }
+    @Deprecated("Deprecated in Android")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     override fun getIntrinsicWidth(): Int = size
     override fun getIntrinsicHeight(): Int = size
 }

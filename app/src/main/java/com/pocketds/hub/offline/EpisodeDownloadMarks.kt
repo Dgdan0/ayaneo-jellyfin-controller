@@ -7,7 +7,8 @@ package com.pocketds.hub.offline
  */
 object EpisodeDownloadMarks {
 
-    enum class Mark { ARROW, RING, WAITING, TICK }
+    /** DONE is the download-done mark (an arrow into a tray), never a tick: a tick is watched. */
+    enum class Mark { ARROW, RING, WAITING, DONE }
 
     /** [progress] is 0..1 and only the ring draws it. */
     data class Badge(val mark: Mark, val progress: Float = 0f)
@@ -17,7 +18,7 @@ object EpisodeDownloadMarks {
         null, OfflineState.FAILED -> Badge(Mark.ARROW)
         OfflineState.DOWNLOADING -> Badge(Mark.RING, progress.coerceIn(0f, 1f))
         OfflineState.QUEUED, OfflineState.WAITING, OfflineState.PAUSED -> Badge(Mark.WAITING)
-        OfflineState.COMPLETE -> Badge(Mark.TICK)
+        OfflineState.COMPLETE -> Badge(Mark.DONE)
     }
 
     /** What a tap on the badge, or Ⓐ on the card's Download row, does. */

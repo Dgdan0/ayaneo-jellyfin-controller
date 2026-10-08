@@ -8,14 +8,14 @@ import org.junit.Test
 
 /** An episode card's download corner and its pad menu (#48). */
 class EpisodeDownloadMarksTest {
-    @Test fun `the corner is an arrow, a ring, waiting or a tick by what the download is`() {
+    @Test fun `the corner is an arrow, a ring, waiting or the done mark by what the download is`() {
         assertEquals(Mark.ARROW, EpisodeDownloadMarks.badge(null, 0f).mark)
         assertEquals(Mark.ARROW, EpisodeDownloadMarks.badge(OfflineState.FAILED, 0.3f).mark)
         assertEquals(EpisodeDownloadMarks.Badge(Mark.RING, 0.42f), EpisodeDownloadMarks.badge(OfflineState.DOWNLOADING, 0.42f))
         listOf(OfflineState.QUEUED, OfflineState.WAITING, OfflineState.PAUSED).forEach {
             assertEquals("$it", Mark.WAITING, EpisodeDownloadMarks.badge(it, 0f).mark)
         }
-        assertEquals(Mark.TICK, EpisodeDownloadMarks.badge(OfflineState.COMPLETE, 1f).mark)
+        assertEquals(Mark.DONE, EpisodeDownloadMarks.badge(OfflineState.COMPLETE, 1f).mark)
     }
 
     @Test fun `the ring is kept inside zero and one`() {
@@ -23,7 +23,7 @@ class EpisodeDownloadMarksTest {
         assertEquals(0f, EpisodeDownloadMarks.badge(OfflineState.DOWNLOADING, -1f).progress, 0f)
     }
 
-    @Test fun `a tap on the corner downloads at once, stops what is coming, retries a failure and opens the menu on a tick`() {
+    @Test fun `a tap on the corner downloads at once, stops what is coming, retries a failure and opens the menu on the done mark`() {
         assertEquals(Tap.DOWNLOAD, EpisodeDownloadMarks.tap(null))
         assertEquals(Tap.RETRY, EpisodeDownloadMarks.tap(OfflineState.FAILED))
         assertEquals(Tap.STOP, EpisodeDownloadMarks.tap(OfflineState.DOWNLOADING))

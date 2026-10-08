@@ -184,7 +184,10 @@ class OfflineSeasonScreen(
                     progress = watched,
                     overview = item.overview,
                     watched = progress?.isComplete() == true,
-                    description = "Episode ${item.indexNumber}, ${item.title}, $status"
+                    description = "Episode ${item.indexNumber}, ${item.title}, $status",
+                    // Every card here is on the device: the same done mark as the series page's corner (#48).
+                    download = com.pocketds.hub.offline.EpisodeDownloadMarks.Badge(com.pocketds.hub.offline.EpisodeDownloadMarks.Mark.DONE),
+                    downloadDescription = "On this device"
                 ),
                 Artwork.loader(api, context)
             )

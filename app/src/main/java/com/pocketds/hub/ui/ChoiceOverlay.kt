@@ -13,7 +13,9 @@ import com.pocketds.hub.input.PadAction
  * [dismiss] answer for both, so a screen keeps talking to one overlay.
  */
 class ChoiceOverlay(context:Context,colors:PocketColors,ringVisible:()->Boolean,sidePanel:Boolean=false) : SidePanelView(context,colors,ringVisible,sidePanel) {
-    data class Choice(val id:String,val label:String,val detail:String="",val danger:Boolean=false,val selected:Boolean=false)
+    data class Choice(val id:String,val label:String,val detail:String="",val danger:Boolean=false,val selected:Boolean=false,
+        /** A symbol before the words, for a menu whose rows each have one. */
+        val icon:android.graphics.drawable.Drawable?=null)
     private val sheet = sidePanel
     private val ring = ringVisible
     /** A side sheet's centred card for its questions. */
@@ -48,7 +50,7 @@ class ChoiceOverlay(context:Context,colors:PocketColors,ringVisible:()->Boolean,
     fun show(title:String,subtitle:String,choices:List<Choice>,startIndex:Int?=null,onCancel:()->Unit={},onPick:(String)->Unit) {
         resetBody()
         open(title,subtitle,onCancel)
-        val views=choices.map { entry -> choice(entry.label,entry.detail,entry.selected,entry.danger) {
+        val views=choices.map { entry -> choice(entry.label,entry.detail,entry.selected,entry.danger,icon=entry.icon) {
             dismiss();onPick(entry.id)
         }}
         focusBody(startIndex?.let(views::getOrNull))
