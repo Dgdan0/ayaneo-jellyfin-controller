@@ -43,6 +43,10 @@ public enum Licences {
                      terms: "© 2017-2024 Thomas Zoechling · MIT", file: "ZIPFoundation-MIT", kind: .software),
         LicenceEntry(id: "swiftsoup", name: "SwiftSoup", role: "Reading a footnote's HTML",
                      terms: "MIT", file: "SwiftSoup-MIT", kind: .software),
+        LicenceEntry(id: "googlecast", name: "Google Cast SDK", role: "Plays videos on a Chromecast or Google TV (iPhone and iPad)",
+                     terms: "© Google LLC · Google's Cast SDK terms", file: "GoogleCast-SDK-Terms", kind: .software),
+        LicenceEntry(id: "gtmsessionfetcher", name: "GTMSessionFetcher", role: "Google Cast: its network requests",
+                     terms: "© Google LLC · Apache License 2.0", file: "GTMSessionFetcher-Apache-2.0", kind: .software),
     ]
 
     public static var fonts: [LicenceEntry] { all.filter { $0.kind == .font } }

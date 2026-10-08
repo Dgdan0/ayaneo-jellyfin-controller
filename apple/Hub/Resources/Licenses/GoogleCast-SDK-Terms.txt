@@ -1,0 +1,18 @@
+Google Cast iOS sender SDK 4.8.6
+
+Copyright Google LLC.
+
+The app plays videos on a Chromecast or Google TV with Google's Cast iOS
+sender SDK, added from Google's Swift package at
+https://github.com/googlecast/google-cast-ios-sdk (GoogleCastDynamic).
+
+The SDK itself is provided by Google LLC and governed by its own terms of
+service and licence agreement: the Google APIs Terms of Service
+(https://developers.google.com/terms) and the Google Cast SDK Additional
+Developer Terms of Service (https://developers.google.com/cast/docs/terms).
+
+The package's manifest is licensed under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0).
+
+The SDK depends on GTMSessionFetcher, listed on its own under the Apache
+License, Version 2.0.

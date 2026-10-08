@@ -27,3 +27,12 @@ so the Mac app does not link it. Each licence text ships in the app, in `apple/H
 
 Readium's package also declares GCDWebServer, SQLite.swift (for LCP) and swift-docc-plugin, which
 Swift Package Manager fetches but the app does not link. LCP and its DRM are not used.
+
+The iPad and iPhone app casts videos to a Chromecast or Google TV (#44) with Google's Cast iOS sender
+SDK, from Google's own Swift package, pinned to **4.8.6**, its dynamic framework, on iOS only (the Mac
+keeps AirPlay). The SDK is Google's, under its own terms; its package brings GTMSessionFetcher.
+
+| Software | Use | Licence | File |
+|---|---|---|---|
+| [Google Cast iOS sender SDK](https://github.com/googlecast/google-cast-ios-sdk) 4.8.6 | Finds TVs, the Cast button, and the TV's player | Google APIs Terms of Service and the Google Cast SDK Additional Developer Terms; the package manifest is Apache 2.0 | `GoogleCast-SDK-Terms.txt` |
+| [GTMSessionFetcher](https://github.com/google/gtm-session-fetcher) 3.5.0 | Google Cast's network requests | Apache 2.0, Copyright Google LLC | `GTMSessionFetcher-Apache-2.0.txt` |

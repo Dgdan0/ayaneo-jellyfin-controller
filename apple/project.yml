@@ -31,6 +31,12 @@ packages:
   Readium:
     url: https://github.com/readium/swift-toolkit.git
     exactVersion: 3.11.0
+  # Google Cast to the TV (#44): Google's own Swift package, the dynamic
+  # framework (it carries the Cast button's pictures). iOS only: the Mac has
+  # no Cast SDK and keeps AirPlay.
+  GoogleCast:
+    url: https://github.com/googlecast/google-cast-ios-sdk
+    exactVersion: 4.8.6
 targets:
   Hub:
     type: application
@@ -47,6 +53,9 @@ targets:
         destinationFilters: [iOS]
       - package: Readium
         product: ReadiumNavigator
+        destinationFilters: [iOS]
+      - package: GoogleCast
+        product: GoogleCastDynamic
         destinationFilters: [iOS]
     # The Mac's sandbox and outgoing network. macOS only: App Store Connect
     # refuses an iOS build signed with macOS entitlements (ITMS-90046).
@@ -95,6 +104,12 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         GCSupportsControllerUserInteraction: true
+        # Google Cast finds TVs on the home network (#44): Google's Default
+        # Media Receiver, CC1AD845, and any Cast device.
+        NSLocalNetworkUsageDescription: JellyHub looks for Chromecasts and Google TVs on your network so a video can play on the TV.
+        NSBonjourServices:
+          - _googlecast._tcp
+          - _CC1AD845._googlecast._tcp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dgdan.jellyhub

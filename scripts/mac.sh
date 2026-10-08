@@ -59,6 +59,7 @@
 # with -demo, HUB_PLAY_FROM_END=<seconds>; HUB_TITLE=<item id>[|subtitles|removal] opens that library
 # title and on to its subtitles or deletion page ("000000000000000000000000deb00003-e2" with -demo),
 # HUB_SUBTITLES=search searches and opens the first result, and HUB_REMOVAL=confirm asks the alert.
+# With -demo, HUB_CAST=standin offers the stand-in TV to Cast to, and HUB_CAST=connected is connected to it (#44).
 # HUB_DOWNLOAD=<item id> downloads that film or episode at launch (an MP4 the PC makes first), and
 # HUB_DOWNLOAD=remove:<item id> takes it off the simulator again.
 # With -demo, HUB_OPEN=book:<work id> HUB_SHEET=finished opens that book's When did you finish?.
@@ -198,6 +199,7 @@ launch_sim() {
     SIMCTL_CHILD_HUB_SUBTITLES="${HUB_SUBTITLES:-}" SIMCTL_CHILD_HUB_REMOVAL="${HUB_REMOVAL:-}" \
     SIMCTL_CHILD_HUB_BOOK_READALONG="${HUB_BOOK_READALONG:-}" SIMCTL_CHILD_HUB_DOWNLOAD="${HUB_DOWNLOAD:-}" \
     SIMCTL_CHILD_HUB_WIDTH="${HUB_WIDTH:-}" SIMCTL_CHILD_HUB_ORIENT="$(cat "$SHOTS/.turned-$udid" 2>/dev/null)" \
+    SIMCTL_CHILD_HUB_CAST="${HUB_CAST:-}" \
     xcrun simctl launch "$udid" "$BUNDLE_ID" $(launch_args "$@") >/dev/null
 }
 

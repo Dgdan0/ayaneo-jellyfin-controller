@@ -10,6 +10,11 @@ import UIKit
 struct HubApp: App {
     @State private var model = AppModel()
 
+    init() {
+        // Google Cast on an iPhone and an iPad (#44); the stand-in TV with the demo hub.
+        CastCenter.shared.start(demo: ProcessInfo.processInfo.arguments.contains("-demo"))
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

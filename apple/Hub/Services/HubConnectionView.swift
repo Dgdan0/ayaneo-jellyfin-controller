@@ -13,12 +13,13 @@ struct HubConnectionView: View {
     var embedded = false
 
     @State private var address = ""
+    @State private var tvAddress = ""
     @State private var token = ""
     @State private var result = StatusMessage("")
     @State private var testing = false
     @FocusState private var focus: Field?
 
-    private enum Field { case address, token }
+    private enum Field { case address, token, tv }
 
     var body: some View {
         Form {
@@ -56,6 +57,24 @@ struct HubConnectionView: View {
                 Text("One token per device, issued on the media PC with hubctl token new --label ipad-pro. It is kept in this device's Keychain.")
             }
 
+            #if os(iOS)
+            if !embedded {
+            Section {
+                TextField("Address for TV playback", text: $tvAddress, prompt: Text("https://your-hub.duckdns.org:55886"))
+                    .textContentType(.URL)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .focused($focus, equals: .tv)
+                    .accessibilityIdentifier("hub-tv-address")
+            } header: {
+                Text("TV playback")
+            } footer: {
+                Text(tvFooter)
+            }
+            }
+            #endif
+
             Section {
                 Button {
                     Task { await saveAndTest() }
@@ -92,8 +111,17 @@ struct HubConnectionView: View {
             // A new device starts with the media PC's address; it only pastes
             // its own token.
             address = model.address.isEmpty ? HubEndpoints.suggestedAddress : model.address
+            tvAddress = model.tvAddress
             focus = model.hasToken ? .address : .token
         }
+    }
+
+    /// What the TV address is for, and what happens without one.
+    private var tvFooter: String {
+        let fallback = CastAddress.problem(base: HubEndpoints.normaliseBase(address)) == nil
+            ? "Empty, the TV uses the hub address above."
+            : "Needed to cast: the TV is not on the tailnet, so it cannot use the hub address above."
+        return "A public HTTPS address of the same hub, which a Chromecast or Google TV fetches the video from. " + fallback
     }
 
     private func saveAndTest() async {
@@ -103,8 +131,15 @@ struct HubConnectionView: View {
             result = StatusMessage(error, tone: .error)
             return
         }
+        let tv = tvAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tv.isEmpty, let problem = CastAddress.problem(base: HubEndpoints.normaliseBase(tv)) {
+            result = StatusMessage(problem, tone: .error)
+            return
+        }
         testing = true
         defer { testing = false }
+        model.saveTVAddress(tv)
+        tvAddress = model.tvAddress
         await model.saveConnection(address: normalised, token: effective)
         address = normalised
         token = ""
