@@ -98,14 +98,7 @@ struct FinishedPanel: View {
     let finish: (BookPage.FinishDate) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var date = BookPage.FinishDate.current()
-    /// A controller's Ⓐ on the month or the year: their choices (#46).
-    @State private var choosing: Part?
     private let now = BookPage.FinishDate.current()
-
-    enum Part: String, Identifiable {
-        case month, year
-        var id: String { rawValue }
-    }
 
     var body: some View {
         NavigationStack {
@@ -122,14 +115,26 @@ struct FinishedPanel: View {
                         }
                     }
                     .accessibilityIdentifier("finish-month")
-                    .padFocusable("month", scrolls: false) { choosing = .month }
+                    .padFocusable("month", scrolls: false) {
+                        PadFocusCenter.shared.present(PadMenu(title: "Month", choices:
+                            BookPage.FinishDate.months(in: date.year, now: now).map { month in
+                                PadChoice(id: "month-\(month)", title: BookPage.months[month - 1], checked: month == date.month) {
+                                    date.month = month
+                                }
+                            }))
+                    }
                     Picker("Year", selection: $date.year) {
                         ForEach(BookPage.FinishDate.years(now: now), id: \.self) { year in
                             Text(String(year)).tag(year)
                         }
                     }
                     .accessibilityIdentifier("finish-year")
-                    .padFocusable("year", scrolls: false) { choosing = .year }
+                    .padFocusable("year", scrolls: false) {
+                        PadFocusCenter.shared.present(PadMenu(title: "Year", choices:
+                            BookPage.FinishDate.years(now: now).map { year in
+                                PadChoice(id: "year-\(year)", title: String(year), checked: year == date.year) { date.year = year }
+                            }))
+                    }
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
@@ -167,19 +172,6 @@ struct FinishedPanel: View {
         }
         .onChange(of: date.year) { _, _ in date = date.clamped(to: now) }
         .padPage("finished", modal: true) { dismiss() }
-        .confirmationDialog(choosing == .year ? "Year" : "Month", isPresented: Binding(
-            get: { choosing != nil }, set: { if !$0 { choosing = nil } }), presenting: choosing) { part in
-            switch part {
-            case .month:
-                ForEach(BookPage.FinishDate.months(in: date.year, now: now), id: \.self) { month in
-                    Button(BookPage.months[month - 1]) { date.month = month }
-                }
-            case .year:
-                ForEach(BookPage.FinishDate.years(now: now), id: \.self) { year in
-                    Button(String(year)) { date.year = year }
-                }
-            }
-        }
         // The app's sheets are glass (the request form, the profiles).
         .presentationBackground { GlassSheetFill() }
         .presentationDetents([.height(250)])

@@ -50,9 +50,7 @@ struct BookView: View {
     @State private var finishUndo: (you: ReadingYou?, wasRead: Bool)?
     /// The chapter the ebook was left at, when it was read last: the Resume button says it.
     @State private var chapter: String?
-    /// ⋯ and Change format, opened with a controller's Ⓐ (#46): their menus as a dialog.
-    @State private var moreOpen = false
-    @State private var formatsOpen = false
+
     #if DEBUG
     @MainActor private static var debugFinished = false
     #endif
@@ -89,18 +87,9 @@ struct BookView: View {
             .padding(.bottom, 28)
         }
         .padPage("book:\(route.workId)")
-        .confirmationDialog(work.map { "More actions for \($0.title)" } ?? "More actions", isPresented: $moreOpen,
-                            titleVisibility: .visible) {
-            if let work { moreChoices(work) }
-        }
-        .confirmationDialog("Change format", isPresented: $formatsOpen) {
-            if let work {
-                let menu = ReadingFormatMenu.forWork(work, remembered: books.entryPreference(work.id))
-                ForEach(menu.options) { option in
-                    Button("\(option.label) · \(option.detail)") { preview = option.choice }
-                }
-            }
-        }
+        // Ⓑ closes them (#46).
+        .padCloses(naming) { naming = false }
+        .padCloses(removing != nil) { removing = nil }
         .ambientArtwork(lit ?? work?.artwork ?? "")
         .refreshable { reloads += 1 }
         .task(id: "\(route.workId)·\(model.userId)·\(readerClosed)·\(reloads)") { await load() }
@@ -121,9 +110,7 @@ struct BookView: View {
             Button("Keep offline copy", role: .cancel) {}
             Button("Remove from this device", role: .destructive) { removeOffline() }
         } message: {
-            if let removing {
-                Text("\(removing.work.title) · \(Fmt.bytes(removing.bytes)) on this device. Removes downloaded text, audio and cached comic pages for this title. Server files, bookmarks and reading progress are kept.")
-            }
+            if let removing { Text(Self.removalMessage(removing.work, bytes: removing.bytes)) }
         }
     }
 
@@ -395,18 +382,7 @@ struct BookView: View {
             }
             if menu.options.count > 1 {
                 Menu {
-                    let current = menu.option(for: preview ?? menu.defaultChoice)?.key
-                    ForEach(menu.options) { option in
-                        Button {
-                            preview = option.choice
-                        } label: {
-                            if option.key == current {
-                                Label("\(option.label) · \(option.detail)", systemImage: "checkmark")
-                            } else {
-                                Text("\(option.label) · \(option.detail)")
-                            }
-                        }
-                    }
+                    PadChoicesMenu(choices: formatChoices(menu))
                 } label: {
                     if compact {
                         Image(systemName: "arrow.left.arrow.right")
@@ -424,7 +400,9 @@ struct BookView: View {
                 .fixedSize()
                 .accessibilityLabel("Change format")
                 .accessibilityHint("Choose ebook, audiobook or read along")
-                .padFocusable("format", ring: compact ? .circle : .capsule) { formatsOpen = true }
+                .padFocusable("format", ring: compact ? .circle : .capsule) {
+                    PadFocusCenter.shared.present(PadMenu(title: "Change format", choices: formatChoices(menu)))
+                }
             }
             if !work.isSeries {
                 // Read or unread by hand (#37): restored at once if undone here, else started again.
@@ -444,23 +422,7 @@ struct BookView: View {
             }
             .accessibilityIdentifier("book-want")
             Menu {
-                ReadingListsMenu(work: work) {
-                    listName = ""
-                    naming = true
-                }
-                Button {
-                    askRemoveOffline(work)
-                } label: {
-                    Label("Remove offline copy", systemImage: "trash")
-                }
-                // Last, and in its own words: a preview and a confirmation follow (#34).
-                Divider()
-                Button(role: .destructive) {
-                    openRoute(.removal(RemovalRoute(kind: "reading", id: work.id, title: work.title)))
-                } label: {
-                    Label(RemovalLines.heading, systemImage: "trash")
-                }
-                .accessibilityIdentifier("book-delete")
+                PadChoicesMenu(choices: moreChoices(work))
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 18, weight: .bold))
@@ -472,7 +434,7 @@ struct BookView: View {
             .menuStyle(.button)
             .buttonStyle(.plain)
             .accessibilityLabel("More actions for \(work.title)")
-            .padFocusable("more", ring: .circle) { moreOpen = true }
+            .padFocusable("more", ring: .circle) { presentMore(work) }
         }
         .padGroup("actions", .row, members: ((preview ?? menu.defaultChoice) == nil ? [] : ["entry"])
                   + (menu.options.count > 1 ? ["format"] : []) + (work.isSeries ? [] : ["read"]) + ["want", "more"],
@@ -496,38 +458,7 @@ struct BookView: View {
                 .padFocusable("entry") { launch(work, choice, remembered: remembered) }
             }
             Menu {
-                if finishUndo != nil {
-                    Button { undoFinished(work) } label: { Label("Undo finished", systemImage: "arrow.uturn.backward") }
-                } else {
-                    Button { finishing = true } label: { Label("Finished", systemImage: "checkmark.circle") }
-                }
-                if work.progress?.completed == true && finishUndo == nil {
-                    // #37's unread: the next read starts at the beginning.
-                    Button { toggleRead(work) } label: { Label("Mark unread", systemImage: "circle") }
-                }
-                let wanted = books.isWanted(work.id)
-                Button {
-                    notice = books.toggleWanted(work) ? "Added to Want to Read" : "Removed from Want to Read"
-                } label: {
-                    Label("Want to read", systemImage: wanted ? "checkmark" : "bookmark")
-                }
-                ReadingListsMenu(work: work) {
-                    listName = ""
-                    naming = true
-                }
-                Button {
-                    askRemoveOffline(work)
-                } label: {
-                    Label("Remove offline copy", systemImage: "arrow.down.circle")
-                }
-                // Last, and in its own words: a preview and a confirmation follow (#34).
-                Divider()
-                Button(role: .destructive) {
-                    openRoute(.removal(RemovalRoute(kind: "reading", id: work.id, title: work.title)))
-                } label: {
-                    Label(RemovalLines.heading, systemImage: "trash")
-                }
-                .accessibilityIdentifier("book-delete")
+                PadChoicesMenu(choices: moreChoices(work))
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 18, weight: .bold))
@@ -539,39 +470,57 @@ struct BookView: View {
             .menuStyle(.button)
             .buttonStyle(.plain)
             .accessibilityLabel("More actions for \(work.title)")
-            .padFocusable("more", ring: .circle) { moreOpen = true }
+            .padFocusable("more", ring: .circle) { presentMore(work) }
         }
         .padGroup("actions", .row, members: (menu.defaultChoice == nil ? [] : ["entry"]) + ["more"], prefix: false)
     }
 
-    /// ⋯ as a dialog, for a controller's Ⓐ (#46): what its menu holds, in its order.
-    @ViewBuilder private func moreChoices(_ work: ReadingWork) -> some View {
+    /// ⋯'s choices: its menu under a finger or a pointer, and its panel under a
+    /// controller's Ⓐ (#46), in the same order.
+    private func moreChoices(_ work: ReadingWork) -> [PadChoice] {
+        var choices: [PadChoice] = []
         if isBook(work) {
             if finishUndo != nil {
-                Button("Undo finished") { undoFinished(work) }
+                choices.append(PadChoice(id: "undo-finished", title: "Undo finished", systemImage: "arrow.uturn.backward") {
+                    undoFinished(work)
+                })
             } else {
-                Button("Finished") { finishing = true }
+                choices.append(PadChoice(id: "finished", title: "Finished", systemImage: "checkmark.circle") { finishing = true })
             }
             if work.progress?.completed == true && finishUndo == nil {
-                Button("Mark unread") { toggleRead(work) }
+                // #37's unread: the next read starts at the beginning.
+                choices.append(PadChoice(id: "unread", title: "Mark unread", systemImage: "circle") { toggleRead(work) })
             }
-            Button(books.isWanted(work.id) ? "Remove from Want to Read" : "Want to read") {
+            let wanted = books.isWanted(work.id)
+            choices.append(PadChoice(id: "want", title: "Want to read", systemImage: wanted ? nil : "bookmark", checked: wanted) {
                 notice = books.toggleWanted(work) ? "Added to Want to Read" : "Removed from Want to Read"
-            }
+            })
         }
-        ForEach(books.lists.lists) { list in
-            let included = list.items.contains { $0.workId == work.id }
-            Button(included ? "Remove from \(list.name)" : "Add to \(list.name)") {
-                books.updateLists { included ? $0.remove(list.id, workId: work.id) : $0.add(list.id, ReadingListEntry.from(work)) }
-            }
-        }
-        Button("New list") {
+        choices.append(ReadingListChoices.addToList(work, books: books) {
             listName = ""
             naming = true
-        }
-        Button("Remove offline copy") { askRemoveOffline(work) }
-        Button(RemovalLines.heading, role: .destructive) {
+        })
+        choices.append(PadChoice(id: "remove-offline", title: "Remove offline copy",
+                                 systemImage: isBook(work) ? "arrow.down.circle" : "trash") { askRemoveOffline(work) })
+        // Last, and in its own words: a preview and a confirmation follow (#34).
+        choices.append(PadChoice(id: "delete", title: RemovalLines.heading, systemImage: "trash", role: .destructive,
+                                 dividerBefore: true) {
             openRoute(.removal(RemovalRoute(kind: "reading", id: work.id, title: work.title)))
+        })
+        return choices
+    }
+
+    private func presentMore(_ work: ReadingWork) {
+        PadFocusCenter.shared.present(PadMenu(title: "More actions for \(work.title)", choices: moreChoices(work)))
+    }
+
+    /// Change format's choices: its menu, and its panel under a controller's Ⓐ.
+    private func formatChoices(_ menu: ReadingFormatMenu) -> [PadChoice] {
+        let current = menu.option(for: preview ?? menu.defaultChoice)?.key
+        return menu.options.map { option in
+            PadChoice(id: "format-\(option.key)", title: "\(option.label) · \(option.detail)", checked: option.key == current) {
+                preview = option.choice
+            }
         }
     }
 
@@ -730,11 +679,24 @@ struct BookView: View {
         Task {
             let bytes = await ReadingOffline.bytes(work, app: model)
             if bytes > 0 {
-                removing = (work, bytes)
+                // The panel while the ring is in use, else the alert.
+                let asked = PadFocusCenter.shared.confirm(PadMenu(
+                    title: "Remove offline copy?", message: Self.removalMessage(work, bytes: bytes), choices: [
+                        PadChoice(id: "keep", title: "Keep offline copy"),
+                        PadChoice(id: "remove", title: "Remove from this device", role: .destructive) {
+                            removing = (work, bytes)
+                            removeOffline()
+                        },
+                    ]))
+                if !asked { removing = (work, bytes) }
             } else {
                 notice = "No offline copy is kept on this device"
             }
         }
+    }
+
+    static func removalMessage(_ work: ReadingWork, bytes: Int64) -> String {
+        "\(work.title) · \(Fmt.bytes(bytes)) on this device. Removes downloaded text, audio and cached comic pages for this title. Server files, bookmarks and reading progress are kept."
     }
 
     private func removeOffline() {

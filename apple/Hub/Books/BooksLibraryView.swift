@@ -124,7 +124,10 @@ struct BooksLibraryView: View {
                 .contextMenu { Button("Arrange libraries", action: startArranging) }
                 #endif
                 .accessibilityAction(named: "Arrange libraries", startArranging)
-                .padFocusable(library.id, ring: .card) { openRoute(.readingLibrary(ReadingLibraryRoute(library: library))) }
+                // Ⓨ is the hold's Arrange libraries (#46).
+                .padFocusable(library.id, ring: .card, hold: startArranging) {
+                    openRoute(.readingLibrary(ReadingLibraryRoute(library: library)))
+                }
         }
     }
 
@@ -202,8 +205,7 @@ struct ReadingLibraryView: View {
     @State private var view: BooksModel.LibraryView = .series
     @State private var sort = SortPreference.forField("title")
     @State private var ready = false
-    /// The order's fields, for a controller's Ⓐ on its menu (#46).
-    @State private var choosingSort = false
+
 
     private var library: ReadingLibrary { route.library }
     private var fields: [(id: String, label: String)] { ReadingSortFields.forLibrary(library) }
@@ -234,11 +236,6 @@ struct ReadingLibraryView: View {
             .padGroup("library", .column, members: (canShowAuthors ? ["views"] : []) + ["order", "grid"], prefix: false)
         }
         .padPage("library:\(library.id)")
-        .confirmationDialog("Sort by", isPresented: $choosingSort) {
-            ForEach(gridFields, id: \.id) { field in
-                Button(field.label) { apply(SortPreference.forField(field.id)) }
-            }
-        }
         .onAppear {
             guard !ready else { return }
             view = canShowAuthors ? books.libraryView : .series
@@ -292,7 +289,14 @@ struct ReadingLibraryView: View {
                 }
                 .menuStyle(.button)
                 .buttonStyle(GlassControlStyle())
-                .padFocusable("sort-field") { choosingSort = true }
+                .accessibilityIdentifier("library-sort-field")
+                .padFocusable("sort-field") {
+                    PadFocusCenter.shared.present(PadMenu(title: "Sort by", choices: gridFields.map { field in
+                        PadChoice(id: "sort-\(field.id)", title: field.label, checked: field.id == sort.field) {
+                            apply(SortPreference.forField(field.id))
+                        }
+                    }))
+                }
             }
             Button {
                 apply(SortPreference(field: sort.field, ascending: !sort.ascending))

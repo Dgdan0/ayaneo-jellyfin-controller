@@ -60,6 +60,8 @@ struct BooksActivityView: View {
         .padPage("books-activity")
         .refreshable { polls += 1 }
         .task(id: polls) { await poll() }
+        // Ⓑ keeps it (#46).
+        .padCloses(cancelling != nil) { cancelling = nil }
         .alert("Cancel transfer?", isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } }),
                presenting: cancelling) { item in
             // An alert: iOS 26 hides a dialog's cancel role. The harmless answer has the cancel
@@ -91,7 +93,14 @@ struct BooksActivityView: View {
     private func act(_ action: ReadingTransferAction, on item: ReadingDownloadItem) {
         switch action {
         case .retry: Task { await run(.retry, on: item) }
-        case .cancel: cancelling = item
+        case .cancel:
+            // The panel while the ring is in use (a controller cannot answer an alert), else the alert.
+            let asked = PadFocusCenter.shared.confirm(PadMenu(
+                title: "Cancel transfer?", message: item.title + " · Stop this transfer and delete its incomplete files.", choices: [
+                    PadChoice(id: "keep", title: "Keep transfer"),
+                    PadChoice(id: "cancel", title: "Cancel transfer", role: .destructive) { Task { await run(.cancel, on: item) } },
+                ]))
+            if !asked { cancelling = item }
         }
     }
 

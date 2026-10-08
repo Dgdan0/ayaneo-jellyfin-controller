@@ -40,7 +40,7 @@ struct SpeedLimitsView: View {
                     if state.canControl && state.modeSwitchSupported {
                         DashboardCard(title: "In use", trailing: { EmptyView() }) {
                             GlassCapsulePicker(items: [.init(id: "normal", title: "Normal speed"), .init(id: "alternative", title: "Quiet")],
-                                               selection: state.mode) { chosen in
+                                               selection: state.mode, pad: "mode") { chosen in
                                 guard chosen != state.mode else { return }
                                 Task { await save(BandwidthChange(mode: chosen)) }
                             }
@@ -81,6 +81,7 @@ struct SpeedLimitsView: View {
             .padding(.top, 4)
             .padding(.bottom, 28)
         }
+        .padPage("speed-limits")
         .refreshable { loads += 1 }
         .task(id: loads) { await load() }
         .sheet(item: $editing) { _ in
@@ -111,6 +112,11 @@ struct SpeedLimitsView: View {
                 }
                 .buttonStyle(GlassControlStyle())
                 .disabled(saving)
+                .padFocusable("edit-\(set)") {
+                    guard !saving else { return }
+                    editing = Editing(limits: set, name: name, download: BandwidthPresentation.field(down),
+                                      upload: BandwidthPresentation.field(up))
+                }
                 .padding(.horizontal, 8)
                 .padding(.top, 6)
                 .accessibilityIdentifier("edit-\(set)")
@@ -165,6 +171,8 @@ struct LimitsEditor: View {
     let inUse: String
     let apply: (BandwidthChange) -> Void
     @Environment(\.horizontalSizeClass) private var sizeClass
+    /// The field a controller's Ⓐ chose to type in (#46).
+    @FocusState private var typing: String?
 
     var body: some View {
         if let current = editing {
@@ -179,7 +187,7 @@ struct LimitsEditor: View {
                             .foregroundStyle(.white.opacity(0.7))
                     }
                     Spacer(minLength: 8)
-                    GlassRoundButton(systemImage: "xmark", label: "Close", size: 40) { editing = nil }
+                    GlassRoundButton(systemImage: "xmark", label: "Close", size: 40, pad: "close") { editing = nil }
                         .keyboardShortcut(.cancelAction)
                 }
                 field("Download", text: Binding(get: { editing?.download ?? "" }, set: { editing?.download = $0 }))
@@ -190,13 +198,7 @@ struct LimitsEditor: View {
                         .foregroundStyle(Color.dangerText)
                 }
                 Button {
-                    guard let down = BandwidthPresentation.parse(current.download),
-                          let up = BandwidthPresentation.parse(current.upload) else {
-                        editing?.error = "Enter a number from 0 to 1,048,576."
-                        return
-                    }
-                    editing = nil
-                    apply(BandwidthChange(limitsFor: current.limits, downloadBps: down, uploadBps: up))
+                    applyLimits(current)
                 } label: {
                     Text("Apply")
                         .frame(maxWidth: .infinity)
@@ -204,15 +206,28 @@ struct LimitsEditor: View {
                 .buttonStyle(PrimaryPillStyle())
                 .keyboardShortcut(.defaultAction)
                 .accessibilityIdentifier("apply-limits")
+                .padFocusable("apply", scrolls: false) { applyLimits(current) }
                 Text("Keeps \(inUse) in use.")
                     .font(HubType.body(13, relativeTo: .footnote))
                     .foregroundStyle(.white.opacity(0.6))
                 Spacer(minLength: 0)
             }
             .padding(20)
+            // A page of its own while it shows: Ⓑ closes it (#46).
+            .padPage("limits-editor", modal: true, initial: "field-Download") { editing = nil }
             .presentationBackground { GlassSheetFill() }
             .presentationDetents(sizeClass == .compact ? [.medium, .large] : [.large])
         }
+    }
+
+    private func applyLimits(_ current: SpeedLimitsView.Editing) {
+        guard let down = BandwidthPresentation.parse(current.download),
+              let up = BandwidthPresentation.parse(current.upload) else {
+            editing?.error = "Enter a number from 0 to 1,048,576."
+            return
+        }
+        editing = nil
+        apply(BandwidthChange(limitsFor: current.limits, downloadBps: down, uploadBps: up))
     }
 
     private func field(_ label: String, text: Binding<String>) -> some View {
@@ -229,6 +244,9 @@ struct LimitsEditor: View {
                 .glassPanel(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .accessibilityLabel("\(label) limit in KiB per second")
                 .accessibilityIdentifier("limit-\(label.lowercased())")
+                .focused($typing, equals: label)
+                // Ⓐ types in it, with the keyboard the system offers.
+                .padFocusable("field-\(label)", ring: .rounded(12), scrolls: false) { typing = label }
         }
     }
 }

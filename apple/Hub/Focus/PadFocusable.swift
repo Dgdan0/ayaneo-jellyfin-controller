@@ -52,8 +52,8 @@ extension View {
     /// (which it scrolls), with the key its focus is remembered by. `modal`
     /// for a sheet, which has the keys while it shows. `back` is a sheet's Ⓑ
     /// and Escape (it closes), or a page's own before Back (select mode ends).
-    func padPage(_ key: String, modal: Bool = false, back: (() -> Void)? = nil) -> some View {
-        modifier(PadPageModifier(key: key, modal: modal, back: back))
+    func padPage(_ key: String, modal: Bool = false, initial: String? = nil, back: (() -> Void)? = nil) -> some View {
+        modifier(PadPageModifier(key: key, modal: modal, initial: initial, back: back))
     }
 
     /// The shell's bars: one page for the top bar and the iPhone's tab bar.
@@ -91,18 +91,32 @@ extension View {
         modifier(PadFocusableModifier(id: id, ring: ring, scroll: scroll, scrolls: scrolls,
                                       actions: PadItemActions(press: press, hold: hold)))
     }
+
+    /// An item with a hold menu (#46, D): `menu` is its context menu under a
+    /// long press or a secondary click and, the same choices, Ⓨ's panel.
+    func padFocusable(_ id: String?, ring: PadRing = .capsule, scroll: AnyHashable? = nil, scrolls: Bool = true,
+                      menu: @escaping () -> PadMenu, press: (() -> Void)?) -> some View {
+        contextMenu { PadChoicesMenu(choices: menu().choices) }
+            .modifier(PadFocusableModifier(id: id, ring: ring, scroll: scroll, scrolls: scrolls,
+                                           actions: PadItemActions(press: press,
+                                                                   hold: { PadFocusCenter.shared.present(menu()) })))
+    }
 }
 
 private struct PadPageModifier: ViewModifier {
     let key: String
     let modal: Bool
+    let initial: String?
     let back: (() -> Void)?
     @Environment(\.shellStack) private var stack
     @State private var page: PadPage
+    /// A menu shown over the page (`PadFocusCenter.present`).
+    @State private var menu: PadMenu?
 
-    init(key: String, modal: Bool, back: (() -> Void)?) {
+    init(key: String, modal: Bool, initial: String?, back: (() -> Void)?) {
         self.key = key
         self.modal = modal
+        self.initial = initial
         self.back = back
         _page = State(initialValue: PadPage(modal: modal))
     }
@@ -124,6 +138,8 @@ private struct PadPageModifier: ViewModifier {
                     page.key = key
                     page.stack = modal ? "" : stack
                     page.back = back
+                    page.initial = initial
+                    page.present = { menu = $0 }
                     page.proxy = proxy
                     PadFocusCenter.shared.appeared(page)
                 }
@@ -131,6 +147,9 @@ private struct PadPageModifier: ViewModifier {
                 .onChange(of: key) { _, latest in page.key = latest }
                 // A page's Ⓑ comes and goes with what it is busy with (a title's select mode).
                 .onChange(of: back == nil) { _, _ in page.back = back }
+                // On a view of its own: a page's own `.sheet` on the same chain
+                // (a book's Finished) kept this one from showing.
+                .background { Color.clear.sheet(item: $menu) { shown in PadMenuPanel(menu: shown) } }
         }
     }
 }
