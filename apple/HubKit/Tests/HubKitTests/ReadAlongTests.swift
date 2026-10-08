@@ -328,6 +328,60 @@ struct ReadAlongStreamTests {
         #expect(clip.fromMs == 3_602_000 && clip.toMs == 3_605_000)
     }
 
+    private func sentence(_ href: String, _ id: String, _ begin: Int64, _ end: Int64) -> ReadAlongSegment {
+        ReadAlongSegment(textHref: "OEBPS/text/one.xhtml", fragment: id, audioHref: href, beginMs: begin, endMs: end)
+    }
+
+    /// A sentence past its file's audio skips itself, not the edition: a file's
+    /// audio is its window of the track, up to the next file mapped there or
+    /// the track's end. One that runs past the window ends there, so the voice
+    /// never reads on into the next file's words.
+    @Test func aSentencePastItsFilesAudioIsSkippedAndOneRunningPastItEndsThere() throws {
+        let first = "OEBPS/Audio/00001-00001.mp3", second = "OEBPS/Audio/00001-00002.mp3", third = "/OEBPS/Audio/00002-00001.mp3"
+        let timeline = ReadAlongTimeline(tracks: [
+            // The first file's window is the first hour of track 1, up to where the second file begins.
+            ReadAlongTrack(audioHref: first, segments: [sentence(first, "a", 2_000, 5_000), sentence(first, "b", 3_599_000, 3_601_000),
+                                                        sentence(first, "c", 3_600_000, 3_602_000), sentence(first, "d", 3_700_000, 3_701_000)]),
+            // The second file's window is the rest of track 1: an hour.
+            ReadAlongTrack(audioHref: second, segments: [sentence(second, "e", 1_000, 2_000)]),
+            // Track 0 is 4,610,652 ms long: nothing of this stretch is in it.
+            ReadAlongTrack(audioHref: third, segments: [sentence(third, "f", 4_610_652, 4_612_000), sentence(third, "g", 4_700_000, 4_701_000)]),
+        ])
+        let fitted = try #require(ReadAlongStream.fitted(timeline, manifest: manifest))
+        #expect(fitted.tracks.map(\.audioHref) == [first, second], "a stretch left with no sentence goes")
+        #expect(fitted.tracks[0].segments.map(\.fragment) == ["a", "b"])
+        #expect(fitted.tracks[0].segments[1].endMs == 3_600_000, "it ends where the next file's audio begins")
+        #expect(fitted.tracks[1] == timeline.tracks[1])
+        // The fitted timeline still maps, each stretch onto its own file.
+        let sources = try ReadAlongStream.sources(fitted, manifest: manifest, sourceItemId: "3726292328809367", url: url)
+        #expect(sources.map(\.startMs) == [0, 3_600_000])
+    }
+
+    @Test func aFileWhoseAudioCannotBeMeasuredIsLeftAsItIs() {
+        // Unmapped (`sources` refuses it), or on a track of unknown length with no file after it.
+        let unmapped = ReadAlongTimeline(tracks: [ReadAlongTrack(audioHref: "OEBPS/Audio/00009-00001.mp3",
+                                                                 segments: [sentence("OEBPS/Audio/00009-00001.mp3", "x", 9_000_000, 9_001_000)])])
+        #expect(ReadAlongStream.fitted(unmapped, manifest: manifest) == unmapped)
+        var unknown = manifest
+        unknown.tracks[0].durationMs = 0
+        let third = "OEBPS/Audio/00002-00001.mp3"
+        let late = ReadAlongTimeline(tracks: [ReadAlongTrack(audioHref: third, segments: [sentence(third, "y", 9_000_000, 9_001_000)])])
+        #expect(ReadAlongStream.fitted(late, manifest: unknown) == late)
+    }
+
+    @Test func anEditionWithNothingLeftToPlayHasNoNarration() {
+        let third = "OEBPS/Audio/00002-00001.mp3"
+        let past = ReadAlongTimeline(tracks: [ReadAlongTrack(audioHref: third, segments: [sentence(third, "z", 5_000_000, 5_001_000)])])
+        #expect(ReadAlongStream.fitted(past, manifest: manifest) == nil)
+    }
+
+    @Test func theDemosEditionFitsItsTracksAsItIs() throws {
+        let timeline = try ReadAlongPackage.read(DemoReadAlong.slimEdition(), requireAudio: false)
+        let data = try JSONSerialization.data(withJSONObject: DemoReading.manifestFields(DemoReading.audiobooks[0]))
+        let manifest = try JSONDecoder().decode(ReadingAudioManifest.self, from: data)
+        #expect(ReadAlongStream.fitted(timeline, manifest: manifest) == timeline)
+    }
+
     @Test func aFileTheHubDidNotMapIsNoNarrationAtAllNeverAnotherFiles() {
         let timeline = ReadAlongTimeline(tracks: [stretch("OEBPS/Audio/00009-00001.mp3")])
         #expect(throws: ReadAlongError.self) {
@@ -486,6 +540,17 @@ struct ReadAlongPackageTests {
         #expect(timeline.tracks[0].segments.map(\.fragment) == ["sentence2"])
     }
 
+    /// A clip that ends before it begins (an older aligner's; the hub mends
+    /// those it serves, but an edition kept from before has them) skips its
+    /// one sentence; the edition reads on. Only a book of nothing but such
+    /// clips has no narration.
+    @Test func aClipEndingBeforeItBeginsSkipsItsSentenceNotTheEdition() throws {
+        let timeline = try ReadAlongPackage.read(book(begin: "2s", end: "1s"))
+        #expect(timeline.tracks.count == 1)
+        #expect(timeline.tracks[0].segments.map(\.fragment) == ["sentence2"])
+        #expect(timeline.tracks[0].startMs == 3_000 && timeline.tracks[0].durationMs == 1_000)
+    }
+
     @Test func clockSyntaxTakesHoursMinutesMillisecondsAndNpt() throws {
         #expect(try ReadAlongPackage.clock("01:02:03.250") == 3_723_250)
         #expect(try ReadAlongPackage.clock("npt=1.25s") == 1_250)
@@ -502,7 +567,7 @@ struct ReadAlongPackageTests {
                       "/EPUB/audio/voice.mp3", "../audio/voice.mp3?x=1", "..\\audio\\voice.mp3"] {
             #expect(throws: ReadAlongError.self, "\(audio)") { try ReadAlongPackage.read(book(audio: audio)) }
         }
-        for (begin, end) in [("2s", "1s"), ("-1s", "2s"), ("NaN", "2s")] {
+        for (begin, end) in [("-1s", "2s"), ("NaN", "2s")] {
             #expect(throws: ReadAlongError.self, "\(begin) to \(end)") { try ReadAlongPackage.read(book(begin: begin, end: end)) }
         }
         #expect(throws: ReadAlongError.self) {

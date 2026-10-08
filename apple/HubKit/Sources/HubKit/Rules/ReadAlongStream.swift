@@ -85,6 +85,42 @@ public enum ReadAlongStream {
         return out
     }
 
+    /// `timeline` as the mapped audio can play it: a sentence that begins at
+    /// or past the end of its file's audio is skipped, and one that runs past
+    /// it ends there, rather than the whole edition refused or the voice
+    /// reading into the next file's words. A file's audio is its window of the
+    /// track the hub mapped it to: from its `startMs` to the next file mapped
+    /// to that track, else to the track's end. A file the hub did not map, or
+    /// on a track of unknown length, is left as it is (`sources` refuses the
+    /// first). A stretch left with no sentence goes; nil when none is left.
+    public static func fitted(_ timeline: ReadAlongTimeline, manifest: ReadingAudioManifest) -> ReadAlongTimeline? {
+        let files = manifest.alignment?.audio ?? []
+        func length(_ href: String) -> Int64? {
+            guard let file = files.first(where: { trimmed($0.href) == trimmed(href) }),
+                  manifest.tracks.indices.contains(file.track) else { return nil }
+            let start = max(0, file.startMs)
+            if let next = files.filter({ $0.track == file.track && $0.startMs > file.startMs }).map(\.startMs).min() {
+                return next - start
+            }
+            let duration = manifest.tracks[file.track].durationMs
+            return duration > start ? duration - start : nil
+        }
+        var tracks: [ReadAlongTrack] = []
+        for track in timeline.tracks {
+            guard let end = length(track.audioHref) else {
+                tracks.append(track)
+                continue
+            }
+            let kept = track.segments.compactMap { segment -> ReadAlongSegment? in
+                guard segment.beginMs < end else { return nil }
+                return ReadAlongSegment(textHref: segment.textHref, fragment: segment.fragment, audioHref: segment.audioHref,
+                                        beginMs: segment.beginMs, endMs: min(segment.endMs, end))
+            }
+            if !kept.isEmpty { tracks.append(ReadAlongTrack(audioHref: track.audioHref, segments: kept)) }
+        }
+        return tracks.isEmpty ? nil : ReadAlongTimeline(tracks: tracks)
+    }
+
     private static func trimmed(_ href: String) -> String {
         String(href.drop { $0 == "/" })
     }
