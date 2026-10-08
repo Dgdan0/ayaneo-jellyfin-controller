@@ -350,6 +350,25 @@ final class ReadAlongTests: XCTestCase {
         }
     }
 
+    /// The spaces round a sentence are not lit with it (#56): Storyteller's
+    /// element holds the space after a sentence ("The dead are dead. "), or
+    /// before it (" Later …", the demo's chapter Two), and the wash ends at its
+    /// full stop and starts at its first letter. The attachments
+    /// "readalong-trim-after", "-before" and "-before-mid-line", which are measured.
+    @MainActor
+    func testTheSpacesRoundASentenceAreNotLit() {
+        // Two's second sentence starts a line; its third starts after "evening." on the same line.
+        for (name, sentence) in [("after", "one-s2"), ("before", "two-s2"), ("before-mid-line", "two-s3")] {
+            let app = launchReadingAlong(Self.largeType.merging(
+                ["HUB_BOOK_THEME": "SEPIA", "HUB_BOOK_SIZE": "1.3", "HUB_BOOK_SPACING": "1.5", "HUB_BOOK_CHROME": "",
+                 "HUB_READALONG_SENTENCE": sentence]) { $1 })
+            XCTAssertTrue(waitUntil(30) { debug(app).label.contains("% of book") }, "the page did not say where it is: \(debug(app).label)")
+            RunLoop.current.run(until: Date().addingTimeInterval(3))
+            keep(app, "readalong-trim-\(name)")
+            app.terminate()
+        }
+    }
+
     /// With the app in the background (Home, as the screen locking does) the
     /// voice reads on: the app is not suspended, the narration has the lock
     /// screen, and back in the app the voice is further on and the page with it.

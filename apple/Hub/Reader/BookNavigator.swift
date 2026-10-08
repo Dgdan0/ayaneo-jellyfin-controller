@@ -80,6 +80,8 @@ final class BookNavigator: NSObject {
     /// Reading along: the accent the sentence is washed in, and the wash for the page's colours (#52).
     private var narrationTint: UInt32?
     private var narrationWash: UInt32?
+    /// The element of the sentence lit, whose words its boxes are trimmed to (#56).
+    private var narrationFragment: String?
     /// The note whose card is open: where "Go to the note" goes.
     private var noteLink: ReadiumShared.Link?
 
@@ -174,6 +176,7 @@ final class BookNavigator: NSObject {
 
     /// The sentence spoken glows, or nothing does.
     func highlight(_ segment: ReadAlongSegment?) {
+        narrationFragment = segment?.fragment
         controller?.apply(decorations: ReadAlongHighlight.decorations(segment), in: ReadAlongHighlight.group)
         fitNarration()
     }
@@ -185,7 +188,7 @@ final class BookNavigator: NSObject {
     /// page has not had it yet.
     func fitNarration() {
         guard let controller, let wash = narrationWash else { return }
-        let script = ReadAlongPageScript.fitNarration(wash: wash)
+        let script = ReadAlongPageScript.fitNarration(wash: wash, fragment: narrationFragment)
         Task { _ = await controller.evaluateJavaScript(script) }
     }
 

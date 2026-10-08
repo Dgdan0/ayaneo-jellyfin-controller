@@ -164,6 +164,27 @@ struct ReadAlongTests {
         #expect(script.contains("var tl=!up||up.l>r.l+1,tr=!up||up.r<r.r-1,bl=!down||down.l>r.l+1,br=!down||down.r<r.r-1;"))
     }
 
+    /// #56: Storyteller's element for a sentence holds the space after it, and
+    /// can hold one before it; the wash covers the sentence's words alone.
+    @Test func eachRowIsTrimmedToTheSentencesWordsWithoutTheSpacesAround() {
+        let script = ReadAlongPageScript.fitNarration(wash: 0xFFF5E0B4, fragment: #"one-s2"x"#)
+        // The sentence's element, named safely, kept for the fits Readium's relayouts set off.
+        #expect(script.contains(#"window.__pocketNarrationId="one-s2\"x";"#))
+        // A Range from its first to its last character that is not a space, its text walked in order.
+        #expect(script.contains("createTreeWalker(el,NodeFilter.SHOW_TEXT,null)"))
+        #expect(script.contains(#"if(/\S/.test(s.charAt(i))){if(!a)a=[n,i];z=[n,i+1];}"#))
+        #expect(script.contains("g.setStart(a[0],a[1]);g.setEnd(z[0],z[1]);"))
+        // A row takes that Range's extent on its line; a row of only the space gets no box.
+        #expect(script.contains("if(!on.length){r.boxes.forEach(function(b){b.style.display='none';});return false;}"))
+        #expect(script.contains("r.l=Math.min.apply(null,on.map(function(q){return q.l;}));r.r=Math.max.apply(null,on.map(function(q){return q.r;}));"))
+        // The air beyond the words stays, applied after the trim.
+        let trim = try! #require(script.range(of: "if(own){"))
+        let air = try! #require(script.range(of: "rows.forEach(function(r){r.l-=2;r.r+=2;});"))
+        #expect(trim.lowerBound < air.lowerBound)
+        // With no element named, Readium's own extents stand.
+        #expect(ReadAlongPageScript.fitNarration(wash: 0xFFF5E0B4).contains(#"window.__pocketNarrationId="";"#))
+    }
+
     // MARK: The place
 
     private let voice = ReadAlongTimeline(tracks: [ReadAlongTrack(audioHref: "voice.mp3", segments: [

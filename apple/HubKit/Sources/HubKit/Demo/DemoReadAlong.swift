@@ -217,10 +217,17 @@ public enum DemoReadAlong {
 
     private static func page(_ chapter: Int) -> String {
         let said = sentences(chapter)
-        // Three sentences to a paragraph.
+        // Three sentences to a paragraph. As Storyteller writes them, the space
+        // between two sentences is inside one of their elements (#56): after
+        // the sentence ("The dead are dead. "), or in chapter Two before the
+        // next (" Later …"), which the highlight must leave out.
+        let before = chapter == 1
         let paragraphs = stride(from: 0, to: said.count, by: 3).map { start in
-            "<p>" + said[start..<min(start + 3, said.count)].map { #"<span id="\#($0.id)">\#($0.text)</span>"# }
-                .joined(separator: " ") + "</p>"
+            let group = Array(said[start..<min(start + 3, said.count)])
+            return "<p>" + group.enumerated().map { index, sentence in
+                let text = before ? (index > 0 ? " " : "") + sentence.text : sentence.text + (index < group.count - 1 ? " " : "")
+                return #"<span id="\#(sentence.id)">\#(text)</span>"#
+            }.joined() + "</p>"
         }
         let title = chapters[chapter].title
         return """

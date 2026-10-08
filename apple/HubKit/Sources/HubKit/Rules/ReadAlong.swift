@@ -323,24 +323,46 @@ extension ReadAlongPageScript {
     /// Corners round only on the outside of the shape. Readium lays the boxes
     /// out again when the page reflows, and the script, which stays in the
     /// page, fits them again then.
-    public static func fitNarration(wash: UInt32) -> String {
+    ///
+    /// Each row is also trimmed across to the sentence's own words (#56):
+    /// Storyteller's element for a sentence holds the space after it (and can
+    /// hold one before it), which Readium's boxes cover. The script measures a
+    /// Range from the first to the last character of the element `fragment`
+    /// that is not a space, and a row takes the left and right of that
+    /// Range's boxes on its line, `side` points of air beyond them; a row with
+    /// none of them (a line holding only the space) gets no box. Without the
+    /// element on the page, Readium's own extents stand.
+    public static func fitNarration(wash: UInt32, fragment: String? = nil) -> String {
         let colour = ReadAlongGlow.rgb(wash)
         let side = ReadAlongGlow.side
         let corner = ReadAlongGlow.corner
         let name = ReadAlongGlow.className
         return "(function(){document.documentElement.style.setProperty('--pocket-narration-wash','\(colour)');"
+            + "window.__pocketNarrationId=\(json(fragment ?? ""));"
             + "if(window.__pocketNarration){window.__pocketNarration();return true;}"
-            + "function fit(){var items=document.querySelectorAll('div[data-style=\"\(name)\"]');"
+            + "function words(){var el=window.__pocketNarrationId?document.getElementById(window.__pocketNarrationId):null;"
+            + "if(!el)return null;var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null),n,a=null,z=null;"
+            + "while((n=w.nextNode())){var s=n.data;for(var i=0;i<s.length;i++){if(/\\S/.test(s.charAt(i))){if(!a)a=[n,i];z=[n,i+1];}}}"
+            + "if(!a)return [];var g=document.createRange();g.setStart(a[0],a[1]);g.setEnd(z[0],z[1]);"
+            + "var se=document.scrollingElement||document.documentElement,ox=se.scrollLeft,oy=se.scrollTop;"
+            + "return Array.prototype.slice.call(g.getClientRects()).filter(function(q){return q.width>0&&q.height>0;})"
+            + ".map(function(q){return{l:q.left+ox,r:q.right+ox,c:(q.top+q.bottom)/2+oy};});}"
+            + "function fit(){var items=document.querySelectorAll('div[data-style=\"\(name)\"]'),own=words();"
             + "for(var n=0;n<items.length;n++){var item=items[n];"
             + "Array.prototype.slice.call(item.querySelectorAll('[data-join]')).forEach(function(j){j.remove();});"
             + "var rows=[];Array.prototype.slice.call(item.children).forEach(function(b){"
             + "if(b.dataset.t===undefined){b.dataset.t=parseFloat(b.style.top);b.dataset.h=parseFloat(b.style.height);"
             + "b.dataset.l=parseFloat(b.style.left);b.dataset.w=parseFloat(b.style.width);}"
+            + "b.style.display='';"
             + "var t=+b.dataset.t,h=+b.dataset.h,l=+b.dataset.l,w=+b.dataset.w,c=t+h/2,row=null;"
             + "for(var k=0;k<rows.length;k++){if(Math.abs(rows[k].c-c)<Math.min(rows[k].h,h)/2){row=rows[k];break;}}"
             + "if(row){row.boxes.push(b);row.l=Math.min(row.l,l)-0;row.r=Math.max(row.r,l+w);"
             + "row.t=Math.min(row.t,t);row.b=Math.max(row.b,t+h);}"
             + "else rows.push({c:c,h:h,t:t,b:t+h,l:l,r:l+w,boxes:[b]});});"
+            + "if(own){rows=rows.filter(function(r){var on=own.filter(function(q){return Math.abs(q.c-r.c)<r.h/2;});"
+            + "if(!on.length){r.boxes.forEach(function(b){b.style.display='none';});return false;}"
+            + "r.l=Math.min.apply(null,on.map(function(q){return q.l;}));r.r=Math.max.apply(null,on.map(function(q){return q.r;}));"
+            + "return true;});}"
             + "rows.forEach(function(r){r.l-=\(side);r.r+=\(side);});"
             + "function near(a,b){return b.r>a.l&&b.l<a.r&&Math.abs(a.c-b.c)<2.2*Math.max(a.h,b.h);}"
             + "rows.forEach(function(r){r.up=null;r.down=null;});"
