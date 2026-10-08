@@ -274,6 +274,44 @@ final class ReadAlongTests: XCTestCase {
         keep(app, "readalong-sideways-turned")
     }
 
+    /// A sentence over several lines is one even tint with one glow (#52):
+    /// where two lines' boxes meet, the colour is not laid twice. Drawn at 130%
+    /// and 200%, at each line spacing, for the eye (the attachments
+    /// "readalong-lines-<size>-<spacing>"); the book opens on its first
+    /// sentence lit, which runs over three lines and more. On an iPad the page
+    /// is two columns.
+    @MainActor
+    func testASentenceOverSeveralLinesIsOneEvenTint() {
+        let columns = UIDevice.current.userInterfaceIdiom == .pad ? "TWO" : "AUTO"
+        for size in ["1.3", "2.0"] {
+            for spacing in ["1.3", "1.5", "1.8"] {
+                let app = launchReadingAlong(Self.largeType.merging(["HUB_BOOK_SIZE": size, "HUB_BOOK_SPACING": spacing,
+                                                                     "HUB_BOOK_COLUMNS": columns, "HUB_BOOK_CHROME": ""]) { $1 })
+                XCTAssertTrue(waitUntil(15) { debug(app).label.contains("% of book") }, "the page did not say where it is: \(debug(app).label)")
+                // The look is set a moment after the book opens, and the sentence lit again on the new layout.
+                RunLoop.current.run(until: Date().addingTimeInterval(3))
+                keep(app, "readalong-lines-\(size)-\(spacing)")
+                app.terminate()
+            }
+        }
+        // An iPad held sideways: two columns, the sentence over lines in the first.
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        for size in ["1.3", "2.0"] {
+            let app = launchReadingAlong(Self.largeType.merging(["HUB_BOOK_SIZE": size, "HUB_BOOK_SPACING": "1.5",
+                                                                 "HUB_BOOK_COLUMNS": "TWO", "HUB_BOOK_CHROME": ""]) { $1 })
+            let window = app.windows.firstMatch
+            guard waitUntil(10, { window.frame.width > window.frame.height }) else {
+                XCTContext.runActivity(named: "the simulator did not turn the app sideways: no two-column picture") { _ in }
+                return
+            }
+            XCTAssertTrue(waitUntil(15) { debug(app).label.contains("% of book") }, "the page did not say where it is: \(debug(app).label)")
+            RunLoop.current.run(until: Date().addingTimeInterval(3))
+            keep(app, "readalong-lines-columns-\(size)")
+            app.terminate()
+        }
+    }
+
     /// With the app in the background (Home, as the screen locking does) the
     /// voice reads on: the app is not suspended, the narration has the lock
     /// screen, and back in the app the voice is further on and the page with it.
