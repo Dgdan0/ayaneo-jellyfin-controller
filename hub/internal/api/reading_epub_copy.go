@@ -16,10 +16,11 @@ package api
 // (readingdomain.WriteReadingEPUB, which says what and why). Places are unchanged,
 // so saved locators and the read-along alignment still match.
 //
-// Two routes serve it, both from the file on this PC (found through
-// media_removal_roots, as the audio is): the ebook (`…/file`, `?format=ebook`) and the
-// read-along edition without its audio (`?format=readaloud&audio=omit`,
-// reading_audio_slim.go). The copy is planned once per path, size and modified time
+// Three routes serve it, all from the file on this PC (found through
+// media_removal_roots, as the audio is): the ebook (`…/file`, `?format=ebook`), the
+// read-along edition without its audio (`?format=readaloud&audio=omit`) and the whole
+// read-along edition (`?format=readaloud`, both reading_audio_slim.go, whose SMIL is
+// mended: readingdomain's epub_narration.go). The copy is planned once per path, size and modified time
 // and kept; what is kept is small whatever the book weighs, because an entry that is
 // only copied (a page of illustrations) is read from the file when it is sent.
 // Everything a file route offers is here: Range, HEAD, conditional requests, a strong
@@ -32,6 +33,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"ayaneohub/internal/cache"
 	readingdomain "ayaneohub/internal/reading"
@@ -61,14 +63,14 @@ func epubCopyKey(kind string, file readingdomain.MediaFile) string {
 
 // epubCopyOf plans the copy of an open EPUB, or finds it planned. ctx is the
 // budget of the request, which stops waiting when it ends; the planning itself, which
-// others may be waiting for, carries on within audioPlanTimeout. kind and book are for
+// others may be waiting for, carries on within copyBudget. kind and book are for
 // the log (never the path).
 func (s *Server) epubCopyOf(ctx context.Context, file readingdomain.MediaFile, options readingdomain.CopyOptions, kind string, book int64) (*epubCopy, error) {
 	options.MaxHeld = maxEPUBCopyBytes
 	built, _, err := cache.Fetch(ctx, s.cache, epubCopyKey(kind, file), cache.ReadingEPUBCopy,
 		func(fetchCtx context.Context) (*epubCopy, error) {
 			// Whoever asks first builds it for everyone asking while it is built.
-			buildCtx, cancel := context.WithTimeout(context.WithoutCancel(fetchCtx), audioPlanTimeout)
+			buildCtx, cancel := context.WithTimeout(context.WithoutCancel(fetchCtx), copyBudget(file, options))
 			defer cancel()
 			plan, err := readingdomain.PlanReadingEPUB(contextReaderAt{ReaderAt: file, ctx: buildCtx}, file.Size, options)
 			if err != nil {
@@ -77,10 +79,21 @@ func (s *Server) epubCopyOf(ctx context.Context, file readingdomain.MediaFile, o
 			report := plan.Report
 			slog.Info("built a reading copy", "kind", kind, "book", book, "bytes", plan.Size, "held", plan.Held(),
 				"fontSizes", report.FontSizes, "lineHeights", report.LineHeights, "styled", report.Styled, "languages", report.Languages, "fontsDecoded", report.FontsDecoded, "fontKeysRecovered", report.KeysRecovered, "edited", report.Edited,
-				"omitted", len(report.Omitted), "left", len(report.Left), "fixedLayout", report.FixedLayout)
+				"omitted", len(report.Omitted), "left", len(report.Left), "fixedLayout", report.FixedLayout, "mended", report.Mended)
 			return &epubCopy{plan: plan, hash: hex.EncodeToString(plan.SHA256[:])}, nil
 		})
 	return built, err
+}
+
+// copyBudget is how long planning a copy may take. A copy reads all of its file
+// once, for the hash of what it sends, except the audio it leaves out, so a whole
+// read-along edition (1.6 GB for This Inevitable Ruin, 9 s here with the disk warm)
+// has a second more for every 32 MB, what a slow disk reads in one.
+func copyBudget(file readingdomain.MediaFile, options readingdomain.CopyOptions) time.Duration {
+	if options.OmitAudio {
+		return audioPlanTimeout
+	}
+	return max(audioPlanTimeout, time.Duration(file.Size/(32<<20))*time.Second)
 }
 
 // serveEPUBCopy sends a copy from the file it was planned from.

@@ -158,7 +158,7 @@ func TestAudioManifestKeepsTheFilesChaptersWhereTheBooksCannotBeUsed(t *testing.
 		aligned bool
 	}{
 		{"a book with no read-along edition", alignedOptions{readaloud: `{"uuid":"a","filepath":"/library/audiobooks/Fixture Odyssey/aligned.epub","status":"PROCESSING"}`}, "", false},
-		{"an edition that cannot be mapped to the files", alignedOptions{omit: []string{"Fixture Odyssey (3).MP3"}}, "files_do_not_match", false},
+		{"an edition that cannot be mapped to the files", alignedOptions{order: append(append([]string(nil), trackedTagOrder...), "Fixture Odyssey (1).mp3")}, "files_do_not_match", false},
 		{"an edition that is not there", alignedOptions{epub: func(path string) { os.Remove(path) }}, "missing_file", false},
 		{"an edition with no contents", alignedOptions{epub: func(path string) {
 			rewriteAlignedEPUB(t, path, func(opf string) string { return strings.Replace(opf, ` properties="nav"`, "", 1) })

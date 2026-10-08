@@ -47,6 +47,12 @@ var (
 	maxEntries = 100_000
 )
 
+// pastEndShare: more than one sentence in this many past the end of its audio is
+// an edition whose times make no sense, not a few sentences at the end of a file
+// that the aligner ran over (at most 12 in 23,737 in this library, The Will of the
+// Many's).
+const pastEndShare = 20
+
 func badf(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrBadAlignment}, args...)...)
 }
@@ -65,6 +71,9 @@ type Alignment struct {
 	// order it lists them. It is empty when the edition has none that can be read,
 	// which is no reason to refuse its narration.
 	Contents []ContentsEntry
+	// PastEnd is how many sentences were left out, and CutAtEnd how many were ended
+	// early, because they lie past the end of their audio file (endAudioAt).
+	PastEnd, CutAtEnd int
 
 	finds    map[findKey]findLocation
 	packages map[string]string // a text document's path inside the package folder -> its zip path
@@ -72,6 +81,11 @@ type Alignment struct {
 	spine []string
 	// chapters are the contents' entries that are narrated, placed (contents.go).
 	chapters []Chapter
+	// audioEnds is where an audio file ends, by its zip path, as a sentence that
+	// ends before it begins says (endAudioAt); overlays are the SMIL documents read.
+	// The reading copy says the same in its SMIL (epub_narration.go).
+	audioEnds map[string]int64
+	overlays  map[string]bool
 }
 
 type AlignedFile struct {
@@ -117,9 +131,12 @@ type packageItem struct{ href, overlay, mediaType, properties string }
 // It mirrors how the app's own reader (ReadAlongPackage) takes the same file, so
 // the two cannot disagree about what a sentence is: paths are resolved
 // relative to the document that names them and must stay inside the
-// archive, a sentence needs a fragment and both its resources must exist, a
-// zero-length sentence is left out, and one that ends before it begins refuses
-// the edition. Documents are read with a 4 MB cap and a DOCTYPE or entity
+// archive, a sentence needs a fragment and both its resources must exist, and a
+// zero-length sentence is left out. A sentence that ends before it begins marks
+// where its audio file ends, and what lies past that is left out or ended there
+// (endAudioAt); the hub's slim edition says the same in its SMIL
+// (MendNarration), so the apps read the same sentences. Documents are read with
+// a 4 MB cap and a DOCTYPE or entity
 // declaration refuses them. Its overlays are listed in the order of the text, and
 // the narration need not follow that order, so the sentences of each audio file
 // are taken in the order they are spoken.
@@ -189,6 +206,9 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 	alignment := &Alignment{Package: packagePath}
 	fileIndex := map[string]int{}
 	seenOverlay := map[string]bool{}
+	// audioEnds is where an audio file ends, as a sentence that ends before it
+	// begins says (endAudioAt).
+	audioEnds := map[string]int64{}
 	pars := 0
 	for _, reference := range spine {
 		chapter, found := items[reference]
@@ -221,6 +241,14 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 			return nil, err
 		}
 		for _, sentence := range sentences {
+			if sentence.end < sentence.begin {
+				// Where its audio ends; the earliest, should a file have two.
+				if end, seen := audioEnds[sentence.audio]; !seen || sentence.end < end {
+					audioEnds[sentence.audio] = sentence.end
+				}
+				alignment.PastEnd++
+				continue
+			}
 			pars++
 			if pars > maxPars {
 				return nil, badf("the narration holds too many sentences")
@@ -241,8 +269,13 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 			audio.LengthMs = max(audio.LengthMs, sentence.end)
 		}
 	}
-	if pars == 0 {
+	alignment.audioEnds, alignment.overlays = audioEnds, seenOverlay
+	pars -= alignment.endAudioAt(audioEnds)
+	if pars <= 0 {
 		return nil, ErrNoAlignment
+	}
+	if (alignment.PastEnd+alignment.CutAtEnd)*pastEndShare > pars+alignment.PastEnd {
+		return nil, badf("sentences end before they begin")
 	}
 	// The overlays are listed in the order of the text, and the narration is in the
 	// order it is spoken. They usually agree and need not: Mistborn's lists a short
@@ -266,6 +299,51 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 	alignment.Contents = readContents(entries, packagePath, items, manifestOrder, ncxID)
 	alignment.chapters = alignment.placeChapters(entries)
 	return alignment, nil
+}
+
+// endAudioAt ends each audio file where a sentence that ends before it begins says
+// it ends. Storyteller's aligner can run past the end of a file at the end of a
+// chapter, and it then gives what lies past the end the file's own length as its
+// end: the last sentence of that run begins after it, and so ends before it
+// begins. Measured on all 14 such sentences in this library (8 books, A Clash of
+// Kings and The Will of the Many among them), each one's end is the length of its
+// audio, to the millisecond on the MP4 files and within 41 ms on the MP3s (as
+// ffprobe estimates them), and the one to four sentences before it run up to 18.5 s
+// past that. Nothing past the end can be heard: a sentence that begins there is
+// left out and one that runs over it ends there, so a file's narrated length is its
+// length and no sentence is placed in the next file's audio. It answers how many
+// sentences it left out.
+func (a *Alignment) endAudioAt(ends map[string]int64) int {
+	left := 0
+	kept := a.Files[:0]
+	for _, file := range a.Files {
+		end, ended := ends[file.Entry]
+		if !ended {
+			kept = append(kept, file)
+			continue
+		}
+		pars := file.Pars[:0]
+		file.LengthMs = 0
+		for _, par := range file.Pars {
+			if par.BeginMs >= end {
+				a.PastEnd++
+				left++
+				continue
+			}
+			if par.EndMs > end {
+				par.EndMs = end
+				a.CutAtEnd++
+			}
+			pars = append(pars, par)
+			file.LengthMs = max(file.LengthMs, par.EndMs)
+		}
+		file.Pars = pars
+		if len(pars) > 0 {
+			kept = append(kept, file)
+		}
+	}
+	a.Files = kept
+	return left
 }
 
 type sentence struct {
@@ -315,13 +393,11 @@ func readSMIL(data []byte, smilPath string, entries map[string]*zip.File) ([]sen
 			failure = badf("a sentence ends at a time that is not one")
 			return
 		}
-		switch {
-		case end == begin:
-			// Word-level alignment can emit a zero-length boundary for a word it
-			// could not place. There is no audio to speak it.
-		case end < begin:
-			failure = badf("a sentence ends before it begins")
-		default:
+		// Word-level alignment can emit a zero-length boundary for a word it could
+		// not place. There is no audio to speak it. One that ends before it begins
+		// is kept here and set aside by ReadAlignment: its end says where its audio
+		// file ends (endAudioAt).
+		if end != begin {
 			out = append(out, sentence{text: textPath, fragment: fragment, audio: audioPath, begin: begin, end: end})
 		}
 	}
@@ -565,185 +641,4 @@ func splitHref(href string) (document, fragment string) {
 		return "", fragment
 	}
 	return document, fragment
-}
-
-// AlignedSource is one of the book's files as the narration saw it: Storyteller
-// numbers its files and cuts a long one into chunks, each of them an audio file
-// in the edition.
-type AlignedSource struct {
-	Number int
-	// Files are the indexes of its chunks in Alignment.Files, in chunk order, and
-	// ChunkStartMs where each begins inside the source.
-	Files        []int
-	ChunkStartMs []int64
-	LengthMs     int64
-}
-
-// Sources groups the audio files by the file of the book they are a piece of.
-// A name that is not Storyteller's, a gap in the chunks, or a chunk with nothing
-// narrated is not an alignment this can read.
-func (a *Alignment) Sources() ([]AlignedSource, error) {
-	if len(a.Files) == 0 {
-		return nil, ErrNoAlignment
-	}
-	bySource := map[int][]int{}
-	for index, file := range a.Files {
-		// A name that is not Storyteller's leaves both zero. The chunks count from
-		// one; the files may count from zero, as the chapters of an M4B do.
-		if file.Chunk <= 0 {
-			return nil, badf("an audio file is not named as the book's files are")
-		}
-		bySource[file.Source] = append(bySource[file.Source], index)
-	}
-	numbers := make([]int, 0, len(bySource))
-	for number := range bySource {
-		numbers = append(numbers, number)
-	}
-	sort.Ints(numbers)
-	sources := make([]AlignedSource, 0, len(numbers))
-	for _, number := range numbers {
-		indexes := bySource[number]
-		sort.Slice(indexes, func(i, j int) bool { return a.Files[indexes[i]].Chunk < a.Files[indexes[j]].Chunk })
-		source := AlignedSource{Number: number, Files: indexes}
-		for position, index := range indexes {
-			file := a.Files[index]
-			if file.Chunk != position+1 {
-				return nil, badf("a file's chunks are not numbered one after another")
-			}
-			if file.LengthMs <= 0 {
-				return nil, badf("a chunk narrates nothing")
-			}
-			source.ChunkStartMs = append(source.ChunkStartMs, source.LengthMs)
-			source.LengthMs += file.LengthMs
-		}
-		sources = append(sources, source)
-	}
-	return sources, nil
-}
-
-// Pairing is which file of the book each narrated source is.
-type Pairing struct {
-	// File is, for each source, the index of its file among the lengths given.
-	File []int
-	// ByOrder says lengths could not settle every pair, and the pairs they left open
-	// were made by order.
-	ByOrder bool
-}
-
-// MatchSources pairs each narrated file with the file of the book it is, by
-// length: a source's narrated length against a file's own, within 250 ms and 15
-// ms for each chunk, since a chunk's last sentence ends a few milliseconds from
-// the end of the audio it was cut from (12 ms short on Dark Matter's files, about
-// 10 ms long for each chunk on Mistborn's, 69 ms over seven). The pairing must be
-// complete and one to one, because a wrong one puts every sentence of a file in
-// another.
-//
-// Lengths come first, and a file only one narration can be settles that
-// narration. When they leave files open (Mistborn's two parts are 12:20:13 and
-// 12:20:13, and what was narrated of them differs by 14 ms) the narration took the
-// book's files in the order it reads them, so sources, which are in the order of
-// their numbers, are paired with the files left open in the order the files are
-// given, which is the order they are played in. That is taken only where it fits:
-// a source whose length is not the length of the file its place would give it
-// leaves the pairing ambiguous, which is refused.
-//
-// The result is, for each source, the index of its file in durationsMs.
-func MatchSources(sources []AlignedSource, durationsMs []int64) (Pairing, error) {
-	if len(sources) == 0 || len(sources) != len(durationsMs) {
-		return Pairing{}, ErrAlignmentCount
-	}
-	candidates := make([][]int, len(sources))
-	for i, source := range sources {
-		tolerance := int64(250 + 15*len(source.Files))
-		for j, duration := range durationsMs {
-			difference := source.LengthMs - duration
-			if difference < 0 {
-				difference = -difference
-			}
-			if difference <= tolerance {
-				candidates[i] = append(candidates[i], j)
-			}
-		}
-		if len(candidates[i]) == 0 {
-			return Pairing{}, ErrAlignmentMismatch
-		}
-	}
-	assigned := make([]int, len(sources))
-	for i := range assigned {
-		assigned[i] = -1
-	}
-	taken := map[int]bool{}
-	for changed := true; changed; {
-		changed = false
-		for i := range sources {
-			if assigned[i] >= 0 {
-				continue
-			}
-			remaining := candidates[i][:0:0]
-			for _, j := range candidates[i] {
-				if !taken[j] {
-					remaining = append(remaining, j)
-				}
-			}
-			candidates[i] = remaining
-			switch len(remaining) {
-			case 0:
-				return Pairing{}, ErrAlignmentMismatch
-			case 1:
-				assigned[i], taken[remaining[0]] = remaining[0], true
-				changed = true
-			}
-		}
-		// A file that only one narration can be settles that narration, too.
-		for j := range durationsMs {
-			if taken[j] {
-				continue
-			}
-			only, count := -1, 0
-			for i := range sources {
-				if assigned[i] >= 0 {
-					continue
-				}
-				for _, candidate := range candidates[i] {
-					if candidate == j {
-						only, count = i, count+1
-					}
-				}
-			}
-			if count == 1 {
-				assigned[only], taken[j] = j, true
-				changed = true
-			}
-		}
-	}
-	var open, free []int
-	for i, j := range assigned {
-		if j < 0 {
-			open = append(open, i)
-		}
-	}
-	if len(open) == 0 {
-		return Pairing{File: assigned}, nil
-	}
-	for j := range durationsMs {
-		if !taken[j] {
-			free = append(free, j)
-		}
-	}
-	if len(open) != len(free) {
-		return Pairing{}, ErrAlignmentAmbiguous
-	}
-	for k, i := range open {
-		fits := false
-		for _, candidate := range candidates[i] {
-			fits = fits || candidate == free[k]
-		}
-		if !fits {
-			return Pairing{}, ErrAlignmentAmbiguous
-		}
-	}
-	for k, i := range open {
-		assigned[i] = free[k]
-	}
-	return Pairing{File: assigned, ByOrder: true}, nil
 }

@@ -32,6 +32,10 @@ type CopyOptions struct {
 	// Restyle makes the book's font sizes follow the reader's text size, and puts
 	// two columns within reach of a narrow screen (epub_css.go, epub_html.go).
 	Restyle bool
+	// MendNarration makes a read-along edition's SMIL say what the hub reads from
+	// it: a sentence past the end of its audio file has no length, and one that runs
+	// over the end ends there (epub_narration.go).
+	MendNarration bool
 	// MaxHeld is the most a plan keeps in memory: the entries it rewrote, its zip
 	// headers and the small entries copied as they were. Zero is no limit.
 	MaxHeld int64
@@ -61,6 +65,9 @@ type CopyReport struct {
 	// KeysRecovered is how many of those fonts' keys are no identifier of the book and
 	// were worked out from the font itself (epub_fontkey.go).
 	KeysRecovered int
+	// Mended is how many sentences of a read-along edition's SMIL were given no
+	// length or ended at the end of their audio (MendNarration).
+	Mended int
 	// Edited is how many entries have other bytes than they had.
 	Edited int
 	// FixedLayout: the package is pre-paginated, whose pages are laid out by the
@@ -233,7 +240,8 @@ func (s *copySink) expectRaw(from, n int64) { s.rawFrom, s.rawLeft = from, n }
 // mimetype stays stored and first. A rewritten one is deflated with the header it
 // had (name, time, comment, mode). Entry names, their order, the package, the
 // navigation and the SMIL are the original's, so every href, element id and
-// locator, and the read-along alignment, mean what they meant.
+// locator, and the read-along alignment, mean what they meant; MendNarration
+// changes only the end of a sentence that lies past the end of its audio.
 //
 // The whole of the source is read once, for the SHA-256, apart from the audio that
 // is left out.
@@ -261,10 +269,23 @@ func PlanReadingEPUB(src io.ReaderAt, size int64, options CopyOptions) (*EPUBCop
 			}
 		}
 	}
+	var mend *narrationMend
+	if options.MendNarration {
+		mend = planNarrationMend(src, size)
+	}
 	for _, entry := range archive.File {
 		if _, audio := AudioKindOf(entry.Name); audio && options.OmitAudio {
 			report.Omitted = append(report.Omitted, entry.Name)
 			continue
+		}
+		if mend != nil {
+			done, err := mend.write(writer, entry, &report)
+			if err != nil {
+				return nil, err
+			}
+			if done {
+				continue
+			}
 		}
 		if fonts != nil {
 			done, err := fonts.write(writer, entry, &report)

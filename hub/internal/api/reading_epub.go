@@ -80,6 +80,8 @@ func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
 	// The ebook is served as the reading copy of the file on this PC (reading_epub_copy.go).
 	// When that cannot be, nothing has been written and Storyteller's file goes through.
 	copied := ok && !omitAudio && (format == "" || format == "ebook") && s.serveReadingCopy(w, r, ctx, bookID, byteRange)
+	// So is the whole read-along edition (reading_audio_slim.go).
+	copied = copied || ok && !omitAudio && format == "readaloud" && s.serveWholeReadaloud(w, r, ctx, bookID, byteRange)
 	cancel()
 	if !ok || omitAudio || copied {
 		return

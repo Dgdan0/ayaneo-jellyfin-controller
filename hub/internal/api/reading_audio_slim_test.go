@@ -241,35 +241,8 @@ func TestSlimReadaloudAnswersRangesAndConditionsLikeAFile(t *testing.T) {
 	}
 }
 
-// The slim edition is a choice made with a query; the file route's other uses
-// are as they were.
-func TestSlimReadaloudLeavesTheFullFileAlone(t *testing.T) {
-	env := newAlignedTrackedEnv(t, alignedOptions{})
-	env.state.noFiles = false
-	env.state.readaloud = true
-	base := "/v1/reading/works/" + env.child + "/publications/12/file"
-	full := env.get(base + "?format=readaloud")
-	if full.Code != http.StatusPartialContent || full.Body.String() != "4567" || env.state.formatSeen != "readaloud" || env.state.fileCalls != 1 {
-		t.Fatalf("the full edition = %d %q (format %q, %d calls)", full.Code, full.Body.String(), env.state.formatSeen, env.state.fileCalls)
-	}
-	if slim := env.slim(nil); slim.Code != http.StatusOK || env.state.fileCalls != 1 {
-		t.Fatalf("the slim edition = %d with %d calls to Storyteller", slim.Code, env.state.fileCalls)
-	}
-	for name, query := range map[string]string{
-		"another value":             "?format=readaloud&audio=keep",
-		"a value in the wrong case": "?format=readaloud&audio=OMIT",
-		"no format":                 "?audio=omit",
-		"the ebook":                 "?format=ebook&audio=omit",
-		"the audiobook archive":     "?format=audiobook&audio=omit",
-	} {
-		if got := env.get(base + query); got.Code != http.StatusBadRequest || decodeAudioError(t, got).Code != CodeInvalidRequest {
-			t.Errorf("%s = %d: %s", name, got.Code, got.Body.String())
-		}
-	}
-	if env.state.fileCalls != 1 {
-		t.Fatalf("a refused request reached Storyteller")
-	}
-}
+// The whole edition, `?format=readaloud` alone, is the hub's copy too:
+// reading_audio_layout_test.go.
 
 // What it costs: a pass over the directory and the text, once for as long as the
 // file is the same, and none of the audio read at all.
