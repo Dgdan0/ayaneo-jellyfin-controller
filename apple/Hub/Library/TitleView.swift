@@ -120,7 +120,7 @@ struct TitleView: View {
         }
         #if DEBUG
         // HUB_SERIES_DOWNLOADS, steps joined by +: keepready turns Keep ready on (3), panel opens the choices,
-        // select[:e1,s2e2] starts select mode with those episodes ticked.
+        // select[:e1,s2e2] starts select mode with those episodes ticked, scroll brings the episodes to the top.
         .task(id: downloads.isLoaded) {
             guard downloads.isLoaded, let launch = ProcessInfo.processInfo.environment["HUB_SERIES_DOWNLOADS"] else { return }
             for step in launch.split(separator: "+") {
@@ -130,6 +130,10 @@ struct TitleView: View {
                     // As a pull down does: the page reads the hub again.
                     try? await Task.sleep(for: .seconds(2))
                     await load()
+                } else if step == "scroll" {
+                    // The page scrolled to the episodes, as a person does.
+                    try? await Task.sleep(for: .seconds(1))
+                    scrollBelow += 1
                 } else if step == "panel" {
                     setPanel(true)
                 } else if step.hasPrefix("select") {
@@ -381,8 +385,9 @@ struct TitleView: View {
 
     /// The button after the season pills: "Season 2 · 4.9 GB", or "Season 2 on this iPad".
     @ViewBuilder private var seasonButton: some View {
-        if !downloads.isLoaded, !downloads.selecting, !seasons.isEmpty, sizeClass == .compact {
-            // Where it will be, so the episodes below do not jump down when the hub's listing arrives.
+        if !downloads.isLoaded, downloads.loading, !downloads.selecting, !seasons.isEmpty, sizeClass == .compact {
+            // Where it will be while the hub's listing is on its way, so the episodes below do not jump down
+            // when it arrives; if the listing does not come, the row goes and nothing is left empty.
             Color.clear.frame(height: 36)
         } else if downloads.isLoaded, !downloads.selecting, let season = seasons.first(where: { $0.id == seasonId }) {
             let name = season.title.isEmpty ? EpisodeLabel.season(season.indexNumber) : season.title
