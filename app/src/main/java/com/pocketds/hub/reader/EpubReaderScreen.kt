@@ -228,6 +228,14 @@ class EpubReaderScreen(
     private var sectionSizes: List<Int> = emptyList()
     /** Where each part of the book starts in it, as how far through ([PageInfo.sectionSpan]). */
     private var sectionStarts: List<Double?> = emptyList()
+    /**
+     * The page each Contents entry starts on (#55), made once when the book opens. Entries that point into a file
+     * wait for their anchor's share of it, read in the background ([contentsJob]); Contents never waits for that.
+     */
+    private var contentsPages: ContentsPages? = null
+    private var contentsJob: Job? = null
+    /** Contents' rows while it is on screen, so a number still being worked out is filled in when it arrives. */
+    private var contentsRows: List<Pair<View, Link>> = emptyList()
     private var pace = ReadingPace()
     private var pacePrior = ReadingPace.DEFAULT_MINUTES_PER_POSITION
     private val paceTracker = ReadingPace.Tracker()
@@ -735,6 +743,7 @@ class EpubReaderScreen(
         bookSections = bookPositions.distinctBy { it.href }
         sectionSizes = bookSections.map { section -> bookPositions.count { it.href == section.href } }
         sectionStarts = bookSections.map { it.locations.totalProgression }
+        startContentsPages(opened)
 
         val factory = EpubNavigatorFactory(opened).createFragmentFactory(
             initialLocator = initialLocator,
@@ -1505,9 +1514,9 @@ class EpubReaderScreen(
     // display and scrubber within each resource while leaving saved Readium locators untouched.
     private fun bookProgress(): Double? {
         val current = latestLocator ?: return null
-        val (start, end) = PageInfo.sectionSpan(sectionStarts, bookSections.indexOfFirst { it.href == current.href })
+        val span = PageInfo.sectionSpan(sectionStarts, bookSections.indexOfFirst { it.href == current.href })
             ?: return current.locations.totalProgression
-        return (start + (end - start) * (current.locations.progression ?: 0.0)).coerceIn(0.0, 1.0)
+        return PageInfo.within(span, current.locations.progression ?: 0.0)
     }
 
     private fun showPageNavigation() {
@@ -1637,17 +1646,67 @@ class EpubReaderScreen(
         }
         var currentRow: View? = null
         if (links.isEmpty()) overlay.choice("This book has no table of contents") { Unit }
+        val rows = ArrayList<Pair<View, Link>>()
         links.forEachIndexed { index, (depth, link) ->
             val active = link.href.toString() == currentHref
+            // The page the entry starts on, as the corners count it; none yet for one still being worked out (#55).
+            val page = contentsPages?.page(link.href.toString())
             val row = overlay.choice("  ".repeat(depth) + (link.title ?: "Section ${index + 1}"),
-                if (active) "Current section" else "", selected = active) {
+                if (active) "Current section" else "", selected = active,
+                trailing = page?.toString().orEmpty(), trailingSpoken = page?.let { "page $it" }.orEmpty()) {
                 book.locatorFromLink(link)?.let { jumpTo(it) }
                 host.refreshHints()
             }
+            rows += row to link
             if (active) currentRow = row
         }
+        contentsRows = rows
         overlay.focusBody(currentRow)
         host.refreshHints()
+    }
+
+    /**
+     * The page each Contents entry starts on (#55), made when the book opens: the numbers for entries that name a
+     * file are known at once, and the anchors of those that point into one are looked for in the background, in the
+     * text of each such file, once. Contents is built from whatever is known when it opens and never waits; the
+     * rows still without a number are filled in if it is still open when the rest arrives.
+     */
+    private fun startContentsPages(book: Publication) {
+        contentsJob?.cancel()
+        val pages = ContentsPages(bookPages, bookSections.map { it.href.toString() }, sectionSizes, sectionStarts)
+        contentsPages = pages
+        contentsRows = emptyList()
+        val sections = bookSections
+        val wanted = pages.wanted(flattenLinks(book.tableOfContents.ifEmpty { book.readingOrder }).map { it.second.href.toString() })
+        if (wanted.isEmpty()) return
+        contentsJob = uiScope.launch {
+            val found = withContext(Dispatchers.Default) {
+                wanted.mapNotNull { (section, anchors) ->
+                    val markup = sections.getOrNull(section)?.let { readText(book, it.href) } ?: return@mapNotNull null
+                    section to AnchorShares.of(markup, anchors)
+                }.toMap()
+            }
+            if (contentsPages !== pages) return@launch
+            pages.learn(found)
+            val rows = contentsRows
+            rows.forEach { (row, link) ->
+                pages.page(link.href.toString())?.let { overlay.setTrailing(row, it.toString(), "page $it") }
+            }
+        }
+    }
+
+    /** A document of the book as text, null if it cannot be read: the anchors' shares are an estimate and do without. */
+    private suspend fun readText(book: Publication, href: org.readium.r2.shared.util.Url): String? {
+        val resource = book.get(href) ?: return null
+        return try {
+            resource.read().getOrNull()?.toString(Charsets.UTF_8)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        } finally {
+            resource.close()
+        }
     }
 
     private fun flattenLinks(links: List<Link>, depth: Int = 0): List<Pair<Int, Link>> = buildList {

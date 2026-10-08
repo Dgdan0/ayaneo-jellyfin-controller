@@ -120,6 +120,46 @@ object ReaderFixtures {
         return output.toByteArray()
     }
 
+    /** [count] paragraphs of generated words that do not compress away: Readium counts a part's positions from its size (#55). */
+    private fun filler(seed: Int, count: Int): String {
+        val random = java.util.Random(seed.toLong())
+        return (1..count).joinToString("") {
+            "<p>" + (1..60).joinToString(" ") { (1..3 + random.nextInt(7)).map { 'a' + random.nextInt(26) }.joinToString("") } + ".</p>"
+        }
+    }
+
+    /**
+     * A generated book for Contents' page numbers (#55): a prologue, a long second part with four entries that point
+     * into it (`two.xhtml#c1` to `#c3b`, the last a sub-entry), an epilogue, and an entry for a file that is in the
+     * book but not in its reading order. [CONTENTS_TITLES] are the entries' words, in order.
+     */
+    fun contentsEpub(): ByteArray {
+        val output = ByteArrayOutputStream()
+        fun page(title: String, body: String) =
+            """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>$title</title></head><body><h1>$title</h1>$body</body></html>"""
+        val files = linkedMapOf(
+            "mimetype" to "application/epub+zip",
+            "META-INF/container.xml" to """<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""",
+            "EPUB/package.opf" to """<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">urn:reader-contents</dc:identifier><dc:title>The Last Observatory</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-10-09T00:00:00Z</meta></metadata><manifest><item id="one" href="one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="two.xhtml" media-type="application/xhtml+xml"/><item id="three" href="three.xhtml" media-type="application/xhtml+xml"/><item id="notes" href="notes.xhtml" media-type="application/xhtml+xml"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest><spine><itemref idref="one"/><itemref idref="two"/><itemref idref="three"/></spine></package>""",
+            "EPUB/one.xhtml" to page("Prologue", filler(1, 14)),
+            "EPUB/two.xhtml" to page("Part one", filler(2, 6) +
+                "<h2 id=\"c1\">1. First light</h2>" + filler(3, 20) +
+                "<h2 id=\"c2\">2. The ridge</h2>" + filler(4, 30) +
+                "<h2 id=\"c3\">3. The lens</h2>" + filler(5, 20) +
+                "<h3 id=\"c3b\">The keeper's log</h3>" + filler(6, 24)),
+            "EPUB/three.xhtml" to page("Epilogue", filler(7, 12)),
+            "EPUB/notes.xhtml" to page("Author's note", filler(8, 4)),
+            "EPUB/nav.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol><li><a href="one.xhtml">Prologue</a></li><li><a href="two.xhtml">Part one</a><ol><li><a href="two.xhtml#c1">1. First light</a></li><li><a href="two.xhtml#c2">2. The ridge</a></li><li><a href="two.xhtml#c3">3. The lens</a><ol><li><a href="two.xhtml#c3b">The keeper's log</a></li></ol></li></ol></li><li><a href="three.xhtml">Epilogue</a></li><li><a href="notes.xhtml">Author's note</a></li></ol></nav></body></html>"""
+        )
+        ZipOutputStream(output).use { zip ->
+            files.forEach { (name, text) -> zip.putNextEntry(ZipEntry(name)); zip.write(text.toByteArray()); zip.closeEntry() }
+        }
+        return output.toByteArray()
+    }
+
+    /** What [contentsEpub]'s Contents says, in order (a sub-entry is indented by two spaces for each level). */
+    val CONTENTS_TITLES = listOf("Prologue", "Part one", "  1. First light", "  2. The ridge", "  3. The lens", "    The keeper's log", "Epilogue", "Author's note")
+
     const val NOTE_REF = "ref1"
     const val NOTE_ID = "note1"
     const val LINK_ID = "onward"
@@ -195,6 +235,30 @@ object ReaderFixtures {
             "EPUB/nav.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol><li><a href="one.xhtml">A light beyond the ridge</a></li></ol></nav></body></html>""".toByteArray(),
             "EPUB/one.smil" to """<smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><seq epub:textref="one.xhtml">$pars</seq></body></smil>""".toByteArray(),
             "EPUB/voice.wav" to silence(seconds = sentences * sentenceSeconds)
+        )
+        val output = ByteArrayOutputStream()
+        ZipOutputStream(output).use { zip -> files.forEach { (name, bytes) -> zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry() } }
+        return output.toByteArray()
+    }
+
+    /**
+     * A short aligned book whose sentences are exactly [sentences], one element `s{n}` each and side by side in one
+     * paragraph, as Storyteller wraps them (#56): the white space between two sentences is inside one of them, after
+     * its last word or before the next one's first. [sentenceSeconds] each over generated silence.
+     */
+    fun spacedEpub(sentences: List<String>, sentenceSeconds: Int = 3): ByteArray {
+        val body = "<p>" + sentences.withIndex().joinToString("") { (i, text) -> "<span id=\"s$i\">$text</span>" } + "</p>"
+        val pars = sentences.indices.joinToString("") {
+            "<par id=\"p$it\"><text src=\"one.xhtml#s$it\"/><audio src=\"voice.wav\" clipBegin=\"${it * sentenceSeconds}s\" clipEnd=\"${(it + 1) * sentenceSeconds}s\"/></par>"
+        }
+        val files = linkedMapOf(
+            "mimetype" to "application/epub+zip".toByteArray(),
+            "META-INF/container.xml" to """<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""".toByteArray(),
+            "EPUB/package.opf" to """<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">urn:reader-spaced</dc:identifier><dc:title>The Last Observatory</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-10-09T00:00:00Z</meta></metadata><manifest><item id="one" href="one.xhtml" media-type="application/xhtml+xml" media-overlay="mo1"/><item id="mo1" href="one.smil" media-type="application/smil+xml"/><item id="voice" href="voice.wav" media-type="audio/wav"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest><spine><itemref idref="one"/></spine></package>""".toByteArray(),
+            "EPUB/one.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>A light beyond the ridge</title></head><body>$body</body></html>""".toByteArray(),
+            "EPUB/nav.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol><li><a href="one.xhtml">A light beyond the ridge</a></li></ol></nav></body></html>""".toByteArray(),
+            "EPUB/one.smil" to """<smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><seq epub:textref="one.xhtml">$pars</seq></body></smil>""".toByteArray(),
+            "EPUB/voice.wav" to silence(seconds = sentences.size * sentenceSeconds)
         )
         val output = ByteArrayOutputStream()
         ZipOutputStream(output).use { zip -> files.forEach { (name, bytes) -> zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry() } }

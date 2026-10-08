@@ -157,6 +157,84 @@ class PageInfoTest {
         assertEquals(null, PageInfo.sectionSpan(emptyList(), 0))
     }
 
+    /** Four parts of a 400 page book, a quarter each; Readium counts 10, 20, 30 and 40 positions in them. */
+    private val sizes = listOf(10, 20, 30, 40)
+    private val starts = listOf(0.0, 0.25, 0.5, 0.75)
+
+    @Test fun `a Contents entry starts on the book's own page where the hub counted pages`() {
+        fun page(section: Int, share: Double?) = PageInfo.entryPage(400, sizes, starts, section, share)
+        // The same count and rounding as the corners, the book's page and Resume: ReadingBookFacts.page of how far through.
+        assertEquals(1, page(0, 0.0))
+        assertEquals(ReadingBookFacts.page(0.25, 400), page(1, 0.0))
+        assertEquals(ReadingBookFacts.page(0.5, 400), page(2, 0.0))
+        assertEquals(ReadingBookFacts.page(0.75, 400), page(3, 0.0))
+        assertEquals(100, page(1, 0.0))
+        assertEquals(300, page(3, 0.0))
+        // A third of the way into the second part: a quarter plus a third of a quarter of the book.
+        assertEquals(ReadingBookFacts.page(0.25 + 0.25 / 3, 400), page(1, 1.0 / 3))
+    }
+
+    @Test fun `without the hub's page count a Contents entry is the position Readium starts there, counted from 1`() {
+        fun page(section: Int, share: Double?) = PageInfo.entryPage(0, sizes, starts, section, share)
+        assertEquals(1, page(0, 0.0))
+        assertEquals(11, page(1, 0.0))
+        assertEquals(31, page(2, 0.0))
+        assertEquals(61, page(3, 0.0))
+        // Half way into the second part: its 20 positions, ten in, after the first part's ten.
+        assertEquals(21, page(1, 0.5))
+        // A count the hub gave as nothing is no count; a part with no start in the book still has its positions.
+        assertEquals(11, PageInfo.entryPage(-3, sizes, starts, 1, 0.0))
+        assertEquals(11, PageInfo.entryPage(0, sizes, listOf(0.0, null, 0.5, 0.75), 1, 0.0))
+    }
+
+    @Test fun `several entries in one file start on different pages by their anchors' shares`() {
+        // The second part runs from page 100 to page 200 of 400: four anchors in it.
+        val withCount = listOf(0.0, 0.25, 0.5, 0.75).map { PageInfo.entryPage(400, sizes, starts, 1, it) }
+        assertEquals(listOf(100, 125, 150, 175), withCount)
+        // By Readium's positions: its 20 positions after the first part's ten.
+        val withPositions = listOf(0.0, 0.25, 0.5, 0.75).map { PageInfo.entryPage(0, sizes, starts, 1, it) }
+        assertEquals(listOf(11, 16, 21, 26), withPositions)
+        // A share outside the file stays in it.
+        assertEquals(PageInfo.entryPage(400, sizes, starts, 1, 1.0), PageInfo.entryPage(400, sizes, starts, 1, 3.0))
+        assertEquals(PageInfo.entryPage(400, sizes, starts, 1, 0.0), PageInfo.entryPage(400, sizes, starts, 1, -1.0))
+    }
+
+    @Test fun `a Contents entry whose file is not in the reading order, or whose place is not known, has no number`() {
+        // The link names a file that is not one of the book's parts.
+        assertEquals(null, PageInfo.entryPage(400, sizes, starts, -1, 0.0))
+        assertEquals(null, PageInfo.entryPage(0, sizes, starts, -1, 0.0))
+        assertEquals(null, PageInfo.entryPage(400, sizes, starts, 4, 0.0))
+        // The anchor's share is still being worked out, or is not a number.
+        assertEquals(null, PageInfo.entryPage(400, sizes, starts, 1, null))
+        assertEquals(null, PageInfo.entryPage(400, sizes, starts, 1, Double.NaN))
+        assertEquals(null, PageInfo.entryPage(0, sizes, starts, 1, Double.POSITIVE_INFINITY))
+        // With the hub's pages, a part whose start in the book is not known has no page rather than Readium's count of something else.
+        assertEquals(null, PageInfo.entryPage(400, sizes, listOf(0.0, null, 0.5, 0.75), 1, 0.0))
+        // Before the book's positions are known.
+        assertEquals(null, PageInfo.entryPage(0, emptyList(), emptyList(), 0, 0.0))
+        assertEquals(null, PageInfo.entryPage(400, emptyList(), emptyList(), 0, 0.0))
+    }
+
+    @Test fun `a Contents entry's page is the page the corners show once the row is chosen`() {
+        // Landing on an entry puts the reader at its share of its part: the corners' place there is the entry's number.
+        for (bookPages in listOf(0, 400, 765)) {
+            for (section in sizes.indices) {
+                for (share in listOf(0.0, 0.1, 0.25, 0.3333, 0.5, 0.9, 0.9999)) {
+                    val fraction = PageInfo.sectionSpan(starts, section)!!.let { PageInfo.within(it, share) }
+                    val corner = PageInfo.place(bookPages, sizes, section, share, PageInfo.sectionSpan(starts, section), fraction, null)
+                    assertEquals("pages $bookPages, part $section, share $share", corner.bookPage, PageInfo.entryPage(bookPages, sizes, starts, section, share))
+                }
+            }
+        }
+    }
+
+    @Test fun `how far through the book a point in a part is`() {
+        assertEquals(0.25 + 0.125, PageInfo.within(0.25 to 0.5, 0.5), 1e-12)
+        assertEquals(0.25, PageInfo.within(0.25 to 0.5, 0.0), 0.0)
+        assertEquals(1.0, PageInfo.within(0.75 to 1.0, 2.0), 0.0)
+        assertEquals(0.0, PageInfo.within(0.0 to 0.1, -1.0), 0.0)
+    }
+
     @Test fun `the bottom right is the menu's percentage, or nothing when it is off`() {
         assertEquals("49%", PageInfo.bottomRight(PageInfoChoice(), place(fraction = 0.49)))
         assertEquals("1%", PageInfo.bottomRight(PageInfoChoice(), place(fraction = 0.004)))

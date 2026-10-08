@@ -91,6 +91,27 @@ class ReadAlongGlowTest {
         assertTrue(script, "border-radius" in script && "MutationObserver" in script && "disconnect()" in script)
     }
 
+    /** #56: Storyteller leaves the space after a sentence inside its element, and the wash ran on over it. */
+    @Test fun `each row's box is cut back to the sentence's words, not the white space inside its element`() {
+        val script = ReadAlongGlow.fitScript("s12")
+        // The words: the element's text nodes in order, from the first character that is not white space to the last.
+        assertTrue(script, "createTreeWalker(target, NodeFilter.SHOW_TEXT)" in script && "walker.nextNode()" in script)
+        assertTrue(script, "text.search(/\\S/)" in script && "/\\s/.test(text.charAt(to - 1))" in script)
+        assertTrue(script, "setStart(first.node, first.at)" in script && "setEnd(last.node, last.at)" in script)
+        // Their rectangles, row by row, in the page's own numbers (the scroll added back, as Readium's boxes are).
+        assertTrue(script, "scroller.scrollLeft" in script && "r.left + across" in script && "r.right + across" in script)
+        // Each box's own extent is cut back to them on its row; a row with nothing but white space has no box.
+        assertTrue(script, "Math.max(l, here.l)" in script && "Math.min(r, here.r)" in script)
+        assertTrue(script, "setProperty('display', 'none')" in script && "removeProperty('display')" in script)
+        // A hidden box takes no part in the corners, which stay square where two lines' boxes join.
+        assertTrue(script, "el.style.display !== 'none'" in script)
+        // The air round the words is the stylesheet's, so the cut is to the words and the box keeps its side room.
+        assertTrue(ReadAlongGlow.STYLESHEET, "margin-left: -${ReadAlongGlow.SIDE_PX}px; padding: 0 ${ReadAlongGlow.SIDE_PX}px" in ReadAlongGlow.STYLESHEET)
+        // The observer and the refit are as they were, and nothing of the Kotlin template is left in the page.
+        assertTrue(script, "window.__pocketNarrationFit()" in script && "childList: true, subtree: true" in script)
+        assertFalse(script, "\$" in script)
+    }
+
     @Test fun `a fragment cannot break out of the script's string`() {
         assertEquals("'s12'", ReadAlongGlow.jsString("s12"))
         assertEquals("'a\\'b\\\\c'", ReadAlongGlow.jsString("a'b\\c"))
