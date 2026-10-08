@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -40,6 +41,8 @@ var bpBooks = []string{
 	`{"id":23,"uuid":"book-23","title":"Piranesi","authors":[{"name":"Susanna Clarke"}],"ebook":{"uuid":"e23"}}`,
 	`{"id":24,"uuid":"book-24","title":"Words of Radiance: Book Two","authors":[{"name":"Brandon Sanderson"}],"ebook":{"uuid":"e24"}}`,
 	`{"id":25,"uuid":"book-25","title":"Golden Son","authors":[{"name":"Pierce Brown"}],"identifiers":[{"type":"isbn","value":"9780345539816"}],"ebook":{"uuid":"e25"}}`,
+	`{"id":26,"uuid":"book-26","title":"Well Of Ascension","authors":[{"name":"Brandon Sanderson"}],"ebook":{"uuid":"e26"}}`,
+	`{"id":27,"uuid":"book-27","title":"Skyward","authors":[{"name":"Brandon Sanderson"}],"ebook":{"uuid":"e27"}}`,
 }
 
 // bookPageStoryteller serves the books above.
@@ -91,6 +94,9 @@ const (
 	hcFinalEmpire = `{"id":8,"title":"The Final Empire","slug":"the-final-empire","rating":4.41,"ratings_count":120000,"cached_tags":{"Genre":[{"tag":"Fantasy","count":400}]},"cached_contributors":[{"author":{"name":"Brandon Sanderson"}}]}`
 	hcImposter    = `{"id":9,"title":"The Final Empire","slug":"another","rating":1.5,"ratings_count":900000,"cached_tags":{"Genre":[{"tag":"Cookery","count":9}]},"cached_contributors":[{"author":{"name":"Someone Else"}}]}`
 	hcGoldenSon   = `{"id":10,"title":"Golden Son","slug":"golden-son","rating":4.6,"ratings_count":150000,"cached_tags":{"Genre":[{"tag":"Science fiction","count":300}]},"cached_contributors":[{"author":{"name":"Pierce Brown"}}]}`
+	hcWell        = `{"id":11,"title":"The Well of Ascension","slug":"the-well-of-ascension","rating":4.37,"ratings_count":4077,"cached_tags":{"Genre":[{"tag":"Fantasy","count":80}]},"cached_contributors":[{"author":{"name":"Brandon Sanderson"}}]}`
+	hcSkyward     = `{"id":12,"title":"Skyward","slug":"skyward","rating":4.2,"ratings_count":100,"cached_contributors":[{"author":{"name":"Brandon Sanderson"}}]}`
+	hcTheSkyward  = `{"id":13,"title":"The Skyward","slug":"the-skyward","rating":3,"ratings_count":5000,"cached_contributors":[{"author":{"name":"Brandon Sanderson"}}]}`
 )
 
 // bookPageHardcover is Hardcover's GraphQL endpoint as much as the hub asks of it.
@@ -148,13 +154,23 @@ func answerHardcover(query string, variables map[string]any) string {
 		}
 		return `{"data":{"editions":[]}}`
 	case strings.Contains(query, "books("):
-		switch variables["title"] {
-		case "The Final Empire":
-			return `{"data":{"books":[` + hcImposter + `,` + hcFinalEmpire + `]}}`
-		case "Golden Son":
-			return `{"data":{"books":[` + hcGoldenSon + `]}}`
+		// Hardcover's exact match on any of the spellings asked, the most rated first.
+		asked := map[string]bool{}
+		titles, _ := variables["titles"].([]any)
+		for _, title := range titles {
+			asked[fmt.Sprint(title)] = true
 		}
-		return `{"data":{"books":[]}}`
+		var books []string
+		for _, book := range []struct{ title, json string }{
+			{"The Final Empire", hcImposter}, {"The Final Empire", hcFinalEmpire},
+			{"Golden Son", hcGoldenSon}, {"The Well of Ascension", hcWell},
+			{"The Skyward", hcTheSkyward}, {"Skyward", hcSkyward},
+		} {
+			if asked[book.title] {
+				books = append(books, book.json)
+			}
+		}
+		return `{"data":{"books":[` + strings.Join(books, ",") + `]}}`
 	}
 	return `{"errors":[{"message":"unexpected query"}]}`
 }
@@ -458,6 +474,23 @@ func TestACommunityRatingCanBeFoundByTitleAndOneOfTheWorksAuthors(t *testing.T) 
 	}
 	if asked := env.hardcover.requests.Load() - before; asked != 2 {
 		t.Errorf("Golden Son took %d requests, want the ISBN and then the title", asked)
+	}
+}
+
+func TestATitleIsFoundInHardcoversSpellingAndOneWrittenAsAskedWins(t *testing.T) {
+	env := newBookPageEnv(t, bookPageOptions{hardcover: true, hardcoverKey: "hc-key"})
+
+	// Storyteller's "Well Of Ascension" is "The Well of Ascension" on Hardcover, whose
+	// match is exact: both the capitals and the "The" are asked as spellings.
+	well := env.view(env.work("Well Of Ascension"), "")
+	if well.Community == nil || well.Community.Rating != 4.37 || well.Community.Count != 4077 {
+		t.Fatalf("community = %+v", well.Community)
+	}
+
+	// "The Skyward" has more ratings, but "Skyward" is the title the book has.
+	sky := env.view(env.work("Skyward"), "")
+	if sky.Community == nil || sky.Community.Rating != 4.2 || sky.Community.Count != 100 {
+		t.Fatalf("community = %+v, want the book written as asked", sky.Community)
 	}
 }
 

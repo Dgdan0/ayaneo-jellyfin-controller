@@ -85,9 +85,79 @@ const editionQuery = `query ($isbn13: String!, $isbn10: String!) {
   }
 }`
 
-const titleQuery = `query ($title: String!) {
-  books(where: {title: {_eq: $title}}, limit: 20) { ` + bookFields + ` }
+// The match is exact, so the title is asked in each of its likely spellings at once,
+// the most rated first. Measured on 2026-10-08: "Dark Matter" is the title of more than
+// twenty books, and with no order the twenty returned left out Blake Crouch's (3,072
+// ratings); `_ilike`, which would have taken care of the capitals, is refused with a 403
+// ("not permitted on this server").
+const titleQuery = `query ($titles: [String!]!) {
+  books(where: {title: {_in: $titles}}, order_by: {ratings_count: desc}, limit: 20) { ` + bookFields + ` }
 }`
+
+// smallWords are a title's words Hardcover writes in lower case after its first word.
+var smallWords = map[string]bool{
+	"a": true, "an": true, "and": true, "as": true, "at": true, "but": true, "by": true,
+	"for": true, "from": true, "in": true, "into": true, "nor": true, "of": true, "on": true,
+	"or": true, "the": true, "to": true, "with": true,
+}
+
+// maxSpellings caps how many spellings one lookup asks for.
+const maxSpellings = 8
+
+// TitleSpellings are the ways Hardcover may have written a title: as given; with its
+// small words in lower case (Storyteller's "The Shadow Of What Was Lost" is "The Shadow
+// of What Was Lost" there); with a leading "The" taken away or added ("Well of
+// Ascension" is "The Well of Ascension"); and with a curly apostrophe made straight.
+// The title as given is first.
+func TitleSpellings(title string) []string {
+	title = strings.Join(strings.Fields(title), " ")
+	if title == "" {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(spelling string) {
+		if spelling != "" && !seen[spelling] && len(out) < maxSpellings {
+			seen[spelling] = true
+			out = append(out, spelling)
+		}
+	}
+	bases := []string{title}
+	if straight := strings.NewReplacer("’", "'", "‘", "'").Replace(title); straight != title {
+		bases = append(bases, straight)
+	}
+	for _, base := range bases {
+		forms := []string{base, smallWordsLower(base)}
+		for _, form := range forms {
+			add(form)
+		}
+		for _, form := range forms {
+			if rest, ok := withoutLeadingThe(form); ok {
+				add(rest)
+			} else {
+				add("The " + form)
+			}
+		}
+	}
+	return out
+}
+
+func smallWordsLower(title string) string {
+	words := strings.Split(title, " ")
+	for i, word := range words {
+		if i > 0 && smallWords[strings.ToLower(word)] {
+			words[i] = strings.ToLower(word)
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+func withoutLeadingThe(title string) (string, bool) {
+	if len(title) > 4 && strings.EqualFold(title[:4], "the ") {
+		return title[4:], true
+	}
+	return "", false
+}
 
 // ByISBN is the book of an edition with this ISBN-13 (or its ISBN-10 form), or nil.
 func (c *Client) ByISBN(ctx context.Context, isbn13, isbn10 string) (*Book, error) {
@@ -126,11 +196,11 @@ func (c *Client) ByISBN(ctx context.Context, isbn13, isbn10 string) (*Book, erro
 	return best, nil
 }
 
-// ByTitle is the books with exactly this title, most rated first. Which of them is
-// the one wanted is the caller's to say, by author.
+// ByTitle is the books with this title in any of its TitleSpellings, most rated first.
+// Which of them is the one wanted is the caller's to say, by author.
 func (c *Client) ByTitle(ctx context.Context, title string) ([]Book, error) {
-	title = strings.TrimSpace(title)
-	if title == "" {
+	titles := TitleSpellings(title)
+	if len(titles) == 0 {
 		return nil, nil
 	}
 	var out struct {
@@ -139,7 +209,7 @@ func (c *Client) ByTitle(ctx context.Context, title string) ([]Book, error) {
 		} `json:"data"`
 		Errors []graphQLError `json:"errors"`
 	}
-	if err := c.query(ctx, titleQuery, map[string]any{"title": title}, &out); err != nil {
+	if err := c.query(ctx, titleQuery, map[string]any{"titles": titles}, &out); err != nil {
 		return nil, err
 	}
 	if err := firstError(out.Errors); err != nil {
@@ -208,6 +278,12 @@ func (n node) book() Book {
 	return book
 }
 
+// notGenres are Genre tags readers put on a book that say how it was had, not what it
+// is (seen on 2026-10-08: "Audiobook" and "General" among The Shadow of What Was Lost's).
+var notGenres = map[string]bool{
+	"audiobook": true, "audiobooks": true, "general": true, "ebook": true, "ebooks": true, "kindle": true,
+}
+
 // genresOf is the Genre tags of a book's cached_tags, whose shape is
 // {"Genre": [{"tag": "Fantasy", "count": 12}, ...], "Mood": [...], ...}.
 func genresOf(raw json.RawMessage) []string {
@@ -224,7 +300,7 @@ func genresOf(raw json.RawMessage) []string {
 	seen := map[string]bool{}
 	for _, entry := range list {
 		name := strings.TrimSpace(entry.Tag)
-		if key := strings.ToLower(name); name != "" && !seen[key] {
+		if key := strings.ToLower(name); name != "" && !seen[key] && !notGenres[key] {
 			seen[key] = true
 			genres = append(genres, name)
 		}

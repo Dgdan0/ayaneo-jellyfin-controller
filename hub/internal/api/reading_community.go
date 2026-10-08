@@ -99,11 +99,23 @@ func (s *Server) lookupHardcover(ctx context.Context, in communityInput) (*commu
 		if err != nil {
 			return nil, err
 		}
-		for _, book := range books {
-			// A book of that title by someone else is another book.
-			if authorsOverlap(in.authors, authorKeys(book.Authors)) {
+		// A book of that title by someone else is another book. The books come in several
+		// spellings of the title, so one written as asked (capitals aside) wins over one
+		// with "The" added or taken away, however many more ratings that has.
+		var other *hardcover.Book
+		for i, book := range books {
+			if !authorsOverlap(in.authors, authorKeys(book.Authors)) {
+				continue
+			}
+			if strings.EqualFold(book.Title, title) {
 				return &communityResult{Found: true, Book: book}, nil
 			}
+			if other == nil {
+				other = &books[i]
+			}
+		}
+		if other != nil {
+			return &communityResult{Found: true, Book: *other}, nil
 		}
 	}
 	return &communityResult{}, nil

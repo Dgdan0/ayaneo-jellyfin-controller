@@ -160,7 +160,9 @@ func TestByISBNTakesTheMostRatedOfTheBooksItsEditionsBelongTo(t *testing.T) {
 func TestByTitleListsTheBooksOfThatTitleMostRatedFirstAndReadsLooseJSON(t *testing.T) {
 	fake := &fakeHardcover{t: t}
 	fake.handler = func(document string, variables map[string]any) (int, string) {
-		if variables["title"] != "The Final Empire" || !strings.Contains(document, "books(") {
+		titles, _ := variables["titles"].([]any)
+		if len(titles) == 0 || titles[0] != "The Final Empire" || !strings.Contains(document, "books(") ||
+			!strings.Contains(document, "_in: $titles") || !strings.Contains(document, "order_by: {ratings_count: desc}") {
 			t.Errorf("document %q variables %v", document, variables)
 		}
 		// cached_tags and cached_contributors as JSON inside strings; a rating that is
@@ -233,5 +235,35 @@ func TestFailuresAreErrorsThatNameTheProblemAndNeverTheKey(t *testing.T) {
 				t.Errorf("a title lookup hid the failure")
 			}
 		})
+	}
+}
+
+func TestATitleIsAskedInTheSpellingsHardcoverMayHaveWrittenItIn(t *testing.T) {
+	for title, want := range map[string][]string{
+		"Well Of Ascension": {"Well Of Ascension", "Well of Ascension", "The Well Of Ascension", "The Well of Ascension"},
+		"The Shadow Of What Was Lost": {
+			"The Shadow Of What Was Lost", "The Shadow of What Was Lost", "Shadow Of What Was Lost", "Shadow of What Was Lost",
+		},
+		"Dune":             {"Dune", "The Dune"},
+		"  Dark   Matter ": {"Dark Matter", "The Dark Matter"},
+		"Ender’s Game":     {"Ender’s Game", "The Ender’s Game", "Ender's Game", "The Ender's Game"},
+		// A small word that begins the title keeps its capital.
+		"Of Mice and Men": {"Of Mice and Men", "The Of Mice and Men"},
+		"   ":             nil,
+	} {
+		if got := TitleSpellings(title); strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Errorf("TitleSpellings(%q) = %q, want %q", title, got, want)
+		}
+	}
+	long := TitleSpellings("The Lion’s Share Of The Wind In The Willows")
+	if len(long) > maxSpellings || long[0] != "The Lion’s Share Of The Wind In The Willows" {
+		t.Errorf("spellings = %q", long)
+	}
+}
+
+func TestTagsThatSayHowABookWasHadAreNotGenres(t *testing.T) {
+	raw := json.RawMessage(`{"Genre": [{"tag": "Fantasy", "count": 9}, {"tag": "Audiobook", "count": 8}, {"tag": "General", "count": 7}, {"tag": "Epic", "count": 6}]}`)
+	if got := strings.Join(genresOf(raw), "|"); got != "Fantasy|Epic" {
+		t.Errorf("genres = %q", got)
 	}
 }
