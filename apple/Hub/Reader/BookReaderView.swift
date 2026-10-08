@@ -101,7 +101,7 @@ struct BookReaderScreen: View {
     @Environment(\.closeReader) private var closeReader
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
-    @State private var pad = ReaderPadInput()
+    @State private var pad = PadClaim()
     @State private var comfort = ReaderComfort.shared
     @State private var topBar = CGRect.zero
     @State private var bottomBar = CGRect.zero

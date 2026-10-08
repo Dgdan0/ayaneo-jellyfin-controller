@@ -303,7 +303,8 @@ public enum OfflinePlayback {
     /// are the series' other downloads, for Previous and Next; `subtitles`
     /// the subtitle files beside it, by track index.
     public static func plan(_ row: OfflineRow, file: URL, saved: OfflineCatalogProgress?, mode: PlaybackStartMode,
-                            siblings: [OfflineRow], subtitles: [Int: URL]) -> PlaybackPrepareResponse {
+                            siblings: [OfflineRow], subtitles: [Int: URL],
+                            kept: [(track: OfflineKeptSubtitle, file: URL)] = []) -> PlaybackPrepareResponse {
         let item = row.manifest.item
         let source = row.manifest.source
         let duration = max(Int64(item.runtimeSeconds) * 1_000, saved?.durationMillis ?? 0)
@@ -321,10 +322,9 @@ public enum OfflinePlayback {
                 PlaybackTrack(index: track.sourceIndex, type: "Audio", label: track.label, language: track.language,
                               codec: track.outputCodec, channels: track.outputChannels, isDefault: track.isDefault)
             }
-            tracks = apple.keptSubtitles.map { track in
-                PlaybackTrack(index: track.sourceIndex, type: "Subtitle", label: track.label, language: track.language,
-                              codec: track.outputCodec, forced: track.forced, hearingImpaired: track.hearingImpaired)
-            }
+            // The subtitles kept beside it (#45) first, drawn by the app; the
+            // MP4's own options where none stands for them.
+            tracks = OfflineSubtitleSync.tracks(kept: kept, mp4: apple.keptSubtitles)
         } else {
             audio = source.tracks.filter { $0.type.lowercased() == "audio" }
             let embedded = source.tracks.filter { $0.type.lowercased() == "subtitle" && !$0.external }
@@ -364,8 +364,10 @@ public enum OfflinePlayback {
     /// tracks of its kind, which an Apple download lists in the MP4's order.
     /// Nil for no track (subtitles off) or one the plan does not have.
     public static func optionPosition(_ tracks: [PlaybackTrack], index: Int?) -> Int? {
-        guard let index, index >= 0 else { return nil }
-        return tracks.firstIndex { $0.index == index }
+        guard let index, index >= 0, let track = tracks.first(where: { $0.index == index }) else { return nil }
+        // A subtitle kept beside the file is the app's to draw: none of the file's (#45).
+        if track.external && !track.externalUrl.isEmpty { return nil }
+        return track.fileOption ?? tracks.firstIndex { $0.index == index }
     }
 
     static func playbackItem(_ item: LibraryItem) -> PlaybackItem {

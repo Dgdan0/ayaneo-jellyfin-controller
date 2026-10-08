@@ -31,19 +31,6 @@ struct PadKeys: View {
     @State private var monitors: [Any] = []
     #endif
 
-    /// Something is presented over the window (a sheet, an alert): Back must
-    /// not take the page under it away.
-    @MainActor static var presenting: Bool {
-        #if os(iOS)
-        let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows).first { $0.isKeyWindow }
-        return window?.rootViewController?.presentedViewController != nil
-        #else
-        guard let window = NSApp.keyWindow else { return true }
-        return window.attachedSheet != nil || window !== NSApp.mainWindow
-        #endif
-    }
-
     var body: some View {
         #if os(iOS)
         ZStack {

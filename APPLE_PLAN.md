@@ -446,7 +446,7 @@ run's issue or a manga volume opens, over the whole window. It leaves through
 | The heading, "Issue 51 · Page 2 of 24", "Part 2 of 3", the end card's words | HubKit `ReaderTitleFormatter`, `EndOfIssue` (`Rules/ComicWords`) |
 | Pages decoded ahead, the Pages grid's cursor, the paper round a page | HubKit `PageSlots`, `PageGrid`, `PageBounds` (`content(ofThumbnail:)` reads the hub's 96-wide thumbnail) |
 | A tap, a swipe | HubKit `ComicTouch` |
-| Every key in every reader, and a keyboard's | HubKit `ReaderPadMap`, `ReaderKeyboard`; a game controller through `Reader/ReaderPadInput` (GameController), the book reader's too |
+| Every key in every reader, and a keyboard's | HubKit `ReaderPadMap`, `ReaderKeyboard`; a game controller through the app's `App/PadRouter` (GameController), claimed by each reader while open (`PadClaim`) |
 | Two pages side by side, where the page goes on screen | HubKit `ComicSpreads` (a window 980 wide or more and 1.25 times as wide as tall), `ComicUnits`, `ComicUnitLayout`, `ComicFrame` and `ComicCamera`: the fit, thirds, kept zoom, pans, pinches and double taps Android keeps in its screen |
 | The issue, its pages and thumbnails, the place sent | HubKit `ReadingPublicationManifest` (`Model/ReadingPages`), `HubEndpoints.readingPublication…` (`Net/ReaderEndpoints`), `ComicProgressOutbox` (`Rules/ComicProgress`) |
 | The reader on screen | `ComicReaderModel` (state, opening, moving, zoom, the place; `ComicReaderPages` the pictures, `ComicReaderInput` the keys), `ComicPageCanvas`, `ComicReaderBars`, `ComicPagesGrid`, `ComicReaderSheetView`, `ComicReaderOverlays` |
@@ -814,6 +814,7 @@ contract is in #5), so AVPlayer plays every download and there is one player.
 | Asking before a download leaves the device | `offlineRemoval` (`OfflineRemoval`): Keep in the cancel role, Remove |
 | A download played | `PlayerModel` takes `OfflineLibrary.localPlan` before the hub; the file's audio is chosen by place when that is its language (two English dubs are told apart), its text subtitles by place with the language checked |
 | A watch made offline | kept on the device and sent with `POST /v1/offline/progress/sync` as the profile that made it |
+| A download's subtitles kept beside it as WebVTT and refreshed (#45): as it arrives, when Downloads opens and before it plays (1.5 s at most, the rest as it plays); fetched when the signature differs, let go when gone from the list, kept on any error | HubKit `OfflineSubtitleSync` (`plan`, `merged`, `failure`, `refresh`, and `tracks`: the kept files drawn by the app first, the MP4's own options for the rest), files in `OfflineStore` (`keptSubtitleFile`, removed with the download); the app's `OfflineLibrary.refreshSubtitles` |
 
 Each item's key is the batch's and the whole Jellyfin id (`OfflineSelection.itemKey`), not its
 first twelve characters as on Android: ids that start alike were one key, and only one of a series'
@@ -852,6 +853,25 @@ Differences from Android, on purpose: the hub's MP4, not the original file; no s
 choose (the app's own Application Support, kept out of backups); no alerts for the server's own
 transfers and subtitles.
 
+## A controller on every page: the input, Ⓑ, L1/R1 and the player (#46, parts A and B)
+
+One listener for the whole app, `App/PadRouter` (`shared`): GameController's handlers on every
+controller, the D-pad and the left stick repeating while held, the right stick panning, each press a
+HubKit `PadAction`. The screen on top claims the presses with a `PadClaim` (`start` when it opens,
+`stop` when it goes) and only the latest claim is sent them: the shell claims first and keeps its
+claim, the player and each reader claim theirs over it while open. HubKit's `PadInput` (#46's
+engine: whether the ring shows) is another thing.
+
+| Behaviour | Owner |
+|---|---|
+| Ⓑ closes the profile picker, else goes back a page; L1 and R1 go round Home, Discover, Library, Downloads and Activity, from Notifications, Services or Settings to the first or the last (the Pocket's `switchWithin`) | HubKit `ShellPadMap`, `SectionCycle`; `Shell.padPressed`, which leaves the page alone while a screen's own sheet or alert is up (`App/PresentedOver`) |
+| The player with a controller: Ⓐ play/pause, ←/→ the seek step, ↑/↓ volume, Ⓧ subtitles on/off, Ⓨ Audio & subtitles, Ⓑ closes a panel and then leaves, L1/R1 the episode before and after, L2/R2 slower and faster, Menu the controls shown or hidden, Options skips the intro or credits. A panel open takes Ⓑ only; the lock is against touches, so presses go on through it | HubKit `PlayerPadMap`; `PlayerView.padPressed` with the keys' own `press` |
+| The UI tests' controller | `HUB_PAD="R1,B"` (Debug builds) presses those, one a second, `HUB_PAD_DELAY` seconds after launch (`PadScript`) |
+
+Escape is not a way back on the iPad yet: a SwiftUI shortcut for it never arrives, since iPadOS keeps
+the key for its own focus system. The keyboard joins through key commands that take priority over
+the system's (`wantsPriorityOverSystemBehavior`), with #46's engine.
+
 ## A controller drives the whole app (#46)
 
 A game controller or a keyboard drives every screen, as the Pocket's pad does. One engine decides
@@ -873,8 +893,8 @@ The app's side (`Hub/Focus`):
 
 | Behaviour | Owner |
 |---|---|
-| Every input's way in | `PadFocusCenter.shared.route(_ action: PadAction)`: the focus takes `.step`, `.activate` (Ⓐ, Return, Space), `.secondary` (Ⓨ, the item's hold menu) and `.back` (Ⓑ, Escape) out of the bar or a sheet; anything else goes to `PadFocusCenter.shared.unhandled`, which the shell sets (Back today; A's sections and the rest). Nothing while the player or a reader is open (`covered`) |
-| The keyboard | `Focus/PadKeys`: hidden buttons whose shortcuts are the arrows, Return, Space and Escape on the iPad and iPhone (a text field keeps its arrows); a key monitor on the Mac that leaves a text field alone. A touch, click or scroll hides the ring (`PadInput.pointer`) |
+| Every input's way in | `PadFocusCenter.shared.route(_ action: PadAction)`, called by the shell's `PadClaim` (A's `PadRouter`) and the keyboard: the focus takes `.step`, `.activate` (Ⓐ, Return, Space), `.secondary` (Ⓨ, the item's hold menu) and `.back` (Ⓑ, Escape) out of the bar or a sheet; anything else goes to `PadFocusCenter.shared.unhandled`, the shell's `padPressed` (Ⓑ back, L1/R1). Nothing while the player or a reader is open (`covered`; their claims have the controller) |
+| The keyboard | `Focus/PadKeys`: on the iPad and iPhone the arrows, Return, Space and Escape are UIKit key commands on the window's root controller with priority over iOS 26's own keyboard focus (which took the arrows and Return otherwise), off while the player or a reader is open, a text field is being typed in or an alert shows; on the Mac a key monitor that leaves a text field alone. A touch, click or scroll hides the ring (`PadInput.pointer`). In the simulator XCUITest's Return arrives only typed as a newline and its Escape not at all |
 | A page, a sheet, the bar | `.padPage("key")` round a page's own scroll view (it scrolls it), `.padPage("key", modal: true) { dismiss() }` for a sheet, whose Ⓑ closes it; the bars are one page (`padBar`), reached up (or down to the iPhone's tab bar) from a page and left with Down, Up or Ⓑ |
 | An item | `.padFocusable("id", ring: .card / .capsule / .circle / .rounded(r) / .inside(r) / .none, scroll:, hold:) { press }`: Ⓐ runs `press`, Ⓨ `hold`. `.card` lights the card as a resting pointer does (`GlassCardStyle` reads `padLit`); `.none` for an item that draws its own (`SheetRowStyle`). Shared parts take a `pad:` id: `ChoicePill`, `GlassRoundButton`, `SheetRow`, `BackPill`, `AvatarButton`, `SidePicker`, and `GlassCapsulePicker` and `UnderlineTabs` as a row |
 | Items in order | `.padGroup("id", .row / .column / .grid(columns: 0), members:, prefix:, strip:, scrollIds:)`: an item in a group is `group/id`; `strip: true` on a horizontal scroll view, which it then scrolls; `scrollIds` where its `ForEach` names cards by position. A column keeps only rows that are there |

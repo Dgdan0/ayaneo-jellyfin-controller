@@ -44,8 +44,19 @@ extension HubEndpoints {
 
     /// An expired grant made good again, under the same routes; 409 `source_changed`
     /// when the file on the server is no longer the one being downloaded.
-    public static func renewOffline(grantId: String) -> HubRequest {
-        HubRequest(grant(grantId) + "/renew", method: .post)
+    public static func renewOffline(grantId: String, user: String? = nil) -> HubRequest {
+        HubRequest(grant(grantId) + "/renew", method: .post, user: user)
+    }
+
+    /// An Apple download's text subtitles as they are now (#45), for the
+    /// profile the download is for; each entry's `url` is its WebVTT.
+    public static func offlineSubtitleTracks(grantId: String, user: String) -> HubRequest {
+        HubRequest(grant(grantId) + "/subtitle-tracks", user: user)
+    }
+
+    /// One listed subtitle as WebVTT, by the route the list names.
+    public static func offlineSubtitleTrack(_ url: String, user: String) -> HubRequest {
+        HubRequest(url, user: user)
     }
 
     /// Watches made on this device, sent once the hub can be reached, as the

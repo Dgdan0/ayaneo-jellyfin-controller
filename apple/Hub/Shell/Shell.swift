@@ -255,6 +255,8 @@ struct MainView: View {
     @State private var alertTaps = DownloadAlertTaps.shared
     /// The bars, as one page for a controller's focus (#46).
     @State private var padBar = PadPage(bar: true)
+    /// A game controller on every page (the player and the readers claim it while open).
+    @State private var pad = PadClaim()
     @State private var profilesOpen = false
     @State private var sheetPlaces = false
     /// The Mac's window buttons sit over the page under its hidden title bar:
@@ -475,19 +477,17 @@ struct MainView: View {
             open(latest)
             PadFocusCenter.shared.shownStack = latest.id
         }
-        // A controller's or keyboard's focus (#46): nothing while the player or a
-        // reader is over the pages, and Back for whatever presses it leaves.
+        // A controller's and the keyboard's presses go to the focus first (#46):
+        // it moves the ring and presses what it is on; Ⓑ, L1, R1 and the rest
+        // it leaves go on to the shell. Nothing while the player or a reader is
+        // over the pages (their own claims, and keys, have them).
         .onChange(of: covered, initial: true) { _, now in PadFocusCenter.shared.covered = now }
         .onAppear {
-            PadFocusCenter.shared.unhandled = { action in
-                guard case .back = action else { return }
-                if profilesOpen {
-                    profilesOpen = false
-                } else if !PadKeys.presenting {
-                    goBack()
-                }
-            }
+            PadFocusCenter.shared.unhandled = { action in padPressed(action) }
+            pad.start { action in PadFocusCenter.shared.route(action) }
         }
+        .onDisappear { pad.stop() }
+
         // A download's notification tapped (#43): Downloads, at its first page, on this side.
         .onChange(of: alertTaps.request) { _, request in
             guard let request else { return }
@@ -689,6 +689,27 @@ struct MainView: View {
         guard var path = paths[key], !path.isEmpty else { return }
         path.removeLast()
         paths[key] = path
+    }
+
+    /// A controller's press with no player or reader open (`ShellPadMap`):
+    /// Ⓑ closes the profile picker or goes back a page, L1 and R1 go round
+    /// the sections. A screen's own sheet or alert is left to be answered.
+    private func padPressed(_ action: PadAction) {
+        guard !covered, let command = ShellPadMap.command(action) else { return }
+        switch command {
+        case .back:
+            if profilesOpen {
+                profilesOpen = false
+            } else if !PresentedOver.any {
+                goBack()
+            }
+        case .section(let delta):
+            guard !profilesOpen, !PresentedOver.any else { return }
+            let sections = AppSection.sections
+            if let next = SectionCycle.next(current: sections.firstIndex(of: section), delta: delta, count: sections.count) {
+                select(sections[next])
+            }
+        }
     }
 
     private func openProfiles(wide: Bool) {
