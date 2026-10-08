@@ -1,5 +1,9 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.model.ReadingContinue
+import com.pocketds.hub.model.ReadingProgress
+import com.pocketds.hub.model.ReadingSection
+import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.model.ReadingSeriesBook
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.screens.library.SeriesFan.Part
@@ -24,7 +28,7 @@ class SeriesFanTest {
                 owned = n !in missing, kind = if (n in audio) "audiobook" else "book")
         })
 
-    private fun plan(series: ReadingWork) = checkNotNull(SeriesFan.plan(series))
+    private fun plan(series: ReadingWork, maxSlots: Int = SeriesFan.SLOTS) = checkNotNull(SeriesFan.plan(series, maxSlots))
     private fun numbers(plan: SeriesFan.Plan) = plan.slots.map { it.book.number }.joinToString(" ")
 
     @Test fun `the book you are on takes the middle slot when it has two books each side`() {
@@ -176,18 +180,18 @@ class SeriesFanTest {
 
     @Test fun `the fan opens a little with focus, as far as its card has room for and no further`() {
         val plan = plan(series(8))
-        assertEquals(1f, SeriesFan.opening(false, plan, 56f, 1000f), 0f)
+        assertEquals(1f, SeriesFan.opening(false, plan, 52f, 1000f), 0f)
         // With all the room in the world it opens as far as it ever does.
-        assertEquals(SeriesFan.MAX_OPENING, SeriesFan.opening(true, plan, 56f, 1000f), 0.001f)
-        // The Pocket's card: 195dp wide, and a small margin round it.
+        assertEquals(SeriesFan.MAX_OPENING, SeriesFan.opening(true, plan, 52f, 1000f), 0.001f)
+        // The Pocket's card: 195dp wide, and a small margin round it. The 52dp covers leave room to open by about 15%.
         val room = 195f / 2 + SeriesFan.SPREAD_MARGIN_DP
-        val opened = SeriesFan.opening(true, plan, 56f, room)
-        assertTrue("it opens, but not fully: $opened", opened > 1f && opened < SeriesFan.MAX_OPENING)
-        assertTrue(SeriesFan.reachDp(plan, 56f, opened) <= room)
+        val opened = SeriesFan.opening(true, plan, 52f, room)
+        assertTrue("it opens, visibly: $opened", opened in 1.12f..SeriesFan.MAX_OPENING)
+        assertTrue(SeriesFan.reachDp(plan, 52f, opened) <= room)
         // A hundredth more would not fit.
-        assertTrue(SeriesFan.reachDp(plan, 56f, opened + 0.01f) > room)
+        assertTrue(SeriesFan.reachDp(plan, 52f, opened + 0.01f) > room)
         // A fan already wider than its room does not open at all, and never closes below its rest.
-        assertEquals(1f, SeriesFan.opening(true, plan, 56f, 90f), 0f)
+        assertEquals(1f, SeriesFan.opening(true, plan, 52f, 80f), 0f)
     }
 
     @Test fun `how far a fan reaches is measured at the corners of its leaning covers`() {
@@ -209,14 +213,97 @@ class SeriesFanTest {
         // A 56dp cover, its lit book 1.1 times that, at the outer slot (16 degrees, opened to 19.5): about 5dp higher than upright.
         assertEquals(5f, SeriesFan.leanRiseDp(56f), 0.3f)
         assertTrue(SeriesFan.leanRiseDp(100f) > SeriesFan.leanRiseDp(56f))
+        // Three slots lean less, one not at all.
+        assertTrue(SeriesFan.leanRiseDp(56f, 3) in 2f..5f)
+        assertEquals(0f, SeriesFan.leanRiseDp(56f, 1), 0f)
     }
 
-    @Test fun `a fan of one known cover stands upright in the middle of its box`() {
-        // The Pocket's 64dp cover in its 130 x 108dp box: 33dp in from each side, 6dp from the top and from the foot.
-        val (left, top) = SeriesFan.centred(130f, 108f, 64f)
-        assertEquals(33f, left, 0f)
-        assertEquals(6f, top, 0f)
-        assertEquals(33f, 130f - 64f - left, 0f)
+    @Test fun `a fan of one book stands upright in the middle`() {
+        val plan = plan(series(1))
+        assertEquals(1, plan.slots.size)
+        assertEquals(0f, plan.slots[0].angleDeg, 0f)
+        assertEquals(0f, plan.slots[0].offset, 0f)
+    }
+
+    @Test fun `the smaller fans take three slots, the book you are on in the middle when it has a book each side`() {
+        assertEquals("4 5 6", numbers(plan(series(10, on = 5), SeriesFan.SMALL_SLOTS)))
+        assertEquals(1, plan(series(10, on = 5), 3).slots.indexOfFirst { it.lit })
+        assertEquals(listOf(-8f, 0f, 8f), plan(series(10, on = 5), 3).slots.map { it.angleDeg })
+        // Near the start or the end it keeps its shape: the first or last three, the book lit in its own slot.
+        assertEquals("1 2 3", numbers(plan(series(10, on = 1), 3)))
+        assertEquals(0, plan(series(10, on = 1), 3).slots.indexOfFirst { it.lit })
+        assertEquals("8 9 10", numbers(plan(series(10, on = 10), 3)))
+        assertEquals(2, plan(series(10, on = 10), 3).slots.indexOfFirst { it.lit })
+        // Not started, or finished: books 1 to 3, the first in front on the left.
+        assertEquals("1 2 3", numbers(plan(series(10), 3)))
+        assertTrue(plan(series(10), 3).slots[0].front)
+        assertEquals("1 2 3", numbers(plan(series(10, finished = true), 3)))
+        // Fewer books than slots: that many.
+        assertEquals(2, plan(series(2, on = 2), 3).slots.size)
+        assertEquals("the same window as the five-slot fan's, narrowed", "3 4 5", numbers(plan(series(10, on = 4), 3)))
+    }
+
+    @Test fun `the first book is in front on the left and the fan runs right`() {
+        val slots = plan(series(8)).slots
+        assertTrue(slots[0].front && slots[0].angleDeg < 0 && slots[0].offset < 0)
+        assertTrue(slots.last().angleDeg > 0 && slots.last().offset > 0)
+        assertEquals(slots.map { it.index }, slots.map { it.index }.sorted())
+        // The same direction on three.
+        assertTrue(plan(series(8), 3).slots.let { it[0].offset < 0 && it[0].front && it[2].offset > 0 })
+    }
+
+    @Test fun `a fan has an odd number of slots`() {
+        assertTrue(runCatching { SeriesFan.plan(series(8), 4) }.isFailure)
+    }
+
+    @Test fun `how many slots fit follows the cover size and the room`() {
+        // 56dp covers in the 130dp box of Home's series and a series page's header, with a few dp of lean: three.
+        assertEquals(SeriesFan.SMALL_SLOTS, SeriesFan.slotsFor(56f, 130f + 2 * 4))
+        // The Series view's 52dp covers in a 195dp card: all five.
+        assertEquals(5, SeriesFan.slotsFor(52f, 195f))
+        // The old 64dp covers did not fit even three there, which is why the smaller fans' covers are 56.
+        assertEquals(1, SeriesFan.slotsFor(64f, 130f + 2 * 4))
+        // A fan is as wide as the lit book of its outer slot reaches, which is what the plan says.
+        val litOuter = plan(series(10, on = 1), 3)
+        assertEquals(SeriesFan.fanWidthDp(56f, 3), 2 * SeriesFan.reachDp(litOuter, 56f, 1f), 0.01f)
+        assertEquals(SeriesFan.fanWidthDp(52f, 5), 2 * SeriesFan.reachDp(plan(series(10, on = 1)), 52f, 1f), 0.01f)
+    }
+
+    @Test fun `the books of a series page are its sections, the one you are on lit and those finished read`() {
+        fun item(n: Int, pct: Double? = null, done: Boolean = false, available: Boolean = true, formats: List<String> = listOf("ebook")) =
+            ReadingSectionItem(workId = if (available) "w$n" else "", title = "Book $n", number = "$n", artwork = "/a/$n", formats = formats,
+                availability = if (available) "available" else "missing",
+                progress = pct?.let { ReadingProgress(percentage = it, completed = done) })
+        val page = ReadingWork(entityType = "collection", title = "Series", artwork = "/a/series",
+            sections = listOf(ReadingSection(items = listOf(item(1, 1.0, done = true), item(2, 1.0, done = true), item(3, 0.4), item(4),
+                item(5, available = false), item(6, formats = listOf("audiobook"))))),
+            continueAt = ReadingContinue(number = "3"))
+        val books = SeriesFan.booksOf(page)
+        assertEquals(listOf("read", "read", "on", "", "", ""), books.map { it.state })
+        assertEquals(listOf(true, true, true, true, false, true), books.map { it.owned })
+        assertEquals(listOf("book", "book", "book", "book", "book", "audiobook"), books.map { it.kind })
+        assertEquals("/a/3", books[2].cover)
+        val plan = plan(page, 3)
+        assertEquals("2 3 4", numbers(plan))
+        assertEquals("6 books · on #3", plan.caption)
+        // Sections win over the hub's own list; without sections the list is the books.
+        assertEquals(6, SeriesFan.booksOf(page.copy(seriesBooks = listOf(book(1)))).size)
+        assertEquals(1, SeriesFan.booksOf(ReadingWork(entityType = "collection", seriesBooks = listOf(book(1)))).size)
+        // A series with nothing but its own cover is that one cover, upright.
+        val lone = plan(ReadingWork(entityType = "collection", title = "Alone", artwork = "/a/alone"))
+        assertEquals(1, lone.slots.size)
+        assertEquals("/a/alone", lone.slots[0].book.cover)
+        assertNull(SeriesFan.plan(ReadingWork(entityType = "collection")))
+    }
+
+    @Test fun `with nothing started or all finished a page's series has no lit book`() {
+        fun item(n: Int, done: Boolean) = ReadingSectionItem(workId = "w$n", number = "$n", progress = if (done) ReadingProgress(percentage = 1.0, completed = true) else null)
+        val none = ReadingWork(entityType = "collection", sections = listOf(ReadingSection(items = (1..4).map { item(it, false) })))
+        assertTrue(plan(none, 3).slots.none { it.lit })
+        assertFalse(plan(none, 3).started)
+        val all = ReadingWork(entityType = "collection", sections = listOf(ReadingSection(items = (1..4).map { item(it, true) })))
+        assertTrue(plan(all, 3).finished)
+        assertTrue(plan(all, 3).slots.none { it.lit })
     }
 
     @Test fun `the room a fan needs follows its covers and its slots`() {

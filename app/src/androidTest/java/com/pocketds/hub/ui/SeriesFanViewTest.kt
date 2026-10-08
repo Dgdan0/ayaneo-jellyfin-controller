@@ -176,23 +176,39 @@ class SeriesFanViewTest {
         }
     }
 
-    @Test fun theSeriesPageHeaderFansItsBooksAndOneKnownCoverStandsUprightInTheMiddle() {
+    /** A series page's books as the page's sections carry them: [done] finished, the next one in progress when [reading]. */
+    private fun page(title: String, count: Int, done: Int, reading: Boolean = true, covers: Boolean = true, missing: Set<Int> = emptySet(), audio: Set<Int> = emptySet()): ReadingWork {
+        val slug = title.lowercase().replace(' ', '-')
+        val items = (1..count).map { n ->
+            ReadingSectionItem(sourceItemId = "$n", workId = if (n in missing) "" else "w$slug$n", title = "$title $n", number = "$n",
+                kind = "book", availability = if (n in missing) "missing" else "available", formats = if (n in audio) listOf("audiobook") else listOf("ebook"),
+                artwork = if (covers) "/c/${if (n in audio) "audio-" else ""}$slug-$n" else "",
+                progress = when { n <= done -> ReadingProgress(percentage = 1.0, completed = true); n == done + 1 && reading -> ReadingProgress(percentage = 0.3); else -> null })
+        }
+        return ReadingWork(id = "s-$slug", entityType = "collection", title = title, authors = listOf("Ann Writer"), bookCount = count, artwork = "/c/$slug-1",
+            sections = listOf(ReadingSection(id = "books", title = "Books", items = items)),
+            continueAt = if (reading) com.pocketds.hub.model.ReadingContinue(number = "${done + 1}") else null)
+    }
+
+    @Test fun theSeriesPageHeaderIsTheSeriesFanTheFirstBookInFrontOnTheLeftAndTheOneYouAreOnLit() {
         val server = covers()
         val base = server.url("/").toString().trimEnd('/')
         val context = ins.targetContext
         val activity = ins.startActivitySync(Intent(context, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         lateinit var harness: PageHarness
         try {
-            val series = series("s-mid", "In The Middle", 10, on = 5)
-            fun page(withCovers: Boolean) = series.copy(sections = listOf(ReadingSection(id = "books", title = "Books", items = (1..10).map { n ->
-                ReadingSectionItem(sourceItemId = "$n", workId = "w$n", title = "Book $n", number = "$n", kind = "book", availability = "available",
-                    artwork = if (withCovers) "/c/in-the-middle-$n" else "")
-            })))
-            for ((withCovers, name) in listOf(true to "04-header-covers", false to "05-header-one-cover")) {
-                val api = FixtureHub.of("readingWork" to { _ -> HubResult.Ok(page(withCovers)) }, "imageUrl" to { args -> base + (args[0] as String) })
+            // In the middle (lit book in the middle slot), not started (first in front on the left), at the start and a book you do not have.
+            val cases = listOf(
+                Triple("04-header-middle", page("In The Middle", 10, done = 4, audio = setOf(6)), listOf("In The Middle 4", "In The Middle 5", "In The Middle 6")),
+                Triple("05-header-not-started", page("Not Started", 8, done = 0, reading = false), listOf("Not Started 1", "Not Started 2", "Not Started 3")),
+                Triple("06-header-at-start", page("At The Start", 8, done = 0, missing = setOf(3)), listOf("At The Start 1", "At The Start 2", "At The Start 3")),
+                Triple("07-header-no-covers", page("No Covers", 6, done = 2, covers = false), listOf("No Covers 2", "No Covers 3", "No Covers 4"))
+            )
+            for ((name, series, expected) in cases) {
+                val api = FixtureHub.of("readingWork" to { _ -> HubResult.Ok(series) }, "imageUrl" to { args -> base + (args[0] as String) })
                 ins.runOnMainSync {
                     harness = PageHarness(activity); harness.tabs.alpha = 0f
-                    harness.push(ReadingWorkScreen(api, "s-mid", "In The Middle", { true }))
+                    harness.push(ReadingWorkScreen(api, series.id, series.title, { true }))
                 }
                 val deadline = System.currentTimeMillis() + 10_000
                 while (System.currentTimeMillis() < deadline && all(harness.stage).filterIsInstance<CoverFanView>().none { it.isShown }) Thread.sleep(150)
@@ -200,35 +216,33 @@ class SeriesFanViewTest {
                 ins.runOnMainSync {
                     val fan = all(harness.stage).filterIsInstance<CoverFanView>().single { it.isShown }
                     val visible = fan.covers.filter { it.visibility == View.VISIBLE }
+                    // The plan's three slots left to right, the first book in front on the left when nothing is lit.
+                    assertEquals(name, 3, visible.size)
+                    assertEquals(name, listOf(-8f, 0f, 8f), visible.map { it.rotation })
+                    val plan = checkNotNull(SeriesFan.plan(series, SeriesFan.SMALL_SLOTS))
+                    assertEquals(name, expected, plan.slots.map { it.book.title })
+                    val litSlot = plan.slots.indexOfFirst { it.lit }
+                    if (litSlot >= 0) {
+                        assertEquals("$name: the book you are on is bigger", SeriesFan.LIT_SCALE, visible[litSlot].scaleX, 0.001f)
+                        assertEquals(name, visible.maxOf { it.elevation }, visible[litSlot].elevation, 0f)
+                    } else {
+                        assertTrue("$name: the first book in front: ${visible.map { it.elevation }}", visible[0].elevation > visible[1].elevation && visible[1].elevation > visible[2].elevation)
+                    }
+                    // A book you do not have is dimmed.
+                    assertEquals(name, plan.slots.map { it.dimmed }, visible.map { it.alpha < 1f })
+                    // Inside the page's gutter at the left (22dp), nothing cut off at the top, no ancestor clipping the lean.
                     val at = IntArray(2); fan.getLocationOnScreen(at)
                     val reach = reachOf(fan)
-                    if (withCovers) {
-                        // The prototype's fan, as it was: four covers leaning -13, -5, 4 and 12 degrees, the book you are on last, on top.
-                        assertEquals(4, visible.size)
-                        assertEquals(listOf(12f, -13f, -5f, 4f), visible.map { it.rotation })
-                    } else {
-                        // One known cover: upright, and in the middle of its box.
-                        assertEquals(1, visible.size)
-                        assertEquals(0f, visible[0].rotation, 0f)
-                        val box = CoverFanView.sizeDp(CoverFanView.COVER_DP)
-                        val (left, top) = SeriesFan.centred(box.first.toFloat(), box.second.toFloat(), CoverFanView.COVER_DP.toFloat())
-                        assertEquals(left * density, visible[0].left.toFloat(), 1.5f)
-                        assertEquals(top * density, visible[0].top.toFloat(), 1.5f)
-                        assertEquals("centred across its box", (fan.width - visible[0].width) / 2f, visible[0].left.toFloat(), 1.5f)
-                        assertEquals("centred down its box", (fan.height - visible[0].height) / 2f, visible[0].top.toFloat(), 1.5f)
-                    }
-                    // Nothing is clipped, at the top or at the left, and the fan's box does not clip it.
-                    assertTrue("left of the screen: ${at[0] + reach.left}", at[0] + reach.left >= 0f)
-                    assertTrue("top of the screen: ${at[1] + reach.top}", at[1] + reach.top >= 0f)
-                    assertTrue("the fan's own top: ${reach.top} (the leaning covers rise at most 5dp over their box)", reach.top >= -5 * density)
-                    // And no ancestor that clips its children has the fan's lean outside its bounds.
                     val onScreen = android.graphics.RectF(reach).apply { offset((at[0] - fan.left).toFloat(), (at[1] - fan.top).toFloat()) }
+                    assertTrue("$name: left of the gutter: ${onScreen.left}", onScreen.left >= 22 * density - 1f)
+                    assertTrue("$name: top: ${onScreen.top}", onScreen.top >= 0f)
+                    assertTrue("$name: over the fan's own box: ${reach.top - fan.top}", reach.top - fan.top >= -1f)
                     var parent = fan.parent
                     while (parent is ViewGroup && parent !== harness.stage) {
                         if (parent.clipChildren) {
                             val where = IntArray(2); parent.getLocationOnScreen(where)
-                            assertTrue("${parent.javaClass.simpleName} clips the fan: ${onScreen.left} < ${where[0]}", onScreen.left >= where[0] - 1f)
-                            assertTrue("${parent.javaClass.simpleName} clips the fan: ${onScreen.top} < ${where[1]}", onScreen.top >= where[1] - 1f)
+                            assertTrue("$name: ${parent.javaClass.simpleName} clips the fan: ${onScreen.left} < ${where[0]}", onScreen.left >= where[0] - 1f)
+                            assertTrue("$name: ${parent.javaClass.simpleName} clips the fan: ${onScreen.top} < ${where[1]}", onScreen.top >= where[1] - 1f)
                         }
                         parent = parent.parent
                     }
@@ -242,21 +256,24 @@ class SeriesFanViewTest {
         }
     }
 
-    @Test fun booksHomeSeriesFanLooksAsItDid() {
+    @Test fun booksHomeSeriesFanIsTheSameFanAndKeepsItsBox() {
         val server = covers()
         val base = server.url("/").toString().trimEnd('/')
         val context = ins.targetContext
         val activity = ins.startActivitySync(Intent(context, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         try {
             val api = FixtureHub.of("imageUrl" to { args -> base + (args[0] as String) })
-            fun item(title: String, count: Int) = ReadingShelves.SeriesShelfItem(title, title, (1..count).map { "/c/${title.lowercase().replace(' ', '-')}-$it" }, "$count books · on #$count")
+            // The series Home lists: you are on #5 of eight, on the first of six, and on the second of two.
+            val shelf = ReadingShelves.yourSeries(listOf(page("Five Of Eight", 8, done = 4), page("First Of Six", 6, done = 0), page("Second Of Two", 2, done = 1)))
+            assertEquals(3, shelf.size)
             lateinit var stacks: List<SeriesStackView>
             ins.runOnMainSync {
+                // Home's row does not clip a fan to its box, nor to its padding.
                 val row = android.widget.LinearLayout(activity).apply { clipChildren = false; clipToPadding = false; setPadding((30 * density).toInt(), (80 * density).toInt(), 0, 0) }
-                stacks = listOf(item("Four Covers", 4), item("Two Covers", 2), item("One Cover", 1)).map { shelf ->
+                stacks = shelf.map { item ->
                     SeriesStackView(activity, Theme.colors(activity)) { true }.also { stack ->
-                        stack.bind(shelf, Artwork.loader(api, activity), api::imageUrl)
-                        row.addView(stack, android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = (24 * density).toInt() })
+                        stack.bind(item, Artwork.loader(api, activity), api::imageUrl)
+                        row.addView(stack, android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = (20 * density).toInt() })
                     }
                 }
                 activity.setContentView(row)
@@ -264,23 +281,31 @@ class SeriesFanViewTest {
             ins.waitForIdleSync(); Thread.sleep(1_500)
             ins.runOnMainSync {
                 fun covers(stack: SeriesStackView) = all(stack).filterIsInstance<CoverFanView>().single().covers.filter { it.visibility == View.VISIBLE }
-                // Four covers, as the prototype leans them: the book you are on (first) last and on top at the right.
-                assertEquals(listOf(12f, -13f, -5f, 4f), covers(stacks[0]).map { it.rotation })
-                val lefts = covers(stacks[0]).map { (it.layoutParams as ViewGroup.MarginLayoutParams).leftMargin.toFloat() }
-                listOf(64f, 0f, 22f, 44f).forEachIndexed { i, dp -> assertEquals("cover $i stands $dp dp in", dp * density, lefts[i], 1f) }
-                // Two lean like the first two of four.
-                assertEquals(listOf(-5f, -13f), covers(stacks[1]).map { it.rotation })
-                // One known cover is not a fan: upright, in the middle of its box.
-                assertEquals(listOf(0f), covers(stacks[2]).map { it.rotation })
-                // Focus opens four of them further, as it did: -13 to -18 and 12 to 17.
+                val byTitle = shelf.zip(stacks).associate { (item, stack) -> item.title to Triple(item, stack, covers(stack)) }
+                // Three slots, left to right: the book you are on lit in the middle when it has a book each side...
+                val (five, _, fiveCovers) = byTitle.getValue("Five Of Eight")
+                assertEquals(listOf("Five Of Eight 4", "Five Of Eight 5", "Five Of Eight 6"), five.plan.slots.map { it.book.title })
+                assertEquals(listOf(-8f, 0f, 8f), fiveCovers.map { it.rotation })
+                assertEquals(SeriesFan.LIT_SCALE, fiveCovers[1].scaleX, 0.001f)
+                // ...at the start it is lit in the first slot, first in front on the left...
+                val (six, _, sixCovers) = byTitle.getValue("First Of Six")
+                assertEquals(0, six.plan.slots.indexOfFirst { it.lit })
+                assertEquals(SeriesFan.LIT_SCALE, sixCovers[0].scaleX, 0.001f)
+                // ...and a series of two has two slots, leaning as the first two of three do not: about the middle.
+                val (two, _, twoCovers) = byTitle.getValue("Second Of Two")
+                assertEquals(listOf(-4f, 4f), twoCovers.map { it.rotation })
+                assertEquals(1, two.plan.slots.indexOfFirst { it.lit })
+                // Home's box as it always was: 130dp across, the series' name under it.
+                stacks.forEach { assertEquals(130 * density, all(it).filterIsInstance<CoverFanView>().single().width.toFloat(), 1f) }
                 assertTrue(stacks[0].requestFocus())
             }
-            ins.waitForIdleSync(); Thread.sleep(500)
+            ins.waitForIdleSync(); Thread.sleep(600)
             ins.runOnMainSync {
-                val four = all(stacks[0]).filterIsInstance<CoverFanView>().single().covers.filter { it.visibility == View.VISIBLE }
-                assertEquals(listOf(17f, -18f, -5f, 4f), four.map { it.rotation })
+                // Focus opens the fan, as far as the box has room: the outer covers lean further than at rest (8).
+                val opened = all(stacks[0]).filterIsInstance<CoverFanView>().single().covers.filter { it.visibility == View.VISIBLE }
+                assertTrue("opened: ${opened.map { it.rotation }}", opened[0].rotation < -8.5f && opened[2].rotation > 8.5f)
             }
-            shot(activity, "06-home-fans")
+            shot(activity, "08-home-fans")
         } finally {
             ins.runOnMainSync { activity.finish() }
             server.shutdown()

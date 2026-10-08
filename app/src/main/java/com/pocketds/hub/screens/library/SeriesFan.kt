@@ -2,6 +2,7 @@ package com.pocketds.hub.screens.library
 
 import com.pocketds.hub.model.ReadingSeriesBook
 import com.pocketds.hub.model.ReadingWork
+import com.pocketds.hub.screens.home.ReadingShelves
 
 /**
  * The Books library's Series view as fans of covers (#54): the owner's rule, decided from mockups with real covers.
@@ -19,10 +20,19 @@ import com.pocketds.hub.model.ReadingWork
  * - Books you do not have are in the fan, dimmed, and in the bar as outlines; the hub lists only the main numbered
  *   books that are out as missing.
  * - Every slot is tall; an audiobook-only book's square sits at the slot's bottom. No format marks on the fan.
+ *
+ * One direction everywhere: the first book in front on the left, fanning right to the last. The Series view, Books
+ * Home's "Your series" and a series page's header all stand a [Plan] from [plan]; the smaller two have room for
+ * [SMALL_SLOTS] (the same rule, centred on the book you are on, with one book each side).
  */
 object SeriesFan {
     /** The most books a fan shows. */
     const val SLOTS = 5
+    /**
+     * What fits where there is room for a 130dp box of [com.pocketds.hub.ui.CoverFanView.COVER_DP] covers (Books Home's
+     * series, a series page's header): three slots, the book you are on in the middle when it has a book each side.
+     */
+    const val SMALL_SLOTS = 3
     /** A series longer than this has one continuous bar with a white mark, not a part for each book. */
     const val CONTINUOUS_AFTER = 25
     /** How far each slot leans from the one before it, in degrees: -16, -8, 0, 8, 16 for five. */
@@ -97,15 +107,47 @@ object SeriesFan {
     /** Whether a library item is a series with books to fan. */
     fun hasFan(item: ReadingWork): Boolean = item.entityType == "collection" && item.seriesBooks.isNotEmpty()
 
-    fun plan(series: ReadingWork): Plan? {
-        val books = series.seriesBooks
+    /**
+     * The books a series' fan stands on, in order. A series page (and Books Home's series) carries its books in its
+     * sections, with the reading progress of each: the one you are on is lit, those finished are read, those you do
+     * not have are dimmed. The library's listing has no sections and sends the hub's own list, [ReadingWork.seriesBooks].
+     * A series with neither is its one cover.
+     */
+    fun booksOf(series: ReadingWork): List<ReadingSeriesBook> {
+        val items = series.sections.flatMap { it.items }
+        if (items.isEmpty()) {
+            if (series.seriesBooks.isNotEmpty()) return series.seriesBooks
+            return if (series.artwork.isBlank()) emptyList() else listOf(ReadingSeriesBook(title = series.title, cover = series.artwork, owned = true))
+        }
+        val on = ReadingShelves.onNumber(series)
+        var litFound = false
+        return items.map { item ->
+            val read = item.progress?.completed == true
+            val lit = !read && !litFound && on.isNotBlank() && item.number == on
+            if (lit) litFound = true
+            ReadingSeriesBook(
+                number = item.number, title = item.title, cover = item.artwork,
+                kind = if (ReadingBookFacts.coverShape(item) == ReadingBookFacts.CoverShape.SQUARE) "audiobook" else "book",
+                owned = item.isAvailable, released = true,
+                state = when { lit -> "on"; read -> "read"; else -> "" }
+            )
+        }
+    }
+
+    /**
+     * The fan of [series]: up to [maxSlots] (an odd number) of its books, the one you are on lit and, when it has
+     * [maxSlots] / 2 books each side, in the middle slot.
+     */
+    fun plan(series: ReadingWork, maxSlots: Int = SLOTS): Plan? {
+        require(maxSlots >= 1 && maxSlots % 2 == 1) { "a fan has an odd number of slots: $maxSlots" }
+        val books = booksOf(series)
         if (books.isEmpty()) return null
         val lit = books.indexOfFirst { it.state == "on" }
         val owned = books.filter { it.owned }
         val finished = owned.isNotEmpty() && owned.all { it.state == "read" }
         val started = books.any { it.state == "on" || it.state == "read" }
-        val size = minOf(SLOTS, books.size)
-        val start = if (lit < 0) 0 else (lit - 2).coerceIn(0, books.size - size)
+        val size = minOf(maxSlots, books.size)
+        val start = if (lit < 0) 0 else (lit - maxSlots / 2).coerceIn(0, books.size - size)
         val front = if (lit < 0) 0 else lit - start
         val centre = (size - 1) / 2f
         val slots = (0 until size).map { slot ->
@@ -177,22 +219,30 @@ object SeriesFan {
     }
 
     /**
-     * How far a leaning lit cover's top corner rises over where it would stand upright, in dp, at the outermost slot
-     * and the fan fully opened: the fan's box leaves this room, or the lit book of a series you are at the start or
-     * the end of is cut off at the top.
+     * How far a leaning lit cover's top corner rises over where it would stand upright, in dp, at the outermost of
+     * [slots] and the fan fully opened: the fan's box leaves this room, or the lit book of a series you are at the
+     * start or the end of is cut off at the top.
      */
-    fun leanRiseDp(coverDp: Float): Float {
+    fun leanRiseDp(coverDp: Float, slots: Int = SLOTS): Float {
         val height = coverHeightDp(coverDp, square = false)
-        val lean = Math.toRadians((((SLOTS - 1) / 2f) * ANGLE_STEP * MAX_OPENING).toDouble())
+        val lean = Math.toRadians((((slots - 1) / 2f) * ANGLE_STEP * MAX_OPENING).toDouble())
         return (LIT_SCALE * (height * kotlin.math.cos(lean) + coverDp / 2f * kotlin.math.sin(lean) - height)).toFloat().coerceAtLeast(0f)
     }
 
     /**
-     * Where a fan's one known cover [coverDp] across stands in its box: upright, in the middle both ways, and
-     * never at the angle of the first slot of a longer fan. Left then top, in dp.
+     * How wide a fan of [slots] covers [coverDp] across is at its widest, at rest: the book you are on lit at an
+     * outer slot, bigger and leaning, which is how far from the middle the fan can ever reach there.
      */
-    fun centred(boxWidthDp: Float, boxHeightDp: Float, coverDp: Float): Pair<Float, Float> =
-        (boxWidthDp - coverDp) / 2f to (boxHeightDp - coverHeightDp(coverDp, square = false)) / 2f
+    fun fanWidthDp(coverDp: Float, slots: Int): Float {
+        val outer = (slots - 1).coerceAtLeast(0) / 2f
+        val lean = Math.toRadians((outer * ANGLE_STEP).toDouble())
+        val corner = coverDp / 2f * kotlin.math.cos(lean) + coverHeightDp(coverDp, square = false) * kotlin.math.sin(lean)
+        return (2.0 * (outer * STEP_FRACTION * coverDp + LIT_SCALE * corner)).toFloat()
+    }
+
+    /** The most slots (five, three or one) a fan of covers [coverDp] across has room for in [availableDp]. */
+    fun slotsFor(coverDp: Float, availableDp: Float): Int =
+        listOf(SLOTS, SMALL_SLOTS, 1).firstOrNull { fanWidthDp(coverDp, it) <= availableDp } ?: 1
 
     /** A tall cover [widthDp] across is this high; a square one as high as it is wide. */
     fun coverHeightDp(widthDp: Float, square: Boolean): Float = if (square) widthDp else widthDp * 1.5f

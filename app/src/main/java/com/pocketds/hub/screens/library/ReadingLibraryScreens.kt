@@ -946,12 +946,15 @@ class ReadingWorkScreen(
         progressRow.visibility = if (fraction > 0 || progressLabel.text.isNotEmpty()) View.VISIBLE else View.GONE
         bookLinks(work, links)
         if (work.entityType == "collection") {
-            val coverDp = CoverFanView.COVER_DP
-            val (width, height) = CoverFanView.sizeDp(coverDp)
-            // In from the page's edge by how far its outer cover leans, or the screen cuts it.
-            replacePoster(CoverFanView(context, colors, coverDp).apply {
-                bind(com.pocketds.hub.screens.home.ReadingShelves.fanCovers(work), Artwork.loader(api, context), api::imageUrl)
-            }, width, height, startDp = CoverFanView.LEAN_DP)
+            // The series' fan, as on Books Home and in the Series view: the first book in front on the left, the book you
+            // are on lit. Its box is Home's, 130dp across; the lit book of an outer slot leans a few dp past it, so it
+            // stands in by that, inside the page's gutter, and the text keeps the place it had.
+            SeriesFan.plan(work, SeriesFan.SMALL_SLOTS)?.let { plan ->
+                val fan = CoverFanView(context, colors, CoverFanView.COVER_DP, SeriesFan.SMALL_SLOTS, CoverFanView.BOX_DP)
+                fan.bindPlan(plan, Artwork.loader(api, context), api::imageUrl)
+                val (width, height) = fan.boxDp
+                replacePoster(fan, width, height, startDp = CoverFanView.OVERHANG_DP, endDp = 20 + 8 - CoverFanView.OVERHANG_DP)
+            }
         }
         bindArtwork("book", null, work.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl),
             Artwork.loader(api, context))

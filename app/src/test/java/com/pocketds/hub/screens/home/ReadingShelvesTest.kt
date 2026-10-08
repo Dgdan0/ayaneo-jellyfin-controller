@@ -242,8 +242,13 @@ class ReadingShelvesTest {
         val shelf = ReadingShelves.yourSeries(listOf(mistborn, unread, redRising, finished))
         assertEquals(listOf("Red Rising", "Mistborn"), shelf.map { it.title })
         assertEquals("6 books · on #6", shelf[0].line)
-        // Up to four: the book you are on, then the first books in order.
-        assertEquals(listOf("/art/6", "/art/1", "/art/2", "/art/3"), shelf[0].covers)
+        // The Series view's fan, three slots here: the last books, the one you are on lit at the right.
+        assertEquals(listOf("/art/4", "/art/5", "/art/6"), shelf[0].plan.slots.map { it.book.cover })
+        assertEquals(2, shelf[0].plan.slots.indexOfFirst { it.lit })
+        assertEquals("/art/6", shelf[0].cover)
+        // Book 1 is the one you are on in a series just begun: lit in the first slot, first in front on the left.
+        assertEquals(listOf("/art/1", "/art/2", "/art/3"), shelf[1].plan.slots.map { it.book.cover })
+        assertTrue(shelf[1].plan.slots[0].lit && shelf[1].plan.slots[0].front)
         assertEquals("3 books · on #1", shelf[1].line)
     }
 }

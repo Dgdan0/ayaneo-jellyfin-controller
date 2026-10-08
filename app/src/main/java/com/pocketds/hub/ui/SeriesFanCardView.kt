@@ -34,7 +34,7 @@ class SeriesFanCardView(context: Context, colors: PocketColors, private val ring
         orientation = VERTICAL
         clipChildren = false
         clipToPadding = false
-        val (width, height) = CoverFanView.planSizeDp(COVER_DP)
+        val (width, height) = fan.boxDp
         addView(fan, LayoutParams(dp(width), dp(height)).apply { gravity = Gravity.CENTER_HORIZONTAL })
         addView(title.apply {
             textSize = 12f
@@ -88,8 +88,11 @@ class SeriesFanCardView(context: Context, colors: PocketColors, private val ring
     private fun dp(value: Int) = Styler.dpInt(context, value.toFloat())
 
     companion object {
-        /** A cover of the fan; five slots of them and the room they lean into fit four to a row of the Pocket's grid. */
-        const val COVER_DP = 56
+        /**
+         * A cover of the fan; five slots of them and the room they lean into fit four to a row of the Pocket's grid,
+         * with room over to open with focus (#54): 56dp covers left the fan as wide as its card.
+         */
+        const val COVER_DP = 52
         /** The bar's width, the same for every series: about that of the fan. */
         private const val BAR_DP = 120
     }
