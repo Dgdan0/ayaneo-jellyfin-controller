@@ -16,6 +16,10 @@
 //                                            once and then reused while it holds it
 //   swift asc.swift certificates             the team's certificates
 //   swift asc.swift profiles                 the team's profiles and their certificates
+//   swift asc.swift crashes [id]             the crashes testers shared from TestFlight's
+//                                            prompt, newest first (device, OS, build, when),
+//                                            or that one's crash log. Read only; a tester's
+//                                            email is never printed
 //
 // It reads ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH and ASC_APP_ID from the
 // environment (`~/.appstoreconnect/jellyhub.env` on the Mac, never the repo),
@@ -320,7 +324,34 @@ case "profiles":
         print("\(attributes["name"] ?? "?"): \(attributes["profileType"] ?? "?") \(attributes["profileState"] ?? "?") "
             + "until \(attributes["expirationDate"] ?? "?") id \(item["id"] ?? "?") certificates \(certificateIds(item).joined(separator: ","))")
     }
+case "crashes":
+    if let id = arguments.dropFirst().first {
+        let json = await get("/v1/betaFeedbackCrashSubmissions/\(id)/crashLog")
+        let attributes = (json["data"] as? [String: Any])?["attributes"] as? [String: Any] ?? [:]
+        print(attributes["logText"] as? String ?? "App Store Connect sent no log for \(id)")
+    } else {
+        let app = need("ASC_APP_ID")
+        let path = "/v1/apps/\(app)/betaFeedbackCrashSubmissions?limit=25"
+        // Newest first with each build's number where the API takes it; plainly where it does not.
+        var (status, json) = await send("GET", path + "&sort=-createdDate&include=build&fields[builds]=version")
+        if status >= 400 { (status, json) = await send("GET", path) }
+        if status >= 400 { fail("App Store Connect answered \(status): \(problems(json))") }
+        var numbers: [String: String] = [:]
+        for item in json["included"] as? [[String: Any]] ?? [] {
+            numbers[item["id"] as? String ?? ""] = (item["attributes"] as? [String: Any])?["version"] as? String
+        }
+        let items = json["data"] as? [[String: Any]] ?? []
+        if items.isEmpty { print("no crashes shared from TestFlight") }
+        for item in items {
+            let attributes = item["attributes"] as? [String: Any] ?? [:]
+            let build = ((item["relationships"] as? [String: Any])?["build"] as? [String: Any])?["data"] as? [String: Any]
+            let number = numbers[build?["id"] as? String ?? ""] ?? "?"
+            let comment = (attributes["comment"] as? String).map { " \"\($0)\"" } ?? ""
+            print("\(attributes["createdDate"] ?? "?") \(attributes["deviceModel"] ?? "?") \(attributes["devicePlatform"] ?? "")"
+                + " \(attributes["osVersion"] ?? "?") build \(number) id \(item["id"] ?? "?")\(comment)")
+        }
+    }
 default:
     fail("swift asc.swift builds | wait <build> | group <name> | notes <build> [file] | cert <type> <csr> <out> | profile ... "
-        + "| certificates | profiles")
+        + "| certificates | profiles | crashes [id]")
 }
