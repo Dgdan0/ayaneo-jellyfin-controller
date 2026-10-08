@@ -11,8 +11,10 @@ package api
 // absolute font sizes and line heights as rem (a line height left in px would no
 // longer fit the text it is set for: the drop cap of A Game of Thrones, 80px on a
 // 70px line, is clipped at a text size of 150%), one <style> that gives two
-// columns from 30em, and the package's language on each document that names none
-// (without a language the browsers do not hyphenate)
+// columns from 30em, the package's language on each document that names none
+// (without a language the browsers do not hyphenate), and, as `!important` in its
+// own style attribute, the right, centre or end alignment that the book gives a
+// paragraph or list item, which the reader's Justify would otherwise replace (#57)
 // (readingdomain.WriteReadingEPUB, which says what and why). Places are unchanged,
 // so saved locators and the read-along alignment still match.
 //
@@ -78,7 +80,7 @@ func (s *Server) epubCopyOf(ctx context.Context, file readingdomain.MediaFile, o
 			}
 			report := plan.Report
 			slog.Info("built a reading copy", "kind", kind, "book", book, "bytes", plan.Size, "held", plan.Held(),
-				"fontSizes", report.FontSizes, "lineHeights", report.LineHeights, "styled", report.Styled, "languages", report.Languages, "fontsDecoded", report.FontsDecoded, "fontKeysRecovered", report.KeysRecovered, "edited", report.Edited,
+				"fontSizes", report.FontSizes, "lineHeights", report.LineHeights, "styled", report.Styled, "languages", report.Languages, "aligned", report.Aligned, "fontsDecoded", report.FontsDecoded, "fontKeysRecovered", report.KeysRecovered, "edited", report.Edited,
 				"omitted", len(report.Omitted), "left", len(report.Left), "fixedLayout", report.FixedLayout, "mended", report.Mended)
 			return &epubCopy{plan: plan, hash: hex.EncodeToString(plan.SHA256[:])}, nil
 		})

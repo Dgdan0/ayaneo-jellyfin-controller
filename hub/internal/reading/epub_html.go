@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 )
 
-// The three changes made to each content document of a book's reading copy, and
+// The four changes made to each content document of a book's reading copy, and
 // the cases in which a document is left exactly as it was.
 //
 // 1. Font sizes and line heights in `<style>` blocks and `style="…"` attributes become rem
@@ -19,6 +19,9 @@ import (
 //    xml:lang, when it has neither. WebKit and Chrome hyphenate only text whose
 //    language they know, and many books (A Game of Thrones) name none in their
 //    documents, only in the package.
+// 4. A paragraph, list item or body that the book aligns right, centre or end gets
+//    that alignment in its own style attribute, as `!important`, so that the
+//    reader's text alignment does not replace it (epub_align.go).
 //
 // The document is never parsed into a tree and never re-serialised. A scan walks
 // its markup far enough to know where the stylesheets are, where the root begins
@@ -65,6 +68,8 @@ type documentResult struct {
 	styled bool
 	// language: the package's language was put on the root element.
 	language bool
+	// aligned is how many elements were given the alignment their book gives them.
+	aligned int
 	// left is why the document was not touched at all, or empty.
 	left string
 }
@@ -75,10 +80,22 @@ const (
 	leftUnread   = "unreadable"
 )
 
+// documentContext is what the rest of the book tells the restyle of one document.
+type documentContext struct {
+	// language is the package's language, or empty: see validLanguage.
+	language string
+	// name is the document's entry name, from which its linked stylesheets are found.
+	name string
+	// styles is what the book's stylesheets say about alignment. Nil knows none, and
+	// the document's own <style> elements and style attributes still count.
+	styles *bookStyles
+}
+
 // restyleDocument returns doc with its font sizes and line heights as rem, the
-// column style in its head and, when language is not empty, that language on its
-// <html> if it names none. It returns doc itself when there is nothing to change.
-func restyleDocument(doc []byte, language string) ([]byte, documentResult) {
+// column style in its head, when ctx.language is not empty that language on its
+// <html> if it names none, and the alignment its book gives its paragraphs, list
+// items and body. It returns doc itself when there is nothing to change.
+func restyleDocument(doc []byte, ctx documentContext) ([]byte, documentResult) {
 	if !isUTF8Text(doc) || declaresOtherCharset(doc) {
 		return doc, documentResult{left: leftEncoding}
 	}
@@ -89,12 +106,23 @@ func restyleDocument(doc []byte, language string) ([]byte, documentResult) {
 	}
 	var edits []edit
 	result := documentResult{}
+	aligned := planAlignment(doc, found, ctx.name, ctx.language, ctx.styles)
+	result.aligned = aligned.count
 	for _, span := range found.attributes {
-		if rewritten, count := rewriteSizes(doc[span.from:span.to], true); count.total() > 0 {
+		rewritten, count := rewriteSizes(doc[span.from:span.to], true)
+		fix, fixed := aligned.styles[span.from]
+		if fixed {
+			// One edit for the attribute, whichever of the two changes it.
+			rewritten = fix.applyToStyle(rewritten)
+		}
+		if count.total() > 0 || fixed {
 			edits = append(edits, edit{span.from, span.to, rewritten})
 			result.fontSizes += count.fontSizes
 			result.lineHeights += count.lineHeights
 		}
+	}
+	for _, insert := range aligned.inserts {
+		edits = append(edits, edit{insert.at, insert.at, []byte(insert.text)})
 	}
 	for _, span := range found.blocks {
 		if rewritten, count := rewriteSizes(doc[span.from:span.to], false); count.total() > 0 {
@@ -110,8 +138,8 @@ func restyleDocument(doc []byte, language string) ([]byte, documentResult) {
 	// Only the root's start tag, only when it says nothing of language: a document
 	// that has a lang or an xml:lang, even an empty one, is the publisher's own word.
 	// The value was checked (validLanguage), so it holds nothing XML would refuse.
-	if language != "" && found.root.nameEnd > 0 && !found.root.hasLanguage {
-		attributes := ` lang="` + language + `" xml:lang="` + language + `"`
+	if ctx.language != "" && found.root.nameEnd > 0 && !found.root.hasLanguage {
+		attributes := ` lang="` + ctx.language + `" xml:lang="` + ctx.language + `"`
 		edits = append(edits, edit{found.root.nameEnd, found.root.nameEnd, []byte(attributes)})
 		result.language = true
 	}
@@ -212,6 +240,27 @@ type markup struct {
 	headEnd    int    // where the first </head> begins, or -1
 	// root is the document's first element when it is <html>.
 	root rootElement
+	// sources are the stylesheets the document uses, in the order it names them:
+	// its <link> and <style> elements that apply on a screen.
+	sources []styleSource
+	// elements are its paragraphs, list items and body, in document order.
+	elements []markupElement
+}
+
+// markupElement is a paragraph, a list item or a body: an element Readium CSS gives
+// the reader's alignment (epub_align.go).
+type markupElement struct {
+	name    string // p, li or body
+	nameEnd int    // just past "<p", where an attribute can be put
+	classes []string
+	id      string
+	dir     string // lower case
+	// style is the inside of its style="…" when it has one; hasStyle says it does.
+	style    span
+	hasStyle bool
+	// unsafe: it cannot be edited with certainty (a style attribute that is unquoted
+	// or given twice, an entity in its class or id).
+	unsafe bool
 }
 
 // rootElement is where the document's <html> begins and whether it already says
@@ -222,6 +271,9 @@ type rootElement struct {
 	nameEnd int
 	// hasLanguage: it has a lang or an xml:lang attribute, whatever the value.
 	hasLanguage bool
+	// lang is the language it names, lang before xml:lang; dir is its direction in
+	// lower case.
+	lang, dir string
 }
 
 // scanMarkup walks the tags of a document. It knows comments, CDATA sections,
@@ -303,8 +355,12 @@ func scanMarkup(doc []byte) markup {
 					for _, attribute := range tag.attributes {
 						if attribute.name == "lang" || attribute.name == "xml:lang" {
 							found.root.hasLanguage = true
+							if found.root.lang == "" || attribute.name == "lang" {
+								found.root.lang = strings.TrimSpace(attribute.value)
+							}
 						}
 					}
+					found.root.dir = strings.ToLower(strings.TrimSpace(tag.attribute("dir")))
 				}
 			}
 			inForeign := foreign > 0 || tag.name == "svg" || tag.name == "math"
@@ -312,6 +368,16 @@ func scanMarkup(doc []byte) markup {
 				for _, attribute := range tag.attributes {
 					if attribute.name == "style" && attribute.quoted {
 						found.attributes = append(found.attributes, span{i + attribute.from, i + attribute.to})
+					}
+				}
+			}
+			if !inForeign {
+				switch tag.name {
+				case "p", "li", "body":
+					found.elements = append(found.elements, alignedElementOf(tag, i))
+				case "link":
+					if href, ok := stylesheetLink(tag); ok {
+						found.sources = append(found.sources, styleSource{href: href})
 					}
 				}
 			}
@@ -330,6 +396,9 @@ func scanMarkup(doc []byte) markup {
 				}
 				if tag.name == "style" && !inForeign && isCSSType(tag.attribute("type")) {
 					found.blocks = append(found.blocks, span{i, i + stop})
+					if appliesOnScreen(tag.attribute("media")) {
+						found.sources = append(found.sources, styleSource{block: true, from: i, to: i + stop})
+					}
 				}
 				i += stop
 			}
@@ -338,6 +407,62 @@ func scanMarkup(doc []byte) markup {
 		}
 	}
 	return found
+}
+
+// alignedElementOf notes the start tag at doc[at] of a paragraph, a list item or a body.
+func alignedElementOf(tag startTag, at int) markupElement {
+	element := markupElement{name: tag.name, nameEnd: at + 1 + len(tag.name)}
+	styles, classes, ids := 0, 0, 0
+	for _, attribute := range tag.attributes {
+		switch attribute.name {
+		case "style":
+			styles++
+			if attribute.quoted {
+				element.style, element.hasStyle = span{at + attribute.from, at + attribute.to}, true
+			}
+		case "class":
+			classes++
+			element.classes = strings.Fields(attribute.value)
+			if strings.ContainsAny(attribute.value, "&\\") {
+				element.unsafe = true
+			}
+		case "id":
+			ids++
+			element.id = attribute.value
+			if strings.ContainsAny(attribute.value, "&\\") {
+				element.unsafe = true
+			}
+		case "dir":
+			element.dir = strings.ToLower(strings.TrimSpace(attribute.value))
+		}
+	}
+	if styles > 1 || classes > 1 || ids > 1 || (styles == 1 && !element.hasStyle) {
+		element.unsafe = true
+	}
+	return element
+}
+
+// stylesheetLink is the address a <link> gives a stylesheet that applies on a screen.
+func stylesheetLink(tag startTag) (string, bool) {
+	relations := strings.Fields(strings.ToLower(tag.attribute("rel")))
+	if !listContains(relations, "stylesheet") || listContains(relations, "alternate") {
+		return "", false
+	}
+	if !isCSSType(tag.attribute("type")) || !appliesOnScreen(tag.attribute("media")) {
+		return "", false
+	}
+	href := strings.TrimSpace(tag.attribute("href"))
+	if href == "" || strings.Contains(href, "&") {
+		return "", false
+	}
+	return href, true
+}
+
+// appliesOnScreen: a stylesheet with no media, or all or screen, which is what a
+// reader shows. Anything else (print, a Kindle's amzn-kf8, a width) is left out.
+func appliesOnScreen(media string) bool {
+	media = strings.ToLower(strings.TrimSpace(media))
+	return media == "" || media == "all" || media == "screen"
 }
 
 func isCSSType(value string) bool {

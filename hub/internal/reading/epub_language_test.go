@@ -55,7 +55,7 @@ func TestRestyleDocumentPutsTheLanguageOnTheRootElementOnly(t *testing.T) {
 		"empty":                   {``, ``},
 	} {
 		t.Run(name, func(t *testing.T) {
-			out, result := restyleDocument([]byte(test.doc), "en-GB")
+			out, result := restyleDocument([]byte(test.doc), documentContext{language: "en-GB"})
 			// The column style is a separate matter, tested elsewhere.
 			got := strings.Replace(string(out), columnStyleElement, "", 1)
 			if got != test.want {
@@ -68,12 +68,12 @@ func TestRestyleDocumentPutsTheLanguageOnTheRootElementOnly(t *testing.T) {
 				t.Fatalf("a well-formed document is not any more: %s", out)
 			}
 			// A second pass finds the language there.
-			again, second := restyleDocument(out, "en-GB")
+			again, second := restyleDocument(out, documentContext{language: "en-GB"})
 			if second.language || string(again) != string(out) {
 				t.Fatalf("a second pass changed it: %q", again)
 			}
 			// And without a language nothing is added.
-			if plain, none := restyleDocument([]byte(test.doc), ""); none.language || strings.Contains(string(plain), "lang=") != strings.Contains(test.doc, "lang=") {
+			if plain, none := restyleDocument([]byte(test.doc), documentContext{}); none.language || strings.Contains(string(plain), "lang=") != strings.Contains(test.doc, "lang=") {
 				t.Fatalf("a language came from nowhere: %q", plain)
 			}
 		})
@@ -83,7 +83,7 @@ func TestRestyleDocumentPutsTheLanguageOnTheRootElementOnly(t *testing.T) {
 // A document in an encoding the pass will not edit is not given a language either.
 func TestRestyleDocumentLeavesAnEncodingItCannotEditWithoutALanguage(t *testing.T) {
 	doc := `<?xml version="1.0" encoding="ISO-8859-1"?><html><head/><body/></html>`
-	out, result := restyleDocument([]byte(doc), "en")
+	out, result := restyleDocument([]byte(doc), documentContext{language: "en"})
 	if string(out) != doc || result.language || result.left != leftEncoding {
 		t.Fatalf("result = %+v: %q", result, out)
 	}
