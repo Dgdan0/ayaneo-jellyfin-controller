@@ -266,9 +266,13 @@ struct MainView: View {
     @State private var debugPlay = ""
     /// Debug builds: HUB_TITLE=<item id>[|subtitles|removal] opens that library title, and on from it, on the first section's stack (#34).
     @State private var debugTitle = ""
-    /// Debug builds: HUB_DOWNLOAD=<item id> downloads that film or episode at launch, and
-    /// HUB_DOWNLOAD=remove:<item id> takes it off this device (#5).
+    /// Debug builds: HUB_DOWNLOAD=<item id> downloads that film or episode at launch (several, as
+    /// <id>,<id>,<id>, as one batch of a series' episodes), and HUB_DOWNLOAD=remove:<item id> takes it
+    /// off this device (#5).
     @State private var debugDownload = ""
+    /// Debug builds: HUB_OFFLINE_TITLE=<film or series id> opens that title's page on this device, which fills
+    /// in as its downloads arrive.
+    @State private var debugOfflineTitle = ""
 
     private var key: StackKey { StackKey(side: side, section: section) }
     /// Something over the pages and bars: the player or a reader.
@@ -378,11 +382,20 @@ struct MainView: View {
                         NSLog("offline: debug removal of %@", target)
                         return
                     }
-                    let item = try? await hub.fetch(HubEndpoints.libraryItem(itemId), as: LibraryItemResponse.self).item
+                    let ids = itemId.split(separator: ",").map(String.init)
+                    let item = try? await hub.fetch(HubEndpoints.libraryItem(ids[0]), as: LibraryItemResponse.self).item
                     let title = item.map { $0.seriesTitle.isEmpty ? $0.title : $0.seriesTitle } ?? "Download"
-                    let problem = await OfflineLibrary.shared.download(itemIds: [itemId], title: title, seriesId: item?.seriesId ?? "")
+                    let problem = await OfflineLibrary.shared.download(itemIds: ids, title: title, seriesId: item?.seriesId ?? "")
                     NSLog("offline: debug download of %@: %@", itemId, problem ?? "queued")
                 }
+            }
+            .task(id: debugOfflineTitle) {
+                let key = debugOfflineTitle
+                guard !key.isEmpty else { return }
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled, debugOfflineTitle == key else { return }
+                debugOfflineTitle = ""
+                paths[self.key, default: []].append(.offlineTitle(OfflineTitleRoute(key: key, title: "On this device")))
             }
             .task(id: debugTitle) {
                 let itemId = debugTitle
@@ -710,6 +723,7 @@ struct MainView: View {
         if let itemId = environment["HUB_PLAY"], !itemId.isEmpty { debugPlay = itemId }
         if let itemId = environment["HUB_TITLE"], !itemId.isEmpty { debugTitle = itemId }
         if let itemId = environment["HUB_DOWNLOAD"], !itemId.isEmpty { debugDownload = itemId }
+        if let key = environment["HUB_OFFLINE_TITLE"], !key.isEmpty { debugOfflineTitle = key }
     }
     #endif
 }

@@ -182,6 +182,8 @@ struct OfflineOutboxEntry: Codable, Equatable, Sendable {
 /// writes as it sees fit (`updateProgress(…, persist:)`).
 public final class OfflineStore: @unchecked Sendable {
     public let root: URL
+    /// What a downloaded series' own page says of it, kept beside its artwork (`OfflineSeriesSnapshot`).
+    public let series: OfflineSeriesStore
     private let lock = NSLock()
     private var batchRecords: [String: OfflineBatchRecord] = [:]
     private var rowsById: [String: OfflineRow] = [:]
@@ -190,6 +192,7 @@ public final class OfflineStore: @unchecked Sendable {
 
     public init(root: URL) {
         self.root = root
+        series = OfflineSeriesStore(folder: root.appendingPathComponent("series", isDirectory: true))
         let manager = FileManager.default
         for folder in [root, mediaFolder, subtitleFolder, artworkFolder, resumeFolder, rowFolder] {
             try? manager.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -648,6 +651,7 @@ public final class OfflineStore: @unchecked Sendable {
         guard let row = rowsById[id] else { return }
         delete(row)
         removeEmptyBatch(row.batchId)
+        pruneSeries()
     }
 
     public func removeBatch(_ batchId: String) {
@@ -662,6 +666,7 @@ public final class OfflineStore: @unchecked Sendable {
             delete(row)
         }
         removeEmptyBatch(batchId)
+        pruneSeries()
     }
 
     // MARK: Watches made offline
@@ -765,6 +770,11 @@ public final class OfflineStore: @unchecked Sendable {
         }
         try? manager.removeItem(at: rowFile(row.id))
         rowsById[row.id] = nil
+    }
+
+    /// A series with no episode left on the device keeps nothing of itself.
+    private func pruneSeries() {
+        series.prune(keeping: Set(rowsById.values.map(\.manifest.item.seriesId).filter { !$0.isEmpty }))
     }
 
     private func removeEmptyBatch(_ batchId: String) {

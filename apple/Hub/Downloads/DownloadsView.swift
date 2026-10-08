@@ -241,19 +241,21 @@ struct OfflineArtwork: View {
     let file: URL
     let fallback: String
     let width: Int
+    /// Behind the picture while it comes: clear for one that fades into the page.
+    var placeholder: Color = .placeholder
     @State private var image: DecodedArtwork?
 
     var body: some View {
         Group {
             if let image {
-                Color.placeholder.overlay {
+                placeholder.overlay {
                     Image(decorative: image.image, scale: 1).resizable().scaledToFill()
                 }
                 .clipped()
             } else if FileManager.default.fileExists(atPath: file.path) {
-                Color.placeholder
+                placeholder
             } else {
-                ArtworkView(path: fallback, width: width)
+                ArtworkView(path: fallback, width: width, placeholder: placeholder)
             }
         }
         .task(id: file) {

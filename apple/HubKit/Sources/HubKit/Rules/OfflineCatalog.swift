@@ -39,6 +39,12 @@ public struct OfflineCatalogPlayTarget: Equatable, Sendable {
     public let row: OfflineRow
     public let kind: Kind
     public let positionMillis: Int64
+
+    public init(row: OfflineRow, kind: Kind, positionMillis: Int64) {
+        self.row = row
+        self.kind = kind
+        self.positionMillis = positionMillis
+    }
 }
 
 /// A watch, kept on this device or reported by the server, in one shape.
@@ -139,6 +145,15 @@ public enum OfflineCatalog {
         if let resumed { return OfflineCatalogPlayTarget(row: resumed.row, kind: .resume, positionMillis: resumed.position) }
         guard let next = ordered.first(where: { !(progress[$0.itemId]?.isComplete ?? false) }) else { return nil }
         return OfflineCatalogPlayTarget(row: next, kind: progress.isEmpty ? .start : .next, positionMillis: 0)
+    }
+
+    /// A downloaded film's place, as a series' is: where it was left here when
+    /// that is part way, else the start.
+    public static func filmTarget(_ row: OfflineRow, progress: OfflineCatalogProgress?) -> OfflineCatalogPlayTarget {
+        guard let progress, !progress.isComplete, progress.resumePosition > 0 else {
+            return OfflineCatalogPlayTarget(row: row, kind: .start, positionMillis: 0)
+        }
+        return OfflineCatalogPlayTarget(row: row, kind: .resume, positionMillis: progress.resumePosition)
     }
 
     private static func episodeOrder(_ left: OfflineRow, _ right: OfflineRow) -> Bool {

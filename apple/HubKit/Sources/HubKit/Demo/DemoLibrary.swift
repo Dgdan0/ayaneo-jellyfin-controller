@@ -184,6 +184,8 @@ enum DemoLibrary {
         return ["media": media,
                 "subtitle": "\(title.year)", "availability": "available", "jellyfinItemId": title.id,
                 "played": now.played, "favorite": now.favorite,
+                // Drawn by `DemoArtwork`, so a title's page has a backdrop and a download keeps its pictures.
+                "poster": "/v1/img/jf/\(title.id)/Primary", "backdrop": "/v1/img/jf/\(title.id)/Backdrop",
                 "unplayedCount": title.type == "series" && !now.played ? 3 : 0, "actions": ["play", "detail"]]
     }
 
@@ -214,7 +216,9 @@ enum DemoLibrary {
         ["id": "\(title.id)-e\(number)", "type": "episode", "title": episodeNames[number - 1],
          "subtitle": "S1E\(number) · \(episodeNames[number - 1])", "seriesTitle": title.title, "seriesId": title.id,
          "seasonId": title.id + "-s1", "year": title.year, "indexNumber": number, "seasonNumber": 1,
-         "overview": "Episode \(number) of \(title.title) in the demo hub.", "runtimeSeconds": title.minutes * 60]
+         "overview": "Episode \(number) of \(title.title) in the demo hub.", "runtimeSeconds": title.minutes * 60,
+         "thumb": "/v1/img/jf/\(title.id)-e\(number)/Primary", "poster": "/v1/img/jf/\(title.id)/Primary",
+         "backdrop": "/v1/img/jf/\(title.id)/Backdrop"]
     }
 
     private static func episode(_ id: String) -> DemoTransport.Answer {
