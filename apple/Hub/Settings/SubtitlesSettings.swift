@@ -63,7 +63,7 @@ struct SubtitlesSettings: View {
             .padding(.vertical, 14)
             .glassPanel(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .accessibilityIdentifier("subtitle-lift")
-            .padFocusableBehind("subtitle-lift", ring: .rounded(20)) { change { $0.liftWithControls.toggle() } }
+            .padFocusable("subtitle-lift", ring: .rounded(20)) { change { $0.liftWithControls.toggle() } }
         }
     }
 

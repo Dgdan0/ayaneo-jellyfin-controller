@@ -479,7 +479,7 @@ struct FolderView: View {
             }
             .menuStyle(.button)
             .buttonStyle(GlassControlStyle())
-            .padFocusableBehind("sort-field") { choosingSort = true }
+            .padFocusable("sort-field") { choosingSort = true }
             Button {
                 setSort(SortPreference(field: sort.field, ascending: !sort.ascending))
             } label: {

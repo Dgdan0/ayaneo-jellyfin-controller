@@ -44,7 +44,7 @@ struct PlaybackSettingsPane: View {
                 }
                 .tint(accent.tint)
                 .accessibilityIdentifier("auto-skip-intro")
-                .padFocusableBehind("auto-skip-intro", ring: .rounded(12)) {
+                .padFocusable("auto-skip-intro", ring: .rounded(12)) {
                     autoSkip.toggle()
                     PlaybackSettings.autoSkipIntro = autoSkip
                 }

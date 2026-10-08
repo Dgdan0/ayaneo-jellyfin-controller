@@ -198,7 +198,7 @@ struct RequestSheet: View {
         .buttonStyle(.plain)
         .accessibilityValue(value)
         // A menu cannot be opened for a controller: Ⓐ asks its choices as a dialog.
-        .padFocusableBehind(pad, ring: .inside(16), press: ask)
+        .padFocusable(pad, ring: .inside(16), press: ask)
     }
 
     private func toggleRow(label: String, detail: String, on: Bool, pad: String,

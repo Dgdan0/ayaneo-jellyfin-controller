@@ -72,19 +72,6 @@ extension View {
                                   scrollIds: scrollIds))
     }
 
-    /// `padFocusable` for a control that must not be redrawn as the input's
-    /// mode changes under a finger (a `Menu`, a `Toggle`): the focus registers
-    /// through a clear view behind it, the same size, and the control is left alone.
-    func padFocusableBehind(_ id: String?, ring: PadRing = .capsule, scrolls: Bool = true,
-                            hold: (() -> Void)? = nil, press: (() -> Void)?) -> some View {
-        background {
-            Color.clear
-                .padFocusable(id, ring: ring, scrolls: scrolls, hold: hold, press: press)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
-    }
-
     /// Runs `action` as a controller's or keyboard's focus lands here: inside
     /// (before) the item's `padFocusable`. Notifications reads a row so.
     func onPadFocus(_ action: @escaping () -> Void) -> some View {

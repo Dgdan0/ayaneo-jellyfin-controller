@@ -115,7 +115,7 @@ struct PlayerSheet: View {
         // the screen; the one at the side runs from top to bottom.
         .frame(height: bottom ? layout.size.height * 0.84 : layout.size.height, alignment: .bottom)
         // A controller moves down its rows and Ⓑ goes back a page, then closes it (#46).
-        .environment(\.padSheetRows, false)
+        .environment(\.padSheetRows, true)
         .padPage("player-\(String(describing: panel))", modal: true) { back() }
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
@@ -616,8 +616,7 @@ struct SheetRow<Leading: View>: View {
     /// In a sheet whose rows a controller moves through by their words (the player's).
     @Environment(\.padSheetRows) private var padRows
 
-    /// Its id by its words, where the sheet asks for that and none is given:
-    /// registered behind the row, which VoiceOver and the tests then read as before.
+    /// Its id by its words, where the sheet asks for that and none is given.
     private var wordsId: String? { pad == nil && padRows ? "row:\(title)·\(detail)" : nil }
 
     var body: some View {
@@ -658,8 +657,7 @@ struct SheetRow<Leading: View>: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SheetRowStyle())
-        .padFocusable(pad, ring: .none, press: action)
-        .padFocusableBehind(wordsId, ring: .inside(12), press: action)
+        .padFocusable(pad ?? wordsId, ring: .none, press: action)
         .sheetDivider()
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(checked ? .isSelected : [])

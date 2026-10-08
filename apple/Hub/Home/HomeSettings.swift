@@ -63,7 +63,7 @@ struct HomeSettingsPane: View {
                 .tint(accent.tint)
                 .accessibilityLabel(row.title)
                 .accessibilityIdentifier("home-row-\(row.id)")
-                .padFocusableBehind("home-row-\(row.id)", ring: .capsule) { layout.setShown(row.id, !row.shown) }
+                .padFocusable("home-row-\(row.id)", ring: .capsule) { layout.setShown(row.id, !row.shown) }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

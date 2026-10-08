@@ -235,7 +235,7 @@ struct TitleView: View {
         .accessibilityLabel("More actions")
         .accessibilityIdentifier("title-more")
         // A menu cannot be opened for a controller: Ⓐ asks its choices as a dialog.
-        .padFocusableBehind("more", ring: .circle) { moreOpen = true }
+        .padFocusable("more", ring: .circle) { moreOpen = true }
     }
 
     /// The "…"'s choices, in its menu and in the dialog a controller opens.
