@@ -63,10 +63,46 @@ struct ComfortLayer: View {
     }
 }
 
+/// Brightness on a line, fixed at the foot of a book's Appearance (#47) as
+/// Kindle's is: a small sun, the slider, a large sun and how bright. It is
+/// Comfort's one brightness, for every reader.
+struct BrightnessBar: View {
+    /// The line a controller is on, ringed.
+    var ringed = false
+    @State private var comfort = ReaderComfort.shared
+
+    var body: some View {
+        let value = comfort.value
+        let label = ScreenComfort.brightnessLabel(value.brightness)
+        HStack(spacing: 10) {
+            Image(systemName: "sun.min").font(.system(size: 15)).foregroundStyle(.white.opacity(0.7))
+            Slider(value: Binding(get: { value.brightness }, set: { next in
+                var changed = value
+                changed.brightness = (next * 20).rounded() / 20
+                comfort.set(changed)
+            }), in: ScreenComfort.minBrightness...1)
+                .tint(.white)
+                .accessibilityLabel("Brightness")
+                .accessibilityValue(label)
+                .accessibilityIdentifier("comfort-brightness")
+            Image(systemName: "sun.max").font(.system(size: 19)).foregroundStyle(.white.opacity(0.7))
+            Text(label)
+                .font(HubType.body(13, weight: .semibold, relativeTo: .footnote))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.62))
+                .frame(width: 40, alignment: .trailing)
+                .accessibilityHidden(true)
+        }
+        .padding(.top, 10)
+        .readerRing(ringed)
+    }
+}
+
 /// The Comfort controls, the same in every reader: brightness and warmth,
-/// and for a book a black page and the screen kept on while narrating.
+/// and for a book the screen kept on while narrating.
 struct ComfortControls: View {
-    /// A book's page: the black page and the screen kept awake are offered.
+    /// A book's page: the screen kept awake is offered, and the brightness is
+    /// the foot of the sheet's own (`BrightnessBar`).
     let book: Bool
     /// Its own heading, where it follows other options (the comic reader's);
     /// a tab or a sheet called Comfort already says so.
@@ -79,14 +115,16 @@ struct ComfortControls: View {
         let value = comfort.value
         if heading { SheetLabel(text: "Comfort") }
         SheetGroup {
-            slider("Brightness", value.brightness, ScreenComfort.minBrightness...1, ScreenComfort.brightnessLabel(value.brightness),
-                   id: "comfort-brightness") { next in
-                var changed = value
-                changed.brightness = next
-                comfort.set(changed)
+            if !book {
+                slider("Brightness", value.brightness, ScreenComfort.minBrightness...1, ScreenComfort.brightnessLabel(value.brightness),
+                       id: "comfort-brightness") { next in
+                    var changed = value
+                    changed.brightness = next
+                    comfort.set(changed)
+                }
+                .readerRing(ring == .brightness)
+                .id(Self.id(.brightness))
             }
-            .readerRing(ring == .brightness)
-            .id(Self.id(.brightness))
             slider("Warmth", value.warmth, 0...1, ScreenComfort.warmthLabel(value.warmth), id: "comfort-warmth") { next in
                 var changed = value
                 changed.warmth = next
@@ -98,12 +136,6 @@ struct ComfortControls: View {
         }
         if book {
             SheetGroup {
-                SheetRow(title: "Black page", detail: ScreenComfort.blackPageDetail(value.blackPage), checked: value.blackPage) {
-                    comfort.set(ComfortLine.blackPage.press(value))
-                }
-                .accessibilityIdentifier("comfort-black")
-                .readerRing(ring == .blackPage)
-                .id(Self.id(.blackPage))
                 SheetRow(title: "Keep the screen on while narrating", value: value.awakeWhileNarrating ? "On" : "Off") {
                     comfort.set(ComfortLine.awake.press(value))
                 }

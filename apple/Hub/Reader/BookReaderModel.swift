@@ -135,6 +135,10 @@ final class BookReaderModel {
     /// The passage a search opened is marked until the reading moves on.
     @ObservationIgnored private var markedFound = false
     var appearanceTab = AppearanceTab.font
+    /// Spacing, Font's page of line spacing and margins, is open (#47).
+    var appearanceSpacing = false
+    /// The page of Appearance the sheet shows, and a controller walks.
+    var appearancePage: BookAppearancePage { appearanceSpacing ? .spacing : appearanceTab.page }
     /// Where a controller's ring is in Appearance, and which part of Keys it is on (#25).
     var appearanceWalk = SheetWalk()
     var keysPart = 0
@@ -180,9 +184,7 @@ final class BookReaderModel {
     /// The device is in dark mode: system colours follow it.
     var systemDark = false {
         didSet {
-            if oldValue != systemDark && preferences.theme == .system && !ReaderComfort.shared.value.blackPage {
-                navigator.submit(rendering)
-            }
+            if oldValue != systemDark && preferences.theme == .system { navigator.submit(rendering) }
         }
     }
 
@@ -248,7 +250,8 @@ final class BookReaderModel {
         bookmarkStore = EpubBookmarks(root: support, scope: EpubBookmarks.scope(address: app.address, userId: app.userId),
                                       workId: work.id, sourceItemId: sourceItemId)
         self.defaults = defaults
-        let saved = EpubAppearanceStore.load(defaults)
+        let saved = EpubAppearanceStore.load(defaults, startingScale: BookNavigator.isTablet
+                                             ? EpubReaderPreferences.tabletScale : EpubReaderPreferences.phoneScale)
         preferences = saved
         pageInfo = PageInfoStore.load(defaults)
         preferenceState = EpubPreferenceState(saved)
@@ -292,12 +295,31 @@ final class BookReaderModel {
                        narration: readAlong?.narration != nil, loading: phase != .reading)
     }
 
-    /// The page as Appearance chose it, black when Comfort asks (#37).
-    var rendering: EpubRendering { EpubRendering(preferences, systemDark: systemDark).comforted(ReaderComfort.shared.value) }
+    /// The page as Appearance chose it. (Comfort dims and warms it over the top, #37.)
+    var rendering: EpubRendering { EpubRendering(preferences, systemDark: systemDark) }
 
-    /// Comfort's black page went on or off: the page is drawn again.
-    func comfortChanged() {
-        navigator.submit(rendering)
+    /// The text's edge from the screen's, in points: Kindle's outer margin (#47).
+    func outerMargin(width: Double) -> Double {
+        EpubGeometry.outerMargin(pageMargins: preferences.pageMargins, tablet: BookNavigator.isTablet, width: width)
+    }
+
+    /// How far the page's view is set in from each side: the margin less the gutter Readium keeps.
+    func pageInset(width: Double) -> Double {
+        EpubGeometry.inset(pageMargins: preferences.pageMargins, tablet: BookNavigator.isTablet, width: width,
+                           gutter: navigator.gutter)
+    }
+
+    /// A tap or a swipe in the margin, outside what Readium hears: it turns the page, or closes what is open.
+    func insetTapped(forward: Bool) {
+        if footnote != nil {
+            footnote = nil
+        } else if sheet != nil {
+            sheet = nil
+        } else if controlsVisible {
+            setControls(false)
+        } else {
+            read(forward ? 1 : -1)
+        }
     }
 
     // MARK: Opening
@@ -594,6 +616,9 @@ final class BookReaderModel {
         if key == .escape {
             if footnote != nil {
                 footnote = nil
+            } else if sheet == .appearance && appearanceSpacing {
+                // Spacing is a page of Font's: Escape goes back to Font first (#47).
+                leaveSpacing()
             } else if sheet != nil {
                 sheet = nil
             } else {
@@ -871,6 +896,7 @@ final class BookReaderModel {
             refreshBookmarks()
             sheetCursor = 0
         case .search: sheetCursor = 0
+        case .appearance: appearanceSpacing = false
         default: break
         }
         sheet = next
@@ -882,7 +908,8 @@ final class BookReaderModel {
         guard let open = sheet else { return }
         switch action {
         case .back:
-            sheet = nil
+            // Spacing is a page of Font's: Ⓑ goes back to Font before it leaves Appearance (#47).
+            if open == .appearance && appearanceSpacing { leaveSpacing() } else { sheet = nil }
         case .step(let direction) where open == .contents || open == .bookmarks:
             let count = open == .contents ? contents.count : bookmarks.count
             switch direction {
@@ -921,9 +948,12 @@ final class BookReaderModel {
             // L1 and R1: the tab before or after.
             let tabs = AppearanceTab.allCases
             let index = (tabs.firstIndex(of: appearanceTab) ?? 0) + delta
-            if tabs.indices.contains(index) { appearanceTab = tabs[index] }
+            if tabs.indices.contains(index) {
+                appearanceSpacing = false
+                appearanceTab = tabs[index]
+            }
         case .activate where open == .appearance:
-            let lines = BookAppearanceLine.lines(appearanceTab.page)
+            let lines = BookAppearanceLine.lines(appearancePage)
             let walk = appearanceWalk.clamped(to: lines.map(\.shape))
             pressAppearance(lines[walk.line], column: walk.column)
         default:
@@ -935,7 +965,7 @@ final class BookReaderModel {
     /// and right across a line's choices (on the tabs, to the next tab), or
     /// the size and Comfort's values a step.
     private func appearanceStep(_ direction: PadDirection) {
-        let lines = BookAppearanceLine.lines(appearanceTab.page)
+        let lines = BookAppearanceLine.lines(appearancePage)
         switch SheetWalk.step(appearanceWalk, direction, lines: lines.map(\.shape)) {
         case .moved(let walk):
             appearanceWalk = walk
@@ -951,7 +981,15 @@ final class BookReaderModel {
     func pressAppearance(_ line: BookAppearanceLine, column: Int = 0) {
         switch line {
         case .tabs:
-            if AppearanceTab.allCases.indices.contains(column) { appearanceTab = AppearanceTab.allCases[column] }
+            if AppearanceTab.allCases.indices.contains(column) {
+                appearanceSpacing = false
+                appearanceTab = AppearanceTab.allCases[column]
+            }
+        case .spacingPage:
+            appearanceSpacing = true
+            appearanceWalk = SheetWalk()
+        case .back:
+            leaveSpacing()
         case .comfort(let comfort):
             ReaderComfort.shared.set(comfort.press(ReaderComfort.shared.value))
         default:
@@ -961,6 +999,21 @@ final class BookReaderModel {
                 setPageInfo(next)
             }
         }
+    }
+
+    /// Back from Spacing to Font, the ring on the row that opened it.
+    func leaveSpacing() {
+        appearanceSpacing = false
+        let font = BookAppearanceLine.lines(.font)
+        appearanceWalk = SheetWalk(line: font.firstIndex(of: .spacingPage) ?? 0)
+    }
+
+    /// The line and choice a controller's ring is on in Appearance, when a controller is in use (#25).
+    var appearanceRing: (line: BookAppearanceLine, column: Int)? {
+        guard controllerActive else { return nil }
+        let lines = BookAppearanceLine.lines(appearancePage)
+        let walk = appearanceWalk.clamped(to: lines.map(\.shape))
+        return (lines[walk.line], walk.column)
     }
 
     /// A value of Appearance a step down or up: the size, or Comfort's brightness and warmth.
