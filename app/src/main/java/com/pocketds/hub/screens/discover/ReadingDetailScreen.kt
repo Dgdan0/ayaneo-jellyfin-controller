@@ -87,7 +87,7 @@ class ReadingDetailScreen(
         val loader = Artwork.loader(api, context)
         header = DetailHeaderView(context, colors, ringVisible).apply {
             book = true
-            squareCover = item.contentType == ReadingType.AUDIOBOOK
+            squareCover = com.pocketds.hub.screens.library.ReadingBookFacts.coverShape(item.contentType, listOf(item.contentType)) == com.pocketds.hub.screens.library.ReadingBookFacts.CoverShape.SQUARE
             eyebrowView.text = eyebrow()
             titleView.text=item.title
             metadataView.text=buildList {

@@ -511,6 +511,8 @@ class DetailArtworkCardView(context: Context, private val colors: PocketColors, 
     /** The ring on the cover, which takes the card's focused state. */
     private val coverRing = Styler.focusOutline(context, colors, ArtworkFrame.GLASS_CORNER_DP, 3f)
     private var coverMarks: android.graphics.drawable.Drawable? = null
+    /** The small round mark of a book that is an ebook and an audiobook too (#54). */
+    private var formatMark: android.graphics.drawable.Drawable? = null
     val image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
     val titleView = label(context, 12f, colors.primaryText).apply { textWeight(700); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
     val subtitleView = label(context, 11f, SettingsCard.GLASS_QUIET).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
@@ -543,15 +545,34 @@ class DetailArtworkCardView(context: Context, private val colors: PocketColors, 
             fraction > 0 -> CoverMarks(colors, fraction, false, resources.displayMetrics.density)
             else -> null
         }
-        // The marks under the ring, in the one foreground the cover has.
-        val ring = coverRing.takeIf { portraitRing == null }
-        image.foreground = if (ring == null) coverMarks
-            else coverMarks?.let { android.graphics.drawable.LayerDrawable(arrayOf(it, ring)) } ?: ring
+        updateForeground()
     }
 
-    fun artworkHeight(heightDp: Int) {
-        image.layoutParams = image.layoutParams.apply { height = dp(heightDp) }
-        minimumHeight = dp(DetailLayout.posterCardHeight(heightDp, resources.configuration.fontScale))
+    /** The format mark at the cover's top left (#54): a book that is both an ebook and an audiobook; none clears it. */
+    fun formatMark(mark: com.pocketds.hub.screens.library.ReadingBookFacts.CoverMark) {
+        formatMark = FormatMark.drawable(context, mark)
+        updateForeground()
+    }
+
+    /** The marks under the ring, in the one foreground the cover has. */
+    private fun updateForeground() {
+        val ring = coverRing.takeIf { portraitRing == null }
+        val layers = listOfNotNull(coverMarks, formatMark, ring)
+        image.foreground = when (layers.size) {
+            0 -> null
+            1 -> layers[0]
+            else -> android.graphics.drawable.LayerDrawable(layers.toTypedArray())
+        }
+    }
+
+    /**
+     * The cover [heightDp] tall. In a row of covers of different shapes, [slotDp] is the tall one's height: a shorter
+     * (square) cover sits at its foot so the row's covers line up along their bottom edge and the captions stay on one
+     * line (#54).
+     */
+    fun artworkHeight(heightDp: Int, slotDp: Int = heightDp) {
+        image.layoutParams = (image.layoutParams as LinearLayout.LayoutParams).apply { height = dp(heightDp); topMargin = dp(slotDp - heightDp) }
+        minimumHeight = dp(DetailLayout.posterCardHeight(slotDp, resources.configuration.fontScale))
     }
     /**
      * A person: a round portrait with the name centred under it. The ring goes

@@ -36,7 +36,7 @@ class MissingReadingItemScreen(private val api:HubApi,private val item:ReadingSe
         val root=FrameLayout(context).apply {setBackgroundColor(colors.background)}
         header=DetailHeaderView(context,colors,ring).apply {
             book = true
-            squareCover = item.kind == ReadingType.AUDIOBOOK
+            squareCover = ReadingBookFacts.coverShape(item) == ReadingBookFacts.CoverShape.SQUARE
             eyebrowView.text = listOfNotNull(item.number.takeIf(String::isNotBlank)?.let { "Book $it" }, "Not in your library").joinToString(" · ")
             poster.alpha = .42f
             titleView.text=item.title;subtitleView.text=item.authors.joinToString(", ");subtitleView.visibility=View.VISIBLE

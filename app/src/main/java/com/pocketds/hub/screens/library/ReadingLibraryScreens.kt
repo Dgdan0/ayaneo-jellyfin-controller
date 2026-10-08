@@ -870,7 +870,7 @@ class ReadingWorkScreen(
         book = true
         // A book of its own takes the owner's layout "1" (#39): formats, stars under the cover, genres on a line.
         reading = ReadingBookPage.isBook(work)
-        squareCover = work.kind == com.pocketds.hub.model.ReadingType.AUDIOBOOK
+        squareCover = ReadingBookFacts.coverShape(work) == ReadingBookFacts.CoverShape.SQUARE
         eyebrowView.text = ReadingBookFacts.eyebrow(work, ReadingLibraryNames.of(work.libraryId).orEmpty())
         overview.onChanged = { host?.refreshHints() }
         titleView.text = work.title
