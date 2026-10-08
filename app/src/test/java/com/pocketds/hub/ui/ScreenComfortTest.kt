@@ -34,7 +34,6 @@ class ScreenComfortTest {
         assertTrue(ScreenComfort().drawsNothing)
         assertFalse(ScreenComfort(brightness = .9f).drawsNothing)
         assertFalse(ScreenComfort(warmth = .1f).drawsNothing)
-        assertTrue(ScreenComfort(blackPage = true).drawsNothing)
     }
 
     @Test fun `the screen stays on only while narration plays and only if asked`() {

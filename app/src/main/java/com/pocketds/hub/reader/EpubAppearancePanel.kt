@@ -65,8 +65,9 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
         when (section) {
             "info" -> {
                 // Kindle's corners (#42): each can be turned off, and a tap on the bottom left moves to the next.
-                heading("Top right")
-                choice("Clock", if (pageInfo.clock) "On" else "Off", pageInfo.clock) { updatePageInfo(pageInfo.copy(clock = !pageInfo.clock)) }.tag = "info:clock"
+                heading("Top")
+                choice("Book title", if (pageInfo.title) "On · in the middle" else "Off", pageInfo.title) { updatePageInfo(pageInfo.copy(title = !pageInfo.title)) }.tag = "info:title"
+                choice("Clock", if (pageInfo.clock) "On · at the right" else "Off", pageInfo.clock) { updatePageInfo(pageInfo.copy(clock = !pageInfo.clock)) }.tag = "info:clock"
                 heading("Bottom left")
                 PageInfoCorner.entries.forEach { corner ->
                     choice(corner.choice, selected = pageInfo.corner == corner) { updatePageInfo(pageInfo.copy(corner = corner)) }.tag = "info:${corner.name}"
@@ -77,15 +78,15 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
             }
             "themes" -> {
                 heading("Page colour")
-                val tiles = listOf(EpubTheme.LIGHT to "Paper", EpubTheme.SEPIA to "Sepia", EpubTheme.DARK to "Night", EpubTheme.BLUE to "Blue").map { (theme, label) ->
-                    val palette = EpubPagePalette.of(theme)!!
-                    sample(label, "theme:$theme", value.theme == theme, TextView(context).apply {
+                val tiles = EpubPagePalette.CHOICES.map { theme ->
+                    val palette = EpubPagePalette.of(theme)
+                    sample(EpubPagePalette.label(theme), "theme:$theme", value.theme == theme, TextView(context).apply {
                         text = "Aa  The story\ncontinues."; textSize = 15f; typeface = Typeface.SERIF; gravity = Gravity.CENTER
                         setTextColor(palette.second); setBackgroundColor(palette.first); importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
                     }) { update(value.copy(theme = theme)) }
                 }
-                row(tiles[0], tiles[1]); row(tiles[2], tiles[3])
-                choice("Use system colours", selected = value.theme == EpubTheme.SYSTEM) { update(value.copy(theme = EpubTheme.SYSTEM)) }.tag = "system"
+                row(tiles[0], tiles[1], tiles[2]); row(tiles[3], tiles[4], View(context))
+                choice("Use system colours", "Paper by day, Dark at night", selected = value.theme == EpubTheme.SYSTEM) { update(value.copy(theme = EpubTheme.SYSTEM)) }.tag = "system"
             }
             "font" -> {
                 heading("Typeface")
@@ -119,11 +120,11 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
                     sample(label, "column:$column", value.columns == column, illustration(if (column == EpubColumns.TWO) 2 else 1)) { update(EpubLayoutPolicy.selectColumns(value, column)) }
                 }.toTypedArray())
                 heading("Margins")
-                row(*listOf(.5f to "Narrow", 1f to "Balanced", 1.7f to "Wide").map { (amount, label) ->
-                    sample(label, "margin:$amount", kotlin.math.abs(value.pageMargins - amount) < .01f, illustration(margin = amount * .15f)) { update(value.copy(pageMargins = amount)) }
+                row(*PageGeometry.Margin.entries.map { margin ->
+                    sample(margin.label, "margin:${margin.stored}", PageGeometry.preset(value.pageMargins) == margin, illustration(margin = margin.outerDp / 240f)) { update(value.copy(pageMargins = margin.stored)) }
                 }.toTypedArray())
                 heading("Line spacing")
-                row(*listOf(1.1f to "Tight", 1.5f to "Relaxed", 1.9f to "Open").mapIndexed { index, (amount, label) ->
+                row(*EpubLayoutPolicy.SPACING.mapIndexed { index, (amount, label) ->
                     sample(label, "spacing:$amount", kotlin.math.abs(value.lineHeight - amount) < .01f, illustration(spacing = 5 + index * 3)) { update(value.copy(lineHeight = amount, publisherStyles = false)) }
                 }.toTypedArray())
                 choice("Automatic columns", selected = value.columns == EpubColumns.AUTO) { update(EpubLayoutPolicy.selectColumns(value, EpubColumns.AUTO)) }.tag = "auto"
@@ -141,16 +142,6 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
             }
         }
         focusBody(getFocusables(FOCUS_FORWARD).firstOrNull { focusKey != null && it.tag == focusKey })
-    }
-}
-
-object EpubPagePalette {
-    fun of(theme: EpubTheme): Pair<Int, Int>? = when (theme) {
-        EpubTheme.LIGHT -> 0xfffbfaf6.toInt() to 0xff282b29.toInt()
-        EpubTheme.SEPIA -> 0xffefe2c6.toInt() to 0xff3e3526.toInt()
-        EpubTheme.DARK -> 0xff202020.toInt() to 0xffdfdfd8.toInt()
-        EpubTheme.BLUE -> 0xff1d303d.toInt() to 0xffdce6e8.toInt()
-        EpubTheme.SYSTEM -> null
     }
 }
 

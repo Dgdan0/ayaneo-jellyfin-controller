@@ -9,10 +9,10 @@ import android.widget.TextView
 import java.util.Calendar
 
 /**
- * Kindle's corners over a book's page (#42): the time at the top right, what
- * [PageInfoChoice.corner] says at the bottom left, how far through the book at
- * the bottom right. Quiet text in the page's colour ([PageInfo.ink]) in strips
- * the page keeps clear of the text; the words are [PageInfo]'s.
+ * Kindle's corners over a book's page (#42, #47): the book's title at the top in the middle, the time at
+ * the top right, what [PageInfoChoice.corner] says at the bottom left, how far through the book at the
+ * bottom right. About 12 sp in the page's own ink ([PageInfo.ink]), regular weight, lined up with the
+ * edges of the text, in strips the page keeps clear of the text; the words are [PageInfo]'s.
  *
  * It lies over the page and moves with it, so the reader's preview shows the
  * corners live while the appearance sheet changes them. Taps pass through to
@@ -24,15 +24,21 @@ class PageInfoView(context: Context) : FrameLayout(context) {
     /** A tap on the bottom left. */
     var onCycle: () -> Unit = {}
 
-    private val clock = corner(Gravity.TOP or Gravity.END)
-    private val left = corner(Gravity.BOTTOM or Gravity.START).apply {
+    private val clock = corner(Gravity.TOP or Gravity.END, Gravity.END)
+    private val title = corner(Gravity.TOP or Gravity.CENTER_HORIZONTAL, Gravity.CENTER_HORIZONTAL).apply {
+        textSize = PageInfo.TITLE_SP
+        // Small capitals, as Kindle draws the title: capitals a little apart, in a smaller size than the corners.
+        letterSpacing = 0.08f
+    }
+    private val left = corner(Gravity.BOTTOM or Gravity.START, Gravity.START).apply {
         isClickable = true
         setOnClickListener { onCycle() }
     }
-    private val right = corner(Gravity.BOTTOM or Gravity.END)
+    private val right = corner(Gravity.BOTTOM or Gravity.END, Gravity.END)
 
     private var choice = PageInfoChoice()
     private var place = PagePlace()
+    private var bookTitle = ""
 
     private val tick = object : Runnable {
         override fun run() {
@@ -42,25 +48,31 @@ class PageInfoView(context: Context) : FrameLayout(context) {
     }
     private var ticking = false
 
-    private fun corner(edge: Int) = TextView(context).apply {
-        textSize = 11f
+    /** A corner's text: in the strip at [edge] of the page, its words [align]ed within its own width. */
+    private fun corner(edge: Int, align: Int) = TextView(context).apply {
+        textSize = PageInfo.TEXT_SP
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
         includeFontPadding = false
-        gravity = Gravity.CENTER_VERTICAL or (if (edge and Gravity.END == Gravity.END) Gravity.END else Gravity.START)
+        gravity = Gravity.CENTER_VERTICAL or align
         visibility = GONE
         // Not a focus stop: the pad reaches the corners by a key, never by focus.
         isFocusable = false
         this@PageInfoView.addView(this, LayoutParams(LayoutParams.WRAP_CONTENT, 0, edge))
     }
 
-    /** What to show: the choice, where the reader is, the ink, the corners' inset from the sides and the strip's height, in pixels. */
-    fun show(choice: PageInfoChoice, place: PagePlace, ink: Int, sideInsetPx: Int, stripPx: Int) {
+    /**
+     * What to show: the choice, where the reader is, the book's [bookTitle], the ink, the corners' inset from the sides (the text's
+     * outer edge) and the strip's height, in pixels.
+     */
+    fun show(choice: PageInfoChoice, place: PagePlace, bookTitle: String, ink: Int, sideInsetPx: Int, stripPx: Int) {
         this.choice = choice
         this.place = place
-        listOf(clock, left, right).forEach { view ->
+        this.bookTitle = bookTitle
+        listOf(clock, title, left, right).forEach { view ->
             view.setTextColor(ink)
-            view.setPadding(sideInsetPx, 0, sideInsetPx, 0)
+            // The title sits between the others: padding at its sides would only shrink it.
+            if (view === title) view.setPadding(0, 0, 0, 0) else view.setPadding(sideInsetPx, 0, sideInsetPx, 0)
             val params = view.layoutParams as LayoutParams
             if (params.height != stripPx) {
                 params.height = stripPx
@@ -75,6 +87,7 @@ class PageInfoView(context: Context) : FrameLayout(context) {
             PageInfo.clock(it.get(Calendar.HOUR_OF_DAY), it.get(Calendar.MINUTE), DateFormat.is24HourFormat(context))
         } else ""
         set(clock, time, "Time")
+        set(title, if (choice.title) PageInfo.titleText(bookTitle) else "", "Book title")
         // The bottom left keeps its place, empty, while there is a strip for it: a tap there still asks for the next.
         set(left, PageInfo.bottomLeft(choice.corner, place), choice.corner.choice, hint = "tap for the next choice", keepPlace = choice.bottomStrip)
         set(right, PageInfo.bottomRight(choice, place), "Through the book")
@@ -89,11 +102,18 @@ class PageInfoView(context: Context) : FrameLayout(context) {
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         // The tap target is a good part of the strip, not only the words in it.
-        val params = left.layoutParams as LayoutParams
+        val leftParams = left.layoutParams as LayoutParams
         val width = (w * LEFT_SHARE).toInt()
-        if (params.width != width) {
-            params.width = width
+        if (leftParams.width != width) {
+            leftParams.width = width
             left.requestLayout()
+        }
+        // The title never reaches a corner: it keeps to the middle of the strip, and is cut short there.
+        val titleParams = title.layoutParams as LayoutParams
+        val middle = (w * TITLE_SHARE).toInt()
+        if (titleParams.width != middle) {
+            titleParams.width = middle
+            title.requestLayout()
         }
     }
 
@@ -117,5 +137,8 @@ class PageInfoView(context: Context) : FrameLayout(context) {
     private companion object {
         /** The bottom left's tap target, of the page's width. */
         const val LEFT_SHARE = 0.45f
+
+        /** The title's room in the middle of the top line. */
+        const val TITLE_SHARE = 0.46f
     }
 }

@@ -24,7 +24,7 @@ class EpubAppearancePanelTest {
             panel.show(saved,{saved=it},{closed=true})
             fun find(v:View,label:String):View? = if(v.contentDescription?.toString()?.startsWith(label)==true || (v is android.widget.TextView && v.text==label)) v else (v as? ViewGroup)?.let { g->(0 until g.childCount).firstNotNullOfOrNull {find(g.getChildAt(it),label)} }
             find(panel,"Themes")!!.performClick()
-            find(panel,"Night")!!.performClick()
+            find(panel,"Dim")!!.performClick()
             assertTrue(panel.isOpen);assertEquals(EpubTheme.DARK,saved.theme)
             assertNull(find(panel,"Save reading appearance"))
             find(panel,"Close panel")!!.performClick()
@@ -84,6 +84,9 @@ class EpubAppearancePanelTest {
             assertEquals(PageInfoCorner.NONE,info.corner)
             find(panel,"Percentage")!!.performClick()
             assertFalse(info.percentage)
+            assertTrue("the title keeps the top clear",info.topStrip)
+            find(panel,"Book title")!!.performClick()
+            assertFalse(info.title)
             assertFalse("with every corner off the page needs no strips",info.topStrip||info.bottomStrip)
         }} finally {i.runOnMainSync {activity.finish()}}
     }

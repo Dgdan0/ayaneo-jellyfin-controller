@@ -2,8 +2,9 @@ package com.pocketds.hub.reader
 
 import kotlinx.serialization.Serializable
 
+/** The stored ids stay: [DARK] is the grey (called Dim), [BLACK] the true black (called Dark); see [EpubPagePalette]. */
 @Serializable
-enum class EpubTheme { SYSTEM, LIGHT, SEPIA, DARK, BLUE }
+enum class EpubTheme { SYSTEM, LIGHT, SEPIA, DARK, BLUE, BLACK }
 
 @Serializable
 enum class EpubColumns { AUTO, ONE, TWO }
@@ -20,7 +21,7 @@ enum class EpubColumns { AUTO, ONE, TWO }
 data class EpubReaderPreferences(
     val theme: EpubTheme = EpubTheme.SEPIA,
     val fontFamily: String = "publisher",
-    val fontScale: Float = 1.0f,
+    val fontScale: Float = 1.3f,
     val lineHeight: Float = 1.5f,
     val pageMargins: Float = 1.0f,
     val columns: EpubColumns = EpubColumns.AUTO,
@@ -33,6 +34,9 @@ data class EpubReaderPreferences(
 )
 
 object EpubLayoutPolicy {
+    /** The line spacings the sheet offers (#47): 1.5 is the default and, in Literata, Kindle's own spacing. */
+    val SPACING: List<Pair<Float, String>> = listOf(1.3f to "Tight", 1.5f to "Relaxed", 1.8f to "Open")
+
     private const val AUTO_TWO_COLUMN_MIN_WIDTH_DP = 840
 
     fun columnCount(

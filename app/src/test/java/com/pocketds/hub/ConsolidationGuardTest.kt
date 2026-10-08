@@ -125,6 +125,12 @@ class ConsolidationGuardTest {
             "ReadingBookFacts.pages / ReadingBookFacts.page: a book's page count and its page, from how far through, in one place, so " +
                 "its page, Resume and the reader's corner say the same page (#42)",
             setOf("screens/library/ReadingBookFacts.kt")),
+        Rule(Regex("""pageMargins\s*=\s*value\.pageMargins"""),
+            "PageGeometry.READIUM_MARGIN_FACTOR: Readium is told one margin and the preset chooses the page's side inset, or its " +
+                "gutter moves and the gap between two columns is twice the margin again (#47)"),
+        Rule(Regex("""0xff?fcf0d9|0xff?afafaf|0xff?c8c8c2""", RegexOption.IGNORE_CASE),
+            "EpubPagePalette: the page colours of every theme, in one place (#47)",
+            setOf("reader/EpubPagePalette.kt")),
         Rule(Regex("""is24HourFormat"""),
             "PageInfoView with PageInfo.clock: the time on a page's corner follows the device's 12 or 24 hour setting in one place (#42)",
             setOf("reader/PageInfoView.kt")),

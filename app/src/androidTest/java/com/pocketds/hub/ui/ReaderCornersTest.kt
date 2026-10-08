@@ -2,6 +2,7 @@ package com.pocketds.hub.ui
 
 import android.content.Intent
 import android.graphics.Bitmap
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -15,6 +16,8 @@ import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.reader.EpubAppearanceStore
 import com.pocketds.hub.reader.EpubReaderPreferences
 import com.pocketds.hub.reader.EpubReaderScreen
+import com.pocketds.hub.reader.EpubPagePalette
+import com.pocketds.hub.reader.PageGeometry
 import com.pocketds.hub.reader.PageInfo
 import com.pocketds.hub.reader.PageInfoChoice
 import com.pocketds.hub.reader.PageInfoCorner
@@ -75,7 +78,7 @@ class ReaderCornersTest {
         val view: PageInfoView = screen.field("pageInfo")
         val texts = all(view).filterIsInstance<TextView>()
         fun at(index: Int) = texts[index].takeIf { it.visibility == View.VISIBLE }?.text?.toString().orEmpty()
-        return Triple(at(0), at(1), at(2))
+        return Triple(at(0), at(2), at(3))
     }
 
     @Test fun cornersShowWhereYouAreAndMoveOnWithATapOrAKey(): Unit = runBlocking {
@@ -114,6 +117,15 @@ class ReaderCornersTest {
                 val host: View = screen!!.field("pageHost")
                 assertEquals("the top strip", strip, host.top)
                 assertEquals("the bottom strip", strip, (host.parent as View).height - host.bottom)
+                // Kindle's margins (#47): the inset at each side is the outer margin less Readium's own gutter.
+                val inset = Styler.dpInt(activity, PageGeometry.insetDp(1f).toFloat())
+                assertEquals("the left inset", inset, host.left)
+                assertEquals("the right inset", inset, (host.parent as View).width - host.right)
+                // The title in the middle of the top line, in capitals, the corners in the page's own ink.
+                val title = all(screen!!.field<PageInfoView>("pageInfo")).filterIsInstance<TextView>()[1]
+                assertEquals("THE LAST OBSERVATORY", title.text.toString())
+                assertEquals(PageInfo.ink(EpubPagePalette.of(EpubReaderPreferences().theme).second), title.currentTextColor)
+                assertEquals(Gravity.CENTER_HORIZONTAL, title.gravity and Gravity.HORIZONTAL_GRAVITY_MASK)
             }
 
             // A tap on the bottom left moves to the next choice, and the choice is kept.
@@ -121,7 +133,7 @@ class ReaderCornersTest {
             repeat(5) {
                 withContext(Dispatchers.Main) {
                     seen += words(screen!!).second
-                    all(screen!!.field<PageInfoView>("pageInfo")).filterIsInstance<TextView>()[1].performClick()
+                    all(screen!!.field<PageInfoView>("pageInfo")).filterIsInstance<TextView>()[2].performClick()
                 }
                 delay(200)
             }
@@ -176,9 +188,16 @@ class ReaderCornersTest {
                 val (clock, left, right) = words(screen!!)
                 assertEquals("", clock); assertEquals("", right)
                 assertTrue(left, left.endsWith("left in book"))
-                // No top strip now, and the foot keeps one for the bottom left alone.
+                // The title still keeps the top clear, and the foot keeps a strip for the bottom left alone.
                 val host: View = screen!!.field("pageHost")
-                assertEquals(0, host.top)
+                assertEquals(Styler.dpInt(activity, PageInfo.STRIP_DP.toFloat()), host.top)
+                all(root).first { it.tag == "info:title" && it.isShown }.performClick()
+                assertFalse(PageInfoSettings.load(activity).title)
+            }
+            delay(400)
+            withContext(Dispatchers.Main) {
+                // No top strip once the title and the clock are both off.
+                assertEquals(0, screen!!.field<View>("pageHost").top)
             }
         } catch (failure: Throwable) {
             File(activity.getExternalFilesDir(null), "reader-corners-failure.png").outputStream().use {

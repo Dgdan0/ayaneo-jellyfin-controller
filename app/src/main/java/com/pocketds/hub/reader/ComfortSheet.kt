@@ -11,8 +11,8 @@ import com.pocketds.hub.ui.ValueRange
 
 /**
  * The Comfort sheet (#16, X3), one glass sheet in every reader: brightness and
- * warmth, and in a book a black page and the screen kept on while narration
- * plays. A change shows at once and is kept for every reader ([ComfortSettings]);
+ * warmth, and in a book the screen kept on while narration plays. (The black
+ * page is the Dark theme in Appearance, #47.) A change shows at once and is kept for every reader ([ComfortSettings]);
  * [onChange] hands it to the reader to draw.
  */
 object ComfortSheet {
@@ -37,11 +37,6 @@ object ComfortSheet {
             change(value.copy(warmth = it))
         }.apply { tag = "warmth" })
         if (kind == ReaderKind.BOOK) {
-            panel.choice("Black page", if (value.blackPage) "On · for the dark, and the OLED's black" else "Off · the page colour in Appearance",
-                value.blackPage) {
-                change(value.copy(blackPage = !value.blackPage))
-                show(panel, colors, kind, onChange, "black")
-            }.tag = "black"
             panel.choice("Keep the screen on while narrating", if (value.awakeWhileNarrating) "On" else "Off", value.awakeWhileNarrating) {
                 change(value.copy(awakeWhileNarrating = !value.awakeWhileNarrating))
                 show(panel, colors, kind, onChange, "awake")

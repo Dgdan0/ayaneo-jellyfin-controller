@@ -101,7 +101,7 @@ class EpubReaderPolishTest {
             ins.waitForIdleSync()
             withContext(Dispatchers.Main) {
                 assertFalse("A modal must cancel a pending chapter hold", screen!!.requiresTriggerHold)
-                listOf("Paper", "Sepia", "Night", "Blue").forEach { label -> assertTrue(all(root).any { it.contentDescription?.toString()?.startsWith(label) == true }) }
+                listOf("Paper", "Sepia", "Dim", "Dark", "Blue").forEach { label -> assertTrue(all(root).any { it.contentDescription?.toString()?.startsWith(label) == true }) }
                 click("Blue")
             }
             until { withContext(Dispatchers.Main) { reader()?.evaluateJavascript("getComputedStyle(document.documentElement).getPropertyValue('--USER__backgroundColor').trim()")?.contains("1d303d", true) == true } }
