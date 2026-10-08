@@ -39,7 +39,8 @@ struct BookReaderCorners: View {
         let ink = Color(argb: EpubPagePalette.argb(rendering.text) ?? 0xFF5A_4931)
         let info = reader.pageInfo
         let corners = reader.corners
-        let title = PageInfo.title(reader.title)
+        // Never behind a Dynamic Island or a notch (#58).
+        let title = PageInfo.showsTitle(tablet: tablet, topSafeArea: Double(layout.safe.top)) ? PageInfo.title(reader.title) : ""
         ZStack {
             if reader.preferences.scrolls {
                 // Scrolling, the text passes through the strips: the page's colour keeps them clear.

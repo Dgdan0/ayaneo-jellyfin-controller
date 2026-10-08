@@ -100,20 +100,28 @@ final class ReaderTypographyTests: XCTestCase {
         let title = element(app, "book-corner-title")
         let clock = element(app, "book-corner-clock")
         let place = app.buttons["book-corner-place"]
-        XCTAssertTrue(title.waitForExistence(timeout: 10), "the book's title is not at the top")
-        XCTAssertEqual(title.label, "Reading Recursion")
-        XCTAssertTrue(clock.waitForExistence(timeout: 5))
+        XCTAssertTrue(clock.waitForExistence(timeout: 10))
+        // A phone with a Dynamic Island or a notch (every iPhone 812 points tall or more) draws no title
+        // at the top centre, where the island would cover it (#58); an iPad and the Mac keep it.
+        let window = app.windows.firstMatch.frame
+        let island = UIDevice.current.userInterfaceIdiom == .phone && max(window.width, window.height) >= 812
+        if island {
+            XCTAssertFalse(title.exists, "the book's title is behind the island")
+        } else {
+            XCTAssertTrue(title.waitForExistence(timeout: 10), "the book's title is not at the top")
+            XCTAssertEqual(title.label, "Reading Recursion")
+        }
         let width = page(app).frame.width
         // Balanced is the default (`pageMargins` 1); an iPad's window under 600 points wide is laid out as a phone's.
         let margin = EpubGeometry.outerMargin(pageMargins: 1, tablet: UIDevice.current.userInterfaceIdiom != .phone,
                                               width: Double(width))
         // The title is in the middle, and the clock ends where the text does: Kindle's margin.
-        XCTAssertEqual(title.frame.midX, width / 2, accuracy: 2, "the title is not centred")
+        if !island { XCTAssertEqual(title.frame.midX, width / 2, accuracy: 2, "the title is not centred") }
         XCTAssertEqual(width - clock.frame.maxX, margin, accuracy: 3, "the clock is not on the text's edge (\(margin))")
         XCTAssertEqual(place.frame.minX, margin, accuracy: 3, "the bottom left is not on the text's edge (\(margin))")
-        // The strips above and below the text are the layout's own: 62 points on a phone, 84 and 96 on an iPad.
+        // The strips above and below the text are the layout's own: Kindle's on a phone (#58) and an iPad (#47).
         let strip = PageInfo.strip(compactHeight: false, tablet: UIDevice.current.userInterfaceIdiom != .phone)
-        XCTAssertLessThan(title.frame.maxY, strip.top, "the title is in the strip above the text")
+        XCTAssertLessThan((island ? clock : title).frame.maxY, strip.top, "the top corner is in the strip above the text")
         // Its tap reaches a little above the words, which are in the strip below the text.
         XCTAssertGreaterThanOrEqual(place.frame.minY, page(app).frame.height - strip.bottom - 8, "the bottom left is in the strip below the text")
 

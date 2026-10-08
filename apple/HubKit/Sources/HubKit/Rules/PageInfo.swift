@@ -191,24 +191,42 @@ public enum PageInfo {
 
     /// The strips Readium keeps at the top and bottom of a page (its content
     /// inset), where the corners sit, off the text: a phone sideways, or any
-    /// screen short of height, keeps less, and an iPad's page starts about 84
-    /// points down and ends 96 up, as Kindle's does (#47). The window's safe
-    /// area can make them deeper.
+    /// screen short of height, keeps less; an iPad's page starts about 84
+    /// points down and ends 96 up, as Kindle's does (#47); and a phone held
+    /// upright keeps `phoneStrip`, Kindle's on an iPhone (#58). The window's
+    /// safe area can make them deeper.
     public static func strip(compactHeight: Bool, tablet: Bool = false) -> (top: Double, bottom: Double) {
         if compactHeight { return (34, 34) }
-        return tablet ? (84, 96) : (62, 62)
+        return tablet ? (84, 96) : phoneStrip
     }
+
+    /// A phone held upright, as Kindle's on an iPhone 17 Pro Max (#58, from
+    /// the owner's screenshots on a 956-point screen): the first line's top
+    /// about 94 points down, the last line's bottom about 829, the bottom
+    /// corner's line 60 up, clear of the home indicator.
+    public static let phoneStrip: (top: Double, bottom: Double) = (84, 96)
 
     /// The corners' words: about 13 points, regular, in the page's full ink (#47).
     public static let cornerSize = 13.0
 
     /// How far from the top and the bottom of the screen the corners' baselines
-    /// sit: Kindle's 50 and 61 points on an iPad, in its deep strips; the middle
-    /// of the strip on a phone, whose top strip is the status bar's, and on an
-    /// iPad whose window is too short for the deep ones.
+    /// sit: Kindle's 50 and 61 points on an iPad, in its deep strips; on a
+    /// phone held upright, the top one beside the status bar's place (where the
+    /// clock was, by the Dynamic Island) and the bottom one 60 up, as Kindle's
+    /// (#58); the middle of the strip on a phone sideways and on an iPad whose
+    /// window is too short for the deep ones.
     public static func baselines(tablet: Bool, strip: (top: Double, bottom: Double)) -> (top: Double, bottom: Double) {
         if tablet && strip.top >= 84 && strip.bottom >= 96 { return (50, 61) }
+        if !tablet && strip.top >= phoneStrip.top && strip.bottom >= phoneStrip.bottom { return (35.5, 60) }
         return (strip.top / 2 + cornerSize * 0.35, strip.bottom / 2 + cornerSize * 0.35)
+    }
+
+    /// Whether the book's title is drawn at the top centre (#58): not on a
+    /// phone whose top safe area holds a Dynamic Island or a notch (44 points
+    /// or more), which would cover it. The clock keeps its corner beside it;
+    /// an iPad, the Mac and a phone without one keep the title.
+    public static func showsTitle(tablet: Bool, topSafeArea: Double) -> Bool {
+        tablet || topSafeArea < 44
     }
 
     /// The book's title for the top centre, small capitals in the view: its
