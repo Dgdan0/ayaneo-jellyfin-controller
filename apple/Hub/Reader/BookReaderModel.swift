@@ -180,9 +180,7 @@ final class BookReaderModel {
     /// The device is in dark mode: system colours follow it.
     var systemDark = false {
         didSet {
-            if oldValue != systemDark && preferences.theme == .system && !ReaderComfort.shared.value.blackPage {
-                navigator.submit(rendering)
-            }
+            if oldValue != systemDark && preferences.theme == .system { navigator.submit(rendering) }
         }
     }
 
@@ -248,7 +246,8 @@ final class BookReaderModel {
         bookmarkStore = EpubBookmarks(root: support, scope: EpubBookmarks.scope(address: app.address, userId: app.userId),
                                       workId: work.id, sourceItemId: sourceItemId)
         self.defaults = defaults
-        let saved = EpubAppearanceStore.load(defaults)
+        let saved = EpubAppearanceStore.load(defaults, startingScale: BookNavigator.isTablet
+                                             ? EpubReaderPreferences.tabletScale : EpubReaderPreferences.phoneScale)
         preferences = saved
         pageInfo = PageInfoStore.load(defaults)
         preferenceState = EpubPreferenceState(saved)
@@ -292,12 +291,31 @@ final class BookReaderModel {
                        narration: readAlong?.narration != nil, loading: phase != .reading)
     }
 
-    /// The page as Appearance chose it, black when Comfort asks (#37).
-    var rendering: EpubRendering { EpubRendering(preferences, systemDark: systemDark).comforted(ReaderComfort.shared.value) }
+    /// The page as Appearance chose it. (Comfort dims and warms it over the top, #37.)
+    var rendering: EpubRendering { EpubRendering(preferences, systemDark: systemDark) }
 
-    /// Comfort's black page went on or off: the page is drawn again.
-    func comfortChanged() {
-        navigator.submit(rendering)
+    /// The text's edge from the screen's, in points: Kindle's outer margin (#47).
+    func outerMargin(width: Double) -> Double {
+        EpubGeometry.outerMargin(pageMargins: preferences.pageMargins, tablet: BookNavigator.isTablet, width: width)
+    }
+
+    /// How far the page's view is set in from each side: the margin less the gutter Readium keeps.
+    func pageInset(width: Double) -> Double {
+        EpubGeometry.inset(pageMargins: preferences.pageMargins, tablet: BookNavigator.isTablet, width: width,
+                           gutter: navigator.gutter)
+    }
+
+    /// A tap or a swipe in the margin, outside what Readium hears: it turns the page, or closes what is open.
+    func insetTapped(forward: Bool) {
+        if footnote != nil {
+            footnote = nil
+        } else if sheet != nil {
+            sheet = nil
+        } else if controlsVisible {
+            setControls(false)
+        } else {
+            read(forward ? 1 : -1)
+        }
     }
 
     // MARK: Opening

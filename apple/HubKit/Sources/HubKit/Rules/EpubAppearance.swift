@@ -9,7 +9,10 @@ public enum EpubTheme: String, CaseIterable, Sendable {
     case system = "SYSTEM"
     case light = "LIGHT"
     case sepia = "SEPIA"
+    /// The grey page, shown as Dim (#47): its stored name from before Dark existed.
     case dark = "DARK"
+    /// A true-black page, shown as Dark (#47), Kindle's.
+    case black = "BLACK"
     case blue = "BLUE"
 }
 
@@ -21,7 +24,7 @@ public enum EpubColumns: String, CaseIterable, Sendable {
 
 public struct EpubReaderPreferences: Equatable, Sendable {
     public var theme: EpubTheme
-    /// "publisher", "serif" or "sans-serif".
+    /// A typeface's id (`EpubTypefaces`): "publisher" is the book's own.
     public var fontFamily: String
     public var fontScale: Double
     public var lineHeight: Double
@@ -35,10 +38,16 @@ public struct EpubReaderPreferences: Equatable, Sendable {
     /// Words broken at the line's end, so justified lines keep even spaces.
     public var hyphens: Bool
 
+    /// The text size a new device starts at (#47): Literata at 130% reads as
+    /// the owner's Kindle does on a tablet; a phone's smaller screen at 120%.
+    public static let tabletScale = 1.3
+    public static let phoneScale = 1.2
+
     /// The reader's own typography to begin with (#42, from the owner's Kindle
-    /// screenshots): justified, hyphenated, a line and a half apart, the
-    /// book's own styling off. Publisher styling brings the book's look back.
-    public init(theme: EpubTheme = .sepia, fontFamily: String = "publisher", fontScale: Double = 1,
+    /// screenshots, #47): Literata, justified, hyphenated, a line and a half
+    /// apart, the book's own styling off. Publisher styling brings the book's
+    /// look back.
+    public init(theme: EpubTheme = .sepia, fontFamily: String = EpubTypefaces.standard, fontScale: Double = tabletScale,
                 lineHeight: Double = 1.5, pageMargins: Double = 1, columns: EpubColumns = .auto, scroll: Bool = false,
                 publisherStyles: Bool = false, textAlignment: String = "justify", onePagePerScreen: Bool = false,
                 hyphens: Bool = true) {
@@ -140,8 +149,10 @@ public enum EpubPagePalette {
     public static func of(_ theme: EpubTheme) -> (page: UInt32, ink: UInt32)? {
         switch theme {
         case .light: (0xFFFB_FAF6, 0xFF28_2B29)
-        case .sepia: (0xFFEF_E2C6, 0xFF3E_3526)
-        case .dark: (0xFF20_2020, 0xFFDF_DFD8)
+        // Kindle's Sepia and Dark, measured (#47); Dim is the old grey with softer words.
+        case .sepia: (0xFFFC_F0D9, 0xFF5A_4931)
+        case .dark: (0xFF20_2020, 0xFFC8_C8C2)
+        case .black: (0xFF00_0000, 0xFFAF_AFAF)
         case .blue: (0xFF1D_303D, 0xFFDC_E6E8)
         case .system: nil
         }
@@ -157,12 +168,12 @@ public enum EpubPagePalette {
 /// `readiumPreferences`, decided here so it is tested, and turned into
 /// Readium's own types by the reader.
 public struct EpubRendering: Equatable, Sendable {
-    /// "light", "sepia" or "dark".
+    /// "light", "sepia" or "dark" (Readium's own three).
     public var theme: String
     public var background: String
     public var text: String
     public let columns: EpubColumns
-    /// "serif", "sans-serif", or nil for the publisher's.
+    /// The face's CSS family name ("Literata", "Charter"), or nil for the book's own.
     public let fontFamily: String?
     public let fontSize: Double
     public let lineHeight: Double
@@ -173,20 +184,19 @@ public struct EpubRendering: Equatable, Sendable {
     public let textAlign: String
     public let hyphens: Bool
 
-    /// System colours follow the device: Paper by day, Night after dark.
+    /// System colours follow the device: Paper by day, Dark after dark (#47).
     public init(_ value: EpubReaderPreferences, systemDark: Bool) {
-        let theme: EpubTheme = value.theme == .system ? (systemDark ? .dark : .light) : value.theme
+        let theme: EpubTheme = value.theme == .system ? (systemDark ? .black : .light) : value.theme
         self.theme = switch theme {
         case .light, .system: "light"
         case .sepia: "sepia"
-        case .dark, .blue: "dark"
+        case .dark, .black, .blue: "dark"
         }
         let palette = EpubPagePalette.of(theme) ?? EpubPagePalette.of(.light)!
         background = EpubPagePalette.hex(palette.page)
         text = EpubPagePalette.hex(palette.ink)
         columns = value.onePagePerScreen ? .one : value.columns
-        fontFamily = value.fontFamily == "serif" || value.fontFamily == "sans-serif" || value.fontFamily == "monospace"
-            ? value.fontFamily : nil
+        fontFamily = EpubTypefaces.family(value.fontFamily)
         fontSize = value.fontScale
         lineHeight = value.lineHeight
         pageMargins = value.pageMargins
@@ -200,18 +210,17 @@ public struct EpubRendering: Equatable, Sendable {
 /// The Appearance sheet's choices (Android's `EpubAppearancePanel`): what
 /// each tile and row sets, so the sheet only draws them.
 public enum EpubAppearance {
-    public static let typefaces: [(id: String, label: String)] = [
-        ("publisher", "Publisher"), ("serif", "Serif"), ("sans-serif", "Sans"),
-    ]
     public static let themes: [(theme: EpubTheme, label: String)] = [
-        (.light, "Paper"), (.sepia, "Sepia"), (.dark, "Night"), (.blue, "Blue"),
+        (.light, "Paper"), (.sepia, "Sepia"), (.dark, "Dim"), (.black, "Dark"), (.blue, "Blue"),
     ]
+    /// Each is a width of text: `EpubGeometry.outerMargin` says how many points.
     public static let margins: [(amount: Double, label: String)] = [(0.5, "Narrow"), (1, "Balanced"), (1.7, "Wide")]
-    public static let spacing: [(amount: Double, label: String)] = [(1.1, "Tight"), (1.5, "Relaxed"), (1.9, "Open")]
+    /// Kindle's three (#47); 1.5 is the default and, with Literata, Kindle's own spacing.
+    public static let spacing: [(amount: Double, label: String)] = [(1.3, "Tight"), (1.5, "Relaxed"), (1.8, "Open")]
     public static let fontScales: ClosedRange<Double> = 0.7...2
     public static let fontStep = 0.1
 
-    /// "Publisher" leaves the book's own styles on; another face takes them off.
+    /// "Original" leaves the book's own styles on; another face takes them off.
     public static func typeface(_ value: EpubReaderPreferences, _ id: String) -> EpubReaderPreferences {
         var next = value
         next.fontFamily = id
@@ -244,13 +253,15 @@ public enum EpubAppearance {
         return next
     }
 
-    /// Reset text style (#42): the reader's own typography as a new device
-    /// starts with it (justified, hyphenated, its line spacing, the book's
-    /// styling off), for a look kept from before. The size, typeface, theme,
-    /// margins and columns stay as they are, and Page info is not a preference.
+    /// Reset text style (#42, #47): the reader's own typography as a new
+    /// device starts with it (Literata, justified, hyphenated, its line
+    /// spacing, the book's styling off), for a look kept from before. The
+    /// size, theme, margins and columns stay as they are, and Page info is not
+    /// a preference.
     public static func resetTextStyle(_ value: EpubReaderPreferences) -> EpubReaderPreferences {
         let start = EpubReaderPreferences()
         var next = value
+        next.fontFamily = start.fontFamily
         next.publisherStyles = start.publisherStyles
         next.textAlignment = start.textAlignment
         next.hyphens = start.hyphens
@@ -258,10 +269,10 @@ public enum EpubAppearance {
         return next
     }
 
-    /// What Reset text style sets, from the defaults: "Justified, hyphenated, 1.5 spacing".
+    /// What Reset text style sets, from the defaults: "Literata, justified, hyphenated, 1.5 spacing".
     public static var resetTextStyleDetail: String {
         let start = EpubReaderPreferences()
-        var parts = [start.textAlignment == "justify" ? "Justified" : "Aligned left"]
+        var parts = [EpubTypefaces.label(start.fontFamily), start.textAlignment == "justify" ? "justified" : "aligned left"]
         if start.hyphens { parts.append("hyphenated") }
         parts.append(String(format: "%g spacing", start.lineHeight))
         return parts.joined(separator: ", ")
@@ -282,8 +293,35 @@ public enum EpubAppearance {
 /// Shared by every book, kept on this device under Android's names.
 public enum EpubAppearanceStore {
     static let prefix = "epub."
+    /// Set once the Kindle look (#47) has been brought to a device.
+    static let kindleKey = prefix + "kindle"
 
-    public static func load(_ defaults: UserDefaults) -> EpubReaderPreferences {
+    /// What a device that kept a look from before gets once, as the update
+    /// brings the reader's new look (#47):
+    /// - Literata, with the book's own styling off, as the typeface (the owner
+    ///   asked for every device to switch);
+    /// - Dark for a device that had Comfort's black page, which is gone;
+    /// - Kindle's two nearer spacings for the two it dropped (1.1 and 1.9).
+    /// The rest it kept stays as it was. A device that never changed its look
+    /// has nothing stored and starts with the new defaults.
+    public static func migrate(_ defaults: UserDefaults) {
+        guard defaults.object(forKey: kindleKey) == nil else { return }
+        defaults.set(true, forKey: kindleKey)
+        if ComfortStore.takeBlackPage(defaults) { defaults.set(EpubTheme.black.rawValue, forKey: prefix + "theme") }
+        guard defaults.object(forKey: prefix + "fontFamily") != nil else { return }
+        defaults.set(EpubTypefaces.standard, forKey: prefix + "fontFamily")
+        defaults.set(false, forKey: prefix + "publisherStyles")
+        if defaults.object(forKey: prefix + "lineHeight") != nil {
+            let spacing = defaults.double(forKey: prefix + "lineHeight")
+            if abs(spacing - 1.1) < 0.01 { defaults.set(1.3, forKey: prefix + "lineHeight") }
+            if abs(spacing - 1.9) < 0.01 { defaults.set(1.8, forKey: prefix + "lineHeight") }
+        }
+    }
+
+    /// `startingScale` is where a device that never chose a size begins: a tablet's 130%, a phone's 120%.
+    public static func load(_ defaults: UserDefaults, startingScale: Double = EpubReaderPreferences.tabletScale)
+        -> EpubReaderPreferences {
+        migrate(defaults)
         func string(_ key: String) -> String? { defaults.string(forKey: prefix + key) }
         func number(_ key: String, _ fallback: Double, _ range: ClosedRange<Double>) -> Double {
             guard defaults.object(forKey: prefix + key) != nil else { return fallback }
@@ -296,7 +334,7 @@ public enum EpubAppearanceStore {
         // A look kept before (#42) keeps what it had: the defaults are for a
         // device that never changed it, and such a look had no hyphenation.
         let kept = defaults.object(forKey: prefix + "publisherStyles") != nil
-        let start = EpubReaderPreferences()
+        let start = EpubReaderPreferences(fontScale: startingScale)
         let value = EpubReaderPreferences(
             theme: string("theme").flatMap(EpubTheme.init(rawValue:)) ?? start.theme,
             fontFamily: string("fontFamily") ?? start.fontFamily,
@@ -313,6 +351,8 @@ public enum EpubAppearanceStore {
     }
 
     public static func save(_ value: EpubReaderPreferences, to defaults: UserDefaults) {
+        // What is saved is the new look's: it is not brought forward again.
+        defaults.set(true, forKey: kindleKey)
         defaults.set(value.theme.rawValue, forKey: prefix + "theme")
         defaults.set(value.fontFamily, forKey: prefix + "fontFamily")
         defaults.set(value.fontScale, forKey: prefix + "fontScale")

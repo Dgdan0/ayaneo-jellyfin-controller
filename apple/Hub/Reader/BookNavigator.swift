@@ -57,6 +57,14 @@ final class BookNavigator: NSObject {
     /// Part of the book could not be read.
     var onFailure: (String) -> Void = { _ in }
 
+    /// An iPad (or the Mac's wide window): Kindle's wide margins and strips (#47).
+    static var isTablet: Bool { UIDevice.current.userInterfaceIdiom != .phone }
+
+    /// Readium's page gutter in CSS pixels: half the gap between two columns.
+    /// Given once, as the navigator is made, so it holds while this one lives
+    /// (`EpubGeometry`).
+    let gutter = EpubGeometry.gutter(tablet: BookNavigator.isTablet)
+
     private var publication: Publication?
     private var controller: EPUBNavigatorViewController?
     /// The note whose card is open: where "Go to the note" goes.
@@ -106,9 +114,10 @@ final class BookNavigator: NSObject {
         let templates = narration.map(ReadAlongHighlight.allTemplates) ?? HTMLDecorationTemplate.defaultTemplates()
         let navigator = try EPUBNavigatorViewController(
             publication: loaded.publication, initialLocation: initial,
-            config: EPUBNavigatorViewController.Configuration(preferences: Self.preferences(rendering),
-                                                              contentInset: Self.strips,
-                                                              decorationTemplates: templates))
+            config: EPUBNavigatorViewController.Configuration(
+                preferences: Self.preferences(rendering), contentInset: Self.strips, decorationTemplates: templates,
+                fontFamilyDeclarations: Self.fontFamilies,
+                readiumCSSRSProperties: CSSRSProperties(pageGutter: CSSPxLength(gutter))))
         navigator.delegate = self
         publication = loaded.publication
         controller = navigator
@@ -243,12 +252,29 @@ final class BookNavigator: NSObject {
     /// The strips kept at the top and bottom of the page, off the text: the
     /// corners sit there (#42, `PageInfo.strip`, which the corners read too).
     private static var strips: [UIUserInterfaceSizeClass: EPUBContentInsets] {
-        let compact = PageInfo.strip(compactHeight: true), regular = PageInfo.strip(compactHeight: false)
+        let compact = PageInfo.strip(compactHeight: true, tablet: isTablet)
+        let regular = PageInfo.strip(compactHeight: false, tablet: isTablet)
         return [.compact: (top: CGFloat(compact.top), bottom: CGFloat(compact.bottom)),
                 .regular: (top: CGFloat(regular.top), bottom: CGFloat(regular.bottom))]
     }
 
-    /// The appearance as Readium's preferences.
+    /// The faces the app ships (#47), declared to Readium: Literata and Atkinson
+    /// Hyperlegible Next are variable fonts, so one file serves every weight.
+    /// Apple's own (Charter, Georgia, Iowan Old Style) need only their names.
+    private static var fontFamilies: [AnyHTMLFontFamilyDeclaration] {
+        func file(_ name: String) -> FileURL? { Bundle.main.url(forResource: name, withExtension: "ttf").flatMap(FileURL.init(url:)) }
+        return EpubTypefaces.bundledFiles.compactMap { entry -> AnyHTMLFontFamilyDeclaration? in
+            guard let roman = file(entry.roman) else { return nil }
+            var faces = [CSSFontFace(file: roman, style: .normal, weight: .variable(200...900))]
+            if let italic = entry.italic.flatMap(file) { faces.append(CSSFontFace(file: italic, style: .italic, weight: .variable(200...900))) }
+            return CSSFontFamilyDeclaration(fontFamily: FontFamily(rawValue: entry.family), fontFaces: faces)
+                .eraseToAnyHTMLFontFamilyDeclaration()
+        }
+    }
+
+    /// The appearance as Readium's preferences. The margins are the app's
+    /// (`EpubGeometry`): Readium is left its own gutter, given with the
+    /// navigator, so its padding is exactly half the gap between columns.
     private static func preferences(_ rendering: EpubRendering) -> EPUBPreferences {
         EPUBPreferences(
             backgroundColor: ReadiumNavigator.Color(hex: rendering.background),
@@ -257,7 +283,7 @@ final class BookNavigator: NSObject {
             fontSize: rendering.fontSize,
             hyphens: rendering.hyphens,
             lineHeight: rendering.lineHeight,
-            pageMargins: rendering.pageMargins,
+            pageMargins: 1,
             publisherStyles: rendering.publisherStyles,
             scroll: rendering.scroll,
             textAlign: rendering.textAlign == "justify" ? ReadiumNavigator.TextAlignment.justify : .start,

@@ -32,7 +32,6 @@ struct ComfortTests {
         #expect(ScreenComfort().drawsNothing)
         #expect(!ScreenComfort(brightness: 0.9).drawsNothing)
         #expect(!ScreenComfort(warmth: 0.1).drawsNothing)
-        #expect(ScreenComfort(blackPage: true).drawsNothing)
     }
 
     @Test func theScreenStaysOnOnlyWhileNarrationPlaysAndOnlyIfAsked() {
@@ -52,20 +51,31 @@ struct ComfortTests {
         let defaults = try #require(UserDefaults(suiteName: "comfort-tests-\(UUID().uuidString)"))
         let store = ComfortStore(defaults: defaults)
         #expect(store.load() == ScreenComfort())
-        store.save(ScreenComfort(brightness: 0.4, warmth: 0.3, blackPage: true, awakeWhileNarrating: false))
-        #expect(store.load() == ScreenComfort(brightness: 0.4, warmth: 0.3, blackPage: true, awakeWhileNarrating: false))
+        store.save(ScreenComfort(brightness: 0.4, warmth: 0.3, awakeWhileNarrating: false))
+        #expect(store.load() == ScreenComfort(brightness: 0.4, warmth: 0.3, awakeWhileNarrating: false))
         store.save(ScreenComfort(brightness: 0.01, warmth: 4))
         #expect(store.load().brightness == ScreenComfort.minBrightness)
         #expect(store.load().warmth == 1)
     }
 
-    @Test func aBlackPageIsNightsLayoutInBlackWithSoftWords() {
-        let paper = EpubRendering(EpubReaderPreferences(), systemDark: false)
-        #expect(paper.comforted(ScreenComfort()) == paper)
-        let black = paper.comforted(ScreenComfort(blackPage: true))
-        #expect(black.theme == "dark")
-        #expect(black.background == "#000000")
-        #expect(black.text == "#C9C3B6")
-        #expect(black.fontSize == paper.fontSize, "the words keep their size")
+    /// Comfort's black page went when Dark came (#47): a device that had it on is on Dark, and its
+    /// brightness and warmth stay as they were.
+    @Test func aDeviceThatHadTheBlackPageIsOnDarkAndKeepsTheRestOfItsComfort() throws {
+        let defaults = try #require(UserDefaults(suiteName: "comfort-migrate-\(UUID().uuidString)"))
+        defaults.set(Data(#"{"brightness":0.4,"warmth":0.3,"blackPage":true,"awakeWhileNarrating":false}"#.utf8), forKey: "reader.comfort")
+        let look = EpubAppearanceStore.load(defaults)
+        #expect(look.theme == .black)
+        #expect(ComfortStore(defaults: defaults).load() == ScreenComfort(brightness: 0.4, warmth: 0.3, awakeWhileNarrating: false))
+        // Taken out of what is stored, so a later theme of its own is not undone.
+        let stored = try #require(defaults.data(forKey: "reader.comfort"))
+        #expect(!String(decoding: stored, as: UTF8.self).contains("blackPage"))
+        var chosen = look
+        chosen.theme = .light
+        EpubAppearanceStore.save(chosen, to: defaults)
+        #expect(EpubAppearanceStore.load(defaults).theme == .light)
+        // One that never had it is left alone.
+        let other = try #require(UserDefaults(suiteName: "comfort-migrate-\(UUID().uuidString)"))
+        other.set(Data(#"{"brightness":0.8,"warmth":0,"blackPage":false,"awakeWhileNarrating":true}"#.utf8), forKey: "reader.comfort")
+        #expect(EpubAppearanceStore.load(other).theme == .sepia)
     }
 }

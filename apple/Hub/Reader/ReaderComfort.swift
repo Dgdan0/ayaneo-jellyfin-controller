@@ -64,9 +64,9 @@ struct ComfortLayer: View {
 }
 
 /// The Comfort controls, the same in every reader: brightness and warmth,
-/// and for a book a black page and the screen kept on while narrating.
+/// and for a book the screen kept on while narrating.
 struct ComfortControls: View {
-    /// A book's page: the black page and the screen kept awake are offered.
+    /// A book's page: the screen kept awake is offered.
     let book: Bool
     /// Its own heading, where it follows other options (the comic reader's);
     /// a tab or a sheet called Comfort already says so.
@@ -98,12 +98,6 @@ struct ComfortControls: View {
         }
         if book {
             SheetGroup {
-                SheetRow(title: "Black page", detail: ScreenComfort.blackPageDetail(value.blackPage), checked: value.blackPage) {
-                    comfort.set(ComfortLine.blackPage.press(value))
-                }
-                .accessibilityIdentifier("comfort-black")
-                .readerRing(ring == .blackPage)
-                .id(Self.id(.blackPage))
                 SheetRow(title: "Keep the screen on while narrating", value: value.awakeWhileNarrating ? "On" : "Off") {
                     comfort.set(ComfortLine.awake.press(value))
                 }

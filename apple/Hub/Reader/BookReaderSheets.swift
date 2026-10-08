@@ -207,8 +207,10 @@ struct BookAppearanceSheet: View {
 
     /// A choice among a line's tiles, pressed through the model as Ⓐ presses it.
     private func tile<Sample: View>(_ line: BookAppearanceLine, _ column: Int, _ label: String, selected: Bool,
-                                    @ViewBuilder sample: () -> Sample) -> some View {
-        AppearanceTile(label: label, selected: selected) { reader.pressAppearance(line, column: column) } sample: { sample() }
+                                    labelLines: Int = 1, @ViewBuilder sample: () -> Sample) -> some View {
+        AppearanceTile(label: label, selected: selected, labelLines: labelLines) {
+            reader.pressAppearance(line, column: column)
+        } sample: { sample() }
             .readerRing(isRinged(line, column), corner: 14)
     }
 
@@ -224,11 +226,12 @@ struct BookAppearanceSheet: View {
 
     @ViewBuilder private var font: some View {
         SheetLabel(text: "Typeface")
-        HStack(spacing: 8) {
-            ForEach(Array(EpubAppearance.typefaces.enumerated()), id: \.element.id) { column, face in
-                tile(.typeface, column, face.label, selected: value.fontFamily == face.id) {
+        // Three across, "Aa" in the face itself: what the tile shows is what the page will use.
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: 3), spacing: 8) {
+            ForEach(Array(EpubTypefaces.all.enumerated()), id: \.element.id) { column, face in
+                tile(.typeface, column, face.label, selected: value.fontFamily == face.id, labelLines: 2) {
                     Text("Aa")
-                        .font(.system(size: 26, weight: .regular, design: face.id == "sans-serif" ? .default : .serif))
+                        .font(face.sample.map { Font.custom($0, size: 26) } ?? .system(size: 26, weight: .regular, design: .serif))
                 }
             }
         }
@@ -346,7 +349,7 @@ struct BookAppearanceSheet: View {
             .id(Self.id(.themes(rowIndex)))
         }
         SheetGroup {
-            row(.systemColours, "Use system colours", detail: "Paper by day, Night in dark mode", checked: value.theme == .system)
+            row(.systemColours, "Use system colours", detail: "Paper by day, Dark at night", checked: value.theme == .system)
         }
     }
 }
@@ -356,6 +359,8 @@ struct BookAppearanceSheet: View {
 struct AppearanceTile<Sample: View>: View {
     let label: String
     let selected: Bool
+    /// Lines the name may take: a long one ("Atkinson Hyperlegible") wraps rather than cuts.
+    var labelLines = 1
     let action: () -> Void
     @ViewBuilder let sample: Sample
     @Environment(\.glassAccent) private var accent
@@ -369,7 +374,9 @@ struct AppearanceTile<Sample: View>: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 Text(label)
                     .font(HubType.body(12.5, weight: .semibold, relativeTo: .caption))
-                    .lineLimit(1)
+                    .lineLimit(labelLines)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.85)
             }
             .padding(6)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(0.08)))

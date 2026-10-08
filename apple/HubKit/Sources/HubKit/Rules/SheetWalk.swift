@@ -80,21 +80,20 @@ public struct SheetWalk: Equatable, Sendable {
 // MARK: The Comfort lines, in every reader
 
 /// Comfort's lines (#37): brightness and warmth as values, and for a book the
-/// black page and the screen kept on while narrating as rows.
+/// screen kept on while narrating as a row.
 public enum ComfortLine: Hashable, Sendable {
-    case brightness, warmth, blackPage, awake
+    case brightness, warmth, awake
 
     public static func lines(book: Bool) -> [ComfortLine] {
-        book ? [.brightness, .warmth, .blackPage, .awake] : [.brightness, .warmth]
+        book ? [.brightness, .warmth, .awake] : [.brightness, .warmth]
     }
 
     public var shape: SheetLine { self == .brightness || self == .warmth ? .value : .row }
 
-    /// Ⓐ on a row: the black page or the screen kept on, the other way.
+    /// Ⓐ on a row: the screen kept on, the other way.
     public func press(_ comfort: ScreenComfort) -> ScreenComfort {
         var next = comfort
         switch self {
-        case .blackPage: next.blackPage.toggle()
         case .awake: next.awakeWhileNarrating.toggle()
         case .brightness, .warmth: break
         }
@@ -109,7 +108,7 @@ public enum ComfortLine: Hashable, Sendable {
             next.brightness = SheetWalk.nudge(comfort.brightness, steps: delta, in: ScreenComfort.minBrightness...1)
         case .warmth:
             next.warmth = SheetWalk.nudge(comfort.warmth, steps: delta, in: 0...1)
-        case .blackPage, .awake: break
+        case .awake: break
         }
         return next
     }
@@ -187,7 +186,7 @@ public enum BookAppearanceLine: Hashable, Sendable {
     public var shape: SheetLine {
         switch self {
         case .tabs: .choices(BookAppearancePage.allCases.count)
-        case .typeface: .choices(EpubAppearance.typefaces.count)
+        case .typeface: .choices(EpubTypefaces.all.count)
         case .columns: .choices(2)
         case .margins: .choices(EpubAppearance.margins.count)
         case .spacing: .choices(EpubAppearance.spacing.count)
@@ -204,8 +203,8 @@ public enum BookAppearanceLine: Hashable, Sendable {
     public func press(_ value: EpubReaderPreferences, column: Int = 0) -> EpubReaderPreferences? {
         switch self {
         case .typeface:
-            guard EpubAppearance.typefaces.indices.contains(column) else { return nil }
-            return EpubAppearance.typeface(value, EpubAppearance.typefaces[column].id)
+            guard EpubTypefaces.all.indices.contains(column) else { return nil }
+            return EpubAppearance.typeface(value, EpubTypefaces.all[column].id)
         case .onePage:
             return EpubLayoutPolicy.selectOnePage(value, !value.onePagePerScreen)
         case .columns:

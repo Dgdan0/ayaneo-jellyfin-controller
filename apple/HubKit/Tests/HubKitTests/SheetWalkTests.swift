@@ -42,11 +42,10 @@ struct SheetWalkTests {
     @Test func comfortsLinesPressAndChange() {
         let comfort = ScreenComfort(brightness: 1, warmth: 0)
         #expect(ComfortLine.lines(book: false) == [.brightness, .warmth])
-        #expect(ComfortLine.lines(book: true) == [.brightness, .warmth, .blackPage, .awake])
+        #expect(ComfortLine.lines(book: true) == [.brightness, .warmth, .awake])
         #expect(ComfortLine.brightness.adjust(comfort, by: -1).brightness == 0.95)
         #expect(ComfortLine.warmth.adjust(comfort, by: 1).warmth == 0.05)
         #expect(ComfortLine.warmth.adjust(comfort, by: -1).warmth == 0)
-        #expect(ComfortLine.blackPage.press(comfort).blackPage)
         #expect(!ComfortLine.awake.press(comfort).awakeWhileNarrating)
         #expect(ComfortLine.brightness.press(comfort) == comfort)
     }

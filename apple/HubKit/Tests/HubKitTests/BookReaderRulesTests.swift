@@ -304,9 +304,9 @@ struct BookReaderRulesTests {
 
     @Test func theAppearanceSheetsChoicesSetWhatAndroidsSet() {
         let start = EpubReaderPreferences()
-        #expect(!EpubAppearance.typeface(start, "serif").publisherStyles)
+        #expect(!EpubAppearance.typeface(start, "charter").publisherStyles)
         #expect(EpubAppearance.typeface(start, "publisher").publisherStyles)
-        #expect(EpubAppearance.fontSize(start, steps: 2).fontScale == 1.2)
+        #expect(EpubAppearance.fontSize(start, steps: 2).fontScale == 1.5)
         #expect(EpubAppearance.fontSize(start, steps: -9).fontScale == 0.7)
         #expect(EpubAppearance.fontSize(start, steps: 30).fontScale == 2)
         #expect(EpubAppearance.fontSizeLabel(1.2) == "120%")
@@ -324,31 +324,41 @@ struct BookReaderRulesTests {
     }
 
     @Test func theBookIsDrawnWithThePagesColoursAndTheRightColumns() {
-        var value = EpubReaderPreferences(theme: .blue, fontFamily: "sans-serif", fontScale: 1.3, columns: .two,
+        var value = EpubReaderPreferences(theme: .blue, fontFamily: "atkinson", fontScale: 1.3, columns: .two,
                                           textAlignment: "justify")
         let blue = EpubRendering(value, systemDark: false)
         #expect(blue.theme == "dark")
         #expect(blue.background == "#1D303D")
         #expect(blue.text == "#DCE6E8")
-        #expect(blue.fontFamily == "sans-serif")
+        #expect(blue.fontFamily == "Atkinson Hyperlegible Next")
         #expect(blue.columns == .two)
         #expect(blue.textAlign == "justify")
         value.onePagePerScreen = true
         value.scroll = true
         let onePage = EpubRendering(value, systemDark: false)
         #expect(onePage.columns == .one && !onePage.scroll)
-        // The publisher's face is no face of ours; system colours follow the device.
+        // The book's own face is no face of ours; system colours follow the device: Paper by day, Dark at night.
+        #expect(EpubRendering(EpubReaderPreferences(fontFamily: "publisher"), systemDark: false).fontFamily == nil)
         let system = EpubRendering(EpubReaderPreferences(theme: .system), systemDark: true)
-        #expect(system.fontFamily == nil)
-        #expect(system.theme == "dark" && system.background == "#202020")
+        #expect(system.fontFamily == "Literata")
+        #expect(system.theme == "dark" && system.background == "#000000" && system.text == "#AFAFAF")
         #expect(EpubRendering(EpubReaderPreferences(theme: .system), systemDark: false).background == "#FBFAF6")
         #expect(EpubRendering(EpubReaderPreferences(), systemDark: false).theme == "sepia")
+        // Kindle's Sepia, Dim (the old grey, softer words) and Dark, as measured.
+        let sepia = EpubRendering(EpubReaderPreferences(theme: .sepia), systemDark: false)
+        #expect(sepia.background == "#FCF0D9" && sepia.text == "#5A4931")
+        let dim = EpubRendering(EpubReaderPreferences(theme: .dark), systemDark: false)
+        #expect(dim.theme == "dark" && dim.background == "#202020" && dim.text == "#C8C8C2")
+        let dark = EpubRendering(EpubReaderPreferences(theme: .black), systemDark: false)
+        #expect(dark.theme == "dark" && dark.background == "#000000" && dark.text == "#AFAFAF")
+        #expect(EpubAppearance.themes.map(\.label) == ["Paper", "Sepia", "Dim", "Dark", "Blue"])
+        #expect(EpubTheme.black.rawValue == "BLACK" && EpubTheme.dark.rawValue == "DARK", "the stored names stay")
     }
 
     @Test func theAppearanceIsKeptForEveryBookAndReadBackWithinItsLimits() throws {
         let defaults = try #require(UserDefaults(suiteName: "book-appearance-\(UUID().uuidString)"))
         #expect(EpubAppearanceStore.load(defaults) == EpubReaderPreferences())
-        let chosen = EpubReaderPreferences(theme: .dark, fontFamily: "serif", fontScale: 1.4, lineHeight: 1.5,
+        let chosen = EpubReaderPreferences(theme: .dark, fontFamily: "charter", fontScale: 1.4, lineHeight: 1.5,
                                            pageMargins: 1.7, columns: .one, scroll: true, publisherStyles: false,
                                            textAlignment: "justify")
         EpubAppearanceStore.save(chosen, to: defaults)
@@ -385,15 +395,49 @@ struct BookReaderRulesTests {
                                        ("pageMargins", 1.0), ("columns", "AUTO"), ("publisherStyles", true), ("scroll", false),
                                        ("textAlignment", "start"), ("onePagePerScreen", false)]
         for (key, value) in stored { defaults.set(value, forKey: "epub." + key) }
+        // The update brings it Literata once (#47); its size, theme, spacing and alignment stay as they were.
         let kept = EpubAppearanceStore.load(defaults)
-        #expect(kept == EpubReaderPreferences(theme: .dark, fontScale: 1.2, lineHeight: 1.25, publisherStyles: true,
-                                              textAlignment: "start", hyphens: false))
+        #expect(kept == EpubReaderPreferences(theme: .dark, fontFamily: "literata", fontScale: 1.2, lineHeight: 1.25,
+                                              publisherStyles: false, textAlignment: "start", hyphens: false))
+        // And only once: a typeface chosen since, or the book's own, is not switched again.
+        var chosen = kept
+        chosen.fontFamily = "publisher"
+        chosen.publisherStyles = true
+        EpubAppearanceStore.save(chosen, to: defaults)
+        #expect(EpubAppearanceStore.load(defaults) == chosen)
+    }
+
+    /// Kindle's three spacings replace 1.1 and 1.9 (#47): a device that had one of those has the nearest.
+    @Test func aKeptSpacingThatKindleDoesNotOfferMovesToTheNearest() throws {
+        for (before, after) in [(1.1, 1.3), (1.9, 1.8), (1.5, 1.5)] {
+            let defaults = try #require(UserDefaults(suiteName: "book-appearance-\(UUID().uuidString)"))
+            defaults.set("SEPIA", forKey: "epub.theme")
+            defaults.set("serif", forKey: "epub.fontFamily")
+            defaults.set(before, forKey: "epub.lineHeight")
+            let kept = EpubAppearanceStore.load(defaults)
+            #expect(kept.lineHeight == after, "\(before)")
+            #expect(kept.fontFamily == "literata", "Serif, which was Times, is gone")
+        }
+        #expect(EpubAppearance.spacing.map(\.amount) == [1.3, 1.5, 1.8])
+    }
+
+    /// A new device starts at 130% on a tablet and 120% on a phone, in Literata; a size chosen is kept.
+    @Test func aNewDeviceStartsInLiterataAtItsOwnSize() throws {
+        let defaults = try #require(UserDefaults(suiteName: "book-appearance-\(UUID().uuidString)"))
+        #expect(EpubAppearanceStore.load(defaults).fontScale == 1.3)
+        #expect(EpubAppearanceStore.load(defaults).fontFamily == "literata")
+        let phone = try #require(UserDefaults(suiteName: "book-appearance-\(UUID().uuidString)"))
+        #expect(EpubAppearanceStore.load(phone, startingScale: EpubReaderPreferences.phoneScale).fontScale == 1.2)
+        var chosen = EpubReaderPreferences(fontScale: 1.5)
+        chosen.theme = .black
+        EpubAppearanceStore.save(chosen, to: phone)
+        #expect(EpubAppearanceStore.load(phone, startingScale: EpubReaderPreferences.phoneScale) == chosen)
     }
 
     /// Reset text style (#42): a look kept from before gets the defaults'
     /// typography, and keeps its size, typeface, theme, margins and columns.
     @Test func resetTextStyleBringsTheDefaultsTypographyAndKeepsTheRest() throws {
-        let kept = EpubReaderPreferences(theme: .dark, fontFamily: "serif", fontScale: 1.4, lineHeight: 1.1, pageMargins: 1.7,
+        let kept = EpubReaderPreferences(theme: .dark, fontFamily: "charter", fontScale: 1.4, lineHeight: 1.1, pageMargins: 1.7,
                                          columns: .two, scroll: false, publisherStyles: true, textAlignment: "start",
                                          onePagePerScreen: false, hyphens: false)
         let reset = EpubAppearance.resetTextStyle(kept)
@@ -401,12 +445,13 @@ struct BookReaderRulesTests {
         #expect(!reset.publisherStyles && reset.textAlignment == "justify" && reset.hyphens && reset.lineHeight == 1.5)
         #expect(reset.publisherStyles == start.publisherStyles && reset.textAlignment == start.textAlignment
                 && reset.hyphens == start.hyphens && reset.lineHeight == start.lineHeight)
-        #expect(reset.theme == .dark && reset.fontFamily == "serif" && reset.fontScale == 1.4 && reset.pageMargins == 1.7
+        #expect(reset.theme == .dark && reset.fontScale == 1.4 && reset.pageMargins == 1.7
                 && reset.columns == .two && !reset.scroll && !reset.onePagePerScreen)
+        #expect(reset.fontFamily == "literata", "it sets the typeface too (#47)")
         // Pressed again it changes nothing, and the defaults themselves are left as they are.
         #expect(EpubAppearance.resetTextStyle(reset) == reset)
         #expect(EpubAppearance.resetTextStyle(start) == start)
-        #expect(EpubAppearance.resetTextStyleDetail == "Justified, hyphenated, 1.5 spacing")
+        #expect(EpubAppearance.resetTextStyleDetail == "Literata, justified, hyphenated, 1.5 spacing")
         // Kept like any change: read back as set, hyphenation and all.
         let defaults = try #require(UserDefaults(suiteName: "book-appearance-\(UUID().uuidString)"))
         EpubAppearanceStore.save(reset, to: defaults)

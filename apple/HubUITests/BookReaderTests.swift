@@ -100,10 +100,14 @@ final class BookReaderTests: XCTestCase {
         let themes = app.buttons["Themes"]
         XCTAssertTrue(themes.waitForExistence(timeout: 15), "Appearance did not open")
         themes.tap()
-        let night = app.buttons["Night"]
-        XCTAssertTrue(night.waitForExistence(timeout: 5))
-        night.tap()
-        XCTAssertTrue(waitUntil(5) { night.isSelected }, "Night was not chosen")
+        // Night is Dim now, and a true-black Dark beside it (#47).
+        let dim = app.buttons["Dim"]
+        XCTAssertTrue(dim.waitForExistence(timeout: 5))
+        dim.tap()
+        XCTAssertTrue(waitUntil(5) { dim.isSelected }, "Dim was not chosen")
+        let dark = app.buttons["Dark"]
+        dark.tap()
+        XCTAssertTrue(waitUntil(5) { dark.isSelected && !dim.isSelected }, "Dark was not chosen")
         // As every other test reads it.
         app.buttons["Sepia"].tap()
         XCTAssertTrue(waitUntil(5) { app.buttons["Sepia"].isSelected })
@@ -331,7 +335,7 @@ final class BookReaderTests: XCTestCase {
                       "the kept look reads \(justified.label) / \(hyphenation.label) / \(publisher.label)")
         let reset = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Reset text style'")).firstMatch
         XCTAssertTrue(reset.exists, "Layout has no Reset text style")
-        XCTAssertTrue(reset.label.contains("Justified, hyphenated, 1.5 spacing"), "Reset text style says \(reset.label)")
+        XCTAssertTrue(reset.label.contains("Literata, justified, hyphenated, 1.5 spacing"), "Reset text style says \(reset.label)")
         reset.tap()
         XCTAssertTrue(waitUntil(5) { justified.label.hasSuffix("On") }, "Justified text says \(justified.label)")
         XCTAssertTrue(hyphenation.label.hasSuffix("On"), "Hyphenation says \(hyphenation.label)")
