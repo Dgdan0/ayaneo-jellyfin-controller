@@ -187,10 +187,12 @@ private struct PadChoiceRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SheetRowStyle())
-        .padFocusable(choice.id, ring: .none, press: action)
-        .sheetDivider()
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("pad-choice-\(choice.id)")
+        // Outside the combined row, never inside it: inside, the focus's anchor and ring made
+        // the row a button holding its own button, met twice by VoiceOver and the tests (#46).
+        .padFocusable(choice.id, ring: .none, press: action)
+        .sheetDivider()
     }
 }
 
