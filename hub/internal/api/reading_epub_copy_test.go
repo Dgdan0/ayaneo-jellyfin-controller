@@ -341,6 +341,23 @@ func TestEbookFallsBackToStorytellersFileWhenThereIsNoCopyToServe(t *testing.T) 
 	}
 }
 
+// On the pass-through an app asking about the book it kept, by Storyteller's tag, is
+// told it is current rather than sent the whole book on every opening.
+func TestStorytellersFileAnswersTheTagAnAppKeptWithNotModified(t *testing.T) {
+	env := newEbookEnv(t, ebookOptions{edit: func(path string) { os.Remove(path) }})
+	env.state.noFiles = false
+	for _, kept := range []string{`"edition-12"`, `W/"edition-12"`, `"older", "edition-12"`, `*`} {
+		response := env.ebook(map[string]string{"If-None-Match": kept})
+		if response.Code != http.StatusNotModified || response.Body.Len() != 0 || response.Header().Get("ETag") != `"edition-12"` {
+			t.Fatalf("If-None-Match %s = %d %q (etag %q)", kept, response.Code, response.Body.String(), response.Header().Get("ETag"))
+		}
+	}
+	response := env.ebook(map[string]string{"If-None-Match": `"older"`})
+	if response.Code != http.StatusPartialContent || response.Body.String() != "4567" {
+		t.Fatalf("another tag = %d %q", response.Code, response.Body.String())
+	}
+}
+
 // A book of illustrations is a hundred megabytes and the reader may be a phone on a
 // slow link. Over a real connection, with the server's write timeout far shorter than
 // the transfer, as the track tests do (reading_audio_track_test.go).

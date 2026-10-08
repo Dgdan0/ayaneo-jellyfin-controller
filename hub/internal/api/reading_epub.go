@@ -102,6 +102,16 @@ func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadGateway, Error{Code: CodeUpstreamDown, Service: "storyteller", Message: "Storyteller returned an invalid publication response", Retryable: true})
 		return
 	}
+	// Both apps ask about a kept book with its ETag when it opens (#41). Storyteller
+	// answers in full whatever it is sent, so on this path, a book the hub could not
+	// make a reading copy of, every opening fetched the whole book again. Its tag
+	// matching the one kept is the answer the app is asking for.
+	if etag := response.Header.Get("ETag"); etag != "" && etagListMatches(r.Header.Get("If-None-Match"), etag) {
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	if err := prepareLongStream(w); err != nil {
 		writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "the EPUB stream could not be prepared", Retryable: true})
 		return
@@ -127,6 +137,25 @@ func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(response.StatusCode)
 	_, _ = io.CopyBuffer(w, response.Body, make([]byte, 128<<10))
+}
+
+// etagListMatches is If-None-Match's weak comparison: `*`, or any tag in the list
+// equal to etag once a `W/` is set aside.
+func etagListMatches(header, etag string) bool {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return false
+	}
+	if header == "*" {
+		return true
+	}
+	weak := func(tag string) string { return strings.TrimPrefix(strings.TrimSpace(tag), "W/") }
+	for _, tag := range strings.Split(header, ",") {
+		if weak(tag) == weak(etag) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Request) {
