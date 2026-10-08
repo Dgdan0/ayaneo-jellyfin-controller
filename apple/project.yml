@@ -142,6 +142,8 @@ targets:
       - path: HubUITests
     dependencies:
       - target: Hub
+      # The layout's own rules, so a test asks them (the reader's margin) rather than repeating a number.
+      - package: HubKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dgdan.jellyhub.uitests

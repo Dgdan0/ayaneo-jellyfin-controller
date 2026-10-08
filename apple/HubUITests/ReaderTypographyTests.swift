@@ -1,3 +1,4 @@
+import HubKit
 import UIKit
 import XCTest
 
@@ -90,8 +91,9 @@ final class ReaderTypographyTests: XCTestCase {
 
     // MARK: The margins
 
-    /// Kindle's 24 points on a phone: the corners' title and time line up with the text's edge, and a
-    /// tap or swipe in the margin outside Readium's own view turns the page.
+    /// Kindle's outer margin (24 points on a phone, 90 on an iPad's wide window): the corners' title and
+    /// time line up with the text's edge, and a tap or swipe in the margin outside Readium's own view turns
+    /// the page. The margin is asked of the rule the layout uses, so the test holds on either device.
     @MainActor
     func testTheCornersLineUpWithTheTextAndTheMarginTurnsThePage() {
         let app = launchReading()
@@ -102,10 +104,13 @@ final class ReaderTypographyTests: XCTestCase {
         XCTAssertEqual(title.label, "Reading Recursion")
         XCTAssertTrue(clock.waitForExistence(timeout: 5))
         let width = page(app).frame.width
-        // The title is in the middle, and the clock ends where the text does: Kindle's margin, 24 points on a phone.
+        // Balanced is the default (`pageMargins` 1); an iPad's window under 600 points wide is laid out as a phone's.
+        let margin = EpubGeometry.outerMargin(pageMargins: 1, tablet: UIDevice.current.userInterfaceIdiom != .phone,
+                                              width: Double(width))
+        // The title is in the middle, and the clock ends where the text does: Kindle's margin.
         XCTAssertEqual(title.frame.midX, width / 2, accuracy: 2, "the title is not centred")
-        XCTAssertEqual(width - clock.frame.maxX, 24, accuracy: 3, "the clock is not on the text's edge")
-        XCTAssertEqual(place.frame.minX, 24, accuracy: 3, "the bottom left is not on the text's edge")
+        XCTAssertEqual(width - clock.frame.maxX, margin, accuracy: 3, "the clock is not on the text's edge (\(margin))")
+        XCTAssertEqual(place.frame.minX, margin, accuracy: 3, "the bottom left is not on the text's edge (\(margin))")
         XCTAssertLessThan(title.frame.maxY, 62, "the title is in the strip above the text")
         // Its tap reaches a little above the words, which are in the strip below the text.
         XCTAssertGreaterThanOrEqual(place.frame.minY, page(app).frame.height - 62 - 8, "the bottom left is in the strip below the text")
