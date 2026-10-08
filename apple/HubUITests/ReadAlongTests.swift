@@ -253,7 +253,8 @@ final class ReadAlongTests: XCTestCase {
     func testTurnedSidewaysTheVoiceStillTurnsThePage() throws {
         // Sideways a phone's page is short: from a smaller size, at which its breaks fall inside sentences
         // (at 2.2 they fell between paragraphs, which a page break keeps whole when it can).
-        let app = try launchOverPages(2, ["HUB_BOOK_COLUMNS": "TWO"], sizes: ["1.8"] + Self.sizes) { app in
+        // Three pages or more, as the others: with two, a chapter's one break can fall between paragraphs.
+        let app = try launchOverPages(3, ["HUB_BOOK_COLUMNS": "TWO"], sizes: ["1.8"] + Self.sizes) { app in
             // Turned once the app is up, and measured only once its window is wide.
             let window = app.windows.firstMatch
             for orientation in [UIDeviceOrientation.landscapeLeft, .landscapeRight]
