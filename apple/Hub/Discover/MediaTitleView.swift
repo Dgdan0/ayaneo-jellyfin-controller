@@ -65,10 +65,13 @@ struct MediaTitleView: View {
                             cast(detail)
                         }
                     }
+                    // A controller goes down the page (#46): Read more, the actions, the cast.
+                    .padGroup("page", .column, members: padColumn, prefix: false)
                 }
                 .padding(.bottom, 28)
             }
             .ignoresSafeArea(edges: .top)
+            .padPage("media:\(route.key)")
         }
         .ambientArtwork(backdrop)
         .refreshable { reloads += 1 }
@@ -85,6 +88,12 @@ struct MediaTitleView: View {
     private var shownStatus: StatusMessage {
         if !status.text.isEmpty { return status }
         return notice.isEmpty ? StatusMessage("") : StatusMessage(notice)
+    }
+
+    /// The page's lines for a controller, top to bottom (#46).
+    private var padColumn: [String] {
+        guard let detail else { return [] }
+        return (detail.overview.isEmpty ? [] : ["read-more"]) + ["actions"] + (detail.cast.isEmpty ? [] : ["cast"])
     }
 
     // MARK: Header
@@ -133,6 +142,7 @@ struct MediaTitleView: View {
                 .font(HubType.body(13, weight: .bold, relativeTo: .footnote))
                 .foregroundStyle(.white.opacity(0.7))
                 .buttonStyle(.plain)
+                .padFocusable("read-more", ring: .rounded(4)) { expanded.toggle() }
         }
     }
 
@@ -148,6 +158,7 @@ struct MediaTitleView: View {
                     Label("Request", systemImage: "plus")
                 }
                 .buttonStyle(PrimaryPillStyle())
+                .padFocusable("request") { requestOpen = true }
             }
             Button {
                 findRelease(detail)
@@ -155,9 +166,10 @@ struct MediaTitleView: View {
                 Label("Find release", systemImage: "magnifyingglass")
             }
             .buttonStyle(GlassPillStyle())
+            .padFocusable("find-release") { findRelease(detail) }
             if let url = URL(string: detail.trailerUrl), !detail.trailerUrl.isEmpty {
                 if metrics.small && canRequest {
-                    GlassRoundButton(systemImage: "play.rectangle", label: "Trailer", size: 42) { openURL(url) }
+                    GlassRoundButton(systemImage: "play.rectangle", label: "Trailer", size: 42, pad: "trailer") { openURL(url) }
                 } else {
                     Button {
                         openURL(url)
@@ -165,9 +177,12 @@ struct MediaTitleView: View {
                         Label("Trailer", systemImage: "play.rectangle")
                     }
                     .buttonStyle(GlassPillStyle())
+                    .padFocusable("trailer") { openURL(url) }
                 }
             }
         }
+        .padGroup("actions", .row, members: (canRequest ? ["request"] : []) + ["find-release"]
+                  + (URL(string: detail.trailerUrl) != nil && !detail.trailerUrl.isEmpty ? ["trailer"] : []), prefix: false)
     }
 
     /// A film's releases at once; a series' season and aired episodes first.
@@ -219,12 +234,16 @@ struct MediaTitleView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("Opens their films and series")
+                        .padFocusable("\(member.id)", ring: .rounded(12)) {
+                            openRoute(.person(PersonRoute(id: member.id, name: member.name)))
+                        }
                     }
                 }
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 14)
                 .padding(.bottom, 18)
             }
+            .padGroup("cast", .row, members: detail.cast.map { "\($0.id)" }, strip: true)
         }
     }
 

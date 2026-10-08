@@ -66,12 +66,14 @@ struct LibraryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 10) {
-                    GlassSearchField(placeholder: "Search your Jellyfin library", query: $query)
+                    GlassSearchField(placeholder: "Search your Jellyfin library", query: $query, pad: "search")
                     NavigationLink(value: AppRoute.folder(.favourites)) {
                         Label("Favourites", systemImage: "star")
                     }
                     .buttonStyle(GlassControlStyle())
+                    .padFocusable("favourites") { openRoute(.folder(.favourites)) }
                 }
+                .padGroup("top", .row, members: ["search", "favourites"], prefix: false)
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 4)
                 if searchText.count >= 2 {
@@ -118,6 +120,7 @@ struct LibraryView: View {
                             }
                             .buttonStyle(GlassControlStyle())
                             .accessibilityIdentifier("arrange-libraries")
+                            .padFocusable("arrange") { arranging ? finishArranging() : startArranging() }
                         }
                     }
                     .padding(.horizontal, metrics.margin)
@@ -130,13 +133,19 @@ struct LibraryView: View {
                             tile(folder, index: index)
                         }
                     }
+                    // A controller goes through the libraries as a grid (#46).
+                    .padGroup("libraries", .grid(columns: 0), members: arranging ? [] : shownFolders.map(\.id))
                     .padding(.horizontal, metrics.margin)
                     .padding(.top, 14)
                     .padding(.bottom, 30)
                     .onDrop(of: [.text], delegate: LibraryDropFallback(dragging: $dragging, editor: editor, model: model))
                 }
             }
+            // Down the page (#46): the search and Favourites, Arrange, the libraries or the matches.
+            .padGroup("page", .column, members: searchText.count >= 2 ? ["top", "grid"]
+                      : ["top"] + (folders.count > 1 ? ["arrange"] : []) + ["libraries"], prefix: false)
         }
+        .padPage("media-libraries")
         .ambientArtwork(searchText.count >= 2 ? "" : (lit ?? folders.first.map(art(of:)) ?? ""))
         .refreshable { await loadFolders() }
         .task(id: "\(model.userId)·\(model.libraryOrderChanges)") { await loadFolders() }
@@ -178,6 +187,7 @@ struct LibraryView: View {
                 }
                 #endif
                 .accessibilityAction(named: "Arrange libraries", startArranging)
+                .padFocusable(folder.id, ring: .card) { openRoute(.folder(FolderRoute(id: folder.id, name: folder.name))) }
         }
     }
 
@@ -345,6 +355,8 @@ struct FolderView: View {
     @State private var query = ""
     /// Debug builds: HUB_SHEET=search:<words> opens the search with them, once.
     @State private var debugSearched = false
+    /// The order's fields, for a controller's Ⓐ on its menu (#46).
+    @State private var choosingSort = false
 
     private var source: GridSource {
         route == .favourites ? .favourites : .folder(id: route.id, name: route.name, sort: sort)
@@ -368,7 +380,7 @@ struct FolderView: View {
                     .padding(.horizontal, metrics.margin)
                     .padding(.top, 4)
                 if searching {
-                    GlassSearchField(placeholder: searchPlaceholder, query: $query, autofocus: !debugSearched)
+                    GlassSearchField(placeholder: searchPlaceholder, query: $query, autofocus: !debugSearched, pad: "search")
                         .padding(.horizontal, metrics.margin)
                         .padding(.top, 12)
                 }
@@ -385,6 +397,15 @@ struct FolderView: View {
                     LibraryGrid(source: source)
                         .id("\(refreshes)·\(String(describing: source))")
                 }
+            }
+            // A controller goes down the page (#46): the libraries, the controls, the search, the grid.
+            .padGroup("folder", .column, members: ["libraries", "controls"] + (searching ? ["search"] : []) + ["grid"],
+                      prefix: false)
+        }
+        .padPage("folder:\(route.id)")
+        .confirmationDialog("Sort by", isPresented: $choosingSort) {
+            ForEach(SortPreference.mediaFields, id: \.id) { field in
+                Button(field.label) { setSort(SortPreference.forField(field.id)) }
             }
         }
         .refreshable { refreshes += 1 }
@@ -406,7 +427,8 @@ struct FolderView: View {
     /// The round search: open, it takes the keyboard; pressed again, it closes
     /// and the library's titles come back.
     private var searchButton: some View {
-        GlassRoundButton(systemImage: "magnifyingglass", label: searchPlaceholder, on: searching, size: 42) {
+        GlassRoundButton(systemImage: "magnifyingglass", label: searchPlaceholder, on: searching, size: 42,
+                         pad: "search-button") {
             withAnimation(.easeInOut(duration: 0.2)) {
                 searching.toggle()
                 if !searching { query = "" }
@@ -418,7 +440,7 @@ struct FolderView: View {
         let capsule = GlassCapsulePicker(
             items: folders.map { GlassCapsulePicker<String>.Item(id: $0.id, title: $0.name) }
                 + [GlassCapsulePicker<String>.Item(id: FolderRoute.favourites.id, title: "Favourites", systemImage: "star.fill")],
-            selection: route.id) { id in
+            selection: route.id, pad: "libraries") { id in
                 let name = folders.first(where: { $0.id == id })?.name ?? FolderRoute.favourites.name
                 navigation.replace(.folder(FolderRoute(id: id, name: name)))
             }
@@ -437,6 +459,9 @@ struct FolderView: View {
                 }
             }
         }
+        // The search and the order: a row after the libraries.
+        .padGroup("controls", .row, members: ["search-button"] + (route == .favourites ? [] : ["sort-field", "sort-direction"]),
+                  prefix: false)
     }
 
     /// Android's `LibrarySortControls`: the field as a menu ("Name ▾") and the
@@ -454,6 +479,7 @@ struct FolderView: View {
             }
             .menuStyle(.button)
             .buttonStyle(GlassControlStyle())
+            .padFocusableBehind("sort-field") { choosingSort = true }
             Button {
                 setSort(SortPreference(field: sort.field, ascending: !sort.ascending))
             } label: {
@@ -461,6 +487,7 @@ struct FolderView: View {
             }
             .buttonStyle(GlassControlStyle())
             .accessibilityHint("Reverses the sort")
+            .padFocusable("sort-direction") { setSort(SortPreference(field: sort.field, ascending: !sort.ascending)) }
         }
         .fixedSize()
     }
@@ -555,8 +582,13 @@ struct LibraryGrid: View {
                         // Six cards before the end, as on Android.
                         if index >= items.count - 6 { Task { await loadNext() } }
                     }
+                    .padFocusable(hit.jellyfinItemId.isEmpty ? nil : hit.id, ring: .card) {
+                        openRoute(.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title)))
+                    }
                 }
             }
+            // A controller goes through the titles as a grid (#46).
+            .padGroup("grid", .grid(columns: 0), members: items.filter { !$0.jellyfinItemId.isEmpty }.map(\.id))
             .padding(.horizontal, metrics.margin)
             .padding(.top, 14)
             .padding(.bottom, 26)

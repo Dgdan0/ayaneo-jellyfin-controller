@@ -44,6 +44,10 @@ struct PlaybackSettingsPane: View {
                 }
                 .tint(accent.tint)
                 .accessibilityIdentifier("auto-skip-intro")
+                .padFocusableBehind("auto-skip-intro", ring: .rounded(12)) {
+                    autoSkip.toggle()
+                    PlaybackSettings.autoSkipIntro = autoSkip
+                }
             }
         }
     }
@@ -72,7 +76,7 @@ struct PlaybackSettingsPane: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(choices, id: \.self) { choice in
-                    ChoicePill(title: label(choice), selected: choice == selected) { choose(choice) }
+                    ChoicePill(title: label(choice), selected: choice == selected, pad: id(choice)) { choose(choice) }
                         .accessibilityIdentifier(id(choice))
                 }
             }

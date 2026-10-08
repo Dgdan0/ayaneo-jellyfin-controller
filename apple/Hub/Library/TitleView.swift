@@ -23,6 +23,8 @@ struct TitleView: View {
     /// Whether the person has picked a tab: until then the first one shows,
     /// even when More like this arrives after Cast.
     @State private var tabChosen = false
+    /// The round "…"'s choices, for a controller's Ⓐ on it (#46).
+    @State private var moreOpen = false
 
     @State private var target: SeriesPlayTarget?
     @State private var targetFailed = false
@@ -76,16 +78,25 @@ struct TitleView: View {
                             .padding(.horizontal, metrics.margin)
                             .padding(.top, 8)
                         if item != nil, !tabs.isEmpty {
-                            UnderlineTabs(tabs: tabs, selection: Binding(get: { tab }, set: { tab = $0; tabChosen = true }))
+                            UnderlineTabs(tabs: tabs, selection: Binding(get: { tab }, set: { tab = $0; tabChosen = true }),
+                                          pad: "tabs")
                                 .padding(.horizontal, metrics.margin)
                                 .padding(.top, 14)
                             tabContent
                         }
                     }
+                    // A controller goes down the page (#46): the series' name, Read more, the
+                    // actions, the tabs, then what the tab shows.
+                    .padGroup("page", .column, members: padColumn, prefix: false)
                 }
                 .padding(.bottom, 28)
             }
             .ignoresSafeArea(edges: .top)
+            .padPage("title:\(route.itemId)")
+        }
+        .confirmationDialog(item.map { "More actions for \($0.title)" } ?? "More actions", isPresented: $moreOpen,
+                            titleVisibility: .visible) {
+            if let item { moreChoices(item) }
         }
         .ambientArtwork(backdropPath)
         .refreshable { await load() }
@@ -117,6 +128,23 @@ struct TitleView: View {
         }
     }
 
+    /// The page's lines for a controller, top to bottom (#46). The season
+    /// pills and the episodes join when they are shared with the downloaded
+    /// series' page.
+    private var padColumn: [String] {
+        guard let item else { return [] }
+        var lines: [String] = []
+        if item.type == "episode", !item.seriesTitle.isEmpty, !item.seriesId.isEmpty { lines.append("series") }
+        if !item.overview.isEmpty { lines.append("read-more") }
+        lines += ["actions", "tabs"]
+        switch tab {
+        case .similar: lines.append("similar")
+        case .cast: lines.append("cast")
+        case .episodes, .details: break
+        }
+        return lines
+    }
+
     // MARK: Header
 
     private var backdropPath: String {
@@ -137,6 +165,9 @@ struct TitleView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(item.seriesId.isEmpty)
+                .padFocusable(item.seriesId.isEmpty ? nil : "series", ring: .rounded(4)) {
+                    openRoute(.title(TitleRoute(itemId: item.seriesId, title: item.seriesTitle)))
+                }
             }
             Text(item?.title ?? route.title)
                 .font(HubType.heading(page.heroTitle, weight: .heavy))
@@ -184,6 +215,7 @@ struct TitleView: View {
                 .font(HubType.body(13, weight: .bold, relativeTo: .footnote))
                 .foregroundStyle(.white.opacity(0.7))
                 .buttonStyle(.plain)
+                .padFocusable("read-more", ring: .rounded(4)) { expanded.toggle() }
         }
     }
 
@@ -199,11 +231,13 @@ struct TitleView: View {
                 }
                 .buttonStyle(PrimaryPillStyle())
                 .disabled(item.type == "series" && target == nil)
+                .padFocusable("play") { playMain(item) }
                 if DetailLines.offersStartOver(item) {
                     // A glass pill on an iPad or a Mac (the prototype's `.bg`), a
                     // round button where a phone's row has no room for the words.
                     if metrics.small {
-                        GlassRoundButton(systemImage: "arrow.counterclockwise", label: "Start over", size: 42) {
+                        GlassRoundButton(systemImage: "arrow.counterclockwise", label: "Start over", size: 42,
+                                         pad: "start-over") {
                             play(request(for: item, mode: .restart))
                         }
                     } else {
@@ -213,26 +247,43 @@ struct TitleView: View {
                             Label("Start over", systemImage: "arrow.counterclockwise")
                         }
                         .buttonStyle(GlassPillStyle())
+                        .padFocusable("start-over") { play(request(for: item, mode: .restart)) }
                     }
                 }
                 GlassRoundButton(systemImage: item.played ? "eye.fill" : "eye",
                                  label: item.played ? "Mark unwatched" : "Mark watched", on: item.played,
-                                 size: metrics.small ? 42 : 46) {
+                                 size: metrics.small ? 42 : 46, pad: "watched") {
                     Task { await change(.played(!item.played)) }
                 }
                 .disabled(saving)
             }
             GlassRoundButton(systemImage: item.favorite ? "star.fill" : "star",
                              label: item.favorite ? "Remove from favourites" : "Favourite", on: item.favorite,
-                             size: metrics.small ? 42 : 46) {
+                             size: metrics.small ? 42 : 46, pad: "favourite") {
                 Task { await change(.favorite(!item.favorite)) }
             }
             .disabled(saving)
             if item.type != "season" {
-                DownloadButton(item: item, size: metrics.small ? 42 : 46)
+                DownloadButton(item: item, size: metrics.small ? 42 : 46, pad: "download")
             }
             more(item)
         }
+        // The actions in a row (#46).
+        .padGroup("actions", .row, members: actionIds(item), prefix: false)
+    }
+
+    /// The actions' ids for a controller, in their order.
+    private func actionIds(_ item: HubKit.LibraryItem) -> [String] {
+        var ids: [String] = []
+        if item.type != "season" {
+            ids.append("play")
+            if DetailLines.offersStartOver(item) { ids.append("start-over") }
+            ids.append("watched")
+        }
+        ids.append("favourite")
+        if item.type != "season" { ids.append("download") }
+        ids.append("more")
+        return ids
     }
 
     /// The round "…" (Android's More actions): subtitles for a film or an
@@ -240,6 +291,26 @@ struct TitleView: View {
     /// last, in its own words (#34).
     private func more(_ item: HubKit.LibraryItem) -> some View {
         Menu {
+            moreChoices(item)
+        } label: {
+            let size: CGFloat = metrics.small ? 42 : 46
+            Image(systemName: "ellipsis")
+                .font(.system(size: size * 0.4, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .glassPanel(Circle())
+                .contentShape(Circle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .accessibilityLabel("More actions")
+        .accessibilityIdentifier("title-more")
+        // A menu cannot be opened for a controller: Ⓐ asks its choices as a dialog.
+        .padFocusableBehind("more", ring: .circle) { moreOpen = true }
+    }
+
+    /// The "…"'s choices, in its menu and in the dialog a controller opens.
+    @ViewBuilder private func moreChoices(_ item: HubKit.LibraryItem) -> some View {
             if LibraryUpkeep.offersSubtitles(item) {
                 Button {
                     openRoute(.subtitles(SubtitlesRoute(itemId: item.id, title: LibraryUpkeep.pageTitle(item))))
@@ -262,19 +333,6 @@ struct TitleView: View {
                     Label(RemovalLines.heading, systemImage: "trash")
                 }
             }
-        } label: {
-            let size: CGFloat = metrics.small ? 42 : 46
-            Image(systemName: "ellipsis")
-                .font(.system(size: size * 0.4, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: size, height: size)
-                .glassPanel(Circle())
-                .contentShape(Circle())
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .accessibilityLabel("More actions")
-        .accessibilityIdentifier("title-more")
     }
 
     /// A series' seasons and aired episodes to search for releases, on the
@@ -467,12 +525,16 @@ struct TitleView: View {
                     }
                     .buttonStyle(GlassCardStyle())
                     .disabled(hit.jellyfinItemId.isEmpty)
+                    .padFocusable(hit.jellyfinItemId.isEmpty ? nil : hit.id, ring: .card) {
+                        openRoute(.title(TitleRoute(itemId: hit.jellyfinItemId, title: hit.media.title)))
+                    }
                 }
             }
             .padding(.horizontal, metrics.margin)
             .padding(.top, 12)
             .padding(.bottom, 16)
         }
+        .padGroup("similar", .row, members: similar.filter { !$0.jellyfinItemId.isEmpty }.map(\.id), strip: true)
     }
 
     /// The prototype's `.people`: a round portrait for each, name and part
@@ -488,6 +550,9 @@ struct TitleView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("Opens their films and series")
+                        .padFocusable(person.id, ring: .rounded(12)) {
+                            openRoute(.person(PersonRoute(id: person.tmdbId, name: person.name)))
+                        }
                     } else {
                         PersonCard(person: person)
                     }
@@ -497,6 +562,7 @@ struct TitleView: View {
             .padding(.top, 16)
             .padding(.bottom, 18)
         }
+        .padGroup("cast", .row, members: DetailLines.cast(item).filter { $0.tmdbId > 0 }.map(\.id), strip: true)
     }
 
     /// The prototype's `.dl`: small capitals over each value, in columns.

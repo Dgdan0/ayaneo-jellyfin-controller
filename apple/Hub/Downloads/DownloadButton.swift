@@ -9,6 +9,8 @@ import SwiftUI
 struct DownloadButton: View {
     let item: HubKit.LibraryItem
     var size: CGFloat = 46
+    /// Its id for a controller's focus (#46).
+    var pad: String?
     @Environment(\.openRoute) private var openRoute
     @State private var offline = OfflineLibrary.shared
     @State private var asking = false
@@ -51,6 +53,7 @@ struct DownloadButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel(state.label)
         .accessibilityIdentifier("title-download")
+        .padFocusable(pad, ring: .circle) { press(state) }
         .confirmationDialog(item.title, isPresented: $choosing, titleVisibility: .visible) {
             Button("Show in Downloads") { openDownloads() }
             Button("Remove from this device", role: .destructive) { askRemove() }

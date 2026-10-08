@@ -62,7 +62,8 @@ final class ControllerTests: XCTestCase {
     @MainActor
     func testThePlayerTakesTheController() {
         let playing = ["HUB_SECTION": "home", "HUB_PLAY": "demo-e5", "HUB_PLAY_CHROME": "pinned", "HUB_PAD_DELAY": "7"]
-        var app = launch(playing.merging(["HUB_PAD": "A,Y"]) { $1 })
+        // Ⓐ well after the video starts, even on a busy Mac (it had not begun at 7 s on an iPad Pro once).
+        var app = launch(playing.merging(["HUB_PAD": "A,Y", "HUB_PAD_DELAY": "11"]) { $1 })
         XCTAssertTrue(app.buttons["Pause"].waitForExistence(timeout: 15), "the video did not play")
         let heading = app.staticTexts.matching(identifier: "panel-heading").firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 15), "Ⓨ did not open a panel")

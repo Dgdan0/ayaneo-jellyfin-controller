@@ -52,14 +52,33 @@ struct DiscoverView: View {
                     browsing
                 }
             }
+            // A controller goes down the page (#46): Discover and Upcoming, the
+            // search or the weeks, then the featured title and the rows, the
+            // results, or the week's days.
+            .padGroup("page", .column, members: padColumn, prefix: false)
             .padding(.bottom, 24)
         }
+        .padPage("discover")
         .ambientArtwork(searching || tab == .upcoming ? "" : (lit ?? featured?.pageArtwork ?? ""))
         .refreshable { if tab == .discover && !searching { await load(force: true) } }
         .task { if rows.isEmpty && !loading { await load(force: false) } }
         .sheet(item: $requesting) { route in
             RequestSheet(key: route.key, fallbackTitle: route.title) { _ in }
         }
+    }
+
+    /// The page's lines for a controller, top to bottom (#46).
+    private var padColumn: [String] {
+        var lines = ["tabs", tab == .upcoming ? "weeks" : "search"]
+        if tab == .upcoming {
+            lines.append("upcoming")
+        } else if searchText.count >= 2 {
+            lines.append("results")
+        } else if !searching {
+            if featured != nil { lines.append("featured") }
+            lines += rows.map { "row-\($0.id)" }
+        }
+        return lines
     }
 
     // MARK: Controls
@@ -70,18 +89,18 @@ struct DiscoverView: View {
         let tabs = GlassCapsulePicker(
             items: [GlassCapsulePicker<Tab>.Item(id: .discover, title: "Discover"),
                     GlassCapsulePicker<Tab>.Item(id: .upcoming, title: "Upcoming")],
-            selection: tab) { chosen in tab = chosen }
+            selection: tab, pad: "tabs") { chosen in tab = chosen }
             .fixedSize()
         let second = Group {
             if tab == .upcoming {
                 ScrollView(.horizontal, showsIndicators: false) {
                     GlassCapsulePicker(items: [-1, 0, 1].map { offset in
                         GlassCapsulePicker<Int>.Item(id: offset, title: UpcomingPresentation.weekLabel(today: today, week: offset))
-                    }, selection: week) { chosen in week = chosen }
+                    }, selection: week, pad: "weeks") { chosen in week = chosen }
                 }
                 .scrollClipDisabled()
             } else {
-                GlassSearchField(placeholder: "Search films and series", query: $query)
+                GlassSearchField(placeholder: "Search films and series", query: $query, pad: "search")
             }
         }
         if metrics.compact {
@@ -112,13 +131,14 @@ struct DiscoverView: View {
             }
             .buttonStyle(GlassCardStyle())
             .previewsWhenFocused { lit = featured.pageArtwork }
+            .padFocusable("featured", ring: .card) { openRoute(featured.route) }
             .padding(.horizontal, metrics.margin)
             .padding(.top, 16)
             .padding(.bottom, 6)
         }
         ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
             let items = index == 0 ? DiscoverFeature.shelf(row.items) : row.items
-            CardRow(title: row.title) {
+            CardRow(title: row.title, pad: "row-\(row.id)", members: items.map(\.media.key)) {
                 ForEach(Array(items.enumerated()), id: \.element.media.key) { position, hit in
                     card(hit)
                         .frame(width: metrics.poster)
@@ -143,6 +163,11 @@ struct DiscoverView: View {
                     Label("Request", systemImage: "plus")
                 }
             }
+        }
+        // Ⓐ opens it; Ⓨ asks for it, as its menu does (#46).
+        .padFocusable(hit.media.key, ring: .card,
+                      hold: shown.canRequest ? { requesting = MediaRoute(key: hit.media.key, title: hit.media.title) } : nil) {
+            openRoute(hit.route)
         }
     }
 
@@ -313,6 +338,7 @@ struct FeaturedCard: View {
 struct DiscoverSearchGrid: View {
     @Environment(AppModel.self) private var model
     @Environment(\.glassMetrics) private var metrics
+    @Environment(\.openRoute) private var openRoute
     let query: String
 
     @State private var items: [MediaHit] = []
@@ -343,8 +369,11 @@ struct DiscoverSearchGrid: View {
                     .buttonStyle(GlassCardStyle())
                     .previewsWhenFocused { lit = hit.pageArtwork }
                     .onAppear { Task { await loadNext(lastVisible: index, retry: false) } }
+                    .padFocusable(hit.media.key, ring: .card) { openRoute(hit.route) }
                 }
             }
+            // A controller goes through the results as a grid (#46).
+            .padGroup("results", .grid(columns: 0), members: items.map(\.media.key))
             .padding(.horizontal, metrics.margin)
             .padding(.top, 14)
         }

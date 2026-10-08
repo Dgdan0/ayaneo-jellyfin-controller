@@ -208,9 +208,10 @@ final class PadFocusCenter {
         if !handle(action) { unhandled(action) }
     }
 
-    /// Whether the focus took `action`.
+    /// Whether the focus took `action`. Under the player only a sheet of its
+    /// own (its panels, `modal`) is the focus's; the player hands it the presses.
     func handle(_ action: PadAction) -> Bool {
-        guard !covered else { return false }
+        guard !covered || activePage?.modal == true else { return false }
         switch action {
         case .step(let direction):
             move(direction)

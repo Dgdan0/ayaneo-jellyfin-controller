@@ -19,6 +19,10 @@ struct RequestSheet: View {
     @State private var status = StatusMessage("")
     @State private var sending = false
     @State private var loads = 0
+    /// A menu's choices asked as a dialog, for a controller's Ⓐ on its row (#46).
+    @State private var choosing: Choosing?
+
+    enum Choosing: Hashable { case profile, folder }
 
     private var isSeries: Bool { draft?.isSeries ?? key.contains(":series:") }
 
@@ -42,9 +46,28 @@ struct RequestSheet: View {
             }
             .buttonStyle(PrimaryPillStyle())
             .disabled(sending || (draft == nil && status.tone != .error))
+            .padFocusable("request", scrolls: false, press: send)
             .padding(.horizontal, 20)
             .padding(.bottom, 24)
             .padding(.top, 6)
+        }
+        // A controller goes down the form and Ⓑ closes it (#46).
+        .padGroup("form", .column, members: padColumn, prefix: false)
+        .padPage("request", modal: true) { if !sending { dismiss() } }
+        .confirmationDialog(choosing == .folder ? "Root folder" : "Quality profile", isPresented: Binding(
+            get: { choosing != nil }, set: { if !$0 { choosing = nil } }), presenting: choosing) { part in
+            if let draft {
+                switch part {
+                case .profile:
+                    ForEach(draft.options.profiles.indices, id: \.self) { index in
+                        Button(draft.options.profiles[index].label) { self.draft?.profileIndex = index }
+                    }
+                case .folder:
+                    ForEach(draft.options.rootFolders.indices, id: \.self) { index in
+                        Button(RequestDraft.folderName(draft.options.rootFolders[index])) { self.draft?.folderIndex = index }
+                    }
+                }
+            }
         }
         .foregroundStyle(.white)
         .presentationBackground { GlassSheetFill() }
@@ -55,6 +78,20 @@ struct RequestSheet: View {
         .frame(minWidth: 460, minHeight: 520)
         #endif
         .task(id: loads) { await loadOptions() }
+    }
+
+    /// The form's lines for a controller, top to bottom (#46).
+    private var padColumn: [String] {
+        var lines = ["close"]
+        if let draft {
+            if !draft.options.profiles.isEmpty { lines.append("profile") }
+            if !draft.options.rootFolders.isEmpty { lines.append("folder") }
+            if draft.isSeries, !draft.seasons.isEmpty {
+                lines.append("all-seasons")
+                if !draft.allSeasons { lines += draft.seasons.map { "season-\($0.number)" } }
+            }
+        }
+        return lines + ["request"]
     }
 
     // MARK: Parts
@@ -72,7 +109,7 @@ struct RequestSheet: View {
                 }
             }
             Spacer(minLength: 8)
-            GlassRoundButton(systemImage: "xmark", label: "Close", size: 38) { dismiss() }
+            GlassRoundButton(systemImage: "xmark", label: "Close", size: 38, pad: "close") { dismiss() }
                 .disabled(sending)
         }
     }
@@ -81,7 +118,8 @@ struct RequestSheet: View {
         if !draft.options.profiles.isEmpty {
             GlassLabel(text: "Quality").padding(.top, 4)
             group {
-                choiceRow(label: "Quality profile", detail: "", value: draft.profile?.label ?? "") {
+                choiceRow(label: "Quality profile", detail: "", value: draft.profile?.label ?? "", pad: "profile",
+                          ask: { choosing = .profile }) {
                     Picker("Quality profile", selection: binding(\.profileIndex)) {
                         ForEach(draft.options.profiles.indices, id: \.self) { index in
                             Text(draft.options.profiles[index].label).tag(index)
@@ -94,7 +132,7 @@ struct RequestSheet: View {
             GlassLabel(text: "Folder").padding(.top, 4)
             group {
                 choiceRow(label: "Root folder", detail: draft.folder.map(RequestDraft.freeSpace) ?? "",
-                          value: draft.folder.map(RequestDraft.folderName) ?? "") {
+                          value: draft.folder.map(RequestDraft.folderName) ?? "", pad: "folder", ask: { choosing = .folder }) {
                     Picker("Root folder", selection: binding(\.folderIndex)) {
                         ForEach(draft.options.rootFolders.indices, id: \.self) { index in
                             Text(RequestDraft.folderName(draft.options.rootFolders[index])).tag(index)
@@ -106,14 +144,14 @@ struct RequestSheet: View {
         if draft.isSeries, !draft.seasons.isEmpty {
             GlassLabel(text: "Seasons").padding(.top, 4)
             group {
-                toggleRow(label: "All seasons", detail: "", on: draft.allSeasons) {
+                toggleRow(label: "All seasons", detail: "", on: draft.allSeasons, pad: "all-seasons") {
                     self.draft?.allSeasons.toggle()
                 }
                 if !draft.allSeasons {
                     ForEach(draft.seasons) { season in
                         Divider().overlay(Color.white.opacity(0.08))
                         toggleRow(label: RequestDraft.seasonName(season), detail: RequestDraft.seasonDetail(season),
-                                  on: draft.ticked.contains(season.number)) {
+                                  on: draft.ticked.contains(season.number), pad: "season-\(season.number)") {
                             self.draft?.toggle(season: season.number)
                         }
                     }
@@ -135,7 +173,8 @@ struct RequestSheet: View {
 
     /// A row whose value is chosen from a menu: the label (and a line under
     /// it) on the left, the value and the menu's mark on the right.
-    private func choiceRow<Choices: View>(label: String, detail: String, value: String,
+    private func choiceRow<Choices: View>(label: String, detail: String, value: String, pad: String,
+                                          ask: @escaping () -> Void,
                                           @ViewBuilder choices: () -> Choices) -> some View {
         Menu {
             choices()
@@ -158,9 +197,12 @@ struct RequestSheet: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .accessibilityValue(value)
+        // A menu cannot be opened for a controller: Ⓐ asks its choices as a dialog.
+        .padFocusableBehind(pad, ring: .inside(16), press: ask)
     }
 
-    private func toggleRow(label: String, detail: String, on: Bool, toggle: @escaping () -> Void) -> some View {
+    private func toggleRow(label: String, detail: String, on: Bool, pad: String,
+                           toggle: @escaping () -> Void) -> some View {
         Button(action: toggle) {
             HStack(spacing: 12) {
                 rowWords(label: label, detail: detail)
@@ -176,6 +218,7 @@ struct RequestSheet: View {
         .buttonStyle(.plain)
         .accessibilityValue(on ? "On" : "Off")
         .accessibilityAddTraits(on ? .isSelected : [])
+        .padFocusable(pad, ring: .inside(16), press: toggle)
     }
 
     private func rowWords(label: String, detail: String) -> some View {

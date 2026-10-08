@@ -14,6 +14,8 @@ enum AppSection: String, Hashable, CaseIterable {
     case home, discover, library, downloads, activity, notifications, services, settings
 
     static let sections: [AppSection] = [.home, .discover, .library, .downloads, .activity]
+    /// The places beside them, in the iPhone's account sheet.
+    static let places: [AppSection] = [.notifications, .services, .settings]
 
     var title: String { rawValue.capitalized }
 

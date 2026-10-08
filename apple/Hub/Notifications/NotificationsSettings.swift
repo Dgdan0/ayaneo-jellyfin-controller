@@ -55,7 +55,8 @@ struct NotificationsSettingsPane: View {
     private func pills(_ service: String, current: Int, words: Bool) -> some View {
         HStack(spacing: 8) {
             ForEach(NotificationSettings.choices, id: \.self) { choice in
-                ChoicePill(title: words ? "\(choice) entries" : "\(choice)", selected: choice == current) {
+                ChoicePill(title: words ? "\(choice) entries" : "\(choice)", selected: choice == current,
+                           pad: "limit-\(service)-\(choice)") {
                     NotificationSettings.setLimit(choice, for: service)
                     limits = NotificationSettings.limits()
                 }

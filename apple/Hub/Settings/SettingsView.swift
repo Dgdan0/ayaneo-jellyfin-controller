@@ -55,7 +55,8 @@ struct SettingsView: View {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 8) {
                                     ForEach(Pane.allCases) { place in
-                                        ChoicePill(title: place.title, selected: place == pane, systemImage: place.systemImage) {
+                                        ChoicePill(title: place.title, selected: place == pane, systemImage: place.systemImage,
+                                                   pad: "pane-\(place.rawValue)") {
                                             pane = place
                                         }
                                         .id(place)
@@ -80,6 +81,9 @@ struct SettingsView: View {
             .padding(.top, 4)
             .padding(.bottom, 30)
         }
+        // A controller moves through the places and the chosen one's controls by
+        // where they are, so left from any control is the places (#46).
+        .padPage("settings")
         .ambientArtwork("")
         .onGeometryChange(for: CGSize.self) { $0.size } action: { window = $0 }
         #if DEBUG
@@ -118,6 +122,7 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
                 .accessibilityIdentifier("pane-\(place.rawValue)")
+                .padFocusable("pane-\(place.rawValue)", ring: .rounded(14)) { pane = place }
             }
         }
     }
@@ -213,6 +218,7 @@ struct LibraryOrderCard: View {
                 }
                 .buttonStyle(GlassControlStyle())
                 .accessibilityLabel("Back to A to Z: \(title)")
+                .padFocusable("a-to-z-\(title)") { editor.resetToName(model: model) }
             }
         }
         .padding(.horizontal, 18)

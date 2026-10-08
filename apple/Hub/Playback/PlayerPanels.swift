@@ -114,6 +114,9 @@ struct PlayerSheet: View {
         // A sheet from the bottom is as tall as what it holds, up to 84% of
         // the screen; the one at the side runs from top to bottom.
         .frame(height: bottom ? layout.size.height * 0.84 : layout.size.height, alignment: .bottom)
+        // A controller moves down its rows and Ⓑ goes back a page, then closes it (#46).
+        .environment(\.padSheetRows, true)
+        .padPage("player-\(String(describing: panel))", modal: true) { back() }
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
     }
@@ -123,7 +126,7 @@ struct PlayerSheet: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             if panels.count > 1 {
-                GlassRoundButton(systemImage: "chevron.left", label: "Back", size: 38) { back() }
+                GlassRoundButton(systemImage: "chevron.left", label: "Back", size: 38, pad: "panel-back") { back() }
             }
             VStack(alignment: .leading, spacing: 5) {
                 Text(heading.title)
@@ -142,7 +145,7 @@ struct PlayerSheet: View {
             if player.applying {
                 ProgressView().tint(.white).padding(.top, 9).accessibilityLabel("Changing")
             }
-            GlassRoundButton(systemImage: "xmark", label: "Close", size: 38) { close() }
+            GlassRoundButton(systemImage: "xmark", label: "Close", size: 38, pad: "panel-close") { close() }
         }
     }
 
@@ -392,6 +395,10 @@ struct PlayerSheet: View {
         .buttonStyle(SheetRowStyle())
         .clipShape(Capsule())
         .accessibilityLabel(label)
+        .padFocusable("step:\(label)", ring: .capsule) {
+            player.setSubtitleOffset(player.subtitleOffsetMillis + delta)
+            player.commitSubtitleOffset()
+        }
     }
 
     @ViewBuilder private var look: some View {
@@ -606,6 +613,11 @@ struct SheetRow<Leading: View>: View {
     let action: () -> Void
     @ViewBuilder let leading: Leading
     @Environment(\.glassAccent) private var accent
+    /// In a sheet whose rows a controller moves through by their words (the player's).
+    @Environment(\.padSheetRows) private var padRows
+
+    /// Its id for a controller: the one given, else its words where the sheet asks for that.
+    private var padId: String? { pad ?? (padRows ? "row:\(title)·\(detail)" : nil) }
 
     var body: some View {
         Button(action: action) {
@@ -645,7 +657,7 @@ struct SheetRow<Leading: View>: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SheetRowStyle())
-        .padFocusable(pad, ring: .none, press: action)
+        .padFocusable(padId, ring: .none, press: action)
         .sheetDivider()
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(checked ? .isSelected : [])
@@ -660,6 +672,12 @@ extension SheetRow where Leading == EmptyView {
             EmptyView()
         }
     }
+}
+
+extension EnvironmentValues {
+    /// The sheet's rows are focusable by their words (#46): the player's panels,
+    /// where every row is a choice and none is given an id of its own.
+    @Entry var padSheetRows = false
 }
 
 /// A row lights up under a finger or the pointer (`.opt:hover`).
