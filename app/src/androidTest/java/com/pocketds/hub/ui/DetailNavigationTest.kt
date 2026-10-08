@@ -36,6 +36,8 @@ class DetailNavigationTest {
                 // The selected season's episodes load inline under the season blob.
                 "libraryEpisodes" -> HubResult.Ok(com.pocketds.hub.model.LibraryEpisodesResponse())
                 "imageUrl" -> args?.firstOrNull() as? String ?: ""
+                // The series page reads what it could download (#48); this test is not about that, and a hub that cannot be reached is fine.
+                "offlineSelection" -> HubResult.Failed(com.pocketds.hub.net.FailureKind.NO_NETWORK, "fixture")
                 else -> error("Unexpected fixture request: ${method.name}")
             }
         } as HubApi

@@ -125,6 +125,9 @@ class PlayerScreen(
     private lateinit var choiceOverlay: ChoiceOverlay
     private lateinit var subtitleOffsetOverlay: SubtitleOffsetOverlay
     private lateinit var upNext: UpNextCardView
+    /** "Still watching?" after three episodes in a row start by themselves with nobody touching the player (#48). */
+    private val autoplayRun = AutoplayRun()
+    private lateinit var stillWatching: StillWatchingView
     private val seekPreview: LinearLayout get() = chrome.seekPreview
     private val seekPreviewImage: ImageView get() = chrome.seekPreviewImage
     private val seekPreviewFrame: FrameLayout get() = chrome.seekPreviewFrame
@@ -215,7 +218,15 @@ class PlayerScreen(
         // Over video, whatever the app theme: a white panel on a dark film glared.
         colors = Theme.onVideo(host.viewContext)
         subtitleLook = SubtitleSettings.look(host.viewContext)
-        root = FrameLayout(host.viewContext).apply {
+        // Opening the player holds Keep ready's tidying back until it is left (#48).
+        com.pocketds.hub.offline.KeepReadyRunner.playerOpened()
+        root = object : FrameLayout(host.viewContext) {
+            // A finger on the player, anywhere, is somebody there: the run of autoplayed episodes starts again (#48).
+            override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+                if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) autoplayRun.input()
+                return super.dispatchTouchEvent(event)
+            }
+        }.apply {
             setBackgroundColor(Color.BLACK)
             isFocusable = true
             isFocusableInTouchMode = true
@@ -331,12 +342,14 @@ class PlayerScreen(
         upNext = UpNextCardView(host.viewContext, colors, api, ringVisible).apply {
             visibility = View.GONE
             onPlayNow = { playNext() }
-            onFilled = { playNext() }
+            onFilled = { autoplayOrAsk() }
             onWatchCredits = { dismissUpNext() }
         }
         root.addView(upNext, FrameLayout.LayoutParams(dp(340), WRAP, Gravity.BOTTOM or Gravity.END).apply {
             setMargins(dp(20), dp(20), dp(24), dp(UP_NEXT_BOTTOM_DP))
         })
+        stillWatching = StillWatchingView(host.viewContext, colors, ringVisible).apply { onContinue = { continueWatching() } }
+        root.addView(stillWatching, FrameLayout.LayoutParams(dp(360), WRAP, Gravity.CENTER))
         return root
     }
 
@@ -383,6 +396,9 @@ class PlayerScreen(
     override fun onDestroyView() {
         if (serviceLoaded) PlaybackService.stop(host.viewContext)
         scope.cancel()
+        // The player is left: Keep ready may tidy up now, and fetch what the watching has made next (#48).
+        com.pocketds.hub.offline.KeepReadyRunner.playerClosed()
+        com.pocketds.hub.offline.KeepReadyRunner.requestRun(host.viewContext)
     }
 
     override fun onAppBackgrounded() {
@@ -391,6 +407,8 @@ class PlayerScreen(
 
     /** Android system Back includes the AYANEO edge-swipe gesture. */
     override fun onSystemBack(): Boolean {
+        if (stillWatching.asking) { continueWatching(); return true }
+        autoplayRun.input()
         if (subtitleOffsetOverlay.onPad(PadAction.Back)) return true
         if (choiceOverlay.onPad(PadAction.Back)) return true
         if (upNext.visibility == View.VISIBLE) { dismissUpNext(); return true }
@@ -419,6 +437,9 @@ class PlayerScreen(
     override fun hints() = emptyList<com.pocketds.hub.nav.ButtonHint>()
 
     override fun onPad(action: PadAction): Boolean {
+        // Any button answers "Still watching?"; any button at all is somebody being there (#48).
+        if (stillWatching.asking) { continueWatching(); return true }
+        autoplayRun.input()
         if (subtitleOffsetOverlay.onPad(action)) return true
         if (choiceOverlay.onPad(action)) return true
         return when (action) {
@@ -1634,6 +1655,32 @@ class PlayerScreen(
 
     private fun playNext() = playAdjacent(plan?.nextItem, "next")
 
+    /**
+     * The up-next bar is full. The next episode starts by itself, unless three have already done so with nobody
+     * touching the player: then it pauses and asks (#48). Casting leaves the TV's own flow alone.
+     */
+    private fun autoplayOrAsk() {
+        if (CastPlaybackCoordinator.isActive || autoplayRun.mayAutoplay()) {
+            autoplayRun.autoplayed()
+            playNext()
+        } else askStillWatching()
+    }
+
+    private fun askStillWatching() {
+        hideUpNext()
+        controller?.pause()
+        setControls(false)
+        stillWatching.ask(plan?.nextItem, autoplayRun.run)
+    }
+
+    /** Any button: it is somebody, and the next episode starts. */
+    private fun continueWatching() {
+        autoplayRun.input()
+        stillWatching.dismiss()
+        root.requestFocus()
+        playNext()
+    }
+
     private fun playPrevious() = playAdjacent(plan?.previousItem, "previous")
 
     private fun playAdjacent(target: com.pocketds.hub.model.PlaybackItem?, direction: String) {
@@ -1806,6 +1853,8 @@ class PlayerScreen(
 
 
     private fun showControls() {
+        // "Still watching?" has the screen: the controls wait until a button answers it (#48).
+        if (::stillWatching.isInitialized && stillWatching.asking) return
         setControls(true)
         scheduleHide()
     }

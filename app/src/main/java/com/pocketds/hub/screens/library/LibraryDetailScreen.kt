@@ -52,6 +52,7 @@ import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
 import com.pocketds.hub.ui.Theme
 import com.pocketds.hub.ui.activateOnTap
+import com.pocketds.hub.ui.textWeight
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -119,6 +120,13 @@ class LibraryDetailScreen(
     private lateinit var episodesPanel: LinearLayout
     private lateinit var seasonBlob: BlobSegmentedView
     private lateinit var episodes: SeasonEpisodesView
+    /** Quick taps, the choices panel, select mode and the storage bar (#48). */
+    private lateinit var downloads: SeriesDownloads
+    /** The season's download button, after the season chips. */
+    private lateinit var seasonDownload: TextView
+    /** Select mode's top line: Cancel, "N selected" and Select season. */
+    private lateinit var selectBar: LinearLayout
+    private lateinit var selectCount: TextView
     private lateinit var cast: CastRowView
     private lateinit var similar: com.pocketds.hub.ui.PosterStripView
     private var similarHits: List<com.pocketds.hub.model.SearchHit> = emptyList()
@@ -127,7 +135,7 @@ class LibraryDetailScreen(
     private var host: ScreenHost? = null
     private var item: LibraryItem? = null
     /** Redraws the download button while a transfer moves; see renderDownload. */
-    private val offlineChanges = OfflineChanges { item?.let(::renderDownload) }
+    private val offlineChanges = OfflineChanges { item?.let(::renderDownload); if (::downloads.isInitialized) downloads.changed() }
     private var itemJob: Job? = null
     private var seasonsJob: Job? = null
     private var targetJob: Job? = null
@@ -206,6 +214,20 @@ class LibraryDetailScreen(
                 addView(tabRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(4) })
                 episodesPanel = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL; clipChildren = false; visibility = View.GONE
+                    // Select mode's top line (#48): Cancel, how many are ticked, Select season.
+                    selectCount = TextView(context).apply {
+                        textSize = 14f; setTextColor(colors.primaryText); maxLines = 1
+                        textWeight(700)
+                    }
+                    selectBar = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+                        visibility = View.GONE; clipChildren = false
+                        setPadding(dp(22), dp(10), dp(22), dp(0))
+                        addView(controlButton("Cancel", null) { downloads.exitSelect() })
+                        addView(selectCount, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = dp(14); marginEnd = dp(8) })
+                        addView(controlButton("Select season", AppIcon.CHECK) { selectedSeason()?.let { downloads.selectSeason(it.id) } })
+                    }
+                    addView(selectBar, LinearLayout.LayoutParams(MATCH, WRAP))
                     // Each season its own glass pill, the chosen one white.
                     seasonBlob = BlobSegmentedView(context, colors, ringVisible, BlobSegmentedView.Style.CHIPS).apply {
                         heightDp = 32f
@@ -213,13 +235,38 @@ class LibraryDetailScreen(
                         onPick = { id -> seasonList.firstOrNull { it.id == id }?.let(::selectSeason) }
                         onOptionFocused = { id -> lastFocusKey = "season:$id"; liftToTabs(); host.refreshHints() }
                     }
+                    // The season's download button follows its chips, so one row carries both (#48).
+                    seasonDownload = TextView(context).apply {
+                        PillButton.control(this, colors, AppIcon.DOWNLOAD)
+                        Styler.makeFocusable(this)
+                        tag = KEY_SEASON_DOWNLOAD
+                        visibility = View.GONE
+                        FocusDecorator.attach(this, ringVisible, scale = false)
+                        FocusDecorator.listen(this, ringVisible) { _, focused ->
+                            if (focused) { lastFocusKey = KEY_SEASON_DOWNLOAD; liftToTabs() }
+                            host.refreshHints()
+                        }
+                        activateOnTap { downloadSelectedSeason() }
+                    }
                     addView(FocusHorizontalScrollView(context).apply {
                         isHorizontalScrollBarEnabled = false; clipToPadding = false
                         setPadding(dp(19), dp(10), dp(19), dp(2))
-                        addView(seasonBlob)
+                        addView(LinearLayout(context).apply {
+                            orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL; clipChildren = false
+                            addView(seasonBlob)
+                            addView(seasonDownload, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = dp(8) })
+                        })
                     }, LinearLayout.LayoutParams(MATCH, WRAP))
                     episodes = SeasonEpisodesView(context, api, colors, ringVisible, scope).apply {
-                        onPlay = { episode -> host.playItem(episode.id, if (episode.positionSeconds > 0) "resume" else "restart") }
+                        onPlay = { episode ->
+                            // Choosing episodes, a tap ticks; otherwise it plays (#48).
+                            if (downloads.selecting) downloads.tick(episode)
+                            else host.playItem(episode.id, if (episode.positionSeconds > 0) "resume" else "restart")
+                        }
+                        marks = { episode -> downloads.marksFor(episode) }
+                        onDownloadTap = { episode -> downloads.cornerTapped(episode) }
+                        // A long press or a right click is Ⓨ: the card's menu (not while choosing, when a tap ticks).
+                        onMenu = { episode -> if (!downloads.selecting) downloads.openMenu(episode) }
                         onFocusedEpisode = { lastFocusKey = "episode"; liftToTabs(); host.refreshHints() }
                         onTotal = { seasonId, total -> seasonTotals[seasonId] = total; labelSeasons() }
                     }
@@ -243,12 +290,15 @@ class LibraryDetailScreen(
                     onFocused = { lastFocusKey = "facts"; host.refreshHints() }
                 }
                 addView(facts, LinearLayout.LayoutParams(MATCH, WRAP))
-                addView(View(context), LinearLayout.LayoutParams(MATCH, dp(16)))
+                // Room under the last row for the download bar, which rises over the foot of the page (#48).
+                addView(View(context), LinearLayout.LayoutParams(MATCH, dp(DOCK_ROOM_DP)))
             }, ViewGroup.LayoutParams(MATCH, WRAP))
         }
         root.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
+        downloads = SeriesDownloads(host.viewContext, api, itemId, colors, scope, ringVisible, { this.host }, downloadHooks)
+        downloads.attach(root, dp(12))
         overview.onChanged = { host.refreshHints() }
         return root
     }
@@ -257,6 +307,7 @@ class LibraryDetailScreen(
         overview.collapse()
         host?.viewContext?.let(offlineChanges::start)
         item?.let(::renderDownload)
+        if (expectedType == "series") downloads.load()
         val returning = item != null
         if (!returning && itemJob?.isActive != true) loadItem()
         if (expectedType == "series" && seasonList.isEmpty() && seasonsJob?.isActive != true) loadSeasons()
@@ -286,11 +337,13 @@ class LibraryDetailScreen(
         when {
             episodes.hasFocus() -> lastFocusKey = "episode"
             seasonBlob.hasFocus() -> seasonBlob.focusedId?.let { lastFocusKey = "season:$it" }
+            seasonDownload.hasFocus() -> lastFocusKey = KEY_SEASON_DOWNLOAD
             tabs.hasFocus() -> lastFocusKey = "tabs"
             else -> listOf(playAction, watchedAction, favoriteAction, downloadAction, moreAction).firstOrNull { it.hasFocus() }
                 ?.let { lastFocusKey = it.tag as? String }
         }
         episodes.cancel()
+        downloads.stop()
         scope.coroutineContext.cancelChildren()
         itemJob = null
         seasonsJob = null
@@ -309,6 +362,7 @@ class LibraryDetailScreen(
             key == "episode" && episodesPanel.visibility == View.VISIBLE && episodes.focusEpisode() -> return true
             key?.startsWith("season:") == true && episodesPanel.visibility == View.VISIBLE &&
                 seasonBlob.focus(key.removePrefix("season:")) -> return true
+            key == KEY_SEASON_DOWNLOAD && seasonDownload.visibility == View.VISIBLE && seasonDownload.requestFocus() -> return true
             key == "tabs" && tabRow.visibility == View.VISIBLE && tabs.focus() -> return true
             key == "cast" && cast.visibility == View.VISIBLE -> cast.first?.let { return it.requestFocus() }
             key == "similar" && similar.visibility == View.VISIBLE && similar.focusFirst() -> return true
@@ -324,7 +378,15 @@ class LibraryDetailScreen(
     }
 
     override fun hints(): List<ButtonHint> = buildList {
-        if (overlay.isOpen) { add(ButtonHint.activate("Choose")); add(ButtonHint.back("Close menu")); return@buildList }
+        if (overlay.isOpen || downloads.sheetOpen) { add(ButtonHint.activate("Choose")); add(ButtonHint.back("Close menu")); return@buildList }
+        if (downloads.selecting) {
+            // Choosing episodes to download (#48): Ⓐ ticks, Ⓧ takes the season, Start downloads, Ⓑ leaves.
+            add(ButtonHint.activate(if (episodes.hasFocus()) "Tick episode" else "Choose"))
+            add(ButtonHint.primary("Select season"))
+            add(ButtonHint("Start", "Download", PadAction.Menu, enabled = !downloads.selection.isEmpty))
+            add(ButtonHint.back("Cancel"))
+            return@buildList
+        }
         if (overview.hasFocus()) {
             overview.actionHint?.let { add(ButtonHint.activate(it)) }
             add(ButtonHint.back(if (overview.expanded) "Collapse description" else "Back"))
@@ -336,8 +398,9 @@ class LibraryDetailScreen(
                 val episode = episodes.focusedEpisode
                 add(ButtonHint.activate(if ((episode?.positionSeconds ?: 0) > 0) "Resume" else "Play"))
                 add(ButtonHint.primary("Episode details"))
-                if (!value?.mediaKey.isNullOrEmpty()) add(ButtonHint.secondary("Find releases"))
+                add(ButtonHint.secondary("Menu"))
             }
+            seasonDownload.hasFocus() -> add(ButtonHint.activate(seasonDownload.contentDescription.toString()))
             seasonBlob.hasFocus() -> {
                 add(ButtonHint.activate("Show season"))
                 add(ButtonHint.primary("Download season"))
@@ -366,6 +429,7 @@ class LibraryDetailScreen(
 
     override fun onPad(action: PadAction): Boolean {
         if (overlay.onPad(action) || overview.onPad(action)) return true
+        if (downloads.onPad(action)) return true
         return when (action) {
             is PadAction.Step -> step(action.direction)
             PadAction.Activate -> when {
@@ -373,10 +437,9 @@ class LibraryDetailScreen(
                 else -> false
             }
             PadAction.Primary -> when {
+                downloads.selecting -> { selectedSeason()?.let { downloads.selectSeason(it.id) }; true }
                 episodes.hasFocus() -> episodes.focusedEpisode?.let { openEpisode(it) } != null
-                seasonBlob.hasFocus() -> focusedSeason()?.let { season ->
-                    host?.downloadItem(LibraryItem(id = itemId, type = "series", title = item?.title ?: fallbackTitle), season.id)
-                } != null
+                seasonBlob.hasFocus() -> focusedSeason()?.let { season -> downloads.downloadSeason(season.id) } != null
                 item?.type == "movie" || item?.type == "episode" -> {
                     host?.openPlaybackOptions(itemId, if (canResume(item)) "resume" else "restart")
                     true
@@ -384,7 +447,8 @@ class LibraryDetailScreen(
                 else -> false
             }
             PadAction.Secondary -> when {
-                episodes.hasFocus() -> selectedSeason()?.let { openReleaseTargets(it, episodes.focusedEpisode?.indexNumber ?: 0) } != null
+                // An episode's menu: Play, Download, Select episodes, Find releases (#48).
+                episodes.hasFocus() -> episodes.focusedEpisode?.let { downloads.openMenu(it) } != null
                 seasonBlob.hasFocus() -> focusedSeason()?.let { openReleaseTargets(it, 0) } != null
                 item?.type == "movie" || item?.type == "episode" -> {
                     host?.playItem(itemId, "restart")
@@ -419,6 +483,9 @@ class LibraryDetailScreen(
         tabs.hasFocus() && direction == Direction.DOWN -> focusPanel()
         seasonBlob.hasFocus() && direction == Direction.UP -> tabs.focus()
         seasonBlob.hasFocus() && direction == Direction.DOWN -> episodes.focusEpisode()
+        seasonDownload.hasFocus() && direction == Direction.UP -> tabs.focus()
+        seasonDownload.hasFocus() && direction == Direction.DOWN -> episodes.focusEpisode()
+        seasonDownload.hasFocus() && direction == Direction.LEFT -> seasonBlob.focus(selectedSeasonId)
         episodes.hasFocus() && direction == Direction.UP -> seasonBlob.focus(selectedSeasonId)
         (cast.hasFocus() || facts.hasFocus() || similar.hasFocus()) && direction == Direction.UP && !factsHasRowAbove() -> tabs.focus()
         else -> false
@@ -608,6 +675,12 @@ class LibraryDetailScreen(
             local != null -> setActionIcon(downloadAction, MediaActionIcon.DOWNLOADING, local.progress.toFloat())
             else -> setActionIcon(downloadAction, MediaActionIcon.DOWNLOAD)
         }
+        // A series with Keep ready on carries its number on the button (#48).
+        if (value.type == "series" && ::downloads.isInitialized) {
+            val keep = downloads.keepCount.takeIf { downloads.keepOn }
+            downloadAction.foreground = keep?.let { com.pocketds.hub.ui.CountBadgeDrawable(downloadAction.context, colors, it) }
+            downloadAction.contentDescription = if (keep != null) "Download, keeping the next $keep ready" else "Download"
+        }
     }
 
     private fun loadPlayTarget() {
@@ -730,6 +803,8 @@ class LibraryDetailScreen(
             "offline-remove" -> item?.let {removeOfflineVideo(requireNotNull(host),overlay,it)}
             "server-remove" -> host?.push(MediaRemovalScreen(api,"video",itemId,ringVisible))
             ACTION_DOWNLOAD -> item?.let { value ->
+                // A series: the choices panel, the quick taps and select mode live on its page (#48).
+                if (value.type == "series") { downloads.openPanel(); return }
                 val existing = if (value.type in setOf("movie", "episode")) {
                     OfflineRepository.get(requireNotNull(host).viewContext).forItem(value.id)
                 } else null
@@ -873,18 +948,79 @@ class LibraryDetailScreen(
         selectedSeasonId = season.id
         seasonBlob.select(season.id)
         labelSeasons()
+        refreshSeasonButton()
         episodes.show(itemId, season, seriesTarget?.item?.id.orEmpty())
     }
 
-    /** "Season 2", and on the chosen one its count once known: "Season 2 · 10 episodes". */
+    /**
+     * "Season 2", and on the chosen one its count once known: "Season 2 · 10 episodes". Choosing episodes, each
+     * season says how many of its are ticked: "Season 2 · 4/14" (#48).
+     */
     private fun labelSeasons() {
         seasonList.forEach { season ->
             val total = seasonTotals[season.id]
             val name = seasonName(season)
-            seasonBlob.relabel(season.id, if (season.id == selectedSeasonId && total != null && total > 0)
-                "$name · $total episode${if (total == 1) "" else "s"}" else name)
+            val ticks = if (::downloads.isInitialized) downloads.seasonTicks(season.id) else null
+            seasonBlob.relabel(season.id, when {
+                ticks != null -> "$name · $ticks"
+                season.id == selectedSeasonId && total != null && total > 0 -> "$name · $total episode${if (total == 1) "" else "s"}"
+                else -> name
+            })
         }
     }
+
+    /** "Season 2 · 4.9 GB", or "Season 2 on this Pocket" once there is nothing left to get (#48). */
+    private fun refreshSeasonButton() {
+        val season = selectedSeason()
+        if (season == null || !::downloads.isInitialized || downloads.episodes.isEmpty()) { seasonDownload.visibility = View.GONE; return }
+        val (words, active) = downloads.seasonButton(season.id, seasonName(season))
+        seasonDownload.visibility = View.VISIBLE
+        seasonDownload.text = words
+        seasonDownload.contentDescription = if (active) "Download $words" else words
+        seasonDownload.alpha = if (active) 1f else .6f
+    }
+
+    private fun downloadSelectedSeason() {
+        val season = selectedSeason() ?: return
+        if (downloads.seasonButton(season.id, seasonName(season)).second) downloads.downloadSeason(season.id)
+        else host?.notify("${seasonName(season)} is already on this ${SeriesDownloads.DEVICE}")
+    }
+
+    /** Select mode's top line, shown only while choosing. */
+    private fun refreshSelectBar() {
+        selectBar.visibility = if (downloads.selecting) View.VISIBLE else View.GONE
+        selectCount.text = downloads.selection.line()
+    }
+
+    /** A small control in a row of controls: Cancel, Select season. */
+    private fun controlButton(label: String, icon: AppIcon?, action: () -> Unit) = TextView(requireNotNull(host).viewContext).apply {
+        text = label
+        PillButton.control(this, colors, icon)
+        Styler.makeFocusable(this)
+        isFocusable = false
+        contentDescription = label
+        activateOnTap(action)
+    }
+
+    /** What the downloads part of the page asks of it (#48). */
+    private val downloadHooks = object : SeriesDownloads.Hooks {
+        override fun title() = item?.title?.ifEmpty { fallbackTitle } ?: fallbackTitle
+        override fun marksChanged() {
+            episodes.refreshMarks()
+            labelSeasons()
+            refreshSeasonButton()
+            refreshSelectBar()
+            item?.let(::renderDownload)
+        }
+        override fun hintsChanged() { host?.refreshHints() }
+        override fun play(item: LibraryItem) { host?.playItem(item.id, if (item.positionSeconds > 0) "resume" else "restart") }
+        override fun findReleases(item: LibraryItem) { selectedSeason()?.let { openReleaseTargets(it, item.indexNumber) } }
+        override fun playTargetId() = seriesTarget?.item?.id
+        override fun seasonName(seasonId: String) = seasonList.firstOrNull { it.id == seasonId }?.let { this@LibraryDetailScreen.seasonName(it) }
+        override fun canFindReleases() = !item?.mediaKey.isNullOrEmpty()
+    }
+
+    override fun onSystemBack(): Boolean = ::downloads.isInitialized && downloads.onSystemBack()
 
     private fun seasonName(season: LibraryItem) = season.title.ifEmpty { EpisodeLabel.season(season.seasonNumber) }
 
@@ -920,6 +1056,9 @@ class LibraryDetailScreen(
         const val ACTION_WATCHED = "watched"
         const val ACTION_FAVORITE = "favorite"
         const val ACTION_DOWNLOAD = "download"
+        const val KEY_SEASON_DOWNLOAD = "seasonDownload"
+        /** What a series page keeps free at its foot for the download bar: its two lines and its padding. */
+        const val DOCK_ROOM_DP = 84
         const val TAB_EPISODES = "episodes"
         const val TAB_CAST = "cast"
         const val TAB_DETAILS = "details"

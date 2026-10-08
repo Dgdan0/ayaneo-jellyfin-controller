@@ -54,3 +54,33 @@ object UpNext {
     /** Skipping these happens by itself when Settings › Playback says so. */
     fun skipsAutomatically(type: String): Boolean = type.equals("Intro", true) || type.equals("Recap", true)
 }
+
+/**
+ * "Still watching?" (#48): the next episode starts by itself, but not for ever.
+ * After [limit] episodes in a row have started that way with nobody touching the
+ * player, the fourth waits: the player pauses and asks, and any button carries on.
+ * Pure, so the count is a test rather than a feeling: an autoplay adds one, and
+ * any press, tap or gesture on the player puts the count back to none.
+ */
+class AutoplayRun(private val limit: Int = LIMIT) {
+    private var autoplayed = 0
+
+    /** Episodes that started by themselves since anybody last touched the player. */
+    val run: Int get() = autoplayed
+
+    /** Any button, tap or gesture on the player: somebody is there. */
+    fun input() { autoplayed = 0 }
+
+    /** The countdown is full: may the next episode start by itself, or is it time to ask? */
+    fun mayAutoplay(): Boolean = autoplayed < limit
+
+    /** The next episode has started by itself. */
+    fun autoplayed() { autoplayed++ }
+
+    companion object {
+        /** Netflix's number: three, then ask. */
+        const val LIMIT = 3
+        const val QUESTION = "Still watching?"
+        const val CONTINUE = "Continue watching"
+    }
+}

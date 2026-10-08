@@ -10,9 +10,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.model.LibraryItem
 import com.pocketds.hub.model.OfflineManifest
-import com.pocketds.hub.model.OfflineSelectionItem
-import com.pocketds.hub.model.OfflineSelectionResponse
-import com.pocketds.hub.model.OfflineSelectionSeason
 import com.pocketds.hub.model.OfflineSource
 import com.pocketds.hub.nav.PageArtwork
 import com.pocketds.hub.nav.ScreenHost
@@ -23,7 +20,6 @@ import com.pocketds.hub.offline.OfflineRepository
 import com.pocketds.hub.offline.OfflineState
 import com.pocketds.hub.screens.offline.OfflineScreen
 import com.pocketds.hub.screens.offline.OfflineSeasonScreen
-import com.pocketds.hub.screens.offline.OfflineSelectionScreen
 import com.pocketds.hub.screens.offline.OfflineSeriesScreen
 import com.pocketds.hub.ui.glass.GlassButtonBackground
 import com.pocketds.hub.ui.glass.GlassPanelDrawable
@@ -138,47 +134,6 @@ class OfflineGlassTest {
         } finally {
             ins.runOnMainSync { harness.close(); activity.finish() }
             ids.forEach { id -> repository.forItem(id)?.let { repository.remove(it.id) } }
-        }
-    }
-
-    @Test fun theDownloadPickerIsAGlassPageAndItsChoicesASideSheet() {
-        val activity = ins.startActivitySync(Intent(ins.targetContext, DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        val series = "glass-picker-${System.nanoTime()}"
-        val selection = OfflineSelectionResponse(
-            series = LibraryItem(id = series, type = "series", title = "Example series", backdrop = "/fixture/backdrop"),
-            seasons = listOf(OfflineSelectionSeason(
-                season = LibraryItem(id = "$series-s1", type = "season", title = "Season 1", seasonNumber = 1),
-                episodes = (1..2).map { n ->
-                    OfflineSelectionItem(LibraryItem(id = "$series-e$n", type = "episode", title = "Episode $n", seasonNumber = 1, indexNumber = n),
-                        estimatedSizeBytes = 1_000_000L, available = true)
-                }
-            ))
-        )
-        // Only the selection may be read; preparing a download would fail the test.
-        val api = Proxy.newProxyInstance(HubApi::class.java.classLoader, arrayOf(HubApi::class.java)) { _, method, _ ->
-            when (method.name) {
-                "offlineSelection" -> HubResult.Ok(selection)
-                "imageUrl" -> ""
-                else -> error("Unexpected ${method.name}")
-            }
-        } as HubApi
-        val picker = OfflineSelectionScreen(api, series, "Example series") { true }
-        try {
-            lateinit var root: View
-            ins.runOnMainSync { root = picker.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); picker.onShow() }
-            ins.waitForIdleSync()
-            ins.runOnMainSync {
-                val texts = all(activity.window.decorView).filterIsInstance<TextView>()
-                assertTrue("the quick choices open at once", texts.any { it.text == "All available episodes" })
-                assertTrue("B cancels them", picker.onPad(PadAction.Back))
-                assertEquals("/fixture/backdrop", picker.pageArtwork)
-                val download = texts.first { it.contentDescription == "Download selected episodes" }
-                assertTrue("Download is the white pill", (download.background as? GlassButtonBackground)?.lit == true)
-                assertTrue("each season under a glass heading", texts.any { it.text.startsWith("Season 1") && it.text.contains("2 episodes") })
-                assertEquals(2, all(root).count { it is EpisodeCardView })
-            }
-        } finally {
-            ins.runOnMainSync { picker.onHide(); picker.onDestroyView(); activity.finish() }
         }
     }
 

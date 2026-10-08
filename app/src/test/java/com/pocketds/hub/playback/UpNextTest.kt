@@ -50,4 +50,42 @@ class UpNextTest {
         assertTrue(UpNext.skipsAutomatically("Intro"))
         assertFalse(UpNext.skipsAutomatically("Preview"))
     }
+
+    // ------------------------------------------------------------------ "Still watching?" (#48)
+
+    @Test
+    fun `three episodes start by themselves, the fourth asks`() {
+        val run = AutoplayRun()
+        // The owner started the first episode: B, C and D follow by themselves.
+        repeat(3) {
+            assertTrue("autoplay number ${it + 1}", run.mayAutoplay())
+            run.autoplayed()
+        }
+        assertFalse("before the fourth, it asks", run.mayAutoplay())
+        assertEquals(3, run.run)
+    }
+
+    @Test
+    fun `any input puts the count back, so a person who is there is never asked`() {
+        val run = AutoplayRun()
+        run.autoplayed(); run.autoplayed()
+        run.input()
+        assertEquals(0, run.run)
+        repeat(3) { assertTrue(run.mayAutoplay()); run.autoplayed() }
+        assertFalse(run.mayAutoplay())
+        // Any button on the question carries on, and the count starts again.
+        run.input()
+        assertTrue(run.mayAutoplay())
+        assertEquals(0, run.run)
+    }
+
+    @Test
+    fun `the limit can be given, and is three`() {
+        assertEquals(3, AutoplayRun.LIMIT)
+        val one = AutoplayRun(limit = 1)
+        assertTrue(one.mayAutoplay())
+        one.autoplayed()
+        assertFalse(one.mayAutoplay())
+        assertEquals("Still watching?", AutoplayRun.QUESTION)
+    }
 }

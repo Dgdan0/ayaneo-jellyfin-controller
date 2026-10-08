@@ -52,11 +52,25 @@ data class OfflineDownload(
     val speedBytesPerSecond: Long,
     val sortOrder: Int,
     val updatedAt: Long,
-    val retryAt: Long = 0L
+    val retryAt: Long = 0L,
+    /** Who asked for it: the owner ([OfflineRepository.ORIGIN_OWN]) or Keep ready, which is the only one that may remove it (#48). */
+    val origin: String = OfflineRepository.ORIGIN_OWN
 ) {
     val progress: Float get() = if (totalBytes <= 0) 0f else
         (bytesDownloaded.toDouble() / totalBytes.toDouble()).coerceIn(0.0, 1.0).toFloat()
 }
+
+/** What the device holds and what is on its way, for the storage bar (#48). */
+data class OfflineTotals(
+    /** Episodes and films on the device, finished. */
+    val onDeviceCount: Int,
+    /** Everything JellyHub keeps here, in bytes, partial files included. */
+    val onDeviceBytes: Long,
+    /** Downloads that are queued, moving or waiting to try again. */
+    val comingCount: Int,
+    /** What those still have to fetch. */
+    val comingBytes: Long
+)
 
 data class PendingSubtitleSync(
     val rowId: String,
@@ -81,7 +95,7 @@ class OfflineRepository private constructor(context: Context) {
     }
 
     @Synchronized
-    fun enqueue(title: String, seriesId: String, manifests: List<OfflineManifest>): Int {
+    fun enqueue(title: String, seriesId: String, manifests: List<OfflineManifest>, origin: String = ORIGIN_OWN): Int {
         if (manifests.isEmpty()) return 0
         val root = OfflineSettings.selectedStorage(app)?.root ?: return 0
         val mediaDir = File(root, "media").apply { mkdirs() }
@@ -110,7 +124,7 @@ class OfflineRepository private constructor(context: Context) {
                         put("state", OfflineState.QUEUED.wire); put("bytes_downloaded", 0)
                         put("total_bytes", manifest.source.sizeBytes); put("local_path", path)
                         put("error", ""); put("sort_order", index); put("updated_at", now)
-                        put("attempts", 0)
+                        put("attempts", 0); put("origin", origin)
                     }, SQLiteDatabase.CONFLICT_IGNORE
                 )
                 if (result != -1L) inserted++
@@ -159,6 +173,78 @@ class OfflineRepository private constructor(context: Context) {
     @Synchronized
     fun forItem(itemId: String, userId: String = HubSettings.userId(app)): OfflineDownload? =
         queryDownloads("user_id=? AND item_id=?", arrayOf(userId, itemId), "updated_at DESC", "1").firstOrNull()
+
+    /** The newest download of each of [itemIds], by item: what a series page draws on its cards (#48). */
+    @Synchronized
+    fun forItems(itemIds: Collection<String>, userId: String = HubSettings.userId(app)): Map<String, OfflineDownload> {
+        if (itemIds.isEmpty()) return emptyMap()
+        val found = linkedMapOf<String, OfflineDownload>()
+        // SQLite takes a limited number of variables: a long series goes in chunks.
+        itemIds.toList().chunked(400).forEach { chunk ->
+            val placeholders = chunk.joinToString(",") { "?" }
+            queryDownloads("user_id=? AND item_id IN ($placeholders)", arrayOf(userId) + chunk.toTypedArray(), "updated_at ASC")
+                .forEach { found[it.manifest.item.id] = it }
+        }
+        return found
+    }
+
+    /** What is on the device and what is coming, for the active profile, for the storage bar (#48). */
+    @Synchronized
+    fun totals(userId: String = HubSettings.userId(app)): OfflineTotals {
+        var onDevice = 0
+        var onDeviceBytes = 0L
+        var coming = 0
+        var comingBytes = 0L
+        db.readableDatabase.rawQuery("SELECT state,bytes_downloaded,total_bytes,user_id FROM downloads", null).use { cursor ->
+            while (cursor.moveToNext()) {
+                val state = cursor.getString(0)
+                val done = cursor.getLong(1)
+                val total = cursor.getLong(2)
+                // Every profile's files are on this disk; only this profile's count as "on this Pocket".
+                onDeviceBytes += if (state == OfflineState.COMPLETE.wire) total else done
+                if (cursor.getString(3) != userId) continue
+                when (state) {
+                    OfflineState.COMPLETE.wire -> onDevice++
+                    OfflineState.QUEUED.wire, OfflineState.DOWNLOADING.wire, OfflineState.WAITING.wire -> {
+                        coming++; comingBytes += (total - done).coerceAtLeast(0L)
+                    }
+                }
+            }
+        }
+        return OfflineTotals(onDevice, onDeviceBytes, coming, comingBytes)
+    }
+
+    /** The N of "Keep the next N ready" for [seriesId], or null when it is off (#48). */
+    @Synchronized
+    fun keepReady(seriesId: String, userId: String = HubSettings.userId(app)): Int? =
+        db.readableDatabase.rawQuery("SELECT count FROM keep_ready WHERE series_id=? AND user_id=?", arrayOf(seriesId, userId))
+            .use { if (it.moveToFirst()) it.getInt(0) else null }
+
+    /** Every series with Keep ready on, with its N. */
+    @Synchronized
+    fun keepReadySeries(userId: String = HubSettings.userId(app)): List<Pair<String, Int>> =
+        db.readableDatabase.rawQuery("SELECT series_id,count FROM keep_ready WHERE user_id=?", arrayOf(userId)).use { cursor ->
+            buildList { while (cursor.moveToNext()) add(cursor.getString(0) to cursor.getInt(1)) }
+        }
+
+    @Synchronized
+    fun setKeepReady(seriesId: String, count: Int, userId: String = HubSettings.userId(app)) {
+        db.writableDatabase.insertWithOnConflict("keep_ready", null, ContentValues().apply {
+            put("series_id", seriesId); put("user_id", userId); put("count", count.coerceIn(1, 10))
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+        changed()
+    }
+
+    /** Turns Keep ready off and keeps every file: the ones it fetched become the owner's (#48). */
+    @Synchronized
+    fun clearKeepReady(seriesId: String, userId: String = HubSettings.userId(app)) {
+        db.writableDatabase.delete("keep_ready", "series_id=? AND user_id=?", arrayOf(seriesId, userId))
+        db.writableDatabase.execSQL(
+            "UPDATE downloads SET origin=? WHERE user_id=? AND origin=? AND batch_id IN (SELECT id FROM batches WHERE series_id=?)",
+            arrayOf(ORIGIN_OWN, userId, ORIGIN_KEEP_READY, seriesId)
+        )
+        changed()
+    }
 
     /** Local watch states for an Offline catalog. They never leave this device until sync runs. */
     @Synchronized
@@ -565,7 +651,7 @@ class OfflineRepository private constructor(context: Context) {
         val alias = if (joined) "d." else ""
         val table = if (joined) "downloads d JOIN batches b ON b.id=d.batch_id" else "downloads"
         val columns = listOf("id", "batch_id", "user_id", "manifest_json", "state", "bytes_downloaded",
-            "total_bytes", "local_path", "error", "attempts", "speed_bps", "sort_order", "updated_at", "retry_at")
+            "total_bytes", "local_path", "error", "attempts", "speed_bps", "sort_order", "updated_at", "retry_at", "origin")
             .joinToString(",") { alias + it }
         val rows = mutableListOf<OfflineDownload>()
         db.readableDatabase.query(table, columns.split(',').toTypedArray(), where, args, null, null, order, limit)
@@ -578,7 +664,7 @@ class OfflineRepository private constructor(context: Context) {
         JSON.decodeFromString(string("manifest_json")),
         OfflineState.entries.firstOrNull { it.wire == string("state") } ?: OfflineState.FAILED,
         long("bytes_downloaded"), long("total_bytes"), string("local_path"), string("error"), int("attempts"),
-        long("speed_bps"), int("sort_order"), long("updated_at"), long("retry_at")
+        long("speed_bps"), int("sort_order"), long("updated_at"), long("retry_at"), string("origin")
     )
 
     private fun verifyCompletedFile(row: OfflineDownload): Boolean {
@@ -622,6 +708,8 @@ class OfflineRepository private constructor(context: Context) {
 
     companion object {
         const val ACTION_CHANGED = "com.pocketds.hub.offline.CHANGED"
+        const val ORIGIN_OWN = "own"
+        const val ORIGIN_KEEP_READY = "keep"
         private val JSON = Json { ignoreUnknownKeys = true; explicitNulls = false }
         @Volatile private var instance: OfflineRepository? = null
         fun get(context: Context): OfflineRepository = instance ?: synchronized(this) {
@@ -630,15 +718,16 @@ class OfflineRepository private constructor(context: Context) {
     }
 }
 
-private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "offline.db", null, 4) {
+private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "offline.db", null, 5) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE batches(id TEXT PRIMARY KEY,title TEXT NOT NULL,series_id TEXT NOT NULL,user_id TEXT NOT NULL,paused INTEGER NOT NULL,created_at INTEGER NOT NULL)")
-        db.execSQL("CREATE TABLE downloads(id TEXT PRIMARY KEY,batch_id TEXT NOT NULL,user_id TEXT NOT NULL,item_id TEXT NOT NULL,source_id TEXT NOT NULL,manifest_json TEXT NOT NULL,state TEXT NOT NULL,bytes_downloaded INTEGER NOT NULL,total_bytes INTEGER NOT NULL,local_path TEXT NOT NULL,error TEXT NOT NULL,attempts INTEGER NOT NULL,speed_bps INTEGER NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,updated_at INTEGER NOT NULL,retry_at INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE downloads(id TEXT PRIMARY KEY,batch_id TEXT NOT NULL,user_id TEXT NOT NULL,item_id TEXT NOT NULL,source_id TEXT NOT NULL,manifest_json TEXT NOT NULL,state TEXT NOT NULL,bytes_downloaded INTEGER NOT NULL,total_bytes INTEGER NOT NULL,local_path TEXT NOT NULL,error TEXT NOT NULL,attempts INTEGER NOT NULL,speed_bps INTEGER NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL,updated_at INTEGER NOT NULL,retry_at INTEGER NOT NULL DEFAULT 0,origin TEXT NOT NULL DEFAULT 'own')")
         db.execSQL("CREATE UNIQUE INDEX downloads_media ON downloads(user_id,item_id,source_id)")
         db.execSQL("CREATE INDEX downloads_queue ON downloads(user_id,state,sort_order)")
         db.execSQL("CREATE TABLE progress(item_id TEXT NOT NULL,user_id TEXT NOT NULL,position_ms INTEGER NOT NULL,duration_ms INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(item_id,user_id))")
         db.execSQL("CREATE TABLE outbox(event_key TEXT PRIMARY KEY,user_id TEXT NOT NULL,item_id TEXT NOT NULL,event_json TEXT NOT NULL,created_at INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE subtitle_sync(row_id TEXT PRIMARY KEY,expected_language TEXT NOT NULL,attempts INTEGER NOT NULL,retry_at INTEGER NOT NULL,error TEXT NOT NULL)")
+        db.execSQL("CREATE TABLE keep_ready(series_id TEXT NOT NULL,user_id TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(series_id,user_id))")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
@@ -649,6 +738,11 @@ private class OfflineDatabase(context: Context) : SQLiteOpenHelper(context, "off
         }
         if (oldVersion < 4) {
             db.execSQL("CREATE TABLE subtitle_sync(row_id TEXT PRIMARY KEY,expected_language TEXT NOT NULL,attempts INTEGER NOT NULL,retry_at INTEGER NOT NULL,error TEXT NOT NULL)")
+        }
+        if (oldVersion < 5) {
+            // Who asked for a download, and Keep ready's N per series (#48). What was here is the owner's.
+            db.execSQL("ALTER TABLE downloads ADD COLUMN origin TEXT NOT NULL DEFAULT 'own'")
+            db.execSQL("CREATE TABLE keep_ready(series_id TEXT NOT NULL,user_id TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(series_id,user_id))")
         }
     }
 }
