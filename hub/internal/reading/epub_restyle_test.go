@@ -48,8 +48,14 @@ type bookFile struct {
 	store bool
 }
 
+// bookPackage is a package in English.
 func bookPackage(extraMeta string, items ...string) string {
-	return `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">urn:x</dc:identifier><dc:title>T</dc:title><dc:language>en</dc:language>` + extraMeta + `</metadata><manifest>` + strings.Join(items, "") + `</manifest><spine><itemref idref="ch1"/></spine></package>`
+	return bookPackageIn("<dc:language>en</dc:language>", extraMeta, items...)
+}
+
+// bookPackageIn is a package whose language elements are written as given.
+func bookPackageIn(languages, extraMeta string, items ...string) string {
+	return `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">urn:x</dc:identifier><dc:title>T</dc:title>` + languages + extraMeta + `</metadata><manifest>` + strings.Join(items, "") + `</manifest><spine><itemref idref="ch1"/></spine></package>`
 }
 
 const bookContainer = `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`
@@ -178,7 +184,7 @@ func TestInjectedColumnStyleIsSafeInsideXHTML(t *testing.T) {
 		t.Fatalf("the column style holds a character XML cannot take as text: %s", columnStyle)
 	}
 	doc := `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>x</title></head><body><p>x</p></body></html>`
-	out, result := restyleDocument([]byte(doc))
+	out, result := restyleDocument([]byte(doc), "")
 	if !result.styled || !wellFormed(out) {
 		t.Fatalf("styled %v, well-formed %v:\n%s", result.styled, wellFormed(out), out)
 	}
@@ -229,7 +235,7 @@ func TestRestyleDocumentPutsOneStyleBeforeTheFirstHeadEndOnly(t *testing.T) {
 		"namespace prefixes":        {`<h:html xmlns:h="http://www.w3.org/1999/xhtml"><h:head></h:head><h:body/></h:html>`, false, ``},
 	} {
 		t.Run(name, func(t *testing.T) {
-			out, result := restyleDocument([]byte(test.doc))
+			out, result := restyleDocument([]byte(test.doc), "")
 			if result.styled != test.styled || result.left != "" {
 				t.Fatalf("styled = %v (want %v), left %q", result.styled, test.styled, result.left)
 			}
@@ -248,7 +254,7 @@ func TestRestyleDocumentPutsOneStyleBeforeTheFirstHeadEndOnly(t *testing.T) {
 				t.Fatalf("the document lost something:\n%s", out)
 			}
 			// And once it has it, it does not get a second.
-			again, second := restyleDocument(out)
+			again, second := restyleDocument(out, "")
 			if second.styled || !bytes.Equal(again, out) {
 				t.Fatalf("a second pass changed the document:\n%s", again)
 			}
@@ -272,7 +278,7 @@ func TestRestyleDocumentRewritesInlineStylesAndStyleBlocksAndOnlyThose(t *testin
 		`<math><mtext style="font-size:12px">m</mtext></math>` +
 		`<p style="font-size:small">after the svg</p>` +
 		`</body></html>`
-	out, result := restyleDocument([]byte(doc))
+	out, result := restyleDocument([]byte(doc), "")
 	want := strings.NewReplacer(
 		`<style>p { font-size: medium }</style>`, `<style>p { font-size: 1rem }</style>`,
 		`h1 { font-size: 20pt }`, `h1 { font-size: 1.6667rem }`,
@@ -308,7 +314,7 @@ func TestRestyleDocumentMakesAbsoluteLineHeightsRelativeToo(t *testing.T) {
 		`<p data-style="line-height:18px" title="line-height:18px">e</p>` +
 		`<svg xmlns="http://www.w3.org/2000/svg"><text style="line-height:18px">svg</text></svg>` +
 		`</body></html>`
-	out, result := restyleDocument([]byte(doc))
+	out, result := restyleDocument([]byte(doc), "")
 	want := strings.NewReplacer(
 		`font-size: 80px; line-height: 70px;`, `font-size: 5rem; line-height: 4.375rem;`,
 		`<p style="line-height:18px">a</p>`, `<p style="line-height:1.125rem">a</p>`,
@@ -334,7 +340,7 @@ func TestRestyleDocumentFollowsHTMLThatIsNotXMLAsFarAsItCan(t *testing.T) {
 	doc := `<html><head><style>p { font-size: medium }</style></head><body>` +
 		`<p style=font-size:small>unquoted</p><br><p style="font-size:large">a < b and c<d</p>` +
 		`<img src=x.png style='font-size:12px'><p style="font-size:small`
-	out, result := restyleDocument([]byte(doc))
+	out, result := restyleDocument([]byte(doc), "")
 	want := strings.NewReplacer(
 		`p { font-size: medium }`, `p { font-size: 1rem }`,
 		`style="font-size:large"`, `style="font-size:1.125rem"`,
@@ -369,7 +375,7 @@ func TestRestyleDocumentLeavesAnEncodingItCannotEditAlone(t *testing.T) {
 		"bytes that are not UTF-8":                                    "<html><head><style>p { font-size: medium }</style></head><body><p>caf\xe9</p></body></html>",
 	} {
 		t.Run(name, func(t *testing.T) {
-			out, result := restyleDocument([]byte(doc))
+			out, result := restyleDocument([]byte(doc), "")
 			if result.left != leftEncoding || string(out) != doc || result.fontSizes != 0 || result.styled {
 				t.Fatalf("result = %+v; changed: %v", result, string(out) != doc)
 			}
@@ -387,7 +393,7 @@ func TestRestyleDocumentLeavesAnEncodingItCannotEditAlone(t *testing.T) {
 		"no declaration":                             `<html>` + body,
 	} {
 		t.Run(name, func(t *testing.T) {
-			out, result := restyleDocument([]byte(doc))
+			out, result := restyleDocument([]byte(doc), "")
 			if result.left != "" || result.fontSizes == 0 || !result.styled {
 				t.Fatalf("result = %+v", result)
 			}
@@ -450,7 +456,9 @@ func TestReadingCopyTakesWhatIsAStylesheetOrADocumentFromThePackage(t *testing.T
 	})
 	data, report := copyOf(t, path, CopyOptions{Restyle: true})
 	_, copied := archiveOf(t, data)
-	rewrittenSheet, rewrittenDoc := `p { font-size: 1rem }`, strings.Replace(strings.Replace(doc, "small", ".8125rem", 1), "</head>", columnStyleElement+"</head>", 1)
+	rewrittenSheet := `p { font-size: 1rem }`
+	// The package says it is in English, and these documents say nothing of language.
+	rewrittenDoc := strings.Replace(strings.Replace(strings.Replace(doc, "small", ".8125rem", 1), "</head>", columnStyleElement+"</head>", 1), "<html>", `<html lang="en" xml:lang="en">`, 1)
 	for name, want := range map[string]string{
 		"OEBPS/Text/ch 1.dat":             rewrittenDoc,
 		"OEBPS/Styles/style.dat":          rewrittenSheet,
@@ -468,7 +476,7 @@ func TestReadingCopyTakesWhatIsAStylesheetOrADocumentFromThePackage(t *testing.T
 		}
 	}
 	// Five documents and two stylesheets, a size in each.
-	if report.Edited != 7 || report.Styled != 5 || report.FontSizes != 7 {
+	if report.Edited != 7 || report.Styled != 5 || report.Languages != 5 || report.FontSizes != 7 {
 		t.Errorf("report = %+v", report)
 	}
 
@@ -628,7 +636,7 @@ func TestTheSlimReadAlongCopyIsRestyledToo(t *testing.T) {
 		}
 	}
 	// The three chapters and the navigation document have heads; the stylesheet one size.
-	if len(report.Omitted) != len(fixture.Audio) || report.Styled != 4 || report.FontSizes != 1 || report.Edited != 5 {
+	if len(report.Omitted) != len(fixture.Audio) || report.Styled != 4 || report.Languages != 4 || report.FontSizes != 1 || report.Edited != 5 {
 		t.Fatalf("report = %+v", report)
 	}
 	if files[0].Name != "mimetype" || files[0].Method != zip.Store {
@@ -650,7 +658,7 @@ func TestTheSlimReadAlongCopyIsRestyledToo(t *testing.T) {
 					t.Errorf("%s lost the id %s", name, fragment)
 				}
 			}
-			if strings.Replace(string(copied[name]), columnStyleElement, "", 1) != string(content) {
+			if strings.Replace(strings.Replace(string(copied[name]), columnStyleElement, "", 1), ` lang="en" xml:lang="en"`, "", 1) != string(content) {
 				t.Errorf("%s changed more than its head", name)
 			}
 		}

@@ -120,7 +120,10 @@ func TestEbookIsServedAsTheReadingCopyOfTheFileOnThisPC(t *testing.T) {
 				if !columnStyleElement.Match(got) {
 					t.Errorf("%s has no column style", name)
 				}
-				got = columnStyleElement.ReplaceAll(got, nil)
+				if !rootLanguage.Match(got) {
+					t.Errorf("%s has no language", name)
+				}
+				got = rootLanguage.ReplaceAll(columnStyleElement.ReplaceAll(got, nil), nil)
 			}
 			if name == "OEBPS/text/part0001.xhtml" {
 				// The keyword, the pixels, the line height and the inline size; ems, the element and its

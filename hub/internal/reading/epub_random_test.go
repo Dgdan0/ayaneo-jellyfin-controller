@@ -154,7 +154,8 @@ func randomXHTML(random *rand.Rand) string {
 	if random.Intn(2) == 0 {
 		out.WriteString("<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\" \"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">\n")
 	}
-	out.WriteString("<html xmlns=\"http://www.w3.org/1999/xhtml\">")
+	root := []string{"", ` lang="fr"`, ` xml:lang="he"`, ` lang="fr" xml:lang="fr"`, ""}[random.Intn(5)]
+	out.WriteString("<html" + root + " xmlns=\"http://www.w3.org/1999/xhtml\">")
 	if random.Intn(6) > 0 {
 		out.WriteString("<head><title>t</title>")
 		if random.Intn(2) == 0 {
@@ -172,15 +173,23 @@ func randomXHTML(random *rand.Rand) string {
 // in it, and it is stable: a second pass finds nothing.
 func TestRestyleDocumentKeepsAWellFormedDocumentWellFormed(t *testing.T) {
 	random := rand.New(rand.NewSource(8102026))
-	styled, resized, lined := 0, 0, 0
+	styled, resized, lined, languaged := 0, 0, 0, 0
 	for i := 0; i < 5000; i++ {
 		doc := randomXHTML(random)
 		if !wellFormed([]byte(doc)) {
 			t.Fatalf("the generator made a document that is not well-formed:\n%s", doc)
 		}
-		out, result := restyleDocument([]byte(doc))
+		out, result := restyleDocument([]byte(doc), "en-US")
 		if !wellFormed(out) {
 			t.Fatalf("a well-formed document is not any more:\n%s\n%s", doc, out)
+		}
+		// The language goes on a root that has none of its own, and only there.
+		hadOwn := strings.Contains(doc, " lang=") || strings.Contains(doc, "xml:lang=")
+		if result.language == hadOwn || (result.language && strings.Count(string(out), `lang="en-US" xml:lang="en-US"`) != 1) {
+			t.Fatalf("language = %v for a document that had its own: %v\n%s", result.language, hadOwn, out)
+		}
+		if result.language {
+			languaged++
 		}
 		if result.styled {
 			styled++
@@ -191,15 +200,15 @@ func TestRestyleDocumentKeepsAWellFormedDocumentWellFormed(t *testing.T) {
 		if result.fontSizes > 0 {
 			resized++
 		}
-		again, second := restyleDocument(out)
-		if second.fontSizes != 0 || second.lineHeights != 0 || second.styled || !bytes.Equal(again, out) {
+		again, second := restyleDocument(out, "en-US")
+		if second.fontSizes != 0 || second.lineHeights != 0 || second.styled || second.language || !bytes.Equal(again, out) {
 			t.Fatalf("a second pass changed the document:\n%s\n%s", out, again)
 		}
 		if result.styled != (strings.Count(string(out), columnStyleElement) == 1) || strings.Count(string(out), columnStyleElement) > 1 {
 			t.Fatalf("%d column styles in\n%s", strings.Count(string(out), columnStyleElement), out)
 		}
 	}
-	if styled < 3000 || resized < 2500 || lined < 400 {
+	if styled < 3000 || resized < 2500 || lined < 400 || languaged < 1500 {
 		t.Fatalf("%d documents were styled, %d resized and %d given line heights of 5000: the generator does not exercise the rewrite", styled, resized, lined)
 	}
 }

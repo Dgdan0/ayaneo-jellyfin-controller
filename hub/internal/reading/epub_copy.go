@@ -10,6 +10,7 @@ import (
 	"hash"
 	"io"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -49,6 +50,9 @@ type CopyReport struct {
 	LineHeights int
 	// Styled is how many documents were given the two-column style.
 	Styled int
+	// Languages is how many documents were given the package's language, because
+	// their <html> had neither lang nor xml:lang.
+	Languages int
 	// Edited is how many entries have other bytes than they had.
 	Edited int
 	// FixedLayout: the package is pre-paginated, whose pages are laid out by the
@@ -237,8 +241,9 @@ func PlanReadingEPUB(src io.ReaderAt, size int64, options CopyOptions) (*EPUBCop
 	}
 	var report CopyReport
 	var kinds map[string]entryKind
+	var language string
 	if options.Restyle {
-		kinds, report.FixedLayout = classifyEntries(archive)
+		kinds, report.FixedLayout, language = classifyEntries(archive)
 	}
 	for _, entry := range archive.File {
 		if _, audio := AudioKindOf(entry.Name); audio && options.OmitAudio {
@@ -246,7 +251,7 @@ func PlanReadingEPUB(src io.ReaderAt, size int64, options CopyOptions) (*EPUBCop
 			continue
 		}
 		if kind := kinds[entry.Name]; kind != kindOther && !report.FixedLayout {
-			done, err := restyleEntry(writer, entry, kind, &report)
+			done, err := restyleEntry(writer, entry, kind, language, &report)
 			if err != nil {
 				return nil, err
 			}
@@ -341,12 +346,15 @@ const (
 // documents. The package's manifest says what each file is, by media type; an
 // entry that it does not list, or lists without a type, is taken by its extension.
 // A package that cannot be read at all leaves the extension to decide everything.
-func classifyEntries(archive *zip.Reader) (kinds map[string]entryKind, fixedLayout bool) {
+// It also reads the language the package gives the book (empty when it gives none
+// that is plausible): see validLanguage.
+func classifyEntries(archive *zip.Reader) (kinds map[string]entryKind, fixedLayout bool, language string) {
 	byName := make(map[string]*zip.File, len(archive.File))
 	for _, entry := range archive.File {
 		byName[entry.Name] = entry
 	}
 	declared := map[string]string{} // zip path -> media type
+	sawLanguage := false
 	if container, err := readXMLEntry(byName, "META-INF/container.xml"); err == nil {
 		var packages []string
 		scanLenientXML(container, func(start xml.StartElement, _ string) {
@@ -363,6 +371,14 @@ func classifyEntries(archive *zip.Reader) (kinds map[string]entryKind, fixedLayo
 			}
 			scanLenientXML(document, func(start xml.StartElement, text string) {
 				switch start.Name.Local {
+				case "language":
+					// The package's first dc:language, and only that: a second one is
+					// another language of the book, and a first that is not a language
+					// tag is no reason to take the second.
+					if !sawLanguage {
+						sawLanguage = true
+						language = validLanguage(text)
+					}
 				case "item":
 					if href, _, ok := resolveRef(packagePath, attribute(start, "href")); ok {
 						declared[href] = strings.ToLower(strings.TrimSpace(strings.SplitN(attribute(start, "media-type"), ";", 2)[0]))
@@ -397,7 +413,30 @@ func classifyEntries(archive *zip.Reader) (kinds map[string]entryKind, fixedLayo
 			}
 		}
 	}
-	return kinds, fixedLayout
+	return kinds, fixedLayout, language
+}
+
+// languageTag is the shape of a BCP 47 language tag: a language of two or three
+// letters and any number of subtags of one to eight letters and digits (script,
+// region, variants, extensions, private use), joined by hyphens.
+var languageTag = regexp.MustCompile(`^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$`)
+
+// validLanguage is the package's dc:language as it can go on a document's <html>,
+// or empty. Without a language WebKit and Chrome do not hyphenate; with a wrong one
+// they hyphenate wrongly, so what is not plausibly a tag (a name, an underscore, a
+// locale of the platform) is not used, and neither are the tags that say there is
+// no language (und, zxx, mul). A plausible tag holds only letters, digits and
+// hyphens, so it needs no escaping in an attribute. Case is kept as written.
+func validLanguage(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 35 || !languageTag.MatchString(value) {
+		return ""
+	}
+	switch strings.ToLower(strings.SplitN(value, "-", 2)[0]) {
+	case "und", "zxx", "mul":
+		return ""
+	}
+	return value
 }
 
 // scanLenientXML visits the start elements of a package or container, with the text
@@ -440,7 +479,7 @@ func scanLenientXML(data []byte, visit func(start xml.StartElement, text string)
 // answers false, having written nothing, for an entry that is to be copied as it
 // was: one that holds nothing to change, or that cannot safely be edited (and then
 // the report says why).
-func restyleEntry(writer *zip.Writer, entry *zip.File, kind entryKind, report *CopyReport) (bool, error) {
+func restyleEntry(writer *zip.Writer, entry *zip.File, kind entryKind, language string, report *CopyReport) (bool, error) {
 	if entry.UncompressedSize64 > uint64(maxRestyleBytes) {
 		report.Left = append(report.Left, LeftAlone{entry.Name, leftTooLarge})
 		return false, nil
@@ -469,7 +508,7 @@ func restyleEntry(writer *zip.Writer, entry *zip.File, kind entryKind, report *C
 	if kind == kindSheet {
 		rewritten, result = restyleSheet(data)
 	} else {
-		rewritten, result = restyleDocument(data)
+		rewritten, result = restyleDocument(data, language)
 	}
 	if result.left != "" {
 		report.Left = append(report.Left, LeftAlone{entry.Name, result.left})
@@ -495,6 +534,9 @@ func restyleEntry(writer *zip.Writer, entry *zip.File, kind entryKind, report *C
 	report.LineHeights += result.lineHeights
 	if result.styled {
 		report.Styled++
+	}
+	if result.language {
+		report.Languages++
 	}
 	report.Edited++
 	return true, nil

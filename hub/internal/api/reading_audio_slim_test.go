@@ -27,6 +27,10 @@ import (
 // columnStyleElement is the style that the reading copy puts in a document's head.
 var columnStyleElement = regexp.MustCompile(`<style type="text/css">@media screen and \(min-width: 30em\) \{[^<]*\}</style>`)
 
+// rootLanguage is what the reading copy puts on a document's <html> from the package's dc:language,
+// which the generated editions give as English.
+var rootLanguage = regexp.MustCompile(` lang="en" xml:lang="en"`)
+
 func (e *audioEnv) slimPath() string {
 	return "/v1/reading/works/" + e.child + "/publications/12/file?format=readaloud&audio=omit"
 }
@@ -148,7 +152,10 @@ func TestSlimReadaloudIsTheEditionWithoutItsAudio(t *testing.T) {
 	for _, name := range want {
 		got, wasOriginally := zipEntry(t, reduced, name), zipEntry(t, original, name)
 		if strings.HasSuffix(name, ".xhtml") {
-			got = columnStyleElement.ReplaceAll(got, nil)
+			if !rootLanguage.Match(got) {
+				t.Errorf("%s has no language", name)
+			}
+			got = rootLanguage.ReplaceAll(columnStyleElement.ReplaceAll(got, nil), nil)
 		}
 		if !bytes.Equal(got, wasOriginally) {
 			t.Errorf("%s changed", name)

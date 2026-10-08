@@ -8,22 +8,26 @@ import (
 	"unicode/utf8"
 )
 
-// The two changes made to each content document of a book's reading copy, and
+// The three changes made to each content document of a book's reading copy, and
 // the cases in which a document is left exactly as it was.
 //
 // 1. Font sizes and line heights in `<style>` blocks and `style="…"` attributes become rem
 //    (epub_css.go), as they do in the stylesheets.
 // 2. One `<style>` is put before the first `</head>` that gives two columns on a
 //    screen too narrow for Readium CSS to give them.
+// 3. The language the package gives the book goes on the root `<html>` as lang and
+//    xml:lang, when it has neither. WebKit and Chrome hyphenate only text whose
+//    language they know, and many books (A Game of Thrones) name none in their
+//    documents, only in the package.
 //
 // The document is never parsed into a tree and never re-serialised. A scan walks
-// its markup far enough to know where the stylesheets are and where the head
-// ends, and the changes are spliced into the original bytes at those places. So
-// whatever the publisher wrote (entities, namespace prefixes, the order of
-// attributes, the way a tag is closed) is what the reader gets, and a document
-// that was well-formed is still well-formed: the only new characters are
-// letters, digits and CSS punctuation, and the one new element sits whole inside
-// the head.
+// its markup far enough to know where the stylesheets are, where the root begins
+// and where the head ends, and the changes are spliced into the original bytes at
+// those places. So whatever the publisher wrote (entities, namespace prefixes, the
+// order of attributes, the way a tag is closed) is what the reader gets, and a
+// document that was well-formed is still well-formed: the only new characters are
+// letters, digits, hyphens and CSS punctuation, the one new element sits whole
+// inside the head, and the two new attributes are on a start tag that lacks them.
 
 // columnStyle is the CSS of the second change. Readium CSS honours an explicit
 // `--USER__colCount: 2` only inside `@media screen and (min-width: 60em), …`, so the
@@ -59,6 +63,8 @@ type documentResult struct {
 	fontSizes, lineHeights int
 	// styled: the two-column style was put in.
 	styled bool
+	// language: the package's language was put on the root element.
+	language bool
 	// left is why the document was not touched at all, or empty.
 	left string
 }
@@ -69,9 +75,10 @@ const (
 	leftUnread   = "unreadable"
 )
 
-// restyleDocument returns doc with its font sizes and line heights as rem and the
-// column style in its head. It returns doc itself when there is nothing to change.
-func restyleDocument(doc []byte) ([]byte, documentResult) {
+// restyleDocument returns doc with its font sizes and line heights as rem, the
+// column style in its head and, when language is not empty, that language on its
+// <html> if it names none. It returns doc itself when there is nothing to change.
+func restyleDocument(doc []byte, language string) ([]byte, documentResult) {
 	if !isUTF8Text(doc) || declaresOtherCharset(doc) {
 		return doc, documentResult{left: leftEncoding}
 	}
@@ -99,6 +106,14 @@ func restyleDocument(doc []byte) ([]byte, documentResult) {
 	if found.headEnd >= 0 && !bytes.Contains(doc, []byte(columnStyle)) {
 		edits = append(edits, edit{found.headEnd, found.headEnd, []byte(columnStyleElement)})
 		result.styled = true
+	}
+	// Only the root's start tag, only when it says nothing of language: a document
+	// that has a lang or an xml:lang, even an empty one, is the publisher's own word.
+	// The value was checked (validLanguage), so it holds nothing XML would refuse.
+	if language != "" && found.root.nameEnd > 0 && !found.root.hasLanguage {
+		attributes := ` lang="` + language + `" xml:lang="` + language + `"`
+		edits = append(edits, edit{found.root.nameEnd, found.root.nameEnd, []byte(attributes)})
+		result.language = true
 	}
 	if len(edits) == 0 {
 		return doc, result
@@ -195,6 +210,18 @@ type markup struct {
 	attributes []span // the inside of each style="…"
 	blocks     []span // the inside of each <style> element
 	headEnd    int    // where the first </head> begins, or -1
+	// root is the document's first element when it is <html>.
+	root rootElement
+}
+
+// rootElement is where the document's <html> begins and whether it already says
+// what language it is in.
+type rootElement struct {
+	// nameEnd is the offset just past "<html", where an attribute can be put; zero
+	// when the first element is not <html>.
+	nameEnd int
+	// hasLanguage: it has a lang or an xml:lang attribute, whatever the value.
+	hasLanguage bool
 }
 
 // scanMarkup walks the tags of a document. It knows comments, CDATA sections,
@@ -207,11 +234,16 @@ type markup struct {
 func scanMarkup(doc []byte) markup {
 	found := markup{headEnd: -1}
 	foreign := 0
+	firstElement := true
+	strayText := false // text, not markup, ahead of the first element
 	i, n := 0, len(doc)
 	for i < n {
 		next := bytes.IndexByte(doc[i:], '<')
 		if next < 0 {
 			break
+		}
+		if firstElement && len(bytes.TrimSpace(bytes.TrimPrefix(doc[i:i+next], []byte{0xEF, 0xBB, 0xBF}))) > 0 {
+			strayText = true
 		}
 		i += next
 		rest := doc[i:]
@@ -261,6 +293,19 @@ func scanMarkup(doc []byte) markup {
 			tag, ok := readStartTag(rest)
 			if !ok {
 				return found
+			}
+			if firstElement {
+				// The root element: the first start tag outside comments, declarations
+				// and processing instructions, which is all the scan has passed.
+				firstElement = false
+				if tag.name == "html" && !strayText {
+					found.root.nameEnd = i + 1 + len("html")
+					for _, attribute := range tag.attributes {
+						if attribute.name == "lang" || attribute.name == "xml:lang" {
+							found.root.hasLanguage = true
+						}
+					}
+				}
 			}
 			inForeign := foreign > 0 || tag.name == "svg" || tag.name == "math"
 			if !inForeign {
