@@ -67,6 +67,12 @@ class SeriesFanCardView(context: Context, colors: PocketColors, private val ring
         }
     }
 
+    /** The fan opens only as far as this card, and a small margin, are wide: not into the next card's cell, nor past the page's gutter. */
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        fan.roomDp = w / resources.displayMetrics.density / 2f + SeriesFan.SPREAD_MARGIN_DP
+    }
+
     fun bind(series: ReadingWork, plan: SeriesFan.Plan, loader: ImageLoader, imageUrl: (String) -> String) {
         title.text = series.title
         caption.text = plan.caption

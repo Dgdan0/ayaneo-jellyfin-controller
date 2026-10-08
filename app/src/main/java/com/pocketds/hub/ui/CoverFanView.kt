@@ -36,6 +36,16 @@ class CoverFanView(context: Context, private val colors: PocketColors, private v
     private var plan: SeriesFan.Plan? = null
     /** The ring a focused fan puts on its front cover, over whatever else that cover carries. */
     private var ring: Drawable? = null
+    /**
+     * How far from the fan's middle its covers may reach when it opens with focus, in dp: the card's half width and a
+     * small margin, set by the card once it has a width. Unbounded until then.
+     */
+    var roomDp: Float = Float.POSITIVE_INFINITY
+        set(value) {
+            if (field == value) return
+            field = value
+            if (plan != null) placePlan()
+        }
 
     init {
         clipChildren = false
@@ -94,17 +104,27 @@ class CoverFanView(context: Context, private val colors: PocketColors, private v
     /**
      * The book you are on takes the last slot, on top at the right;
      * the others fill the slots before it in order. A fan of two leans like
-     * the first two of four, as the prototype's does.
+     * the first two of four, as the prototype's does. A fan of one known cover
+     * is not a fan: it stands upright in the middle of its box, never at the
+     * first slot's angle.
      */
     private fun place() {
         covers.forEach { resetPlanLook(it) }
+        val width = Styler.dpInt(context, coverWidthDp.toFloat())
+        val height = Styler.dpInt(context, coverWidthDp * 1.5f)
+        if (shown == 1) {
+            val (boxWidth, boxHeight) = sizeDp(coverWidthDp)
+            val (left, top) = SeriesFan.centred(boxWidth.toFloat(), boxHeight.toFloat(), coverWidthDp.toFloat())
+            stand(covers[0], width, height, Styler.dpInt(context, left), Styler.dpInt(context, top))
+            covers[0].rotation = 0f
+            covers[0].elevation = Styler.dp(context, 6f)
+            return
+        }
         for (i in 0 until shown) {
             val slot = if (i == 0) shown - 1 else i - 1
             val cover = covers[i]
-            (cover.layoutParams as LayoutParams).let {
-                val left = Styler.dpInt(context, LEFT_DP[slot] * scale)
-                if (it.leftMargin != left) { it.leftMargin = left; cover.layoutParams = it }
-            }
+            // On its foot, whatever stood here before (a lone cover is centred, the Series view's slots are its own).
+            stand(cover, width, height, Styler.dpInt(context, LEFT_DP[slot] * scale), Styler.dpInt(context, (HEIGHT_DP - FOOT_DP) * scale) - height)
             cover.rotation = ANGLES[slot] + when {
                 !spread || shown < COUNT -> 0f
                 slot == 0 -> -SPREAD
@@ -113,6 +133,13 @@ class CoverFanView(context: Context, private val colors: PocketColors, private v
             }
             cover.elevation = Styler.dp(context, 6f + slot * 2f)
         }
+    }
+
+    private fun stand(cover: ImageView, width: Int, height: Int, left: Int, top: Int) {
+        val params = cover.layoutParams as LayoutParams
+        if (params.width == width && params.height == height && params.leftMargin == left && params.topMargin == top) return
+        params.width = width; params.height = height; params.leftMargin = left; params.topMargin = top
+        cover.layoutParams = params
     }
 
     /** What a plan changes of a cover, undone for the prototype's fan. */
@@ -126,7 +153,7 @@ class CoverFanView(context: Context, private val colors: PocketColors, private v
      */
     private fun placePlan() {
         val plan = plan ?: return
-        val opening = SeriesFan.opening(spread)
+        val opening = SeriesFan.opening(spread, plan, coverWidthDp.toFloat(), roomDp)
         val (widthDp, heightDp) = planSizeDp(coverWidthDp)
         val centre = Styler.dp(context, widthDp / 2f)
         val bottom = Styler.dp(context, heightDp - PLAN_FOOT_DP)
@@ -190,13 +217,15 @@ class CoverFanView(context: Context, private val colors: PocketColors, private v
             (coverWidthDp * WIDTH_DP / BASE_COVER_DP).toInt() to (coverWidthDp * HEIGHT_DP / BASE_COVER_DP).toInt()
 
         /**
-         * The room the Series view's fan of covers [coverWidthDp] across needs, width then height, in dp: five
-         * slots, opened with focus, and the lit one raised and bigger over the tallest cover.
+         * The box the Series view's fan of covers [coverWidthDp] across stands in, width then height, in dp: five
+         * slots at rest, and the lit one raised, bigger and leaning over the tallest cover. The covers lean and open
+         * past its sides; [roomDp] is how far they may.
          */
         fun planSizeDp(coverWidthDp: Int): Pair<Int, Int> {
-            val width = SeriesFan.widthDp(coverWidthDp.toFloat(), SeriesFan.SLOTS) * SeriesFan.opening(true)
+            val width = SeriesFan.widthDp(coverWidthDp.toFloat(), SeriesFan.SLOTS)
             val tallest = coverWidthDp * 1.5f * SeriesFan.LIT_SCALE
-            return Math.ceil(width.toDouble()).toInt() to Math.ceil((tallest + coverWidthDp * 1.5f * SeriesFan.LIT_RAISE + PLAN_FOOT_DP).toDouble()).toInt()
+            val rise = coverWidthDp * 1.5f * SeriesFan.LIT_RAISE + SeriesFan.leanRiseDp(coverWidthDp.toFloat())
+            return Math.ceil(width.toDouble()).toInt() to Math.ceil((tallest + rise + PLAN_FOOT_DP).toDouble()).toInt()
         }
 
         /** A fan's covers: the prototype's 64dp on the Pocket. */

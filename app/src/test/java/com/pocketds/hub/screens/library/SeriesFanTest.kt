@@ -174,9 +174,49 @@ class SeriesFanTest {
         assertFalse(SeriesFan.hasFan(series(2).copy(entityType = "work")))
     }
 
-    @Test fun `the fan opens a little when it has focus`() {
-        assertEquals(1f, SeriesFan.opening(false), 0f)
-        assertTrue(SeriesFan.opening(true) > 1f)
+    @Test fun `the fan opens a little with focus, as far as its card has room for and no further`() {
+        val plan = plan(series(8))
+        assertEquals(1f, SeriesFan.opening(false, plan, 56f, 1000f), 0f)
+        // With all the room in the world it opens as far as it ever does.
+        assertEquals(SeriesFan.MAX_OPENING, SeriesFan.opening(true, plan, 56f, 1000f), 0.001f)
+        // The Pocket's card: 195dp wide, and a small margin round it.
+        val room = 195f / 2 + SeriesFan.SPREAD_MARGIN_DP
+        val opened = SeriesFan.opening(true, plan, 56f, room)
+        assertTrue("it opens, but not fully: $opened", opened > 1f && opened < SeriesFan.MAX_OPENING)
+        assertTrue(SeriesFan.reachDp(plan, 56f, opened) <= room)
+        // A hundredth more would not fit.
+        assertTrue(SeriesFan.reachDp(plan, 56f, opened + 0.01f) > room)
+        // A fan already wider than its room does not open at all, and never closes below its rest.
+        assertEquals(1f, SeriesFan.opening(true, plan, 56f, 90f), 0f)
+    }
+
+    @Test fun `how far a fan reaches is measured at the corners of its leaning covers`() {
+        // The outer slot of five 56dp covers: two steps out, and the top corner leaning 16 degrees about its foot.
+        assertEquals(97.1f, SeriesFan.reachDp(plan(series(8)), 56f, 1f), 0.1f)
+        // Opening it reaches further.
+        assertTrue(SeriesFan.reachDp(plan(series(8)), 56f, 1.1f) > 97.1f)
+        // The lit book is bigger, and at an outer slot it reaches further than the same book unlit.
+        assertEquals(102.1f, SeriesFan.reachDp(plan(series(8, on = 1)), 56f, 1f), 0.1f)
+        // A square audiobook is not as tall, so its corner leans less far.
+        assertEquals(89.4f, SeriesFan.reachDp(plan(series(8, audio = setOf(1, 5))), 56f, 1f), 0.1f)
+        // A lit book in the middle does not reach past the outer ones.
+        assertEquals(97.1f, SeriesFan.reachDp(plan(series(10, on = 5)), 56f, 1f), 0.1f)
+        // A series of two is as wide as its two covers.
+        assertTrue(SeriesFan.reachDp(plan(series(2)), 56f, 1f) < 60f)
+    }
+
+    @Test fun `the box has room over the lit book for it leaning at the end of a series`() {
+        // A 56dp cover, its lit book 1.1 times that, at the outer slot (16 degrees, opened to 19.5): about 5dp higher than upright.
+        assertEquals(5f, SeriesFan.leanRiseDp(56f), 0.3f)
+        assertTrue(SeriesFan.leanRiseDp(100f) > SeriesFan.leanRiseDp(56f))
+    }
+
+    @Test fun `a fan of one known cover stands upright in the middle of its box`() {
+        // The Pocket's 64dp cover in its 130 x 108dp box: 33dp in from each side, 6dp from the top and from the foot.
+        val (left, top) = SeriesFan.centred(130f, 108f, 64f)
+        assertEquals(33f, left, 0f)
+        assertEquals(6f, top, 0f)
+        assertEquals(33f, 130f - 64f - left, 0f)
     }
 
     @Test fun `the room a fan needs follows its covers and its slots`() {

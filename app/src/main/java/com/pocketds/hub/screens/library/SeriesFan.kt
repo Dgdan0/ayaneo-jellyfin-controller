@@ -35,8 +35,14 @@ object SeriesFan {
     /** The lit book is a little bigger and raised, as a fraction of a cover's size. */
     const val LIT_SCALE = 1.1f
     const val LIT_RAISE = 0.06f
-    /** The fan opens a little with focus: its angles and the room between slots grow by this. */
-    private const val OPEN = 1.22f
+    /** The most the fan opens with focus: its angles and the room between slots grow by this, when there is room. */
+    const val MAX_OPENING = 1.22f
+    /**
+     * How far past its card a fan may open: a small margin, so an opened fan stays about as wide as the card it is
+     * in (not into the next card's cell, nor, in the first and last columns, out to the screen's edge). The card
+     * is lifted a little with focus, and the fan with it, so this is of the card as it is seen.
+     */
+    const val SPREAD_MARGIN_DP = 3f
 
     enum class Part { READ, ON, TO_READ, MISSING }
 
@@ -142,8 +148,51 @@ object SeriesFan {
         }
     ).joinToString(" · ")
 
-    /** How far the fan opens: 1 at rest, a little more with focus. */
-    fun opening(focused: Boolean): Float = if (focused) OPEN else 1f
+    /**
+     * How far the fan opens: 1 at rest, and with focus as much as [MAX_OPENING] allows without [plan]'s covers
+     * reaching further from the fan's middle than [halfWidthDp] (the card's half width and its margin). A fan
+     * that is already as wide as its card does not open at all.
+     */
+    fun opening(focused: Boolean, plan: Plan, coverDp: Float, halfWidthDp: Float): Float {
+        if (!focused) return 1f
+        val steps = ((MAX_OPENING - 1f) * 100).toInt()
+        return (steps downTo 0).map { 1f + it / 100f }.firstOrNull { reachDp(plan, coverDp, it) <= halfWidthDp } ?: 1f
+    }
+
+    /**
+     * How far from the fan's middle [plan]'s covers [coverDp] across reach, opened by [opening]: the corners of each
+     * cover after it leans about its foot (and is made bigger, when it is the lit one), measured from where it stands.
+     */
+    fun reachDp(plan: Plan, coverDp: Float, opening: Float): Float = plan.slots.maxOf { slot ->
+        val height = coverHeightDp(coverDp, slot.square)
+        val scale = if (slot.lit) LIT_SCALE else 1f
+        val lean = Math.toRadians((slot.angleDeg * opening).toDouble())
+        val cos = kotlin.math.cos(lean)
+        val sin = kotlin.math.sin(lean)
+        val foot = slot.offset * STEP_FRACTION * coverDp * opening
+        // The pivot is the middle of the cover's bottom edge; y runs down, so the top corners are at -height.
+        listOf(-coverDp / 2f to 0f, coverDp / 2f to 0f, -coverDp / 2f to -height, coverDp / 2f to -height).maxOf { (x, y) ->
+            kotlin.math.abs(foot + scale * (x * cos - y * sin)).toFloat()
+        }
+    }
+
+    /**
+     * How far a leaning lit cover's top corner rises over where it would stand upright, in dp, at the outermost slot
+     * and the fan fully opened: the fan's box leaves this room, or the lit book of a series you are at the start or
+     * the end of is cut off at the top.
+     */
+    fun leanRiseDp(coverDp: Float): Float {
+        val height = coverHeightDp(coverDp, square = false)
+        val lean = Math.toRadians((((SLOTS - 1) / 2f) * ANGLE_STEP * MAX_OPENING).toDouble())
+        return (LIT_SCALE * (height * kotlin.math.cos(lean) + coverDp / 2f * kotlin.math.sin(lean) - height)).toFloat().coerceAtLeast(0f)
+    }
+
+    /**
+     * Where a fan's one known cover [coverDp] across stands in its box: upright, in the middle both ways, and
+     * never at the angle of the first slot of a longer fan. Left then top, in dp.
+     */
+    fun centred(boxWidthDp: Float, boxHeightDp: Float, coverDp: Float): Pair<Float, Float> =
+        (boxWidthDp - coverDp) / 2f to (boxHeightDp - coverHeightDp(coverDp, square = false)) / 2f
 
     /** A tall cover [widthDp] across is this high; a square one as high as it is wide. */
     fun coverHeightDp(widthDp: Float, square: Boolean): Float = if (square) widthDp else widthDp * 1.5f
