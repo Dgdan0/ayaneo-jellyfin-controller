@@ -17,6 +17,8 @@ struct OfflineTitleView: View {
     @Environment(\.openRoute) private var openRoute
     @State private var offline = OfflineLibrary.shared
     @State private var removing: OfflineRemoval?
+    /// The round "…"'s choices, for a controller's Ⓐ on it (#46).
+    @State private var moreOpen = false
     /// The season chosen on its pill; until one is, the season Play is in.
     @State private var chosenSeason = ""
 
@@ -48,7 +50,11 @@ struct OfflineTitleView: View {
 
     private func page(_ entry: OfflineCatalogEntry) -> some View {
         let item = facts(entry)
-        return TitlePage(backdrop: FadedArtwork.titleFade { backdrop(entry) }) { page in
+        // A controller goes down the page as on the library's (#46): Read more, the
+        // actions, then a series' seasons and episodes.
+        let column = (item.overview.isEmpty ? [] : ["read-more"]) + ["actions"] + (entry.isSeries ? ["seasons", "episodes"] : [])
+        return TitlePage(backdrop: FadedArtwork.titleFade { backdrop(entry) }, pad: "offline-title:\(entry.key)",
+                         padColumn: column) { page in
             TitleHeader(title: entry.title, originalTitle: item.originalTitle, page: page, facts: DetailLines.facts(item),
                         state: summary(entry), overview: item.overview) {
                 EmptyView()
@@ -119,13 +125,17 @@ struct OfflineTitleView: View {
             }
             .buttonStyle(PrimaryPillStyle())
             .accessibilityIdentifier("offline-play")
-            GlassRoundButton(systemImage: "trash", label: "Remove", size: size) {
+            .padFocusable("play") {
+                play(PlayRequest(itemId: (target?.row ?? entry.rows[0]).itemId, mode: .resume, title: entry.title))
+            }
+            GlassRoundButton(systemImage: "trash", label: "Remove", size: size, pad: "remove") {
                 removing = OfflineRemoval(id: entry.key, title: "Remove \(entry.title)?",
                                           detail: OfflineRemoval.detail(entry)) { offline.removeTitle(entry) }
             }
             .accessibilityIdentifier("offline-remove")
             more(entry, target: target, size: size)
         }
+        .padGroup("actions", .row, members: ["play", "remove", "more"], prefix: false)
     }
 
     /// "Resume S1E4", "Play S1E1" for a series; "Resume · 17:12" or "Play" for a film.
@@ -142,18 +152,7 @@ struct OfflineTitleView: View {
     /// The round "…": start over what is half watched, and the title's page on the hub.
     private func more(_ entry: OfflineCatalogEntry, target: OfflineCatalogPlayTarget?, size: CGFloat) -> some View {
         Menu {
-            if let target, target.kind == .resume {
-                Button {
-                    play(PlayRequest(itemId: target.row.itemId, mode: .restart, title: entry.title))
-                } label: {
-                    Label("Start over", systemImage: "arrow.counterclockwise")
-                }
-            }
-            Button {
-                openRoute(.title(TitleRoute(itemId: entry.key, title: entry.title)))
-            } label: {
-                Label("Open on the hub", systemImage: "arrow.up.right.square")
-            }
+            moreChoices(entry, target: target)
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: size * 0.4, weight: .semibold))
@@ -166,6 +165,27 @@ struct OfflineTitleView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("More actions")
         .accessibilityIdentifier("offline-more")
+        // A menu cannot be opened for a controller: Ⓐ asks its choices as a dialog (#46).
+        .padFocusable("more", ring: .circle) { moreOpen = true }
+        .confirmationDialog("More actions for \(entry.title)", isPresented: $moreOpen, titleVisibility: .visible) {
+            moreChoices(entry, target: target)
+        }
+    }
+
+    /// The "…"'s choices, in its menu and in the dialog a controller opens.
+    @ViewBuilder private func moreChoices(_ entry: OfflineCatalogEntry, target: OfflineCatalogPlayTarget?) -> some View {
+        if let target, target.kind == .resume {
+            Button {
+                play(PlayRequest(itemId: target.row.itemId, mode: .restart, title: entry.title))
+            } label: {
+                Label("Start over", systemImage: "arrow.counterclockwise")
+            }
+        }
+        Button {
+            openRoute(.title(TitleRoute(itemId: entry.key, title: entry.title)))
+        } label: {
+            Label("Open on the hub", systemImage: "arrow.up.right.square")
+        }
     }
 
     // MARK: A film

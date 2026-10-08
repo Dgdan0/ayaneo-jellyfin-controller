@@ -73,6 +73,8 @@ struct PlayerSheet: View {
                                            style: .continuous)
         return VStack(alignment: .leading, spacing: 12) {
             header
+            // A controller moves down the rows and Ⓑ goes back a page, then
+            // closes the sheet (#46): a page in the rows' own reader.
             ScrollViewReader { reader in
                 Group {
                     if bottom {
@@ -91,6 +93,7 @@ struct PlayerSheet: View {
                 // Each page its own scroll view, at its top or its choice.
                 .id(panel)
                 .onAppear { scrollToChoice(reader) }
+                .padPage("player-\(String(describing: panel))", modal: true, scrolling: reader) { back() }
             }
         }
         .padding(.top, 22 + (bottom ? 0 : layout.safe.top))
@@ -114,9 +117,7 @@ struct PlayerSheet: View {
         // A sheet from the bottom is as tall as what it holds, up to 84% of
         // the screen; the one at the side runs from top to bottom.
         .frame(height: bottom ? layout.size.height * 0.84 : layout.size.height, alignment: .bottom)
-        // A controller moves down its rows and Ⓑ goes back a page, then closes it (#46).
         .environment(\.padSheetRows, true)
-        .padPage("player-\(String(describing: panel))", modal: true) { back() }
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
     }
