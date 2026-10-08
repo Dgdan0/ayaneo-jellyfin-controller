@@ -535,11 +535,11 @@ class EpubReaderScreen(
             }
             val streamed = plan is NarrationPlan.Stream
             var file = editionFile(if (!readAlong) editionCache("") else if (streamed || plan is NarrationPlan.Unreachable) slimCache else wholeCache,
-                forceDownload, omitAudio = streamed)
+                forceDownload, omitAudio = streamed, revalidate = !readAlong || streamed)
             if (file == null && streamed && lastDownload?.code == AudiobookStream.NOT_STREAMABLE) {
                 // The hub cannot cut this edition's audio out: the whole edition, as before.
                 plan = NarrationPlan.Whole
-                file = editionFile(wholeCache, forceDownload, omitAudio = false)
+                file = editionFile(wholeCache, forceDownload, omitAudio = false, revalidate = false)
             }
             if (file == null) { showFailure(lastDownload?.message ?: "The EPUB could not be downloaded"); return@launch }
             loading.text = "Opening book…"
@@ -581,26 +581,36 @@ class EpubReaderScreen(
     private fun editionCache(kind: String) =
         EpubPackageCache(File(host.viewContext.cacheDir, "reading-epub/${readingSession.identity}" + if (kind.isEmpty()) "" else "/$kind"))
 
-    /** The edition from [cache], downloaded first when it is not complete there; null when it could not be. */
-    private suspend fun editionFile(cache: EpubPackageCache, forceDownload: Boolean, omitAudio: Boolean): File? {
+    /**
+     * The edition from [cache], downloaded first when it is not complete there; null when it could not be.
+     * A copy that is here is checked against the hub ([EpubEdition], #41) when [revalidate]: the ebook
+     * and the slim read-along edition, which the hub rewrites. The whole read-along edition is not asked
+     * about: the hub passes it through from Storyteller without conditional requests, so asking would cost
+     * the hub a stream of hundreds of megabytes for nothing, and a change would be as much again to fetch.
+     * Nor is an edition kept for a hub that could not be reached a moment ago.
+     */
+    private suspend fun editionFile(cache: EpubPackageCache, forceDownload: Boolean, omitAudio: Boolean, revalidate: Boolean): File? {
         lastDownload = null
-        if (forceDownload) {
-            cache.completeFile(workId, sourceItemId).delete()
-            cache.clearDownload(workId, sourceItemId)
-        }
-        if (cache.isComplete(workId, sourceItemId)) return cache.completeFile(workId, sourceItemId)
-        val temporary = cache.temporaryFile(workId, sourceItemId)
-        loading.text = when {
-            !readAlong -> "Downloading book…"
-            omitAudio -> "Downloading the book…"
-            else -> "Downloading aligned book and narration…"
-        }
-        return when (val result = readingSession.api.downloadReadingEpub(workId, sourceItemId, temporary, readAlong, omitAudio)) {
-            is HubResult.Ok -> runCatching { cache.promote(workId, sourceItemId) }.getOrElse {
-                lastDownload = HubResult.Failed(com.pocketds.hub.net.FailureKind.BAD_RESPONSE, "The downloaded EPUB is incomplete")
-                null
+        val opened = EpubEdition(cache, workId, sourceItemId).open(
+            forceDownload, revalidate,
+            fetch = { destination, check -> readingSession.api.downloadReadingEpub(workId, sourceItemId, destination, readAlong, omitAudio, check) },
+            // From the transfer's thread when a newer edition begins to arrive.
+            onStage = { stage ->
+                val text = when {
+                    stage == EpubEdition.Stage.UPDATING -> "Updating book…"
+                    !readAlong -> "Downloading book…"
+                    omitAudio -> "Downloading the book…"
+                    else -> "Downloading aligned book and narration…"
+                }
+                loading.post { loading.text = text }
             }
-            is HubResult.Failed -> { lastDownload = result; null }
+        )
+        return when (opened) {
+            is EpubEdition.Opened.Ready -> {
+                if (revalidate) DebugLog.log("reader", "epub ${opened.how.name.lowercase()}")
+                opened.file
+            }
+            is EpubEdition.Opened.Failed -> { lastDownload = opened.failure; null }
         }
     }
 
