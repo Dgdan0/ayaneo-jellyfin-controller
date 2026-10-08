@@ -301,6 +301,7 @@ private struct CueAccessibility: ViewModifier {
             content
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(words)
+                .accessibilityAddTraits(.isStaticText)
                 .accessibilityIdentifier("subtitle-cue")
         } else {
             content.accessibilityHidden(true)

@@ -130,6 +130,10 @@ final class DownloadsTests: XCTestCase {
             format: "identifier == 'subtitle-cue' AND (label CONTAINS %@ OR label CONTAINS %@)",
             "כתובית שנשמרה ליד ההורדה", "היא מוצגת גם בלי רשת")).firstMatch
         XCTAssertTrue(cue.waitForExistence(timeout: 10), "the kept Hebrew was not drawn")
+        // Paused, so the line holds still while the panel is used: a cue that
+        // changes between two of XCTest's looks at the screen fails a tap.
+        app.buttons["Pause"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 5), "the film did not pause")
 
         // Both are choices, though the MP4 holds no subtitles; the Hebrew is ticked.
         app.buttons["Audio & subtitles"].firstMatch.tap()

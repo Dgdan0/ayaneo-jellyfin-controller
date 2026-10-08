@@ -352,8 +352,7 @@ struct OfflineSubtitleSyncTests {
         // A refresh that ends after the download went writes nothing.
         #expect(await OfflineSubtitleSync.refresh(row, store: store, hub: hub, now: 1_000_000) == .unchanged)
         #expect(store.keptSubtitles(row) == nil)
-        try store.writeKeptSubtitle(row, key: "ext-heb", data: Data("WEBVTT
-".utf8))
+        try store.writeKeptSubtitle(row, key: "ext-heb", data: Data("WEBVTT".utf8))
         #expect(!store.hasKeptSubtitle(row, key: "ext-heb"))
         #expect(try FileManager.default.contentsOfDirectory(atPath: store.subtitleFolder.path).isEmpty)
     }
