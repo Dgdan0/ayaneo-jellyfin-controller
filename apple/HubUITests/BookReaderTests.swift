@@ -80,7 +80,12 @@ final class BookReaderTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.6))
         reference.tap()
         let note = app.staticTexts["book-footnote"]
-        XCTAssertTrue(note.waitForExistence(timeout: 5), "the note did not open as a card")
+        // On a loaded Mac the iPad Pro's two columns can still be settling, and
+        // the tap is lost (the class's suite, 2026-10-07 and 08; alone it passed):
+        // once more, then it must open.
+        if !note.waitForExistence(timeout: 5), reference.isHittable { reference.tap() }
+        XCTAssertTrue(note.waitForExistence(timeout: 5), "the note did not open as a card: frame \(reference.frame) in \(app.windows.firstMatch.frame); "
+                      + app.staticTexts.allElementsBoundByIndex.prefix(12).map(\.label).joined(separator: " | "))
         XCTAssertTrue(note.label.contains("harbour office"), "the card reads \(note.label)")
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(note.waitForNonExistence(timeout: 5), "the card stayed")
