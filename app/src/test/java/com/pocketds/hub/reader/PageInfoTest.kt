@@ -186,19 +186,22 @@ class PageInfoTest {
     @Test fun `a strip is kept only where a corner is shown`() {
         val all = PageInfoChoice()
         assertTrue(all.topStrip && all.bottomStrip)
-        assertFalse(all.copy(clock = false).topStrip)
+        // The title keeps the top clear when the clock is off, and the clock when the title is.
+        assertTrue(all.copy(clock = false).topStrip)
+        assertTrue(all.copy(title = false).topStrip)
+        assertFalse(all.copy(clock = false, title = false).topStrip)
         assertTrue(all.copy(clock = false).bottomStrip)
         // Either bottom corner keeps the foot clear.
         assertTrue(all.copy(corner = PageInfoCorner.NONE).bottomStrip)
         assertTrue(all.copy(percentage = false).bottomStrip)
         assertFalse(all.copy(corner = PageInfoCorner.NONE, percentage = false).bottomStrip)
-        val none = PageInfoChoice(clock = false, corner = PageInfoCorner.NONE, percentage = false)
+        val none = PageInfoChoice(clock = false, corner = PageInfoCorner.NONE, percentage = false, title = false)
         assertFalse(none.topStrip || none.bottomStrip)
     }
 
-    @Test fun `all three corners are on until turned off`() {
+    @Test fun `all the corners are on until turned off`() {
         val defaults = PageInfoChoice()
-        assertTrue(defaults.clock && defaults.percentage)
+        assertTrue(defaults.clock && defaults.percentage && defaults.title)
         assertEquals(PageInfoCorner.PAGE_IN_BOOK, defaults.corner)
     }
 
@@ -208,18 +211,23 @@ class PageInfoTest {
         assertEquals(PageInfoCorner.PAGE_IN_BOOK, PageInfoCorner.named(null))
     }
 
-    @Test fun `the ink is the page's text colour, quieter`() {
-        val ink = PageInfo.ink(0xFF3E3526.toInt())
-        assertEquals(0x3E3526, ink and 0xFFFFFF)
-        assertEquals(153, (ink ushr 24))
+    @Test fun `the ink is the page's own ink at full strength`() {
+        val ink = PageInfo.ink(0xFF5A4931.toInt())
+        assertEquals(0x5A4931, ink and 0xFFFFFF)
+        assertEquals(255, (ink ushr 24))
         // Whatever alpha the colour had, the corners' is the same.
-        assertEquals(ink, PageInfo.ink(0x803E3526.toInt()))
+        assertEquals(ink, PageInfo.ink(0x805A4931.toInt()))
     }
 
-    @Test fun `the corners sit level with the text and stay on the screen`() {
-        assertEquals(20, PageInfo.sideInsetDp(1f))
-        assertEquals(14, PageInfo.sideInsetDp(0.5f))
-        assertEquals(34, PageInfo.sideInsetDp(1.7f))
-        assertEquals(40, PageInfo.sideInsetDp(2f))
+    @Test fun `the title is one line of capitals`() {
+        assertEquals("LIGHT BRINGER", PageInfo.titleText("Light Bringer"))
+        assertEquals("A GAME OF THRONES", PageInfo.titleText("  A Game\n of   Thrones "))
+        assertEquals("", PageInfo.titleText("   "))
+    }
+
+    @Test fun `the corners are sized and strip-high for the Pocket`() {
+        assertEquals(30, PageInfo.STRIP_DP)
+        assertTrue(PageInfo.TEXT_SP in 12f..13f)
+        assertTrue("the title is smaller", PageInfo.TITLE_SP < PageInfo.TEXT_SP)
     }
 }

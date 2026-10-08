@@ -4,8 +4,8 @@ import kotlin.math.roundToInt
 
 /**
  * Comfort in a long session (#16, X3): how bright and how warm this app draws
- * a reader, whether a book's page is pure black, and whether the screen stays
- * on while narration plays. One owner for the player's brightness drag and
+ * a reader, and whether the screen stays on while narration plays. (A book's
+ * black page is the Dark theme now, #47.) One owner for the player's brightness drag and
  * every reader's Comfort sheet; the readers keep theirs in ComfortSettings.
  *
  * Software only. The Pocket has two backlights and this never touches either:
@@ -19,8 +19,6 @@ data class ScreenComfort(
     val brightness: Float = 1f,
     /** 0 is as drawn; 1 is candlelight. */
     val warmth: Float = 0f,
-    /** A book's page in black, its words a soft warm grey. */
-    val blackPage: Boolean = false,
     /** The screen stays on while a read-along book is narrating. */
     val awakeWhileNarrating: Boolean = true
 ) {
@@ -34,14 +32,14 @@ data class ScreenComfort(
 
     companion object {
         const val MIN_BRIGHTNESS = 0.1f
+
+        /** Brightness in steps of 5%, the dimmest [MIN_BRIGHTNESS]: the slider at the foot of a book's appearance sheet and the one a comic's Comfort has. */
+        val BRIGHTNESS_RANGE = ValueRange(MIN_BRIGHTNESS, 1f, 0.05f)
         /** How dark the dimmest is: the player's measure, which lets a little of the picture through. */
         const val MAX_DIM = 0.85f
         const val WHITE: Int = -1
         /** White at full warmth, about 2,800 K: the warm end of a reading lamp. */
         const val CANDLE: Int = 0xFFFFB46B.toInt()
-        /** The black page and its words: not white, which glares on black in the dark. */
-        const val BLACK_PAGE: Int = 0xFF000000.toInt()
-        const val BLACK_PAGE_TEXT: Int = 0xFFC9C3B6.toInt()
 
         /** The black laid over the picture: none at full brightness, [MAX_DIM] at none. */
         fun dimAlpha(brightness: Float): Float = (1f - brightness.coerceIn(0f, 1f)) * MAX_DIM

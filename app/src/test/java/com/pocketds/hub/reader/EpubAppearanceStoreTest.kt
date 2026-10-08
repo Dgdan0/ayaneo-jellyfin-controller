@@ -37,6 +37,21 @@ class EpubAppearanceStoreTest {
         assertTrue(defaults.copy(publisherStyles = true).publisherStyles)
     }
 
+    @Test fun `a new device reads at 130 percent, in Kindle's three line spacings, on the middle margin`() {
+        val defaults = EpubReaderPreferences()
+        assertEquals(1.3f, defaults.fontScale, 0f)
+        assertEquals(listOf(1.3f, 1.5f, 1.8f), EpubLayoutPolicy.SPACING.map { it.first })
+        assertTrue("the default spacing is one of the three", EpubLayoutPolicy.SPACING.any { it.first == defaults.lineHeight })
+        assertEquals(1.5f, defaults.lineHeight, 0f)
+        assertEquals(com.pocketds.hub.reader.PageGeometry.Margin.BALANCED, PageGeometry.preset(defaults.pageMargins))
+        assertEquals(1.3f, EpubAppearanceStore.decode(store()).fontScale, 0f)
+    }
+
+    @Test fun `a device that chose its size keeps it`() {
+        assertEquals(1.0f, EpubAppearanceStore.decode(store(mapOf("fontScale" to 1.0f))).fontScale, 0f)
+        assertEquals(1.1f, EpubAppearanceStore.decode(store(mapOf("lineHeight" to 1.1f))).lineHeight, 0f)
+    }
+
     @Test fun `a device whose look was changed keeps it`() {
         val look = EpubAppearanceStore.decode(store(mapOf(
             "publisherStyles" to true, "textAlignment" to "start", "lineHeight" to 1.25f, "hyphenation" to false,

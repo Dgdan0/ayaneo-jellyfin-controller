@@ -72,10 +72,11 @@ import kotlinx.serialization.json.jsonObject
 import org.json.JSONObject
 import org.json.JSONArray
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
+import org.readium.r2.navigator.epub.css.Length
+import org.readium.r2.navigator.epub.css.RsProperties
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.preferences.ColumnCount
-import org.readium.r2.navigator.preferences.FontFamily
 import org.readium.r2.navigator.preferences.TextAlign
 import org.readium.r2.navigator.preferences.Theme as ReadiumTheme
 import org.readium.r2.shared.ExperimentalReadiumApi
@@ -146,6 +147,8 @@ class EpubReaderScreen(
     private lateinit var pageHost: FrameLayout
     private lateinit var pageInfo: PageInfoView
     private var pageChoice = PageInfoChoice()
+    /** The page's side inset in pixels, where a tap turns the page itself (#47). */
+    private var insetPx = 0
     private lateinit var loading: TextView
     private lateinit var bars: ReaderBars
     private lateinit var topBar: LinearLayout
@@ -230,7 +233,14 @@ class EpubReaderScreen(
         root = FrameLayout(host.viewContext).apply { setBackgroundColor(Color.BLACK) }
         navigatorContainer = object : FrameLayout(host.viewContext) {
             private var longPressCheck: Runnable? = null
+            /** A touch that began in the side inset, which is not Readium's page: a tap there turns the page (#47). */
+            private var insetSide = PageGeometry.InsetTap.NONE
+            private var insetMoved = false
+            private var insetDownX = 0f
+            private var insetDownY = 0f
+
             override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                if (insetSide != PageGeometry.InsetTap.NONE) return followInsetTouch(event)
                 if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                     longPressCheck?.let { removeCallbacks(it) }
                     longPressCheck = Runnable { inspectSelection() }.also {
@@ -245,13 +255,37 @@ class EpubReaderScreen(
                 }
                 val consumed = super.dispatchTouchEvent(event)
                 if (inspect) postDelayed({ inspectSelection() }, 120)
+                // Nothing under the finger took it, and it is in the inset at a side: it is ours.
+                if (!consumed && event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    val side = PageGeometry.inset(event.x, width.toFloat(), insetPx.toFloat())
+                    if (side != PageGeometry.InsetTap.NONE) {
+                        insetSide = side; insetMoved = false; insetDownX = event.x; insetDownY = event.y
+                        return true
+                    }
+                }
                 return consumed
+            }
+
+            private fun followInsetTouch(event: MotionEvent): Boolean {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_MOVE -> {
+                        val slop = ViewConfiguration.get(context).scaledTouchSlop
+                        if (Math.abs(event.x - insetDownX) > slop || Math.abs(event.y - insetDownY) > slop) insetMoved = true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val side = insetSide
+                        insetSide = PageGeometry.InsetTap.NONE
+                        if (!insetMoved && event.eventTime - event.downTime < ViewConfiguration.getLongPressTimeout()) onInsetTap(side)
+                    }
+                    MotionEvent.ACTION_CANCEL -> insetSide = PageGeometry.InsetTap.NONE
+                }
+                return true
             }
         }.apply {
             id = View.generateViewId()
             setBackgroundColor(Color.BLACK)
         }
-        pageHost =FrameLayout(host.viewContext).apply { id = View.generateViewId() }
+        pageHost = FrameLayout(host.viewContext).apply { id = View.generateViewId() }
         navigatorContainer.addView(pageHost, FrameLayout.LayoutParams(MATCH, MATCH))
         pageInfo = PageInfoView(host.viewContext).apply { onCycle = ::cyclePageInfo }
         navigatorContainer.addView(pageInfo, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -447,17 +481,22 @@ class EpubReaderScreen(
         ReaderKeys.show(overlay, padState().copy(controlsVisible = false))
     }
 
-    /** Comfort (X3): the same glass sheet as every reader's, with the black page and the screen kept on. */
+    /** Comfort (X3): the same glass sheet as every reader's, with the screen kept on while narrating. */
     private fun showComfort() {
         setControlsVisible(true)
         ComfortSheet.show(overlay, colors, ReaderKind.BOOK, ::applyComfort)
     }
 
+    /** The brightness slider at the foot of Appearance (#47): kept for every reader, as Comfort's own was. */
+    private fun setBrightness(brightness: Float) {
+        val next = comfort.copy(brightness = brightness)
+        ComfortSettings.save(host.viewContext, next)
+        applyComfort(next)
+    }
+
     private fun applyComfort(value: ScreenComfort) {
-        val pageChanged = value.blackPage != comfort.blackPage
         comfort = value
         comfortLayer.apply(value)
-        if (pageChanged) applyPreferences()
         updateAwake()
     }
 
@@ -466,9 +505,13 @@ class EpubReaderScreen(
         if (::root.isInitialized) root.keepScreenOn = comfort.keepsScreenOn(narration?.isPlaying == true)
     }
 
-    /** The page's colours: the theme's, or black while Comfort asks for a black page. */
-    private fun pagePalette(value: EpubReaderPreferences): Pair<Int, Int>? =
-        if (comfort.blackPage) ScreenComfort.BLACK_PAGE to ScreenComfort.BLACK_PAGE_TEXT else EpubPagePalette.of(value.theme)
+    /** The page's colours, the theme's: "Use system colours" is Paper by day and Dark at night (#47). */
+    private fun pagePalette(value: EpubReaderPreferences): Pair<Int, Int> = EpubPagePalette.of(value.theme, isNight())
+
+    /** Whether the system is at night: the system's own setting, since the app itself always runs in night mode. */
+    private fun isNight(): Boolean =
+        (android.content.res.Resources.getSystem().configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
 
     /** Readium's highlight, as the read-along's glow ([ReadAlongGlow]): narration is its only highlight. */
     private fun narrationTemplates(): HtmlDecorationTemplates = HtmlDecorationTemplates.defaultTemplates().copy().apply {
@@ -659,7 +702,12 @@ class EpubReaderScreen(
             initialLocator = initialLocator,
             initialPreferences = readiumPreferences(preferences),
             listener = linkListener,
-            configuration = EpubNavigatorFragment.Configuration(decorationTemplates = narrationTemplates()),
+            configuration = EpubNavigatorFragment.Configuration(
+                decorationTemplates = narrationTemplates(),
+                // Half the gap between two columns, in each column's padding: the rest of the outer margin is the
+                // inset of pageHost (PageGeometry, #47). The CSS pixel is the dp.
+                readiumCssRsProperties = RsProperties(pageGutter = Length.Px(PageGeometry.GUTTER_DP.toDouble()))
+            ).also { EpubFontDeclarations.declare(it) },
             paginationListener = object : EpubNavigatorFragment.PaginationListener {
                 override fun onPageChanged(pageIndex: Int, totalPages: Int, locator: Locator) {
                     this@EpubReaderScreen.pageIndex = pageIndex
@@ -740,6 +788,18 @@ class EpubReaderScreen(
         } else switchToReading()
         val didMove = if (delta >= 0) navigator?.goForward(animated = true) else navigator?.goBackward(animated = true)
         if (didMove == false) host.notify(if (delta >= 0) "End of book" else "Start of book")
+    }
+
+    /**
+     * A tap in the side inset (#47), which Readium never sees: the page turns the way the margin points, as with the
+     * chrome open it is put away, and the edges leave a voice alone, as they do inside the page (#21).
+     */
+    private fun onInsetTap(side: PageGeometry.InsetTap) {
+        if (controlsVisible) return setControlsVisible(false)
+        if (narration?.isOn == true) return
+        val rtl = navigator?.overflow?.value?.readingProgression == org.readium.r2.navigator.preferences.ReadingProgression.RTL
+        val forward = (side == PageGeometry.InsetTap.FORWARD) != rtl
+        turn(if (forward) 1 else -1)
     }
 
     private fun changeChapter(direction: Direction) {
@@ -1434,7 +1494,8 @@ class EpubReaderScreen(
             applyPreferences()
         }, onClose = {
             host.refreshHints()
-        }, pageInfo = pageChoice, onPageInfoChanged = ::setPageInfo)
+        }, pageInfo = pageChoice, onPageInfoChanged = ::setPageInfo,
+            brightness = comfort.brightness, onBrightness = ::setBrightness)
         host.refreshHints()
     }
 
@@ -1444,8 +1505,8 @@ class EpubReaderScreen(
         if (::pageInfo.isInitialized) applyPageInfo()
     }
 
-    /** The page's colours, whatever the theme: the palette's, Comfort's black page, or what Readium draws with no theme. */
-    private fun pageColors(): Pair<Int, Int> = pagePalette(preferences) ?: (Color.WHITE to DEFAULT_PAGE_INK)
+    /** The page, and the ink on it. */
+    private fun pageColors(): Pair<Int, Int> = pagePalette(preferences)
 
     /**
      * Kindle's corners (#42): the strips the page keeps clear of the text (the navigator is inset by them,
@@ -1456,9 +1517,13 @@ class EpubReaderScreen(
         val strip = dp(PageInfo.STRIP_DP)
         val top = if (pageChoice.topStrip) strip else 0
         val bottom = if (pageChoice.bottomStrip) strip else 0
+        // Kindle's margins (#47): Readium keeps half the gap at each side of a column (attachNavigator), and the
+        // rest of the outer margin is this inset, so two columns are a gap apart and the outer edge is the margin.
+        val side = dp(PageGeometry.insetDp(preferences.pageMargins))
+        insetPx = side
         (pageHost.layoutParams as FrameLayout.LayoutParams).let { margins ->
-            if (margins.topMargin != top || margins.bottomMargin != bottom) {
-                margins.topMargin = top; margins.bottomMargin = bottom
+            if (margins.topMargin != top || margins.bottomMargin != bottom || margins.leftMargin != side || margins.rightMargin != side) {
+                margins.topMargin = top; margins.bottomMargin = bottom; margins.leftMargin = side; margins.rightMargin = side
                 pageHost.requestLayout()
             }
         }
@@ -1478,8 +1543,9 @@ class EpubReaderScreen(
             bookPages, sectionSizes, section, current.locations.progression ?: 0.0,
             PageInfo.sectionSpan(sectionStarts, section), bookProgress(), currentTimeLeft()
         )
-        pageInfo.show(pageChoice, place, PageInfo.ink(pageColors().second),
-            dp(PageInfo.sideInsetDp(preferences.pageMargins)), dp(PageInfo.STRIP_DP))
+        // The corners line up with the text's outer edge, which is the outer margin from the screen's.
+        pageInfo.show(pageChoice, place, title, PageInfo.ink(pageColors().second),
+            dp(PageGeometry.outerMarginDp(preferences.pageMargins)), dp(PageInfo.STRIP_DP))
     }
 
     private fun setPageInfo(value: PageInfoChoice) {
@@ -1496,28 +1562,24 @@ class EpubReaderScreen(
     private fun persistPreferences(value: EpubReaderPreferences) = EpubAppearanceStore.save(host.viewContext, value)
 
     private fun readiumPreferences(value: EpubReaderPreferences) = EpubPreferences(
-        theme = if (comfort.blackPage) ReadiumTheme.DARK else when (value.theme) {
-            EpubTheme.SYSTEM -> null
-            EpubTheme.LIGHT -> ReadiumTheme.LIGHT
+        theme = when (EpubPagePalette.resolve(value.theme, isNight())) {
             EpubTheme.SEPIA -> ReadiumTheme.SEPIA
-            EpubTheme.DARK, EpubTheme.BLUE -> ReadiumTheme.DARK
+            EpubTheme.DARK, EpubTheme.BLACK, EpubTheme.BLUE -> ReadiumTheme.DARK
+            else -> ReadiumTheme.LIGHT
         },
-        backgroundColor = pagePalette(value)?.first?.let { org.readium.r2.navigator.preferences.Color(it) },
-        textColor = pagePalette(value)?.second?.let { org.readium.r2.navigator.preferences.Color(it) },
+        backgroundColor = org.readium.r2.navigator.preferences.Color(pagePalette(value).first),
+        textColor = org.readium.r2.navigator.preferences.Color(pagePalette(value).second),
         columnCount = when (if (value.onePagePerScreen) EpubColumns.ONE else value.columns) {
             EpubColumns.AUTO -> ColumnCount.AUTO
             EpubColumns.ONE -> ColumnCount.ONE
             EpubColumns.TWO -> ColumnCount.TWO
         },
-        fontFamily = when (value.fontFamily) {
-            "serif" -> FontFamily.SERIF
-            "sans-serif" -> FontFamily.SANS_SERIF
-            "monospace" -> FontFamily.MONOSPACE
-            else -> null
-        },
+        // Literata, Charis, Atkinson Hyperlegible: bundled and declared in attachNavigator; null is the book's own font.
+        fontFamily = EpubFontDeclarations.family(value.fontFamily),
         fontSize = value.fontScale.toDouble(),
         lineHeight = value.lineHeight.toDouble(),
-        pageMargins = value.pageMargins.toDouble(),
+        // Always the same: the margin is chosen by the page's inset (PageGeometry), not by Readium's multiplier.
+        pageMargins = PageGeometry.READIUM_MARGIN_FACTOR,
         publisherStyles = value.publisherStyles,
         hyphens = value.hyphenation,
         scroll = value.scroll && !value.onePagePerScreen,
@@ -1703,7 +1765,5 @@ class EpubReaderScreen(
         const val LINK_MS = 3_000L
         /** The lower bar: the position row over the book's line, with their padding. */
         const val BOTTOM_ROW_DP = 44 + 30 + 8
-        /** The ink of the page Readium draws with no theme of its own. */
-        const val DEFAULT_PAGE_INK = 0xFF121212.toInt()
     }
 }

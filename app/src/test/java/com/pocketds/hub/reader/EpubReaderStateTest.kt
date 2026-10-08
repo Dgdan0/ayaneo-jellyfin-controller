@@ -89,9 +89,39 @@ class EpubReaderStateTest {
         assertFalse(state.commit())
     }
 
+    @Test fun `the size slider goes from 70 to 200 percent in tens, fourteen marks`() {
+        val sizes = EpubLayoutPolicy.SIZES
+        assertEquals(13, sizes.steps)
+        assertEquals(14, (0..sizes.steps).map { sizes.at(it) }.toSet().size)
+        assertEquals(0.7f, sizes.at(0), 0f)
+        assertEquals(2f, sizes.at(sizes.steps), 0f)
+        assertEquals(listOf("70%", "100%", "130%", "200%"), listOf(0.7f, 1f, 1.3f, 2f).map { EpubLayoutPolicy.sizeLabel(it) })
+        // The default is one of the marks, and a step on the pad is one mark.
+        assertEquals(1.3f, sizes.at(sizes.index(EpubReaderPreferences().fontScale)), 0f)
+        assertEquals(1.4f, sizes.move(1.3f, 1), 0.001f)
+        assertEquals(0.7f, sizes.move(0.7f, -1), 0f)
+        assertEquals(2f, sizes.move(2f, 1), 0f)
+        // The labels never show a float's tail.
+        assertEquals("110%", EpubLayoutPolicy.sizeLabel(sizes.at(4)))
+    }
+
+    @Test fun `the spacing row says the line spacing and the margins it opens`() {
+        assertEquals("1.5 · Balanced margins", EpubLayoutPolicy.spacingSummary(EpubReaderPreferences()))
+        assertEquals("1.3 · Narrow margins", EpubLayoutPolicy.spacingSummary(EpubReaderPreferences(lineHeight = 1.3f, pageMargins = 0.5f)))
+        assertEquals("1.8 · Wide margins", EpubLayoutPolicy.spacingSummary(EpubReaderPreferences(lineHeight = 1.8f, pageMargins = 1.7f)))
+    }
+
+    @Test fun `brightness is a slider in steps of five percent, never fully dark`() {
+        val range = com.pocketds.hub.ui.ScreenComfort.BRIGHTNESS_RANGE
+        assertEquals(com.pocketds.hub.ui.ScreenComfort.MIN_BRIGHTNESS, range.at(0), 0f)
+        assertEquals(1f, range.at(range.steps), 0f)
+        assertEquals(0.05f, range.step, 0f)
+        assertEquals(0.95f, range.move(1f, -1), 0.001f)
+    }
+
     /** A look a device that once changed it still has: the book's own style, ragged, tight, and everything else chosen. */
     private val oldLook = EpubReaderPreferences(
-        theme = EpubTheme.DARK, fontFamily = "serif", fontScale = 1.4f, lineHeight = 1.1f, pageMargins = 1.7f,
+        theme = EpubTheme.DARK, fontFamily = "charis", fontScale = 1.4f, lineHeight = 1.1f, pageMargins = 1.7f,
         columns = EpubColumns.TWO, scroll = false, publisherStyles = true, textAlignment = "start", onePagePerScreen = false,
         hyphenation = false
     )
@@ -99,16 +129,16 @@ class EpubReaderStateTest {
     @Test fun `reset text style brings back the reader's own typography and leaves the rest of the look`() {
         val reset = EpubLayoutPolicy.resetTextStyle(oldLook)
         val defaults = EpubReaderPreferences()
-        // The four of the text's style are the defaults'; no literal here, so a changed default is followed.
+        // The text's style and its typeface are the defaults'; no literal here, so a changed default is followed.
         assertEquals(defaults.publisherStyles, reset.publisherStyles)
         assertEquals(defaults.textAlignment, reset.textAlignment)
         assertEquals(defaults.hyphenation, reset.hyphenation)
         assertEquals(defaults.lineHeight, reset.lineHeight, 0f)
-        // The size, typeface, theme, margins and columns are as they were.
+        assertEquals(defaults.fontFamily, reset.fontFamily)
+        // The size, theme, margins and columns are as they were.
         assertEquals(oldLook.copy(publisherStyles = defaults.publisherStyles, textAlignment = defaults.textAlignment,
-            hyphenation = defaults.hyphenation, lineHeight = defaults.lineHeight), reset)
+            hyphenation = defaults.hyphenation, lineHeight = defaults.lineHeight, fontFamily = defaults.fontFamily), reset)
         assertEquals(1.4f, reset.fontScale, 0f)
-        assertEquals("serif", reset.fontFamily)
         assertEquals(EpubTheme.DARK, reset.theme)
         assertEquals(1.7f, reset.pageMargins, 0f)
         assertEquals(EpubColumns.TWO, reset.columns)
@@ -120,14 +150,15 @@ class EpubReaderStateTest {
         assertEquals("justify", reset.textAlignment)
         assertTrue(reset.hyphenation)
         assertEquals(1.5f, reset.lineHeight, 0f)
-        assertEquals("Justified, hyphenated, 1.5 spacing", EpubLayoutPolicy.textStyleSummary())
+        assertEquals("literata", reset.fontFamily)
+        assertEquals("Literata, justified, hyphenated, 1.5 spacing", EpubLayoutPolicy.textStyleSummary())
     }
 
     @Test fun `reset text style leaves the layout modes alone and is the same twice`() {
         val scrolling = oldLook.copy(scroll = true, columns = EpubColumns.ONE)
         assertEquals(true, EpubLayoutPolicy.resetTextStyle(scrolling).scroll)
         val onePage = EpubLayoutPolicy.selectOnePage(oldLook, true)
-        assertEquals(onePage.copy(publisherStyles = false, textAlignment = "justify", hyphenation = true, lineHeight = 1.5f),
+        assertEquals(onePage.copy(publisherStyles = false, textAlignment = "justify", hyphenation = true, lineHeight = 1.5f, fontFamily = "literata"),
             EpubLayoutPolicy.resetTextStyle(onePage))
         val once = EpubLayoutPolicy.resetTextStyle(oldLook)
         assertEquals(once, EpubLayoutPolicy.resetTextStyle(once))

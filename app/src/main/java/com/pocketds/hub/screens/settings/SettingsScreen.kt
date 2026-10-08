@@ -487,10 +487,13 @@ class SettingsScreen(
             ), onCancel = host::refreshHints) { }
             host.refreshHints()
         }
-        utility("licences", "Fonts and licences", "Figtree and Bricolage Grotesque · SIL Open Font License", AppIcon.APPEARANCE) {
+        utility("licences", "Fonts and licences", "Figtree, Bricolage Grotesque and the reading fonts · SIL Open Font License", AppIcon.APPEARANCE) {
             overlay.show("Fonts and licences", "Their full texts are in the app, under assets/licenses", listOf(
                 ChoiceOverlay.Choice("figtree", "Figtree", "Body text · © The Figtree Project Authors · SIL OFL 1.1"),
                 ChoiceOverlay.Choice("bricolage", "Bricolage Grotesque", "Titles · © The Bricolage Grotesque Project Authors · SIL OFL 1.1"),
+                ChoiceOverlay.Choice("literata", "Literata", "Books, the default · 3.103 · © The Literata Project Authors · SIL OFL 1.1"),
+                ChoiceOverlay.Choice("charis", "Charis", "Books · 7.000 · © SIL Global · SIL OFL 1.1, Reserved Font Names \"Charis\" and \"SIL\""),
+                ChoiceOverlay.Choice("atkinson", "Atkinson Hyperlegible Next", "Books · 2.001 · © The Atkinson Hyperlegible Next Project Authors · SIL OFL 1.1"),
                 ChoiceOverlay.Choice("ffmpeg", "FFmpeg audio decoder", "AC-3 and E-AC-3 · LGPL 2.1"),
                 ChoiceOverlay.Choice("wordnet", "Open English WordNet", "Dictionary · CC BY 4.0")
             ), onCancel = host::refreshHints) { }

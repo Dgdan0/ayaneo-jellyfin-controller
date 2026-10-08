@@ -131,20 +131,25 @@ object ReaderFixtures {
      * first eight sentences, [sentenceSeconds] each, over generated silence;
      * [withAudio] false leaves the silence out, as the hub's slim edition does.
      */
-    fun epub(aligned: Boolean, sentenceSeconds: Int = 1, withAudio: Boolean = true): ByteArray {
+    /**
+     * [twoColumns]: the hub's own two-column rule in each document (`epub_html.go`, `columnStyle`), which the reading copy carries. Readium
+     * CSS asks for two columns only from 60em (960 CSS px), so on the Pocket's 853 dp page that rule is what makes "Two pages" work.
+     */
+    fun epub(aligned: Boolean, sentenceSeconds: Int = 1, withAudio: Boolean = true, twoColumns: Boolean = false): ByteArray {
         val output = ByteArrayOutputStream()
         val sentences = (0 until 8).map { "The pines marked the quiet path, and Mara followed the lantern toward the ridge, sentence ${it + 1}." }
         ZipOutputStream(output).use { zip ->
             val text = sentences.chunked(2).joinToString("") { pair ->
                 "<p>" + pair.joinToString(" ") { s -> "<span id=\"s${sentences.indexOf(s)}\">$s</span>" } + "</p>"
             } + (1..30).joinToString("") { "<p>The observatory kept its light on through the night. This is passage $it.</p>" }
+            val columnRule = if (twoColumns) HUB_COLUMN_RULE else ""
             val overlay = if (aligned) " media-overlay=\"mo1\"" else ""
             val extra = if (aligned) """<item id="mo1" href="one.smil" media-type="application/smil+xml"/><item id="voice" href="voice.wav" media-type="audio/wav"/>""" else ""
             val files = mutableMapOf(
                 "mimetype" to "application/epub+zip".toByteArray(),
                 "META-INF/container.xml" to """<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""".toByteArray(),
                 "EPUB/package.opf" to """<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">urn:reader-glass</dc:identifier><dc:title>The Last Observatory</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-10-05T00:00:00Z</meta></metadata><manifest><item id="one" href="one.xhtml" media-type="application/xhtml+xml"$overlay/>$extra<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest><spine><itemref idref="one"/></spine></package>""".toByteArray(),
-                "EPUB/one.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>A light beyond the ridge</title></head><body><h1>A light beyond the ridge</h1>$text</body></html>""".toByteArray(),
+                "EPUB/one.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>A light beyond the ridge</title>$columnRule</head><body><h1>A light beyond the ridge</h1>$text</body></html>""".toByteArray(),
                 "EPUB/nav.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol><li><a href="one.xhtml">A light beyond the ridge</a></li></ol></nav></body></html>""".toByteArray()
             )
             if (aligned) {
@@ -159,6 +164,10 @@ object ReaderFixtures {
         }
         return output.toByteArray()
     }
+
+    private const val HUB_COLUMN_RULE = "<style type=\"text/css\">@media screen and (min-width: 30em) { " +
+        ":root[style*=\"--USER__colCount: 2\"], :root[style*=\"--USER__colCount:2\"] { --RS__colWidth: auto !important; " +
+        "-webkit-column-count: 2 !important; column-count: 2 !important; -webkit-column-width: auto !important; column-width: auto !important; } }</style>"
 
     /** An audiobook as Storyteller sends one: a ZIP of parts, here [parts] of generated silence. */
     fun audiobook(parts: List<Pair<String, Int>>): ByteArray {

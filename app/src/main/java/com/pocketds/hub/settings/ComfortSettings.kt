@@ -11,7 +11,6 @@ import com.pocketds.hub.ui.ScreenComfort
 object ComfortSettings {
     private const val KEY_BRIGHTNESS = "reader_comfort_brightness"
     private const val KEY_WARMTH = "reader_comfort_warmth"
-    private const val KEY_BLACK_PAGE = "reader_comfort_black_page"
     private const val KEY_AWAKE = "reader_comfort_awake_narrating"
 
     fun load(context: Context): ScreenComfort {
@@ -19,7 +18,6 @@ object ComfortSettings {
         return ScreenComfort(
             brightness = prefs.getFloat(KEY_BRIGHTNESS, 1f).coerceIn(ScreenComfort.MIN_BRIGHTNESS, 1f),
             warmth = prefs.getFloat(KEY_WARMTH, 0f).coerceIn(0f, 1f),
-            blackPage = prefs.getBoolean(KEY_BLACK_PAGE, false),
             awakeWhileNarrating = prefs.getBoolean(KEY_AWAKE, true)
         )
     }
@@ -28,7 +26,6 @@ object ComfortSettings {
         Prefs.of(context).edit()
             .putFloat(KEY_BRIGHTNESS, comfort.brightness)
             .putFloat(KEY_WARMTH, comfort.warmth)
-            .putBoolean(KEY_BLACK_PAGE, comfort.blackPage)
             .putBoolean(KEY_AWAKE, comfort.awakeWhileNarrating)
             .apply()
     }

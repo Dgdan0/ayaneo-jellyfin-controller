@@ -31,10 +31,12 @@ enum class PageInfoCorner(val choice: String) {
 data class PageInfoChoice(
     val clock: Boolean = true,
     val corner: PageInfoCorner = PageInfoCorner.PAGE_IN_BOOK,
-    val percentage: Boolean = true
+    val percentage: Boolean = true,
+    /** The book's title, top centre in small capitals (#47), as Kindle has it. */
+    val title: Boolean = true
 ) {
-    /** A strip at the top is kept for the clock, so it never sits on the text. */
-    val topStrip: Boolean get() = clock
+    /** A strip at the top is kept for the clock and the title, so they never sit on the text. */
+    val topStrip: Boolean get() = clock || title
 
     /** A strip at the foot is kept for the bottom corners. */
     val bottomStrip: Boolean get() = corner != PageInfoCorner.NONE || percentage
@@ -61,11 +63,17 @@ data class PagePlace(
  * from [Fmt.readingPercentLabel], so the corners agree with the menu's line.
  */
 object PageInfo {
-    /** The strip kept at the top and the foot of the page for the corners, in dp. */
-    const val STRIP_DP = 26
+    /** The strip kept at the top and the foot of the page for the corners, in dp (about 30 on the Pocket, #47). */
+    const val STRIP_DP = 30
 
-    /** Quiet: the page's text colour at this much of its strength. */
-    const val INK_ALPHA = 0.6f
+    /** The page's own ink at its full strength, as Kindle's corners are: they were hard to read at 60% (#47). */
+    const val INK_ALPHA = 1f
+
+    /** The corners' size, in sp. */
+    const val TEXT_SP = 12.5f
+
+    /** The title is a little smaller, in capitals. */
+    const val TITLE_SP = 10.5f
 
     /** Kindle's order: where you are in the book, in the chapter, how long is left in each, then nothing. */
     fun next(corner: PageInfoCorner): PageInfoCorner {
@@ -153,12 +161,9 @@ object PageInfo {
     /** How long until the minute on the clock changes, a moment past it. */
     fun millisToNextMinute(nowMillis: Long): Long = 60_000L - Math.floorMod(nowMillis, 60_000L) + 50L
 
-    /** [textColor] at [INK_ALPHA]: the page's own colour, quieter, whatever the theme. */
-    fun ink(textColor: Int): Int = ((INK_ALPHA * 255).roundToInt() shl 24) or (textColor and 0x00FFFFFF)
+    /** The book's title as the top line says it: one line, in capitals, the spaces single (#47). */
+    fun titleText(title: String): String = title.trim().replace(Regex("\\s+"), " ").uppercase(Locale.ROOT)
 
-    /**
-     * The corners sit level with the text: Readium's gutter is 20 css pixels at the balanced margin and
-     * grows and shrinks with it. Kept within a range that fits the screen's edge.
-     */
-    fun sideInsetDp(pageMargins: Float): Int = (20f * pageMargins).roundToInt().coerceIn(14, 40)
+    /** [textColor] at [INK_ALPHA]: the page's own ink, whatever the theme. */
+    fun ink(textColor: Int): Int = ((INK_ALPHA * 255).roundToInt() shl 24) or (textColor and 0x00FFFFFF)
 }

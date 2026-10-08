@@ -101,12 +101,12 @@ class EpubReaderPolishTest {
             ins.waitForIdleSync()
             withContext(Dispatchers.Main) {
                 assertFalse("A modal must cancel a pending chapter hold", screen!!.requiresTriggerHold)
-                listOf("Paper", "Sepia", "Night", "Blue").forEach { label -> assertTrue(all(root).any { it.contentDescription?.toString()?.startsWith(label) == true }) }
+                listOf("Paper", "Sepia", "Dim", "Dark", "Blue").forEach { label -> assertTrue(all(root).any { it.contentDescription?.toString()?.startsWith(label) == true }) }
                 click("Blue")
             }
             until { withContext(Dispatchers.Main) { reader()?.evaluateJavascript("getComputedStyle(document.documentElement).getPropertyValue('--USER__backgroundColor').trim()")?.contains("1d303d", true) == true } }
             withContext(Dispatchers.Main) {
-                click("Layout"); click("Wide"); click("Two pages"); click("Font"); click("Sans"); click("One full page per screen")
+                click("Layout"); click("Two pages"); click("Font"); click("Spacing"); click("Wide"); click("‹ Font"); click("Atkinson Hyperlegible"); click("Layout"); click("One full page per screen")
                 assertTrue(EpubAppearanceStore.load(activity).onePagePerScreen)
                 assertEquals(EpubColumns.ONE, EpubAppearanceStore.load(activity).columns)
                 assertFalse(EpubAppearanceStore.load(activity).scroll)

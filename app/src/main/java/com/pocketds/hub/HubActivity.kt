@@ -172,6 +172,8 @@ class HubActivity : AppCompatActivity(), ScreenHost {
         supportFragmentManager.fragmentFactory = EpubNavigatorFragment.createDummyFactory()
         // The look and theme a Classic install stored are not read any more (#20).
         com.pocketds.hub.settings.RetiredSettings.clear(this)
+        // Comfort's black page is the Dark theme now (#47), and the fonts changed once.
+        com.pocketds.hub.settings.ReaderLookMigration.run(this)
         // The app is always dark, whatever the system says: the platform's own
         // parts (a text field's handles, a dialog) follow the page.
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)

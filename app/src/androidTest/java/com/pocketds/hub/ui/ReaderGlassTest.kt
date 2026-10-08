@@ -234,7 +234,7 @@ class ReaderGlassTest {
         }
     }
 
-    @Test fun bookPageMakesRoomAndComfortBlacksItOut(): Unit = runBlocking {
+    @Test fun bookPageMakesRoomAndDarkIsTrueBlack(): Unit = runBlocking {
         val activity = ins.startActivitySync(Intent(ins.targetContext, ReaderFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ReaderFixtureActivity
         check(activity.packageName.endsWith(".uitest"))
         val original = EpubAppearanceStore.load(activity)
@@ -267,18 +267,27 @@ class ReaderGlassTest {
                 assertTrue(bars.top.isShown && bars.bottomRow.isShown)
             }
             shot(activity, "05-book-page-makes-room")
-            // Comfort's black page.
+            // Comfort has no black page any more (#47): a black page is the Dark theme in Appearance.
             withContext(Dispatchers.Main) { all(root).first { it.contentDescription == "Comfort" && it.isShown }.performClick() }
-            until("the Comfort sheet") { all(root).any { it is TextView && it.isShown && it.text == "Black page" } }
+            until("the Comfort sheet") { all(root).any { it is TextView && it.isShown && it.text == "Keep the screen on while narrating" } }
             withContext(Dispatchers.Main) {
-                var row: View? = all(root).first { it is TextView && it.isShown && it.text == "Black page" }
-                while (row != null && !row.isClickable) row = row.parent as? View
-                row!!.performClick()
+                assertFalse("no black page in Comfort", all(root).any { it is TextView && it.isShown && it.text == "Black page" })
+                screen!!.onPad(PadAction.Back)
             }
-            until("the black page") { reader()?.settings?.value?.backgroundColor?.int == com.pocketds.hub.ui.ScreenComfort.BLACK_PAGE }
-            withContext(Dispatchers.Main) { assertTrue(ComfortSettings.load(activity).blackPage) }
+            delay(400)
+            withContext(Dispatchers.Main) { all(root).first { it.contentDescription == "Reading appearance" && it.isShown }.performClick() }
+            until("the appearance sheet") { all(root).any { it is TextView && it.isShown && it.text == "Themes" } }
+            withContext(Dispatchers.Main) { all(root).first { it is TextView && it.isShown && it.text == "Themes" }.performClick() }
+            until("the themes") { all(root).any { it.isShown && it.contentDescription?.toString()?.startsWith("Dark") == true } }
+            withContext(Dispatchers.Main) {
+                var tile: View? = all(root).first { it.isShown && it.contentDescription?.toString()?.startsWith("Dark") == true }
+                while (tile != null && !tile.isClickable) tile = tile.parent as? View
+                tile!!.performClick()
+            }
+            until("the black page") { reader()?.settings?.value?.backgroundColor?.int == 0xFF000000.toInt() }
+            withContext(Dispatchers.Main) { assertEquals(com.pocketds.hub.reader.EpubTheme.BLACK, EpubAppearanceStore.load(activity).theme) }
             delay(600)
-            shot(activity, "06-book-comfort-black-page")
+            shot(activity, "06-book-dark-theme")
             withContext(Dispatchers.Main) { screen!!.onPad(PadAction.Back) }
             delay(600)
             shot(activity, "07-book-black-page-menu")

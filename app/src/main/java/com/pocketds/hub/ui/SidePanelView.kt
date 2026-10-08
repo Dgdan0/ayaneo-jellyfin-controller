@@ -326,8 +326,21 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     }
 }
 
+/**
+ * How a [ValueAdjusterView] frames its slider: the glyphs of its two step buttons, how large each is, and whether the
+ * slider's steps are marked. [SIZE] is Kindle's text size: a small A, a large A, a mark at every step (#47).
+ */
+data class AdjusterStyle(val less:String="−",val more:String="+",val lessSp:Float=24f,val moreSp:Float=24f,val ticks:Boolean=false,val compact:Boolean=false) {
+    companion object {
+        val STEPS=AdjusterStyle()
+        val SIZE=AdjusterStyle(less="A",more="A",lessSp=14f,moreSp=26f,ticks=true)
+        /** One short line, the label beside a slider and no step buttons: what a sheet's fixed foot has room for (the appearance sheet's brightness, #47). */
+        val FOOT=AdjusterStyle(compact=true)
+    }
+}
+
 class ValueAdjusterView(context:Context,colors:PocketColors,label:String,private val range:ValueRange,initial:Float,
-    private val format:(Float)->String,private val changed:(Float)->Unit) : LinearLayout(context) {
+    private val format:(Float)->String,private val style:AdjusterStyle=AdjusterStyle.STEPS,private val changed:(Float)->Unit) : LinearLayout(context) {
     private val value=TextView(context).apply{textSize=13f;setTextColor(colors.primaryText)}
     private val seek=SeekBar(context).apply{
         max=range.steps;progress=range.index(initial);contentDescription=label;minimumHeight=dp(48);Styler.makeFocusable(this)
@@ -335,17 +348,10 @@ class ValueAdjusterView(context:Context,colors:PocketColors,label:String,private
         thumbTintList=android.content.res.ColorStateList.valueOf(colors.accent)
         progressBackgroundTintList=android.content.res.ColorStateList.valueOf(colors.cardSurfacePressed)
         ViewCompat.setStateDescription(this,format(range.at(progress)))
+        if(style.ticks)tickMark=android.graphics.drawable.GradientDrawable().apply {setSize(dp(2),dp(10));setColor(colors.mutedText)}
     }
     init {
-        orientation=VERTICAL;setPadding(dp(4),dp(10),dp(4),dp(6));addView(value)
-        val row=LinearLayout(context).apply{gravity=Gravity.CENTER_VERTICAL}
-        fun stepButton(text:String,delta:Int)=TextView(context).apply {
-            this.text=text;textSize=24f;gravity=Gravity.CENTER;contentDescription="$label ${if(delta<0) "decrease" else "increase"}"
-            DetailStyler.action(this,colors);activateOnTap{seek.progress=(seek.progress+delta).coerceIn(0,seek.max)}
-        }
-        row.addView(stepButton("−",-1),LayoutParams(dp(48),dp(48)))
-        row.addView(seek,LayoutParams(0,dp(48),1f));row.addView(stepButton("+",1),LayoutParams(dp(48),dp(48)))
-        addView(row);value.text="$label · ${format(range.at(seek.progress))}"
+        // The slider reports each step the same way in both layouts.
         seek.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
             override fun onStartTrackingTouch(bar:SeekBar)=Unit
             override fun onStopTrackingTouch(bar:SeekBar)=Unit
@@ -353,6 +359,21 @@ class ValueAdjusterView(context:Context,colors:PocketColors,label:String,private
                 val v=range.at(index);value.text="$label · ${format(v)}";ViewCompat.setStateDescription(seek,format(v));changed(v)
             }
         })
+        value.text="$label · ${format(range.at(seek.progress))}"
+        if(style.compact) {
+            orientation=HORIZONTAL;gravity=Gravity.CENTER_VERTICAL;setPadding(dp(4),dp(2),dp(4),dp(2))
+            addView(value,LayoutParams(dp(132),-2));addView(seek,LayoutParams(0,dp(44),1f))
+        } else {
+            orientation=VERTICAL;setPadding(dp(4),dp(10),dp(4),dp(6));addView(value)
+            val row=LinearLayout(context).apply{gravity=Gravity.CENTER_VERTICAL}
+            fun stepButton(text:String,delta:Int,sp:Float)=TextView(context).apply {
+                this.text=text;textSize=sp;gravity=Gravity.CENTER;contentDescription="$label ${if(delta<0) "decrease" else "increase"}"
+                DetailStyler.action(this,colors);activateOnTap{seek.progress=(seek.progress+delta).coerceIn(0,seek.max)}
+            }
+            row.addView(stepButton(style.less,-1,style.lessSp),LayoutParams(dp(48),dp(48)))
+            row.addView(seek,LayoutParams(0,dp(48),1f));row.addView(stepButton(style.more,1,style.moreSp),LayoutParams(dp(48),dp(48)))
+            addView(row)
+        }
     }
     fun onDirection(direction:Direction):Boolean {
         if(!seek.hasFocus() || direction !in listOf(Direction.LEFT,Direction.RIGHT))return false
