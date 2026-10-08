@@ -151,5 +151,18 @@ struct PageInfoTests {
         #expect(EpubPagePalette.argb("#12345") == nil && EpubPagePalette.argb("#GGGGGG") == nil)
         let compact = PageInfo.strip(compactHeight: true), regular = PageInfo.strip(compactHeight: false)
         #expect([compact.top, compact.bottom, regular.top, regular.bottom] == [34, 34, 62, 62])
+        // An iPad's page starts lower and ends higher, as Kindle's does (#47).
+        let pad = PageInfo.strip(compactHeight: false, tablet: true)
+        #expect([pad.top, pad.bottom] == [84, 96])
+        #expect(PageInfo.strip(compactHeight: true, tablet: true) == compact)
+        let baselines = PageInfo.baselines(tablet: true, strip: pad)
+        #expect([baselines.top, baselines.bottom] == [50, 61])
+        // Too short for the deep strips, an iPad's corners sit in the middle of the shallower ones.
+        let short = PageInfo.baselines(tablet: true, strip: compact)
+        #expect(short.top > 17 && short.top < 24 && short.top == short.bottom)
+        let phone = PageInfo.baselines(tablet: false, strip: regular)
+        #expect(phone.top > 31 && phone.top < 40 && phone.top == phone.bottom, "in the middle of the strip, a little below it")
+        #expect(PageInfo.cornerSize == 13)
+        #expect(PageInfo.title("  Light   Bringer\n") == "Light Bringer")
     }
 }

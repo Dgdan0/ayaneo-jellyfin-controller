@@ -80,21 +80,20 @@ public struct SheetWalk: Equatable, Sendable {
 // MARK: The Comfort lines, in every reader
 
 /// Comfort's lines (#37): brightness and warmth as values, and for a book the
-/// black page and the screen kept on while narrating as rows.
+/// screen kept on while narrating as a row.
 public enum ComfortLine: Hashable, Sendable {
-    case brightness, warmth, blackPage, awake
+    case brightness, warmth, awake
 
     public static func lines(book: Bool) -> [ComfortLine] {
-        book ? [.brightness, .warmth, .blackPage, .awake] : [.brightness, .warmth]
+        book ? [.brightness, .warmth, .awake] : [.brightness, .warmth]
     }
 
     public var shape: SheetLine { self == .brightness || self == .warmth ? .value : .row }
 
-    /// Ⓐ on a row: the black page or the screen kept on, the other way.
+    /// Ⓐ on a row: the screen kept on, the other way.
     public func press(_ comfort: ScreenComfort) -> ScreenComfort {
         var next = comfort
         switch self {
-        case .blackPage: next.blackPage.toggle()
         case .awake: next.awakeWhileNarrating.toggle()
         case .brightness, .warmth: break
         }
@@ -109,7 +108,7 @@ public enum ComfortLine: Hashable, Sendable {
             next.brightness = SheetWalk.nudge(comfort.brightness, steps: delta, in: ScreenComfort.minBrightness...1)
         case .warmth:
             next.warmth = SheetWalk.nudge(comfort.warmth, steps: delta, in: 0...1)
-        case .blackPage, .awake: break
+        case .awake: break
         }
         return next
     }
@@ -144,9 +143,13 @@ public enum ComicDisplayLine: Hashable, Sendable {
 
 // MARK: The ebook reader's Appearance
 
-/// Appearance's tabs (`BookAppearanceSheet`).
+/// Appearance's pages (`BookAppearanceSheet`): four tabs, and Spacing, which
+/// Font's own row opens and which has its own way back (#47).
 public enum BookAppearancePage: Int, CaseIterable, Sendable {
-    case font, layout, themes, comfort
+    case font, layout, themes, comfort, spacing
+
+    /// The pages that are tabs.
+    public static let tabs: [BookAppearancePage] = [.font, .layout, .themes, .comfort]
 }
 
 /// Appearance's lines on each tab, the tabs themselves first: what each
@@ -154,6 +157,8 @@ public enum BookAppearancePage: Int, CaseIterable, Sendable {
 public enum BookAppearanceLine: Hashable, Sendable {
     case tabs
     case typeface, size, onePage
+    /// Font's row that opens Spacing (#47), and the way back from it.
+    case spacingPage, back
     case columns, margins, spacing, automaticColumns, scroll, publisher, justified, hyphenation
     /// Reset text style (#42): the defaults' typography in one press.
     case resetTextStyle
@@ -171,23 +176,28 @@ public enum BookAppearanceLine: Hashable, Sendable {
         }
     }
 
+    /// Brightness is the last line of every page, fixed at the bottom of the
+    /// sheet as Kindle's is (#47); warmth and the screen kept on are Comfort's own.
+    public static let brightness = BookAppearanceLine.comfort(.brightness)
+
     public static func lines(_ page: BookAppearancePage) -> [BookAppearanceLine] {
         let body: [BookAppearanceLine]
         switch page {
-        case .font: body = [.typeface, .size, .onePage]
+        case .font: body = [.typeface, .size, .spacingPage, .onePage]
         case .layout:
-            body = [.columns, .margins, .spacing, .automaticColumns, .scroll, .publisher, .justified, .hyphenation,
+            body = [.columns, .automaticColumns, .scroll, .publisher, .justified, .hyphenation,
                     .resetTextStyle, .clock, .percentage] + PageInfoPlace.allCases.map { .place($0) }
         case .themes: body = themeRows.indices.map { .themes($0) } + [.systemColours]
-        case .comfort: body = ComfortLine.lines(book: true).map { .comfort($0) }
+        case .comfort: body = [.comfort(.warmth), .comfort(.awake)]
+        case .spacing: return [.back, .spacing, .margins, brightness]
         }
-        return [.tabs] + body
+        return [.tabs] + body + [brightness]
     }
 
     public var shape: SheetLine {
         switch self {
-        case .tabs: .choices(BookAppearancePage.allCases.count)
-        case .typeface: .choices(EpubAppearance.typefaces.count)
+        case .tabs: .choices(BookAppearancePage.tabs.count)
+        case .typeface: .choices(EpubTypefaces.all.count)
         case .columns: .choices(2)
         case .margins: .choices(EpubAppearance.margins.count)
         case .spacing: .choices(EpubAppearance.spacing.count)
@@ -195,7 +205,7 @@ public enum BookAppearanceLine: Hashable, Sendable {
         case .size: .value
         case .comfort(let line): line.shape
         case .onePage, .automaticColumns, .scroll, .publisher, .justified, .hyphenation, .resetTextStyle,
-             .systemColours, .clock, .percentage, .place: .row
+             .systemColours, .clock, .percentage, .place, .spacingPage, .back: .row
         }
     }
 
@@ -204,8 +214,8 @@ public enum BookAppearanceLine: Hashable, Sendable {
     public func press(_ value: EpubReaderPreferences, column: Int = 0) -> EpubReaderPreferences? {
         switch self {
         case .typeface:
-            guard EpubAppearance.typefaces.indices.contains(column) else { return nil }
-            return EpubAppearance.typeface(value, EpubAppearance.typefaces[column].id)
+            guard EpubTypefaces.all.indices.contains(column) else { return nil }
+            return EpubAppearance.typeface(value, EpubTypefaces.all[column].id)
         case .onePage:
             return EpubLayoutPolicy.selectOnePage(value, !value.onePagePerScreen)
         case .columns:
@@ -241,7 +251,7 @@ public enum BookAppearanceLine: Hashable, Sendable {
             var next = value
             next.theme = .system
             return next
-        case .tabs, .size, .comfort, .clock, .percentage, .place:
+        case .tabs, .size, .comfort, .clock, .percentage, .place, .spacingPage, .back:
             return nil
         }
     }

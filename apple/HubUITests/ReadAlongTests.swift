@@ -87,9 +87,9 @@ final class ReadAlongTests: XCTestCase {
     // MARK: The voice and the page (#49)
 
     /// The demo's chapters are a page or two at the usual size: drawn larger
-    /// (`HUB_BOOK_FONT`, for this launch only), they run over several pages,
+    /// (`HUB_BOOK_SIZE`, for this launch only), they run over several pages,
     /// and sentences break across them.
-    private static let largeType = ["HUB_BOOK_FONT": "2.2", "HUB_DEBUG_READALONG": "1"]
+    private static let largeType = ["HUB_BOOK_SIZE": "2.2", "HUB_BOOK_LOOK_ONCE": "1", "HUB_DEBUG_READALONG": "1"]
 
     override func tearDown() {
         XCUIDevice.shared.orientation = .portrait
@@ -214,7 +214,7 @@ final class ReadAlongTests: XCTestCase {
     /// spread, which the page's script measures as one page.)
     @MainActor
     func testTurnedSidewaysTheVoiceStillTurnsThePage() {
-        let app = launchReadingAlong(Self.largeType.merging(["HUB_BOOK_COLUMNS": "2", "HUB_BOOK_FONT": "1.8"]) { $1 })
+        let app = launchReadingAlong(Self.largeType.merging(["HUB_BOOK_COLUMNS": "TWO", "HUB_BOOK_SIZE": "1.8"]) { $1 })
         // Turned once the app is up, and measured only once its window is wide.
         XCUIDevice.shared.orientation = .landscapeLeft
         let window = app.windows.firstMatch

@@ -36,3 +36,15 @@ keeps AirPlay). The SDK is Google's, under its own terms; its package brings GTM
 |---|---|---|---|
 | [Google Cast iOS sender SDK](https://github.com/googlecast/google-cast-ios-sdk) 4.8.6 | Finds TVs, the Cast button, and the TV's player | Google APIs Terms of Service and the Google Cast SDK Additional Developer Terms; the package manifest is Apache 2.0 | `GoogleCast-SDK-Terms.txt` |
 | [GTMSessionFetcher](https://github.com/google/gtm-session-fetcher) 3.5.0 | Google Cast's network requests | Apache 2.0, Copyright Google LLC | `GTMSessionFetcher-Apache-2.0.txt` |
+
+The ebook reader's own typefaces (#47) are bundled in the Apple app, as variable fonts, and declared to
+Readium: Literata (the default) and Atkinson Hyperlegible Next. Both are under the SIL Open Font
+License 1.1, and the texts ship in `apple/Hub/Resources/Licenses`. The font files are unmodified, from
+the Google Fonts repository (Literata 3.103, with its italic; Atkinson Hyperlegible Next 2.001).
+
+| Font | Use | Licence | File |
+|---|---|---|---|
+| [Literata](https://github.com/googlefonts/literata) 3.103 | The reader's default typeface | SIL OFL 1.1, Copyright 2017 The Literata Project Authors | `Literata-OFL-1.1.txt` |
+| [Atkinson Hyperlegible Next](https://github.com/googlefonts/atkinson-hyperlegible-next) 2.001 | A typeface for the reader, made for easy reading | SIL OFL 1.1, Copyright 2020-2024 The Atkinson Hyperlegible Next Project Authors | `AtkinsonHyperlegibleNext-OFL-1.1.txt` |
+
+Charter, Georgia and Iowan Old Style, also offered, are the device's own fonts and are not shipped.

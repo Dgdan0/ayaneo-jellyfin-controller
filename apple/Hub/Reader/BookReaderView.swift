@@ -207,7 +207,6 @@ struct BookReaderScreen: View {
             reader.stop()
             comfort.letSleep()
         }
-        .onChange(of: comfort.value.blackPage) { _, _ in reader.comfortChanged() }
         // Reading along, the screen stays awake while the voice reads, as Comfort asks.
         .onChange(of: "\(reader.readAlong?.narration?.playing == true)·\(comfort.value.awakeWhileNarrating)") { _, _ in
             comfort.keepAwake(narrating: reader.readAlong?.narration?.playing == true)
@@ -237,7 +236,9 @@ struct BookReaderScreen: View {
     @ViewBuilder private func page(_ layout: ComicReaderLayout) -> some View {
         if let controller = reader.controller {
             let fit = pageFit(layout)
-            BookPageHost(controller: controller) { key in reader.key(key) }
+            BookPageHost(controller: controller, inset: reader.pageInset(width: layout.size.width),
+                         page: EpubPagePalette.argb(reader.rendering.background) ?? 0xFF00_0000,
+                         onKey: { key in reader.key(key) }, onInset: { forward in reader.insetTapped(forward: forward) })
                 .id(ObjectIdentifier(controller))
                 .frame(width: layout.size.width, height: layout.size.height)
                 .clipShape(RoundedRectangle(cornerRadius: fit.scale < 1 ? 14 / fit.scale : 0, style: .continuous))
@@ -284,8 +285,7 @@ struct BookReaderScreen: View {
     #if DEBUG
     /// Debug builds, for screenshots: HUB_BOOK_SCROLL=1 (or 0) turns continuous
     /// scrolling on (or off) for every book, as Appearance would and kept as it
-    /// keeps it; HUB_BOOK_FONT=<scale> and HUB_BOOK_COLUMNS=1|2 draw the page so,
-    /// for this launch only; HUB_BOOK_AT=<percent> goes that far into the book;
+    /// keeps it; HUB_BOOK_AT=<percent> goes that far into the book;
     /// HUB_BOOK_SHEET=menu|contents|bookmarks|search|appearance|layout|comfort|keys opens the menu
     /// or a sheet, once the book has opened; HUB_BOOK_SEARCH=<words> searches for them.
     private func debugTour() async {
@@ -298,11 +298,18 @@ struct BookReaderScreen: View {
             reader.setPreferences(EpubLayoutPolicy.selectScroll(reader.preferences, scroll == "1"))
             try? await Task.sleep(for: .milliseconds(900))
         }
-        // HUB_BOOK_FONT=<scale> and HUB_BOOK_COLUMNS=1|2: the page drawn so for this launch only.
-        let font = environment["HUB_BOOK_FONT"].flatMap(Double.init)
-        let columns = environment["HUB_BOOK_COLUMNS"].flatMap { $0 == "2" ? EpubColumns.two : $0 == "1" ? .one : nil }
-        if font != nil || columns != nil {
-            reader.debugAppearance(fontScale: font, columns: columns)
+        // HUB_BOOK_THEME=SEPIA|DARK|BLACK|LIGHT|BLUE, HUB_BOOK_COLUMNS=ONE|TWO|AUTO, HUB_BOOK_FONT=<typeface id> and
+        // HUB_BOOK_SIZE=1.3 set the look first, as Appearance would, and keep it as it keeps it (#47);
+        // with HUB_BOOK_LOOK_ONCE=1 for this launch only, so a UI test leaves no look behind for the next (#49).
+        var look = reader.preferences
+        if let theme = environment["HUB_BOOK_THEME"].flatMap(EpubTheme.init(rawValue:)) { look.theme = theme }
+        if let columns = environment["HUB_BOOK_COLUMNS"].flatMap(EpubColumns.init(rawValue:)) {
+            look = EpubLayoutPolicy.selectColumns(look, columns)
+        }
+        if let face = environment["HUB_BOOK_FONT"], EpubTypefaces.typeface(face) != nil { look = EpubAppearance.typeface(look, face) }
+        if let size = environment["HUB_BOOK_SIZE"].flatMap(Double.init) { look.fontScale = size }
+        if look != reader.preferences {
+            if environment["HUB_BOOK_LOOK_ONCE"] == "1" { reader.debugAppearance(look) } else { reader.setPreferences(look) }
             try? await Task.sleep(for: .milliseconds(900))
         }
         if let percent = environment["HUB_BOOK_AT"].flatMap(Double.init) {
@@ -326,6 +333,10 @@ struct BookReaderScreen: View {
         case "comfort":
             reader.appearanceTab = .comfort
             reader.openSheet(.appearance)
+        case "spacing":
+            reader.appearanceTab = .font
+            reader.openSheet(.appearance)
+            reader.pressAppearance(.spacingPage)
         case "keys": reader.openSheet(.keys)
         default: break
         }
@@ -337,16 +348,39 @@ struct BookReaderScreen: View {
 /// the keyboard while Readium holds it.
 struct BookPageHost: UIViewControllerRepresentable {
     let controller: UIViewController
+    /// How far the page is set in from each side (#47): Kindle's margin is
+    /// that and the gutter Readium keeps itself.
+    let inset: CGFloat
+    /// The page's colour, ARGB, behind the page and in the inset.
+    let page: UInt32
     let onKey: (ReaderKey) -> Void
+    /// A tap or a swipe in the inset: on a page (true), or back (false).
+    let onInset: (Bool) -> Void
 
     func makeUIViewController(context: Context) -> BookKeysController {
         // What the UI tests find the page by, on the UIKit view as well as
         // SwiftUI's. Loaded here, as it is about to be shown, never earlier:
-        // Readium lays the book out for the size its view first has.
+        // Readium lays the book out for the size its view first has, so the
+        // inset is set before that.
         controller.view.accessibilityIdentifier = "book-page"
-        return BookKeysController(content: controller, onKey: onKey)
+        let container = BookKeysController(content: controller, onKey: onKey)
+        container.sideInset = inset
+        container.pageColor = UIColor(argb: page)
+        container.onInset = onInset
+        return container
     }
 
-    func updateUIViewController(_ container: BookKeysController, context: Context) {}
+    func updateUIViewController(_ container: BookKeysController, context: Context) {
+        container.sideInset = inset
+        container.pageColor = UIColor(argb: page)
+        container.onInset = onInset
+    }
+}
+
+private extension UIColor {
+    convenience init(argb: UInt32) {
+        self.init(red: CGFloat((argb >> 16) & 0xFF) / 255, green: CGFloat((argb >> 8) & 0xFF) / 255,
+                  blue: CGFloat(argb & 0xFF) / 255, alpha: 1)
+    }
 }
 #endif
