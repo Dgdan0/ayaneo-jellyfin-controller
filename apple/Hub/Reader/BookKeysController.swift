@@ -26,6 +26,21 @@ final class BookKeysController: UIViewController {
     private var repeating: Task<Void, Never>?
     private var activeObserver: NSObjectProtocol?
 
+    /// How far the page is set in from each side (#47). Kindle's outer margin
+    /// is this and the gutter Readium keeps; two columns keep a narrow gap
+    /// between them only so. The view's own colour is the page's, behind both.
+    var sideInset: CGFloat = 0 {
+        didSet { if oldValue != sideInset { view.setNeedsLayout() } }
+    }
+    var pageColor: UIColor? {
+        didSet { viewIfLoaded?.backgroundColor = pageColor }
+    }
+    /// A tap or a swipe in the inset turns the page: on (true) or back (false).
+    /// Readium hears nothing outside its own view.
+    var onInset: (Bool) -> Void = { _ in }
+    private let leftInset = UIView()
+    private let rightInset = UIView()
+
     /// A held arrow repeats after this long, this often.
     private static let repeatDelay: Duration = .milliseconds(420)
     private static let repeatEvery: Duration = .milliseconds(110)
@@ -40,12 +55,42 @@ final class BookKeysController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        view.backgroundColor = pageColor
         addChild(content)
         content.view.frame = view.bounds
-        content.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(content.view)
         content.didMove(toParent: self)
+        for (side, forward) in [(leftInset, false), (rightInset, true)] {
+            side.isAccessibilityElement = false
+            side.backgroundColor = .clear
+            let tap = UITapGestureRecognizer(target: self, action: forward ? #selector(tappedRight) : #selector(tappedLeft))
+            side.addGestureRecognizer(tap)
+            // A swipe across the margin turns the page as one across the text does.
+            let swipe = UISwipeGestureRecognizer(target: self, action: forward ? #selector(swipedBack) : #selector(swipedOn))
+            swipe.direction = forward ? .right : .left
+            side.addGestureRecognizer(swipe)
+            let other = UISwipeGestureRecognizer(target: self, action: forward ? #selector(swipedOn) : #selector(swipedBack))
+            other.direction = forward ? .left : .right
+            side.addGestureRecognizer(other)
+            view.addSubview(side)
+        }
     }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let bounds = view.bounds
+        let inset = max(0, min(sideInset, bounds.width / 3))
+        content.view.frame = CGRect(x: inset, y: 0, width: bounds.width - 2 * inset, height: bounds.height)
+        leftInset.frame = CGRect(x: 0, y: 0, width: inset, height: bounds.height)
+        rightInset.frame = CGRect(x: bounds.width - inset, y: 0, width: inset, height: bounds.height)
+        leftInset.isHidden = inset == 0
+        rightInset.isHidden = inset == 0
+    }
+
+    @objc private func tappedLeft() { onInset(false) }
+    @objc private func tappedRight() { onInset(true) }
+    @objc private func swipedOn() { onInset(true) }
+    @objc private func swipedBack() { onInset(false) }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)

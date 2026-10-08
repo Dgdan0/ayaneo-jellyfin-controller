@@ -131,14 +131,14 @@ struct LicencesTests {
     }
 
     @Test func theFontsAreAskedForFirstAndEachEntryIsComplete() {
-        #expect(Licences.fonts.map(\.name) == ["Figtree", "Bricolage Grotesque"])
-        #expect(Licences.software.count == Licences.all.count - 2)
+        #expect(Licences.fonts.map(\.name) == ["Figtree", "Bricolage Grotesque", "Literata", "Atkinson Hyperlegible Next"])
+        #expect(Licences.software.count == Licences.all.count - 4)
         #expect(Set(Licences.all.map(\.id)).count == Licences.all.count)
         for entry in Licences.all {
             #expect(!entry.name.isEmpty && !entry.role.isEmpty && !entry.terms.isEmpty)
             #expect(entry.line == entry.role + " · " + entry.terms)
         }
-        #expect(Licences.all.map(\.kind).prefix(2).allSatisfy { $0 == .font })
+        #expect(Licences.all.map(\.kind).prefix(4).allSatisfy { $0 == .font })
     }
 }
 

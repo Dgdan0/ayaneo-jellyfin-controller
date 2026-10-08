@@ -100,10 +100,14 @@ final class BookReaderTests: XCTestCase {
         let themes = app.buttons["Themes"]
         XCTAssertTrue(themes.waitForExistence(timeout: 15), "Appearance did not open")
         themes.tap()
-        let night = app.buttons["Night"]
-        XCTAssertTrue(night.waitForExistence(timeout: 5))
-        night.tap()
-        XCTAssertTrue(waitUntil(5) { night.isSelected }, "Night was not chosen")
+        // Night is Dim now, and a true-black Dark beside it (#47).
+        let dim = app.buttons["Dim"]
+        XCTAssertTrue(dim.waitForExistence(timeout: 5))
+        dim.tap()
+        XCTAssertTrue(waitUntil(5) { dim.isSelected }, "Dim was not chosen")
+        let dark = app.buttons["Dark"]
+        dark.tap()
+        XCTAssertTrue(waitUntil(5) { dark.isSelected && !dim.isSelected }, "Dark was not chosen")
         // As every other test reads it.
         app.buttons["Sepia"].tap()
         XCTAssertTrue(waitUntil(5) { app.buttons["Sepia"].isSelected })
@@ -126,7 +130,8 @@ final class BookReaderTests: XCTestCase {
         XCTAssertTrue(waitUntil(5) { two.isSelected }, "Return did not choose Two pages")
         // Back to automatic columns, as the other tests read the book.
         app.typeKey(.leftArrow, modifierFlags: [])
-        for _ in 0..<3 { app.typeKey(.downArrow, modifierFlags: []) }
+        // Margins and Line spacing are Spacing's now (#47): Automatic columns is the next line.
+        app.typeKey(.downArrow, modifierFlags: [])
         app.typeKey(" ", modifierFlags: [])
         let automatic = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Automatic columns")).firstMatch
         XCTAssertTrue(waitUntil(5) { automatic.isSelected },
@@ -331,12 +336,18 @@ final class BookReaderTests: XCTestCase {
                       "the kept look reads \(justified.label) / \(hyphenation.label) / \(publisher.label)")
         let reset = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Reset text style'")).firstMatch
         XCTAssertTrue(reset.exists, "Layout has no Reset text style")
-        XCTAssertTrue(reset.label.contains("Justified, hyphenated, 1.5 spacing"), "Reset text style says \(reset.label)")
+        XCTAssertTrue(reset.label.contains("Literata, justified, hyphenated, 1.5 spacing"), "Reset text style says \(reset.label)")
         reset.tap()
         XCTAssertTrue(waitUntil(5) { justified.label.hasSuffix("On") }, "Justified text says \(justified.label)")
         XCTAssertTrue(hyphenation.label.hasSuffix("On"), "Hyphenation says \(hyphenation.label)")
         XCTAssertTrue(publisher.label.hasSuffix("Off"), "Publisher styling says \(publisher.label)")
-        XCTAssertTrue(app.buttons["Relaxed"].firstMatch.isSelected, "the line spacing is not Relaxed (1.5)")
+        // Line spacing is on Font's Spacing page (#47).
+        app.buttons["Font"].firstMatch.tap()
+        let spacing = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Spacing'")).firstMatch
+        XCTAssertTrue(spacing.waitForExistence(timeout: 5), "Font has no Spacing")
+        spacing.tap()
+        XCTAssertTrue(app.buttons["Relaxed"].firstMatch.waitForExistence(timeout: 5), "Spacing has no line spacing")
+        XCTAssertTrue(waitUntil(5) { app.buttons["Relaxed"].firstMatch.isSelected }, "the line spacing is not Relaxed (1.5)")
     }
 
     /// Where the book is, from its menu, which ↑ opens (as Ⓑ and Delete do).

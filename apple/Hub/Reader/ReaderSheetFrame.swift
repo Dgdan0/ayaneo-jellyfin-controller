@@ -23,6 +23,8 @@ struct ReaderSheetFrame<Content: View>: View {
     /// Appearance: from the bottom, the page above stays undimmed and the
     /// sheet lower, so each change shows on the page as it is made.
     var previews = false
+    /// What stays at the foot of the sheet while its rows scroll (#47): Appearance's brightness.
+    var footer: AnyView?
     /// Asked once the sheet has slid away.
     let close: () -> Void
     /// The sheet's rows, with the proxy of the scroll view they are in.
@@ -93,6 +95,10 @@ struct ReaderSheetFrame<Content: View>: View {
                 }
                 .scrollIndicators(.hidden)
                 .scrollBounceBehavior(.basedOnSize)
+            }
+            if let footer {
+                Rectangle().fill(.white.opacity(0.12)).frame(height: 1)
+                footer
             }
         }
         .padding(.top, 22 + (bottom ? 0 : safe.top))

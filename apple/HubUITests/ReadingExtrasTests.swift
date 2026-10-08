@@ -103,9 +103,10 @@ final class ReadingExtrasTests: XCTestCase {
 
     // MARK: Comfort
 
-    /// Comfort in the ebook reader's Appearance: brightness and warmth, a
-    /// black page, and the screen kept on while narrating; every reader
-    /// opens the same way after.
+    /// Comfort in the ebook reader's Appearance: warmth and the screen kept on
+    /// while narrating, with brightness fixed at the foot of every tab (#47)
+    /// and no black page, which is the Dark theme's now; every reader opens
+    /// the same way after.
     @MainActor
     func testComfortIsInTheBookReaderAndKeptForTheComicReader() {
         let app = XCUIApplication()
@@ -118,15 +119,15 @@ final class ReadingExtrasTests: XCTestCase {
         XCTAssertTrue(app.sliders["comfort-warmth"].exists)
         brightness.adjust(toNormalizedSliderPosition: 0.5)
         XCTAssertTrue(text(app, containing: "%").exists)
-        let black = app.buttons["comfort-black"]
-        XCTAssertTrue(black.exists, "a book's Comfort has no black page")
-        let wasBlack = black.label.contains("On")
-        black.tap()
-        XCTAssertTrue(app.buttons["comfort-black"].label.contains(wasBlack ? "Off" : "On"), "the black page did not change")
-        keep(app, "comfort-dimmed-black-page")
+        XCTAssertFalse(app.buttons["comfort-black"].exists, "a book's Comfort still has a black page")
+        keep(app, "comfort-dimmed")
         XCTAssertTrue(app.buttons["comfort-awake"].exists, "no keeping the screen on while narrating")
+        // The brightness is one slider, at the foot of every tab.
+        app.buttons["Themes"].tap()
+        XCTAssertTrue(app.sliders["comfort-brightness"].waitForExistence(timeout: 5), "Themes has no brightness at its foot")
+        app.buttons["Comfort"].tap()
+        XCTAssertTrue(app.sliders["comfort-warmth"].waitForExistence(timeout: 5), "Comfort has no warmth")
         // Back as it was, for the next run.
-        app.buttons["comfort-black"].tap()
         app.sliders["comfort-brightness"].adjust(toNormalizedSliderPosition: 1)
         app.sliders["comfort-warmth"].adjust(toNormalizedSliderPosition: 0)
         app.terminate()
