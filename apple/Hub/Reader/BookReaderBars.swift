@@ -207,26 +207,4 @@ struct BookSlider: View {
         }
     }
 }
-/// Reading along with the menu away (#16, A5): the narration plays, and
-/// where the page stands with it, "Following · 1×". A tap brings the menu
-/// and its dock back.
-struct ReadAlongPill: View {
-    let reading: ReadAlongReader
-    let narration: NarrationModel
-    let open: () -> Void
-
-    var body: some View {
-        Button(action: open) {
-            Label("\(reading.followLabel) · \(PlayerLabels.rate(narration.speed))", systemImage: "play.fill")
-                .font(HubType.body(13, weight: .bold, relativeTo: .footnote))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .glassPanel(Capsule())
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("readalong-pill")
-    }
-}
 #endif

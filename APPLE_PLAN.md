@@ -548,6 +548,8 @@ speaks Readium (`@preconcurrency` imports; the EPUB opened off the main actor an
 | The reader on screen | `BookReaderModel` (opening, the place, the pace, keys and pad, scrolling, bookmarks, appearance), `BookNavigator`, `BookReaderScreen`, `BookReaderBars`, `BookReaderSheetView` with `BookAppearanceSheet`, `FootnoteCard`, `BookReaderStatus` |
 | A reader's sheet and its rows of keys, the keys' hint row | `ReaderSheetFrame`, `ReaderKeyLines`, `ReaderHintRow`: both readers. A book's sheet sits beside the page wherever the page keeps at least half the window (`keepsPage`), and Appearance from the bottom leaves the page above it undimmed (`previews`) |
 | The keyboard while Readium holds it | `BookKeysController`: Readium's navigator inside a controller that takes the first responder after it |
+| Read along's voice and page moving each other (#49): a page's first and last words placed inside their sentences' clips (`clipBegin + share of letters × length`, from the word's start), the turn at the next page's first word, a page turned by hand taking the voice to its first word unless the sentence spoken is still on it | HubKit `ReadAlongWords`, `ReadAlongPageEdges`, `ReadAlongTimeline.span`, `ReadAlongPageSpan`, `ReadAlongPageFollow` (`Rules/ReadAlongPage`); the page only reports offsets (`ReadAlongPageScript.edges`). `ReadAlongReader` runs it, one page job at a time |
+| The narration on the lock screen and in Control Center, playing on in the background (#49) | `NarrationModel` as a `NowPlaying` client (`AudioSource.narration`); its commands go to `ReadAlongReader` |
 
 As on the Pocket: Ⓑ opens the menu and the page shrinks inside it, round with the cover's glass;
 Ⓑ again leaves the book. The top bar has Close, the title over the time left, Contents, Bookmark,
@@ -588,14 +590,22 @@ a hub that cannot be asked offers the beginning, which writes nothing until the 
 **Read along (after phase 2, as on the Pocket, #21)**: the slim edition (`readingEpubFile(format:
 "readaloud", omitAudio: true)`) with its narration streamed from the audiobook's tracks; the
 narration's dock stands in the lower bar's place (`BookLowerBar`), the sentence read lit through
-Readium's decorations, and the time left the narration's own.
+Readium's decorations, and the time left the narration's own. While it plays the voice and the page
+move each other (#49): the voice turns the page at the next page's first word, inside a sentence
+too (in two columns the page is the spread), and a page turned or jumped to by hand takes the voice
+to its first word unless the sentence spoken is still on it; paused, a turn moves nothing and Play
+starts from the page's first word. The corners stay as they are while it plays (no pill). It plays
+on with the screen locked and the app in the background, on the lock screen with the cover, and back
+in the app the page catches up with the voice.
 
 Debug builds take `HUB_BOOK=<work id>/<edition id>` with `-demo` only (the scripts and the app both
 refuse it otherwise, since reading writes the place): `rw_demo_recursion/demo-rw_demo_recursion` is a
 book not started, `rw_demo_rr6/rr6` Light Bringer half read. `HUB_BOOK_CHROME=pinned` opens the menu,
 `HUB_BOOK_AT=<percent>` goes that far in, `HUB_BOOK_SHEET=menu|contents|bookmarks|appearance|keys`
 opens the menu or a sheet, and `HUB_BOOK_SCROLL=1|0` turns continuous scrolling on or off, kept as
-Appearance keeps it (every UI test launches with 0, so a test cut short leaves no scrolling behind). The demo hub writes a real EPUB 3 for every Books demo work with an ebook
+Appearance keeps it (every UI test launches with 0, so a test cut short leaves no scrolling behind).
+`HUB_BOOK_FONT=<scale>` and `HUB_BOOK_COLUMNS=1|2` draw the page so for that launch only, and
+`HUB_DEBUG_READALONG=1` puts what the voice and the page last did to each other where UI tests read it. The demo hub writes a real EPUB 3 for every Books demo work with an ebook
 (`DemoEpub`): made-up words, eight chapters of 9 to 18 KB, a footnote in One, a link on to Five in
 Two, an endnote in Three, a link out of the book in Four and a second part in Eight's contents.
 

@@ -1,5 +1,6 @@
 import AVFoundation
 import HubKit
+import MediaPlayer
 import Observation
 import SwiftUI
 
@@ -13,10 +14,20 @@ import SwiftUI
 /// `ReadAlongLocation`) every ten seconds while it plays and on every pause,
 /// jump and step; it pauses for a call; and it takes its turn with the video
 /// and the audiobook (`SoundGuard`). Its speed is the book's, the
-/// audiobook's own. `release()` before letting it go.
+/// audiobook's own. It plays on with the screen locked and the app in the
+/// background (#49), and shows on the lock screen and in Control Center with
+/// the book's cover and title (`NowPlaying`), whose commands its reader
+/// answers (`onRemote`). `release()` before letting it go.
 @MainActor
 @Observable
 final class NarrationModel {
+    /// What the lock screen shows of the book: its title, its author and its cover.
+    struct Book: Sendable {
+        let title: String
+        let author: String
+        let artwork: String
+    }
+
     /// A book's narration, ready to play.
     struct Narration: Sendable {
         let timeline: ReadAlongTimeline
@@ -45,6 +56,12 @@ final class NarrationModel {
     /// The place to keep, and whether the narration is finished.
     @ObservationIgnored var onSave: ((ReadAlongPosition, Bool) -> Void)?
     @ObservationIgnored var onError: (() -> Void)?
+    /// Ten times a second while it plays: where the voice is (the page turns with it, #49).
+    @ObservationIgnored var onTick: ((ReadAlongPosition) -> Void)?
+    /// A command from the lock screen, Control Center or the headphones; the narration's own when nobody answers.
+    @ObservationIgnored var onRemote: ((RemoteCommand) -> Void)?
+    /// The part of the book the voice is in, for the lock screen.
+    @ObservationIgnored var chapter: () -> String? = { nil }
 
     @ObservationIgnored private let runs: NarrationRuns
     @ObservationIgnored private let kept: (tracks: [String: ListeningTracks.Track], hub: HubClient, cache: AudioTrackCache)
@@ -66,9 +83,14 @@ final class NarrationModel {
     @ObservationIgnored private var lastSave = ContinuousClock.now
     @ObservationIgnored private var observers: [any NSObjectProtocol] = []
     @ObservationIgnored private var released = false
+    @ObservationIgnored private let book: Book
+    @ObservationIgnored private var artwork: MPMediaItemArtwork?
+    /// When the lock screen's moment was last given: once a second is enough.
+    @ObservationIgnored private var published = ContinuousClock.now
 
     /// The narration at `initial` (the sentence the place names), paused.
-    init(_ narration: Narration, workId: String, token: String, initial: ReadAlongPosition?) {
+    init(_ narration: Narration, workId: String, token: String, initial: ReadAlongPosition?, book: Book) {
+        self.book = book
         timeline = narration.timeline
         runs = NarrationRuns(narration.timeline, sources: narration.sources)
         kept = (narration.tracks, narration.hub, narration.cache)
@@ -93,6 +115,8 @@ final class NarrationModel {
         #endif
         // Video or the audiobook starting pauses the narration.
         SoundGuard.shared.pause(.narration) { [weak self] in self?.pause() }
+        NowPlaying.shared.register(.narration, self)
+        loadArtwork()
         load(position, play: false)
         segment = timeline.active(track: position.track, offsetMs: position.offsetMs)
         poll = Task { [weak self] in
@@ -118,6 +142,9 @@ final class NarrationModel {
         lastSave = .now
         ListeningAudio.activateSession(for: .narration)
         SoundGuard.shared.started(.narration)
+        // Playing, the narration has the lock screen and Control Center (#49).
+        NowPlaying.shared.take(.narration, commands: NowPlaying.Commands(next: true, previous: true))
+        defer { updateNowPlaying() }
         if var start = pending {
             start.play = true
             pending = start
@@ -141,6 +168,7 @@ final class NarrationModel {
         }
         SoundGuard.shared.stopped(.narration)
         save()
+        updateNowPlaying()
     }
 
     /// To `target`, playing on if it was.
@@ -151,6 +179,7 @@ final class NarrationModel {
         let now = timeline.active(track: position.track, offsetMs: position.offsetMs)
         segment = now
         onSegment?(now)
+        updateNowPlaying()
     }
 
     /// By `deltaMs` of narration, across stretches (−10 and +10).
@@ -175,6 +204,7 @@ final class NarrationModel {
         ListeningSettings.setSpeed(speed, for: workId)
         player.defaultRate = speed
         if playing && pending == nil && !seeking { player.rate = speed }
+        updateNowPlaying()
     }
 
     /// The reader is closing: paused, its place handed over, nothing left playing.
@@ -189,6 +219,8 @@ final class NarrationModel {
         player.replaceCurrentItem(with: nil)
         ListeningTracks.shared.stop()
         SoundGuard.shared.forget(.narration)
+        // The audiobook behind it, if any, has the lock screen again.
+        NowPlaying.shared.release(.narration)
         ListeningAudio.deactivateSession(for: .narration)
     }
 
@@ -272,7 +304,10 @@ final class NarrationModel {
             segment = now
             onSegment?(now)
         }
-        if playing && ContinuousClock.now - lastSave >= .seconds(10) { save() }
+        guard playing else { return }
+        onTick?(position)
+        if ContinuousClock.now - lastSave >= .seconds(10) { save() }
+        if ContinuousClock.now - published >= .seconds(1) { updateNowPlaying(position: true) }
     }
 
     /// The track playing kept on the device, then the next run's, once the
@@ -300,6 +335,7 @@ final class NarrationModel {
         onSegment?(nil)
         SoundGuard.shared.stopped(.narration)
         save()
+        updateNowPlaying()
     }
 
     private func fail() {
@@ -313,6 +349,49 @@ final class NarrationModel {
     private func save() {
         lastSave = .now
         onSave?(position, completed)
+    }
+
+    // MARK: The lock screen
+
+    /// Now Playing: the book, the part being read (or its author), the cover,
+    /// and where in the stretch playing, as the dock says it.
+    private func updateNowPlaying(position only: Bool = false) {
+        published = .now
+        guard timeline.tracks.indices.contains(position.track) else { return }
+        let track = timeline.tracks[position.track]
+        let elapsed = Double(min(max(position.offsetMs, 0), track.durationMs)) / 1_000
+        let rate = playing ? Double(speed) : 0
+        if only {
+            NowPlaying.shared.publishPosition(.narration, elapsedSeconds: elapsed, rate: rate,
+                                              durationSeconds: Double(track.durationMs) / 1_000)
+            return
+        }
+        let chapter = (self.chapter() ?? "").trimmingCharacters(in: .whitespaces)
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: book.title,
+            MPMediaItemPropertyArtist: chapter.isEmpty ? book.author : chapter,
+            MPMediaItemPropertyAlbumTitle: chapter.isEmpty ? "Read along" : book.author,
+            MPMediaItemPropertyPlaybackDuration: Double(track.durationMs) / 1_000,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: elapsed,
+            MPNowPlayingInfoPropertyPlaybackRate: rate,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: Double(speed),
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
+            MPNowPlayingInfoPropertyChapterNumber: position.track,
+            MPNowPlayingInfoPropertyChapterCount: timeline.tracks.count,
+        ]
+        if let artwork { info[MPMediaItemPropertyArtwork] = artwork }
+        NowPlaying.shared.publish(.narration, info: info, playing: playing)
+    }
+
+    private func loadArtwork() {
+        guard !book.artwork.isEmpty else { return }
+        let hub = kept.hub
+        let path = book.artwork
+        Task { [weak self] in
+            guard let data = try? await hub.image(path), let art = NowPlaying.artwork(data), let self, !self.released else { return }
+            self.artwork = art
+            self.updateNowPlaying()
+        }
     }
 
     // MARK: Opening
@@ -372,6 +451,26 @@ final class NarrationModel {
                            note: "Aligned narration could not be opened. You can still read this book.")
         }
     }
+}
+
+extension NarrationModel: NowPlayingClient {
+    func remote(_ command: RemoteCommand) {
+        if let onRemote {
+            onRemote(command)
+            return
+        }
+        switch command {
+        case .play: play()
+        case .pause: pause()
+        case .toggle: toggle()
+        case .skip(let forward): jump(by: (forward ? 1 : -1) * Int64(ListeningSettings.seekSeconds) * 1_000)
+        case .step(let delta): stepSentence(delta)
+        // The lock screen's line is the stretch playing, as the dock's is.
+        case .seek(let millis): seek(to: ReadAlongPosition(track: position.track, offsetMs: millis))
+        }
+    }
+
+    func publishNowPlaying() { updateNowPlaying() }
 }
 
 /// The read-along edition without its audio (#19), downloaded once and kept

@@ -49,7 +49,7 @@ struct BookYouBlock: View {
     }
 }
 
-/// What you can do: Audiobook, Ebook and Read along, each an icon and its
+/// What you can do: Ebook, Audiobook and Read along (#49), each an icon and its
 /// name, in the accent when it opens and a quiet grey when it does not.
 struct BookFormatsRow: View {
     let formats: [BookPage.Format]

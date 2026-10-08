@@ -125,7 +125,7 @@ struct BookReaderScreen: View {
                     BookReaderBars(reader: reader, layout: layout, leave: leave, topBar: $topBar, bottomBar: $bottomBar)
                         .transition(.opacity)
                 }
-                // Kindle's corners, and reading along the narration's pill, while the bars are away (#42).
+                // Kindle's corners while the bars are away (#42), reading along too (#49).
                 if reader.sheet == nil && !reader.controlsVisible && reader.phase == .reading {
                     BookReaderCorners(reader: reader, layout: layout)
                         .transition(.opacity)
@@ -149,6 +149,15 @@ struct BookReaderScreen: View {
                 }
                 // Comfort over the whole reader, page and controls (#37).
                 ComfortLayer(comfort: comfort.value)
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["HUB_DEBUG_READALONG"] == "1" {
+                    Text(reader.debugReadAlong)
+                        .font(.caption2)
+                        .opacity(0.02)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("debug-readalong")
+                }
+                #endif
             }
             .coordinateSpace(.named(Self.space))
             .ignoresSafeArea()
@@ -214,6 +223,8 @@ struct BookReaderScreen: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { reader.flushPlace() }
+            // The voice reads on with the screen locked; the page catches up once it shows again (#49).
+            reader.scene(active: phase != .background)
         }
         #if DEBUG
         .task(id: reader.phase == .reading) { await debugTour() }
@@ -273,7 +284,8 @@ struct BookReaderScreen: View {
     #if DEBUG
     /// Debug builds, for screenshots: HUB_BOOK_SCROLL=1 (or 0) turns continuous
     /// scrolling on (or off) for every book, as Appearance would and kept as it
-    /// keeps it; HUB_BOOK_AT=<percent> goes that far into the book;
+    /// keeps it; HUB_BOOK_FONT=<scale> and HUB_BOOK_COLUMNS=1|2 draw the page so,
+    /// for this launch only; HUB_BOOK_AT=<percent> goes that far into the book;
     /// HUB_BOOK_SHEET=menu|contents|bookmarks|search|appearance|layout|comfort|keys opens the menu
     /// or a sheet, once the book has opened; HUB_BOOK_SEARCH=<words> searches for them.
     private func debugTour() async {
@@ -284,6 +296,13 @@ struct BookReaderScreen: View {
         if let scroll = environment["HUB_BOOK_SCROLL"], scroll == "1" || scroll == "0",
            reader.preferences.scroll != (scroll == "1") {
             reader.setPreferences(EpubLayoutPolicy.selectScroll(reader.preferences, scroll == "1"))
+            try? await Task.sleep(for: .milliseconds(900))
+        }
+        // HUB_BOOK_FONT=<scale> and HUB_BOOK_COLUMNS=1|2: the page drawn so for this launch only.
+        let font = environment["HUB_BOOK_FONT"].flatMap(Double.init)
+        let columns = environment["HUB_BOOK_COLUMNS"].flatMap { $0 == "2" ? EpubColumns.two : $0 == "1" ? .one : nil }
+        if font != nil || columns != nil {
+            reader.debugAppearance(fontScale: font, columns: columns)
             try? await Task.sleep(for: .milliseconds(900))
         }
         if let percent = environment["HUB_BOOK_AT"].flatMap(Double.init) {

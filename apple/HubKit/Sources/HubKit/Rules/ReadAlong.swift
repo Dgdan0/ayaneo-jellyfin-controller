@@ -291,7 +291,7 @@ public enum ReadAlongPageScript {
             + "return null;})()"
     }
 
-    private static func json(_ value: Any) -> String {
+    static func json(_ value: Any) -> String {
         guard JSONSerialization.isValidJSONObject([value]),
               let data = try? JSONSerialization.data(withJSONObject: [value], options: [.withoutEscapingSlashes]),
               let text = String(data: data, encoding: .utf8) else { return "null" }
