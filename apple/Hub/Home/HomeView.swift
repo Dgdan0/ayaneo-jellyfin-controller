@@ -418,12 +418,15 @@ struct HomeRowView: View {
 struct PreviewsWhenFocused: ViewModifier {
     let preview: () -> Void
     @FocusState private var focused: Bool
+    /// A controller's or keyboard's focus (#46): `padFocusable` outside this.
+    @Environment(\.padLit) private var padLit
 
     func body(content: Content) -> some View {
         content
             .focused($focused)
             .onHover { inside in if inside { preview() } }
             .onChange(of: focused) { _, now in if now { preview() } }
+            .onChange(of: padLit) { _, now in if now { preview() } }
     }
 }
 

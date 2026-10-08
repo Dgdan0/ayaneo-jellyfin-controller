@@ -54,8 +54,13 @@ struct KeptBooksView: View {
                                 Label("Remove offline copy", systemImage: "trash")
                             }
                         }
+                        // Ⓨ is the hold's Remove offline copy (#46).
+                        .padFocusable(book.workId, ring: .card, hold: { removing = book }) {
+                            openRoute(.book(BookRoute(workId: book.workId, title: book.title)))
+                        }
                     }
                 }
+                .padGroup("kept", .grid(columns: 0), members: shown.map(\.workId))
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 20)
                 SheetNote(text: "Kept in this device's caches: the system may clear them when the device is short of room. "

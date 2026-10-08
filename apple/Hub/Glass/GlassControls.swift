@@ -10,6 +10,8 @@ struct ChoicePill: View {
     let title: String
     let selected: Bool
     var systemImage: String?
+    /// Its id for a controller's focus (#46).
+    var pad: String?
     let action: () -> Void
 
     var body: some View {
@@ -38,6 +40,7 @@ struct ChoicePill: View {
         #if os(iOS)
         .hoverEffect(.highlight)
         #endif
+        .padFocusable(pad, ring: .capsule, press: action)
     }
 }
 
@@ -52,6 +55,8 @@ struct GlassCapsulePicker<ID: Hashable>: View {
 
     let items: [Item]
     let selection: ID
+    /// Its group's id for a controller's focus (#46): a row of its places.
+    var pad: String?
     let select: (ID) -> Void
     @Namespace private var pill
 
@@ -79,11 +84,13 @@ struct GlassCapsulePicker<ID: Hashable>: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
+                .padFocusable(pad == nil ? nil : "\(item.id)", ring: .capsule) { select(item.id) }
             }
         }
         .padding(4)
         .glassPanel(Capsule())
         .animation(.spring(duration: 0.3), value: selection)
+        .padGroup(pad, .row, members: items.map { "\($0.id)" })
     }
 }
 
@@ -114,6 +121,8 @@ struct GlassControlStyle: ButtonStyle {
 struct UnderlineTabs<Tab: Hashable>: View {
     let tabs: [(id: Tab, title: String)]
     @Binding var selection: Tab
+    /// Its group's id for a controller's focus (#46): a row of its tabs.
+    var pad: String?
     @Environment(\.glassAccent) private var accent
     @Namespace private var line
 
@@ -140,9 +149,13 @@ struct UnderlineTabs<Tab: Hashable>: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(on ? .isSelected : [])
+                    .padFocusable(pad == nil ? nil : "\(tab.id)", ring: .inside(8)) {
+                        withAnimation(.easeInOut(duration: 0.2)) { selection = tab.id }
+                    }
                 }
             }
         }
+        .padGroup(pad, .row, members: tabs.map { "\($0.id)" }, strip: pad != nil)
         .background(alignment: .bottom) {
             Rectangle().fill(.white.opacity(0.14)).frame(height: 1)
         }

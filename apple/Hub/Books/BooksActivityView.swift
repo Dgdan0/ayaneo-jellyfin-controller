@@ -56,6 +56,8 @@ struct BooksActivityView: View {
             }
             .padding(.bottom, 28)
         }
+        // A controller goes through the transfers' buttons by looking (#46).
+        .padPage("books-activity")
         .refreshable { polls += 1 }
         .task(id: polls) { await poll() }
         .alert("Cancel transfer?", isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } }),
@@ -223,6 +225,7 @@ struct ReadingTransferRow: View {
                                 .buttonStyle(GlassControlStyle())
                                 .disabled(working)
                                 .accessibilityIdentifier("\(action.rawValue)-\(item.id)")
+                                .padFocusable("\(action.rawValue)-\(item.id)") { if !working { act(action) } }
                         }
                     }
                     .padding(.top, 4)

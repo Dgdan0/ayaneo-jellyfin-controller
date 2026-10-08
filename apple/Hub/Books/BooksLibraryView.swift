@@ -60,25 +60,31 @@ struct BooksLibraryView: View {
                             }
                         }
                         .buttonStyle(GlassControlStyle())
+                        .padFocusable("arrange") { arranging ? finishArranging() : startArranging() }
                     }
                 }
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 4)
+                let kavita = arranging ? nil : libraries.first(where: { $0.source == "kavita" })
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: metrics.small ? 230 : 300), spacing: metrics.gap)],
                           spacing: metrics.gap) {
                     ForEach(Array(shown.enumerated()), id: \.element.id) { index, library in
                         tile(library, index: index)
                     }
-                    if !arranging, let kavita = libraries.first(where: { $0.source == "kavita" }) {
+                    if let kavita {
                         readingLists(kavita)
                     }
                 }
+                // A controller goes through the libraries as a grid (#46).
+                .padGroup("libraries", .grid(columns: 0),
+                          members: shown.map(\.id) + (kavita == nil ? [] : ["reading-lists"]))
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 14)
                 .padding(.bottom, 30)
                 .onDrop(of: [.text], delegate: LibraryDropFallback(dragging: $dragging, editor: editor, model: model))
             }
         }
+        .padPage("books-libraries")
         .ambientArtwork(lit ?? libraries.first?.artwork ?? "")
         .refreshable { await load() }
         .task(id: "\(model.userId)·\(model.libraryOrderChanges)") { await load() }
@@ -118,6 +124,7 @@ struct BooksLibraryView: View {
                 .contextMenu { Button("Arrange libraries", action: startArranging) }
                 #endif
                 .accessibilityAction(named: "Arrange libraries", startArranging)
+                .padFocusable(library.id, ring: .card) { openRoute(.readingLibrary(ReadingLibraryRoute(library: library))) }
         }
     }
 
@@ -133,6 +140,9 @@ struct BooksLibraryView: View {
         .buttonStyle(GlassCardStyle())
         .previewsWhenFocused { lit = kavita.artwork }
         .accessibilityIdentifier("reading-lists")
+        .padFocusable("reading-lists", ring: .card) {
+            openRoute(.readingLists(ReadingListsRoute(list: nil, artwork: kavita.artwork)))
+        }
     }
 
     private func startArranging() {
@@ -192,6 +202,8 @@ struct ReadingLibraryView: View {
     @State private var view: BooksModel.LibraryView = .series
     @State private var sort = SortPreference.forField("title")
     @State private var ready = false
+    /// The order's fields, for a controller's Ⓐ on its menu (#46).
+    @State private var choosingSort = false
 
     private var library: ReadingLibrary { route.library }
     private var fields: [(id: String, label: String)] { ReadingSortFields.forLibrary(library) }
@@ -218,6 +230,14 @@ struct ReadingLibraryView: View {
                     }
                 }
             }
+            // The views and the order, then the grid (#46).
+            .padGroup("library", .column, members: (canShowAuthors ? ["views"] : []) + ["order", "grid"], prefix: false)
+        }
+        .padPage("library:\(library.id)")
+        .confirmationDialog("Sort by", isPresented: $choosingSort) {
+            ForEach(gridFields, id: \.id) { field in
+                Button(field.label) { apply(SortPreference.forField(field.id)) }
+            }
         }
         .onAppear {
             guard !ready else { return }
@@ -239,7 +259,7 @@ struct ReadingLibraryView: View {
     @ViewBuilder private var controls: some View {
         let capsule = GlassCapsulePicker(
             items: BooksModel.LibraryView.allCases.map { GlassCapsulePicker<BooksModel.LibraryView>.Item(id: $0, title: $0.title) },
-            selection: view) { chosen in show(chosen) }
+            selection: view, pad: "views") { chosen in show(chosen) }
             .fixedSize()
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("library-views")
@@ -272,6 +292,7 @@ struct ReadingLibraryView: View {
                 }
                 .menuStyle(.button)
                 .buttonStyle(GlassControlStyle())
+                .padFocusable("sort-field") { choosingSort = true }
             }
             Button {
                 apply(SortPreference(field: sort.field, ascending: !sort.ascending))
@@ -280,7 +301,10 @@ struct ReadingLibraryView: View {
             }
             .buttonStyle(GlassControlStyle())
             .accessibilityHint("Reverses the order")
+            .padFocusable("sort-direction") { apply(SortPreference(field: sort.field, ascending: !sort.ascending)) }
         }
+        .padGroup("order", .row, members: view == .authors ? ["sort-direction"] : ["sort-field", "sort-direction"],
+                  prefix: false)
         .fixedSize()
     }
 
@@ -320,6 +344,7 @@ struct ReadingWorksGrid: View {
     @State private var total = 0
     @State private var status = StatusMessage("")
     @State private var lit: String?
+    @Environment(\.openRoute) private var openRoute
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -345,8 +370,10 @@ struct ReadingWorksGrid: View {
                     .onAppear {
                         if let page = paging.next(lastVisible: index, count: items.count) { Task { await fetch(page) } }
                     }
+                    .padFocusable(work.id, ring: .card) { openRoute(.book(BookRoute(workId: work.id, title: work.title))) }
                 }
             }
+            .padGroup("grid", .grid(columns: 0), members: items.map(\.id))
             .padding(.horizontal, metrics.margin)
             .padding(.top, 10)
             .padding(.bottom, 26)
@@ -398,6 +425,7 @@ struct AuthorsGrid: View {
     @State private var paging = PagedLoadState(prefetchAhead: 6)
     @State private var total = 0
     @State private var status = StatusMessage("")
+    @Environment(\.openRoute) private var openRoute
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -425,8 +453,14 @@ struct AuthorsGrid: View {
                     .onAppear {
                         if let page = paging.next(lastVisible: index, count: authors.count) { Task { await fetch(page) } }
                     }
+                    .padFocusable(author.id, ring: .card) {
+                        openRoute(.author(AuthorRoute(libraryId: libraryId, id: author.id, name: author.name,
+                                                      artwork: author.artwork, seriesCount: author.seriesCount,
+                                                      bookCount: author.bookCount, total: author.total)))
+                    }
                 }
             }
+            .padGroup("grid", .grid(columns: 0), members: authors.map(\.id))
             .padding(.horizontal, metrics.margin)
             .padding(.top, 14)
             .padding(.bottom, 26)

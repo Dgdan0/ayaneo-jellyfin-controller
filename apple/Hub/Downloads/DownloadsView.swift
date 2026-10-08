@@ -57,16 +57,21 @@ struct DownloadsView: View {
                 .padding(.top, 4)
                 HStack(spacing: 8) {
                     if books {
-                        ChoicePill(title: "Books", selected: tab == .books) { tab = .books }
+                        ChoicePill(title: "Books", selected: tab == .books, pad: "books") { tab = .books }
                             .accessibilityIdentifier("downloads-books")
                     }
-                    ChoicePill(title: books ? "Films and TV" : "On this device", selected: tab == .device) { tab = .device }
-                        .accessibilityIdentifier("downloads-device")
-                    ChoicePill(title: offline.coming > 0 ? "Queue · \(offline.coming)" : "Queue", selected: tab == .queue) {
+                    ChoicePill(title: books ? "Films and TV" : "On this device", selected: tab == .device, pad: "device") {
+                        tab = .device
+                    }
+                    .accessibilityIdentifier("downloads-device")
+                    ChoicePill(title: offline.coming > 0 ? "Queue · \(offline.coming)" : "Queue", selected: tab == .queue,
+                               pad: "queue") {
                         tab = .queue
                     }
                     .accessibilityIdentifier("downloads-queue")
                 }
+                // A controller's row of the three (#46); what is under them it finds by looking down.
+                .padGroup("tabs", .row, members: (books ? ["books"] : []) + ["device", "queue"])
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 14)
                 switch tab {
@@ -77,6 +82,7 @@ struct DownloadsView: View {
             }
             .padding(.bottom, 28)
         }
+        .padPage(books ? "downloads-books" : "downloads")
         .task { offline.syncSoon() }
         // A download's notification tapped: the queue for a failure, the device for one done (#43).
         .onChange(of: taps.opening, initial: true) { _, _ in
@@ -123,18 +129,27 @@ struct DownloadsView: View {
                         .buttonStyle(GlassCardStyle())
                         .contextMenu {
                             Button(role: .destructive) {
-                                removing = OfflineRemoval(id: entry.key, title: "Remove \(entry.title)?",
-                                                          detail: OfflineRemoval.detail(entry)) { offline.removeTitle(entry) }
+                                askRemove(entry)
                             } label: {
                                 Label("Remove download", systemImage: "trash")
                             }
                         }
+                        // Ⓨ is the hold's Remove download (#46).
+                        .padFocusable(entry.key, ring: .card, hold: { askRemove(entry) }) {
+                            openRoute(.offlineTitle(OfflineTitleRoute(key: entry.key, title: entry.title)))
+                        }
                     }
                 }
+                .padGroup("library-\(group.library)", .grid(columns: 0), members: group.entries.map(\.key))
             }
             .padding(.horizontal, metrics.margin)
             .padding(.top, 20)
         }
+    }
+
+    private func askRemove(_ entry: OfflineCatalogEntry) {
+        removing = OfflineRemoval(id: entry.key, title: "Remove \(entry.title)?",
+                                  detail: OfflineRemoval.detail(entry)) { offline.removeTitle(entry) }
     }
 
     // MARK: The queue
@@ -297,8 +312,12 @@ struct OfflineBatchCard: View {
                     if batch.paused { offline.resumeBatch(batch.id) } else { offline.pauseBatch(batch.id) }
                 }
                 .buttonStyle(GlassControlStyle())
+                .padFocusable("batch-\(batch.id)-pause") {
+                    if batch.paused { offline.resumeBatch(batch.id) } else { offline.pauseBatch(batch.id) }
+                }
                 Button("Cancel", action: cancel)
                     .buttonStyle(GlassControlStyle())
+                    .padFocusable("batch-\(batch.id)-cancel", press: cancel)
             }
             ForEach(batch.jobs) { row in
                 OfflineQueueRow(row: row, offline: offline) { remove(row) }
@@ -375,14 +394,18 @@ struct OfflineQueueRow: View {
                 switch row.state {
                 case .queued, .downloading, .preparing, .waiting:
                     Button("Pause") { offline.pause(row.id) }.buttonStyle(GlassControlStyle())
+                        .padFocusable("row-\(row.id)-step") { offline.pause(row.id) }
                 case .paused:
                     Button("Resume") { offline.resume(row.id) }.buttonStyle(GlassControlStyle())
+                        .padFocusable("row-\(row.id)-step") { offline.resume(row.id) }
                 case .failed:
                     Button("Retry") { offline.retry(row.id) }.buttonStyle(GlassControlStyle())
+                        .padFocusable("row-\(row.id)-step") { offline.retry(row.id) }
                 case .complete:
                     EmptyView()
                 }
                 Button("Remove", action: remove).buttonStyle(GlassControlStyle())
+                    .padFocusable("row-\(row.id)-remove", press: remove)
             }
             .padding(.top, 2)
         }
@@ -410,6 +433,7 @@ struct OfflineSettingsCard: View {
                 }
             }
             .tint(.white.opacity(0.6))
+            .padFocusable("wifi-only", ring: .rounded(12)) { offline.wifiOnly.toggle() }
             Text("Kept on this device and out of its backups. The PC makes an MP4 of each for this device first; a converted picture takes a few minutes.")
                 .font(HubType.body(12.5, relativeTo: .caption))
                 .foregroundStyle(.white.opacity(0.55))

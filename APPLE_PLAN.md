@@ -869,6 +869,19 @@ item; the page asks the engine and moves focus, scrolling, pressing Ⓐ and draw
 | The ring only while a controller or keyboard is in use | `PadInput` (Android's `InputModeTracker`): `directional()` and `pointer()` report a change once. It starts hidden, because here a touch is the default |
 | How far to scroll to the focused item | `PadReveal.origin(showing:in:margin:above:pin:content:)` (as little as it takes; `above` keeps a row's heading in view, `pin` rests the row at the top as Home's rows do, the row's frame from `PadMap.frame(parent(of:).id)`) and `PadReveal.offset` along one axis |
 
+The app's side (`Hub/Focus`):
+
+| Behaviour | Owner |
+|---|---|
+| Every input's way in | `PadFocusCenter.shared.route(_ action: PadAction)`: the focus takes `.step`, `.activate` (Ⓐ, Return, Space), `.secondary` (Ⓨ, the item's hold menu) and `.back` (Ⓑ, Escape) out of the bar or a sheet; anything else goes to `PadFocusCenter.shared.unhandled`, which the shell sets (Back today; A's sections and the rest). Nothing while the player or a reader is open (`covered`) |
+| The keyboard | `Focus/PadKeys`: hidden buttons whose shortcuts are the arrows, Return, Space and Escape on the iPad and iPhone (a text field keeps its arrows); a key monitor on the Mac that leaves a text field alone. A touch, click or scroll hides the ring (`PadInput.pointer`) |
+| A page, a sheet, the bar | `.padPage("key")` round a page's own scroll view (it scrolls it), `.padPage("key", modal: true) { dismiss() }` for a sheet, whose Ⓑ closes it; the bars are one page (`padBar`), reached up (or down to the iPhone's tab bar) from a page and left with Down, Up or Ⓑ |
+| An item | `.padFocusable("id", ring: .card / .capsule / .circle / .rounded(r) / .inside(r) / .none, scroll:, hold:) { press }`: Ⓐ runs `press`, Ⓨ `hold`. `.card` lights the card as a resting pointer does (`GlassCardStyle` reads `padLit`); `.none` for an item that draws its own (`SheetRowStyle`). Shared parts take a `pad:` id: `ChoicePill`, `GlassRoundButton`, `SheetRow`, `BackPill`, `AvatarButton`, `SidePicker`, and `GlassCapsulePicker` and `UnderlineTabs` as a row |
+| Items in order | `.padGroup("id", .row / .column / .grid(columns: 0), members:, prefix:, strip:, scrollIds:)`: an item in a group is `group/id`; `strip: true` on a horizontal scroll view, which it then scrolls; `scrollIds` where its `ForEach` names cards by position. A column keeps only rows that are there |
+| A menu or a picker a controller presses | Its choices as a `confirmationDialog` the press opens (a book's ⋯ and Change format, a library's Sort by, the Finished panel's month and year): a `Menu` cannot be opened from code |
+| Reading focus as it lands | `.onPadFocus { … }` inside the item's `padFocusable` (Notifications marks a row seen) |
+| Where the focus is, for UI tests | Debug builds' `pad-focus` text: "ring books-home hero-resume", "hidden …", "none" |
+
 How a page uses it:
 
 - **Ids.** Each item's id is the one its view carries for scrolling (`ScrollViewReader`), stable

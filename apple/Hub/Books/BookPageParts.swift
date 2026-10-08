@@ -27,8 +27,10 @@ struct BookYouBlock: View {
                     .accessibilityLabel(star == 1 ? "1 star" : "\(star) stars")
                     .accessibilityValue(star <= rating ? "Given" : "")
                     .accessibilityIdentifier("book-star-\(star)")
+                    .padFocusable("\(star)", ring: .circle) { rate(star) }
                 }
             }
+            .padGroup("stars", .row, members: (1...5).map { "\($0)" })
             .accessibilityElement(children: .contain)
             .accessibilityLabel(BookPage.ratingLabel(you?.rating))
             .accessibilityIdentifier("book-stars")
@@ -72,10 +74,13 @@ struct BookFormatsRow: View {
                     .accessibilityLabel("\(format.label), \(format.readiness.description)")
                     .accessibilityHint(format.opens ? "Opens at your place" : "")
                     .accessibilityIdentifier("book-format-\(format.kind)")
+                    .padFocusable(format.kind, ring: .rounded(8)) { open(format) }
                 }
             }
+            .padding(.horizontal, 2)
         }
         .scrollClipDisabled()
+        .padGroup("formats", .row, members: formats.map(\.kind), strip: true)
     }
 
     static func symbol(_ kind: String) -> String {
@@ -93,7 +98,14 @@ struct FinishedPanel: View {
     let finish: (BookPage.FinishDate) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var date = BookPage.FinishDate.current()
+    /// A controller's Ⓐ on the month or the year: their choices (#46).
+    @State private var choosing: Part?
     private let now = BookPage.FinishDate.current()
+
+    enum Part: String, Identifiable {
+        case month, year
+        var id: String { rawValue }
+    }
 
     var body: some View {
         NavigationStack {
@@ -110,12 +122,14 @@ struct FinishedPanel: View {
                         }
                     }
                     .accessibilityIdentifier("finish-month")
+                    .padFocusable("month") { choosing = .month }
                     Picker("Year", selection: $date.year) {
                         ForEach(BookPage.FinishDate.years(now: now), id: \.self) { year in
                             Text(String(year)).tag(year)
                         }
                     }
                     .accessibilityIdentifier("finish-year")
+                    .padFocusable("year") { choosing = .year }
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
@@ -133,8 +147,19 @@ struct FinishedPanel: View {
                         .buttonStyle(PrimaryPillStyle())
                         .keyboardShortcut(.defaultAction)
                         .accessibilityIdentifier("finish-confirm")
+                        .padFocusable("finish") { markFinished() }
                 }
                 .padding(.top, 6)
+                #else
+                // A controller's way to the answer the bar holds (#46).
+                Button {
+                    markFinished()
+                } label: {
+                    Label("Mark finished", systemImage: "checkmark")
+                }
+                .buttonStyle(PrimaryPillStyle())
+                .accessibilityIdentifier("finish-mark")
+                .padFocusable("finish") { markFinished() }
                 #endif
             }
             #if os(macOS)
@@ -156,9 +181,23 @@ struct FinishedPanel: View {
             #endif
         }
         .onChange(of: date.year) { _, _ in date = date.clamped(to: now) }
+        .padPage("finished", modal: true) { dismiss() }
+        .confirmationDialog(choosing == .year ? "Year" : "Month", isPresented: Binding(
+            get: { choosing != nil }, set: { if !$0 { choosing = nil } }), presenting: choosing) { part in
+            switch part {
+            case .month:
+                ForEach(BookPage.FinishDate.months(in: date.year, now: now), id: \.self) { month in
+                    Button(BookPage.months[month - 1]) { date.month = month }
+                }
+            case .year:
+                ForEach(BookPage.FinishDate.years(now: now), id: \.self) { year in
+                    Button(String(year)) { date.year = year }
+                }
+            }
+        }
         // The app's sheets are glass (the request form, the profiles).
         .presentationBackground { GlassSheetFill() }
-        .presentationDetents([.height(220)])
+        .presentationDetents([.height(270)])
         #if os(macOS)
         .frame(minWidth: 360, minHeight: 170)
         #endif

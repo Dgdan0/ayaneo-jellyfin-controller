@@ -253,6 +253,8 @@ struct MainView: View {
     /// One sound at a time: the video and an audiobook.
     @State private var sounds = SoundGuard.shared
     @State private var alertTaps = DownloadAlertTaps.shared
+    /// The bars, as one page for a controller's focus (#46).
+    @State private var padBar = PadPage(bar: true)
     @State private var profilesOpen = false
     @State private var sheetPlaces = false
     /// The Mac's window buttons sit over the page under its hidden title bar:
@@ -305,10 +307,15 @@ struct MainView: View {
                         .disabled(!shown || covered)
                         .accessibilityHidden(!shown || covered)
                 }
+                // The keyboard's arrows, Return and Escape, for the focus (#46).
+                PadKeys()
+                    .disabled(covered)
                 topBar(metrics)
+                    .padBar(padBar)
                     .accessibilityHidden(covered)
                 if !metrics.wide {
                     ShellTabBar(section: section, short: metrics.short, select: select)
+                        .padBar(padBar)
                         // An iPad mini in portrait is wider than a phone: the
                         // bar keeps a phone's proportions, centred.
                         .frame(maxWidth: 520)
@@ -464,7 +471,23 @@ struct MainView: View {
         .onChange(of: listening.playing) { _, playing in playing ? sounds.started(.audiobook) : sounds.stopped(.audiobook) }
         .environment(\.glassPalette, model.colors.palette(for: ambient.displayed))
         .environment(\.glassAccent, accents.accent(side))
-        .onChange(of: key, initial: true) { _, latest in open(latest) }
+        .onChange(of: key, initial: true) { _, latest in
+            open(latest)
+            PadFocusCenter.shared.shownStack = latest.id
+        }
+        // A controller's or keyboard's focus (#46): nothing while the player or a
+        // reader is over the pages, and Back for whatever presses it leaves.
+        .onChange(of: covered, initial: true) { _, now in PadFocusCenter.shared.covered = now }
+        .onAppear {
+            PadFocusCenter.shared.unhandled = { action in
+                guard case .back = action else { return }
+                if profilesOpen {
+                    profilesOpen = false
+                } else if !PadKeys.presenting {
+                    goBack()
+                }
+            }
+        }
         // A download's notification tapped (#43): Downloads, at its first page, on this side.
         .onChange(of: alertTaps.request) { _, request in
             guard let request else { return }

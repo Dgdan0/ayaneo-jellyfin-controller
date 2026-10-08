@@ -50,6 +50,9 @@ struct BookView: View {
     @State private var finishUndo: (you: ReadingYou?, wasRead: Bool)?
     /// The chapter the ebook was left at, when it was read last: the Resume button says it.
     @State private var chapter: String?
+    /// ⋯ and Change format, opened with a controller's Ⓐ (#46): their menus as a dialog.
+    @State private var moreOpen = false
+    @State private var formatsOpen = false
     #if DEBUG
     @MainActor private static var debugFinished = false
     #endif
@@ -84,6 +87,19 @@ struct BookView: View {
                 }
             }
             .padding(.bottom, 28)
+        }
+        .padPage("book:\(route.workId)")
+        .confirmationDialog(work.map { "More actions for \($0.title)" } ?? "More actions", isPresented: $moreOpen,
+                            titleVisibility: .visible) {
+            if let work { moreChoices(work) }
+        }
+        .confirmationDialog("Change format", isPresented: $formatsOpen) {
+            if let work {
+                let menu = ReadingFormatMenu.forWork(work, remembered: books.entryPreference(work.id))
+                ForEach(menu.options) { option in
+                    Button("\(option.label) · \(option.detail)") { preview = option.choice }
+                }
+            }
         }
         .ambientArtwork(lit ?? work?.artwork ?? "")
         .refreshable { reloads += 1 }
@@ -262,6 +278,9 @@ struct BookView: View {
                         }
                         .buttonStyle(LinkPillStyle())
                         .accessibilityHint("Opens their books")
+                        .padFocusable(author.id) {
+                            openRoute(.author(AuthorRoute(libraryId: libraryId, id: author.id, name: author.name)))
+                        }
                     }
                     if !work.isSeries && !work.seriesId.isEmpty {
                         NavigationLink(value: AppRoute.book(BookRoute(workId: work.seriesId, title: work.series))) {
@@ -273,10 +292,13 @@ struct BookView: View {
                         }
                         .buttonStyle(LinkPillStyle())
                         .accessibilityLabel("Series \(work.series)" + (work.seriesNumber.isEmpty ? "" : ", book \(work.seriesNumber)"))
+                        .padFocusable("series") { openRoute(.book(BookRoute(workId: work.seriesId, title: work.series))) }
                     }
                 }
             }
             .scrollClipDisabled()
+            .padGroup("links", .row, members: work.authorRefs.map(\.id)
+                      + (!work.isSeries && !work.seriesId.isEmpty ? ["series"] : []), strip: true)
         }
     }
 
@@ -322,6 +344,7 @@ struct BookView: View {
                 .font(HubType.body(13, weight: .bold, relativeTo: .footnote))
                 .foregroundStyle(.white.opacity(0.7))
                 .buttonStyle(.plain)
+                .padFocusable("read-more", ring: .rounded(4)) { expanded.toggle() }
         }
     }
 
@@ -337,6 +360,7 @@ struct BookView: View {
                 }
                 .buttonStyle(PrimaryPillStyle(accent: accent))
                 .accessibilityIdentifier("book-entry")
+                .padFocusable("entry") { continueSeries(work, point) }
             }
         } else {
             let remembered = books.entryPreference(work.id)
@@ -367,6 +391,7 @@ struct BookView: View {
                 .buttonStyle(PrimaryPillStyle(accent: accent))
                 .fixedSize()
                 .accessibilityIdentifier("book-entry")
+                .padFocusable("entry") { launch(work, choice, remembered: remembered) }
             }
             if menu.options.count > 1 {
                 Menu {
@@ -399,12 +424,14 @@ struct BookView: View {
                 .fixedSize()
                 .accessibilityLabel("Change format")
                 .accessibilityHint("Choose ebook, audiobook or read along")
+                .padFocusable("format", ring: compact ? .circle : .capsule) { formatsOpen = true }
             }
             if !work.isSeries {
                 // Read or unread by hand (#37): restored at once if undone here, else started again.
                 let read = work.progress?.completed == true
                 GlassRoundButton(systemImage: read ? "checkmark.circle.fill" : "checkmark.circle",
-                                 label: read ? "Mark \(work.title) unread" : "Mark \(work.title) read", on: read, size: 46) {
+                                 label: read ? "Mark \(work.title) unread" : "Mark \(work.title) read", on: read, size: 46,
+                                 pad: "read") {
                     toggleRead(work)
                 }
                 .accessibilityIdentifier("book-read")
@@ -412,7 +439,7 @@ struct BookView: View {
             let wanted = books.isWanted(work.id)
             GlassRoundButton(systemImage: wanted ? "bookmark.fill" : "bookmark",
                              label: wanted ? "Remove from Want to Read" : "Add to Want to Read",
-                             on: wanted, size: 46) {
+                             on: wanted, size: 46, pad: "want") {
                 notice = books.toggleWanted(work) ? "Added to Want to Read" : "Removed from Want to Read"
             }
             .accessibilityIdentifier("book-want")
@@ -445,7 +472,11 @@ struct BookView: View {
             .menuStyle(.button)
             .buttonStyle(.plain)
             .accessibilityLabel("More actions for \(work.title)")
+            .padFocusable("more", ring: .circle) { moreOpen = true }
         }
+        .padGroup("actions", .row, members: ((preview ?? menu.defaultChoice) == nil ? [] : ["entry"])
+                  + (menu.options.count > 1 ? ["format"] : []) + (work.isSeries ? [] : ["read"]) + ["want", "more"],
+                  prefix: false)
     }
 
     /// A book's row (#39): Resume with where you are, and ⋯. The formats
@@ -462,6 +493,7 @@ struct BookView: View {
                 }
                 .buttonStyle(PrimaryPillStyle(accent: accent))
                 .accessibilityIdentifier("book-entry")
+                .padFocusable("entry") { launch(work, choice, remembered: remembered) }
             }
             Menu {
                 if finishUndo != nil {
@@ -507,6 +539,39 @@ struct BookView: View {
             .menuStyle(.button)
             .buttonStyle(.plain)
             .accessibilityLabel("More actions for \(work.title)")
+            .padFocusable("more", ring: .circle) { moreOpen = true }
+        }
+        .padGroup("actions", .row, members: (menu.defaultChoice == nil ? [] : ["entry"]) + ["more"], prefix: false)
+    }
+
+    /// ⋯ as a dialog, for a controller's Ⓐ (#46): what its menu holds, in its order.
+    @ViewBuilder private func moreChoices(_ work: ReadingWork) -> some View {
+        if isBook(work) {
+            if finishUndo != nil {
+                Button("Undo finished") { undoFinished(work) }
+            } else {
+                Button("Finished") { finishing = true }
+            }
+            if work.progress?.completed == true && finishUndo == nil {
+                Button("Mark unread") { toggleRead(work) }
+            }
+            Button(books.isWanted(work.id) ? "Remove from Want to Read" : "Want to read") {
+                notice = books.toggleWanted(work) ? "Added to Want to Read" : "Removed from Want to Read"
+            }
+        }
+        ForEach(books.lists.lists) { list in
+            let included = list.items.contains { $0.workId == work.id }
+            Button(included ? "Remove from \(list.name)" : "Add to \(list.name)") {
+                books.updateLists { included ? $0.remove(list.id, workId: work.id) : $0.add(list.id, ReadingListEntry.from(work)) }
+            }
+        }
+        Button("New list") {
+            listName = ""
+            naming = true
+        }
+        Button("Remove offline copy") { askRemoveOffline(work) }
+        Button(RemovalLines.heading, role: .destructive) {
+            openRoute(.removal(RemovalRoute(kind: "reading", id: work.id, title: work.title)))
         }
     }
 
@@ -559,12 +624,12 @@ struct BookView: View {
         if ReadingBookFacts.kindTag(work.kind) != nil && !shown.isEmpty {
             issues(work, volumes: shown)
         } else {
-            ForEach(Array(shown.enumerated()), id: \.offset) { _, section in
+            ForEach(Array(shown.enumerated()), id: \.offset) { index, section in
                 VStack(alignment: .leading, spacing: 0) {
                     RowHeading(title: work.isSeries && shown.count == 1 ? "In reading order" : section.title,
                                count: work.isSeries ? nil : "\(section.items.count)")
                         .padding(.horizontal, metrics.margin)
-                    SeriesBookStrip(items: section.items, current: work.id)
+                    SeriesBookStrip(items: section.items, current: work.id, pad: "section-\(index)")
                 }
                 .padding(.top, 20)
             }
@@ -581,12 +646,13 @@ struct BookView: View {
                     HStack(spacing: 8) {
                         ForEach(Array(volumes.enumerated()), id: \.offset) { index, item in
                             ChoicePill(title: "\(item.title) · \(ReadingBookFacts.plural(item.items.count, work.kind == "manga" ? "chapter" : "issue"))",
-                                       selected: index == chosen) { volume = index }
+                                       selected: index == chosen, pad: "\(index)") { volume = index }
                         }
                     }
                     .padding(.horizontal, metrics.margin)
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 6)
                 }
+                .padGroup("volumes", .row, members: volumes.indices.map { "\($0)" }, strip: true)
                 .padding(.top, 18)
             }
             RowHeading(title: section.title, count: ReadingBookFacts.plural(section.items.count,
@@ -612,7 +678,7 @@ struct BookView: View {
             VStack(alignment: .leading, spacing: 0) {
                 RowHeading(title: "More in \(work.series)")
                     .padding(.horizontal, metrics.margin)
-                SeriesBookStrip(items: series.items.map(books.completion.project), current: work.id)
+                SeriesBookStrip(items: series.items.map(books.completion.project), current: work.id, pad: "more-in-series")
             }
             .padding(.top, 20)
         }
@@ -895,6 +961,7 @@ struct SeriesContinueCard: View {
         .buttonStyle(GlassCardStyle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Continue reading \(point.title), \(ReadingBookFacts.continueLine(point, kind: series.kind, pages: pages))")
+        .padFocusable("continue", ring: .card, press: action)
     }
 }
 
@@ -932,12 +999,19 @@ struct IssueStrip: View {
                         .disabled(!ReadingWorkPresentation.canRead(kind: kind, sourceItemId: item.sourceItemId))
                         .previewsWhenFocused { preview(item) }
                         .id(index)
+                        .padFocusable("\(index)", ring: .card, scroll: index) {
+                            if ReadingWorkPresentation.canRead(kind: kind, sourceItemId: item.sourceItemId) {
+                                read(.pages(work: work, publication: item))
+                            }
+                        }
                     }
                 }
                 .padding(.top, 12)
                 .padding(.bottom, 16)
             }
             .contentMargins(.horizontal, metrics.margin, for: .scrollContent)
+            .padGroup("issues", .row, members: items.indices.map { "\($0)" }, strip: true,
+                      scrollIds: items.indices.map { AnyHashable($0) })
             .onAppear { if start > 0 { reader.scrollTo(start, anchor: .leading) } }
         }
     }
