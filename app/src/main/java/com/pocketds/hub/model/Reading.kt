@@ -348,6 +348,8 @@ data class ReadingWork(
     val progress: ReadingProgress? = null,
     val availability: List<String> = emptyList(),
     val sections: List<ReadingSection> = emptyList(),
+    /** A series item's books in order for the library's fan (#54): the ones you have and the main ones you do not. */
+    val seriesBooks: List<ReadingSeriesBook> = emptyList(),
     @SerialName("continue") val continueAt: ReadingContinue? = null,
     val partial: List<PartialFailure> = emptyList(),
     val cache: CacheInfo = CacheInfo(),
@@ -379,6 +381,22 @@ data class ReadingWork(
         get() = if (entityType != "collection" && seriesNumber.isNotBlank()) "$series #$seriesNumber"
             else byline.ifBlank { subtitle }
 }
+
+/**
+ * A book of a series for the library's fan (#54). [state] is "read" for a book you have finished and "on" for the
+ * one you are on (blank for the rest); [owned] false is a main numbered book you do not have, [released] false one
+ * announced and not out (the hub does not list those), [kind] "audiobook" a book that is only an audiobook.
+ */
+@Serializable
+data class ReadingSeriesBook(
+    val number: String = "",
+    val title: String = "",
+    val cover: String = "",
+    val kind: String = "book",
+    val owned: Boolean = true,
+    val released: Boolean = true,
+    val state: String = ""
+)
 
 /** An author page a book links to. */
 @Serializable

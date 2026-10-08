@@ -2,6 +2,7 @@ package com.pocketds.hub.screens.home
 
 import android.content.Context
 import com.pocketds.hub.model.ReadingWork
+import com.pocketds.hub.screens.library.SeriesFan
 import com.pocketds.hub.model.ReadingProgress
 import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.settings.HubSettings
@@ -171,8 +172,11 @@ object ReadingShelves {
 
     fun isComic(work: ReadingWork) = work.kind == "comic" || work.kind == "manga"
 
-    /** A series on Home: up to three covers to fan out, front first, and "6 books · on #6". */
-    data class SeriesShelfItem(val id: String, val title: String, val covers: List<String>, val line: String)
+    /** A series on Home: its fan (the series' books, the one you are on lit) and "6 books · on #6". */
+    data class SeriesShelfItem(val id: String, val title: String, val plan: SeriesFan.Plan, val line: String) {
+        /** The cover of the book you are on, which the page's backdrop follows; else the fan's first. */
+        val cover: String get() = (plan.slots.firstOrNull { it.lit } ?: plan.slots.first()).book.cover
+    }
 
     /**
      * The series being read, last read first: those with a book started and
@@ -185,22 +189,6 @@ object ReadingShelves {
             ?: books.lastOrNull { (it.progress?.percentage ?: 0.0) > 0.0 && it.progress?.completed != true }?.number.orEmpty()
     }
 
-    /**
-     * A series' covers for a fan: the book being read in front, then its first
-     * books in order. Up to four, as the fan holds.
-     */
-    fun fanCovers(series: ReadingWork): List<String> {
-        val books = series.sections.flatMap { it.items }
-        val on = onNumber(series)
-        val front = series.continueAt?.artwork?.takeIf(String::isNotBlank)
-            ?: books.firstOrNull { it.number == on }?.artwork.orEmpty()
-        return (listOf(front) + books.map { it.artwork }).filter(String::isNotBlank).distinct().take(FAN_COVERS)
-            .ifEmpty { listOf(series.artwork).filter(String::isNotBlank) }
-    }
-
-    /** The most covers a fan holds. */
-    const val FAN_COVERS = 4
-
     fun yourSeries(collections: List<ReadingWork>): List<SeriesShelfItem> = collections
         .filter { it.entityType == "collection" }
         .distinctBy { it.id }
@@ -209,14 +197,13 @@ object ReadingShelves {
             if (books.none { (it.progress?.percentage ?: 0.0) > 0.0 || it.progress?.completed == true }) return@mapNotNull null
             if (books.isNotEmpty() && books.all { it.progress?.completed == true }) return@mapNotNull null
             val on = onNumber(series)
-            val covers = fanCovers(series)
+            // The same fan as the Series view's, with the room Home has for it (#54).
+            val plan = SeriesFan.plan(series, SeriesFan.SMALL_SLOTS) ?: return@mapNotNull null
             val count = series.bookCount.takeIf { it > 0 } ?: books.size
-            val line = listOfNotNull(
-                "$count ${if (count == 1) "book" else "books"}".takeIf { count > 0 },
-                on.takeIf(String::isNotBlank)?.let { "on #$it" }
-            ).joinToString(" · ")
+            // "6 books · on #6": the Series view's caption too, so it is made in one place (#54).
+            val line = SeriesFan.caption(count, on, finished = false)
             val last = books.maxOfOrNull { timestamp(it.progress?.updatedAt) } ?: timestamp(series.progress?.updatedAt)
-            last to SeriesShelfItem(series.id, series.title, covers, line)
+            last to SeriesShelfItem(series.id, series.title, plan, line)
         }
         .sortedByDescending { it.first }
         .map { it.second }

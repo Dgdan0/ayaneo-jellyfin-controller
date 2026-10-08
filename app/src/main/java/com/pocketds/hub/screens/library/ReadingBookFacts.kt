@@ -188,5 +188,60 @@ object ReadingBookFacts {
 
     private val FORMATS = listOf("ebook", "audiobook", "readaloud")
 
+    /** The shape of a book's cover (#54): the tall 2:3 one, or an audiobook's square. */
+    enum class CoverShape { TALL, SQUARE }
+
+    /**
+     * The small round mark on the corner of a tall cover of a book that is more than its ebook (#54): [READ_ALONG]
+     * (a book with sound) once an edition is aligned for read along, [HEADPHONES] while it is only an ebook and
+     * an audiobook. A cover with [NONE] says nothing: the ebook the usual case, the audiobook its square.
+     */
+    enum class CoverMark { NONE, READ_ALONG, HEADPHONES }
+
+    /** A tall cover's width over its height. */
+    const val TALL_RATIO = 2f / 3f
+
+    /**
+     * What the cover says of the formats, wherever a book is shown on its own (the Books grid, Home's rows, a series
+     * page's row, an author's page). Ebook only is tall and unmarked, audiobook only a square cover; both is tall with
+     * a mark ([formatMark]). A read-along edition is both at once. A comic or manga is its kind pill's business and
+     * always tall. With nothing known of the formats (an older hub) the [kind] decides: an audiobook is square.
+     */
+    fun coverShape(kind: String, formats: List<String>): CoverShape {
+        if (kindTag(kind) != null) return CoverShape.TALL
+        val audio = "audiobook" in formats || "readaloud" in formats
+        val text = "ebook" in formats || "readaloud" in formats
+        return when {
+            audio && !text -> CoverShape.SQUARE
+            text -> CoverShape.TALL
+            else -> if (kind == "audiobook") CoverShape.SQUARE else CoverShape.TALL
+        }
+    }
+
+    fun formatMark(kind: String, formats: List<String>): CoverMark {
+        if (kindTag(kind) != null) return CoverMark.NONE
+        val audio = "audiobook" in formats || "readaloud" in formats
+        val text = "ebook" in formats || "readaloud" in formats
+        return when {
+            !(audio && text) -> CoverMark.NONE
+            "readaloud" in formats -> CoverMark.READ_ALONG
+            else -> CoverMark.HEADPHONES
+        }
+    }
+
+    fun coverShape(work: ReadingWork) = coverShape(work.kind, formats(work))
+    fun formatMark(work: ReadingWork) = formatMark(work.kind, formats(work))
+    fun coverShape(item: com.pocketds.hub.model.ReadingSectionItem) = coverShape(item.kind, item.formats)
+    fun formatMark(item: com.pocketds.hub.model.ReadingSectionItem) = formatMark(item.kind, item.formats)
+
+    /** The height of a tall cover [width] across. */
+    fun tallHeight(width: Float): Float = width / TALL_RATIO
+
+    /**
+     * How far down a cover of [shape] sits in the place of a tall one [width] across: a square one sits at its foot,
+     * so a row's covers line up along their bottom edge and its captions stay on one line (#54).
+     */
+    fun coverLift(shape: CoverShape, width: Float): Float = if (shape == CoverShape.SQUARE) tallHeight(width) - width else 0f
+
     private fun plural(n: Int, one: String) = if (n == 1) "1 $one" else "$n ${one}s"
 }

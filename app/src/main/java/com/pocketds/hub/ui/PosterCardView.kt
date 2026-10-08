@@ -28,7 +28,9 @@ import com.pocketds.hub.ui.glass.GlassPanelDrawable
  * count as a white pill and a tick in the accent, how far in as a white bar
  * inside the picture ([GlassProgressBar]), and the day of a coming-up title on
  * a strip of the page's glass ([setDayChip]). A book's cover keeps its words on
- * the page; an audiobook's is square, and a comic's kind sits on a dark pill.
+ * the page. A book's cover says its formats (#54): tall for an ebook, square for an audiobook, tall with a small
+ * round mark ([FormatMark]) for both; a square one sits at the foot of the tall one's place, so a row's covers line up
+ * along their bottom edge and its captions stay on one line. A comic's kind sits on a dark pill.
  */
 class PosterCardView(
     context: Context,
@@ -41,6 +43,8 @@ class PosterCardView(
     private val captions: Boolean = true
 ) : LinearLayout(context) {
 
+    /** A tall cover's place, which a square cover sits at the foot of. */
+    private val coverSlot: CoverSlot
     private val posterWrap: ArtworkFrame
     private val poster: ImageView
     private val missingArt: TextView
@@ -153,7 +157,10 @@ class PosterCardView(
             val edge = Styler.dpInt(context, 6f)
             posterWrap.addView(chip, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM).apply { setMargins(edge, 0, edge, edge) })
         }
-        addView(posterWrap, LayoutParams(MATCH, WRAP))
+        // The place follows the card's state as the cover in it does (the card is the one focus target).
+        coverSlot = CoverSlot(context, POSTER_RATIO).apply { isDuplicateParentStateEnabled = true }
+        coverSlot.addView(posterWrap, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+        addView(coverSlot, LayoutParams(MATCH, WRAP))
 
         // The prototype's captions: the title on one bold line, the year under it.
         title = TextView(context).apply {
@@ -192,6 +199,7 @@ class PosterCardView(
     ) {
         kindTag.visibility = GONE
         posterWrap.ratio = POSTER_RATIO
+        setFormatMark(com.pocketds.hub.screens.library.ReadingBookFacts.CoverMark.NONE)
         // A recycled card keeps no day from the row it came from.
         dayChip.visibility = GONE
         title.text = hit.media.title
@@ -226,8 +234,10 @@ class PosterCardView(
         subtitle.text = item.subtitle
         subtitle.visibility = if (compactCard) GONE else VISIBLE
         showProgress(0.0)
-        // An audiobook's cover is square, as the prototype's Discover draws it.
-        posterWrap.ratio = if (item.contentType == com.pocketds.hub.model.ReadingType.AUDIOBOOK) 1f else POSTER_RATIO
+        // An audiobook's cover is square, as the prototype's Discover draws it: a result is one format, so it has no mark.
+        val facts = com.pocketds.hub.screens.library.ReadingBookFacts
+        posterWrap.ratio = coverRatio(facts.coverShape(item.contentType, listOf(item.contentType)))
+        setFormatMark(com.pocketds.hub.screens.library.ReadingBookFacts.CoverMark.NONE)
         if (item.inLibrary) availabilityChip(Availability.AVAILABLE) else badge.visibility = GONE
         loadPoster(item.cover, imageLoader, imageUrl)
     }
@@ -240,8 +250,11 @@ class PosterCardView(
         kindTag.visibility = if (kind != null && showKind) VISIBLE else GONE
         subtitle.text = if (kind != null) com.pocketds.hub.screens.library.ReadingBookFacts.comicLine(work.progress) else work.cardSubtitle
         subtitle.visibility = VISIBLE
-        // The words stay on the page under the cover; an audiobook's cover is square.
-        posterWrap.ratio = if (work.kind == com.pocketds.hub.model.ReadingType.AUDIOBOOK) 1f else POSTER_RATIO
+        // The words stay on the page under the cover; what the cover says of the formats is the facts' (#54).
+        val facts = com.pocketds.hub.screens.library.ReadingBookFacts
+        val mark = facts.formatMark(work)
+        posterWrap.ratio = coverRatio(facts.coverShape(work))
+        setFormatMark(mark)
         subtitle.ellipsize=android.text.TextUtils.TruncateAt.END
         showProgress(if (work.progress?.completed == true) 0.0 else work.progress?.percentage ?: 0.0)
         if (work.progress?.completed == true) {
@@ -258,8 +271,17 @@ class PosterCardView(
                 append(", ").append(work.bookCount).append(if (work.bookCount == 1) " book" else " books")
             }
             if (work.subtitle.isNotBlank()) append(", ").append(work.subtitle)
+            FormatMark.words(mark)?.let { append(", ").append(it) }
             work.progress?.let { append(", ").append(com.pocketds.hub.state.Fmt.readingPercent(it.percentage, it.completed)).append(" percent read") }
         }
+    }
+
+    private fun coverRatio(shape: com.pocketds.hub.screens.library.ReadingBookFacts.CoverShape) =
+        if (shape == com.pocketds.hub.screens.library.ReadingBookFacts.CoverShape.SQUARE) 1f else POSTER_RATIO
+
+    /** The small round mark on the cover's top left corner, or nothing: over the picture, under the ring and the other marks. */
+    private fun setFormatMark(mark: com.pocketds.hub.screens.library.ReadingBookFacts.CoverMark) {
+        poster.foreground = FormatMark.drawable(context, mark)
     }
 
     /** How far in: the white bar inside the picture, with a comic's kind pill lifted clear of it. */
@@ -357,6 +379,14 @@ class PosterCardView(
             colors.badgePending
         Availability.BLOCKED, Availability.DELETED -> colors.badgeFailed
         else -> colors.mutedText
+    }
+
+    /** The place of a tall cover [ratio] wide for its height, whatever the cover in it. */
+    private class CoverSlot(context: Context, private val ratio: Float) : FrameLayout(context) {
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val width = MeasureSpec.getSize(widthMeasureSpec)
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec((width / ratio).toInt(), MeasureSpec.EXACTLY))
+        }
     }
 
     private companion object {

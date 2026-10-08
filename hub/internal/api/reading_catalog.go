@@ -122,6 +122,9 @@ type ReadingWork struct {
 	Progress     *ReadingProgress   `json:"progress,omitempty"`
 	Availability []string           `json:"availability"`
 	Sections     []ReadingSection   `json:"sections,omitempty"`
+	// SeriesBooks are a series item's books in order, for the library's Series view as a fan (#54): the ones
+	// you have and, as far as Hardcover says, the main numbered ones you do not. Only a series item has them.
+	SeriesBooks []ReadingSeriesBook `json:"seriesBooks,omitempty"`
 	Continue     *ReadingContinue   `json:"continue,omitempty"`
 	Partial      []Partial          `json:"partial,omitempty"`
 	Cache        CacheInfo          `json:"cache"`
@@ -392,6 +395,8 @@ func (s *Server) handleReadingLibraryItems(w http.ResponseWriter, r *http.Reques
 			end = len(items)
 		}
 		totalPages := (len(items) + pageSize - 1) / pageSize
+		// The books of a series you do not have, for the Series view's fans (#54): as far as Hardcover answers in time.
+		s.addSeriesFans(ctx, items[start:end])
 		writeJSON(w, http.StatusOK, ReadingLibraryItemsResponse{
 			LibraryID: libraryID, Page: page, PageSize: pageSize, Total: len(items), TotalPages: totalPages,
 			HasMore: page < totalPages, Items: items[start:end], Partial: []Partial{}, Cache: cacheInfoFrom(meta),
@@ -1017,6 +1022,7 @@ func (s *Server) storytellerCollection(
 		Genres:   []string{}, Languages: []string{}, Editions: []ReadingEdition{},
 		Progress: storytellerCollectionProgress(books), Availability: availability,
 		Year: year, AddedAt: addedAt, BookCount: distinctStorytellerBooks(books), Partial: []Partial{},
+		SeriesBooks: ownedSeriesBooks(books),
 	}
 	seriesID := storytellerAcquisitionSeriesID(books)
 	manifest, hasManifest := s.readingAcquisitions.seriesRoster(seriesID, group.title, authors)

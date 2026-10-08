@@ -5,6 +5,7 @@ import android.text.TextUtils
 import android.widget.LinearLayout
 import android.widget.TextView
 import coil.ImageLoader
+import com.pocketds.hub.screens.library.SeriesFan
 import com.pocketds.hub.ui.CoverFanView
 import com.pocketds.hub.ui.FocusDecorator
 import com.pocketds.hub.ui.PocketColors
@@ -14,22 +15,21 @@ import com.pocketds.hub.ui.glass.GlassColors
 import com.pocketds.hub.ui.textWeight
 
 /**
- * A series on Books Home: a fan of its covers with the book you are on in
- * front, the series' name and "6 books · on #6" under it.
+ * A series on Books Home: a fan of its books, the first in front on the left and the others fanning right with the
+ * book you are on lit (the same plan as the library's Series view and a series page's header, #54), the series'
+ * name and "6 books · on #6" under it.
  *
- * Focus rings the front cover rather than the whole fan, which would be a box
- * around empty corners. The fan is the prototype's (`.fanc`): four covers
- * leaning about their feet, the outer two leaning further with focus.
+ * Focus rings the front cover rather than the whole fan, which would be a box around empty corners, and opens the
+ * fan as far as its box has room for.
  */
 class SeriesStackView(
     context: Context,
     colors: PocketColors,
-    ringVisible: () -> Boolean
+    private val ringVisible: () -> Boolean
 ) : LinearLayout(context) {
 
     var onFocused: (() -> Unit)? = null
-    private val coverDp = CoverFanView.COVER_DP
-    private val fan = CoverFanView(context, colors, coverDp)
+    private val fan = CoverFanView(context, colors, CoverFanView.COVER_DP, SeriesFan.SMALL_SLOTS, CoverFanView.BOX_DP)
     private val title = TextView(context)
     private val line = TextView(context)
     private val ring = ThemeGradientDrawable.rounded(Styler.dp(context, 7f), android.graphics.Color.TRANSPARENT,
@@ -39,7 +39,8 @@ class SeriesStackView(
         orientation = VERTICAL
         clipChildren = false
         clipToPadding = false
-        val (width, height) = CoverFanView.sizeDp(coverDp)
+        val (width, height) = fan.boxDp
+        fan.roomDp = width / 2f + SeriesFan.SPREAD_MARGIN_DP
         addView(fan, LayoutParams(dp(width), dp(height)))
         addView(title.apply {
             textSize = 12f
@@ -59,7 +60,7 @@ class SeriesStackView(
         // The lift and haptic tick every card has; the ring goes on the front cover.
         FocusDecorator.attach(this, ringVisible)
         FocusDecorator.listen(this, ringVisible) { _, focused ->
-            fan.front.foreground = if (focused && ringVisible()) ring else null
+            fan.setRing(if (focused && ringVisible()) ring else null)
             fan.spread(focused)
             if (focused) onFocused?.invoke()
         }
@@ -69,7 +70,10 @@ class SeriesStackView(
         title.text = item.title
         line.text = item.line
         contentDescription = "${item.title}, ${item.line}"
-        fan.bind(item.covers, loader, imageUrl)
+        fan.bindPlan(item.plan, loader, imageUrl)
+        // A recycled stack keeps no ring from the series it showed before.
+        fan.setRing(if (isFocused && ringVisible()) ring else null)
+        fan.spread(isFocused)
     }
 
     private fun dp(value: Int) = Styler.dpInt(context, value.toFloat())

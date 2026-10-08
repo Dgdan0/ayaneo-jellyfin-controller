@@ -242,11 +242,11 @@ class DetailHeaderView(context: Context, private val colors: PocketColors, priva
 
     private var leading: View? = null
 
-    /** Something in the poster's place: a series page shows a fan of its covers. */
-    fun replacePoster(view: View, widthDp: Int, heightDp: Int, startDp: Int = 0) {
+    /** Something in the poster's place: a series page shows a fan of its books. */
+    fun replacePoster(view: View, widthDp: Int, heightDp: Int, startDp: Int = 0, endDp: Int = 20) {
         leading?.let(row::removeView)
         leading = view
-        row.addView(view, 0, LinearLayout.LayoutParams(dp(widthDp), dp(heightDp)).apply { marginEnd = dp(20); marginStart = dp(startDp) })
+        row.addView(view, 0, LinearLayout.LayoutParams(dp(widthDp), dp(heightDp)).apply { marginEnd = dp(endDp); marginStart = dp(startDp) })
         requestLayout()
     }
 
@@ -511,6 +511,8 @@ class DetailArtworkCardView(context: Context, private val colors: PocketColors, 
     /** The ring on the cover, which takes the card's focused state. */
     private val coverRing = Styler.focusOutline(context, colors, ArtworkFrame.GLASS_CORNER_DP, 3f)
     private var coverMarks: android.graphics.drawable.Drawable? = null
+    /** The small round mark of a book that is an ebook and an audiobook too (#54). */
+    private var formatMark: android.graphics.drawable.Drawable? = null
     val image = ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
     val titleView = label(context, 12f, colors.primaryText).apply { textWeight(700); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
     val subtitleView = label(context, 11f, SettingsCard.GLASS_QUIET).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
@@ -543,15 +545,34 @@ class DetailArtworkCardView(context: Context, private val colors: PocketColors, 
             fraction > 0 -> CoverMarks(colors, fraction, false, resources.displayMetrics.density)
             else -> null
         }
-        // The marks under the ring, in the one foreground the cover has.
-        val ring = coverRing.takeIf { portraitRing == null }
-        image.foreground = if (ring == null) coverMarks
-            else coverMarks?.let { android.graphics.drawable.LayerDrawable(arrayOf(it, ring)) } ?: ring
+        updateForeground()
     }
 
-    fun artworkHeight(heightDp: Int) {
-        image.layoutParams = image.layoutParams.apply { height = dp(heightDp) }
-        minimumHeight = dp(DetailLayout.posterCardHeight(heightDp, resources.configuration.fontScale))
+    /** The format mark at the cover's top left (#54): a book that is both an ebook and an audiobook; none clears it. */
+    fun formatMark(mark: com.pocketds.hub.screens.library.ReadingBookFacts.CoverMark) {
+        formatMark = FormatMark.drawable(context, mark)
+        updateForeground()
+    }
+
+    /** The marks under the ring, in the one foreground the cover has. */
+    private fun updateForeground() {
+        val ring = coverRing.takeIf { portraitRing == null }
+        val layers = listOfNotNull(coverMarks, formatMark, ring)
+        image.foreground = when (layers.size) {
+            0 -> null
+            1 -> layers[0]
+            else -> android.graphics.drawable.LayerDrawable(layers.toTypedArray())
+        }
+    }
+
+    /**
+     * The cover [heightDp] tall. In a row of covers of different shapes, [slotDp] is the tall one's height: a shorter
+     * (square) cover sits at its foot so the row's covers line up along their bottom edge and the captions stay on one
+     * line (#54).
+     */
+    fun artworkHeight(heightDp: Int, slotDp: Int = heightDp) {
+        image.layoutParams = (image.layoutParams as LinearLayout.LayoutParams).apply { height = dp(heightDp); topMargin = dp(slotDp - heightDp) }
+        minimumHeight = dp(DetailLayout.posterCardHeight(slotDp, resources.configuration.fontScale))
     }
     /**
      * A person: a round portrait with the name centred under it. The ring goes
@@ -605,7 +626,7 @@ private class CoverMarks(
     private val density: Float
 ) : android.graphics.drawable.Drawable() {
     private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-    private val check = AppIconDrawable(AppIcon.CHECK, colors.accentText)
+    private val tick = FinishedTick.drawable(colors, density)
 
     override fun draw(canvas: android.graphics.Canvas) {
         val b = bounds
@@ -620,15 +641,8 @@ private class CoverMarks(
             canvas.drawRoundRect(b.left + inset, top, end, top + height, height / 2, height / 2, paint)
             return
         }
-        val size = 22 * density
-        val inset = 6 * density
-        val cx = b.right - inset - size / 2
-        val cy = b.top + inset + size / 2
-        paint.color = colors.accent
-        canvas.drawCircle(cx, cy, size / 2, paint)
-        val pad = (5 * density).toInt()
-        check.setBounds((cx - size / 2).toInt() + pad, (cy - size / 2).toInt() + pad, (cx + size / 2).toInt() - pad, (cy + size / 2).toInt() - pad)
-        check.draw(canvas)
+        tick.setBounds(b)
+        tick.draw(canvas)
     }
 
     override fun setAlpha(alpha: Int) { paint.alpha = alpha }

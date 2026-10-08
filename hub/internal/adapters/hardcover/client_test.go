@@ -267,3 +267,98 @@ func TestTagsThatSayHowABookWasHadAreNotGenres(t *testing.T) {
 		t.Errorf("genres = %q", got)
 	}
 }
+
+// A series as Hardcover answers for the Red Rising Saga: a book's place taken by its translations too (the
+// query keeps the canonical one, and the first of a place is the one read most), a novella between two
+// books, parts of a book, a book with no date.
+const redRisingSaga = `{"id": 1033, "name": "Red Rising Saga", "primary_books_count": 7, "author": {"name": "Pierce Brown"},
+ "book_series": [
+  {"position": 1, "details": "1", "book": {"id": 427473, "title": "Red Rising", "slug": "red-rising", "release_date": "2014-01-28", "cached_image": {"id": 1, "url": "https://assets.hardcover.app/editions/1.jpg", "width": 311}}},
+  {"position": 1, "details": "1", "book": {"id": 99, "title": "Vörös lázadás", "slug": "voros", "release_date": "2014-01-01", "cached_image": {}}},
+  {"position": 2, "details": "2", "book": {"id": 378044, "title": "Golden Son", "slug": "golden-son", "release_date": "2015-01-01", "cached_image": {}}},
+  {"position": 2.5, "details": "2.5", "book": {"id": 5, "title": "Sons of Ares", "slug": "sons-of-ares", "release_date": "2015-06-01", "cached_image": null}},
+  {"position": 4.1, "details": "4.1", "book": {"id": 6, "title": "Iron Gold - Part 1", "slug": "iron-gold-1", "release_date": "2018-09-12", "cached_image": {}}},
+  {"position": 4, "details": "1-8", "book": {"id": 7, "title": "A box set", "slug": "box", "release_date": "2018-09-12", "cached_image": {}}},
+  {"position": 7, "details": "7", "book": {"id": 507636, "title": "Red God", "slug": "red-god", "release_date": null, "cached_image": {}}}
+ ]}`
+
+func TestSeriesByNameAsksForTheSeriesByExactNameAndReadsItsMainEntries(t *testing.T) {
+	fake := &fakeHardcover{t: t}
+	fake.handler = func(document string, variables map[string]any) (int, string) {
+		for _, want := range []string{"series(", "name: {_in: $names}", "featured", "canonical_id"} {
+			if !strings.Contains(document, want) {
+				t.Errorf("the query lacks %q: %s", want, document)
+			}
+		}
+		// `_ilike` is refused by Hardcover (403): the names are matched exactly.
+		if strings.Contains(document, "_ilike") {
+			t.Error("the query uses _ilike, which Hardcover refuses")
+		}
+		names, _ := variables["names"].([]any)
+		if len(names) != 2 || names[0] != "Red Rising" || names[1] != "Red Rising Saga" {
+			t.Errorf("names = %v", variables["names"])
+		}
+		return 200, `{"data": {"series": [` + redRisingSaga + `]}}`
+	}
+	server := fake.serve()
+	defer server.Close()
+	client := newClient(t, server, "hc-key")
+
+	series, err := client.SeriesByName(context.Background(), []string{"Red Rising", "Red Rising Saga"})
+	if err != nil || len(series) != 1 {
+		t.Fatalf("series = %+v, %v", series, err)
+	}
+	got := series[0]
+	if got.ID != 1033 || got.Name != "Red Rising Saga" || got.Primary != 7 || len(got.Authors) != 1 || got.Authors[0] != "Pierce Brown" {
+		t.Errorf("series = %+v", got)
+	}
+	// One entry for a place, the first of it; a place below 1 and a repeated one are not entries.
+	var places []float64
+	for _, entry := range got.Entries {
+		places = append(places, entry.Position)
+	}
+	if len(places) != 6 || places[0] != 1 || places[1] != 2 || places[2] != 2.5 || places[3] != 4.1 || places[4] != 4 || places[5] != 7 {
+		t.Fatalf("places = %v", places)
+	}
+	first := got.Entries[0]
+	if first.Title != "Red Rising" || !first.Main || first.ReleasedOn != "2014-01-28" || first.Cover != "https://assets.hardcover.app/editions/1.jpg" {
+		t.Errorf("first = %+v", first)
+	}
+	if got.Entries[1].Cover != "" {
+		t.Errorf("a book with no picture has no cover: %+v", got.Entries[1])
+	}
+	// A novella and a part are entries but not main ones; a box set's place is not a numbered book's.
+	if got.Entries[2].Main || got.Entries[3].Main || got.Entries[4].Main {
+		t.Errorf("novella, part and box set are not main: %+v", got.Entries[2:5])
+	}
+	// A book with no date is not out.
+	if last := got.Entries[5]; !last.Main || last.ReleasedOn != "" {
+		t.Errorf("red god = %+v", last)
+	}
+	if fake.tokens[0] != "Bearer hc-key" {
+		t.Errorf("Authorization = %q", fake.tokens[0])
+	}
+}
+
+func TestSeriesByNameWithNothingToAskAsksNothing(t *testing.T) {
+	fake := &fakeHardcover{t: t}
+	fake.handler = func(string, map[string]any) (int, string) { t.Error("asked"); return 200, "{}" }
+	server := fake.serve()
+	defer server.Close()
+	if series, err := newClient(t, server, "hc-key").SeriesByName(context.Background(), nil); series != nil || err != nil {
+		t.Errorf("%v, %v", series, err)
+	}
+}
+
+func TestSeriesByNameReportsTheServicesOwnWordsAndNeverTheKey(t *testing.T) {
+	fake := &fakeHardcover{t: t}
+	fake.handler = func(string, map[string]any) (int, string) {
+		return 200, `{"errors": [{"message": "field 'series' not found in type: 'query_root'"}]}`
+	}
+	server := fake.serve()
+	defer server.Close()
+	_, err := newClient(t, server, "secret-key").SeriesByName(context.Background(), []string{"X"})
+	if err == nil || !strings.Contains(err.Error(), "not found in type") || strings.Contains(err.Error(), "secret-key") {
+		t.Errorf("err = %v", err)
+	}
+}

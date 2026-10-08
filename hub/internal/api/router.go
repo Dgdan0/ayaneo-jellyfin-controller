@@ -94,6 +94,11 @@ type Server struct {
 	readingYou      *readingYouStore
 	hardcoverUntil  atomic.Int64
 	communityBudget time.Duration
+	// How far apart series lookups are (zero is a second and a tenth; negative is none, for a test), and
+	// where the last one was, under the gate (reading_seriesfan.go).
+	hardcoverSpacing time.Duration
+	hardcoverGate    sync.Mutex
+	hardcoverLast    time.Time
 
 	// The MP4s an Apple download is repackaged into (#5): the queue and cache
 	// (made on first use), the encoder conversions use (found once), and three

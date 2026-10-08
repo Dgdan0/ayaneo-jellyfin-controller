@@ -4,6 +4,7 @@ import android.content.Intent
 import android.graphics.Rect
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.ScrollView
@@ -117,7 +118,10 @@ class PosterBrowsingLayoutTest {
                         val visible=Rect()
                         assertTrue(caption.getGlobalVisibleRect(visible))
                         assertTrue("Caption was clipped after vertical navigation: $visible / ${caption.height}",visible.height()>=caption.height)
-                        val art=focused.getChildAt(0)
+                        // The cover is in the place of a tall one (#54), which follows the card's state too.
+                        val place=focused.getChildAt(0) as ViewGroup
+                        assertTrue(place.drawableState.contains(android.R.attr.state_focused))
+                        val art=place.getChildAt(0)
                         assertTrue("Artwork must inherit the card focus ring",art.drawableState.contains(android.R.attr.state_focused))
                         assertNotNull(art.foreground)
                     }

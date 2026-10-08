@@ -386,7 +386,7 @@ class ReadingHomeView(
         renderedSeries = seriesShelf
         // The page's colours for every cover shown, before focus reaches one.
         host.prefetchArtwork((next.flatMap { row -> row.items.map { it.artwork } } +
-            seriesShelf.mapNotNull { it.covers.firstOrNull() }).filter(String::isNotBlank).distinct())
+            seriesShelf.map { it.cover }).filter(String::isNotBlank).distinct())
         cards.clear()
         headerActions.clear()
         selfActing.clear()
@@ -644,7 +644,7 @@ class ReadingHomeView(
                     onFocused = {
                         focusedListHeader = null; selectedRow = ""; selectedWork = ""
                         focusedSeries = item.id
-                        focusedSeriesCover = item.covers.firstOrNull()
+                        focusedSeriesCover = item.cover
                         host.refreshHints()
                     }
                     selfActing += this

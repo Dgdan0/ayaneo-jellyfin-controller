@@ -15,7 +15,6 @@ import com.pocketds.hub.ui.DetailStyler
 import com.pocketds.hub.ui.FocusHorizontalScrollView
 import com.pocketds.hub.ui.PocketColors
 import com.pocketds.hub.ui.Styler
-import com.pocketds.hub.model.ReadingType
 
 /** What a book in a series row says under its cover. Pure, so it is tested. */
 object SeriesBookLabels {
@@ -52,7 +51,7 @@ object SeriesBookLabels {
  * page both show a series this way; the caller decides what a card does.
  *
  * They are the prototype's book cards: 82 x 123dp covers 12dp apart from the
- * page's 22dp edge, an audiobook's square.
+ * page's 22dp edge, an audiobook's square and a book with sound marked (#54).
  */
 object SeriesBookStrip {
     private const val ARTWORK_DP = 123
@@ -78,8 +77,9 @@ object SeriesBookStrip {
             orientation = LinearLayout.HORIZONTAL; clipChildren = false
             items.forEach { item ->
                 addView(DetailArtworkCardView(context, colors, ringVisible).apply {
-                    // An audiobook's cover is square.
-                    artworkHeight(if (item.kind == ReadingType.AUDIOBOOK) CARD_DP else artwork)
+                    // What the cover says of the formats (#54): an audiobook's is square, at the foot of the tall one's place.
+                    artworkHeight(if (ReadingBookFacts.coverShape(item) == ReadingBookFacts.CoverShape.SQUARE) CARD_DP else artwork, slotDp = artwork)
+                    formatMark(ReadingBookFacts.formatMark(item))
                     layoutParams = LinearLayout.LayoutParams(dp(context, CARD_DP), ViewGroup.LayoutParams.WRAP_CONTENT)
                         .apply { marginEnd = dp(context, GAP_DP) }
                     titleView.text = item.title
