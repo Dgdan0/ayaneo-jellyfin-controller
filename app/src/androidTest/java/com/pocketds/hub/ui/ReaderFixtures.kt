@@ -241,6 +241,30 @@ object ReaderFixtures {
         return output.toByteArray()
     }
 
+    /**
+     * A short aligned book whose sentences are exactly [sentences], one element `s{n}` each and side by side in one
+     * paragraph, as Storyteller wraps them (#56): the white space between two sentences is inside one of them, after
+     * its last word or before the next one's first. [sentenceSeconds] each over generated silence.
+     */
+    fun spacedEpub(sentences: List<String>, sentenceSeconds: Int = 3): ByteArray {
+        val body = "<p>" + sentences.withIndex().joinToString("") { (i, text) -> "<span id=\"s$i\">$text</span>" } + "</p>"
+        val pars = sentences.indices.joinToString("") {
+            "<par id=\"p$it\"><text src=\"one.xhtml#s$it\"/><audio src=\"voice.wav\" clipBegin=\"${it * sentenceSeconds}s\" clipEnd=\"${(it + 1) * sentenceSeconds}s\"/></par>"
+        }
+        val files = linkedMapOf(
+            "mimetype" to "application/epub+zip".toByteArray(),
+            "META-INF/container.xml" to """<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""".toByteArray(),
+            "EPUB/package.opf" to """<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">urn:reader-spaced</dc:identifier><dc:title>The Last Observatory</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-10-09T00:00:00Z</meta></metadata><manifest><item id="one" href="one.xhtml" media-type="application/xhtml+xml" media-overlay="mo1"/><item id="mo1" href="one.smil" media-type="application/smil+xml"/><item id="voice" href="voice.wav" media-type="audio/wav"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest><spine><itemref idref="one"/></spine></package>""".toByteArray(),
+            "EPUB/one.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>A light beyond the ridge</title></head><body>$body</body></html>""".toByteArray(),
+            "EPUB/nav.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol><li><a href="one.xhtml">A light beyond the ridge</a></li></ol></nav></body></html>""".toByteArray(),
+            "EPUB/one.smil" to """<smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><seq epub:textref="one.xhtml">$pars</seq></body></smil>""".toByteArray(),
+            "EPUB/voice.wav" to silence(seconds = sentences.size * sentenceSeconds)
+        )
+        val output = ByteArrayOutputStream()
+        ZipOutputStream(output).use { zip -> files.forEach { (name, bytes) -> zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry() } }
+        return output.toByteArray()
+    }
+
     private const val HUB_COLUMN_RULE = "<style type=\"text/css\">@media screen and (min-width: 30em) { " +
         ":root[style*=\"--USER__colCount: 2\"], :root[style*=\"--USER__colCount:2\"] { --RS__colWidth: auto !important; " +
         "-webkit-column-count: 2 !important; column-count: 2 !important; -webkit-column-width: auto !important; column-width: auto !important; } }</style>"
