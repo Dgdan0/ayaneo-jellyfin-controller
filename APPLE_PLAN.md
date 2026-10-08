@@ -503,8 +503,13 @@ Checked on the simulators with pictures of a curl held half way: a page alone on
 manga page from the left, and spreads on the iPad Pro sideways both ways. Just after a turn, until
 the next page is decoded, the edge is the canvas's, so a quick second drag turns as a swipe does.
 
-Differences from Android, for now: two pages side by side and the page curl are new; the sheets
-are not walked with the D-pad (Ⓑ closes them). Comfort and Kavita's reading lists came with #37.
+A controller walks Reading options as Android's D-pad does (HubKit `SheetWalk`, the lines in
+`ComicDisplayLine`): up and down from line to line, Ⓐ presses one, left and right change Comfort's
+brightness and warmth a step; Keys goes a part at a time. The ring shows only while a controller is
+in use (`readerRing`). A keyboard's arrows and Space do the same (Return does not reach a sheet).
+
+Differences from Android, for now: two pages side by side and the page curl are new. Comfort and
+Kavita's reading lists came with #37.
 
 ## The ebook reader (#25, phase 4)
 
@@ -591,8 +596,16 @@ Appearance keeps it (every UI test launches with 0, so a test cut short leaves n
 (`DemoEpub`): made-up words, eight chapters of 9 to 18 KB, a footnote in One, a link on to Five in
 Two, an endnote in Three, a link out of the book in Four and a second part in Eight's contents.
 
-Differences from Android, for now: Appearance and the Keys sheet are not walked with the D-pad
-(Ⓑ closes them), the edges of the page turn nothing on a tap (Android's too), and no Mac reader.
+A controller walks Appearance (`BookAppearanceLine`, `SheetWalk`): the tabs first, where left and
+right change tab (as do L1 and R1), then each tab's lines, the tiles across, the size and Comfort's
+values changed with left and right; Keys a part at a time.
+
+**No reader on the Mac**, by the owner's choice (2026-10-08, #25): Readium's navigator is UIKit, and
+a reader of our own waits until the rest is finished. Read and Read along open a card that says to
+read on the iPad, iPhone or Pocket (`BookReaderUnavailable`), its one button Close; the audiobook
+plays on the Mac.
+
+Differences from Android, for now: the edges of the page turn nothing on a tap (Android's too).
 Search, Look Up and Comfort came with #37.
 
 ## Working on the Mac

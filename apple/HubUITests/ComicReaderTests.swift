@@ -175,6 +175,39 @@ final class ComicReaderTests: XCTestCase {
         XCTAssertTrue(entry.waitForExistence(timeout: 10), "closing the reader did not come back to the run's page")
     }
 
+    /// Reading options walked with the keys, as a controller walks them (#25):
+    /// up to Whole page and Return chooses it; down to Comfort and left takes
+    /// the brightness a step down, right puts it back.
+    @MainActor
+    func testReadingOptionsAreWalkedWithTheKeys() {
+        let app = launchReading(["HUB_READ_SHEET": "display"])
+        let whole = app.buttons["Whole page"].firstMatch
+        XCTAssertTrue(whole.waitForExistence(timeout: 10), "Reading options did not open")
+        // The ring starts on the series' fit, Read in thirds: two up is Whole page.
+        app.typeKey(.upArrow, modifierFlags: [])
+        app.typeKey(.upArrow, modifierFlags: [])
+        app.typeKey(" ", modifierFlags: [])
+        XCTAssertTrue(waitUntil(5) { whole.isSelected }, "Return did not choose Whole page")
+        // Down past every row stops on Comfort's last line, warmth; one up is the brightness.
+        for _ in 0..<16 { app.typeKey(.downArrow, modifierFlags: []) }
+        app.typeKey(.upArrow, modifierFlags: [])
+        let brightness = app.sliders["comfort-brightness"]
+        XCTAssertTrue(brightness.waitForExistence(timeout: 5), "Comfort has no brightness")
+        let before = brightness.value as? String ?? ""
+        app.typeKey(.leftArrow, modifierFlags: [])
+        XCTAssertTrue(waitUntil(5) { (brightness.value as? String ?? "") != before },
+                      "left did not change the brightness from \(before)")
+        app.typeKey(.rightArrow, modifierFlags: [])
+        XCTAssertTrue(waitUntil(5) { (brightness.value as? String ?? "") == before }, "right did not put the brightness back")
+        // As the other tests read it.
+        app.typeKey(.downArrow, modifierFlags: [])
+        for _ in 0..<12 { app.typeKey(.upArrow, modifierFlags: []) }
+        app.typeKey(.downArrow, modifierFlags: [])
+        app.typeKey(.downArrow, modifierFlags: [])
+        app.typeKey(" ", modifierFlags: [])
+        XCTAssertTrue(waitUntil(5) { app.buttons["Read in thirds"].firstMatch.isSelected }, "Read in thirds was not chosen again")
+    }
+
     /// Asks `condition` every quarter of a second until it holds or `seconds` pass.
     @MainActor
     private func waitUntil(_ seconds: TimeInterval, _ condition: () -> Bool) -> Bool {

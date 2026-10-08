@@ -12,10 +12,7 @@ extension ComicReaderModel {
         if case .click(.left, false) = action { return magnify(false) }
         if endCard != nil { return endCardPad(action) }
         if gridOpen { return gridPad(action) }
-        if sheet != nil {
-            if action == .back || action == .refresh { sheet = nil }
-            return
-        }
+        if sheet != nil { return sheetPad(action) }
         switch ReaderPadMap.command(padState, action) {
         case .forward: forward()
         case .backward: backward()
@@ -38,6 +35,56 @@ extension ComicReaderModel {
     /// Close leaves through the view, which knows its host; everything else is the model's.
     func choose(_ control: ComicControl) {
         if control == .close { leaving = true } else { perform(control) }
+    }
+
+    /// A sheet open (#25): Reading options walked a line at a time, left and
+    /// right changing a value and Ⓐ pressing the line; Keys a part at a time.
+    /// Ⓑ and Select close it.
+    private func sheetPad(_ action: PadAction) {
+        switch action {
+        case .back, .refresh:
+            sheet = nil
+        case .step(let direction) where sheet == .keys:
+            keysPart = ReaderKeysPart.step(keysPart, direction)
+        case .step(let direction) where sheet == .display:
+            let lines = displayLines
+            switch SheetWalk.step(displayWalk, direction, lines: lines.map(\.shape)) {
+            case .moved(let walk): displayWalk = walk
+            case .adjust(let delta): adjustDisplay(lines[displayWalk.clamped(to: lines.map(\.shape)).line], by: delta)
+            case .stay: break
+            }
+        case .activate where sheet == .display:
+            let lines = displayLines
+            pressDisplay(lines[displayWalk.clamped(to: lines.map(\.shape)).line])
+        default:
+            break
+        }
+    }
+
+    /// Reading options' lines, as the sheet shows them now.
+    var displayLines: [ComicDisplayLine] { ComicDisplayLine.lines(narrow: displayNarrow) }
+
+    /// A line of Reading options pressed, by a finger or by Ⓐ.
+    func pressDisplay(_ line: ComicDisplayLine) {
+        switch line {
+        case .fit(let fit): setFit(fit)
+        case .trim: setTrim(!view.trim)
+        case .direction(let direction): setDirection(direction)
+        case .everySeries: openEverySeriesThisWay()
+        case .previousIssue, .nextIssue:
+            sheet = nil
+            movePublication(line == .nextIssue ? 1 : -1)
+        case .keys:
+            keysPart = 0
+            sheet = .keys
+        case .comfort(let comfort): ReaderComfort.shared.set(comfort.press(ReaderComfort.shared.value))
+        }
+    }
+
+    /// Left or right on a value line: Comfort's brightness or warmth by a step.
+    func adjustDisplay(_ line: ComicDisplayLine, by delta: Int) {
+        guard case .comfort(let comfort) = line else { return }
+        ReaderComfort.shared.set(comfort.adjust(ReaderComfort.shared.value, by: delta))
     }
 
     /// The end card: Ⓐ goes on to the next issue, Ⓑ stays on the last page,

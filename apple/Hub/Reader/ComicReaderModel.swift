@@ -109,6 +109,11 @@ final class ComicReaderModel {
     var gridColumns = 4
     var gridRows = 3
     var sheet: Sheet?
+    /// Where a controller's ring is in Reading options, and which part of Keys it is on (#25).
+    var displayWalk = SheetWalk()
+    var keysPart = 0
+    /// Reading options carries the issue's own rows: the narrow bar leaves them out.
+    @ObservationIgnored var displayNarrow = false
     /// Select, Escape or Close asked to leave: the view tells its host.
     var leaving = false
     private(set) var endCard: EndCard?

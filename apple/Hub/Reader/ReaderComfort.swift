@@ -71,6 +71,8 @@ struct ComfortControls: View {
     /// Its own heading, where it follows other options (the comic reader's);
     /// a tab or a sheet called Comfort already says so.
     var heading = false
+    /// The line a controller is on, ringed (#25: `ComfortLine`, `SheetWalk`).
+    var ring: ComfortLine?
     @State private var comfort = ReaderComfort.shared
 
     var body: some View {
@@ -83,31 +85,38 @@ struct ComfortControls: View {
                 changed.brightness = next
                 comfort.set(changed)
             }
+            .readerRing(ring == .brightness)
+            .id(Self.id(.brightness))
             slider("Warmth", value.warmth, 0...1, ScreenComfort.warmthLabel(value.warmth), id: "comfort-warmth") { next in
                 var changed = value
                 changed.warmth = next
                 comfort.set(changed)
             }
             .sheetDivider()
+            .readerRing(ring == .warmth)
+            .id(Self.id(.warmth))
         }
         if book {
             SheetGroup {
                 SheetRow(title: "Black page", detail: ScreenComfort.blackPageDetail(value.blackPage), checked: value.blackPage) {
-                    var changed = value
-                    changed.blackPage.toggle()
-                    comfort.set(changed)
+                    comfort.set(ComfortLine.blackPage.press(value))
                 }
                 .accessibilityIdentifier("comfort-black")
+                .readerRing(ring == .blackPage)
+                .id(Self.id(.blackPage))
                 SheetRow(title: "Keep the screen on while narrating", value: value.awakeWhileNarrating ? "On" : "Off") {
-                    var changed = value
-                    changed.awakeWhileNarrating.toggle()
-                    comfort.set(changed)
+                    comfort.set(ComfortLine.awake.press(value))
                 }
                 .accessibilityIdentifier("comfort-awake")
+                .readerRing(ring == .awake)
+                .id(Self.id(.awake))
             }
         }
         SheetNote(text: "Dims and warms this app's page, not the screen's own light. Every reader opens this way until you change it.")
     }
+
+    /// Where a sheet scrolls to bring `line` into view.
+    static func id(_ line: ComfortLine) -> String { "comfort-\(line)" }
 
     private func slider(_ title: String, _ value: Double, _ range: ClosedRange<Double>, _ label: String, id: String,
                         _ change: @escaping (Double) -> Void) -> some View {

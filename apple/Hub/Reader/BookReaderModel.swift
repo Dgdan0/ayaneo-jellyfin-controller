@@ -96,8 +96,18 @@ final class BookReaderModel {
         case problem(BookSearch.Problem)
     }
 
-    enum AppearanceTab: Hashable {
+    enum AppearanceTab: Hashable, CaseIterable {
         case font, layout, themes, comfort
+
+        /// Its lines' page in HubKit's walk (#25).
+        var page: BookAppearancePage {
+            switch self {
+            case .font: .font
+            case .layout: .layout
+            case .themes: .themes
+            case .comfort: .comfort
+            }
+        }
     }
 
     let workId: String
@@ -125,6 +135,9 @@ final class BookReaderModel {
     /// The passage a search opened is marked until the reading moves on.
     @ObservationIgnored private var markedFound = false
     var appearanceTab = AppearanceTab.font
+    /// Where a controller's ring is in Appearance, and which part of Keys it is on (#25).
+    var appearanceWalk = SheetWalk()
+    var keysPart = 0
     /// A note's words while its card is open.
     private(set) var footnote: String?
     private(set) var notice: String?
@@ -862,8 +875,58 @@ final class BookReaderModel {
             sheet = nil
         case .click(.right, true):
             openSheet(.keys)
+        case .step(let direction) where open == .keys:
+            keysPart = ReaderKeysPart.step(keysPart, direction)
+        case .step(let direction) where open == .appearance:
+            appearanceStep(direction)
+        case .section(let delta) where open == .appearance:
+            // L1 and R1: the tab before or after.
+            let tabs = AppearanceTab.allCases
+            let index = (tabs.firstIndex(of: appearanceTab) ?? 0) + delta
+            if tabs.indices.contains(index) { appearanceTab = tabs[index] }
+        case .activate where open == .appearance:
+            let lines = BookAppearanceLine.lines(appearanceTab.page)
+            let walk = appearanceWalk.clamped(to: lines.map(\.shape))
+            pressAppearance(lines[walk.line], column: walk.column)
         default:
             break
+        }
+    }
+
+    /// Appearance (#25): up and down from line to line, the tabs first; left
+    /// and right across a line's choices (on the tabs, to the next tab), or
+    /// the size and Comfort's values a step.
+    private func appearanceStep(_ direction: PadDirection) {
+        let lines = BookAppearanceLine.lines(appearanceTab.page)
+        switch SheetWalk.step(appearanceWalk, direction, lines: lines.map(\.shape)) {
+        case .moved(let walk):
+            appearanceWalk = walk
+            if lines[walk.line] == .tabs { appearanceTab = AppearanceTab.allCases[walk.column] }
+        case .adjust(let delta):
+            adjustAppearance(lines[appearanceWalk.clamped(to: lines.map(\.shape)).line], by: delta)
+        case .stay:
+            break
+        }
+    }
+
+    /// A line of Appearance pressed, by a finger or by Ⓐ: `column` of its choices.
+    func pressAppearance(_ line: BookAppearanceLine, column: Int = 0) {
+        switch line {
+        case .tabs:
+            if AppearanceTab.allCases.indices.contains(column) { appearanceTab = AppearanceTab.allCases[column] }
+        case .comfort(let comfort):
+            ReaderComfort.shared.set(comfort.press(ReaderComfort.shared.value))
+        default:
+            if let next = line.press(preferences, column: column) { setPreferences(next) }
+        }
+    }
+
+    /// A value of Appearance a step down or up: the size, or Comfort's brightness and warmth.
+    func adjustAppearance(_ line: BookAppearanceLine, by delta: Int) {
+        if case .comfort(let comfort) = line {
+            ReaderComfort.shared.set(comfort.adjust(ReaderComfort.shared.value, by: delta))
+        } else if let next = line.adjust(preferences, by: delta) {
+            setPreferences(next)
         }
     }
 
