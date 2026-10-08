@@ -63,10 +63,12 @@ type LeftAlone struct {
 
 // What a plan holds of the source rather than of its own: an entry whose
 // compressed bytes are more than this stays in the file it came from and is read
-// from there when it is served (a page of illustrations, an embedded font).
-// Smaller ones are copied into memory with the rest, so a text-only book is served
-// without touching the disk again. A variable so a test can lower it.
-var heldEntryBytes = int64(256 << 10)
+// from there when it is served (an illustration, an embedded font). Smaller ones are
+// copied into memory with the rest. Every content document is rewritten, so the text
+// of a book is held whatever this is; it is the pictures that this keeps out of
+// memory (Oathbringer's 182 pictures are 33 MB of a 34 MB file). A variable so a
+// test can lower it.
+var heldEntryBytes = int64(64 << 10)
 
 // What a stylesheet or document may be, unpacked, to be rewritten. A variable so a
 // test can lower it.
@@ -277,7 +279,18 @@ func WriteReadingEPUB(dst io.Writer, src io.ReaderAt, size int64, options CopyOp
 // copyEntry copies an entry as it was: its header and its compressed bytes, with
 // nothing decompressed or recompressed.
 func copyEntry(writer *zip.Writer, sink *copySink, entry *zip.File) error {
-	if int64(entry.CompressedSize64) <= heldEntryBytes || strings.HasSuffix(entry.Name, "/") {
+	if strings.HasSuffix(entry.Name, "/") {
+		// A folder has no bytes. Some archivers still give one the two bytes of an
+		// empty deflate stream (most of this library's books do), which a raw copy
+		// cannot carry (the writer refuses "to write to directory"), so it is written
+		// as what it means: an empty stored entry with the name, time and mode it had.
+		_, err := writer.CreateHeader(&zip.FileHeader{
+			Name: entry.Name, Comment: entry.Comment, NonUTF8: entry.NonUTF8, Method: zip.Store,
+			ModifiedDate: entry.ModifiedDate, ModifiedTime: entry.ModifiedTime, ExternalAttrs: entry.ExternalAttrs,
+		})
+		return err
+	}
+	if int64(entry.CompressedSize64) <= heldEntryBytes {
 		return writer.Copy(entry)
 	}
 	offset, err := entry.DataOffset()

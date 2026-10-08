@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"ayaneohub/internal/config"
 	readingdomain "ayaneohub/internal/reading"
@@ -32,6 +34,8 @@ type ebookOptions struct {
 	json string
 	// roots overrides the media mapping.
 	roots func(root string) []config.MediaRemovalRoot
+	// audioBytes is the size of each stored audio entry (300 KB by default).
+	audioBytes int
 }
 
 // newEbookEnv is a book whose ebook is an EPUB on this PC: two narrated chapters
@@ -40,10 +44,13 @@ type ebookOptions struct {
 // file when it is sent.
 func newEbookEnv(t *testing.T, options ebookOptions) *audioEnv {
 	t.Helper()
+	if options.audioBytes == 0 {
+		options.audioBytes = 300 << 10
+	}
 	env := newAudioEnv(t, audioEnvOptions{roots: options.roots}, func(root string) audioBuild {
 		path := filepath.Join(root, "Books", "Fixture Odyssey", "Fixture Odyssey.epub")
 		fixture, err := readingdomain.GenerateAlignedEPUB(path, readingdomain.AlignedEPUBOptions{
-			PackageDir: "OEBPS", AudioBytes: 300 << 10,
+			PackageDir: "OEBPS", AudioBytes: options.audioBytes,
 			Narrations: []readingdomain.FixtureNarration{
 				{ChunkMs: []int64{100_000}, Sentences: []int{8}},
 				{ChunkMs: []int64{50_000}, Sentences: []int{5}},
@@ -332,6 +339,65 @@ func TestEbookFallsBackToStorytellersFileWhenThereIsNoCopyToServe(t *testing.T) 
 			}
 		})
 	}
+}
+
+// A book of illustrations is a hundred megabytes and the reader may be a phone on a
+// slow link. Over a real connection, with the server's write timeout far shorter than
+// the transfer, as the track tests do (reading_audio_track_test.go).
+func stallingEbookEnv(t *testing.T, window time.Duration) (env *audioEnv, url string, watch epubWatch) {
+	t.Helper()
+	env = newEbookEnv(t, ebookOptions{audioBytes: 4 << 20}) // 8 MiB of audio entries, read from the file
+	env.server.audioStall = stallPolicy{Window: window, Step: 64 << 10}
+	watch = env.watchEPUB()
+	server := httptest.NewUnstartedServer(env.handler)
+	server.Config.WriteTimeout = stallingServerWriteTimeout
+	server.Config.ConnState = smallBuffers
+	server.Start()
+	t.Cleanup(server.Close)
+	return env, server.URL + "/v1/reading/works/" + env.child + "/publications/12/file", watch
+}
+
+func TestEbookCopyToASlowButMovingReaderOutlivesTheServersWriteTimeout(t *testing.T) {
+	_, url, watch := stallingEbookEnv(t, patient)
+	response := getTrack(t, url)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	hash := sha256.New()
+	buffer := make([]byte, 256<<10)
+	total, reads := int64(0), 0
+	for {
+		n, err := response.Body.Read(buffer)
+		hash.Write(buffer[:n])
+		total += int64(n)
+		reads++
+		if err != nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if total < 8<<20 || response.ContentLength != total {
+		t.Fatalf("read %d bytes of %d", total, response.ContentLength)
+	}
+	if "sha256:"+hex.EncodeToString(hash.Sum(nil)) != response.Header.Get("X-Reading-Content-Hash") {
+		t.Fatal("the bytes received are not the bytes the hash names")
+	}
+	if pacing := time.Duration(reads-1) * 5 * time.Millisecond; pacing <= stallingServerWriteTimeout {
+		t.Fatalf("%d reads is too few to outlive the server's %v write timeout", reads, stallingServerWriteTimeout)
+	}
+	eventually(t, "the file to be let go", func() bool { return watch.opened.Load() == watch.closed.Load() })
+}
+
+func TestEbookCopyToAReaderWhoStoppedReadingIsLetGoWithItsFile(t *testing.T) {
+	_, url, watch := stallingEbookEnv(t, 300*time.Millisecond)
+	response := getTrack(t, url)
+	defer response.Body.Close()
+	if _, err := io.ReadFull(response.Body, make([]byte, 64<<10)); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing more is read, and the connection stays open and quiet.
+	eventually(t, "the file to be let go", func() bool { return watch.opened.Load() == watch.closed.Load() && watch.opened.Load() > 0 })
 }
 
 // A request for the full read-along edition or the audiobook is not a request for the

@@ -322,13 +322,14 @@ func TestRestyleDocumentLeavesAnEncodingItCannotEditAlone(t *testing.T) {
 	}
 	body := `<head><style>p { font-size: medium }</style></head><body><p style="font-size:small">é</p></body></html>`
 	for name, doc := range map[string]string{
-		"latin-1 declared in the XML declaration": `<?xml version="1.0" encoding="ISO-8859-1"?><html>` + body,
-		"shift_jis declared":                      `<?xml version='1.0' encoding='Shift_JIS'?><html>` + body,
-		"a charset in a meta element":             `<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252"/><style>p { font-size: medium }</style></head><body/></html>`,
-		"a meta charset attribute":                `<html><head><meta charset="iso-8859-1"><style>p { font-size: medium }</style></head><body/></html>`,
-		"UTF-16 with a byte-order mark":           utf16(`<html>` + body),
-		"UTF-16 without one":                      "<\x00h\x00t\x00m\x00l\x00>\x00",
-		"bytes that are not UTF-8":                "<html><head><style>p { font-size: medium }</style></head><body><p>caf\xe9</p></body></html>",
+		"latin-1 declared in the XML declaration":                     `<?xml version="1.0" encoding="ISO-8859-1"?><html>` + body,
+		"shift_jis declared":                                          `<?xml version='1.0' encoding='Shift_JIS'?><html>` + body,
+		"a declaration of another encoding outweighs a meta in UTF-8": `<?xml version="1.0" encoding="windows-1252"?><html><head><meta charset="utf-8"/><style>p { font-size: medium }</style></head><body/></html>`,
+		"a charset in a meta element":                                 `<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252"/><style>p { font-size: medium }</style></head><body/></html>`,
+		"a meta charset attribute":                                    `<html><head><meta charset="iso-8859-1"><style>p { font-size: medium }</style></head><body/></html>`,
+		"UTF-16 with a byte-order mark":                               utf16(`<html>` + body),
+		"UTF-16 without one":                                          "<\x00h\x00t\x00m\x00l\x00>\x00",
+		"bytes that are not UTF-8":                                    "<html><head><style>p { font-size: medium }</style></head><body><p>caf\xe9</p></body></html>",
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, result := restyleDocument([]byte(doc))
@@ -344,8 +345,9 @@ func TestRestyleDocumentLeavesAnEncodingItCannotEditAlone(t *testing.T) {
 		"utf8 in lower case": `<?xml version="1.0" encoding="utf8"?><html>` + body,
 		"us-ascii":           `<?xml version="1.0" encoding="us-ascii"?><html>` + body,
 		"a meta in UTF-8":    `<html><head><meta http-equiv="Content-Type" content="application/xhtml+xml; charset=utf-8"/><style>p { font-size: medium }</style></head><body/></html>`,
-		"a byte-order mark":  "\xEF\xBB\xBF" + `<?xml version="1.0" encoding="UTF-8"?><html>` + body,
-		"no declaration":     `<html>` + body,
+		"a UTF-8 declaration outweighs a stale meta": `<?xml version="1.0" encoding="utf-8"?><html><head><meta http-equiv="CONTENT-TYPE" content="text/html; charset=windows-1252"/><meta content="http://www.w3.org/1999/xhtml; charset=utf-8" http-equiv="Content-Type"/><style>p { font-size: medium }</style></head><body/></html>`,
+		"a byte-order mark":                          "\xEF\xBB\xBF" + `<?xml version="1.0" encoding="UTF-8"?><html>` + body,
+		"no declaration":                             `<html>` + body,
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, result := restyleDocument([]byte(doc))

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"errors"
+	"hash/crc32"
 	"io"
 	"math/rand"
 	"os"
@@ -233,6 +234,111 @@ func TestCopyRefusesWhatIsNotAnArchive(t *testing.T) {
 	file, size = openEPUB(t, fixture.Path)
 	if _, err := WriteReadingEPUB(&out, file, size, CopyOptions{}); !errors.Is(err, ErrNotAnEPUB) {
 		t.Fatalf("an archive over the entry cap: %v", err)
+	}
+}
+
+// rawZip writes an archive by hand, entry by entry, so that it can hold what Go's
+// writer will not make: a folder whose two bytes are an empty deflate stream, which
+// is how most of this library's books were written.
+func rawZip(entries []rawZipEntry) []byte {
+	var out, directory bytes.Buffer
+	put16 := func(b *bytes.Buffer, v uint16) { b.Write([]byte{byte(v), byte(v >> 8)}) }
+	put32 := func(b *bytes.Buffer, v uint32) { b.Write([]byte{byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24)}) }
+	for _, entry := range entries {
+		offset := uint32(out.Len())
+		checksum := crc32Of(entry.plain)
+		for _, b := range []*bytes.Buffer{&out, &directory} {
+			if b == &out {
+				put32(b, 0x04034b50)
+			} else {
+				put32(b, 0x02014b50)
+				put16(b, 20) // made by
+			}
+			put16(b, 20) // needed
+			put16(b, 0)  // flags
+			put16(b, entry.method)
+			put16(b, 0)      // time
+			put16(b, 0x5821) // date
+			put32(b, checksum)
+			put32(b, uint32(len(entry.stored)))
+			put32(b, uint32(len(entry.plain)))
+			put16(b, uint16(len(entry.name)))
+			put16(b, 0) // extra
+			if b == &directory {
+				put16(b, 0) // comment
+				put16(b, 0) // disk
+				put16(b, 0) // internal attributes
+				put32(b, 0) // external attributes
+				put32(b, offset)
+			}
+			b.WriteString(entry.name)
+		}
+		out.Write(entry.stored)
+	}
+	start := uint32(out.Len())
+	out.Write(directory.Bytes())
+	put32(&out, 0x06054b50)
+	put16(&out, 0)
+	put16(&out, 0)
+	put16(&out, uint16(len(entries)))
+	put16(&out, uint16(len(entries)))
+	put32(&out, uint32(directory.Len()))
+	put32(&out, start)
+	put16(&out, 0)
+	return out.Bytes()
+}
+
+type rawZipEntry struct {
+	name          string
+	method        uint16
+	plain, stored []byte
+}
+
+func crc32Of(data []byte) uint32 { return crc32.ChecksumIEEE(data) }
+
+// A folder entry written with the two bytes of an empty deflate stream cannot be
+// carried by a raw copy; it is written as the empty folder it means, and everything
+// else about the book is as it was.
+func TestCopyCarriesFolderEntriesThatHoldAnEmptyDeflateStream(t *testing.T) {
+	emptyDeflate := []byte{0x03, 0x00}
+	archive := rawZip([]rawZipEntry{
+		{"mimetype", 0, []byte("application/epub+zip"), []byte("application/epub+zip")},
+		{"META-INF/", 8, nil, emptyDeflate},
+		{"META-INF/container.xml", 0, []byte("<container/>"), []byte("<container/>")},
+		{"OEBPS/", 8, nil, emptyDeflate},
+		{"OEBPS/Styles/", 0, nil, nil},
+		{"OEBPS/Styles/book.css", 0, []byte("p { font-size: medium }"), []byte("p { font-size: medium }")},
+	})
+	// The archive is what it is meant to be: Go reads it.
+	original, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil || original.File[1].CompressedSize64 != 2 || original.File[1].Method != zip.Deflate {
+		t.Fatalf("the test archive: %v", err)
+	}
+	for _, options := range []CopyOptions{{}, {Restyle: true}, {OmitAudio: true, Restyle: true}} {
+		var out bytes.Buffer
+		if _, err := WriteReadingEPUB(&out, bytes.NewReader(archive), int64(len(archive)), options); err != nil {
+			t.Fatalf("%+v: %v", options, err)
+		}
+		files, contents := archiveOf(t, out.Bytes())
+		want := []string{"mimetype", "META-INF/", "META-INF/container.xml", "OEBPS/", "OEBPS/Styles/", "OEBPS/Styles/book.css"}
+		if !reflect.DeepEqual(namesOf(files), want) {
+			t.Fatalf("%+v: entries %v", options, namesOf(files))
+		}
+		for _, folder := range []int{1, 3, 4} {
+			if files[folder].Method != zip.Store || files[folder].CompressedSize64 != 0 || files[folder].UncompressedSize64 != 0 {
+				t.Errorf("%+v: %s is %+v", options, files[folder].Name, files[folder].FileHeader)
+			}
+		}
+		if files[0].Method != zip.Store || string(contents["META-INF/container.xml"]) != "<container/>" {
+			t.Errorf("%+v: the rest of the book changed", options)
+		}
+		wantCSS := "p { font-size: medium }"
+		if options.Restyle {
+			wantCSS = "p { font-size: 1rem }"
+		}
+		if string(contents["OEBPS/Styles/book.css"]) != wantCSS {
+			t.Errorf("%+v: stylesheet %q", options, contents["OEBPS/Styles/book.css"])
+		}
 	}
 }
 

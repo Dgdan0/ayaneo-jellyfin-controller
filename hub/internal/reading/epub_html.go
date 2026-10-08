@@ -141,14 +141,21 @@ func isUTF8Label(label string) bool {
 	return false
 }
 
-// declaresOtherCharset: the document says it is in an encoding that is not UTF-8,
-// in its XML declaration or a meta element of its head. Bytes of such a document
-// would still be ASCII where the edits are, but a multi-byte encoding (Shift_JIS,
-// GBK, Big5) can hide an ASCII-looking byte inside a character, so it is left alone.
+// declaresOtherCharset: the document says it is in an encoding that is not UTF-8.
+// Bytes of such a document would still be ASCII where the edits are, but a
+// multi-byte encoding (Shift_JIS, GBK, Big5) can hide an ASCII-looking byte inside
+// a character, so it is left alone.
+//
+// An XML declaration that names an encoding is what the document is in: an XML
+// parser reads it as that and ignores every meta element (The Well of Ascension's
+// documents say utf-8 in the declaration and carry a stale windows-1252 meta from
+// the Word file they were made from, and are UTF-8). Only a document with no such
+// declaration is judged by its meta elements, any one of which that names another
+// encoding leaves it alone.
 func declaresOtherCharset(doc []byte) bool {
 	head := bytes.TrimPrefix(doc, []byte{0xEF, 0xBB, 0xBF})
-	if match := xmlDeclaredEncoding.FindSubmatch(head[:min(len(head), 512)]); match != nil && !isUTF8Label(string(match[1])) {
-		return true
+	if match := xmlDeclaredEncoding.FindSubmatch(head[:min(len(head), 512)]); match != nil {
+		return !isUTF8Label(string(match[1]))
 	}
 	// A meta element is in the head, which ends well inside the first kilobytes.
 	region := head[:min(len(head), 8<<10)]

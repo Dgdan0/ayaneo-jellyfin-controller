@@ -34,11 +34,11 @@ import (
 )
 
 // What the hub will keep in memory of one copy: its headers, the stylesheets and
-// documents it rewrote, and the small entries copied as they were. A text-only
-// book is about its own size (A Game of Thrones is 1.4 MB); a book of
-// illustrations holds only its text (Rhythm of War, 112 MB, holds about a
-// twentieth). A copy that would hold more is not made, and the file is served as
-// Storyteller has it.
+// documents it rewrote, and the small entries copied as they were. Measured over
+// the 122 EPUBs of this library, the most any holds is 4.0 MB (Dark Age); Rhythm of
+// War, which is 112 MB of illustrations, holds 1.4 MB, and its pictures are read from
+// the file as they are sent. A copy that would hold more than this is not made, and
+// the file is served as Storyteller has it.
 var maxEPUBCopyBytes = int64(64 << 20)
 
 // epubCopy is a planned copy, with the hash of the bytes it is made of.
@@ -79,8 +79,17 @@ func (s *Server) epubCopyOf(ctx context.Context, file readingdomain.MediaFile, o
 }
 
 // serveEPUBCopy sends a copy from the file it was planned from.
-func serveEPUBCopy(w http.ResponseWriter, r *http.Request, copied *epubCopy, file readingdomain.MediaFile, byteRange string) {
-	header := w.Header()
+func (s *Server) serveEPUBCopy(w http.ResponseWriter, r *http.Request, copied *epubCopy, file readingdomain.MediaFile, byteRange string) {
+	// A book of illustrations is a hundred megabytes and the reader may be a phone on
+	// a slow link: the server's write timeout (two minutes, for the whole response) is
+	// replaced by one that only a stall can reach, as for a track. A reader that stops
+	// reading is let go, and with it the file.
+	out, err := streamUntilStalled(w, s.audioStall)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, Error{Code: CodeInternal, Message: "the book could not be prepared", Retryable: true})
+		return
+	}
+	header := out.Header()
 	header.Set("Content-Type", "application/epub+zip")
 	// A validator of the bytes sent: the same book is the same tag, whatever the
 	// file it was made from is called or where it is.
@@ -92,7 +101,7 @@ func serveEPUBCopy(w http.ResponseWriter, r *http.Request, copied *epubCopy, fil
 		// What was checked is what the file server reads.
 		r.Header.Set("Range", byteRange)
 	}
-	http.ServeContent(w, r, "", file.ModTime, copied.plan.Reader(file))
+	http.ServeContent(out, r, "", file.ModTime, copied.plan.Reader(file))
 }
 
 // serveReadingCopy answers the ebook route (`…/file`, `?format=ebook`) from the
@@ -129,6 +138,6 @@ func (s *Server) serveReadingCopy(w http.ResponseWriter, r *http.Request, ctx co
 		}
 		return unavailable("unreadable")
 	}
-	serveEPUBCopy(w, r, copied, file, byteRange)
+	s.serveEPUBCopy(w, r, copied, file, byteRange)
 	return true
 }

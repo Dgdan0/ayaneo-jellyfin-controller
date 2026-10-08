@@ -62,7 +62,7 @@ func (s *Server) serveSlimReadaloud(w http.ResponseWriter, r *http.Request, ctx 
 		}
 		return
 	}
-	serveEPUBCopy(w, r, copied, file, byteRange)
+	s.serveEPUBCopy(w, r, copied, file, byteRange)
 }
 
 func (s *Server) writeSlimUnavailable(w http.ResponseWriter, r *http.Request, bookID int64, reason string) {
