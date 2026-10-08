@@ -83,6 +83,11 @@ type Server struct {
 	readingSeriesPreviews *readingSeriesPreviewStore
 	readingAcquisitions   *readingAcquisitionStore
 	readingAlignments     *readingAlignmentStore
+	// The list entry's stamp each held Storyteller book record was read against
+	// (reading_storyteller_book.go), so a record that no longer matches the list is
+	// dropped instead of served for the rest of its day.
+	storytellerMu     sync.Mutex
+	storytellerStamps map[int64]string
 	// What each profile has to say of its books: its Goodreads import and what it set
 	// from an app (#39), and until when Hardcover is left alone, and how long a page
 	// waits for it.

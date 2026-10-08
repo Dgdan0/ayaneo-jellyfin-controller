@@ -511,6 +511,13 @@ source said it would.
   back `qbit:abc` from `qbit%3Aabc` — verified against the live hub with both forms. It does
   *not* sanitise them: `qbit%3A..%2F..%2Fetc%2Fpasswd` arrives as `../../etc/passwd`, and only
   `parseActivityID`'s strict hex check rejects it.
+- **Storyteller answers a book id it does not have with a 500** ("Error: no result",
+  `database/books.ts:55`), not a 404, and a deleted-then-reimported book gets a new id. Only the
+  book list can say a book is gone: a bound id the list lacks is left out of the work with no
+  partial and unbound from the catalog; a 500 for a *listed* book, a failed list or an empty one
+  stays `upstream_unavailable` (#50). The list entry carries the read-along's `status`, so a
+  book's cached record is dropped when its `storytellerStamp` moves, and held 30 s (not a day)
+  while a read-along is queued or processing.
 
 ### Caching
 
@@ -662,6 +669,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | Reading times from the hub | `ReadingShelves.timestamp` (Storyteller writes `2026-09-27 03:16:47`, UTC with no zone) |
 | Hub: an author page id | `readingAuthorRef` (Authors view and a book's author link) |
 | Hub: a Storyteller title | `reconcileStorytellerBook` (file-name titles, `withoutSeriesNote`) and `storytellerPeople` (writers, not narrators, as First Last) |
+| Hub: Storyteller's book list, whether a bound book still exists, whether its cached record is still good | `reading_storyteller_book.go`: `storytellerBooks` (every list read; it follows the list), `storytellerStanding` (listed / gone / unknown; gone is pruned from the catalog by `CatalogStore.Unbind`), `storytellerBookRecord` (the record, checked against `storytellerStamp`; `ReadingBookActive` while a read-along is being made; `errStorytellerBookGone` → `writeStorytellerError`). The minute automation feeds it through `followStorytellerList` |
 | Activating a focusable on the first tap | `activateOnTap`, never `setOnClickListener` on a focusable |
 | Pick one of a few (tabs, seasons, a setting's value, Media/Books) | `ui/BlobSegmentedView` (`PILL`, `ACCENT`, `UNDERLINE`, `CHIPS`: Glass seasons, each its own glass pill with the chosen one white; `useGlassTrack()` for a glass capsule; `followFocus` for tabs that switch on focus); geometry in `SegmentGeometry` (`gap` between pills) |
 | A line mixing a Hebrew title with English facts ("… פרק 6 · 11 min") | `ui/Bidi.join` / `isolateParts` (each part isolated); captions under cards align to the view's start, not the text's |

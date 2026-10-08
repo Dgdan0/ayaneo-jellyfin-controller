@@ -247,7 +247,7 @@ func (s *Server) resolveStorytellerAudiobook(w http.ResponseWriter, r *http.Requ
 	// an audiobook's folder and manifest are read from.
 	record, recordMeta, err := s.storytellerBookRecord(ctx, book.ID)
 	if err != nil {
-		writeUpstreamError(w, r, "storyteller", err)
+		writeStorytellerError(w, r, err)
 		return storyteller.Book{}, freshness, false
 	}
 	freshness.add(recordMeta)

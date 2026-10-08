@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"ayaneohub/internal/cache"
 	readingdomain "ayaneohub/internal/reading"
 )
 
@@ -223,7 +222,7 @@ func (s *Server) goodreadsCandidates(ctx context.Context) ([]matchCandidate, err
 	if s.storyteller == nil {
 		return nil, nil
 	}
-	books, _, err := cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+	books, _, err := s.storytellerBooks(ctx)
 	if err != nil {
 		return nil, err
 	}

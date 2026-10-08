@@ -35,7 +35,7 @@ var slimUnavailableMessages = map[string]string{
 func (s *Server) serveSlimReadaloud(w http.ResponseWriter, r *http.Request, ctx context.Context, bookID int64, byteRange string) {
 	record, _, err := s.storytellerBookRecord(ctx, bookID)
 	if err != nil {
-		writeUpstreamError(w, r, "storyteller", err)
+		writeStorytellerError(w, r, err)
 		return
 	}
 	book := s.reconcileStorytellerBook(*record)

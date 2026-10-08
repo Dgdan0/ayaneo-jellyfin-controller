@@ -63,6 +63,14 @@ var (
 	// stale-if-error keeps the previous timeline visible during a brief outage.
 	Notifications = Spec{Fresh: 15 * time.Second, Stale: 45 * time.Second, IfError: 10 * time.Minute}
 
+	// A Storyteller book's own record while its read-along is still being made
+	// (queued, processing, just created; #50). The record changes stage by stage and
+	// ends as ALIGNED, and a page built from a record read before that hides a
+	// finished read-along, so it is kept for seconds, never served stale, and read
+	// again as soon as it expires. A book that is aligned, errored or never queued
+	// keeps the Metadata window. The choice is made in storytellerBookRecord.
+	ReadingBookActive = Spec{Fresh: 30 * time.Second, Stale: 0, IfError: 10 * time.Minute}
+
 	// An audiobook's track list as the hub read it from the disk: which files,
 	// in which order, how big, how long. It is rebuilt from the book's record
 	// and the files themselves, so it only has to outlive a burst of requests

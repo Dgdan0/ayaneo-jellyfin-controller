@@ -168,7 +168,7 @@ func (s *Server) handleReadingLibraries(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if s.storyteller != nil {
-		books, meta, err := cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+		books, meta, err := s.storytellerBooks(ctx)
 		if err != nil {
 			out.Partial = append(out.Partial, readingPartial("storyteller", "libraries"))
 		} else {
@@ -371,7 +371,7 @@ func (s *Server) handleReadingLibraryItems(w http.ResponseWriter, r *http.Reques
 			writeError(w, r, http.StatusServiceUnavailable, Error{Code: CodeUpstreamDown, Service: "storyteller", Message: "Storyteller is not configured"})
 			return
 		}
-		books, meta, err := cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+		books, meta, err := s.storytellerBooks(ctx)
 		if err != nil {
 			writeUpstreamError(w, r, "storyteller", err)
 			return
@@ -420,6 +420,7 @@ func (s *Server) handleReadingWork(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var combined *ReadingWork
 	var partial []Partial
+	gone := 0
 	storytellerBases := []storyteller.Book{}
 	for _, source := range binding.Sources {
 		var mapped ReadingWork
@@ -441,7 +442,12 @@ func (s *Server) handleReadingWork(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			var book *storyteller.Book
-			book, _, err = cache.Fetch(ctx, s.cache, "reading:storyteller:work:"+source.SourceID, cache.Metadata, func(fetchCtx context.Context) (*storyteller.Book, error) { return s.storyteller.Book(fetchCtx, id) })
+			book, _, err = s.storytellerBookRecord(ctx, id)
+			if errors.Is(err, errStorytellerBookGone) {
+				// Deleted from Storyteller (and now unbound): not an outage, so no partial.
+				gone++
+				continue
+			}
 			if err == nil {
 				mapped, err = s.storytellerWork("storyteller:books", *book, true)
 				if err == nil {
@@ -453,7 +459,7 @@ func (s *Server) handleReadingWork(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			var books []storyteller.Book
-			books, _, err = cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+			books, _, err = s.storytellerBooks(ctx)
 			if err == nil {
 				mapped, err = s.storytellerCollectionBySourceID("storyteller:books", source.SourceID, books)
 			}
@@ -470,7 +476,7 @@ func (s *Server) handleReadingWork(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(storytellerBases) > 0 && s.storyteller != nil {
-		books, _, err := cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+		books, _, err := s.storytellerBooks(ctx)
 		if err == nil {
 			for _, candidate := range books {
 				if !anyStorytellerEditionMatch(candidate, storytellerBases) || containsStorytellerBookID(storytellerBases, candidate.ID) {
@@ -484,6 +490,11 @@ func (s *Server) handleReadingWork(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if combined == nil {
+		if gone > 0 && len(partial) == 0 {
+			// Every book it was made of has been deleted: nothing to retry.
+			writeError(w, r, http.StatusNotFound, Error{Code: CodeNotFound, Message: "reading work not found"})
+			return
+		}
 		writeError(w, r, http.StatusServiceUnavailable, Error{Code: CodeUpstreamDown, Service: "reading", Message: "Reading work is unavailable", Retryable: true})
 		return
 	}

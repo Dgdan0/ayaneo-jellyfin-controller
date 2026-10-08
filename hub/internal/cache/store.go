@@ -207,6 +207,14 @@ func (s *Store) evictOldestLocked() {
 	}
 }
 
+// Set keeps a value the caller has just read for itself, as if Do had fetched it
+// now: fresh for the spec's window, with nothing called upstream. For a reader that
+// already asked the upstream directly (a worker that must see the live state) and
+// should leave the screens the answer it got rather than a copy up to Stale old.
+func (s *Store) Set(key string, value any) {
+	s.store(key, value)
+}
+
 // Invalidate drops a key. Called after a mutation, so the screen that follows a
 // request shows the request rather than the cached "not in library".
 func (s *Store) Invalidate(key string) {

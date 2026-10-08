@@ -152,6 +152,43 @@ func (s *CatalogStore) Resolve(id string) (CatalogWork, bool) {
 	return work, true
 }
 
+// Unbind forgets that one source record belongs to its work, for a record its
+// service no longer has (a Storyteller book deleted and imported again gets a new
+// id, so the old one is dead for good). It reports whether there was a binding.
+//
+// Only the record goes. The work keeps its id and its identity keys, even with no
+// sources left: an app may have saved a link to that id, and a record that comes
+// back rejoins the work through Bind's strong-identity match instead of making a
+// second one. It fails closed on a damaged catalog exactly like Bind.
+func (s *CatalogStore) Unbind(source, sourceID string) (bool, error) {
+	source = strings.TrimSpace(strings.ToLower(source))
+	sourceID = strings.TrimSpace(sourceID)
+	if source == "" || sourceID == "" {
+		return false, errors.New("reading catalog: source and source id are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.loadErr != nil {
+		return false, s.loadErr
+	}
+	refKey := sourceRefKey(source, sourceID)
+	id, bound := s.refs[refKey]
+	if !bound {
+		return false, nil
+	}
+	delete(s.refs, refKey)
+	work := s.works[id]
+	kept := make([]SourceRef, 0, len(work.Sources))
+	for _, ref := range work.Sources {
+		if ref.Source != source || ref.SourceID != sourceID {
+			kept = append(kept, ref)
+		}
+	}
+	work.Sources = kept
+	s.works[id] = work
+	return true, s.saveLocked()
+}
+
 func (s *CatalogStore) WorkIDFor(source, sourceID string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

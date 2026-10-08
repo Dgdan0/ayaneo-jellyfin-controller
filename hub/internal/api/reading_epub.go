@@ -241,7 +241,7 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.invalidateStorytellerWork(sourceItemID)
-	s.cache.Invalidate("reading:storyteller:books")
+	s.cache.Invalidate(storytellerBooksKey)
 	writeJSON(w, http.StatusOK, struct {
 		OK        bool   `json:"ok"`
 		Action    string `json:"action"`
@@ -308,12 +308,12 @@ func (s *Server) resolveStorytellerBook(w http.ResponseWriter, r *http.Request, 
 	if direct {
 		loaded, loadMeta, loadErr := s.storytellerBookRecord(ctx, bookID)
 		if loadErr != nil {
-			writeUpstreamError(w, r, "storyteller", loadErr)
+			writeStorytellerError(w, r, loadErr)
 			return storyteller.Book{}, cache.Meta{}, false
 		}
 		book, meta = *loaded, loadMeta
 	} else if seriesSource != "" {
-		books, listMeta, loadErr := cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+		books, listMeta, loadErr := s.storytellerBooks(ctx)
 		if loadErr != nil {
 			writeUpstreamError(w, r, "storyteller", loadErr)
 			return storyteller.Book{}, cache.Meta{}, false
@@ -328,7 +328,7 @@ func (s *Server) resolveStorytellerBook(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	if book.ID != bookID && !direct && s.storyteller != nil {
-		books, _, loadErr := cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+		books, _, loadErr := s.storytellerBooks(ctx)
 		if loadErr == nil {
 			var requested storyteller.Book
 			for _, candidate := range books {
@@ -357,20 +357,6 @@ func (s *Server) resolveStorytellerBook(w http.ResponseWriter, r *http.Request, 
 		return storyteller.Book{}, cache.Meta{}, false
 	}
 	return s.reconcileStorytellerBook(book), meta, true
-}
-
-// storytellerBookRecord is one Storyteller book from its own endpoint, held a day
-// and cleared with everything else the hub knows of Storyteller. A series or a
-// shelf is built from the list endpoint, which is not the place to read an
-// audiobook's folder and manifest from.
-func (s *Server) storytellerBookRecord(ctx context.Context, id int64) (*storyteller.Book, cache.Meta, error) {
-	return cache.Fetch(ctx, s.cache, storytellerWorkKey(strconv.FormatInt(id, 10)), cache.Metadata, func(fetchCtx context.Context) (*storyteller.Book, error) {
-		return s.storyteller.Book(fetchCtx, id)
-	})
-}
-
-func storytellerWorkKey(sourceItemID string) string {
-	return "reading:storyteller:work:" + sourceItemID
 }
 
 // What a refused write of a reading position says, the same for the EPUB route and
@@ -482,21 +468,6 @@ func (s *Server) nextPositionStamp(current *storyteller.PositionRecord) int64 {
 		stamp = current.Timestamp + 1
 	}
 	return stamp
-}
-
-// invalidateStorytellerPosition drops what carries a book's place: its record and
-// Storyteller's list, which the shelves read it from. Not the audiobook's track
-// list, which a place does not change.
-func (s *Server) invalidateStorytellerPosition(sourceItemID string) {
-	s.cache.Invalidate(storytellerWorkKey(sourceItemID))
-	s.cache.Invalidate("reading:storyteller:books")
-}
-
-// invalidateStorytellerWork drops what the hub holds of one Storyteller book: its
-// record, and the audiobook track list read from the disk on its account.
-func (s *Server) invalidateStorytellerWork(sourceItemID string) {
-	s.cache.Invalidate(storytellerWorkKey(sourceItemID))
-	s.cache.Invalidate(audioPlanKey(sourceItemID))
 }
 
 func validReadiumLocator(raw json.RawMessage) bool {

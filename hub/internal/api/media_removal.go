@@ -268,6 +268,11 @@ func (s *Server) buildRemovalPlan(ctx context.Context, w http.ResponseWriter, r 
 				return nil, fmt.Errorf("Storyteller is unavailable")
 			}
 			id, _ := strconv.ParseInt(source.SourceID, 10, 64)
+			if _, state := s.storytellerStanding(ctx, id); state == storytellerGone {
+				// Deleted from Storyteller already (and now unbound): nothing of it to
+				// verify or delete, and it must not stop the rest of the work going.
+				continue
+			}
 			book, err := s.storyteller.Book(ctx, id)
 			if err != nil {
 				return nil, fmt.Errorf("Could not verify every book edition")

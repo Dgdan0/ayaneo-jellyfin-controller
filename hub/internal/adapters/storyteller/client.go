@@ -114,6 +114,7 @@ type Readaloud struct {
 	CurrentStage  string  `json:"currentStage,omitempty"`
 	StageProgress float64 `json:"stageProgress,omitempty"`
 	QueuePosition int     `json:"queuePosition,omitempty"`
+	UpdatedAt     string  `json:"updatedAt,omitempty"` // Storyteller's stamp of the row; moves each stage, and when the edition is made anew
 }
 
 func (r *Readaloud) Available() bool {

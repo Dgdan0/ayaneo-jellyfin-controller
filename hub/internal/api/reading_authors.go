@@ -82,7 +82,7 @@ func (s *Server) handleReadingAuthors(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := timeoutFor(r, 25*time.Second)
 	defer cancel()
-	books, meta, err := cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+	books, meta, err := s.storytellerBooks(ctx)
 	if err != nil {
 		writeUpstreamError(w, r, "storyteller", err)
 		return
@@ -274,7 +274,7 @@ func (s *Server) handleReadingResolve(w http.ResponseWriter, r *http.Request) {
 	if s.storyteller != nil {
 		ctx, cancel := timeoutFor(r, 25*time.Second)
 		defer cancel()
-		books, _, err := cache.Fetch(ctx, s.cache, "reading:storyteller:books", cache.LibraryPage, s.storyteller.Books)
+		books, _, err := s.storytellerBooks(ctx)
 		if err != nil {
 			writeUpstreamError(w, r, "storyteller", err)
 			return

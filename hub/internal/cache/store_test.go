@@ -206,6 +206,24 @@ func TestInvalidate(t *testing.T) {
 	}
 }
 
+func TestSetKeepsAValueTheCallerReadItselfAsFresh(t *testing.T) {
+	s, advance := fixedClock(time.Now())
+	fetch, calls := counting("from upstream")
+	spec := Spec{Fresh: time.Minute}
+	s.Do(context.Background(), "k", spec, fetch)
+	advance(10 * time.Minute) // long past fresh and any stale window
+	s.Set("k", "read directly")
+	advance(30 * time.Second)
+
+	value, meta, err := s.Do(context.Background(), "k", spec, fetch)
+	if err != nil || value != "read directly" || !meta.Hit || meta.Stale {
+		t.Fatalf("value=%v meta=%+v err=%v", value, meta, err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream called %d times, want 1", calls.Load())
+	}
+}
+
 func TestInvalidatePrefix(t *testing.T) {
 	// After a request is submitted, every cached search page is now wrong about
 	// that title's availability.

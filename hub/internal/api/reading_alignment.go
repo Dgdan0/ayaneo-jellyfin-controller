@@ -179,6 +179,11 @@ func (s *Server) reconcileReadingAlignments(parent context.Context) error {
 	if err != nil {
 		return err
 	}
+	// This is the one read of Storyteller's list that never comes from the cache,
+	// every minute. Keep it for the screens, and drop the record of any book whose
+	// read-along (or files) it shows moved since that record was read.
+	s.cache.Set(storytellerBooksKey, append([]storyteller.Book(nil), books...))
+	s.followStorytellerList(books)
 	if !s.readingAlignments.ready() {
 		return s.readingAlignments.initialize(books)
 	}

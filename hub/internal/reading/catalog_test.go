@@ -78,3 +78,77 @@ func TestCatalogStoreDoesNotOverwriteCorruptState(t *testing.T) {
 		t.Fatalf("corrupt state was overwritten: %q", got)
 	}
 }
+
+func TestCatalogStoreUnbindDropsOneSourceAndKeepsTheWork(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reading-catalog.json")
+	store := NewCatalogStore(path)
+	keys := []string{"isbn:9780345539786", "metadata:a game of thrones|george r r martin||0"}
+	id, err := store.Bind(WorkBinding{Source: "storyteller", SourceID: "111", IdentityKeys: keys})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := store.Bind(WorkBinding{Source: "storyteller", SourceID: "222", IdentityKeys: keys}); again != id {
+		t.Fatalf("second edition bound to %q, want %q", again, id)
+	}
+
+	removed, err := store.Unbind("Storyteller", " 111 ")
+	if err != nil || !removed {
+		t.Fatalf("Unbind() = %v, %v", removed, err)
+	}
+	work, ok := store.Resolve(id)
+	if !ok || len(work.Sources) != 1 || work.Sources[0].SourceID != "222" || len(work.IdentityKeys) != 2 {
+		t.Fatalf("work after unbind = %+v, %v", work, ok)
+	}
+	if _, bound := store.WorkIDFor("storyteller", "111"); bound {
+		t.Fatal("the unbound record still resolves to a work")
+	}
+
+	// What reaches the disk is the same: a restart does not bring the dead record back.
+	reopened := NewCatalogStore(path)
+	if again, _ := reopened.Resolve(id); len(again.Sources) != 1 || again.Sources[0].SourceID != "222" {
+		t.Fatalf("reopened work = %+v", again)
+	}
+}
+
+func TestCatalogStoreUnbindOfTheLastSourceKeepsTheWorkIDForARecordThatReturns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reading-catalog.json")
+	store := NewCatalogStore(path)
+	keys := []string{"isbn:9780345539786"}
+	id, _ := store.Bind(WorkBinding{Source: "storyteller", SourceID: "111", IdentityKeys: keys})
+	if removed, err := store.Unbind("storyteller", "111"); err != nil || !removed {
+		t.Fatalf("Unbind() = %v, %v", removed, err)
+	}
+	work, ok := NewCatalogStore(path).Resolve(id)
+	if !ok || len(work.Sources) != 0 {
+		t.Fatalf("emptied work = %+v, %v (links saved in an app must keep resolving)", work, ok)
+	}
+	if saved, _ := os.ReadFile(path); !strings.Contains(string(saved), `"sources": []`) {
+		t.Fatalf("an emptied work must be saved with an empty list, not null: %s", saved)
+	}
+	// The book is imported again under a new id and rejoins the same work by its strong identity.
+	if back, _ := store.Bind(WorkBinding{Source: "storyteller", SourceID: "333", IdentityKeys: keys}); back != id {
+		t.Fatalf("re-imported record bound to %q, want %q", back, id)
+	}
+}
+
+func TestCatalogStoreUnbindIgnoresUnknownRecordsAndRefusesACorruptCatalog(t *testing.T) {
+	store := NewCatalogStore("")
+	if removed, err := store.Unbind("storyteller", "404"); err != nil || removed {
+		t.Fatalf("Unbind(unknown) = %v, %v", removed, err)
+	}
+	if _, err := store.Unbind("", "1"); err == nil {
+		t.Fatal("a missing source was accepted")
+	}
+
+	path := filepath.Join(t.TempDir(), "reading-catalog.json")
+	original := []byte(`{"version":1,"works":`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewCatalogStore(path).Unbind("storyteller", "1"); err == nil {
+		t.Fatal("a corrupt catalog was written to")
+	}
+	if got, _ := os.ReadFile(path); string(got) != string(original) {
+		t.Fatalf("corrupt state was overwritten: %q", got)
+	}
+}
