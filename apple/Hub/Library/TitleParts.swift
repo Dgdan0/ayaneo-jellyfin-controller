@@ -256,6 +256,16 @@ struct CardAction: Identifiable {
     }
 }
 
+extension CardAction {
+    /// The actions as the panel a controller's Ⓨ shows (`PadMenuPanel`), the one that deletes last.
+    static func menu(_ title: String, _ actions: [CardAction]) -> PadMenu {
+        PadMenu(title: title, choices: actions.map { action in
+            PadChoice(id: action.id, title: action.title, systemImage: action.systemImage,
+                      role: action.destructive ? .destructive : nil, action: action.run)
+        })
+    }
+}
+
 /// A list of card actions as menu buttons.
 struct CardActionButtons: View {
     let actions: [CardAction]
@@ -290,16 +300,16 @@ struct EpisodeStrip<Item: Identifiable, Card: View, Menu: View, Overlay: View>: 
     let reached: (Int) -> Void
     /// What a card offers on a hold, for VoiceOver and a controller; the menu draws its own.
     let actions: (Item) -> [CardAction]
+    /// The heading over a controller's panel of those actions ("S1E4 · Title").
+    let title: (Item) -> String
     let card: (Item) -> Card
     let menu: (Item) -> Menu
     let overlay: (Item) -> Overlay
     @State private var revealed = ""
-    /// The card whose actions a controller's Ⓨ asked for.
-    @State private var holding: String?
 
     init(_ items: [Item], reveal: String?, play: @escaping (Item) -> Void, hint: @escaping (Item) -> String,
          identifier: @escaping (Item) -> String = { _ in "" }, reached: @escaping (Int) -> Void = { _ in },
-         actions: @escaping (Item) -> [CardAction] = { _ in [] },
+         actions: @escaping (Item) -> [CardAction] = { _ in [] }, title: @escaping (Item) -> String = { _ in "" },
          @ViewBuilder card: @escaping (Item) -> Card, @ViewBuilder menu: @escaping (Item) -> Menu,
          @ViewBuilder overlay: @escaping (Item) -> Overlay) {
         self.items = items
@@ -309,6 +319,7 @@ struct EpisodeStrip<Item: Identifiable, Card: View, Menu: View, Overlay: View>: 
         self.identifier = identifier
         self.reached = reached
         self.actions = actions
+        self.title = title
         self.card = card
         self.menu = menu
         self.overlay = overlay
@@ -330,14 +341,11 @@ struct EpisodeStrip<Item: Identifiable, Card: View, Menu: View, Overlay: View>: 
                             .accessibilityIdentifier(identifier(item))
                             .modifier(CardActionsModifier(actions: actions(item)))
                             .contextMenu { menu(item) }
-                            // Ⓐ plays it, as a press does; Ⓨ asks what else, as a hold does (#46).
-                            .padFocusable(item.id, ring: .card,
-                                          hold: actions(item).isEmpty ? nil : { holding = item.id }) { play(item) }
-                            .confirmationDialog("", isPresented: Binding(get: { holding == item.id },
-                                                                         set: { if !$0 { holding = nil } }),
-                                                titleVisibility: .hidden) {
-                                CardActionButtons(actions: actions(item))
-                            }
+                            // Ⓐ plays it, as a press does; Ⓨ shows what else as rows the ring walks, as a hold
+                            // does (#46).
+                            .padFocusable(item.id, ring: .card, hold: actions(item).isEmpty ? nil : {
+                                PadFocusCenter.shared.present(CardAction.menu(title(item), actions(item)))
+                            }) { play(item) }
                             // In the corner of the still, outside the press: its own button.
                             overlay(item)
                                 .padding(4)
@@ -366,10 +374,10 @@ struct EpisodeStrip<Item: Identifiable, Card: View, Menu: View, Overlay: View>: 
 extension EpisodeStrip where Overlay == EmptyView {
     init(_ items: [Item], reveal: String?, play: @escaping (Item) -> Void, hint: @escaping (Item) -> String,
          identifier: @escaping (Item) -> String = { _ in "" }, reached: @escaping (Int) -> Void = { _ in },
-         actions: @escaping (Item) -> [CardAction] = { _ in [] },
+         actions: @escaping (Item) -> [CardAction] = { _ in [] }, title: @escaping (Item) -> String = { _ in "" },
          @ViewBuilder card: @escaping (Item) -> Card, @ViewBuilder menu: @escaping (Item) -> Menu) {
         self.init(items, reveal: reveal, play: play, hint: hint, identifier: identifier, reached: reached, actions: actions,
-                  card: card, menu: menu, overlay: { _ in EmptyView() })
+                  title: title, card: card, menu: menu, overlay: { _ in EmptyView() })
     }
 }
 

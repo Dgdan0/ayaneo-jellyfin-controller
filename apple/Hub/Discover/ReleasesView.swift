@@ -234,7 +234,7 @@ struct ReleasesView: View {
                 LazyVStack(spacing: 8) {
                     ForEach(shown) { release in
                         Button {
-                            if release.scopeBlocked { blocked = release } else { confirming = release }
+                            ask(release)
                         } label: {
                             ReleaseRow(release: release)
                         }
@@ -243,7 +243,7 @@ struct ReleasesView: View {
                         // Ⓐ asks before anything is grabbed, as a tap does (#46).
                         .padFocusable(release.id, ring: .card) {
                             guard !grabbing else { return }
-                            if release.scopeBlocked { blocked = release } else { confirming = release }
+                            ask(release)
                         }
                     }
                 }
@@ -264,6 +264,9 @@ struct ReleasesView: View {
         } message: {
             Text(ReleaseLines.blockedDetail)
         }
+        // Ⓑ is the harmless answer to either (#46).
+        .padCloses(blocked != nil) { blocked = nil }
+        .padCloses(confirming != nil) { confirming = nil }
         .confirmationDialog(confirming?.title ?? "", isPresented: Binding(get: { confirming != nil },
                                                                           set: { if !$0 { confirming = nil } }),
                             titleVisibility: .visible, presenting: confirming) { release in
@@ -274,8 +277,7 @@ struct ReleasesView: View {
                 Button("Grab this release") { grab(release) }
             }
         } message: { release in
-            Text(ReleaseLines.confirmDetail(release)
-                 + (release.rejected ? "\nOverrides what \(release.indexer) and your profile decided" : "\n" + release.indexer))
+            Text(confirmDetail(release))
         }
     }
 
@@ -300,6 +302,30 @@ struct ReleasesView: View {
             if error.kind == .cancelled { return }
             status = StatusText.failed(error.message, kind: error.kind, hasData: false, canRetry: false)
         }
+    }
+
+    /// Asks before anything is grabbed: while the ring is in use as the panel a controller answers (the
+    /// harmless answer first), else the dialog or, for a release outside what was asked for, the alert (#46).
+    private func ask(_ release: Release) {
+        if release.scopeBlocked {
+            let asked = PadFocusCenter.shared.confirm(PadMenu(
+                title: ReleaseLines.blockedTitle(season: route.season ?? 0, episode: route.episode ?? 0),
+                message: ReleaseLines.blockedDetail, choices: [PadChoice(id: "another", title: "Choose another release")]))
+            if !asked { blocked = release }
+            return
+        }
+        let asked = PadFocusCenter.shared.confirm(PadMenu(
+            title: release.title, message: confirmDetail(release),
+            choices: [PadChoice(id: "cancel", title: "Cancel"),
+                      PadChoice(id: "grab", title: release.rejected ? "Grab anyway" : "Grab this release",
+                                role: release.rejected ? .destructive : nil) { grab(release) }]))
+        if !asked { confirming = release }
+    }
+
+    /// The release in a line, then whose rules Grab anyway overrides, or its indexer.
+    private func confirmDetail(_ release: Release) -> String {
+        ReleaseLines.confirmDetail(release)
+            + (release.rejected ? "\nOverrides what \(release.indexer) and your profile decided" : "\n" + release.indexer)
     }
 
     private func grab(_ release: Release) {

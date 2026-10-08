@@ -19,11 +19,6 @@ struct RequestSheet: View {
     @State private var status = StatusMessage("")
     @State private var sending = false
     @State private var loads = 0
-    /// A menu's choices asked as a dialog, for a controller's Ⓐ on its row (#46).
-    @State private var choosing: Choosing?
-
-    enum Choosing: Hashable { case profile, folder }
-
     private var isSeries: Bool { draft?.isSeries ?? key.contains(":series:") }
 
     var body: some View {
@@ -54,21 +49,6 @@ struct RequestSheet: View {
         // A controller goes down the form and Ⓑ closes it (#46).
         .padGroup("form", .column, members: padColumn, prefix: false)
         .padPage("request", modal: true) { if !sending { dismiss() } }
-        .confirmationDialog(choosing == .folder ? "Root folder" : "Quality profile", isPresented: Binding(
-            get: { choosing != nil }, set: { if !$0 { choosing = nil } }), presenting: choosing) { part in
-            if let draft {
-                switch part {
-                case .profile:
-                    ForEach(draft.options.profiles.indices, id: \.self) { index in
-                        Button(draft.options.profiles[index].label) { self.draft?.profileIndex = index }
-                    }
-                case .folder:
-                    ForEach(draft.options.rootFolders.indices, id: \.self) { index in
-                        Button(RequestDraft.folderName(draft.options.rootFolders[index])) { self.draft?.folderIndex = index }
-                    }
-                }
-            }
-        }
         .foregroundStyle(.white)
         .presentationBackground { GlassSheetFill() }
         .presentationCornerRadius(sizeClass == .compact ? 32 : 28)
@@ -114,12 +94,30 @@ struct RequestSheet: View {
         }
     }
 
+    /// A menu cannot be opened for a controller: Ⓐ on a row shows its choices as rows the ring walks (#46).
+    private func askProfile(_ draft: RequestDraft) {
+        PadFocusCenter.shared.present(PadMenu(title: "Quality profile", choices: draft.options.profiles.indices.map { index in
+            PadChoice(id: "profile-\(index)", title: draft.options.profiles[index].label, checked: index == draft.profileIndex) {
+                self.draft?.profileIndex = index
+            }
+        }))
+    }
+
+    private func askFolder(_ draft: RequestDraft) {
+        PadFocusCenter.shared.present(PadMenu(title: "Root folder", choices: draft.options.rootFolders.indices.map { index in
+            PadChoice(id: "folder-\(index)", title: RequestDraft.folderName(draft.options.rootFolders[index]),
+                      checked: index == draft.folderIndex) {
+                self.draft?.folderIndex = index
+            }
+        }))
+    }
+
     @ViewBuilder private func form(_ draft: RequestDraft) -> some View {
         if !draft.options.profiles.isEmpty {
             GlassLabel(text: "Quality").padding(.top, 4)
             group {
                 choiceRow(label: "Quality profile", detail: "", value: draft.profile?.label ?? "", pad: "profile",
-                          ask: { choosing = .profile }) {
+                          ask: { askProfile(draft) }) {
                     Picker("Quality profile", selection: binding(\.profileIndex)) {
                         ForEach(draft.options.profiles.indices, id: \.self) { index in
                             Text(draft.options.profiles[index].label).tag(index)
@@ -132,7 +130,7 @@ struct RequestSheet: View {
             GlassLabel(text: "Folder").padding(.top, 4)
             group {
                 choiceRow(label: "Root folder", detail: draft.folder.map(RequestDraft.freeSpace) ?? "",
-                          value: draft.folder.map(RequestDraft.folderName) ?? "", pad: "folder", ask: { choosing = .folder }) {
+                          value: draft.folder.map(RequestDraft.folderName) ?? "", pad: "folder", ask: { askFolder(draft) }) {
                     Picker("Root folder", selection: binding(\.folderIndex)) {
                         ForEach(draft.options.rootFolders.indices, id: \.self) { index in
                             Text(RequestDraft.folderName(draft.options.rootFolders[index])).tag(index)
@@ -197,7 +195,7 @@ struct RequestSheet: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .accessibilityValue(value)
-        // A menu cannot be opened for a controller: Ⓐ asks its choices as a dialog.
+        // A menu cannot be opened for a controller: Ⓐ shows its choices as the menu panel.
         .padFocusable(pad, ring: .inside(16), press: ask)
     }
 

@@ -355,8 +355,6 @@ struct FolderView: View {
     @State private var query = ""
     /// Debug builds: HUB_SHEET=search:<words> opens the search with them, once.
     @State private var debugSearched = false
-    /// The order's fields, for a controller's Ⓐ on its menu (#46).
-    @State private var choosingSort = false
 
     private var source: GridSource {
         route == .favourites ? .favourites : .folder(id: route.id, name: route.name, sort: sort)
@@ -403,11 +401,6 @@ struct FolderView: View {
                       prefix: false)
         }
         .padPage("folder:\(route.id)")
-        .confirmationDialog("Sort by", isPresented: $choosingSort) {
-            ForEach(SortPreference.mediaFields, id: \.id) { field in
-                Button(field.label) { setSort(SortPreference.forField(field.id)) }
-            }
-        }
         .refreshable { refreshes += 1 }
         .onAppear {
             sort = LibrarySorts.sort(for: route.id)
@@ -479,7 +472,14 @@ struct FolderView: View {
             }
             .menuStyle(.button)
             .buttonStyle(GlassControlStyle())
-            .padFocusable("sort-field") { choosingSort = true }
+            // A menu cannot be opened for a controller: Ⓐ shows the fields as rows the ring walks (#46).
+            .padFocusable("sort-field") {
+                PadFocusCenter.shared.present(PadMenu(title: "Sort by", choices: SortPreference.mediaFields.map { field in
+                    PadChoice(id: field.id, title: field.label, checked: field.id == sort.field) {
+                        setSort(SortPreference.forField(field.id))
+                    }
+                }))
+            }
             Button {
                 setSort(SortPreference(field: sort.field, ascending: !sort.ascending))
             } label: {

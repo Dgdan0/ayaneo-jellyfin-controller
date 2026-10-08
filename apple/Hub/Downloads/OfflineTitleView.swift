@@ -18,7 +18,6 @@ struct OfflineTitleView: View {
     @State private var offline = OfflineLibrary.shared
     @State private var removing: OfflineRemoval?
     /// The round "…"'s choices, for a controller's Ⓐ on it (#46).
-    @State private var moreOpen = false
     /// The season chosen on its pill; until one is, the season Play is in.
     @State private var chosenSeason = ""
 
@@ -152,7 +151,7 @@ struct OfflineTitleView: View {
     /// The round "…": start over what is half watched, and the title's page on the hub.
     private func more(_ entry: OfflineCatalogEntry, target: OfflineCatalogPlayTarget?, size: CGFloat) -> some View {
         Menu {
-            moreChoices(entry, target: target)
+            PadChoicesMenu(choices: moreChoices(entry, target: target))
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: size * 0.4, weight: .semibold))
@@ -165,27 +164,25 @@ struct OfflineTitleView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("More actions")
         .accessibilityIdentifier("offline-more")
-        // A menu cannot be opened for a controller: Ⓐ asks its choices as a dialog (#46).
-        .padFocusable("more", ring: .circle) { moreOpen = true }
-        .confirmationDialog("More actions for \(entry.title)", isPresented: $moreOpen, titleVisibility: .visible) {
-            moreChoices(entry, target: target)
+        // A menu cannot be opened for a controller: Ⓐ shows its choices as rows the ring walks (#46).
+        .padFocusable("more", ring: .circle) {
+            PadFocusCenter.shared.present(PadMenu(title: "More actions for \(entry.title)",
+                                                  choices: moreChoices(entry, target: target)))
         }
     }
 
-    /// The "…"'s choices, in its menu and in the dialog a controller opens.
-    @ViewBuilder private func moreChoices(_ entry: OfflineCatalogEntry, target: OfflineCatalogPlayTarget?) -> some View {
+    /// The "…"'s choices, in its menu and in the panel a controller opens.
+    private func moreChoices(_ entry: OfflineCatalogEntry, target: OfflineCatalogPlayTarget?) -> [PadChoice] {
+        var out: [PadChoice] = []
         if let target, target.kind == .resume {
-            Button {
+            out.append(PadChoice(id: "start-over", title: "Start over", systemImage: "arrow.counterclockwise") {
                 play(PlayRequest(itemId: target.row.itemId, mode: .restart, title: entry.title))
-            } label: {
-                Label("Start over", systemImage: "arrow.counterclockwise")
-            }
+            })
         }
-        Button {
+        out.append(PadChoice(id: "hub", title: "Open on the hub", systemImage: "arrow.up.right.square") {
             openRoute(.title(TitleRoute(itemId: entry.key, title: entry.title)))
-        } label: {
-            Label("Open on the hub", systemImage: "arrow.up.right.square")
-        }
+        })
+        return out
     }
 
     // MARK: A film

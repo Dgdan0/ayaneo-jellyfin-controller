@@ -24,7 +24,6 @@ struct TitleView: View {
     /// even when More like this arrives after Cast.
     @State private var tabChosen = false
     /// The round "…"'s choices, for a controller's Ⓐ on it (#46).
-    @State private var moreOpen = false
 
     @State private var target: SeriesPlayTarget?
     @State private var targetFailed = false
@@ -85,10 +84,6 @@ struct TitleView: View {
                     .padding(.top, 14)
                 tabContent
             }
-        }
-        .confirmationDialog(item.map { "More actions for \($0.title)" } ?? "More actions", isPresented: $moreOpen,
-                            titleVisibility: .visible) {
-            if let item { moreChoices(item) }
         }
         .ambientArtwork(backdropPath)
         // A download started shows how far it is, and how full the device is, until a few seconds after it ends.
@@ -292,7 +287,7 @@ struct TitleView: View {
     /// last, in its own words (#34).
     private func more(_ item: HubKit.LibraryItem) -> some View {
         Menu {
-            moreChoices(item)
+            PadChoicesMenu(choices: moreChoices(item))
         } label: {
             let size: CGFloat = metrics.small ? 42 : 46
             Image(systemName: "ellipsis")
@@ -306,34 +301,32 @@ struct TitleView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("More actions")
         .accessibilityIdentifier("title-more")
-        // A menu cannot be opened for a controller: Ⓐ asks its choices as a dialog.
-        .padFocusable("more", ring: .circle) { moreOpen = true }
+        // A menu cannot be opened for a controller: Ⓐ shows its choices as rows the ring walks.
+        .padFocusable("more", ring: .circle) {
+            PadFocusCenter.shared.present(PadMenu(title: "More actions for \(item.title)", choices: moreChoices(item)))
+        }
     }
 
-    /// The "…"'s choices, in its menu and in the dialog a controller opens.
-    @ViewBuilder private func moreChoices(_ item: HubKit.LibraryItem) -> some View {
-            if LibraryUpkeep.offersSubtitles(item) {
-                Button {
-                    openRoute(.subtitles(SubtitlesRoute(itemId: item.id, title: LibraryUpkeep.pageTitle(item))))
-                } label: {
-                    Label("Find subtitles", systemImage: "captions.bubble")
-                }
-            }
-            if LibraryUpkeep.offersReleases(item) {
-                Button {
-                    findRelease(item, season: seasons.first { $0.id == seasonId }?.indexNumber)
-                } label: {
-                    Label("Find release", systemImage: "magnifyingglass")
-                }
-            }
-            if LibraryUpkeep.offersDeleting(item) {
-                Divider()
-                Button(role: .destructive) {
-                    openRoute(.removal(RemovalRoute(kind: "video", id: item.id, title: LibraryUpkeep.pageTitle(item))))
-                } label: {
-                    Label(RemovalLines.heading, systemImage: "trash")
-                }
-            }
+    /// The "…"'s choices, in its menu and in the panel a controller opens.
+    private func moreChoices(_ item: HubKit.LibraryItem) -> [PadChoice] {
+        var out: [PadChoice] = []
+        if LibraryUpkeep.offersSubtitles(item) {
+            out.append(PadChoice(id: "subtitles", title: "Find subtitles", systemImage: "captions.bubble") {
+                openRoute(.subtitles(SubtitlesRoute(itemId: item.id, title: LibraryUpkeep.pageTitle(item))))
+            })
+        }
+        if LibraryUpkeep.offersReleases(item) {
+            out.append(PadChoice(id: "releases", title: "Find release", systemImage: "magnifyingglass") {
+                findRelease(item, season: seasons.first { $0.id == seasonId }?.indexNumber)
+            })
+        }
+        if LibraryUpkeep.offersDeleting(item) {
+            out.append(PadChoice(id: "delete", title: RemovalLines.heading, systemImage: "trash", role: .destructive,
+                                 dividerBefore: true) {
+                openRoute(.removal(RemovalRoute(kind: "video", id: item.id, title: LibraryUpkeep.pageTitle(item))))
+            })
+        }
+        return out
     }
 
     /// A series' seasons and aired episodes to search for releases, on the
@@ -435,6 +428,7 @@ struct TitleView: View {
                              if index >= episodes.count - 3 { Task { await loadEpisodes(reset: false) } }
                          },
                          actions: { cardActions($0) },
+                         title: { EpisodeLabel.of(season: $0.seasonNumber, episode: $0.indexNumber, title: $0.title) },
                          card: { episode in
                              EpisodeCard(episode: episode, upNext: episode.id == target?.item.id,
                                          selected: downloads.selecting && downloads.ticked.contains(episode.id),
@@ -499,10 +493,10 @@ struct TitleView: View {
 
     private func askRemove(_ episode: HubKit.LibraryItem) {
         guard let row = offline.row(forItem: episode.id) else { return }
-        removing = OfflineRemoval(id: row.id, title: "Remove \(episode.title)?",
-                                  detail: "\(Fmt.bytes(row.totalBytes)) gone from this device. The library keeps it on the PC.") {
+        OfflineRemoval(id: row.id, title: "Remove \(episode.title)?",
+                       detail: "\(Fmt.bytes(row.totalBytes)) gone from this device. The library keeps it on the PC.") {
             offline.remove(row.id)
-        }
+        }.ask($removing)
     }
 
     // MARK: The choices and select mode

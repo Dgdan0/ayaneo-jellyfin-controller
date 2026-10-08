@@ -82,6 +82,10 @@ struct DownloadButton: View {
             Button("Show in Downloads") { openDownloads() }
             Button("Remove from this device", role: .destructive) { askRemove() }
         }
+        // Ⓑ closes what this asks (#46).
+        .padCloses(choosing) { choosing = false }
+        .padCloses(asking) { asking = false }
+        .padCloses(problem != nil) { problem = nil }
         .alert(OfflineTitleState.confirmTitle(item.title), isPresented: $asking) {
             // The harmless answer in the cancel role: without one, iOS 26 adds a Cancel of its own.
             Button("Not now", role: .cancel) {}
@@ -111,10 +115,21 @@ struct DownloadButton: View {
             if let openChoices { openChoices() } else { openRoute(.offlineQueue) }
             return
         }
+        // While the ring is in use the question is the panel a controller answers, else the alert or the dialog (#46).
         switch state {
-        case .none: asking = true
+        case .none:
+            let asked = PadFocusCenter.shared.confirm(PadMenu(
+                title: OfflineTitleState.confirmTitle(item.title), message: OfflineTitleState.confirmDetail(free: offline.freeBytes),
+                choices: [PadChoice(id: "not-now", title: "Not now"),
+                          PadChoice(id: "download", title: "Download") { Task { await download() } }]))
+            if !asked { asking = true }
         case .coming, .failed: openDownloads()
-        case .downloaded: choosing = true
+        case .downloaded:
+            let asked = PadFocusCenter.shared.confirm(PadMenu(title: item.title, choices: [
+                PadChoice(id: "show", title: "Show in Downloads") { openDownloads() },
+                PadChoice(id: "remove", title: "Remove from this device", role: .destructive) { askRemove() },
+            ]))
+            if !asked { choosing = true }
         }
     }
 
@@ -129,10 +144,10 @@ struct DownloadButton: View {
 
     private func askRemove() {
         guard let row = offline.row(forItem: item.id) else { return }
-        removing = OfflineRemoval(id: row.id, title: "Remove \(item.title)?",
-                                  detail: "\(Fmt.bytes(row.totalBytes)) gone from this device. The library keeps it on the PC.") {
+        OfflineRemoval(id: row.id, title: "Remove \(item.title)?",
+                       detail: "\(Fmt.bytes(row.totalBytes)) gone from this device. The library keeps it on the PC.") {
             offline.remove(row.id)
-        }
+        }.ask($removing)
     }
 
     private func download() async {
