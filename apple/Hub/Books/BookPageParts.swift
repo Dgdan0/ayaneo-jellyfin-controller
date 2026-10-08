@@ -119,30 +119,53 @@ struct FinishedPanel: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
+                #if os(iOS)
                 .tint(.white)
+                #endif
+                #if os(macOS)
+                // A Mac sheet's toolbar is the window's own (white boxes on the
+                // glass): its answers are the app's pills, the harmless one first.
+                HStack(spacing: 10) {
+                    Button("Cancel") { dismiss() }
+                        .buttonStyle(GlassPillStyle())
+                        .keyboardShortcut(.cancelAction)
+                    Button("Mark finished") { markFinished() }
+                        .buttonStyle(PrimaryPillStyle())
+                        .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier("finish-confirm")
+                }
+                .padding(.top, 6)
+                #endif
             }
+            #if os(macOS)
+            .padding(.top, 18)
+            #endif
             .frame(maxWidth: .infinity)
             .frame(maxHeight: .infinity, alignment: .top)
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
-            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Mark finished") {
-                        finish(date.clamped(to: now))
-                        dismiss()
-                    }
-                    .accessibilityIdentifier("finish-confirm")
+                    Button("Mark finished") { markFinished() }
+                        .accessibilityIdentifier("finish-confirm")
                 }
             }
+            #endif
         }
         .onChange(of: date.year) { _, _ in date = date.clamped(to: now) }
+        // The app's sheets are glass (the request form, the profiles).
+        .presentationBackground { GlassSheetFill() }
         .presentationDetents([.height(220)])
         #if os(macOS)
-        .frame(minWidth: 360, minHeight: 160)
+        .frame(minWidth: 360, minHeight: 170)
         #endif
+    }
+
+    private func markFinished() {
+        finish(date.clamped(to: now))
+        dismiss()
     }
 }
