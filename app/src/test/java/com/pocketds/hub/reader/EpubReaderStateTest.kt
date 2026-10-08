@@ -88,4 +88,50 @@ class EpubReaderStateTest {
         assertEquals(state.saved, state.visible)
         assertFalse(state.commit())
     }
+
+    /** A look a device that once changed it still has: the book's own style, ragged, tight, and everything else chosen. */
+    private val oldLook = EpubReaderPreferences(
+        theme = EpubTheme.DARK, fontFamily = "serif", fontScale = 1.4f, lineHeight = 1.1f, pageMargins = 1.7f,
+        columns = EpubColumns.TWO, scroll = false, publisherStyles = true, textAlignment = "start", onePagePerScreen = false,
+        hyphenation = false
+    )
+
+    @Test fun `reset text style brings back the reader's own typography and leaves the rest of the look`() {
+        val reset = EpubLayoutPolicy.resetTextStyle(oldLook)
+        val defaults = EpubReaderPreferences()
+        // The four of the text's style are the defaults'; no literal here, so a changed default is followed.
+        assertEquals(defaults.publisherStyles, reset.publisherStyles)
+        assertEquals(defaults.textAlignment, reset.textAlignment)
+        assertEquals(defaults.hyphenation, reset.hyphenation)
+        assertEquals(defaults.lineHeight, reset.lineHeight, 0f)
+        // The size, typeface, theme, margins and columns are as they were.
+        assertEquals(oldLook.copy(publisherStyles = defaults.publisherStyles, textAlignment = defaults.textAlignment,
+            hyphenation = defaults.hyphenation, lineHeight = defaults.lineHeight), reset)
+        assertEquals(1.4f, reset.fontScale, 0f)
+        assertEquals("serif", reset.fontFamily)
+        assertEquals(EpubTheme.DARK, reset.theme)
+        assertEquals(1.7f, reset.pageMargins, 0f)
+        assertEquals(EpubColumns.TWO, reset.columns)
+    }
+
+    @Test fun `reset text style is today's defaults, justified, hyphenated, one and a half`() {
+        val reset = EpubLayoutPolicy.resetTextStyle(oldLook)
+        assertFalse(reset.publisherStyles)
+        assertEquals("justify", reset.textAlignment)
+        assertTrue(reset.hyphenation)
+        assertEquals(1.5f, reset.lineHeight, 0f)
+        assertEquals("Justified, hyphenated, 1.5 spacing", EpubLayoutPolicy.textStyleSummary())
+    }
+
+    @Test fun `reset text style leaves the layout modes alone and is the same twice`() {
+        val scrolling = oldLook.copy(scroll = true, columns = EpubColumns.ONE)
+        assertEquals(true, EpubLayoutPolicy.resetTextStyle(scrolling).scroll)
+        val onePage = EpubLayoutPolicy.selectOnePage(oldLook, true)
+        assertEquals(onePage.copy(publisherStyles = false, textAlignment = "justify", hyphenation = true, lineHeight = 1.5f),
+            EpubLayoutPolicy.resetTextStyle(onePage))
+        val once = EpubLayoutPolicy.resetTextStyle(oldLook)
+        assertEquals(once, EpubLayoutPolicy.resetTextStyle(once))
+        // A device that never changed it has nothing to reset.
+        assertEquals(EpubReaderPreferences(), EpubLayoutPolicy.resetTextStyle(EpubReaderPreferences()))
+    }
 }

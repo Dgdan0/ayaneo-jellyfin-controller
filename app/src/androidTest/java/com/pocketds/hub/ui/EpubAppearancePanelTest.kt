@@ -5,6 +5,8 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.pocketds.hub.input.Direction
+import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.reader.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -84,5 +86,42 @@ class EpubAppearancePanelTest {
             assertFalse(info.percentage)
             assertFalse("with every corner off the page needs no strips",info.topStrip||info.bottomStrip)
         }} finally {i.runOnMainSync {activity.finish()}}
+    }
+
+    /** A device that once changed its look never saw the new default: one row brings the text's style back, and the pad reaches it (#42, Part 3). */
+    @Test fun resetTextStyleIsOnePressFromThePadAndMovesOnlyTheTextStyle() {
+        val i=InstrumentationRegistry.getInstrumentation()
+        val activity=i.startActivitySync(Intent(i.targetContext,DetailFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val old=EpubReaderPreferences(theme=EpubTheme.DARK,fontFamily="serif",fontScale=1.4f,lineHeight=1.1f,pageMargins=1.7f,
+            columns=EpubColumns.TWO,publisherStyles=true,textAlignment="start",hyphenation=false)
+        var saved=old
+        lateinit var panel:EpubAppearancePanel
+        fun find(v:View,label:String):View? = if(v.contentDescription?.toString()?.startsWith(label)==true || (v is android.widget.TextView && v.text==label)) v else (v as? ViewGroup)?.let { g->(0 until g.childCount).firstNotNullOfOrNull {find(g.getChildAt(it),label)} }
+        try {
+            i.runOnMainSync {
+                panel=EpubAppearancePanel(activity,Theme.colors(activity)){true}
+                activity.setContentView(panel)
+                panel.show(old,{saved=it},{})
+                find(panel,"Layout")!!.performClick()
+            }
+            i.waitForIdleSync()
+            i.runOnMainSync {
+                val row=find(panel,"Reset text style")!!
+                assertTrue("says what it does: ${row.contentDescription}",row.contentDescription.toString().contains("Justified, hyphenated, 1.5 spacing"))
+                // Down the pad from the first row until the focus is on it: it is a row like any other, reached by D-pad.
+                var presses=0
+                while(panel.findFocus()?.tag!="reset-text-style" && presses<40) {panel.onPad(PadAction.Step(Direction.DOWN));presses++}
+                assertEquals("reset-text-style",panel.findFocus()?.tag)
+                panel.onPad(PadAction.Activate)
+                val defaults=EpubReaderPreferences()
+                assertEquals(defaults.publisherStyles,saved.publisherStyles);assertEquals(defaults.textAlignment,saved.textAlignment)
+                assertEquals(defaults.hyphenation,saved.hyphenation);assertEquals(defaults.lineHeight,saved.lineHeight,0f)
+                assertEquals(old.copy(publisherStyles=defaults.publisherStyles,textAlignment=defaults.textAlignment,
+                    hyphenation=defaults.hyphenation,lineHeight=defaults.lineHeight),saved)
+                // The rows above show the change at once.
+                assertTrue(find(panel,"Justified text")!!.contentDescription.toString().contains("On"))
+                assertTrue(find(panel,"Publisher styling")!!.contentDescription.toString().contains("Off"))
+            }
+        } finally {i.runOnMainSync {activity.finish()}}
     }
 }

@@ -136,6 +136,8 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
                 choice("Hyphenation", if (value.hyphenation) "On" else "Off", value.hyphenation) {
                     update(value.copy(hyphenation = !value.hyphenation, publisherStyles = if (value.hyphenation) value.publisherStyles else false))
                 }.tag = "hyphenation"
+                // For a device that changed its look once and so never saw the new default: one press, and only the text's style moves.
+                choice("Reset text style", EpubLayoutPolicy.textStyleSummary()) { update(EpubLayoutPolicy.resetTextStyle(value)) }.tag = "reset-text-style"
             }
         }
         focusBody(getFocusables(FOCUS_FORWARD).firstOrNull { focusKey != null && it.tag == focusKey })

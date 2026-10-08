@@ -58,6 +58,34 @@ object EpubLayoutPolicy {
     fun selectOnePage(value: EpubReaderPreferences, enabled: Boolean): EpubReaderPreferences =
         if (enabled) value.copy(onePagePerScreen = true, columns = EpubColumns.ONE, scroll = false)
         else value.copy(onePagePerScreen = false)
+
+    /**
+     * "Reset text style" (#42, Part 3): the reader's own typography as a device with nothing stored has it, for a
+     * device that changed its look once and so never saw the new default. The four settings of the text's style
+     * (Publisher styling, alignment, hyphenation, line spacing) go back to [EpubReaderPreferences]'s defaults,
+     * read from an instance so a changed default cannot be missed here; the size, typeface, theme, margins and
+     * columns stay as they are.
+     */
+    fun resetTextStyle(value: EpubReaderPreferences): EpubReaderPreferences {
+        val defaults = EpubReaderPreferences()
+        return value.copy(
+            publisherStyles = defaults.publisherStyles,
+            textAlignment = defaults.textAlignment,
+            hyphenation = defaults.hyphenation,
+            lineHeight = defaults.lineHeight
+        )
+    }
+
+    /** What the reset does, for its row: "Justified, hyphenated, 1.5 spacing", said from the defaults it applies. */
+    fun textStyleSummary(): String {
+        val defaults = EpubReaderPreferences()
+        return listOfNotNull(
+            if (defaults.publisherStyles) "The book's own style" else null,
+            when (defaults.textAlignment) { "justify" -> "Justified"; "center" -> "Centred"; else -> null },
+            if (defaults.hyphenation) "hyphenated" else null,
+            String.format(java.util.Locale.US, "%.1f spacing", defaults.lineHeight)
+        ).mapIndexed { index, part -> if (index == 0) part.replaceFirstChar { it.uppercase() } else part }.joinToString(", ")
+    }
 }
 
 object EpubChromePolicy {
