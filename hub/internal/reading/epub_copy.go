@@ -53,6 +53,11 @@ type CopyReport struct {
 	// Languages is how many documents were given the package's language, because
 	// their <html> had neither lang nor xml:lang.
 	Languages int
+	// FontsDecoded is how many obfuscated fonts were written as the fonts they are,
+	// each under the book's own identifier (see epub_fonts.go). Their entries are
+	// gone from META-INF/encryption.xml, and the file with them when they were all
+	// it listed.
+	FontsDecoded int
 	// Edited is how many entries have other bytes than they had.
 	Edited int
 	// FixedLayout: the package is pre-paginated, whose pages are laid out by the
@@ -242,13 +247,30 @@ func PlanReadingEPUB(src io.ReaderAt, size int64, options CopyOptions) (*EPUBCop
 	var report CopyReport
 	var kinds map[string]entryKind
 	var language string
+	var fonts *fontPlan
 	if options.Restyle {
-		kinds, report.FixedLayout, language = classifyEntries(archive)
+		facts := classifyEntries(archive)
+		kinds, language, report.FixedLayout = facts.kinds, facts.language, facts.fixedLayout
+		if !report.FixedLayout {
+			var err error
+			if fonts, err = planFonts(archive, facts.identifiers, &report); err != nil {
+				return nil, err
+			}
+		}
 	}
 	for _, entry := range archive.File {
 		if _, audio := AudioKindOf(entry.Name); audio && options.OmitAudio {
 			report.Omitted = append(report.Omitted, entry.Name)
 			continue
+		}
+		if fonts != nil {
+			done, err := fonts.write(writer, entry, &report)
+			if err != nil {
+				return nil, err
+			}
+			if done {
+				continue
+			}
 		}
 		if kind := kinds[entry.Name]; kind != kindOther && !report.FixedLayout {
 			done, err := restyleEntry(writer, entry, kind, language, &report)
@@ -342,17 +364,32 @@ const (
 	kindDocument
 )
 
+// packageFacts is what the package of a book says that the copy needs.
+type packageFacts struct {
+	// kinds says which entries are stylesheets and which are content documents.
+	kinds map[string]entryKind
+	// fixedLayout: the package is pre-paginated.
+	fixedLayout bool
+	// language is the language the package gives the book, or empty when it gives
+	// none that is plausible: see validLanguage.
+	language string
+	// identifiers are the package's dc:identifier values: the unique identifier (the
+	// one `unique-identifier` points at) first, then the others as the package lists
+	// them. The key of an obfuscated font is made of one of them (epub_fonts.go).
+	identifiers []string
+}
+
 // classifyEntries says which entries are stylesheets and which are content
 // documents. The package's manifest says what each file is, by media type; an
 // entry that it does not list, or lists without a type, is taken by its extension.
 // A package that cannot be read at all leaves the extension to decide everything.
-// It also reads the language the package gives the book (empty when it gives none
-// that is plausible): see validLanguage.
-func classifyEntries(archive *zip.Reader) (kinds map[string]entryKind, fixedLayout bool, language string) {
+// It also reads the language the package gives the book and its identifiers.
+func classifyEntries(archive *zip.Reader) packageFacts {
 	byName := make(map[string]*zip.File, len(archive.File))
 	for _, entry := range archive.File {
 		byName[entry.Name] = entry
 	}
+	var facts packageFacts
 	declared := map[string]string{} // zip path -> media type
 	sawLanguage := false
 	if container, err := readXMLEntry(byName, "META-INF/container.xml"); err == nil {
@@ -369,15 +406,27 @@ func classifyEntries(archive *zip.Reader) (kinds map[string]entryKind, fixedLayo
 			if err != nil {
 				continue
 			}
+			var uniqueID, unique string
+			var others []string
 			scanLenientXML(document, func(start xml.StartElement, text string) {
 				switch start.Name.Local {
+				case "package":
+					uniqueID = attribute(start, "unique-identifier")
+				case "identifier":
+					switch {
+					case strings.TrimSpace(text) == "":
+					case unique == "" && uniqueID != "" && attribute(start, "id") == uniqueID:
+						unique = text
+					default:
+						others = append(others, text)
+					}
 				case "language":
 					// The package's first dc:language, and only that: a second one is
 					// another language of the book, and a first that is not a language
 					// tag is no reason to take the second.
 					if !sawLanguage {
 						sawLanguage = true
-						language = validLanguage(text)
+						facts.language = validLanguage(text)
 					}
 				case "item":
 					if href, _, ok := resolveRef(packagePath, attribute(start, "href")); ok {
@@ -385,13 +434,17 @@ func classifyEntries(archive *zip.Reader) (kinds map[string]entryKind, fixedLayo
 					}
 				case "meta":
 					if attribute(start, "property") == "rendition:layout" && strings.EqualFold(strings.TrimSpace(text), "pre-paginated") {
-						fixedLayout = true
+						facts.fixedLayout = true
 					}
 				}
 			})
+			if unique != "" {
+				facts.identifiers = append(facts.identifiers, unique)
+			}
+			facts.identifiers = append(facts.identifiers, others...)
 		}
 	}
-	kinds = make(map[string]entryKind, len(archive.File))
+	kinds := make(map[string]entryKind, len(archive.File))
 	for _, entry := range archive.File {
 		if strings.HasSuffix(entry.Name, "/") {
 			continue
@@ -413,7 +466,8 @@ func classifyEntries(archive *zip.Reader) (kinds map[string]entryKind, fixedLayo
 			}
 		}
 	}
-	return kinds, fixedLayout, language
+	facts.kinds = kinds
+	return facts
 }
 
 // languageTag is the shape of a BCP 47 language tag: a language of two or three
@@ -517,17 +571,7 @@ func restyleEntry(writer *zip.Writer, entry *zip.File, kind entryKind, language 
 	if bytes.Equal(rewritten, data) {
 		return false, nil
 	}
-	header := &zip.FileHeader{
-		Name: entry.Name, Comment: entry.Comment, NonUTF8: entry.NonUTF8,
-		Method:       zip.Deflate,
-		ModifiedDate: entry.ModifiedDate, ModifiedTime: entry.ModifiedTime,
-		ExternalAttrs: entry.ExternalAttrs,
-	}
-	out, err := writer.CreateHeader(header)
-	if err != nil {
-		return false, err
-	}
-	if _, err := out.Write(rewritten); err != nil {
+	if err := writeRewritten(writer, entry, zip.Deflate, rewritten); err != nil {
 		return false, err
 	}
 	report.FontSizes += result.fontSizes
@@ -540,6 +584,22 @@ func restyleEntry(writer *zip.Writer, entry *zip.File, kind entryKind, language 
 	}
 	report.Edited++
 	return true, nil
+}
+
+// writeRewritten writes data as the entry's new content, under the header it had
+// (name, time, comment, mode) and the given method.
+func writeRewritten(writer *zip.Writer, entry *zip.File, method uint16, data []byte) error {
+	out, err := writer.CreateHeader(&zip.FileHeader{
+		Name: entry.Name, Comment: entry.Comment, NonUTF8: entry.NonUTF8,
+		Method:       method,
+		ModifiedDate: entry.ModifiedDate, ModifiedTime: entry.ModifiedTime,
+		ExternalAttrs: entry.ExternalAttrs,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = out.Write(data)
+	return err
 }
 
 // isDamagedEntry: the entry's own bytes are wrong (a bad checksum, a stream that

@@ -75,7 +75,7 @@ func (s *Server) epubCopyOf(ctx context.Context, file readingdomain.MediaFile, o
 			}
 			report := plan.Report
 			slog.Info("built a reading copy", "kind", kind, "book", book, "bytes", plan.Size, "held", plan.Held(),
-				"fontSizes", report.FontSizes, "lineHeights", report.LineHeights, "styled", report.Styled, "languages", report.Languages, "edited", report.Edited,
+				"fontSizes", report.FontSizes, "lineHeights", report.LineHeights, "styled", report.Styled, "languages", report.Languages, "fontsDecoded", report.FontsDecoded, "edited", report.Edited,
 				"omitted", len(report.Omitted), "left", len(report.Left), "fixedLayout", report.FixedLayout)
 			return &epubCopy{plan: plan, hash: hex.EncodeToString(plan.SHA256[:])}, nil
 		})
