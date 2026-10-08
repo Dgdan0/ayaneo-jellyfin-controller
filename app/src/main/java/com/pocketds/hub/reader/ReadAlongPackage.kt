@@ -37,6 +37,34 @@ data class ReadAlongTimeline(val tracks: List<ReadAlongTrack>) {
         return null
     }
 
+    /** A sentence with its place in the narration: which file, which one in it. */
+    data class Located(val track: Int, val index: Int, val segment: ReadAlongSegment)
+
+    /** Where [fragment] of [href] is narrated (the first sentence naming it), for the page's maths (#49). */
+    fun locate(href: String, fragment: String): Located? {
+        tracks.forEachIndexed { track, value ->
+            val index = value.segments.indexOfFirst { it.textHref == href && it.fragment == fragment }
+            if (index >= 0) return Located(track, index, value.segments[index])
+        }
+        return null
+    }
+
+    /** The sentence after [located], on into the next file at the end of one; null after the last. */
+    fun after(located: Located): Located? {
+        val value = tracks.getOrNull(located.track) ?: return null
+        value.segments.getOrNull(located.index + 1)?.let { return Located(located.track, located.index + 1, it) }
+        val next = tracks.getOrNull(located.track + 1)?.takeIf { it.segments.isNotEmpty() } ?: return null
+        return Located(located.track + 1, 0, next.segments.first())
+    }
+
+    /** Where in its file [absoluteMs] of [track] is, as the player counts it. */
+    fun positionAt(track: Int, absoluteMs: Long): ReadAlongPosition =
+        ReadAlongPosition(track, absoluteMs - (tracks.getOrNull(track)?.startMs ?: 0L))
+
+    /** Every element of [href] the narration names, in the order it reads them. */
+    fun fragments(href: String): List<String> =
+        tracks.flatMap { track -> track.segments.filter { it.textHref == href }.map { it.fragment } }.distinct()
+
     /**
      * L1 and R1 read along (#16, A5): where the sentence [delta] away from
      * [position] begins, across tracks. Back from more than [RESTART_MS] into
@@ -69,16 +97,12 @@ data class ReadAlongTimeline(val tracks: List<ReadAlongTrack>) {
 }
 
 /**
- * What a read-along page says about the narration (#16, A5): the page turns
- * with the voice, you have turned away to read on your own while it plays, or
- * this part of the book has no narration to follow.
+ * What a read-along page says about the narration (#16, A5, #49): while it plays
+ * the page and the voice move each other, so the page is always following, except
+ * where this part of the book has no narration to follow.
  */
 object ReadAlongFollow {
-    fun label(following: Boolean, narrated: Boolean): String = when {
-        !narrated -> "Alignment unavailable"
-        following -> "Following"
-        else -> "Reading"
-    }
+    fun label(narrated: Boolean): String = if (narrated) "Following" else "Alignment unavailable"
 }
 
 /** EPUB 3 media overlays. Only in-package resources are accepted; source files are never modified. */

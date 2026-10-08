@@ -214,7 +214,7 @@ object ReadingYouEdits {
 }
 
 /**
- * The formats as a row of icon and name (#39): Audiobook, Ebook, Read along, in the Books accent where
+ * The formats as a row of icon and name (#39, #49): Ebook, Audiobook, Read along, in the Books accent where
  * the book has them and quiet where it does not or one is still on its way. A ready one opens that
  * format at your place; a quiet one says why it cannot.
  */
@@ -231,7 +231,7 @@ object ReadingFormatChips {
         val ready: Boolean get() = readiness == FormatReadiness.READY && choice != null
     }
 
-    private val ORDER = listOf("audiobook", "ebook", "readaloud")
+    private val ORDER = listOf("ebook", "audiobook", "readaloud")
 
     fun of(work: ReadingWork, remembered: ReadingEntryPreference?): List<Chip> {
         val statuses = ReadingFormatStatus.forWork(work).associateBy { it.kind }

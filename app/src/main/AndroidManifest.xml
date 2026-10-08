@@ -92,6 +92,15 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+        <!-- The read-along voice, held with the screen off (#49): its own session beside the audiobook's. -->
+        <service
+            android:name=".reader.NarrationService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
         <service android:name=".alerts.TransferAlertJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="true" />
 
         <service

@@ -613,7 +613,6 @@ class ReaderListeningTest {
         }
         fun narration(): ReadAlongPlayback? = screen!!.field("narration")
         fun dock(): ReadAlongDock = screen!!.field("narrationDock")
-        fun pill(): TextView = screen!!.field("narrationPill")
         fun sentence(): String? = narration()!!.let { it.timeline.active(it.position.track, it.position.offsetMs)?.fragment }
         try {
             EpubAppearanceStore.save(activity, EpubReaderPreferences())
@@ -641,12 +640,12 @@ class ReaderListeningTest {
             withContext(Main) { assertEquals(1.1f, narration()!!.speed, 0.001f) }
             until("the dock to say so") { all(dock()).any { it is TextView && it.text == "1.1×" } }
 
-            // Play, then Start hides the menu: the pill says the page follows the voice, at its speed.
+            // Play, then Start hides the menu: nothing floats over the page (#49), whose corners show.
             withContext(Main) { all(dock()).first { it.contentDescription == "Play narration" }.performClick() }
             until("narrating") { narration()!!.isPlaying && narration()!!.position.offsetMs > 300 }
             withContext(Main) { assertTrue(screen!!.onPad(PadAction.Menu)) }
             until("the menu to close") { !screen!!.field<Boolean>("controlsVisible") }
-            until("the pill") { pill().isShown && pill().text == "▶  Following · 1.1×" }
+            withContext(Main) { assertTrue("No pill over the page", all(root).none { it is TextView && it.isShown && it.text.startsWith("▶") }) }
             shot(activity, "15-read-along-following")
 
             // R1 and L1 step through the narration a sentence at a time.
@@ -663,20 +662,21 @@ class ReaderListeningTest {
                 assertTrue("Still narrating", narration()!!.isOn)
             }
 
-            // Turning the page while it reads: the voice carries on, and the pill says you read on your own.
+            // Turning the page while it reads (#49): the voice carries on, and there is no "Reading" to be in. The next page
+            // has no narrated text, so the voice is left alone, and its next sentence brings the page back.
             withContext(Main) { assertTrue(screen!!.onPad(PadAction.Step(Direction.RIGHT))) }
-            until("Reading") { pill().text == "▶  Reading · 1.1×" }
+            delay(600)
             until("the narration carrying on") { narration()!!.isPlaying }
-            shot(activity, "16-read-along-reading")
+            shot(activity, "16-read-along-turned")
             // L3: back to the voice.
             withContext(Main) {
                 assertTrue(screen!!.onPad(PadAction.Click(Stick.LEFT, down = true)))
                 screen!!.onPad(PadAction.Click(Stick.LEFT, down = false))
             }
-            until("Following") { pill().text == "▶  Following · 1.1×" }
-            // With the menu open the dock says it, and the pill steps aside.
+            // With the menu open the dock says the page follows.
             withContext(Main) { assertTrue(screen!!.onPad(PadAction.Menu)) }
-            until("the dock's heading") { dock().isShown && all(dock()).any { it is TextView && it.text == "Read along · Following" } && !pill().isShown }
+            until("the dock's heading") { dock().isShown && all(dock()).any { it is TextView && it.text == "Read along · Following" } }
+            withContext(Main) { assertTrue("Nothing says Reading", all(dock()).none { it is TextView && it.text.contains("Reading") }) }
             shot(activity, "17-read-along-dock")
 
             // A1: video starting pauses the narration.

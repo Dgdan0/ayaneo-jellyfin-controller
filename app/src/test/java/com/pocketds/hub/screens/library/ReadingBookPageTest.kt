@@ -224,31 +224,31 @@ class ReadingBookPageTest {
 
     // ------------------------------------------------------------------ the formats
 
-    @Test fun `the formats are Audiobook, Ebook and Read along, each opening its own mode`() {
+    @Test fun `the formats are Ebook, Audiobook and Read along, each opening its own mode`() {
         val work = ReadingWork(editions = listOf(edition("ebook"), edition("audiobook"), edition("readaloud")))
         val chips = ReadingFormatChips.of(work, null)
-        assertEquals(listOf("Audiobook", "Ebook", "Read along"), chips.map { it.label })
-        assertEquals(listOf(ReadingEntryMode.LISTEN, ReadingEntryMode.READ, ReadingEntryMode.READ_ALONG), chips.map { it.choice?.mode })
+        assertEquals(listOf("Ebook", "Audiobook", "Read along"), chips.map { it.label })
+        assertEquals(listOf(ReadingEntryMode.READ, ReadingEntryMode.LISTEN, ReadingEntryMode.READ_ALONG), chips.map { it.choice?.mode })
         assertTrue(chips.all { it.ready })
     }
 
     @Test fun `a format the book lacks, or has not finished, is quiet and says why`() {
         val noEbook = ReadingFormatChips.of(ReadingWork(editions = listOf(edition("audiobook"))), null)
-        assertEquals(listOf(true, false, false), noEbook.map { it.ready })
-        assertNull(noEbook[1].choice)
-        assertEquals("No ebook for this book yet", noEbook[1].note)
+        assertEquals(listOf(false, true, false), noEbook.map { it.ready })
+        assertNull(noEbook[0].choice)
+        assertEquals("No ebook for this book yet", noEbook[0].note)
         val aligning = ReadingFormatChips.of(ReadingWork(editions = listOf(edition("ebook"), edition("audiobook"), edition("readaloud", "processing"))), null)
         assertEquals(FormatReadiness.PENDING, aligning[2].readiness)
         assertFalse(aligning[2].ready)
         assertEquals("Read along is still being aligned", aligning[2].note)
-        assertEquals("No audiobook for this book yet", ReadingFormatChips.of(ReadingWork(editions = listOf(edition("ebook"))), null)[0].note)
+        assertEquals("No audiobook for this book yet", ReadingFormatChips.of(ReadingWork(editions = listOf(edition("ebook"))), null)[1].note)
     }
 
     @Test fun `the narration you last used is the one the audiobook opens`() {
         val work = ReadingWork(editions = listOf(edition("ebook"), edition("audiobook", id = "a1"), edition("audiobook", id = "a2")))
         val remembered = ReadingEntryPreference(ReadingEntryMode.LISTEN, "a2")
-        assertEquals("a2", ReadingFormatChips.of(work, remembered)[0].choice?.audio?.sourceItemId)
-        assertEquals("a1", ReadingFormatChips.of(work, null)[0].choice?.audio?.sourceItemId)
+        assertEquals("a2", ReadingFormatChips.of(work, remembered)[1].choice?.audio?.sourceItemId)
+        assertEquals("a1", ReadingFormatChips.of(work, null)[1].choice?.audio?.sourceItemId)
     }
 
     @Test fun `a series page and an empty book have no formats to open`() {

@@ -202,10 +202,25 @@ class EpubReaderScreen(
     private var selectedNarrationTarget: ReadAlongPosition? = null
     private var selectionGeneration = 0
     private var matchNarrationToPage = false
-    /** Read along (A5): the page turns with the voice, until you turn it yourself. */
-    private var following = true
-    /** Narration playing with the menu hidden: "Following · 1.25×" in a corner. */
-    private lateinit var narrationPill: TextView
+    /**
+     * Read along (#49): the page and the voice move each other. What the page shows of the narration, probed after
+     * every page change settles; null while a page is being turned or probed, so nothing acts on a page that is gone.
+     */
+    private var pageSpan: PageSpan? = null
+    private var pageKey: String? = null
+    private var probeJob: Job? = null
+    private var probeFailures = 0
+    private var followJob: Job? = null
+    /** A page change of our own making (the voice turning the page, or the page brought to it) is expected until then. */
+    private var ownMoveUntil = 0L
+    /** The sentence the page was last sent to, and the page last turned from: neither is asked for twice. */
+    private var lastSent: ReadAlongSegment? = null
+    private var turnedFrom: PageSpan? = null
+    private var lastFollowed: ReadAlongPosition? = null
+    /** The screen is off or another app is in front (#49): the voice plays on, held by [NarrationService], the page waits. */
+    private var backgrounded = false
+    private var voiceAtBackground: ReadAlongPosition? = null
+    private val narratedFragments = HashMap<String, List<String>>()
     /** Scrolling with the D-pad and the right stick (E1): whole pixels, and on into the next part at the end. */
     private var bookScroll = BookScroll(edgePx = 0f)
     private var stepAnimator: ValueAnimator? = null
@@ -339,6 +354,8 @@ class EpubReaderScreen(
     }
 
     override fun onShow() {
+        val wasBackgrounded = backgrounded
+        backgrounded = false
         // The time away from the book is not reading.
         paceTracker.restart()
         val shared = loadPreferences()
@@ -354,7 +371,10 @@ class EpubReaderScreen(
             if (readAlong) ReadingEntryMode.READ_ALONG else ReadingEntryMode.READ,
             if (readAlong) sourceItemId else previousAudio)
         if ((navigator == null || (readAlong && narration == null)) && loadJob?.isActive != true) openBook()
-        else if (narration != null) startDockUpdates()
+        else if (narration != null) {
+            startDockUpdates()
+            if (wasBackgrounded) catchUpWithVoice() else scheduleProbe()
+        }
     }
 
     override fun onHide() {
@@ -363,9 +383,13 @@ class EpubReaderScreen(
         closeDictionary(resumeNarration = false)
         if (::footnoteCard.isInitialized) footnoteCard.dismiss()
         stepAnimator?.end()
-        narration?.pause()
+        // Leaving the book pauses the voice; the screen going off does not (#49): it plays on, held by NarrationService.
+        if (!backgrounded) narration?.pause()
         root.keepScreenOn = false
         dockJob?.cancel()
+        followJob?.cancel()
+        probeJob?.cancel()
+        pageSpan = null
         if (::appearance.isInitialized && appearance.isOpen) appearance.cancel()
         if (::overlay.isInitialized) overlay.dismiss()
         saveCurrent(immediate = true)
@@ -382,6 +406,8 @@ class EpubReaderScreen(
         selectionJob?.cancel()
         dictionaryJob?.cancel()
         dockJob?.cancel()
+        followJob?.cancel()
+        probeJob?.cancel()
         locatorJob?.cancel()
         removeNavigator()
         publication?.close()
@@ -390,7 +416,18 @@ class EpubReaderScreen(
         controls.clear()
     }
 
-    override fun onAppBackgrounded() { narration?.pause(); saveCurrent(immediate = true) }
+    /**
+     * The app left the front (#49): the screen went off, or another app came up. A voice that is playing plays on,
+     * held by [NarrationService] with its notification, and the page is left alone until we are back; one that is
+     * paused stays so.
+     */
+    override fun onAppBackgrounded() {
+        // The place as the page shows it; from now on it is the narration's.
+        saveCurrent(immediate = true)
+        backgrounded = true
+        voiceAtBackground = narration?.position
+        probeJob?.cancel()
+    }
 
     override val requiresTriggerHold: Boolean get() = navigator != null &&
         !appearance.isOpen && !overlay.isOpen && !dictionaryCard.isOpen && !footnoteCard.isOpen
@@ -464,7 +501,8 @@ class EpubReaderScreen(
             is ReaderCommand.Glide -> glide(command.dy)
             ReaderCommand.FollowNarration -> follow()
             is ReaderCommand.Sentence -> narration?.let { audio ->
-                following = true
+                // The voice was moved on purpose: it and the page belong together again.
+                matchNarrationToPage = false
                 if (!audio.stepSentence(command.delta)) host.notify(if (command.delta > 0) "The last sentence" else "The first sentence")
                 updateDock()
             }
@@ -715,6 +753,7 @@ class EpubReaderScreen(
                     latestLocator = locator
                     updatePosition()
                     scheduleSave()
+                    pageMoved()
                 }
             }
         )
@@ -763,6 +802,7 @@ class EpubReaderScreen(
                 updatePosition()
                 refreshBookmarkButton()
                 scheduleSave()
+                pageMoved()
             }
         }
         loading.visibility = View.GONE
@@ -781,11 +821,8 @@ class EpubReaderScreen(
 
     private fun turn(delta: Int) {
         bookScroll.reset()
-        val audio = narration
-        if (audio != null && audio.isOn) {
-            following = false
-            updateDock()
-        } else switchToReading()
+        // While the voice reads, the page it lands on decides what the voice does (#49); otherwise the book is read on its own.
+        movedByHand()
         val didMove = if (delta >= 0) navigator?.goForward(animated = true) else navigator?.goBackward(animated = true)
         if (didMove == false) host.notify(if (delta >= 0) "End of book" else "Start of book")
     }
@@ -823,6 +860,8 @@ class EpubReaderScreen(
             val audioPosition = narrationCheckpoint.pointForSave(narration?.takeIf { it.isPlaying }?.position)
             audioPosition?.let { audio -> narration?.timeline?.let { timeline ->
                 raw = ReadAlongLocation.save(raw, timeline, audio, narrationCompleted)
+                // The page is not being followed with the screen off (#49): how far through the book is the narration's.
+                if (backgrounded && !narrationCompleted) raw = progressWithoutPage(raw, timeline, audio)
             } }
             progress.save(checkpointKey, ReadingLocation(locator = raw))
             if (immediate) progress.requestSync(immediate = true)
@@ -831,6 +870,15 @@ class EpubReaderScreen(
             if (!checkpointErrorShown) host.notify("Reading position could not be saved on this device")
             checkpointErrorShown = true
         }
+    }
+
+    /** A place saved while the page is not being followed: how far through the book the sentence is, from the narration. */
+    private fun progressWithoutPage(locator: kotlinx.serialization.json.JsonObject, timeline: ReadAlongTimeline, audio: ReadAlongPosition): kotlinx.serialization.json.JsonObject {
+        val href = (locator["href"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.substringBefore('#') ?: return locator
+        val section = bookSections.indexOfFirst { it.href.toString().substringBefore('#') == href }
+        val (start, end) = PageInfo.sectionSpan(sectionStarts, section) ?: return locator
+        val estimate = ReadAlongLocation.estimate(timeline, audio, start, end) ?: return locator
+        return ReadAlongLocation.withProgress(locator, estimate)
     }
 
     private fun buildTopBar() {
@@ -942,19 +990,8 @@ class EpubReaderScreen(
             onSpeed = { narration?.let { setNarrationSpeed(Listening.nextSpeed(it.speed)) } }
             onFollow = { follow() }
         }
-        // The dock joins the bars as the lower bar once the narration is ready (prepareNarration).
-        narrationPill = TextView(host.viewContext).apply {
-            textSize = 12f
-            setTextColor(Color.WHITE)
-            setPadding(dp(12), dp(6), dp(14), dp(6))
-            visibility = View.GONE
-            com.pocketds.hub.ui.OverlayButtons.panel(this, 999f)
-            // A tap on it opens the menu, with the dock.
-            setOnClickListener { setControlsVisible(true) }
-        }
-        root.addView(narrationPill, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.END).apply {
-            rightMargin = dp(14); bottomMargin = dp(12)
-        })
+        // The dock joins the bars as the lower bar once the narration is ready (prepareNarration). Nothing floats over
+        // the page while it plays (#49): the corners show, and the menu brings the dock.
         narrationDock.focusableControls.forEach { view ->
             FocusDecorator.attach(view, ringVisible, scale = false)
             FocusDecorator.listen(view, ringVisible) { focusedView, focused ->
@@ -1010,6 +1047,9 @@ class EpubReaderScreen(
         val resume = saved?.let { ReadAlongLocation.resume(locatorJson(it), timeline) }
         matchNarrationToPage = saved != null && resume == null
         narration?.release()
+        // Nothing known of the page belongs to the new voice (#49): it is looked at again below.
+        pageSpan = null; pageKey = null; lastSent = null; turnedFrom = null; lastFollowed = null
+        narratedFragments.clear()
         narration = ReadAlongPlayback(host.viewContext, timeline, sources, resume,
             onSegment = ::highlightNarration,
             onState = { playing ->
@@ -1018,32 +1058,36 @@ class EpubReaderScreen(
                 updateAwake()
             },
             onSave = { point, completed -> narrationCheckpoint.record(point); narrationCompleted = completed; saveCurrent(immediate = true) },
-            onError = { host.notify("Narration playback failed. Your position is saved; reading is still available.") }
+            onError = { host.notify("Narration playback failed. Your position is saved; reading is still available.") },
+            title = title
         )
         narration?.speed = com.pocketds.hub.settings.ListeningSettings.speed(host.viewContext, workId)
-        following = true
         narrationCheckpoint.ready(resume)
         // The player is the menu's lower bar (#21): it shows and hides with the menu.
         bars.useAsLowerBar(narrationDock, ReadAlongDock.HEIGHT_DP)
         pagePreview.refresh()
         startDockUpdates()
+        scheduleProbe()
         DebugLog.log("reader", "aligned narration ready: ${timeline.tracks.size} tracks, resumed=${resume != null}")
         loading.visibility = View.GONE
         setControlsVisible(true)
     }
 
+    /** The glow on the sentence being read. Where the page goes is [followVoice]'s. */
     private fun highlightNarration(segment: ReadAlongSegment?) {
         highlightJob?.cancel()
+        if (backgrounded) return
         highlightJob = uiScope.launch {
             val reader = navigator ?: return@launch
             if (segment == null) { reader.applyDecorations(emptyList(), "readalong"); return@launch }
-            val locator = Locator.fromJSON(JSONObject().put("href", segment.textHref).put("type", "application/xhtml+xml")
-                .put("locations", JSONObject().put("fragments", org.json.JSONArray().put(segment.fragment)))) ?: return@launch
-            val visible = reader.evaluateJavascript("(function(){var e=document.getElementById(${JSONObject.quote(segment.fragment)});if(!e)return false;var r=e.getBoundingClientRect();return r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;})()") == "true"
-            if (following && (reader.currentLocator.value.href.toString() != segment.textHref || !visible)) reader.go(locator, animated = false)
+            val locator = segmentLocator(segment) ?: return@launch
             reader.applyDecorations(listOf(Decoration("narration", locator, Decoration.Style.Highlight(colors.accent, isActive = true))), "readalong")
         }
     }
+
+    private fun segmentLocator(segment: ReadAlongSegment): Locator? =
+        Locator.fromJSON(JSONObject().put("href", segment.textHref).put("type", "application/xhtml+xml")
+            .put("locations", JSONObject().put("fragments", org.json.JSONArray().put(segment.fragment))))
 
     private fun startDockUpdates() {
         dockJob?.cancel()
@@ -1053,29 +1097,164 @@ class EpubReaderScreen(
                 delay(500)
             }
         }
+        followJob?.cancel()
+        followJob = uiScope.launch {
+            while (true) {
+                delay(FOLLOW_MS)
+                followVoice()
+            }
+        }
     }
 
     private fun updateDock() {
         if (!::narrationDock.isInitialized) return
-        val audio = narration ?: run { narrationPill.visibility = View.GONE; return }
-        val label = followLabel(audio)
-        narrationDock.update(audio.isOn, audio.position, audio.timeline, audio.speed, if (audio.isOn) label else "")
-        // The pill: narration playing with the menu hidden says so, and where the page stands (A5).
-        narrationPill.visibility = if (audio.isOn && !controlsVisible) View.VISIBLE else View.GONE
-        narrationPill.text = "▶  $label · ${com.pocketds.hub.playback.PlayerLabels.rate(audio.speed)}"
+        val audio = narration ?: return
+        narrationDock.update(audio.isOn, audio.position, audio.timeline, audio.speed, if (audio.isOn) followLabel(audio) else "")
         updateTimeLeft()
     }
 
-    /** "Following", "Reading", or "Alignment unavailable" on a page the narration never reaches. */
+    /** "Following" while it plays, or "Alignment unavailable" on a page the narration never reaches. */
     private fun followLabel(audio: ReadAlongPlayback): String =
-        ReadAlongFollow.label(following, latestLocator?.href?.toString()?.let(audio.timeline::narrates) ?: true)
+        ReadAlongFollow.label(latestLocator?.href?.toString()?.let(audio.timeline::narrates) ?: true)
 
-    /** L3, the dock's follow and "Return to narration": the page back to the voice. */
+    /** L3, the dock's follow and "Return to narration": the page back to the sentence being read. */
     private fun follow() {
         val audio = narration ?: return
-        following = true
-        highlightNarration(audio.timeline.active(audio.position.track, audio.position.offsetMs))
+        val segment = audio.timeline.active(audio.position.track, audio.position.offsetMs)
+        highlightNarration(segment)
+        // The page and the voice are together again, for Play and for what is saved.
+        matchNarrationToPage = false
+        narrationCheckpoint.record(audio.position)
+        val span = pageSpan
+        if (segment != null && (span == null || span.href != segment.textHref || segment.fragment !in span.visible)) {
+            lastSent = segment
+            sendPageTo(segment)
+        }
         updateDock()
+    }
+
+    // ---------------------------------------------------------------- page and voice (#49)
+
+    /** The page changed, by whoever: nothing acts on the old one, and the new one is looked at once it has settled. */
+    private fun pageMoved() {
+        if (narration == null) return
+        pageSpan = null
+        scheduleProbe()
+    }
+
+    private fun ownMove() { ownMoveUntil = SystemClock.uptimeMillis() + OWN_MOVE_MS }
+
+    private fun scheduleProbe(afterMs: Long = PROBE_MS) {
+        if (narration == null || backgrounded) return
+        probeJob?.cancel()
+        probeJob = uiScope.launch {
+            delay(afterMs)
+            val audio = narration ?: return@launch
+            val reader = navigator ?: return@launch
+            val href = reader.currentLocator.value.href.toString()
+            val probe = askPage(reader, audio, href)
+            // Moved on while it was asked: the next change asks again.
+            if (reader.currentLocator.value.href.toString() != href) return@launch
+            if (probe == null) {
+                if (++probeFailures <= PROBE_RETRIES) scheduleProbe(PROBE_RETRY_MS)
+                return@launch
+            }
+            probeFailures = 0
+            pageProbed(audio, probe)
+        }
+    }
+
+    /** What the page in front shows of the narration; a part of the book with none is a page with no narrated text. */
+    private suspend fun askPage(reader: EpubNavigatorFragment, audio: ReadAlongPlayback, href: String): PageProbe? {
+        val ids = narratedFragments.getOrPut(href) { audio.timeline.fragments(href) }
+        if (ids.isEmpty()) return PageProbe(href, null, null, emptyList())
+        val raw = runCatching { reader.evaluateJavascript(ReadAlongPageProbe.script(ids)) }.getOrNull()
+        // A look cancelled by the next page change is no failure to try again: runCatching took the cancellation too.
+        coroutineContext.ensureActive()
+        return ReadAlongPageProbe.parse(href, raw)
+    }
+
+    private fun pageProbed(audio: ReadAlongPlayback, probe: PageProbe) {
+        var span = ReadAlongPageSync.span(audio.timeline, probe)
+        val previous = pageKey
+        pageKey = probe.key
+        lastSent = null
+        if (probe.key != previous) {
+            val ours = SystemClock.uptimeMillis() < ownMoveUntil
+            ownMoveUntil = 0L
+            // A page turned by hand while the voice reads: the first look at a page (previous null) is not one.
+            if (!ours && previous != null && audio.isOn && !matchNarrationToPage) span = pageTurnedByHand(audio, span)
+        }
+        pageSpan = span
+        updateDock()
+    }
+
+    /** The new page decides (#49): the sentence being read is still on it and nothing restarts, or the voice goes to its first word. */
+    private fun pageTurnedByHand(audio: ReadAlongPlayback, span: PageSpan): PageSpan =
+        when (val decision = ReadAlongPageSync.afterManualTurn(audio.timeline, audio.position, span)) {
+            ReadAlongPageSync.Manual.Keep -> ReadAlongPageSync.keptFor(span, audio.position)
+            is ReadAlongPageSync.Manual.Jump -> { jumpVoice(audio, decision.to); span }
+            ReadAlongPageSync.Manual.Nothing -> span
+        }
+
+    private fun jumpVoice(audio: ReadAlongPlayback, target: ReadAlongPosition) {
+        matchNarrationToPage = false
+        narrationCompleted = false
+        audio.seek(target)
+        narrationCheckpoint.record(target)
+        highlightNarration(audio.timeline.active(target.track, target.offsetMs))
+        saveCurrent(immediate = true)
+    }
+
+    /** The page follows the voice: every [FOLLOW_MS], and only when the voice has moved (paused, it is left where it is). */
+    private fun followVoice() {
+        val audio = narration ?: return
+        val position = audio.position
+        val moved = position != lastFollowed
+        lastFollowed = position
+        if (backgrounded || !moved) return
+        val span = pageSpan ?: return
+        if (SystemClock.uptimeMillis() < ownMoveUntil) return
+        when (val step = ReadAlongPageSync.follow(audio.timeline, position, span)) {
+            ReadAlongPageSync.Step.Stay -> Unit
+            ReadAlongPageSync.Step.TurnPage -> if (turnedFrom != span) {
+                turnedFrom = span
+                ownMove()
+                // At the end of the book there is no page to turn to, and no page change to wait for.
+                if (navigator?.goForward(animated = false) != true) ownMoveUntil = 0L
+            }
+            is ReadAlongPageSync.Step.GoTo -> if (lastSent != step.segment) {
+                lastSent = step.segment
+                sendPageTo(step.segment)
+            }
+        }
+    }
+
+    private fun sendPageTo(segment: ReadAlongSegment) {
+        val locator = segmentLocator(segment) ?: return
+        ownMove()
+        if (navigator?.go(locator, animated = false) != true) ownMoveUntil = 0L
+    }
+
+    /** The app is back (#49): the voice went on without the page, which catches up to it. */
+    private fun catchUpWithVoice() {
+        val audio = narration ?: return
+        pageSpan = null
+        val moved = audio.position != voiceAtBackground
+        voiceAtBackground = null
+        val segment = audio.timeline.active(audio.position.track, audio.position.offsetMs)
+        highlightNarration(segment)
+        if (moved && segment != null) { lastSent = segment; sendPageTo(segment) }
+        scheduleProbe()
+    }
+
+    /**
+     * The page moved by hand (a turn, a drag, a link, the contents, a search, the slider, a bookmark). Paused, the book
+     * is read on its own and Play starts from the page; while the voice reads, nothing is paused: the page it lands on
+     * decides, once it shows (#49).
+     */
+    private fun movedByHand() {
+        if (narration?.isOn == true) closeDictionary(resumeNarration = false) else switchToReading()
     }
 
     /** A speed for this book's narration, kept for the book whichever way it is opened next (A5). */
@@ -1154,13 +1333,7 @@ class EpubReaderScreen(
             seekNarrationToPage(play = true)
             return
         }
-        matchNarrationToPage = false
-        narrationCompleted = false
-        following = true
-        audio.seek(target)
-        narrationCheckpoint.record(target)
-        highlightNarration(audio.timeline.active(target.track, target.offsetMs))
-        saveCurrent(immediate = true)
+        jumpVoice(audio, target)
         if (!audio.isPlaying) audio.toggle()
     }
 
@@ -1178,24 +1351,16 @@ class EpubReaderScreen(
         }
     }
 
+    /** Play from the page: the voice goes to the first word on it, which may be inside a sentence the page cuts (#49). */
     private fun seekNarrationToPage(play: Boolean) {
         uiScope.launch {
             val audio = narration ?: return@launch
             val reader = navigator ?: return@launch
             val href = reader.currentLocator.value.href.toString()
-            val ids = audio.timeline.tracks.flatMap { it.segments }.filter { it.textHref == href }.map { it.fragment }.distinct()
-            val result = reader.evaluateJavascript("(function(){var ids=${org.json.JSONArray(ids)};for(var i=0;i<ids.length;i++){var e=document.getElementById(ids[i]);if(e){var r=e.getBoundingClientRect();if(r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth)return ids[i];}}return null;})()")
-            val fragment = runCatching { org.json.JSONArray("[$result]").getString(0) }.getOrNull()
-            val target = fragment?.let { audio.timeline.find(href, it) }
+            val target = askPage(reader, audio, href)?.let { ReadAlongPageSync.startOf(audio.timeline, it) }
             if (target == null) host.notify("No aligned sentence on this page. Turn to a narrated page and try again.")
             else {
-                matchNarrationToPage = false
-                narrationCompleted = false
-                following = true
-                audio.seek(target)
-                highlightNarration(audio.timeline.active(target.track, target.offsetMs))
-                narrationCheckpoint.record(target)
-                saveCurrent(immediate = true)
+                jumpVoice(audio, target)
                 if (play && !audio.isPlaying) audio.toggle()
             }
         }
@@ -1305,7 +1470,7 @@ class EpubReaderScreen(
         val previous = latestLocator
         paceTracker.restart()
         bookScroll.reset()
-        switchToReading()
+        movedByHand()
         if (navigator?.go(target, animated = false) != true) {
             host.notify("This reading position could not be opened")
             return false
@@ -1501,6 +1666,8 @@ class EpubReaderScreen(
 
     private fun applyPreferences() {
         navigator?.submitPreferences(readiumPreferences(preferences))
+        // A reflow moves every page break: the page is looked at again once it has settled.
+        if (narration != null) { pageSpan = null; scheduleProbe(REFLOW_PROBE_MS) }
         // The corners' ink and the strips' colour follow the page.
         if (::pageInfo.isInitialized) applyPageInfo()
     }
@@ -1526,10 +1693,6 @@ class EpubReaderScreen(
                 margins.topMargin = top; margins.bottomMargin = bottom; margins.leftMargin = side; margins.rightMargin = side
                 pageHost.requestLayout()
             }
-        }
-        // The narration's pill rests above the bottom strip, not on its percentage.
-        (narrationPill.layoutParams as FrameLayout.LayoutParams).let { margins ->
-            if (margins.bottomMargin != dp(12) + bottom) { margins.bottomMargin = dp(12) + bottom; narrationPill.requestLayout() }
         }
         refreshPageInfo()
     }
@@ -1665,7 +1828,7 @@ class EpubReaderScreen(
     private fun currentTimeLeft(): TimeLeft? {
         val audio = narration
         val current = latestLocator
-        return if (audio != null && following) TimeLeft.ofNarration(audio.timeline, audio.position, audio.speed)
+        return if (audio != null && !matchNarrationToPage) TimeLeft.ofNarration(audio.timeline, audio.position, audio.speed)
             else if (current == null) null
             else TimeLeft.ofPositions(sectionSizes, bookSections.indexOfFirst { it.href == current.href },
                 current.locations.progression ?: 0.0, pace.minutesPerPosition(pacePrior))
@@ -1709,18 +1872,8 @@ class EpubReaderScreen(
         }
     }
 
-    /**
-     * The page moved by hand, by a link followed or a drag (A5): while the voice
-     * reads it carries on and the page stops following it ("Reading"); quiet, the
-     * book is read on its own and Play starts from the page.
-     */
-    private fun turnedByHand() {
-        val audio = narration
-        if (audio != null && audio.isOn) {
-            following = false
-            updateDock()
-        } else switchToReading()
-    }
+    /** The page moved by hand, by a link followed or a drag (A5, #49): see [movedByHand]. */
+    private fun turnedByHand() = movedByHand()
 
     /** A footnote's card (E5); an empty note is simply followed. */
     private fun showFootnote(html: String, link: Link) {
@@ -1765,5 +1918,13 @@ class EpubReaderScreen(
         const val LINK_MS = 3_000L
         /** The lower bar: the position row over the book's line, with their padding. */
         const val BOTTOM_ROW_DP = 44 + 30 + 8
+        /** Read along (#49): how long after a page change it settles before the page is looked at, and after a reflow. */
+        const val PROBE_MS = 90L
+        const val REFLOW_PROBE_MS = 450L
+        const val PROBE_RETRIES = 4
+        const val PROBE_RETRY_MS = 400L
+        /** How often the page asks whether the voice has moved on, and how long a page change of its own is expected. */
+        const val FOLLOW_MS = 100L
+        const val OWN_MOVE_MS = 1_500L
     }
 }

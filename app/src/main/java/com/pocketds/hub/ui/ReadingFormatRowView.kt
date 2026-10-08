@@ -8,7 +8,7 @@ import com.pocketds.hub.screens.library.ReadingFormatChips
 import com.pocketds.hub.ui.glass.GlassColors
 
 /**
- * The formats of a book as a row of icon and name (#39): Audiobook, Ebook, Read along. A format the
+ * The formats of a book as a row of icon and name (#39, #49): Ebook, Audiobook, Read along. A format the
  * book has is in the Books accent and is a control: Ⓐ or a tap opens it at your place. One it does not
  * have, or that is still on its way, is quiet grey and no stop for the pad; a tap on it says why not.
  * Which chips there are and what they open is [ReadingFormatChips]'; this draws them.
@@ -18,7 +18,7 @@ class ReadingFormatRowView(
     private val colors: PocketColors,
     private val ringVisible: () -> Boolean
 ) : LinearLayout(context) {
-    /** The chips by their kind (audiobook, ebook, readaloud), for focus and for hints. */
+    /** The chips by their kind (ebook, audiobook, readaloud), for focus and for hints. */
     val chipViews = linkedMapOf<String, TextView>()
 
     init { orientation = HORIZONTAL; clipChildren = false; clipToPadding = false }

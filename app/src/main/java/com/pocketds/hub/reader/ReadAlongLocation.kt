@@ -18,6 +18,43 @@ object ReadAlongLocation {
         return fragments.firstNotNullOfOrNull { timeline.find(href, it) }
     }
 
+    /**
+     * How far through its part of the book, and through the book, the sentence at [point] is (#49), from the share
+     * of that part's narration that comes before it: what the page says when there is a page to ask. With the
+     * screen off there is none, and a book listened to for an hour would keep saying where it was when the screen
+     * went. [start] and [end] are where the part begins and ends in the book, 0 to 1. Null when the part is not narrated.
+     */
+    fun estimate(timeline: ReadAlongTimeline, point: ReadAlongPosition, start: Double, end: Double): Estimate? {
+        val track = timeline.tracks.getOrNull(point.track) ?: return null
+        val now = track.startMs + point.offsetMs.coerceAtLeast(0)
+        val href = (timeline.active(point.track, point.offsetMs) ?: track.segments.lastOrNull { it.endMs <= now } ?: track.segments.firstOrNull())
+            ?.textHref ?: return null
+        var before = 0L
+        var total = 0L
+        timeline.tracks.forEachIndexed { index, value ->
+            value.segments.forEach { segment ->
+                if (segment.textHref != href) return@forEach
+                val length = (segment.endMs - segment.beginMs).coerceAtLeast(0)
+                total += length
+                if (index < point.track) before += length
+                else if (index == point.track) before += (minOf(now, segment.endMs) - segment.beginMs).coerceIn(0, length)
+            }
+        }
+        if (total <= 0) return null
+        val inPart = (before.toDouble() / total).coerceIn(0.0, 1.0)
+        return Estimate(href, inPart, (start + (end - start) * inPart).coerceIn(0.0, 1.0))
+    }
+
+    data class Estimate(val href: String, val progression: Double, val totalProgression: Double)
+
+    /** [locator] with how far through its part and the book it is, as [estimate] says. */
+    fun withProgress(locator: JsonObject, estimate: Estimate): JsonObject {
+        val locations = (locator["locations"] as? JsonObject).orEmpty().toMutableMap()
+        locations["progression"] = JsonPrimitive(estimate.progression)
+        locations["totalProgression"] = JsonPrimitive(estimate.totalProgression)
+        return JsonObject(locator.toMutableMap().apply { put("locations", JsonObject(locations)) })
+    }
+
     /** The page's locator moved to the sentence playing at [point], finished when [completed]. */
     fun save(locator: JsonObject, timeline: ReadAlongTimeline, point: ReadAlongPosition, completed: Boolean): JsonObject {
         val track = timeline.tracks.getOrNull(point.track) ?: return locator

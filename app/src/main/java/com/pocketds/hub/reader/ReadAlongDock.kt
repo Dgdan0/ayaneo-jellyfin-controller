@@ -88,7 +88,7 @@ class ReadAlongDock(context: Context, colors: PocketColors, seekSeconds: Int = 1
 
     private fun <T : View> control(view: T): T = view.also { focusableControls += it }
 
-    /** [follow]: where the page stands with the voice, "Following" or "Reading" (A5). */
+    /** [follow]: where the page stands with the voice while it plays, "Following" (A5, #49). */
     fun update(playing: Boolean, position: ReadAlongPosition, timeline: ReadAlongTimeline, speed: Float, follow: String = "") {
         heading.text = if (follow.isBlank()) "Read along" else "Read along · $follow"
         playButton.setIcon(if (playing) PlayerControlIcon.PAUSE else PlayerControlIcon.PLAY)

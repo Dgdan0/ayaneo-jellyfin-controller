@@ -171,10 +171,10 @@ class ReadingBookPageViewTest {
                 assertNotNull("The ⋯ is a round glass toggle", actions()["list:more"])
                 // The formats: the two the book has are controls, the one it lacks is quiet and no stop for the pad.
                 val chips = header().formatRow.chipViews
-                assertEquals(listOf("audiobook", "ebook", "readaloud"), chips.keys.toList())
+                assertEquals(listOf("ebook", "audiobook", "readaloud"), chips.keys.toList())
                 assertTrue(chips["audiobook"]!!.isFocusable && chips["ebook"]!!.isFocusable)
                 assertFalse(chips["readaloud"]!!.isFocusable)
-                assertEquals(setOf("list:format:audiobook", "list:format:ebook"), actions().keys.filter { it.startsWith("list:format:") }.toSet())
+                assertEquals(setOf("list:format:ebook", "list:format:audiobook"), actions().keys.filter { it.startsWith("list:format:") }.toSet())
                 // Under the cover: your stars, when you finished and your shelves.
                 assertEquals(4, stars().rating)
                 assertEquals("Finished Sep 2025 · 2nd time", header().finishedView.text.toString())
@@ -193,7 +193,7 @@ class ReadingBookPageViewTest {
                 assertEquals(actions()["list:more"], entry.focusSearch(View.FOCUS_RIGHT))
                 assertEquals(entry, chips["ebook"]!!.focusSearch(View.FOCUS_DOWN))
                 assertTrue(chips.values.contains(entry.focusSearch(View.FOCUS_UP)))
-                assertEquals(chips["ebook"], chips["audiobook"]!!.focusSearch(View.FOCUS_RIGHT))
+                assertEquals(chips["audiobook"], chips["ebook"]!!.focusSearch(View.FOCUS_RIGHT))
             }
 
             // Your stars by pad: focus, Right moves the cursor to the fifth, Ⓐ rates, Ⓐ on it again takes it away.

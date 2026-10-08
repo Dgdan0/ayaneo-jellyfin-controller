@@ -41,8 +41,28 @@ class ReadAlongFollowTest {
     @Test fun `which pages are narrated, and what the page says`() {
         assertTrue(timeline.narrates("two.xhtml"))
         assertFalse(timeline.narrates("front.xhtml"))
-        assertEquals("Following", ReadAlongFollow.label(following = true, narrated = true))
-        assertEquals("Reading", ReadAlongFollow.label(following = false, narrated = true))
-        assertEquals("Alignment unavailable", ReadAlongFollow.label(following = true, narrated = false))
+        // While it plays the page and the voice move each other (#49): there is no "Reading" to be in.
+        assertEquals("Following", ReadAlongFollow.label(narrated = true))
+        assertEquals("Alignment unavailable", ReadAlongFollow.label(narrated = false))
+    }
+
+    @Test fun `a sentence is found with its file and what comes after it`() {
+        val found = timeline.locate("one.xhtml", "s1")!!
+        assertEquals(0, found.track)
+        assertEquals(1, found.index)
+        assertEquals("s2", timeline.after(found)!!.segment.fragment)
+        // The last sentence of a file goes on to the first of the next.
+        val last = timeline.locate("one.xhtml", "s2")!!
+        assertEquals(ReadAlongTimeline.Located(1, 0, timeline.tracks[1].segments[0]), timeline.after(last))
+        assertNull(timeline.after(timeline.locate("two.xhtml", "t1")!!))
+        assertNull(timeline.locate("one.xhtml", "t0"))
+        // Where the player counts it: from the file's first sentence.
+        assertEquals(ReadAlongPosition(0, 1_000), timeline.positionAt(0, 6_000))
+        assertEquals(ReadAlongPosition(1, 3_000), timeline.positionAt(1, 3_000))
+    }
+
+    @Test fun `the elements a part of the book names are listed in reading order`() {
+        assertEquals(listOf("s0", "s1", "s2"), timeline.fragments("one.xhtml"))
+        assertEquals(emptyList<String>(), timeline.fragments("front.xhtml"))
     }
 }

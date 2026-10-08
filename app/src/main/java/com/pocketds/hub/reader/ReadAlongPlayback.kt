@@ -4,15 +4,18 @@ import android.content.Context
 import android.net.Uri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.*
 
 /**
- * Foreground narration owned by its reader. Pauses on hide/background; never
- * starts on opening a book. It reports to [AudioHandoff] (#16, A1), so starting
+ * Narration owned by its reader. Leaving the book pauses it; the screen going off does not (#49): once it
+ * plays, [NarrationService] holds it with a media notification, and the wake lock below keeps the device
+ * streaming. It never starts on opening a book. It reports to [AudioHandoff] (#16, A1), so starting
  * it pauses video or an audiobook and either of those pauses it.
  *
  * Each stretch of the [timeline] plays from its [NarrationSource] (#19): a
@@ -29,7 +32,9 @@ class ReadAlongPlayback(
     private val onSegment: (ReadAlongSegment?) -> Unit,
     private val onState: (Boolean) -> Unit,
     private val onSave: (ReadAlongPosition, Boolean) -> Unit,
-    private val onError: () -> Unit
+    private val onError: () -> Unit,
+    /** The book's title, for the notification and the lock screen. */
+    private val title: String = ""
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val app = context.applicationContext
@@ -54,6 +59,8 @@ class ReadAlongPlayback(
     init {
         player.setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(), true)
         player.setHandleAudioBecomingNoisy(true)
+        // Playing on with the screen off, streaming: the wake lock and the Wi-Fi lock while it plays (#49).
+        player.setWakeMode(C.WAKE_MODE_NETWORK)
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) AudioHandoff.started(app, AudioSource.NARRATION) else AudioHandoff.stopped(AudioSource.NARRATION)
@@ -68,6 +75,7 @@ class ReadAlongPlayback(
         player.setMediaItems(timeline.tracks.mapIndexed { index, track ->
             val source = sources[index]
             MediaItem.Builder().setUri(Uri.parse(source.uri)).setCustomCacheKey(source.cacheKey.ifEmpty { null })
+                .setMediaMetadata(MediaMetadata.Builder().setTitle(title.ifBlank { null }).setArtist("Read along").build())
                 .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder()
                     .setStartPositionMs(source.startMs + track.startMs)
                     .setEndPositionMs(source.startMs + track.startMs + track.durationMs).build()
@@ -94,6 +102,8 @@ class ReadAlongPlayback(
             pauseGeneration++
             engaged = true
             if (player.playbackState == Player.STATE_ENDED) seek(ReadAlongPosition(0, 0))
+            // The service that holds the voice with the screen off starts with it (#49).
+            NarrationHost.engage(app, this)
             player.play()
         }
     }
@@ -137,6 +147,35 @@ class ReadAlongPlayback(
         return true
     }
 
+    /**
+     * What the media session drives (#49): the player, but play and pause go through [toggle] and [pause] so the
+     * place is kept as from the dock, and the notification's skips are the dock's jumps by the seek step the
+     * player uses everywhere. A sentence is too small to skip from a lock screen, and a track is a stretch of the
+     * recording the book is cut into, not a chapter.
+     */
+    internal fun sessionPlayer(): Player = object : ForwardingPlayer(player) {
+        private fun skipMs() = com.pocketds.hub.settings.PlaybackSettings.seekSeconds(app) * 1_000L
+        // A book of one recording has no next track, which would leave the notification without a skip forward.
+        override fun getAvailableCommands(): Player.Commands = super.getAvailableCommands().buildUpon()
+            .addAll(Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_FORWARD, Player.COMMAND_SEEK_BACK).build()
+        override fun isCommandAvailable(command: Int): Boolean = availableCommands.contains(command)
+        override fun play() { if (!player.playWhenReady) toggle() }
+        override fun pause() { this@ReadAlongPlayback.pause() }
+        override fun setPlayWhenReady(playWhenReady: Boolean) { if (playWhenReady) play() else pause() }
+        override fun seekForward() = jump(skipMs())
+        override fun seekBack() = jump(-skipMs())
+        override fun seekToNext() = jump(skipMs())
+        override fun seekToPrevious() = jump(-skipMs())
+        override fun seekToNextMediaItem() = jump(skipMs())
+        override fun seekToPreviousMediaItem() = jump(-skipMs())
+    }
+
     private fun save(completed: Boolean = player.playbackState == Player.STATE_ENDED) = onSave(position, completed)
-    fun release() { pause(); AudioHandoff.unregister(AudioSource.NARRATION, pauser); scope.cancel(); player.release() }
+    fun release() {
+        pause()
+        NarrationHost.release(this)
+        AudioHandoff.unregister(AudioSource.NARRATION, pauser)
+        scope.cancel()
+        player.release()
+    }
 }

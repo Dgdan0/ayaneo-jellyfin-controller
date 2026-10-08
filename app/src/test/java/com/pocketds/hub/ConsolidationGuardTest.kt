@@ -140,6 +140,13 @@ class ConsolidationGuardTest {
         Rule(Regex("""get(Boolean|Float|String)\("(publisherStyles|textAlignment|lineHeight|hyphenation)",\s*+(?!defaults\.)"""),
             "EpubReaderPreferences()'s own defaults in EpubAppearanceStore.decode: one place for what a device with nothing " +
                 "stored reads in (#42, Part 3)"),
+        Rule(Regex("""getElementById\([^\n]*getBoundingClientRect|getBoundingClientRect[^\n]*getElementById"""),
+            "ReadAlongPageProbe.script, read by ReadAlongPageSync: what a page shows of the narration is one script and one piece of " +
+                "maths, so the voice turning the page, a page turned by hand and Play from the page all agree on where a page begins " +
+                "and ends, in a sentence too (#49)",
+            setOf("reader/ReadAlongPageProbe.kt")),
+        Rule(Regex("""\bnarrationPill\b"""),
+            "the dock alone: nothing floats over the page while the voice reads (#49); the corners show and the menu brings the dock"),
         Rule(Regex("""\bisComplete\([^)]*\)\s*\)\s*return\s+\w+\.completeFile"""),
             "EpubEdition.open: a book that is kept is asked about when it opens (If-None-Match against the ETag kept), " +
                 "so a copy from before the hub rewrote font sizes is replaced rather than reused for ever (#41)"),

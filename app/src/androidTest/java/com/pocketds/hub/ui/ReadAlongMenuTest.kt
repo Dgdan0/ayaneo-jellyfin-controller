@@ -16,6 +16,7 @@ import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.reader.EpubAppearanceStore
 import com.pocketds.hub.reader.EpubReaderPreferences
 import com.pocketds.hub.reader.EpubReaderScreen
+import com.pocketds.hub.reader.NarrationHost
 import com.pocketds.hub.reader.ReadAlongDock
 import com.pocketds.hub.reader.ReadAlongPlayback
 import com.pocketds.hub.reader.ReaderBars
@@ -96,7 +97,6 @@ class ReadAlongMenuTest {
         fun narration(): ReadAlongPlayback? = screen!!.field("narration")
         fun dock() = screen!!.field<ReadAlongDock>("narrationDock")
         fun bars() = screen!!.field<ReaderBars>("bars")
-        fun pill() = screen!!.field<TextView>("narrationPill")
         try {
             EpubAppearanceStore.save(activity, EpubReaderPreferences())
             ComfortSettings.save(activity, ScreenComfort())
@@ -140,13 +140,15 @@ class ReadAlongMenuTest {
             tap(page())
             until("a tap to close the menu") { !menu() }
             until("the page to fill the screen") { page().scaleY == 1f }
-            until("the pill") { pill().isShown && pill().text.contains("Following") }
             delay(1_500)
             withContext(Dispatchers.Main) {
                 assertTrue("The tap left the voice reading", narration()!!.isPlaying)
                 assertFalse("The menu stays closed while the voice reads on", menu())
+                // Nothing floats over the page while it reads (#49): the dock goes with the menu and no pill takes its place.
+                assertTrue("No pill over the page", all(root).none { it is TextView && it.isShown && (it.text.contains("Following") || it.text.startsWith("\u25B6")) })
+                assertTrue("The voice is held by its service", NarrationHost.isHeld)
             }
-            shot(activity, "02-closed-with-pill")
+            shot(activity, "02-closed-no-pill")
 
             // A tap at the page's edge turns no page, and leaves the voice alone too.
             tap(page(), fx = .1f)
