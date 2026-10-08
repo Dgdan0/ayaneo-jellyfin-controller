@@ -43,15 +43,25 @@ struct BookReaderView: View {
             #endif
         }
         #else
-        BookReaderUnavailable(work: work)
+        BookReaderUnavailable(work: work, readAlong: readAlong)
         #endif
     }
 }
 
-/// The Mac until it has a reader of its own: Readium's navigator is UIKit.
+/// The Mac, which has no ebook reader (Readium's navigator is UIKit, and the
+/// owner left a Mac reader for later, #25): it says plainly where the book
+/// reads, and its one button closes.
 struct BookReaderUnavailable: View {
     let work: ReadingWork
+    var readAlong = false
     @Environment(\.closeReader) private var closeReader
+
+    /// Where it reads instead; read-along's audiobook still plays here.
+    private var words: String {
+        readAlong
+            ? "Read along on the iPad, iPhone or Pocket. The Mac doesn't open ebooks, but this book's audiobook plays here: choose Listen."
+            : "Read this on the iPad, iPhone or Pocket. The Mac doesn't open ebooks."
+    }
 
     var body: some View {
         ZStack {
@@ -60,7 +70,7 @@ struct BookReaderUnavailable: View {
                 Text(work.title)
                     .font(HubType.heading(26, weight: .heavy, relativeTo: .title))
                     .multilineTextAlignment(.center)
-                Text("Ebooks open on the iPad and the iPhone for now. The Mac reads them in a later build.")
+                Text(words)
                     .font(HubType.body(15, relativeTo: .body))
                     .foregroundStyle(.white.opacity(0.75))
                     .multilineTextAlignment(.center)
