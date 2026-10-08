@@ -1,5 +1,6 @@
 package com.pocketds.hub.screens.library
 
+import com.pocketds.hub.model.ReadingEdition
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.state.Fmt
 
@@ -41,9 +42,20 @@ object ReadingBookFacts {
             comicLine(p)
         ).joinToString(" · ")
         val percent = Fmt.readingPercentLabel(p.percentage)
-        val pages = work.editions.filter { it.kind != "audiobook" }.maxOfOrNull { it.pageCount } ?: 0
-        return if (pages > 0) "$percent · page ${(p.percentage * pages).toInt().coerceIn(1, pages)} of $pages" else "$percent read"
+        val pages = pages(work)
+        return if (pages > 0) "$percent · page ${page(p.percentage, pages)} of $pages" else "$percent read"
     }
+
+    /**
+     * The book's own page count, from the hub: the longest of its text editions (an audiobook has
+     * none), 0 when the hub has none. The reader's "Page in book" corner counts the same pages (#42).
+     */
+    fun pages(editions: List<ReadingEdition>): Int = editions.filter { it.kind != "audiobook" }.maxOfOrNull { it.pageCount }?.coerceAtLeast(0) ?: 0
+
+    fun pages(work: ReadingWork): Int = pages(work.editions)
+
+    /** The page [fraction] of the way through a book of [pages] pages: the first at the start, the last at the end; 0 without a page count. */
+    fun page(fraction: Double, pages: Int): Int = if (pages <= 0) 0 else (fraction * pages).toInt().coerceIn(1, pages)
 
     /** Pages of the longest text edition and the length of the audiobook, with its narrator. */
     fun length(work: ReadingWork): List<String> = buildList {
@@ -54,8 +66,7 @@ object ReadingBookFacts {
             add(if (work.kind == "manga") plural(issues, "chapter") else plural(issues, "issue"))
             return@buildList
         }
-        work.editions.filter { it.kind != "audiobook" }.maxOfOrNull { it.pageCount }
-            ?.takeIf { it > 0 }?.let { add("$it pages") }
+        pages(work).takeIf { it > 0 }?.let { add("$it pages") }
         work.editions.firstOrNull { it.kind == "audiobook" }?.let { audio ->
             Fmt.runtime(audio.durationMs / 1000).takeIf { it.isNotBlank() }?.let(::add)
             audio.narrator.takeIf { it.isNotBlank() }?.let { add("read by $it") }

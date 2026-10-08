@@ -1525,7 +1525,8 @@ class ReadingWorkScreen(
                 readAlongAvailable = ReadingWorkPresentation.readAlongEditions(work).any { it.sourceItemId == sourceItemId },
                 alignedEditions = ReadingWorkPresentation.readAlongEditions(work),
                 audioEditions = ReadingWorkPresentation.audiobooks(work),
-                ebookSourceItemId = work.editions.firstOrNull { it.kind == "ebook" }?.sourceItemId ?: sourceItemId
+                ebookSourceItemId = work.editions.firstOrNull { it.kind == "ebook" }?.sourceItemId ?: sourceItemId,
+                bookPages = ReadingBookFacts.pages(work)
             ) else PagedImageReaderScreen(
                 api = api,
                 workId = work.id,

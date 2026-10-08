@@ -605,7 +605,9 @@ class AudiobookScreen(
         host.push(EpubReaderScreen(api, workId, target.sourceItemId, title, ringVisible,
             onProgressChanged, readAlong = readAlong, readAlongAvailable = aligned != null,
             alignedEditions = alignedOptions, audioEditions = narrations,
-            ebookSourceItemId = ebook?.sourceItemId ?: target.sourceItemId))
+            ebookSourceItemId = ebook?.sourceItemId ?: target.sourceItemId,
+            // The book's own page count, as its page and Resume say it (#42).
+            bookPages = com.pocketds.hub.screens.library.ReadingBookFacts.pages(book?.editions ?: (listOfNotNull(ebook) + alignedOptions))))
     }
 
     private fun showReadingModes() {

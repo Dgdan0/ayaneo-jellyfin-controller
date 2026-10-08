@@ -55,6 +55,25 @@ class ReadingBookFactsTest {
     }
 
     @Test
+    fun `a book's pages are the longest text edition's, and its page is how far through, first to last`() {
+        val editions = listOf(ReadingEdition(kind = "audiobook", pageCount = 9000), ReadingEdition(kind = "ebook", pageCount = 735),
+            ReadingEdition(kind = "readaloud", pageCount = 740))
+        assertEquals(740, ReadingBookFacts.pages(editions))
+        assertEquals(735, ReadingBookFacts.pages(editions.take(2)))
+        assertEquals(0, ReadingBookFacts.pages(editions.take(1)))
+        assertEquals(0, ReadingBookFacts.pages(emptyList()))
+        assertEquals(0, ReadingBookFacts.pages(listOf(ReadingEdition(kind = "ebook", pageCount = -5))))
+        assertEquals(363, ReadingBookFacts.page(0.4945, 735))
+        assertEquals(1, ReadingBookFacts.page(0.0, 735))
+        assertEquals(735, ReadingBookFacts.page(1.0, 735))
+        assertEquals(735, ReadingBookFacts.page(3.0, 735))
+        assertEquals(1, ReadingBookFacts.page(-1.0, 735))
+        // Without a page count there is no page, and no failure.
+        assertEquals(0, ReadingBookFacts.page(0.5, 0))
+        assertEquals(0, ReadingBookFacts.page(0.5, -1))
+    }
+
+    @Test
     fun `a series page says which book and how many are finished`() {
         fun book(n: Int, pct: Double?, done: Boolean = false) = com.pocketds.hub.model.ReadingSectionItem(
             workId = "b$n", number = "$n", progress = pct?.let { com.pocketds.hub.model.ReadingProgress(percentage = it, completed = done) })

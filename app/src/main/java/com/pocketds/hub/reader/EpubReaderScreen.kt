@@ -64,6 +64,7 @@ import org.readium.r2.navigator.Decoration
 import org.readium.r2.navigator.html.HtmlDecorationTemplate
 import org.readium.r2.navigator.html.HtmlDecorationTemplates
 import com.pocketds.hub.settings.ComfortSettings
+import com.pocketds.hub.settings.PageInfoSettings
 import com.pocketds.hub.ui.ComfortLayerView
 import com.pocketds.hub.ui.ScreenComfort
 import kotlinx.serialization.json.Json
@@ -126,7 +127,12 @@ class EpubReaderScreen(
     private val readAlongAvailable: Boolean = false,
     private val alignedEditions: List<ReadingEdition> = emptyList(),
     private val audioEditions: List<ReadingEdition> = emptyList(),
-    private val ebookSourceItemId: String = sourceItemId
+    private val ebookSourceItemId: String = sourceItemId,
+    /**
+     * The book's own page count from the hub ([ReadingBookFacts.pages]), 0 when it has none: the corners'
+     * "Page in book" counts those pages, as the book's page and Resume do, and Readium's positions only without (#42).
+     */
+    private val bookPages: Int = 0
 ) : Screen {
     override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val immersive = true
@@ -134,7 +140,12 @@ class EpubReaderScreen(
 
     private lateinit var host: ScreenHost
     private lateinit var root: FrameLayout
+    /** The page, which the menu shrinks: Readium's host inside it, and Kindle's corners over it (#42). */
     private lateinit var navigatorContainer: FrameLayout
+    /** Where Readium's navigator lives, inset from the top and the foot by the strips the corners keep clear (#42). */
+    private lateinit var pageHost: FrameLayout
+    private lateinit var pageInfo: PageInfoView
+    private var pageChoice = PageInfoChoice()
     private lateinit var loading: TextView
     private lateinit var bars: ReaderBars
     private lateinit var topBar: LinearLayout
@@ -197,6 +208,8 @@ class EpubReaderScreen(
     private var stepAnimator: ValueAnimator? = null
     /** Time left (E3): the positions in each part, this book's pace, and where it was last measured from. */
     private var sectionSizes: List<Int> = emptyList()
+    /** Where each part of the book starts in it, as how far through ([PageInfo.sectionSpan]). */
+    private var sectionStarts: List<Double?> = emptyList()
     private var pace = ReadingPace()
     private var pacePrior = ReadingPace.DEFAULT_MINUTES_PER_POSITION
     private val paceTracker = ReadingPace.Tracker()
@@ -238,6 +251,11 @@ class EpubReaderScreen(
             id = View.generateViewId()
             setBackgroundColor(Color.BLACK)
         }
+        pageHost =FrameLayout(host.viewContext).apply { id = View.generateViewId() }
+        navigatorContainer.addView(pageHost, FrameLayout.LayoutParams(MATCH, MATCH))
+        pageInfo = PageInfoView(host.viewContext).apply { onCycle = ::cyclePageInfo }
+        navigatorContainer.addView(pageInfo, FrameLayout.LayoutParams(MATCH, MATCH))
+        pageChoice = PageInfoSettings.load(host.viewContext)
         root.addView(navigatorContainer, FrameLayout.LayoutParams(MATCH, MATCH))
         loading = TextView(host.viewContext).apply {
             text = "Preparing book…"
@@ -279,8 +297,9 @@ class EpubReaderScreen(
         // The owner's choice for books (X7): the page makes room, shrinking with the menu round it.
         // Read along is the book with a player (#21): the narration's dock is the menu's lower bar,
         // so the page makes room for it as for the book's row, and it goes with the menu.
-        pagePreview = ReaderPagePreviewController(root, navigatorContainer, bars.top, bars.bottom, listOf(overlay, appearance))
+        pagePreview = ReaderPagePreviewController(root, navigatorContainer, bars.top, bars.bottom, listOf(overlay, appearance), corners = pageInfo)
         focusedControl = controls.indexOfLast { it.contentDescription == "Next page" }.coerceAtLeast(0)
+        applyPageInfo()
         setControlsVisible(false)
         return root
     }
@@ -294,6 +313,8 @@ class EpubReaderScreen(
             comfort = kept; comfortLayer.apply(kept)
             preferences = shared; preferenceState = EpubPreferenceState(shared); applyPreferences()
         }
+        PageInfoSettings.load(host.viewContext).let { if (it != pageChoice) { pageChoice = it; applyPageInfo() } }
+        pageInfo.start()
         val previousAudio = ReadingEntryPreferences.get(host.viewContext, workId)?.audioSourceItemId.orEmpty()
         ReadingEntryPreferences.put(host.viewContext, workId,
             if (readAlong) ReadingEntryMode.READ_ALONG else ReadingEntryMode.READ,
@@ -303,6 +324,7 @@ class EpubReaderScreen(
     }
 
     override fun onHide() {
+        pageInfo.stop()
         cancelSearch()
         closeDictionary(resumeNarration = false)
         if (::footnoteCard.isInitialized) footnoteCard.dismiss()
@@ -413,6 +435,7 @@ class EpubReaderScreen(
                 updateDock()
             }
             ReaderCommand.Keys -> showKeys()
+            ReaderCommand.NextPageInfo -> cyclePageInfo()
             else -> Unit
         }
         return true
@@ -630,6 +653,7 @@ class EpubReaderScreen(
         bookPositions = withContext(Dispatchers.Default) { opened.positions() }
         bookSections = bookPositions.distinctBy { it.href }
         sectionSizes = bookSections.map { section -> bookPositions.count { it.href == section.href } }
+        sectionStarts = bookSections.map { it.locations.totalProgression }
 
         val factory = EpubNavigatorFactory(opened).createFragmentFactory(
             initialLocator = initialLocator,
@@ -650,7 +674,7 @@ class EpubReaderScreen(
         val fragment = factory.instantiate(activity.classLoader, EpubNavigatorFragment::class.java.name)
             as EpubNavigatorFragment
         activity.supportFragmentManager.beginTransaction()
-            .add(navigatorContainer.id, fragment, fragmentTag())
+            .add(pageHost.id, fragment, fragmentTag())
             .commitNowAllowingStateLoss()
         navigator = fragment
         fragment.addInputListener(object : org.readium.r2.navigator.input.InputListener {
@@ -1187,7 +1211,8 @@ class EpubReaderScreen(
         host.back()
         host.push(EpubReaderScreen(api, workId, targetSourceItemId, title, ringVisible,
             onProgressChanged, readAlong = aligned, readAlongAvailable = readAlongAvailable,
-            alignedEditions = alignedEditions, audioEditions = audioEditions, ebookSourceItemId = ebookSourceItemId))
+            alignedEditions = alignedEditions, audioEditions = audioEditions, ebookSourceItemId = ebookSourceItemId,
+            bookPages = bookPages))
     }
 
     private fun locatorJson(locator: Locator): kotlinx.serialization.json.JsonObject =
@@ -1245,10 +1270,8 @@ class EpubReaderScreen(
     // display and scrubber within each resource while leaving saved Readium locators untouched.
     private fun bookProgress(): Double? {
         val current = latestLocator ?: return null
-        val index = bookSections.indexOfFirst { it.href == current.href }
-        if (index < 0) return current.locations.totalProgression
-        val start = bookSections[index].locations.totalProgression ?: return current.locations.totalProgression
-        val end = bookSections.getOrNull(index + 1)?.locations?.totalProgression ?: 1.0
+        val (start, end) = PageInfo.sectionSpan(sectionStarts, bookSections.indexOfFirst { it.href == current.href })
+            ?: return current.locations.totalProgression
         return (start + (end - start) * (current.locations.progression ?: 0.0)).coerceIn(0.0, 1.0)
     }
 
@@ -1411,13 +1434,62 @@ class EpubReaderScreen(
             applyPreferences()
         }, onClose = {
             host.refreshHints()
-        })
+        }, pageInfo = pageChoice, onPageInfoChanged = ::setPageInfo)
         host.refreshHints()
     }
 
     private fun applyPreferences() {
         navigator?.submitPreferences(readiumPreferences(preferences))
+        // The corners' ink and the strips' colour follow the page.
+        if (::pageInfo.isInitialized) applyPageInfo()
     }
+
+    /** The page's colours, whatever the theme: the palette's, Comfort's black page, or what Readium draws with no theme. */
+    private fun pageColors(): Pair<Int, Int> = pagePalette(preferences) ?: (Color.WHITE to DEFAULT_PAGE_INK)
+
+    /**
+     * Kindle's corners (#42): the strips the page keeps clear of the text (the navigator is inset by them,
+     * and they take the page's colour), the corners' ink, and what they say.
+     */
+    private fun applyPageInfo() {
+        navigatorContainer.setBackgroundColor(pageColors().first)
+        val strip = dp(PageInfo.STRIP_DP)
+        val top = if (pageChoice.topStrip) strip else 0
+        val bottom = if (pageChoice.bottomStrip) strip else 0
+        (pageHost.layoutParams as FrameLayout.LayoutParams).let { margins ->
+            if (margins.topMargin != top || margins.bottomMargin != bottom) {
+                margins.topMargin = top; margins.bottomMargin = bottom
+                pageHost.requestLayout()
+            }
+        }
+        // The narration's pill rests above the bottom strip, not on its percentage.
+        (narrationPill.layoutParams as FrameLayout.LayoutParams).let { margins ->
+            if (margins.bottomMargin != dp(12) + bottom) { margins.bottomMargin = dp(12) + bottom; narrationPill.requestLayout() }
+        }
+        refreshPageInfo()
+    }
+
+    /** What the corners say now: the same place and time left the menu's line is made from. */
+    private fun refreshPageInfo() {
+        if (!::pageInfo.isInitialized) return
+        val current = latestLocator
+        val section = if (current == null) -1 else bookSections.indexOfFirst { it.href == current.href }
+        val place = if (current == null) PagePlace() else PageInfo.place(
+            bookPages, sectionSizes, section, current.locations.progression ?: 0.0,
+            PageInfo.sectionSpan(sectionStarts, section), bookProgress(), currentTimeLeft()
+        )
+        pageInfo.show(pageChoice, place, PageInfo.ink(pageColors().second),
+            dp(PageInfo.sideInsetDp(preferences.pageMargins)), dp(PageInfo.STRIP_DP))
+    }
+
+    private fun setPageInfo(value: PageInfoChoice) {
+        pageChoice = value
+        PageInfoSettings.save(host.viewContext, value)
+        applyPageInfo()
+    }
+
+    /** A tap on the bottom left, or L3: the next choice, as on Kindle (#42). */
+    private fun cyclePageInfo() = setPageInfo(pageChoice.copy(corner = PageInfo.next(pageChoice.corner)))
 
     private fun loadPreferences() = EpubAppearanceStore.load(host.viewContext)
 
@@ -1447,6 +1519,7 @@ class EpubReaderScreen(
         lineHeight = value.lineHeight.toDouble(),
         pageMargins = value.pageMargins.toDouble(),
         publisherStyles = value.publisherStyles,
+        hyphens = value.hyphenation,
         scroll = value.scroll && !value.onePagePerScreen,
         textAlign = when (value.textAlignment) {
             "justify" -> TextAlign.JUSTIFY
@@ -1469,7 +1542,12 @@ class EpubReaderScreen(
     private fun moveControlFocus(direction: Direction) {
         val focused = root.findFocus()
         val axis = when (direction) { Direction.LEFT -> View.FOCUS_LEFT; Direction.RIGHT -> View.FOCUS_RIGHT; Direction.UP -> View.FOCUS_UP; Direction.DOWN -> View.FOCUS_DOWN }
-        val next = FocusFinder.getInstance().findNextFocus(root, focused, axis)
+        // The page is never where the menu's focus goes, and the search must not find it: with a strip kept above
+        // the text for the corners (#42) its top lies below the top bar's buttons, which made it the nearest thing
+        // under them, ahead of the position row.
+        pageHost.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        val next = try { FocusFinder.getInstance().findNextFocus(root, focused, axis) }
+            finally { pageHost.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS }
         if (next != null && next in controls && next.isShown) { focusedControl = controls.indexOf(next); next.requestFocus() }
     }
 
@@ -1515,14 +1593,20 @@ class EpubReaderScreen(
      */
     private fun updateTimeLeft() {
         if (!::timeLeftView.isInitialized) return
+        val left = currentTimeLeft()
+        timeLeftView.text = left?.label().orEmpty()
+        timeLeftView.visibility = if (left == null) View.GONE else View.VISIBLE
+        refreshPageInfo()
+    }
+
+    /** The one measure of time left, for the menu's line and the page's corner (#42): no second pace. */
+    private fun currentTimeLeft(): TimeLeft? {
         val audio = narration
         val current = latestLocator
-        val left = if (audio != null && following) TimeLeft.ofNarration(audio.timeline, audio.position, audio.speed)
+        return if (audio != null && following) TimeLeft.ofNarration(audio.timeline, audio.position, audio.speed)
             else if (current == null) null
             else TimeLeft.ofPositions(sectionSizes, bookSections.indexOfFirst { it.href == current.href },
                 current.locations.progression ?: 0.0, pace.minutesPerPosition(pacePrior))
-        timeLeftView.text = left?.label().orEmpty()
-        timeLeftView.visibility = if (left == null) View.GONE else View.VISIBLE
     }
 
     private fun paceKey(): String = "$workId:$sourceItemId"
@@ -1619,5 +1703,7 @@ class EpubReaderScreen(
         const val LINK_MS = 3_000L
         /** The lower bar: the position row over the book's line, with their padding. */
         const val BOTTOM_ROW_DP = 44 + 30 + 8
+        /** The ink of the page Readium draws with no theme of its own. */
+        const val DEFAULT_PAGE_INK = 0xFF121212.toInt()
     }
 }

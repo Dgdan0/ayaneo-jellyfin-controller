@@ -48,6 +48,8 @@ sealed interface ReaderCommand {
     data object FollowNarration : ReaderCommand
     /** Read along, L1 and R1: the sentence before or after (#16, A5). */
     data class Sentence(val delta: Int) : ReaderCommand
+    /** Books, L3: the page's bottom-left corner says the next thing (#42), as a tap on it does. */
+    data object NextPageInfo : ReaderCommand
     /** Comics: show or hide the controls. Books: open the menu, or go back to the page. */
     data class Controls(val visible: Boolean) : ReaderCommand
     data object Leave : ReaderCommand
@@ -134,8 +136,9 @@ object ReaderPadMap {
         is PadAction.Click -> when {
             !action.down -> ReaderCommand.Ignore
             action.stick == Stick.RIGHT -> ReaderCommand.Keys
+            // Reading along, L3 is the voice's: the corner is one tap away, and the sheet's (#42).
             state.narration -> ReaderCommand.FollowNarration
-            else -> ReaderCommand.Ignore
+            else -> ReaderCommand.NextPageInfo
         }
     }
 
@@ -173,6 +176,7 @@ object ReaderPadMap {
         is ReaderCommand.Magnifier -> "Magnifier, while held"
         ReaderCommand.FollowNarration -> "Back to the narration"
         is ReaderCommand.Sentence -> if (command.delta > 0) "Next sentence" else "Previous sentence"
+        ReaderCommand.NextPageInfo -> "Page info"
         is ReaderCommand.Controls -> when {
             kind == ReaderKind.BOOK -> if (command.visible) "Menu" else "Back to the page"
             command.visible -> "Controls"
@@ -269,7 +273,8 @@ object ReaderPadMap {
         ReaderKind.COMIC to listOf(A to PadAction.Activate, B to PadAction.Back, X to PadAction.Primary,
             Y to PadAction.Secondary, SELECT to PadAction.Refresh, R3 to PadAction.Click(Stick.RIGHT)),
         ReaderKind.BOOK to listOf(A to PadAction.Activate, B to PadAction.Back, X to PadAction.Primary,
-            Y to PadAction.Secondary, START to PadAction.Menu, SELECT to PadAction.Refresh, R3 to PadAction.Click(Stick.RIGHT)),
+            Y to PadAction.Secondary, START to PadAction.Menu, SELECT to PadAction.Refresh,
+            L3 to PadAction.Click(Stick.LEFT), R3 to PadAction.Click(Stick.RIGHT)),
         ReaderKind.AUDIOBOOK to listOf(A to PadAction.Activate, B to PadAction.Back, X to PadAction.Primary,
             L1 to PadAction.Section(-1), R1 to PadAction.Section(1), L2 to PadAction.Page(Direction.UP),
             R2 to PadAction.Page(Direction.DOWN), R3 to PadAction.Click(Stick.RIGHT))

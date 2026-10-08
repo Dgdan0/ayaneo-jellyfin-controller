@@ -117,6 +117,20 @@ class ConsolidationGuardTest {
             "EpubPackageCache.remove(workId, sourceItemId): the ETag kept beside a book goes with its copy, or the next " +
                 "opening is vouched for by a tag that belongs to other bytes (#41)",
             setOf("reader/EpubPackageCache.kt")),
+        Rule(Regex("""\} left in (chapter|book)""""),
+            "TimeLeft.label / chapterLabel / bookLabel: the menu's line and a page's corner say the time left in one set of words, " +
+                "from the one pace (#42)",
+            setOf("reader/ReadingPace.kt")),
+        Rule(Regex("""maxOfOrNull \{ it\.pageCount \}|\(\w+(\.\w+)? \* pages\)\.toInt\(\)"""),
+            "ReadingBookFacts.pages / ReadingBookFacts.page: a book's page count and its page, from how far through, in one place, so " +
+                "its page, Resume and the reader's corner say the same page (#42)",
+            setOf("screens/library/ReadingBookFacts.kt")),
+        Rule(Regex("""is24HourFormat"""),
+            "PageInfoView with PageInfo.clock: the time on a page's corner follows the device's 12 or 24 hour setting in one place (#42)",
+            setOf("reader/PageInfoView.kt")),
+        Rule(Regex("""get(Boolean|Float|String)\("(publisherStyles|textAlignment|lineHeight|hyphenation)",\s*+(?!defaults\.)"""),
+            "EpubReaderPreferences()'s own defaults in EpubAppearanceStore.decode: one place for what a device with nothing " +
+                "stored reads in (#42, Part 3)"),
         Rule(Regex("""\bisComplete\([^)]*\)\s*\)\s*return\s+\w+\.completeFile"""),
             "EpubEdition.open: a book that is kept is asked about when it opens (If-None-Match against the ETag kept), " +
                 "so a copy from before the hub rewrote font sizes is replaced rather than reused for ever (#41)"),
