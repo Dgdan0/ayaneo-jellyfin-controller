@@ -17,6 +17,9 @@ type publicationUpstreamState struct {
 	chapterInfoCalls int
 	pageCalls        int
 	saved            kavita.Progress
+	// unread is each series Kavita was told to mark unread, and unreadFails makes it refuse (#60).
+	unread      []int
+	unreadFails bool
 }
 
 func newReadingPublicationUpstream(t *testing.T, state *publicationUpstreamState) *httptest.Server {
@@ -61,6 +64,19 @@ func newReadingPublicationUpstream(t *testing.T, state *publicationUpstreamState
 				t.Fatal(err)
 			}
 			w.WriteHeader(http.StatusNoContent)
+		case "/api/Reader/mark-unread":
+			var body struct {
+				SeriesID int `json:"seriesId"`
+			}
+			if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&body) != nil {
+				t.Fatalf("mark-unread was asked %s with an unreadable body", r.Method)
+			}
+			if state.unreadFails {
+				http.Error(w, "kavita is busy", http.StatusInternalServerError)
+				return
+			}
+			state.unread = append(state.unread, body.SeriesID)
+			w.WriteHeader(http.StatusOK)
 		default:
 			http.NotFound(w, r)
 		}

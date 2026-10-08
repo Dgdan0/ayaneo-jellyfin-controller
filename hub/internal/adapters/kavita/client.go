@@ -354,6 +354,17 @@ func (c *Client) SaveProgress(ctx context.Context, progress Progress) error {
 	return c.base.PostJSON(ctx, "/api/Reader/progress", progress, nil)
 }
 
+// MarkSeriesUnread is Kavita's own "mark unread" for a whole series: every volume and chapter of it
+// goes back to no page read (#60).
+func (c *Client) MarkSeriesUnread(ctx context.Context, seriesID int) error {
+	if seriesID <= 0 {
+		return fmt.Errorf("kavita: invalid series id")
+	}
+	return c.base.PostJSON(ctx, "/api/Reader/mark-unread", struct {
+		SeriesID int `json:"seriesId"`
+	}{SeriesID: seriesID}, nil)
+}
+
 func (c *Client) Cover(ctx context.Context, seriesID int) ([]byte, string, error) {
 	if seriesID <= 0 {
 		return nil, "", fmt.Errorf("kavita: invalid series id")

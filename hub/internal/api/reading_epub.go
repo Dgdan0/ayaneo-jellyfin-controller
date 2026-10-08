@@ -47,6 +47,9 @@ type ReadingEpubPosition struct {
 	Timestamp    int64                 `json:"timestamp,omitempty"`
 	UpdatedAt    string                `json:"updatedAt,omitempty"`
 	Audio        *ReadingAudioPosition `json:"audio,omitempty"`
+	// ResetAt is when the book was last started over (the hub's milliseconds), so a device that
+	// has not seen it drops the place it kept (#60). Absent when it never was.
+	ResetAt int64 `json:"resetAt,omitempty"`
 }
 
 func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
@@ -177,13 +180,14 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 			writeUpstreamError(w, r, "storyteller", err)
 			return
 		}
+		resetAt := s.readingResets.source("storyteller", strconv.FormatInt(bookID, 10))
 		if position == nil {
-			writeJSON(w, http.StatusOK, ReadingEpubPosition{WorkID: workID, SourceItemID: sourceItemID, Locator: json.RawMessage("null")})
+			writeJSON(w, http.StatusOK, ReadingEpubPosition{WorkID: workID, SourceItemID: sourceItemID, Locator: json.RawMessage("null"), ResetAt: resetAt})
 			return
 		}
 		shown := ReadingEpubPosition{
 			WorkID: workID, SourceItemID: sourceItemID, Locator: position.Locator,
-			Timestamp: position.Timestamp, UpdatedAt: position.UpdatedAt,
+			Timestamp: position.Timestamp, UpdatedAt: position.UpdatedAt, ResetAt: resetAt,
 		}
 		if sentence, audio := s.textPlaceOfAudio(ctx, bookID, position); sentence != nil {
 			shown.Locator, shown.Audio = sentence, audio
@@ -202,6 +206,9 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 		Timestamp       int64           `json:"timestamp"`
 		CheckBase       bool            `json:"checkBase"`
 		ExpectedLocator json.RawMessage `json:"expectedLocator"`
+		// ResetSeen is the start over this device last knew of, when it sends one (#60): a write made
+		// from a book since started over is refused with its own code.
+		ResetSeen *int64 `json:"resetSeen"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	decoder.DisallowUnknownFields()
@@ -212,9 +219,15 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 	unlock := lockReadingCheckpoint("storyteller", strconv.FormatInt(bookID, 10))
 	defer unlock()
 	// What is held now: the base is checked against it, and the stamp follows it.
-	current, err := s.currentStorytellerPosition(ctx, bookID)
+	current, held, err := s.storytellerPlace(ctx, bookID)
 	if err != nil {
 		writeUpstreamError(w, r, "storyteller", err)
+		return
+	}
+	if s.staleAfterReset("storyteller", strconv.FormatInt(bookID, 10), body.ResetSeen, held, func() bool {
+		return body.CheckBase && len(body.ExpectedLocator) > 0 && string(body.ExpectedLocator) != "null" && sameReadingLocator(body.ExpectedLocator, held.Locator)
+	}) {
+		writePositionReset(w, r)
 		return
 	}
 	if body.CheckBase {
@@ -232,7 +245,7 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 			}
 		}
 	}
-	stamp := s.nextPositionStamp(current)
+	stamp := s.stampAfterReset(bookID, held)
 	if err := s.storyteller.SavePosition(ctx, bookID, body.Locator, stamp); err != nil {
 		var upstream *httpx.Error
 		if errors.As(err, &upstream) && upstream.Status == http.StatusConflict {
@@ -375,9 +388,16 @@ func writeStorytellerNewerPosition(w http.ResponseWriter, r *http.Request) {
 	writeError(w, r, http.StatusConflict, Error{Code: codeReadingPositionConflict, Service: "storyteller", Message: "a newer reading position already exists"})
 }
 
-// currentStorytellerPosition is the account's place in a book, or nil when it has
-// none (Storyteller answers 404 for a book never opened).
+// currentStorytellerPosition is the account's place in a book as it counts, or nil when it has
+// none (Storyteller answers 404 for a book never opened) or the book was started over since it
+// was written (#60).
 func (s *Server) currentStorytellerPosition(ctx context.Context, bookID int64) (*storyteller.PositionRecord, error) {
+	live, _, err := s.storytellerPlace(ctx, bookID)
+	return live, err
+}
+
+// rawStorytellerPosition is the place as Storyteller holds it, whatever the hub makes of it.
+func (s *Server) rawStorytellerPosition(ctx context.Context, bookID int64) (*storyteller.PositionRecord, error) {
 	record, err := s.storyteller.Position(ctx, bookID)
 	if err != nil {
 		var upstream *httpx.Error

@@ -35,6 +35,8 @@ type ReadingPublicationManifest struct {
 	DoublePairs          map[string]int           `json:"doublePairs"`
 	PreviousSourceItemID string                   `json:"previousSourceItemId,omitempty"`
 	NextSourceItemID     string                   `json:"nextSourceItemId,omitempty"`
+	// ResetAt is when the series was last started over (#60); absent when it never was.
+	ResetAt int64 `json:"resetAt,omitempty"`
 }
 
 type readingPublicationContext struct {
@@ -106,6 +108,8 @@ func (s *Server) handleReadingPublicationProgress(w http.ResponseWriter, r *http
 	var body struct {
 		PageIndex    int  `json:"pageIndex"`
 		ExpectedPage *int `json:"expectedPage"`
+		// ResetSeen is the start over this device last knew of, when it sends one (#60).
+		ResetSeen *int64 `json:"resetSeen"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
 	decoder.DisallowUnknownFields()
@@ -119,6 +123,10 @@ func (s *Server) handleReadingPublicationProgress(w http.ResponseWriter, r *http
 	defer unlock()
 	publication, ok := s.resolveReadingPublication(w, r, ctx, body.ExpectedPage != nil)
 	if !ok {
+		return
+	}
+	if at := s.readingResets.source("kavita", strconv.Itoa(publication.seriesID)); at > 0 && body.ResetSeen != nil && *body.ResetSeen < at {
+		writePositionReset(w, r)
 		return
 	}
 	if body.ExpectedPage != nil && *body.ExpectedPage != publication.manifest.CurrentPage {
@@ -240,6 +248,7 @@ func (s *Server) resolveReadingPublication(
 		Title: title, SeriesTitle: detail.Series.Name, Number: kavitaChapterNumber(chapter.Number),
 		PageCount: info.Pages, CurrentPage: currentPage, Direction: direction, Pages: pages,
 		DoublePairs: info.DoublePairs, PreviousSourceItemID: previous, NextSourceItemID: next,
+		ResetAt: s.readingResets.source("kavita", strconv.Itoa(seriesID)),
 	}
 	return readingPublicationContext{
 		manifest: manifest, chapterID: chapterID, seriesID: seriesID,
