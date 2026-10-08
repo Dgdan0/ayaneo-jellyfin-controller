@@ -8,7 +8,10 @@ package api
 // Thrones: `p.* { font-size: medium }` 42 times) does not follow the root, and the
 // Pocket (853dp), every iPhone and an iPad mini upright are narrower than 60em. So
 // the hub serves each Storyteller EPUB as a reading copy: the same book with its
-// absolute font sizes as rem and one <style> that gives two columns from 30em
+// absolute font sizes and line heights as rem (a line height left in px would no
+// longer fit the text it is set for: the drop cap of A Game of Thrones, 80px on a
+// 70px line, is clipped at a text size of 150%) and one <style> that gives two
+// columns from 30em
 // (readingdomain.WriteReadingEPUB, which says what and why). Places are unchanged,
 // so saved locators and the read-along alignment still match.
 //
@@ -71,7 +74,7 @@ func (s *Server) epubCopyOf(ctx context.Context, file readingdomain.MediaFile, o
 			}
 			report := plan.Report
 			slog.Info("built a reading copy", "kind", kind, "book", book, "bytes", plan.Size, "held", plan.Held(),
-				"fontSizes", report.FontSizes, "styled", report.Styled, "edited", report.Edited,
+				"fontSizes", report.FontSizes, "lineHeights", report.LineHeights, "styled", report.Styled, "edited", report.Edited,
 				"omitted", len(report.Omitted), "left", len(report.Left), "fixedLayout", report.FixedLayout)
 			return &epubCopy{plan: plan, hash: hex.EncodeToString(plan.SHA256[:])}, nil
 		})

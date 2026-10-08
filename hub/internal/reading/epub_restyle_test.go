@@ -32,12 +32,14 @@ p.big { font-size: 24px !important; }
 .note { font-size: 10pt; color: #333 }
 h1 { font-size: 1.5em }
 sup { font-size: smaller }
+span.dropcaps { font-size: 80px; line-height: 70px; float: left }
+p.tight { line-height: 18px; font: 12px/18px serif }
 /* font-size: large; */
 `
 
 const chapterXHTML = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml"><head><title>One</title><link rel="stylesheet" href="../Styles/book.css" type="text/css"/><style type="text/css">.drop { font-size: large }</style></head><body><h1 id="top">One</h1><p class="calibre1" id="p1" style="font-size: 14px; color: red">Hello&nbsp;world <span style='font-size:small'>and</span> <span style="line-height:12px">more</span></p></body></html>`
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>One</title><link rel="stylesheet" href="../Styles/book.css" type="text/css"/><style type="text/css">.drop { font-size: large; line-height: 20pt }</style></head><body><h1 id="top">One</h1><p class="calibre1" id="p1" style="font-size: 14px; color: red">Hello&nbsp;world <span style='font-size:small'>and</span> <span style="line-height:12px">more</span></p></body></html>`
 
 // bookFile is one entry of a hand-made book.
 type bookFile struct {
@@ -120,6 +122,8 @@ func TestReadingCopyRewritesTheStylesAndLeavesTheRestOfTheBookAlone(t *testing.T
 		"p.calibre1 { font-size: medium;", "p.calibre1 { font-size: 1rem;",
 		"font-size: 24px !important;", "font-size: 1.5rem !important;",
 		".note { font-size: 10pt;", ".note { font-size: .8333rem;",
+		"span.dropcaps { font-size: 80px; line-height: 70px;", "span.dropcaps { font-size: 5rem; line-height: 4.375rem;",
+		"p.tight { line-height: 18px;", "p.tight { line-height: 1.125rem;",
 	).Replace(gameOfThronesCSS)
 	if got := string(copied["OEBPS/Styles/book.css"]); got != wantCSS {
 		t.Fatalf("stylesheet\n%s\nwant\n%s", got, wantCSS)
@@ -127,10 +131,10 @@ func TestReadingCopyRewritesTheStylesAndLeavesTheRestOfTheBookAlone(t *testing.T
 
 	chapter := string(copied["OEBPS/Text/ch1.xhtml"])
 	for _, want := range []string{
-		`.drop { font-size: 1.125rem }`,
+		`.drop { font-size: 1.125rem; line-height: 1.6667rem }`,
 		`style="font-size: .875rem; color: red"`,
 		`style='font-size:.8125rem'`,
-		`style="line-height:12px"`,
+		`style="line-height:.75rem"`,
 		`Hello&nbsp;world`,
 		`<h1 id="top">One</h1>`, `<p class="calibre1" id="p1"`,
 		columnStyleElement + `</head>`,
@@ -142,8 +146,9 @@ func TestReadingCopyRewritesTheStylesAndLeavesTheRestOfTheBookAlone(t *testing.T
 	if strings.Count(chapter, columnStyleElement) != 1 {
 		t.Errorf("%d column styles", strings.Count(chapter, columnStyleElement))
 	}
-	// 1 in the block, 2 inline, 4 in the sheet.
-	if report.FontSizes != 7 || report.Styled != 1 || report.Edited != 2 || report.FixedLayout || len(report.Left) != 0 {
+	// Font sizes: 1 in the block, 2 inline, 5 in the sheet. Line heights: 1 in the block, 1 inline, 2 in the sheet;
+	// the font: shorthand with a line height in it is as it was.
+	if report.FontSizes != 8 || report.LineHeights != 4 || report.Styled != 1 || report.Edited != 2 || report.FixedLayout || len(report.Left) != 0 {
 		t.Errorf("report = %+v", report)
 	}
 	if !wellFormed([]byte(chapterXHTML)) || !wellFormed([]byte(chapter)) {
@@ -288,6 +293,38 @@ func TestRestyleDocumentRewritesInlineStylesAndStyleBlocksAndOnlyThose(t *testin
 	}
 	if !wellFormed([]byte(doc)) || !wellFormed(out) {
 		t.Fatalf("well-formed before %v after %v", wellFormed([]byte(doc)), wellFormed(out))
+	}
+}
+
+// Line heights follow the font sizes they are set for, in every place a font size is
+// read: <style> blocks, style attributes and (in epub_css_test.go) stylesheets. A bare
+// number, ems, percent, normal and the font: shorthand stay.
+func TestRestyleDocumentMakesAbsoluteLineHeightsRelativeToo(t *testing.T) {
+	doc := `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>line-height: 18px</title>` +
+		`<style type="text/css">span.dropcaps { font-size: 80px; line-height: 70px; float: left } p { line-height: 1.4 } h1 { line-height: 150% } h2 { line-height: normal; font: 12px/18px serif }</style>` +
+		`</head><body>` +
+		`<p style="line-height:18px">a</p><p style='color:red; LINE-HEIGHT: 14pt !important'>b</p>` +
+		`<p style="line-height:1.5em">c</p><p style="line-height:normal;font:12px/18px serif">d</p>` +
+		`<p data-style="line-height:18px" title="line-height:18px">e</p>` +
+		`<svg xmlns="http://www.w3.org/2000/svg"><text style="line-height:18px">svg</text></svg>` +
+		`</body></html>`
+	out, result := restyleDocument([]byte(doc))
+	want := strings.NewReplacer(
+		`font-size: 80px; line-height: 70px;`, `font-size: 5rem; line-height: 4.375rem;`,
+		`<p style="line-height:18px">a</p>`, `<p style="line-height:1.125rem">a</p>`,
+		`LINE-HEIGHT: 14pt !important`, `LINE-HEIGHT: 1.1667rem !important`,
+		`</head>`, columnStyleElement+`</head>`,
+	).Replace(doc)
+	if string(out) != want || result.fontSizes != 1 || result.lineHeights != 3 || !result.styled {
+		t.Fatalf("\n got %s (%+v)\nwant %s", out, result, want)
+	}
+	if !wellFormed([]byte(doc)) || !wellFormed(out) {
+		t.Fatalf("well-formed before %v after %v", wellFormed([]byte(doc)), wellFormed(out))
+	}
+	// A stylesheet reports its line heights as well.
+	sheet, sheetResult := restyleSheet([]byte(`span.dropcaps { font-size: 80px; line-height: 70px }`))
+	if string(sheet) != `span.dropcaps { font-size: 5rem; line-height: 4.375rem }` || sheetResult.fontSizes != 1 || sheetResult.lineHeights != 1 {
+		t.Fatalf("sheet = %q (%+v)", sheet, sheetResult)
 	}
 }
 

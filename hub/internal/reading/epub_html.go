@@ -11,7 +11,7 @@ import (
 // The two changes made to each content document of a book's reading copy, and
 // the cases in which a document is left exactly as it was.
 //
-// 1. Font sizes in `<style>` blocks and `style="…"` attributes become rem
+// 1. Font sizes and line heights in `<style>` blocks and `style="…"` attributes become rem
 //    (epub_css.go), as they do in the stylesheets.
 // 2. One `<style>` is put before the first `</head>` that gives two columns on a
 //    screen too narrow for Readium CSS to give them.
@@ -55,7 +55,8 @@ const columnStyleElement = `<style type="text/css">` + columnStyle + `</style>`
 
 // documentResult is what was done to one document.
 type documentResult struct {
-	fontSizes int
+	// fontSizes and lineHeights are the absolute declarations made relative.
+	fontSizes, lineHeights int
 	// styled: the two-column style was put in.
 	styled bool
 	// left is why the document was not touched at all, or empty.
@@ -68,8 +69,8 @@ const (
 	leftUnread   = "unreadable"
 )
 
-// restyleDocument returns doc with its font sizes as rem and the column style in
-// its head. It returns doc itself when there is nothing to change.
+// restyleDocument returns doc with its font sizes and line heights as rem and the
+// column style in its head. It returns doc itself when there is nothing to change.
 func restyleDocument(doc []byte) ([]byte, documentResult) {
 	if !isUTF8Text(doc) || declaresOtherCharset(doc) {
 		return doc, documentResult{left: leftEncoding}
@@ -82,15 +83,17 @@ func restyleDocument(doc []byte) ([]byte, documentResult) {
 	var edits []edit
 	result := documentResult{}
 	for _, span := range found.attributes {
-		if rewritten, count := rewriteFontSizes(doc[span.from:span.to], true); count > 0 {
+		if rewritten, count := rewriteSizes(doc[span.from:span.to], true); count.total() > 0 {
 			edits = append(edits, edit{span.from, span.to, rewritten})
-			result.fontSizes += count
+			result.fontSizes += count.fontSizes
+			result.lineHeights += count.lineHeights
 		}
 	}
 	for _, span := range found.blocks {
-		if rewritten, count := rewriteFontSizes(doc[span.from:span.to], false); count > 0 {
+		if rewritten, count := rewriteSizes(doc[span.from:span.to], false); count.total() > 0 {
 			edits = append(edits, edit{span.from, span.to, rewritten})
-			result.fontSizes += count
+			result.fontSizes += count.fontSizes
+			result.lineHeights += count.lineHeights
 		}
 	}
 	if found.headEnd >= 0 && !bytes.Contains(doc, []byte(columnStyle)) {
@@ -170,7 +173,8 @@ func declaresOtherCharset(doc []byte) bool {
 	return false
 }
 
-// restyleSheet is restyleDocument for a stylesheet: its font sizes as rem.
+// restyleSheet is restyleDocument for a stylesheet: its font sizes and line heights
+// as rem.
 func restyleSheet(sheet []byte) ([]byte, documentResult) {
 	body := bytes.TrimPrefix(sheet, []byte{0xEF, 0xBB, 0xBF})
 	if bytes.HasPrefix(body, []byte{0xFE, 0xFF}) || bytes.HasPrefix(body, []byte{0xFF, 0xFE}) ||
@@ -180,8 +184,8 @@ func restyleSheet(sheet []byte) ([]byte, documentResult) {
 	if match := cssDeclaredCharset.FindSubmatch(body[:min(len(body), 128)]); match != nil && !isUTF8Label(string(match[1])) {
 		return sheet, documentResult{left: leftEncoding}
 	}
-	rewritten, count := rewriteFontSizes(sheet, false)
-	return rewritten, documentResult{fontSizes: count}
+	rewritten, count := rewriteSizes(sheet, false)
+	return rewritten, documentResult{fontSizes: count.fontSizes, lineHeights: count.lineHeights}
 }
 
 type span struct{ from, to int }

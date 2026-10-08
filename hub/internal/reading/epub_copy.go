@@ -43,6 +43,10 @@ type CopyReport struct {
 	// FontSizes is how many font-size declarations became rem, in all the book's
 	// stylesheets, <style> blocks and style attributes.
 	FontSizes int
+	// LineHeights is how many line-height declarations in px or pt became rem, in the
+	// same places: a line height that stayed absolute would no longer fit the text
+	// it is set for once that scales.
+	LineHeights int
 	// Styled is how many documents were given the two-column style.
 	Styled int
 	// Edited is how many entries have other bytes than they had.
@@ -488,6 +492,7 @@ func restyleEntry(writer *zip.Writer, entry *zip.File, kind entryKind, report *C
 		return false, err
 	}
 	report.FontSizes += result.fontSizes
+	report.LineHeights += result.lineHeights
 	if result.styled {
 		report.Styled++
 	}

@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// A book's own font sizes, made to follow the reader's text size.
+// A book's own font sizes and line heights, made to follow the reader's text size.
 //
 // Both apps scale text by setting the root element's font size (Readium CSS:
 // `:root { font-size: var(--USER__fontSize) !important }`). Only a size that is
@@ -15,12 +15,18 @@ import (
 // text-size setting did nothing on A Game of Thrones, whose stylesheet says
 // `p.* { font-size: medium }` 42 times and `body { font-size: small }`.
 //
+// A line height in px or pt is absolute too, and once the sizes scale it no longer
+// fits them: the same book's drop cap, `span.dropcaps { font-size: 80px;
+// line-height: 70px }`, is 120px on a 70px line at a text size of 150%, and its top
+// is clipped. A body text set to `line-height: 18px` would overlap in the same way.
+//
 // Each of those becomes the rem that is the same size at the browsers' own 16px
 // root, so the page looks as it did at 100% and now scales. Nothing else changes:
-// em, %, rem, ex, ch, vw, smaller, larger, inherit, calc(), the `font:` shorthand
-// and every other property stay as written. The rewrite is a tokenising pass over
-// the stylesheet rather than a pattern replace, so a comment, a string, a url() or
-// a selector that merely contains the words is never mistaken for a declaration.
+// em, %, rem, ex, ch, vw, smaller, larger, inherit, normal, a bare number, calc(),
+// the `font:` shorthand and every other property stay as written. The rewrite is a
+// tokenising pass over the stylesheet rather than a pattern replace, so a comment, a
+// string, a url() or a selector that merely contains the words is never mistaken for
+// a declaration.
 
 // fontSizeKeywords are the absolute-size keywords at the browsers' 16px scale
 // (9px, 10px, 13px, 16px, 18px, 24px, 32px, 48px), as rem.
@@ -35,14 +41,42 @@ var fontSizeKeywords = map[string]string{
 	"xxx-large": "3rem",
 }
 
-// rewriteFontSizes returns css with its absolute font-size declarations as rem, and
-// how many it changed. It returns the input itself, not a copy, when none changed.
-// declarations says that css is a declaration list (a style attribute) rather than
-// a stylesheet, so a declaration may begin at its first token.
-func rewriteFontSizes(css []byte, declarations bool) ([]byte, int) {
+// sizeCounts is how many declarations a rewrite changed.
+type sizeCounts struct{ fontSizes, lineHeights int }
+
+func (c sizeCounts) total() int { return c.fontSizes + c.lineHeights }
+
+// sizeProperty is a property whose absolute values are made relative.
+type sizeProperty int
+
+const (
+	notASizeProperty sizeProperty = iota
+	fontSizeProperty
+	lineHeightProperty
+)
+
+func sizePropertyOf(word []byte) sizeProperty {
+	switch len(word) {
+	case len("font-size"):
+		if strings.EqualFold(string(word), "font-size") {
+			return fontSizeProperty
+		}
+	case len("line-height"):
+		if strings.EqualFold(string(word), "line-height") {
+			return lineHeightProperty
+		}
+	}
+	return notASizeProperty
+}
+
+// rewriteSizes returns css with its absolute font-size and line-height declarations
+// as rem, and how many of each it changed. It returns the input itself, not a copy,
+// when none changed. declarations says that css is a declaration list (a style
+// attribute) rather than a stylesheet, so a declaration may begin at its first token.
+func rewriteSizes(css []byte, declarations bool) ([]byte, sizeCounts) {
 	var out []byte
 	written := 0 // css[:written] is already in out
-	changed := 0
+	var changed sizeCounts
 	depth, parens := 0, 0
 	// The last token that was not space or a comment, as a class: '{', '}', ';',
 	// '(', ')', 's' (a string), 'i' (a word) or 'o' (anything else). A declaration
@@ -105,17 +139,22 @@ func rewriteFontSizes(css []byte, declarations bool) ([]byte, int) {
 					continue
 				}
 			}
-			if (prev == '{' || prev == ';') && parens == 0 && (declarations || depth > 0) &&
-				len(word) == len("font-size") && strings.EqualFold(string(word), "font-size") {
-				if from, to, replacement, ok := fontSizeValue(css, i); ok {
-					if out == nil {
-						out = make([]byte, 0, len(css)+16)
+			if (prev == '{' || prev == ';') && parens == 0 && (declarations || depth > 0) {
+				if property := sizePropertyOf(word); property != notASizeProperty {
+					if from, to, replacement, ok := sizeValue(css, i, property); ok {
+						if out == nil {
+							out = make([]byte, 0, len(css)+16)
+						}
+						out = append(out, css[written:from]...)
+						out = append(out, replacement...)
+						written = to
+						if property == fontSizeProperty {
+							changed.fontSizes++
+						} else {
+							changed.lineHeights++
+						}
+						i = to
 					}
-					out = append(out, css[written:from]...)
-					out = append(out, replacement...)
-					written = to
-					changed++
-					i = to
 				}
 			}
 			prev = 'i'
@@ -124,17 +163,17 @@ func rewriteFontSizes(css []byte, declarations bool) ([]byte, int) {
 			i++
 		}
 	}
-	if changed == 0 {
-		return css, 0
+	if changed.total() == 0 {
+		return css, changed
 	}
 	return append(out, css[written:]...), changed
 }
 
-// fontSizeValue reads the value of the font-size declaration whose name ends at
+// sizeValue reads the value of the declaration of property whose name ends at
 // css[i]: where the value is, and what replaces it. It answers false for a value
 // that is not a lone absolute size, optionally followed by !important, and for one
 // that is already relative.
-func fontSizeValue(css []byte, i int) (from, to int, replacement string, ok bool) {
+func sizeValue(css []byte, i int, property sizeProperty) (from, to int, replacement string, ok bool) {
 	n := len(css)
 	j := skipCSSSpace(css, i)
 	if j >= n || css[j] != ':' {
@@ -150,8 +189,9 @@ func fontSizeValue(css []byte, i int) (from, to int, replacement string, ok bool
 		return 0, 0, "", false
 	}
 	// Only the value alone, then a declaration's end, or !important and then its
-	// end. `font-size: medium foo` is not a font-size, and a value cut short by an
-	// entity (`medium&#59;`) is left for whoever decodes it.
+	// end. `font-size: medium foo` is not a font-size, `line-height: 12px 14px` is
+	// not a line height, and a value cut short by an entity (`medium&#59;`) is left
+	// for whoever decodes it.
 	k := skipCSSSpace(css, to)
 	if k < n {
 		switch css[k] {
@@ -173,16 +213,17 @@ func fontSizeValue(css []byte, i int) (from, to int, replacement string, ok bool
 			return 0, 0, "", false
 		}
 	}
-	replacement, ok = absoluteSizeAsRem(css[from:to])
+	replacement, ok = absoluteSizeAsRem(css[from:to], property == fontSizeProperty)
 	return from, to, replacement, ok
 }
 
 // absoluteSizeAsRem is the rem that an absolute size is, or false for a size that
-// is not one: a keyword, or a number of px or pt. Zero is left as it is (it is the
-// same size in any unit), and so is a negative size, which is no size at all.
-func absoluteSizeAsRem(token []byte) (string, bool) {
+// is not one: a number of px or pt, and for a font size also a keyword (a line
+// height has none: `normal` is not a length). Zero is left as it is (it is the same
+// size in any unit), and so is a negative size, which is no size at all.
+func absoluteSizeAsRem(token []byte, keywords bool) (string, bool) {
 	text := strings.ToLower(string(token))
-	if rem, found := fontSizeKeywords[text]; found {
+	if rem, found := fontSizeKeywords[text]; found && keywords {
 		return rem, true
 	}
 	i := 0

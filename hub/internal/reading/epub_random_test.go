@@ -31,9 +31,9 @@ func randomCSS(random *rand.Rand) string {
 			out.WriteString(pick(cssPieces))
 		case 3, 4, 5, 6:
 			// A declaration, nearly well made.
-			out.WriteString(pick([]string{"font-size", "FONT-SIZE", "font-size", "line-height", "--size", "-webkit-font-size"}))
+			out.WriteString(pick([]string{"font-size", "FONT-SIZE", "font-size", "line-height", "LINE-HEIGHT", "line-height", "--size", "-webkit-font-size", "-webkit-line-height"}))
 			out.WriteString(pick([]string{":", ": ", " : ", ":", "/**/:/**/"}))
-			out.WriteString(pick([]string{"medium", "small", "large", "xx-large", "smaller", "inherit", "12px", "9pt", "1.5em", "100%", "0", "calc(1em + 2px)", ".5px", "10", "MEDIUM", "12PX", "url(a;b)", `"x"`}))
+			out.WriteString(pick([]string{"medium", "small", "large", "xx-large", "smaller", "inherit", "12px", "9pt", "1.5em", "100%", "0", "calc(1em + 2px)", ".5px", "10", "MEDIUM", "12PX", "url(a;b)", `"x"`, "18px", "14pt", "normal", "1.4", "70PX"}))
 			out.WriteString(pick([]string{"", "", "!important", " !important", " ! IMPORTANT", " /* c */", "&#59;"}))
 			out.WriteString(pick([]string{";", "; ", "}", ";}", "", "\n"}))
 		case 7, 8:
@@ -46,35 +46,42 @@ func randomCSS(random *rand.Rand) string {
 	return out.String()
 }
 
-func TestRewriteFontSizesSurvivesAnythingAndIsStable(t *testing.T) {
+func TestRewriteSizesSurvivesAnythingAndIsStable(t *testing.T) {
 	random := rand.New(rand.NewSource(20261008))
-	changed := 0
+	fonts, lines := 0, 0
 	for i := 0; i < 20000; i++ {
 		css := randomCSS(random)
+		lower := strings.ToLower(css)
 		for _, declarations := range []bool{false, true} {
-			once, count := rewriteFontSizes([]byte(css), declarations)
-			if count == 0 && string(once) != css {
+			once, count := rewriteSizes([]byte(css), declarations)
+			if count.total() == 0 && string(once) != css {
 				t.Fatalf("%q: nothing counted but the text changed to %q", css, once)
 			}
-			if count > 0 {
-				changed++
+			if count.fontSizes > 0 {
+				fonts++
 			}
-			twice, again := rewriteFontSizes(once, declarations)
-			if again != 0 || !bytes.Equal(twice, once) {
-				t.Fatalf("declarations=%v %q -> %q -> %q (%d)", declarations, css, once, twice, again)
+			if count.lineHeights > 0 {
+				lines++
+			}
+			twice, again := rewriteSizes(once, declarations)
+			if again.total() != 0 || !bytes.Equal(twice, once) {
+				t.Fatalf("declarations=%v %q -> %q -> %q (%+v)", declarations, css, once, twice, again)
 			}
 			// Only a size can have changed: take the sizes' own text out of both and
 			// what is left is the same.
-			if count > 0 && stripSizes(string(once)) != stripSizes(css) {
+			if count.total() > 0 && stripSizes(string(once)) != stripSizes(css) {
 				t.Fatalf("more than a size changed: %q -> %q", css, once)
 			}
-			if !strings.Contains(strings.ToLower(css), "font-size") && count != 0 {
+			if !strings.Contains(lower, "font-size") && count.fontSizes != 0 {
 				t.Fatalf("%q has no font-size and was changed", css)
+			}
+			if !strings.Contains(lower, "line-height") && count.lineHeights != 0 {
+				t.Fatalf("%q has no line-height and was changed", css)
 			}
 		}
 	}
-	if changed < 500 {
-		t.Fatalf("only %d of the random sheets held a size to rewrite: the pieces do not exercise the rewrite", changed)
+	if fonts < 500 || lines < 500 {
+		t.Fatalf("%d sheets had a font size to rewrite and %d a line height of the 40000 tried: the pieces do not exercise the rewrite", fonts, lines)
 	}
 }
 
@@ -101,7 +108,7 @@ func randomXHTML(random *rand.Rand) string {
 		out.WriteString([]string{"words", " &amp; ", "&nbsp;", "é", "\n", "a &lt; b", " ", "font-size: medium"}[random.Intn(8)])
 	}
 	style := func() string {
-		return []string{"font-size:medium", "color:red; font-size: 12pt", "FONT-SIZE:LARGE!important", "line-height:12px", "font-size:1.2em", "font-family:&quot;A&quot;;font-size:small", ""}[random.Intn(7)]
+		return []string{"font-size:medium", "color:red; font-size: 12pt", "FONT-SIZE:LARGE!important", "line-height:12px", "line-height:1.2", "line-height: 18pt !important", "font-size:1.2em", "font-family:&quot;A&quot;;font-size:small", ""}[random.Intn(9)]
 	}
 	element = func(depth int, name string) {
 		fmt.Fprintf(&out, "<%s", name)
@@ -130,7 +137,7 @@ func randomXHTML(random *rand.Rand) string {
 			case 3:
 				out.WriteString("<?pi font-size:medium?>")
 			case 4:
-				fmt.Fprintf(&out, "<style type=\"text/css\">%s</style>", []string{"p { font-size: medium }", "/*<![CDATA[*/ a { font-size: 9pt } /*]]>*/", "<![CDATA[ h1 { font-size: 20px } ]]>", ""}[random.Intn(4)])
+				fmt.Fprintf(&out, "<style type=\"text/css\">%s</style>", []string{"p { font-size: medium }", "/*<![CDATA[*/ a { font-size: 9pt } /*]]>*/", "<![CDATA[ h1 { font-size: 20px } ]]>", "span.d { font-size: 80px; line-height: 70px }", ""}[random.Intn(5)])
 			case 5:
 				out.WriteString("<svg xmlns=\"http://www.w3.org/2000/svg\"><text style=\"font-size:12px\">t</text></svg>")
 			case 6:
@@ -165,7 +172,7 @@ func randomXHTML(random *rand.Rand) string {
 // in it, and it is stable: a second pass finds nothing.
 func TestRestyleDocumentKeepsAWellFormedDocumentWellFormed(t *testing.T) {
 	random := rand.New(rand.NewSource(8102026))
-	styled, resized := 0, 0
+	styled, resized, lined := 0, 0, 0
 	for i := 0; i < 5000; i++ {
 		doc := randomXHTML(random)
 		if !wellFormed([]byte(doc)) {
@@ -178,18 +185,21 @@ func TestRestyleDocumentKeepsAWellFormedDocumentWellFormed(t *testing.T) {
 		if result.styled {
 			styled++
 		}
+		if result.lineHeights > 0 {
+			lined++
+		}
 		if result.fontSizes > 0 {
 			resized++
 		}
 		again, second := restyleDocument(out)
-		if second.fontSizes != 0 || second.styled || !bytes.Equal(again, out) {
+		if second.fontSizes != 0 || second.lineHeights != 0 || second.styled || !bytes.Equal(again, out) {
 			t.Fatalf("a second pass changed the document:\n%s\n%s", out, again)
 		}
 		if result.styled != (strings.Count(string(out), columnStyleElement) == 1) || strings.Count(string(out), columnStyleElement) > 1 {
 			t.Fatalf("%d column styles in\n%s", strings.Count(string(out), columnStyleElement), out)
 		}
 	}
-	if styled < 3000 || resized < 3000 {
-		t.Fatalf("%d documents were styled and %d resized of 5000: the generator does not exercise the rewrite", styled, resized)
+	if styled < 3000 || resized < 2500 || lined < 400 {
+		t.Fatalf("%d documents were styled, %d resized and %d given line heights of 5000: the generator does not exercise the rewrite", styled, resized, lined)
 	}
 }

@@ -60,7 +60,7 @@ func newEbookEnv(t *testing.T, options ebookOptions) *audioEnv {
 			t.Fatal(err)
 		}
 		rewriteAlignedEPUBEntry(t, path, "OEBPS/text/part0001.xhtml", func(content string) string {
-			content = strings.Replace(content, "<title>Part 1</title></head>", `<title>Part 1</title><style type="text/css">p { font-size: medium } .x { font-size: 12px } h1 { font-size: 1.5em }</style></head>`, 1)
+			content = strings.Replace(content, "<title>Part 1</title></head>", `<title>Part 1</title><style type="text/css">p { font-size: medium } .x { font-size: 12px; line-height: 18px } h1 { font-size: 1.5em; line-height: 1.4 }</style></head>`, 1)
 			return strings.Replace(content, "<p>", `<p style="font-size:small">`, 1)
 		})
 		if options.edit != nil {
@@ -123,9 +123,9 @@ func TestEbookIsServedAsTheReadingCopyOfTheFileOnThisPC(t *testing.T) {
 				got = columnStyleElement.ReplaceAll(got, nil)
 			}
 			if name == "OEBPS/text/part0001.xhtml" {
-				// The keyword, the pixels and the inline size; ems, the element and its
+				// The keyword, the pixels, the line height and the inline size; ems, the element and its
 				// ids as they were.
-				for _, want := range []string{`p { font-size: 1rem }`, `.x { font-size: .75rem }`, `h1 { font-size: 1.5em }`, `<p style="font-size:.8125rem">`, `id="id1-s0"`} {
+				for _, want := range []string{`p { font-size: 1rem }`, `.x { font-size: .75rem; line-height: 1.125rem }`, `h1 { font-size: 1.5em; line-height: 1.4 }`, `<p style="font-size:.8125rem">`, `id="id1-s0"`} {
 					if !strings.Contains(string(got), want) {
 						t.Errorf("%s lacks %s:\n%s", name, want, got)
 					}
