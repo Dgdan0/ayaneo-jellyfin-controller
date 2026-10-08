@@ -142,6 +142,32 @@ public actor HubClient {
         try await perform(request, transport: request.slow ? slow : screens)
     }
 
+    /// A file this device keeps a copy of (an EPUB, #41), as the hub answers it.
+    public enum FileAnswer: Equatable, Sendable {
+        /// 304: the copy kept is the hub's.
+        case unchanged
+        /// The file, with its ETag when the hub sent one.
+        case file(Data, etag: String?)
+    }
+
+    /// Seconds a kept copy waits for the hub before it opens as it is.
+    public static let quickCheckSeconds: TimeInterval = 5
+
+    /// A file, asked for with `If-None-Match` when `ifNoneMatch` names the
+    /// copy kept (304 is `.unchanged`). `quick` is for a copy that opens
+    /// without the hub: a short timeout and no retries, so an outage opens it at once.
+    public func file(_ request: HubRequest, ifNoneMatch etag: String? = nil,
+                     quick: Bool = false) async throws(HubFailure) -> FileAnswer {
+        let conditional = etag.map { !$0.isEmpty } ?? false
+        let headers = conditional ? ["If-None-Match": etag ?? ""] : [:]
+        let (data, response) = try await exchange(request, transport: request.slow ? slow : screens, headers: headers,
+                                                  timeout: quick ? Self.quickCheckSeconds : nil, retries: !quick,
+                                                  accepts: { (200...299).contains($0) || ($0 == 304 && conditional) })
+        if response.statusCode == 304 { return .unchanged }
+        let sent = response.value(forHTTPHeaderField: "ETag")?.trimmingCharacters(in: .whitespaces)
+        return .file(data, etag: sent?.isEmpty == false ? sent : nil)
+    }
+
     /// The bytes of a hub image path ("/v1/img/jf/..."), through the artwork
     /// transport and its cache.
     public func image(_ hubPath: String) async throws(HubFailure) -> Data {
@@ -187,6 +213,17 @@ public actor HubClient {
     }
 
     private func perform(_ request: HubRequest, transport: any HubTransport) async throws(HubFailure) -> Data {
+        try await exchange(request, transport: transport).data
+    }
+
+    /// One request and its answer: `headers` added, `timeout` seconds idle at
+    /// most, retried by `RetryPolicy` unless `retries` is false, and an answer
+    /// is the caller's when `accepts` its status (2xx otherwise).
+    private func exchange(
+        _ request: HubRequest, transport: any HubTransport, headers: [String: String] = [:],
+        timeout: TimeInterval? = nil, retries: Bool = true,
+        accepts: (Int) -> Bool = { (200...299).contains($0) }
+    ) async throws(HubFailure) -> (data: Data, response: HTTPURLResponse) {
         let creds = credentials
         if creds.baseURL.isEmpty {
             throw HubFailure(.unauthorized, message: "No Hub address is configured")
@@ -211,6 +248,8 @@ public actor HubClient {
                 urlRequest.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
             }
         }
+        for (name, value) in headers { urlRequest.setValue(value, forHTTPHeaderField: name) }
+        if let timeout { urlRequest.timeoutInterval = timeout }
 
         var attempt = 0
         while true {
@@ -218,7 +257,7 @@ public actor HubClient {
             let failure: HubFailure
             do {
                 let (data, response) = try await sendThroughGate(urlRequest, token: creds.token, transport: transport)
-                if (200...299).contains(response.statusCode) { return data }
+                if accepts(response.statusCode) { return (data, response) }
                 failure = HubFailure.answer(status: response.statusCode, body: data,
                                             retryAfter: response.value(forHTTPHeaderField: "Retry-After"))
             } catch let blocked as HubFailure {
@@ -228,8 +267,8 @@ public actor HubClient {
                 if kind == .cancelled { throw HubFailure(.cancelled) }
                 failure = HubFailure(kind)
             }
-            guard let delay = RetryPolicy.delayMillis(attempt: attempt, kind: failure.kind,
-                                                      idempotent: request.idempotent) else {
+            guard retries, let delay = RetryPolicy.delayMillis(attempt: attempt, kind: failure.kind,
+                                                               idempotent: request.idempotent) else {
                 throw failure
             }
             do {

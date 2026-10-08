@@ -121,7 +121,9 @@ public enum DemoReadAlong {
         guard value("audio", in: query) == "omit" else {
             return DemoTransport.Answer(404, #"{"error":{"code":"not_found","message":"The whole edition is not in the demo hub"}}"#)
         }
-        return DemoTransport.Answer(200, data: slimEdition(), type: "application/epub+zip")
+        var answer = DemoTransport.Answer(200, data: slimEdition(), type: "application/epub+zip")
+        answer.headers = ["ETag": DemoTransport.etag(slimEdition())]
+        return answer
     }
 
     /// The edition without its audio, made once a run.

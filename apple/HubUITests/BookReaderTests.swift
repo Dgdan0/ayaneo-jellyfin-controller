@@ -179,6 +179,41 @@ final class BookReaderTests: XCTestCase {
         }
     }
 
+    /// A book read once is kept on the device, its ETag beside it (#41):
+    /// with the reading servers gone once the reader closes, the check with
+    /// the hub fails at once and Light Bringer opens again from the copy
+    /// kept, half way through, without a word of failure.
+    @MainActor
+    func testABookKeptOnTheDeviceOpensAgainInAnOutage() {
+        // Under the edition id its page opens it by, so Resume finds the copy this opening keeps.
+        let app = launchReading("rw_demo_rr6/demo-rw_demo_rr6", ["HUB_OPEN": "book:rw_demo_rr6", "HUB_BOOK_CHROME": "pinned",
+                                                                 "HUB_DEMO_OUTAGE": "after-close"])
+        let position = app.staticTexts["book-position"]
+        XCTAssertTrue(position.waitForExistence(timeout: 15), "the menu did not come")
+        XCTAssertTrue(waitUntil(10) { position.label.contains("% of book") }, "the menu says \(position.label)")
+        app.buttons["book-close"].tap()
+        XCTAssertTrue(page(app).waitForNonExistence(timeout: 5), "the reader stayed open")
+
+        // The reading servers are gone now; the book's page is still there.
+        let entry = app.buttons["book-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10), "Light Bringer's page is not under the reader")
+        entry.tap()
+        // Kept, it opens rather than downloads.
+        let downloading = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Downloading'")).firstMatch
+        XCTAssertFalse(downloading.waitForExistence(timeout: 2), "the kept copy was not found: \(downloading.label)")
+        // The hub's place cannot be asked either: this device's is offered when it asks.
+        let local = app.buttons["book-choice-local"]
+        XCTAssertTrue(waitUntil(20) { self.page(app).exists || local.exists }, "the kept book did not open")
+        if local.exists { local.tap() }
+        XCTAssertTrue(page(app).waitForExistence(timeout: 15), "the kept book did not open")
+        XCTAssertFalse(app.staticTexts["book-status-heading"].exists, "a failure was said: \(app.staticTexts["book-status-heading"].label)")
+        // Half way through, as it was (the menu pinned again, or opened by ↑).
+        if !position.waitForExistence(timeout: 4) { app.typeKey(.upArrow, modifierFlags: []) }
+        XCTAssertTrue(position.waitForExistence(timeout: 5), "the menu did not come")
+        XCTAssertTrue(waitUntil(10) { position.label.contains("% of book") }, "the menu says \(position.label)")
+        XCTAssertTrue((40...60).contains(percent(position.label)), "it opened at \(position.label)")
+    }
+
     /// Where the book is, from its menu, which ↑ opens (as Ⓑ and Delete do).
     @MainActor
     private func place(_ app: XCUIApplication) -> String {

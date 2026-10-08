@@ -257,6 +257,10 @@ struct BookReaderScreen: View {
         pad.stop()
         reader.stop()
         closeReader()
+        #if DEBUG
+        // HUB_DEMO_OUTAGE=after-close, the demo hub only: the reading servers go once a reader has closed (#37, #41).
+        if model.isDemo, ProcessInfo.processInfo.environment["HUB_DEMO_OUTAGE"] == "after-close" { DemoTransport.beginOutage() }
+        #endif
     }
 
     #if DEBUG

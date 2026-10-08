@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Synchronization
 
@@ -55,9 +56,21 @@ public struct DemoTransport: HubTransport {
         if method == "GET", answer.status == 200, path.contains("/publications/"), path.contains("/pages/") {
             _ = Self.served.withLock { $0.insert(path) }
         }
+        // A file asked for with the ETag it still has: 304, as the hub's ServeContent answers (#41).
+        if method == "GET", answer.status == 200, let etag = answer.headers["ETag"],
+           request.value(forHTTPHeaderField: "If-None-Match") == etag {
+            let response = HTTPURLResponse(url: request.url!, statusCode: 304, httpVersion: "HTTP/1.1",
+                                           headerFields: ["ETag": etag])!
+            return (Data(), response)
+        }
         let response = HTTPURLResponse(url: request.url!, statusCode: answer.status, httpVersion: "HTTP/1.1",
                                        headerFields: answer.headers.merging(["Content-Type": answer.type]) { _, type in type })!
         return (answer.body, response)
+    }
+
+    /// A strong ETag of a demo file's bytes, as the hub sends with an ebook's reading copy.
+    static func etag(_ data: Data) -> String {
+        "\"" + SHA256.hash(data: data).prefix(12).map { String(format: "%02x", $0) }.joined() + "\""
     }
 
     /// A demo answer: its status, bytes and their type, and any other headers

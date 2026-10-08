@@ -365,16 +365,13 @@ final class BookReaderModel {
         opened(loaded, opening)
     }
 
+    /// The book on this device, checked with the hub as it opens (#41): the
+    /// hub's reading copy replaces one it has since changed, and an outage
+    /// opens what is kept.
     private func bookFile(force: Bool) async throws -> URL {
-        if force { cache.remove(workId: workId, sourceItemId: sourceItemId) }
-        if cache.isComplete(workId: workId, sourceItemId: sourceItemId) {
-            cache.touch(workId: workId, sourceItemId: sourceItemId)
-            return cache.completeFile(workId: workId, sourceItemId: sourceItemId)
-        }
-        let data = try await hub.data(HubEndpoints.readingEpubFile(workId: workId, sourceItemId: sourceItemId))
-        let file = try cache.install(workId: workId, sourceItemId: sourceItemId) { try data.write(to: $0) }
-        cache.prune(keeping: file)
-        return file
+        try await cache.open(workId: workId, sourceItemId: sourceItemId,
+                             request: HubEndpoints.readingEpubFile(workId: workId, sourceItemId: sourceItemId),
+                             hub: hub, force: force)
     }
 
     private func show(_ loaded: BookNavigator.Loaded, at locator: String?) {

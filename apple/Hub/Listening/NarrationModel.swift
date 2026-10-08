@@ -383,25 +383,17 @@ enum ReadAlongEdition {
         ReadingOffline.readAlong(app: app)
     }
 
-    /// The edition, from the cache or the hub; `force` downloads it again.
+    /// The edition, from the cache, checked with the hub as the ebook is
+    /// (#41), or from the hub; `force` downloads it again.
     static func file(app: AppModel, cache: EpubPackageCache, workId: String, sourceItemId: String,
                      force: Bool = false) async throws(ReadAlongError) -> URL {
-        if force { cache.remove(workId: workId, sourceItemId: sourceItemId) }
-        if cache.isComplete(workId: workId, sourceItemId: sourceItemId) {
-            cache.touch(workId: workId, sourceItemId: sourceItemId)
-            return cache.completeFile(workId: workId, sourceItemId: sourceItemId)
-        }
-        let data: Data
         do {
-            data = try await app.hub.data(HubEndpoints.readingEpubFile(workId: workId, sourceItemId: sourceItemId,
-                                                                       format: "readaloud", omitAudio: true))
-        } catch {
-            throw ReadAlongError(error.message)
-        }
-        do {
-            let file = try cache.install(workId: workId, sourceItemId: sourceItemId) { try data.write(to: $0) }
-            cache.prune(keeping: file)
-            return file
+            return try await cache.open(workId: workId, sourceItemId: sourceItemId,
+                                        request: HubEndpoints.readingEpubFile(workId: workId, sourceItemId: sourceItemId,
+                                                                              format: "readaloud", omitAudio: true),
+                                        hub: app.hub, force: force)
+        } catch let failure as HubFailure {
+            throw ReadAlongError(failure.message)
         } catch {
             throw ReadAlongError("The read-along edition could not be kept on this device")
         }
