@@ -50,6 +50,9 @@ struct BookView: View {
     @State private var finishUndo: (you: ReadingYou?, wasRead: Bool)?
     /// The chapter the ebook was left at, when it was read last: the Resume button says it.
     @State private var chapter: String?
+    #if DEBUG
+    @MainActor private static var debugFinished = false
+    #endif
 
     private var work: ReadingWork? { loaded.map(books.project) }
 
@@ -194,11 +197,17 @@ struct BookView: View {
             actions(work).padding(.top, 4)
             let genres = BookPage.genres(work)
             if !genres.isEmpty {
-                Text(genres)
-                    .font(HubType.body(13.5, relativeTo: .footnote))
-                    .foregroundStyle(.white.opacity(0.56))
-                    .accessibilityLabel("Genres: " + genres)
-                    .accessibilityIdentifier("book-genres")
+                // One quiet line: as many whole genres as fit; VoiceOver hears them all.
+                ViewThatFits(in: .horizontal) {
+                    ForEach(BookPage.genreLines(work), id: \.self) { line in
+                        Text(line).lineLimit(1)
+                    }
+                }
+                .font(HubType.body(13.5, relativeTo: .footnote))
+                .foregroundStyle(.white.opacity(0.56))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Genres: " + genres)
+                .accessibilityIdentifier("book-genres")
             }
             if !work.overview.isEmpty { overview(work.overview).padding(.top, 4) }
         }
@@ -621,6 +630,14 @@ struct BookView: View {
             if response != loaded { loaded = response }
             chapter = Self.chapter(response, scope: scope, address: model.address, userId: model.userId)
             books.observe([response])
+            #if DEBUG
+            // scripts/mac.sh: HUB_SHEET=finished opens When did you finish? once, for a
+            // screenshot. The demo hub's books only: Mark finished would PATCH a real one.
+            if !Self.debugFinished, model.isDemo, isBook(response), ProcessInfo.processInfo.environment["HUB_SHEET"] == "finished" {
+                Self.debugFinished = true
+                finishing = true
+            }
+            #endif
             model.colors.want([response.artwork])
             status = StatusText.caveat(response.cache, unavailable: response.partial.map(\.service))
             if route.openEntry && !entryOpened {

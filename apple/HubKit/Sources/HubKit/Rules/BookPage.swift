@@ -30,7 +30,19 @@ public enum BookPage {
 
     /// The labels, one quiet line: "Fantasy · Epic fantasy · Magic systems".
     public static func genres(_ work: ReadingWork) -> String {
-        work.genres.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " · ")
+        genreNames(work).joined(separator: " · ")
+    }
+
+    /// The line one genre at a time, longest first: all of them, then one
+    /// fewer, down to the first. The page shows the longest that fits on one
+    /// line, whole genres only: Hardcover gives Mistborn six, two lines on a phone.
+    public static func genreLines(_ work: ReadingWork) -> [String] {
+        let names = genreNames(work)
+        return names.indices.reversed().map { names[...$0].joined(separator: " · ") }
+    }
+
+    private static func genreNames(_ work: ReadingWork) -> [String] {
+        work.genres.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
     /// A format as the row shows it: its name, and whether it opens.

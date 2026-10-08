@@ -68,6 +68,10 @@ struct BookPageTests {
         #expect(BookPage.community(ReadingCommunity(rating: 0, source: "hardcover")) == nil)
         book.genres = ["Fantasy", " Epic fantasy ", ""]
         #expect(BookPage.genres(book) == "Fantasy · Epic fantasy")
+        // One line, whole genres: the longest first, down to the first alone.
+        #expect(BookPage.genreLines(book) == ["Fantasy · Epic fantasy", "Fantasy"])
+        book.genres = []
+        #expect(BookPage.genreLines(book).isEmpty)
     }
 
     @Test func theFormatsAreAudiobookEbookAndReadAlongReadyOrNot() {

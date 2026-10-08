@@ -59,6 +59,7 @@
 # with -demo, HUB_PLAY_FROM_END=<seconds>; HUB_TITLE=<item id>[|subtitles|removal] opens that library
 # title and on to its subtitles or deletion page ("000000000000000000000000deb00003-e2" with -demo),
 # HUB_SUBTITLES=search searches and opens the first result, and HUB_REMOVAL=confirm asks the alert.
+# With -demo, HUB_OPEN=book:<work id> HUB_SHEET=finished opens that book's When did you finish?.
 # SHOT_SIMS="iPad Pro (12.9-inch) (4th generation),iPhone 17 Pro Max"
 # limits sims and shot to those simulators, and HUB_WIDTH=375 lays the app out
 # in a window that wide, as an iPad's Split View would; SHOT_STATE names the screenshots
