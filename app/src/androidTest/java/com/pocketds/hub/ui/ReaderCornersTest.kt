@@ -9,6 +9,7 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.pocketds.hub.debug.DebugLog
 import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.input.Stick
 import com.pocketds.hub.nav.ScreenHost
@@ -35,6 +36,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -278,6 +280,149 @@ class ReaderCornersTest {
             File(activity.getExternalFilesDir(null), "reader-corners-pages-failure.png").outputStream().use {
                 ins.uiAutomation.takeScreenshot().compress(Bitmap.CompressFormat.PNG, 100, it)
             }
+            throw failure
+        } finally {
+            withContext(Dispatchers.Main) { screen?.onHide(); screen?.onDestroyView(); activity.finish() }
+            EpubAppearanceStore.save(activity, original)
+            PageInfoSettings.save(activity, oldInfo)
+            ComfortSettings.save(activity, oldComfort)
+            HubSettings.save(activity, oldUrl, oldToken)
+            server.shutdown()
+        }
+    }
+
+    /** A screenshot kept on the device's shared storage, where it outlives the test app (Gradle uninstalls it after the run). */
+    private suspend fun keep(name: String) {
+        ins.waitForIdleSync(); delay(600)
+        shell("screencap -p /sdcard/Download/$name.png")
+    }
+
+    private fun shell(command: String): String =
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(ins.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText() }
+
+    /** A Contents row as it is on screen: its words, and the page at its right edge (null where it has none). */
+    private fun contentsRow(row: View): Pair<String, Int?> {
+        val texts = all(row).filterIsInstance<TextView>()
+        val figure = texts.lastOrNull()?.takeIf { it.fontFeatureSettings == "tnum" && it.visibility == View.VISIBLE }
+        return texts.first().text.toString() to figure?.text?.toString()?.toIntOrNull()
+    }
+
+    /**
+     * Contents ends each chapter's row with the page it starts on (#55), in the count of the corner's "Page X of Y": chosen,
+     * a row that names a file lands on exactly that page, and one that points into a file within a few pages of it. Done with
+     * the hub's own page count and with Readium's positions; a row whose file is not in the reading order has no number.
+     */
+    @Test fun contentsEndsEachRowWithThePageItStartsOn(): Unit = runBlocking {
+        val activity = ins.startActivitySync(Intent(ins.targetContext, ReaderFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ReaderFixtureActivity
+        check(activity.packageName.endsWith(".uitest"))
+        val original = EpubAppearanceStore.load(activity)
+        val oldInfo = PageInfoSettings.load(activity)
+        val oldComfort = ComfortSettings.load(activity)
+        val oldUrl = HubSettings.baseUrl(activity)
+        val oldToken = HubSettings.token(activity)
+        val server = ReaderFixtures.fileServer(ReaderFixtures.contentsEpub())
+        HubSettings.save(activity, server.url("/").toString(), "fixture")
+        var screen: EpubReaderScreen? = null
+        lateinit var root: View
+        fun reader() = activity.supportFragmentManager.fragments.filterIsInstance<EpubNavigatorFragment>().firstOrNull()
+        fun overlay() = screen!!.field<SidePanelView>("overlay")
+        suspend fun open(pages: Int) {
+            withContext(Dispatchers.Main) {
+                screen = EpubReaderScreen(HubClient(activity), "contents-pages-${System.nanoTime()}", "edition", "The Last Observatory", { true }, bookPages = pages)
+                root = screen!!.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); screen!!.onShow()
+            }
+            until("the book") { reader() != null && screen!!.field<View>("loading").visibility != View.VISIBLE }
+            until("the corners to know the place") { words(screen!!).second.startsWith("Page ") }
+            delay(800)
+        }
+        suspend fun close() { withContext(Dispatchers.Main) { screen?.onHide(); screen?.onDestroyView() } }
+        suspend fun openContents(): List<Pair<String, Int?>> {
+            withContext(Dispatchers.Main) { all(root).first { it.contentDescription == "Table of contents" }.performClick() }
+            until("Contents") { overlay().isOpen && overlay().rows.size == ReaderFixtures.CONTENTS_TITLES.size }
+            return withContext(Dispatchers.Main) { overlay().rows.map(::contentsRow) }
+        }
+        /** The page the corner says, once the page has settled after a jump. */
+        suspend fun cornerPage(): Int {
+            delay(1600)
+            return withContext(Dispatchers.Main) {
+                Regex("""Page (\d+) of \d+""").matchEntire(words(screen!!).second)?.groupValues?.get(1)?.toInt()
+                    ?: throw AssertionError("not a page: ${words(screen!!).second}")
+            }
+        }
+        suspend fun choose(title: String) {
+            withContext(Dispatchers.Main) { overlay().rows.first { contentsRow(it).first.trim() == title }.performClick() }
+            until("Contents to close") { !overlay().isOpen }
+        }
+        suspend fun verify(bookPages: Int) {
+            open(bookPages)
+            // Opened at once, the numbers that need no reading are there; the others arrive on their own.
+            withContext(Dispatchers.Main) { all(root).first { it.contentDescription == "Table of contents" }.performClick() }
+            until("Contents") { overlay().isOpen && overlay().rows.size == ReaderFixtures.CONTENTS_TITLES.size }
+            until("the anchors' pages") {
+                val rows = overlay().rows.map(::contentsRow)
+                rows.filter { it.first.trim().let { t -> t != "Author's note" } }.all { it.second != null }
+            }
+            val listed = withContext(Dispatchers.Main) { overlay().rows.map(::contentsRow) }
+            assertEquals(ReaderFixtures.CONTENTS_TITLES, listed.map { it.first })
+            val page = listed.associate { it.first.trim() to it.second }
+            // The entry for a file that is not in the reading order has no number.
+            assertNull(page["Author's note"])
+            val numbers = listed.mapNotNull { it.second }
+            assertEquals("in order: $listed", numbers.sorted(), numbers)
+            assertEquals("the book starts on its first page", 1, page["Prologue"])
+            // Four entries into one file, four different pages.
+            val inside = listOf("1. First light", "2. The ridge", "3. The lens", "The keeper's log").map { page.getValue(it)!! }
+            assertEquals("each its own: $inside", inside.size, inside.distinct().size)
+            assertTrue("after the file's own start: $listed", inside.first() >= page.getValue("Part one")!!)
+            assertTrue("before the epilogue: $listed", inside.last() <= page.getValue("Epilogue")!!)
+            // Reopened, the numbers are there at once: they are kept for the open book.
+            withContext(Dispatchers.Main) { overlay().cancel() }
+            assertEquals(listed, openContents())
+            val total = withContext(Dispatchers.Main) { Regex("""Page \d+ of (\d+)""").matchEntire(words(screen!!).second)!!.groupValues[1].toInt() }
+            val seen = mutableListOf<String>()
+            // Choosing a file's row lands on exactly the page it names.
+            for (title in listOf("Epilogue", "Part one", "Prologue", "Epilogue")) {
+                choose(title)
+                val landed = cornerPage()
+                seen += "$title ${page[title]} -> $landed of $total"
+                assertEquals("$title: $seen", page[title], landed)
+                openContents()
+            }
+            // An entry into a file is on, or very near, the page it says: the anchor's share of the file is an estimate.
+            // Measured from the file's own top, where Readium's jump to an anchor is steady: across files it can
+            // settle short or long of the anchor, whatever the number says.
+            for (title in listOf("1. First light", "2. The ridge", "3. The lens", "The keeper's log")) {
+                choose("Part one"); cornerPage(); openContents()
+                choose(title)
+                val landed = cornerPage()
+                seen += "$title ${page[title]} -> $landed of $total"
+                assertTrue("$title: $seen", Math.abs(landed - page[title]!!) <= maxOf(3, total / 50))
+                openContents()
+            }
+            DebugLog.log("reader", "contents pages ($bookPages): $seen")
+            // The current section keeps its words and its number.
+            choose("Part one")
+            openContents()
+            withContext(Dispatchers.Main) {
+                val part = overlay().rows.first { contentsRow(it).first == "Part one" }
+                assertTrue("Current section", all(part).filterIsInstance<TextView>().any { it.text == "Current section" })
+                assertEquals(page["Part one"], contentsRow(part).second)
+            }
+            keep(if (bookPages > 0) "toc-pages-hub-count" else "toc-pages-positions")
+            withContext(Dispatchers.Main) { overlay().cancel() }
+            close()
+        }
+        try {
+            EpubAppearanceStore.save(activity, EpubReaderPreferences())
+            ComfortSettings.save(activity, com.pocketds.hub.ui.ScreenComfort())
+            PageInfoSettings.save(activity, PageInfoChoice(corner = PageInfoCorner.PAGE_IN_BOOK))
+            verify(300)
+            verify(0)
+        } catch (failure: Throwable) {
+            File(activity.getExternalFilesDir(null), "reader-corners-contents-failure.png").outputStream().use {
+                ins.uiAutomation.takeScreenshot().compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+            shell("screencap -p /sdcard/Download/contents-failure.png")
             throw failure
         } finally {
             withContext(Dispatchers.Main) { screen?.onHide(); screen?.onDestroyView(); activity.finish() }

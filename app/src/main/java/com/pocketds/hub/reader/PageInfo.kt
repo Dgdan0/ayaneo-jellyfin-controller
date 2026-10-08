@@ -113,16 +113,58 @@ object PageInfo {
             return PagePlace(page, bookPages, chapter?.first ?: 0, chapter?.second ?: 0, timeLeft, fraction)
         }
         val total = sectionSizes.sum()
-        val position = if (total > 0 && section >= 0) TimeLeft.position(sectionSizes, section, progression) else null
+        val bookPage = positionPage(sectionSizes, section, progression)
         val size = sectionSizes.getOrNull(section)?.takeIf { it > 0 }
         return PagePlace(
-            bookPage = position?.let { (it.toInt() + 1).coerceIn(1, total) } ?: 0,
-            bookPages = if (position != null) total else 0,
+            bookPage = bookPage ?: 0,
+            bookPages = if (bookPage != null) total else 0,
             chapterPage = size?.let { (Math.floor(progression.coerceIn(0.0, 1.0) * it).toInt() + 1).coerceIn(1, it) } ?: 0,
             chapterPages = size ?: 0,
             timeLeft = timeLeft,
             fraction = fraction
         )
+    }
+
+    /**
+     * Readium's position [progression] of the way through [section], as a page of the book: the count the corners
+     * use without a page count from the hub, the position counted from 1. Null when the part or the book's
+     * positions are not known.
+     */
+    private fun positionPage(sectionSizes: List<Int>, section: Int, progression: Double): Int? {
+        val total = sectionSizes.sum()
+        if (total <= 0 || section < 0) return null
+        return TimeLeft.position(sectionSizes, section, progression)?.let { (it.toInt() + 1).coerceIn(1, total) }
+    }
+
+    /**
+     * How far through the book a point is, given [span] (a part's start and end, [sectionSpan]) and how far
+     * through the part it is: the interpolation the menu and the corners use for the place on screen, and a
+     * Contents entry's start page ([entryPage]) is measured by.
+     */
+    fun within(span: Pair<Double, Double>, share: Double): Double =
+        (span.first + (span.second - span.first) * share).coerceIn(0.0, 1.0)
+
+    /**
+     * The page a Contents entry starts on (#55), in the same count as the corners' "Page X of Y", the book's page
+     * and Resume, so choosing the row lands on the page it names. [section] is the part of the book (in reading
+     * order) the entry's file is, -1 when the file is not among them; [share] is how far into that file the entry
+     * starts: 0 for an entry that points at the file, the anchor's share for one that points into it
+     * (`chapter.xhtml#part2`, [AnchorShares]), null while that is not known.
+     *
+     * With the book's own page count ([bookPages], > 0) it is [ReadingBookFacts.page] of how far through the book
+     * that point is ([sectionStarts] and [within], as [place] counts it); without, the position Readium starts there
+     * on, counted from 1 as the corners count it ([sectionSizes]). Null when it cannot be worked out: the entry is
+     * left without a number rather than given a guessed one.
+     */
+    fun entryPage(bookPages: Int, sectionSizes: List<Int>, sectionStarts: List<Double?>, section: Int, share: Double?): Int? {
+        if (section < 0 || share == null || !share.isFinite()) return null
+        // Within the file, whatever the estimate said.
+        val inFile = share.coerceIn(0.0, 1.0)
+        if (bookPages > 0) {
+            val span = sectionSpan(sectionStarts, section) ?: return null
+            return ReadingBookFacts.page(within(span, inFile), bookPages)
+        }
+        return positionPage(sectionSizes, section, inFile)
     }
 
     /**

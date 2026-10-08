@@ -145,7 +145,7 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
         }
     }
     /** [keepScroll]: a caller redrawing its own rows on every press (the request form) stays where it was. */
-    fun resetBody(keepScroll:Boolean=false) {body.removeAllViews();tabRow.removeAllViews();footer.removeAllViews();choiceRows.clear();if(!keepScroll)scroll.scrollTo(0,0)}
+    fun resetBody(keepScroll:Boolean=false) {body.removeAllViews();tabRow.removeAllViews();footer.removeAllViews();choiceRows.clear();trailers.clear();if(!keepScroll)scroll.scrollTo(0,0)}
     /** A card for rows the caller builds and selects itself (the request form's); a [section] before it starts a new one. */
     fun group():LinearLayout=currentGroup()
     /**
@@ -217,14 +217,35 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
     /**
      * One option. [leading] sits before the words: a chapter's frame. A
      * selected option shows the check mark; there is no "Selected" text.
+     * [trailing] is a figure at the row's right edge, past the check mark, as a printed contents list ends
+     * each line with its page (#55): muted, in tabular figures so a column of them lines up. An empty one keeps
+     * the place for a figure that is not known yet, which [setTrailing] fills in; null has no place.
      */
-    fun choice(label:String,detail:String="",selected:Boolean=false,danger:Boolean=false,leading:View?=null,icon:android.graphics.drawable.Drawable?=null,onPick:()->Unit):View {
+    fun choice(label:String,detail:String="",selected:Boolean=false,danger:Boolean=false,leading:View?=null,icon:android.graphics.drawable.Drawable?=null,trailing:String?=null,trailingSpoken:String=trailing.orEmpty(),onPick:()->Unit):View {
         val row=row(label,detail,selected,danger,onPick)
         leading?.let {row.addView(it,0,LinearLayout.LayoutParams(dp(96),dp(54)).apply {marginEnd=dp(12)})}
         // A small symbol before the words (#48): the card menu's rows, the done mark on Remove download.
         icon?.let {row.addView(ImageView(context).apply {setImageDrawable(it);importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO},0,LinearLayout.LayoutParams(dp(22),dp(22)).apply {marginEnd=dp(12)})}
         if(selected)row.addView(ImageView(context).apply {setImageDrawable(AppIconDrawable(AppIcon.CHECK,colors.accent));importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO},LinearLayout.LayoutParams(dp(20),dp(20)).apply{marginStart=dp(8)})
+        if(trailing!=null) {
+            val figure=TextView(context).apply {
+                textSize=13f;textWeight(600);setTextColor(colors.mutedText);maxLines=1;gravity=Gravity.END
+                fontFeatureSettings="tnum";textDirection=TEXT_DIRECTION_LTR;importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            row.addView(figure,LinearLayout.LayoutParams(-2,-2).apply {marginStart=dp(12)})
+            trailers[row]=Trailing(figure,row.contentDescription?.toString().orEmpty())
+            setTrailing(row,trailing,trailingSpoken)
+        }
         return row
+    }
+    /** A row's trailing figure: where it is on screen, and how the row reads without it. */
+    private class Trailing(val view:TextView,val described:String)
+    private val trailers=mutableMapOf<View,Trailing>()
+    /** Sets or clears the figure at the right edge of a [choice] row made with a [trailing]; [spoken] is how a screen reader says it. */
+    fun setTrailing(row:View,text:String,spoken:String=text) {
+        val slot=trailers[row] ?: return
+        slot.view.text=text;slot.view.visibility=if(text.isBlank()) GONE else VISIBLE
+        row.contentDescription=listOf(slot.described,spoken).filter(String::isNotBlank).joinToString(", ")
     }
     /**
      * A key and what it does (a reader's Controls sheet, #16): the caps as
