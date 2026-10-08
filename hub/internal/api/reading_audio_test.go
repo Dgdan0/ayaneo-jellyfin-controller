@@ -62,6 +62,9 @@ type audioBuild struct {
 	// edition, and epub what was generated for it.
 	readaloud string
 	epub      readingdomain.AlignedEPUBFixture
+	// ebook is the raw JSON Storyteller reports for the book's ebook, with the
+	// path of its file; empty is the bare ebook that has none.
+	ebook string
 }
 
 // audioEnv is a hub whose Storyteller reports one audiobook, book 12, whose
@@ -106,7 +109,7 @@ func newAudioEnv(t *testing.T, options audioEnvOptions, build func(root string) 
 	root := t.TempDir()
 	env := &audioEnv{t: t, root: root, tags: map[string]int{}, chapters: map[string][]probedChapter{}}
 	env.build = build(root)
-	env.state = &epubUpstreamState{audio: env.build.json, noFiles: true, narrators: `[{"name":"Jon Lindstrom"}]`, readaloudJSON: env.build.readaloud}
+	env.state = &epubUpstreamState{audio: env.build.json, noFiles: true, narrators: `[{"name":"Jon Lindstrom"}]`, readaloudJSON: env.build.readaloud, ebookJSON: env.build.ebook}
 	env.upstream = newEpubUpstream(t, env.state)
 	t.Cleanup(env.upstream.Close)
 	cfg := readingCatalogConfig(env.upstream.URL, filepath.Join(t.TempDir(), "catalog.json"), options.scopes)

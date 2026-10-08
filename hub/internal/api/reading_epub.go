@@ -77,8 +77,11 @@ func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
 	if ok && omitAudio {
 		s.serveSlimReadaloud(w, r, ctx, bookID, byteRange)
 	}
+	// The ebook is served as the reading copy of the file on this PC (reading_epub_copy.go).
+	// When that cannot be, nothing has been written and Storyteller's file goes through.
+	copied := ok && !omitAudio && (format == "" || format == "ebook") && s.serveReadingCopy(w, r, ctx, bookID, byteRange)
 	cancel()
-	if !ok || omitAudio {
+	if !ok || omitAudio || copied {
 		return
 	}
 	// The file transfer uses the request context rather than the metadata

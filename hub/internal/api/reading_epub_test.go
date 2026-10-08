@@ -39,6 +39,10 @@ type epubUpstreamState struct {
 	// an audio one: the aligned EPUB's path in Storyteller's filesystem and its
 	// status.
 	readaloudJSON string
+	// ebookJSON is the raw JSON of the "ebook" field for book 12, with the path of
+	// the book's file in Storyteller's filesystem. Empty is the bare ebook that
+	// older tests use, which has no path.
+	ebookJSON string
 	// positions, when set, is Storyteller's real position table for book 12,
 	// with the rules of its database/positions.ts, in place of the fixed
 	// locator and the one-shot conflict switch of the older tests.
@@ -131,6 +135,10 @@ func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
 		case "/api/v2/books":
 			_, _ = io.WriteString(w, `[{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":{"uuid":"ebook-12","pageCount":400}}]`)
 		case "/api/v2/books/12":
+			ebook := `{"uuid":"ebook-12","pageCount":400}`
+			if state.ebookJSON != "" {
+				ebook = state.ebookJSON
+			}
 			if state.audio != "" {
 				narrators := state.narrators
 				if narrators == "" {
@@ -141,7 +149,7 @@ func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
 					readaloud = `,"readaloud":` + state.readaloudJSON
 				}
 				_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"narrators":`+narrators+
-					`,"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":{"uuid":"ebook-12","pageCount":400},"audiobook":`+state.audio+readaloud+`}`)
+					`,"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":`+ebook+`,"audiobook":`+state.audio+readaloud+`}`)
 				return
 			}
 			if state.readaloud {
@@ -152,7 +160,7 @@ func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
 				_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","ebook":{"uuid":"ebook-12"},"audiobook":{"uuid":"audio-12"}}`)
 				return
 			}
-			_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":{"uuid":"ebook-12","pageCount":400}}`)
+			_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":`+ebook+`}`)
 		case "/api/v2/books/12/files":
 			if state.noFiles {
 				t.Errorf("Storyteller's /files route was called (%s): streaming must read the files itself", r.URL)

@@ -243,7 +243,15 @@ func (s *Server) alignPlan(ctx context.Context, book storyteller.Book, plan *aud
 // openReadaloudEdition opens the book's read-along edition, read-only, through
 // the media mapping, or says why it cannot be: in the words alignmentReason uses.
 func (s *Server) openReadaloudEdition(book storyteller.Book) (readingdomain.MediaFile, string) {
-	remote := path.Clean(strings.ReplaceAll(strings.TrimSpace(book.Readaloud.Filepath), "\\", "/"))
+	return s.openStorytellerEPUB(book.Readaloud.Filepath)
+}
+
+// openStorytellerEPUB is the way to any of a Storyteller book's EPUB files from the
+// path Storyteller reports for it (the ebook, the read-along edition): through
+// media_removal_roots, read-only, opened once. It says why it cannot be opened in
+// the same words, and names no path.
+func (s *Server) openStorytellerEPUB(storytellerPath string) (readingdomain.MediaFile, string) {
+	remote := path.Clean(strings.ReplaceAll(strings.TrimSpace(storytellerPath), "\\", "/"))
 	if !strings.HasPrefix(remote, "/") {
 		return readingdomain.MediaFile{}, alignReasonUnreadable
 	}

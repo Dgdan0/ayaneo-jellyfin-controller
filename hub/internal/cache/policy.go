@@ -78,10 +78,13 @@ var (
 	// how long an unused reading is kept. Never stale.
 	ReadingAlignment = Spec{Fresh: 6 * time.Hour, Stale: 0, IfError: 0}
 
-	// A read-along edition without its audio: its text and SMIL, about a
-	// megabyte, kept so that a book opened on several devices, or resumed, is
-	// built once. The key holds the edition's size and modified time. Never stale.
-	ReadingSlimEPUB = Spec{Fresh: 6 * time.Hour, Stale: 0, IfError: 0}
+	// The reading copy of an EPUB (#41): an ebook, or a read-along edition without
+	// its audio, with its font sizes made relative and two columns within reach of a
+	// narrow screen. What is kept is the plan of the copy (its rewritten entries, its
+	// zip headers and its small entries, a few megabytes; a large entry stays in the
+	// file) so that a book opened on several devices, or resumed, is built once. The
+	// key holds the file's size and modified time. Never stale.
+	ReadingEPUBCopy = Spec{Fresh: 6 * time.Hour, Stale: 0, IfError: 0}
 
 	// What Hardcover says of a book: its readers' rating and its genres (#39). A rating
 	// moves slowly, and the free key is limited to 60 requests a minute, so an answer is

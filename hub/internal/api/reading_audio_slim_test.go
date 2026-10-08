@@ -24,6 +24,9 @@ import (
 // of a 293 MB file, so a reader opens on the words at once and takes the
 // narration from the hub's tracks.
 
+// columnStyleElement is the style that the reading copy puts in a document's head.
+var columnStyleElement = regexp.MustCompile(`<style type="text/css">@media screen and \(min-width: 30em\) \{[^<]*\}</style>`)
+
 func (e *audioEnv) slimPath() string {
 	return "/v1/reading/works/" + e.child + "/publications/12/file?format=readaloud&audio=omit"
 }
@@ -140,10 +143,19 @@ func TestSlimReadaloudIsTheEditionWithoutItsAudio(t *testing.T) {
 	if reduced.File[0].Name != "mimetype" || reduced.File[0].Method != zip.Store || string(zipEntry(t, reduced, "mimetype")) != "application/epub+zip" {
 		t.Fatalf("the archive does not open on a stored mimetype: %+v", reduced.File[0].FileHeader)
 	}
+	// Every entry is as it was, but for the one <style> that each document has
+	// been given in its head (the reading copy, reading_epub_copy.go).
 	for _, name := range want {
-		if !bytes.Equal(zipEntry(t, reduced, name), zipEntry(t, original, name)) {
+		got, wasOriginally := zipEntry(t, reduced, name), zipEntry(t, original, name)
+		if strings.HasSuffix(name, ".xhtml") {
+			got = columnStyleElement.ReplaceAll(got, nil)
+		}
+		if !bytes.Equal(got, wasOriginally) {
 			t.Errorf("%s changed", name)
 		}
+	}
+	if !columnStyleElement.Match(zipEntry(t, reduced, "OEBPS/text/part0001.xhtml")) {
+		t.Error("a chapter of the slim edition has no column style")
 	}
 	if len(body)*10 > len(originalBytes) {
 		t.Fatalf("the slim edition is %d bytes of %d: the audio is in it", len(body), len(originalBytes))
@@ -335,9 +347,9 @@ func TestSlimReadaloudIsBuiltOnceForAnyNumberOfAskers(t *testing.T) {
 
 func TestSlimReadaloudSaysWhyItCannotBeServed(t *testing.T) {
 	large := func(t *testing.T) {
-		previous := maxSlimEPUBBytes
-		t.Cleanup(func() { maxSlimEPUBBytes = previous })
-		maxSlimEPUBBytes = 1000
+		previous := maxEPUBCopyBytes
+		t.Cleanup(func() { maxEPUBCopyBytes = previous })
+		maxEPUBCopyBytes = 1000
 	}
 	for _, test := range []struct {
 		name     string
