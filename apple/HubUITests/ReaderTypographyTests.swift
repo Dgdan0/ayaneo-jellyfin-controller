@@ -111,9 +111,11 @@ final class ReaderTypographyTests: XCTestCase {
         XCTAssertEqual(title.frame.midX, width / 2, accuracy: 2, "the title is not centred")
         XCTAssertEqual(width - clock.frame.maxX, margin, accuracy: 3, "the clock is not on the text's edge (\(margin))")
         XCTAssertEqual(place.frame.minX, margin, accuracy: 3, "the bottom left is not on the text's edge (\(margin))")
-        XCTAssertLessThan(title.frame.maxY, 62, "the title is in the strip above the text")
+        // The strips above and below the text are the layout's own: 62 points on a phone, 84 and 96 on an iPad.
+        let strip = PageInfo.strip(compactHeight: false, tablet: UIDevice.current.userInterfaceIdiom != .phone)
+        XCTAssertLessThan(title.frame.maxY, strip.top, "the title is in the strip above the text")
         // Its tap reaches a little above the words, which are in the strip below the text.
-        XCTAssertGreaterThanOrEqual(place.frame.minY, page(app).frame.height - 62 - 8, "the bottom left is in the strip below the text")
+        XCTAssertGreaterThanOrEqual(place.frame.minY, page(app).frame.height - strip.bottom - 8, "the bottom left is in the strip below the text")
 
         // A tap in the margin turns the page, forward at the right edge and back at the left.
         XCTAssertTrue(waitUntil(10) { place.label.hasPrefix("Page 1 of ") }, "the bottom left says \(place.label)")
