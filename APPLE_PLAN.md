@@ -534,6 +534,7 @@ speaks Readium (`@preconcurrency` imports; the EPUB opened off the main actor an
 |---|---|
 | How fast you read and the time left ("12 min left in chapter · 4h 10m in book") | HubKit `ReadingPace`, `ReadingPace.Tracker`, `ReadingPaceStore`, `TimeLeft` (`Rules/ReadingPace`), Android's with its test cases |
 | The book's parts and positions, how far through it, the slider's place, the menu's line | HubKit `BookSections` (`Rules/BookSections`), the arithmetic Android keeps in its screen |
+| The page each contents line starts on (#55), in the corners' count: the hub's page count, else Readium's positions; a line into the middle of a file from its share of the file's letters | HubKit `ContentsPages` (`page`, `share`, `shares`); `BookReaderModel.contentsPages`, the lines into a file measured in the background once per open; drawn as `SheetRow(tabular:)` |
 | Scrolling with the D-pad, the arrows, Space and the right stick, on into the next part | HubKit `BookScroll` |
 | The page shrunk, never laid out again, for the menu or beside a sheet | HubKit `ReaderPagePreview` |
 | A footnote's words for its card | HubKit `FootnoteText` |

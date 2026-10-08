@@ -595,12 +595,16 @@ extension View {
 
 /// A row (`.opt`): its name and a line under it, then its value, a tick in
 /// the accent while chosen, or a chevron when it opens another page.
+/// `tabular`: the value is a number in a column down the rows (the
+/// contents' pages, #55), last in the row whether the tick is there or not,
+/// and said as "page 12".
 struct SheetRow<Leading: View>: View {
     let title: String
     var detail = ""
     var value = ""
     var checked = false
     var chevron = false
+    var tabular = false
     let action: () -> Void
     @ViewBuilder let leading: Leading
     @Environment(\.glassAccent) private var accent
@@ -620,7 +624,7 @@ struct SheetRow<Leading: View>: View {
                 }
                 .multilineTextAlignment(.leading)
                 Spacer(minLength: 8)
-                if !value.isEmpty {
+                if !value.isEmpty && !tabular {
                     Text(value)
                         .font(HubType.body(14, relativeTo: .subheadline))
                         .foregroundStyle(.white.opacity(0.62))
@@ -630,6 +634,12 @@ struct SheetRow<Leading: View>: View {
                     Image(systemName: "checkmark")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(accent.tint)
+                }
+                if !value.isEmpty && tabular {
+                    Text(value)
+                        .font(HubType.body(14, relativeTo: .subheadline).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.62))
+                        .accessibilityHidden(true)
                 }
                 if chevron {
                     Image(systemName: "chevron.right")
@@ -645,7 +655,20 @@ struct SheetRow<Leading: View>: View {
         .buttonStyle(SheetRowStyle())
         .sheetDivider()
         .accessibilityElement(children: .combine)
+        .modifier(SpokenPage(tabular: tabular, page: value))
         .accessibilityAddTraits(checked ? .isSelected : [])
+    }
+}
+
+/// A `tabular` row's number, said as its value ("page 12"); other rows keep
+/// what their parts say. Which branch is fixed per row, so a number that
+/// arrives later does not make the row a new view.
+private struct SpokenPage: ViewModifier {
+    let tabular: Bool
+    let page: String
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if tabular { content.accessibilityValue(page.isEmpty ? "" : "page " + page) } else { content }
     }
 }
 

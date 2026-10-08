@@ -80,7 +80,9 @@ struct BookReaderSheetView: View {
             SheetGroup {
                 ForEach(Array(reader.contents.enumerated()), id: \.element.id) { index, row in
                     let current = index == reader.currentContentsRow
-                    SheetRow(title: row.title, detail: current ? "Where you are" : "", checked: current) {
+                    // The page it starts on, in the corners' count (#55), in a column at the right.
+                    SheetRow(title: row.title, detail: current ? "Where you are" : "",
+                             value: reader.contentsPages[row.id].map(String.init) ?? "", checked: current, tabular: true) {
                         reader.openContents(row)
                     } leading: {
                         if row.depth > 0 { Color.clear.frame(width: CGFloat(row.depth) * 16, height: 1) }
