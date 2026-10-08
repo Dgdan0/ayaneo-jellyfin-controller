@@ -1,10 +1,10 @@
 import Foundation
 
 /// Comfort in a long session (#37; Android's `ScreenComfort`, #16 X3): how
-/// bright and how warm the app draws a reader, whether a book's page is pure
-/// black, and whether the screen stays on while narration plays. Kept for
-/// every reader and every book (`ComfortStore`): dim a comic at night and the
-/// next book opens just as dim.
+/// bright and how warm the app draws a reader, and whether the screen stays
+/// on while narration plays. Kept for every reader and every book
+/// (`ComfortStore`): dim a comic at night and the next book opens just as dim.
+/// (A black page is the Dark theme's now, #47.)
 ///
 /// Drawn, never the device's own backlight: black laid over what the reader
 /// shows (`dimAlpha`) and a warm colour multiplied into it (`warmColor`),
@@ -15,8 +15,6 @@ public struct ScreenComfort: Equatable, Codable, Sendable {
     public var brightness: Double
     /// 0 is as drawn; 1 is candlelight.
     public var warmth: Double
-    /// A book's page in black, its words a soft warm grey.
-    public var blackPage: Bool
     /// The screen stays on while a book's narration plays.
     public var awakeWhileNarrating: Bool
 
@@ -26,14 +24,10 @@ public struct ScreenComfort: Equatable, Codable, Sendable {
     public static let white: UInt32 = 0xFFFF_FFFF
     /// White at full warmth, about 2,800 K: the warm end of a reading lamp.
     public static let candle: UInt32 = 0xFFFF_B46B
-    /// The black page and its words: not white, which glares on black in the dark.
-    public static let blackPageColor: UInt32 = 0xFF00_0000
-    public static let blackPageText: UInt32 = 0xFFC9_C3B6
 
-    public init(brightness: Double = 1, warmth: Double = 0, blackPage: Bool = false, awakeWhileNarrating: Bool = true) {
+    public init(brightness: Double = 1, warmth: Double = 0, awakeWhileNarrating: Bool = true) {
         self.brightness = brightness
         self.warmth = warmth
-        self.blackPage = blackPage
         self.awakeWhileNarrating = awakeWhileNarrating
     }
 
@@ -65,16 +59,11 @@ public struct ScreenComfort: Equatable, Codable, Sendable {
     public static func warmthLabel(_ warmth: Double) -> String {
         warmth <= 0.001 ? "Off" : "\(Int((min(max(warmth, 0), 1) * 100).rounded()))%"
     }
-
-    /// The black page's line in the sheet.
-    public static func blackPageDetail(_ on: Bool) -> String {
-        on ? "On · for the dark, and an OLED's black" : "Off · the page colour in Appearance"
-    }
 }
 
 /// Where Comfort is kept: one for every reader and every book.
 public struct ComfortStore: @unchecked Sendable {
-    private let key = "reader.comfort"
+    static let key = "reader.comfort"
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
@@ -82,7 +71,7 @@ public struct ComfortStore: @unchecked Sendable {
     }
 
     public func load() -> ScreenComfort {
-        guard let data = defaults.data(forKey: key), var comfort = try? JSONDecoder().decode(ScreenComfort.self, from: data) else {
+        guard let data = defaults.data(forKey: Self.key), var comfort = try? JSONDecoder().decode(ScreenComfort.self, from: data) else {
             return ScreenComfort()
         }
         comfort.brightness = min(max(comfort.brightness, ScreenComfort.minBrightness), 1)
@@ -91,19 +80,16 @@ public struct ComfortStore: @unchecked Sendable {
     }
 
     public func save(_ comfort: ScreenComfort) {
-        if let data = try? JSONEncoder().encode(comfort) { defaults.set(data, forKey: key) }
+        if let data = try? JSONEncoder().encode(comfort) { defaults.set(data, forKey: Self.key) }
     }
-}
 
-extension EpubRendering {
-    /// The page as Comfort says (#37): a black page in Night's layout, its
-    /// words a soft warm grey; else as Appearance chose.
-    public func comforted(_ comfort: ScreenComfort) -> EpubRendering {
-        guard comfort.blackPage else { return self }
-        var next = self
-        next.theme = "dark"
-        next.background = EpubPagePalette.hex(ScreenComfort.blackPageColor)
-        next.text = EpubPagePalette.hex(ScreenComfort.blackPageText)
-        return next
+    /// Whether a device kept the black page Comfort had until #47, and gone:
+    /// the stored Comfort is written again without it. Dark is that page now.
+    static func takeBlackPage(_ defaults: UserDefaults) -> Bool {
+        guard let data = defaults.data(forKey: key),
+              var stored = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let had = stored.removeValue(forKey: "blackPage") as? Bool else { return false }
+        if let rewritten = try? JSONSerialization.data(withJSONObject: stored) { defaults.set(rewritten, forKey: key) }
+        return had
     }
 }

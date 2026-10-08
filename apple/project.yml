@@ -81,6 +81,11 @@ targets:
           - Bricolage-SemiBold.ttf
           - Bricolage-Bold.ttf
           - Bricolage-ExtraBold.ttf
+          # The ebook reader's own faces (#47): Literata is its default, and Readium
+          # is given these files by name (`BookNavigator`).
+          - Literata.ttf
+          - Literata-Italic.ttf
+          - AtkinsonHyperlegibleNext.ttf
         ATSApplicationFontsPath: .
         UILaunchScreen:
           UIColorName: LaunchBackground
@@ -137,6 +142,8 @@ targets:
       - path: HubUITests
     dependencies:
       - target: Hub
+      # The layout's own rules, so a test asks them (the reader's margin) rather than repeating a number.
+      - package: HubKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dgdan.jellyhub.uitests

@@ -139,6 +139,9 @@ run() {
     HUB_TITLE=$(printf '%q' "${HUB_TITLE:-}") HUB_SUBTITLES=$(printf '%q' "${HUB_SUBTITLES:-}") \
     HUB_REMOVAL=$(printf '%q' "${HUB_REMOVAL:-}") HUB_DOWNLOAD=$(printf '%q' "${HUB_DOWNLOAD:-}") \
     HUB_CAST=$(printf '%q' "${HUB_CAST:-}") HUB_OFFLINE_TITLE=$(printf '%q' "${HUB_OFFLINE_TITLE:-}") HUB_OFFLINE_WATCH=$(printf '%q' "${HUB_OFFLINE_WATCH:-}") \
+    HUB_BOOK_THEME=$(printf '%q' "${HUB_BOOK_THEME:-}") HUB_BOOK_COLUMNS=$(printf '%q' "${HUB_BOOK_COLUMNS:-}") \
+    HUB_BOOK_FONT=$(printf '%q' "${HUB_BOOK_FONT:-}") HUB_BOOK_SIZE=$(printf '%q' "${HUB_BOOK_SIZE:-}") \
+    HUB_BOOK_TABLET=$(printf '%q' "${HUB_BOOK_TABLET:-}") \
     SHOT_SIMS=$(printf '%q' "${SHOT_SIMS:-}") SHOT_WAIT=$(printf '%q' "${SHOT_WAIT:-3}") \
     SHOT_STATE=$(printf '%q' "${SHOT_STATE:-}") SHOT_TIMES=$(printf '%q' "${SHOT_TIMES:-}") \
     ${BUILD_NUMBER:+BUILD_NUMBER=$(printf '%q' "$BUILD_NUMBER")} \
