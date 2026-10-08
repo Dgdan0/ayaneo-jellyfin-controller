@@ -329,4 +329,58 @@ final class PadFocusTests: XCTestCase {
         press(activity, .rightArrow)
         XCTAssertTrue(focus(activity).hasPrefix("ring activity speed/"), "right left the speed choice: \(focus(activity))")
     }
+
+    // MARK: Controls a finger still works (#46)
+
+    /// The Books library's Sort by is a `Menu` the ring can focus: a tap
+    /// still opens it, and a field chosen there sorts the books.
+    @MainActor
+    func testTheSortMenuStillOpensOnATap() {
+        let app = launch(side: "books", section: "library")
+        let tile = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Books & Audiobooks")).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 20), "the reading libraries did not load")
+        tile.tap()
+        let views = app.otherElements["library-views"]
+        XCTAssertTrue(views.waitForExistence(timeout: 10), "the library has no Series, Authors and Books")
+        views.buttons["Series"].tap()
+        let sort = app.buttons["library-sort-field"].firstMatch
+        XCTAssertTrue(sort.waitForExistence(timeout: 10), "no Sort by on Series")
+        let before = sort.label
+        // Another field than the one sorted by, so the choice shows.
+        let field = before.hasPrefix("Title") ? "Series" : "Title"
+        sort.tap()
+        let choice = app.buttons.matching(NSPredicate(format: "label == %@", field)).firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), "a tap did not open Sort by (\(before))")
+        choice.tap()
+        XCTAssertTrue(sort.wait(for: \.label, toEqual: field + " ▾", timeout: 5), "the field chosen did not sort: \(sort.label)")
+        // The order chosen stays from one visit to the next: as it was, for the next run.
+        sort.tap()
+        let back = app.buttons.matching(NSPredicate(format: "label == %@", String(before.dropLast(2)))).firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "Sort by did not open again")
+        back.tap()
+        XCTAssertTrue(sort.wait(for: \.label, toEqual: before, timeout: 5), "the first field did not come back: \(sort.label)")
+    }
+
+    /// Downloads' Wait for Wi-Fi is a `Toggle` the ring can focus: a tap on
+    /// its switch still turns it off, and again on.
+    @MainActor
+    func testTheWifiToggleStillSwitchesOnATap() {
+        let app = launch(side: "books", section: "downloads")
+        // This side's: the other side's Downloads, kept out of sight, has its own.
+        let queue = app.buttons.matching(NSPredicate(format: "identifier == %@ AND enabled == true", "downloads-queue")).firstMatch
+        XCTAssertTrue(queue.waitForExistence(timeout: 20), "no queue pill")
+        queue.tap()
+        let toggles = app.switches.matching(identifier: "offline-wifi-only")
+        XCTAssertTrue(toggles.firstMatch.waitForExistence(timeout: 10), "no Wait for Wi-Fi in the queue")
+        // The one on screen: hittable is not a key a query can match on.
+        let toggle = toggles.allElementsBoundByIndex.first { $0.isHittable } ?? toggles.firstMatch
+        let before = toggle.value as? String ?? ""
+        let after = before == "1" ? "0" : "1"
+        // On the switch itself, at the trailing end, where a finger turns it.
+        let knob = toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5))
+        knob.tap()
+        XCTAssertTrue(waitFor(app, 5) { _ in (toggle.value as? String) == after }, "a tap did not switch Wait for Wi-Fi: \(toggle.value ?? "none")")
+        knob.tap()
+        XCTAssertTrue(waitFor(app, 5) { _ in (toggle.value as? String) == before }, "a second tap did not switch it back: \(toggle.value ?? "none")")
+    }
 }

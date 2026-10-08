@@ -289,6 +289,7 @@ struct ReadingLibraryView: View {
                 }
                 .menuStyle(.button)
                 .buttonStyle(GlassControlStyle())
+                .accessibilityIdentifier("library-sort-field")
                 .padFocusable("sort-field") {
                     PadFocusCenter.shared.present(PadMenu(title: "Sort by", choices: gridFields.map { field in
                         PadChoice(id: "sort-\(field.id)", title: field.label, checked: field.id == sort.field) {

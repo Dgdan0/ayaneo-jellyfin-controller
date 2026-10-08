@@ -452,6 +452,7 @@ struct OfflineSettingsCard: View {
                 }
             }
             .tint(.white.opacity(0.6))
+            .accessibilityIdentifier("offline-wifi-only")
             .padFocusable("wifi-only", ring: .rounded(12)) { offline.wifiOnly.toggle() }
             Text("Kept on this device and out of its backups. The PC makes an MP4 of each for this device first; a converted picture takes a few minutes.")
                 .font(HubType.body(12.5, relativeTo: .caption))
