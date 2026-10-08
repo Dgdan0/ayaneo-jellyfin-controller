@@ -1,6 +1,7 @@
 package repackage
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -87,6 +88,55 @@ func TestArgsMapEachStreamThePlanKeepsAndNoOther(t *testing.T) {
 	// No bare -map 0 and no -c copy that would carry along what was left out.
 	if has(args, "-map", "0") || has(args, "-c", "copy") || has(args, "-codec", "copy") {
 		t.Errorf("a catch-all crept in: %v", args)
+	}
+}
+
+// Jellyfin 10.11 numbers a file's sidecar subtitles first. A Drake & Josh episode is
+// subtitles 0 (Hebrew .srt) and 1 (.srt), video 2 and audio 3, where the MP4 holds the
+// video at 0 and the audio at 1; mapping Jellyfin's numbers failed every episode with
+// "Stream map '0:2' matches no streams".
+func TestArgsMapStreamsInsideTheFileWhereTheFileHasThemWhenSidecarsAreNumberedFirst(t *testing.T) {
+	external := func(s Stream) Stream { s.External = true; return s }
+	streams := []Stream{
+		external(subtitle(0, "subrip", "heb")), external(subtitle(1, "subrip", "")),
+		video(2, "h264", "High", 8, "yuv420p"), audio(3, "ac3", "eng", 2),
+	}
+	plan, err := PlanApple(Source{Container: "mov,mp4,m4a,3gp,3g2,mj2", SizeBytes: 300_000_000, DurationSeconds: 1400, DefaultAudio: 3, Streams: streams})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := Inputs{SourcePath: "episode.mp4", Subtitles: map[int]string{0: "sub-0.srt", 1: "sub-1.srt"}, FileIndex: FileIndexes(streams)}
+	args := mustArgs(t, plan, in, "out.part", X264)
+	var maps []string
+	for at, word := range args {
+		if word == "-map" {
+			maps = append(maps, args[at+1])
+		}
+	}
+	if want := []string{"0:0", "0:1", "1:0", "2:0"}; !slices.Equal(maps, want) {
+		t.Fatalf("maps = %v, want %v", maps, want)
+	}
+	// The plan keeps Jellyfin's numbers: they are what the manifest and the signature say.
+	if plan.Video.SourceIndex != 2 || plan.Audio[0].SourceIndex != 3 {
+		t.Errorf("the plan's numbers changed: video %d, audio %d", plan.Video.SourceIndex, plan.Audio[0].SourceIndex)
+	}
+}
+
+func TestFileIndexesCountOnlyTheSidecarsNumberedBeforeAStream(t *testing.T) {
+	external := func(s Stream) Stream { s.External = true; return s }
+	for name, test := range map[string]struct {
+		streams []Stream
+		want    map[int]int
+	}{
+		"sidecars first": {[]Stream{external(subtitle(0, "subrip", "heb")), video(1, "h264", "High", 8, "yuv420p"), audio(2, "aac", "eng", 2), subtitle(3, "subrip", "eng")},
+			map[int]int{1: 0, 2: 1, 3: 2}},
+		"sidecars last, as an older Jellyfin": {[]Stream{video(0, "h264", "High", 8, "yuv420p"), audio(1, "aac", "eng", 2), external(subtitle(2, "subrip", "heb"))},
+			map[int]int{0: 0, 1: 1}},
+		"no sidecars": {[]Stream{video(0, "hevc", "Main", 8, "yuv420p"), audio(1, "eac3", "eng", 6)}, map[int]int{0: 0, 1: 1}},
+	} {
+		if got := FileIndexes(test.streams); !maps.Equal(got, test.want) {
+			t.Errorf("%s: %v, want %v", name, got, test.want)
+		}
 	}
 }
 

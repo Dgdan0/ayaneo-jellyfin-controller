@@ -398,10 +398,11 @@ func (s *Server) appleBuild(grant offlineGrant) repackage.BuildFunc {
 		if plan.Video.Converted {
 			encoder = s.appleEncoder(ffmpeg)
 		}
+		planned := planSourceFrom(source, *item)
 		buildErr := s.buildMP4(ctx, repackage.BuildSpec{
 			FFmpeg: ffmpeg, Plan: plan, Out: job.Out, Encoder: encoder,
-			Duration: time.Duration(planSourceFrom(source, *item).DurationSeconds * float64(time.Second)),
-			Inputs:   repackage.Inputs{SourcePath: path, Subtitles: sidecars},
+			Duration: time.Duration(planned.DurationSeconds * float64(time.Second)),
+			Inputs:   repackage.Inputs{SourcePath: path, Subtitles: sidecars, FileIndex: repackage.FileIndexes(planned.Streams)},
 		}, job.Progress)
 		return s.appleBuildFailure(buildErr, path, job.Out)
 	}

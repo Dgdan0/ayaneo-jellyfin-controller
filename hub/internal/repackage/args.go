@@ -34,6 +34,41 @@ var NVENC = Encoder{Name: "h264_nvenc", Options: []string{
 type Inputs struct {
 	SourcePath string
 	Subtitles  map[int]string
+	// FileIndex is where a stream inside the file is in the file, by Jellyfin's index
+	// (FileIndexes); one absent from it is where Jellyfin says.
+	FileIndex map[int]int
+}
+
+// inFile is the index ffmpeg's -map takes for a stream inside the file.
+func (in Inputs) inFile(index int) int {
+	if at, ok := in.FileIndex[index]; ok {
+		return at
+	}
+	return index
+}
+
+// FileIndexes is where each stream inside the file sits in it, by Jellyfin's index.
+// Jellyfin numbers a file's sidecar subtitles first: an episode with a Hebrew and an
+// English .srt beside it is subtitle 0 and 1, video 2 and audio 3, where the file
+// itself has the video at 0 and the audio at 1 (Drake & Josh, 2026-10-08: "Stream
+// map '0:2' matches no streams" on every episode). A stream inside the file is
+// Jellyfin's index less the sidecars numbered before it, which also holds for an
+// older Jellyfin that numbered the sidecars last.
+func FileIndexes(streams []Stream) map[int]int {
+	out := map[int]int{}
+	for _, stream := range streams {
+		if stream.External {
+			continue
+		}
+		before := 0
+		for _, other := range streams {
+			if other.External && other.Index < stream.Index {
+				before++
+			}
+		}
+		out[stream.Index] = stream.Index - before
+	}
+	return out
 }
 
 // BuildArgs is the ffmpeg command for a plan: one -map for each stream the plan
@@ -63,7 +98,7 @@ func BuildArgs(plan Plan, in Inputs, out string, encoder Encoder) ([]string, err
 			continue
 		}
 		if !track.External {
-			subtitleMaps = append(subtitleMaps, mapped{0, track.SourceIndex})
+			subtitleMaps = append(subtitleMaps, mapped{0, in.inFile(track.SourceIndex)})
 			continue
 		}
 		path := in.Subtitles[track.SourceIndex]
@@ -75,9 +110,9 @@ func BuildArgs(plan Plan, in Inputs, out string, encoder Encoder) ([]string, err
 		nextInput++
 	}
 
-	args = append(args, "-map", "0:"+strconv.Itoa(plan.Video.SourceIndex))
+	args = append(args, "-map", "0:"+strconv.Itoa(in.inFile(plan.Video.SourceIndex)))
 	for _, track := range plan.Audio {
-		args = append(args, "-map", "0:"+strconv.Itoa(track.SourceIndex))
+		args = append(args, "-map", "0:"+strconv.Itoa(in.inFile(track.SourceIndex)))
 	}
 	for _, track := range subtitleMaps {
 		args = append(args, "-map", strconv.Itoa(track.input)+":"+strconv.Itoa(track.stream))
