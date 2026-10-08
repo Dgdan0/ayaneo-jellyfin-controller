@@ -16,6 +16,8 @@ final class SeriesDownloadsModel {
     private(set) var requesting: Set<String> = []
     /// What went wrong the last time something was asked for, in words.
     private(set) var problem: String?
+    /// The hub's listing is being asked for: the page keeps the season button's row open for it. Never longer.
+    private(set) var loading = false
 
     /// Select mode: tap to tick, then Download. Ticks stay across seasons.
     var selecting = false
@@ -60,6 +62,8 @@ final class SeriesDownloadsModel {
     /// ready tidied from the same answer, so it never asks the hub twice.
     func load(_ hub: HubClient, seriesId: String) async {
         self.seriesId = seriesId
+        loading = true
+        defer { loading = false }
         guard let response = try? await hub.fetch(HubEndpoints.offlineSelection(seriesId: seriesId, format: OfflineFormat.apple),
                                                   as: OfflineSelectionResponse.self) else { return }
         selection = response
