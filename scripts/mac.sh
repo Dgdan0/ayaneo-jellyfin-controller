@@ -64,6 +64,7 @@
 # HUB_DOWNLOAD=<id>,<id> downloads those episodes as one batch and HUB_OFFLINE_TITLE=<series or film id> opens that title's
 # page on this device (with -demo: Bleach is 000000000000000000000000deb00003, its episodes that, "-e1" to "-e3").
 # HUB_OFFLINE_WATCH=<item id>:<position ms>/<duration ms>[/done],… makes watches on this device, so its cards say what is left.
+# HUB_SERIES_DOWNLOADS=panel opens a series page's download choices; select[:e1,s2e2] starts its select mode with those ticked (#48).
 # HUB_BOOK_THEME=SEPIA|DARK|BLACK|LIGHT|BLUE, HUB_BOOK_COLUMNS=ONE|TWO|AUTO, HUB_BOOK_FONT=<typeface id: literata,
 # charter, georgia, iowan, atkinson, publisher> and HUB_BOOK_SIZE=1.3 set the ebook's look (kept, as Appearance
 # keeps it), and HUB_BOOK_TABLET=1 lays a phone's reader out with an iPad's margins and strips.
@@ -210,7 +211,7 @@ launch_sim() {
     SIMCTL_CHILD_HUB_BOOK_TABLET="${HUB_BOOK_TABLET:-}" \
     SIMCTL_CHILD_HUB_BOOK_READALONG="${HUB_BOOK_READALONG:-}" SIMCTL_CHILD_HUB_DOWNLOAD="${HUB_DOWNLOAD:-}" \
     SIMCTL_CHILD_HUB_WIDTH="${HUB_WIDTH:-}" SIMCTL_CHILD_HUB_ORIENT="$(cat "$SHOTS/.turned-$udid" 2>/dev/null)" \
-    SIMCTL_CHILD_HUB_CAST="${HUB_CAST:-}" SIMCTL_CHILD_HUB_OFFLINE_TITLE="${HUB_OFFLINE_TITLE:-}" SIMCTL_CHILD_HUB_OFFLINE_WATCH="${HUB_OFFLINE_WATCH:-}" \
+    SIMCTL_CHILD_HUB_CAST="${HUB_CAST:-}" SIMCTL_CHILD_HUB_OFFLINE_TITLE="${HUB_OFFLINE_TITLE:-}" SIMCTL_CHILD_HUB_OFFLINE_WATCH="${HUB_OFFLINE_WATCH:-}" SIMCTL_CHILD_HUB_SERIES_DOWNLOADS="${HUB_SERIES_DOWNLOADS:-}" \
     xcrun simctl launch "$udid" "$BUNDLE_ID" $(launch_args "$@") >/dev/null
 }
 

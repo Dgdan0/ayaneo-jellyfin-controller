@@ -308,6 +308,8 @@ struct BookReaderScreen: View {
         }
         if let face = environment["HUB_BOOK_FONT"], EpubTypefaces.typeface(face) != nil { look = EpubAppearance.typeface(look, face) }
         if let size = environment["HUB_BOOK_SIZE"].flatMap(Double.init) { look.fontScale = size }
+        // HUB_BOOK_SPACING=1.3|1.5|1.8, the line spacing (#52).
+        if let spacing = environment["HUB_BOOK_SPACING"].flatMap(Double.init) { look.lineHeight = spacing }
         if look != reader.preferences {
             if environment["HUB_BOOK_LOOK_ONCE"] == "1" { reader.debugAppearance(look) } else { reader.setPreferences(look) }
             try? await Task.sleep(for: .milliseconds(900))

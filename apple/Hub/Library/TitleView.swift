@@ -13,6 +13,7 @@ struct TitleView: View {
     @Environment(\.openRoute) private var openRoute
     @Environment(\.play) private var play
     @Environment(\.playbackClosed) private var playbackClosed
+    @Environment(\.horizontalSizeClass) private var sizeClass
     let route: TitleRoute
 
     @State private var item: HubKit.LibraryItem?
@@ -34,9 +35,16 @@ struct TitleView: View {
     @State private var episodePage = 0
     @State private var episodePages = 1
     @State private var loadingEpisodes = false
-    /// An episode held in the strip and chosen to download, waiting for its answer (#5).
-    @State private var downloadingEpisode: HubKit.LibraryItem?
+    /// Counts up each time the episodes start over, so an answer to an earlier ask is not taken for this one's.
+    @State private var episodeGeneration = 0
     @State private var offline = OfflineLibrary.shared
+    /// A series' downloads: the corner of each card, the season button, the choices and select mode (#48).
+    @State private var downloads = SeriesDownloadsModel()
+    /// The choices behind the round download button: a side panel, or a sheet on a phone.
+    @State private var panelOpen = false
+    /// Counts up to scroll to the episodes, as select mode starts.
+    @State private var scrollBelow = 0
+    @State private var removing: OfflineRemoval?
 
     enum TitleTab: Hashable { case episodes, similar, cast, details }
 
@@ -53,13 +61,22 @@ struct TitleView: View {
     }
 
     var body: some View {
-        TitlePage(backdrop: FadedArtwork.title(backdropPath), pad: "title:\(route.itemId)", padColumn: padColumn) { page in
+        TitlePage(backdrop: FadedArtwork.title(backdropPath), pad: "title:\(route.itemId)", padColumn: padColumn,
+                  scrollToBelow: scrollBelow) { page in
             header(page)
         } below: {
             StatusLine(message: status) { Task { await load() } }
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 8)
-            if item != nil, !tabs.isEmpty {
+            if downloads.selecting {
+                // Select mode: the top is Cancel, how many, and Select season.
+                SelectTopBar(count: downloads.ticked.count, seasonAllTicked: downloads.seasonAllTicked(seasonId),
+                             cancel: { withAnimation(.snappy) { downloads.cancelSelecting() } },
+                             toggleSeason: { downloads.toggleSeason(seasonId) })
+                    .padding(.horizontal, metrics.margin)
+                    .padding(.top, 14)
+                tabContent
+            } else if item != nil, !tabs.isEmpty {
                 UnderlineTabs(tabs: tabs, selection: Binding(get: { tab }, set: { tab = $0; tabChosen = true }),
                               pad: "tabs")
                     .padding(.horizontal, metrics.margin)
@@ -72,6 +89,65 @@ struct TitleView: View {
             if let item { moreChoices(item) }
         }
         .ambientArtwork(backdropPath)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if downloads.selecting {
+                SelectBottomBar(total: SeriesDownloads.total(downloads.ticked, among: downloads.episodes),
+                                bytes: SeriesDownloads.size(downloads.tickedEpisodes),
+                                canDownload: !downloads.ticked.isEmpty) {
+                    withAnimation(.snappy) { downloads.downloadTicked() }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        // A download started shows how far it is, and how full the device is, until a few seconds after it ends.
+        .downloadBar(scope: route.itemId, suppressed: downloads.selecting)
+        .overlay { sidePanel }
+        .sheet(isPresented: Binding(get: { panelOpen && sizeClass == .compact }, set: { if !$0 { panelOpen = false } })) {
+            panel(inSheet: true)
+                .presentationBackground { GlassSheetFill() }
+                .presentationCornerRadius(32)
+                #if os(iOS)
+                .presentationDetents([.fraction(0.92), .large])
+                #endif
+        }
+        .offlineRemoval($removing)
+        #if DEBUG
+        // For the UI tests: which of this series' episodes are on the device, as the ends of their ids ("e1,s2e2").
+        // The strip builds only the cards at the screen, so a card's own corner cannot always be read.
+        .overlay(alignment: .topLeading) {
+            Text("[" + offline.rows(scope: route.itemId).filter { $0.state == .complete }
+                .map { String($0.itemId.dropFirst(33)) }.sorted().joined(separator: ",") + "]")
+                .font(.system(size: 1))
+                .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("downloaded-episodes")
+        }
+        #endif
+        .onChange(of: downloads.problem) { _, problem in
+            if let problem { status = StatusMessage(problem, tone: .error) }
+        }
+        #if DEBUG
+        // HUB_SERIES_DOWNLOADS, steps joined by +: keepready turns Keep ready on (3), panel opens the choices,
+        // select[:e1,s2e2] starts select mode with those episodes ticked.
+        .task(id: downloads.isLoaded) {
+            guard downloads.isLoaded, let launch = ProcessInfo.processInfo.environment["HUB_SERIES_DOWNLOADS"] else { return }
+            for step in launch.split(separator: "+") {
+                if step == "keepready" {
+                    downloads.setKeepReady(KeepReady.defaultCount)
+                } else if step == "reload" {
+                    // As a pull down does: the page reads the hub again.
+                    try? await Task.sleep(for: .seconds(2))
+                    await load()
+                } else if step == "panel" {
+                    setPanel(true)
+                } else if step.hasPrefix("select") {
+                    startSelecting()
+                    let suffixes = step.dropFirst("select:".count).split(separator: ",")
+                    downloads.ticked = Set(suffixes.map { route.itemId + "-" + $0 })
+                }
+            }
+        }
+        #endif
         .refreshable { await load() }
         .task(id: model.userId) { await load() }
         .onChange(of: playbackClosed) { _, _ in Task { await refreshAfterPlayback() } }
@@ -80,24 +156,6 @@ struct TitleView: View {
         .onChange(of: model.libraryChanges) { _, _ in Task { await load() } }
         .onChange(of: tabs.map(\.id)) { _, ids in
             if let first = ids.first, !tabChosen || !ids.contains(tab) { tab = first }
-        }
-        .alert(OfflineTitleState.confirmTitle(downloadingEpisode.map {
-            EpisodeLabel.of(season: $0.seasonNumber, episode: $0.indexNumber, title: $0.title)
-        } ?? ""), isPresented: Binding(get: { downloadingEpisode != nil }, set: { if !$0 { downloadingEpisode = nil } })) {
-            // The harmless answer in the cancel role: without one, iOS 26 adds a Cancel of its own.
-            Button("Not now", role: .cancel) { downloadingEpisode = nil }
-            Button("Download") {
-                guard let episode = downloadingEpisode else { return }
-                downloadingEpisode = nil
-                Task {
-                    let title = episode.seriesTitle.isEmpty ? (item?.title ?? episode.title) : episode.seriesTitle
-                    let problem = await offline.download(itemIds: [episode.id], title: title,
-                                                         seriesId: episode.seriesId.isEmpty ? (item?.id ?? "") : episode.seriesId)
-                    status = problem.map { StatusMessage($0, tone: .error) } ?? StatusMessage("On its way · Downloads shows how far")
-                }
-            }
-        } message: {
-            Text(OfflineTitleState.confirmDetail(free: offline.freeBytes))
         }
     }
 
@@ -193,7 +251,8 @@ struct TitleView: View {
             }
             .disabled(saving)
             if item.type != "season" {
-                DownloadButton(item: item, size: metrics.small ? 42 : 46, pad: "download")
+                DownloadButton(item: item, size: metrics.small ? 42 : 46, pad: "download",
+                               openChoices: item.type == "series" ? { setPanel(true) } : nil)
             }
             more(item)
         }
@@ -326,13 +385,16 @@ struct TitleView: View {
 
     @ViewBuilder private var episodesTab: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SeasonPills(seasons.map { SeasonPill(id: $0.id, title: seasonTitle($0), selected: $0.id == seasonId) },
+            SeasonPills(seasons.map { SeasonPill(id: $0.id, title: seasonTitle($0), selected: $0.id == seasonId,
+                                                 ring: downloads.selecting ? ringFor($0) : nil) },
                         choose: { id in
                             guard id != seasonId else { return }
                             seasonId = id
                             Task { await loadEpisodes(reset: true) }
                         }, menu: { id in
                             if let season = seasons.first(where: { $0.id == id }) { seasonMenu(season) }
+                        }, trailing: {
+                            seasonButton
                         })
             if episodes.isEmpty && !loadingEpisodes && !seasons.isEmpty {
                 Text("No episodes in this season yet.")
@@ -342,26 +404,144 @@ struct TitleView: View {
                     .padding(.top, 14)
             }
             // An episode plays, as the prototype's and Android's do; its own page is in the menu.
+            // In select mode a tap ticks it instead.
             EpisodeStrip(episodes, reveal: target?.item.id,
-                         play: { episode in play(request(for: episode, mode: DetailLines.startMode(episode))) },
-                         hint: { $0.positionSeconds > 0 ? "Resumes the episode" : "Plays the episode" },
+                         play: { episode in
+                             if downloads.selecting {
+                                 downloads.toggle(episode.id)
+                             } else {
+                                 play(request(for: episode, mode: DetailLines.startMode(episode)))
+                             }
+                         },
+                         hint: { episode in
+                             downloads.selecting ? "Ticks the episode to download"
+                                 : (episode.positionSeconds > 0 ? "Resumes the episode" : "Plays the episode")
+                         },
+                         identifier: { "episode-" + $0.id },
                          reached: { index in
                              if index >= episodes.count - 3 { Task { await loadEpisodes(reset: false) } }
                          },
-                         card: { episode in EpisodeCard(episode: episode, upNext: episode.id == target?.item.id) },
-                         menu: { episode in episodeMenu(episode) })
+                         actions: { cardActions($0) },
+                         card: { episode in
+                             EpisodeCard(episode: episode, upNext: episode.id == target?.item.id,
+                                         selected: downloads.selecting && downloads.ticked.contains(episode.id),
+                                         dimmed: downloads.selecting && !downloads.tickable.contains(episode.id))
+                         },
+                         menu: { episode in episodeMenu(episode) },
+                         overlay: { episode in corner(episode) })
         }
+    }
+
+    /// The button after the season pills: "Season 2 · 4.9 GB", or "Season 2 on this iPad".
+    @ViewBuilder private var seasonButton: some View {
+        if !downloads.isLoaded, !downloads.selecting, !seasons.isEmpty, sizeClass == .compact {
+            // Where it will be, so the episodes below do not jump down when the hub's listing arrives.
+            Color.clear.frame(height: 36)
+        } else if downloads.isLoaded, !downloads.selecting, let season = seasons.first(where: { $0.id == seasonId }) {
+            let name = season.title.isEmpty ? EpisodeLabel.season(season.indexNumber) : season.title
+            SeasonDownloadButton(words: downloads.seasonButton(season.id, name: name),
+                                 done: downloads.missing(season: season.id).isEmpty) {
+                downloads.downloadSeason(season.id)
+            }
+        }
+    }
+
+    /// A card's corner: its download, as a button of its own; a tick circle in select mode.
+    @ViewBuilder private func corner(_ episode: HubKit.LibraryItem) -> some View {
+        if downloads.selecting {
+            SelectTick(ticked: downloads.ticked.contains(episode.id), possible: downloads.tickable.contains(episode.id))
+        } else if downloads.canDownload(episode.id) {
+            DownloadBadgeButton(id: episode.id, badge: downloads.badge(episode.id)) { downloads.tap(episode.id) }
+        }
+    }
+
+    /// What a card offers on a hold, as plain actions: the menu, VoiceOver and a controller read this list.
+    private func cardActions(_ episode: HubKit.LibraryItem) -> [CardAction] {
+        guard !downloads.selecting else { return [] }
+        var out: [CardAction] = []
+        switch downloads.badge(episode.id) {
+        case .none where downloads.canDownload(episode.id):
+            out.append(CardAction("download", "Download", systemImage: "arrow.down.circle") { downloads.start([episode.id]) })
+        case .waiting, .moving:
+            out.append(CardAction("stop", "Stop download", systemImage: "xmark.circle") { downloads.tap(episode.id) })
+        case .failed:
+            out.append(CardAction("retry", "Try download again", systemImage: "arrow.clockwise") { downloads.tap(episode.id) })
+        case .downloaded:
+            out.append(CardAction("remove", "Remove download", systemImage: "trash", destructive: true) { askRemove(episode) })
+        default: break
+        }
+        if downloads.isLoaded {
+            out.append(CardAction("select", "Select episodes", systemImage: "checkmark.circle") { startSelecting(ticking: episode.id) })
+        }
+        return out
+    }
+
+    private func askRemove(_ episode: HubKit.LibraryItem) {
+        guard let row = offline.row(forItem: episode.id) else { return }
+        removing = OfflineRemoval(id: row.id, title: "Remove \(episode.title)?",
+                                  detail: "\(Fmt.bytes(row.totalBytes)) gone from this device. The library keeps it on the PC.") {
+            offline.remove(row.id)
+        }
+    }
+
+    // MARK: The choices and select mode
+
+    private func setPanel(_ open: Bool) {
+        withAnimation(.snappy) { panelOpen = open }
+    }
+
+    /// Select mode on the episodes, scrolled into view; `id` is ticked as it starts.
+    private func startSelecting(ticking id: String? = nil) {
+        tab = .episodes
+        tabChosen = true
+        withAnimation(.snappy) {
+            panelOpen = false
+            downloads.beginSelecting(ticking: id)
+        }
+        scrollBelow += 1
+    }
+
+    private func panel(inSheet: Bool) -> some View {
+        SeriesDownloadPanel(downloads: downloads, close: { setPanel(false) },
+                            chooseEpisodes: { startSelecting() })
+    }
+
+    /// On an iPad or a Mac: a panel at the right, over a scrim that closes it.
+    @ViewBuilder private var sidePanel: some View {
+        if panelOpen && sizeClass != .compact {
+            ZStack(alignment: .trailing) {
+                Color.black.opacity(0.4)
+                    .ignoresSafeArea()
+                    .onTapGesture { setPanel(false) }
+                    .accessibilityHidden(true)
+                panel(inSheet: false)
+                    .frame(width: 400)
+                    .frame(maxHeight: .infinity)
+                    .background { GlassSheetFill() }
+                    .clipShape(UnevenRoundedRectangle(topLeadingRadius: 28, bottomLeadingRadius: 28, style: .continuous))
+                    .shadow(color: .black.opacity(0.4), radius: 24)
+                    .transition(.move(edge: .trailing))
+            }
+            .transition(.opacity)
+        }
+    }
+
+    /// The ring on a season's pill in select mode: how much of it is ticked.
+    private func ringFor(_ season: HubKit.LibraryItem) -> Double? {
+        let ticks = downloads.ticks(season.id)
+        return ticks.of > 0 ? Double(ticks.ticked) / Double(ticks.of) : nil
     }
 
     /// A season's pill, held: its episodes to download, and its releases to find.
     @ViewBuilder private func seasonMenu(_ season: HubKit.LibraryItem) -> some View {
-        if let item {
-            // The season's episodes, ticked in the picker (#43).
+        if item != nil {
+            // Every episode of the season not here yet, at once: the shortcut to the season button (#43, #48).
             Button {
-                openRoute(.offlinePicker(OfflinePickerRoute(seriesId: item.id, title: item.title, seasonId: season.id)))
+                downloads.downloadSeason(season.id)
             } label: {
                 Label("Download season", systemImage: "arrow.down.circle")
             }
+            .disabled(!downloads.isLoaded)
         }
         if let item, LibraryUpkeep.offersReleases(item) {
             Button {
@@ -374,6 +554,11 @@ struct TitleView: View {
     }
 
     @ViewBuilder private func episodeMenu(_ episode: HubKit.LibraryItem) -> some View {
+        // Where it is: on this device, in the download mark (not a tick, which is watched).
+        if downloads.badge(episode.id) == .downloaded {
+            Button {} label: { Label("On this device", systemImage: DownloadedMark.symbol) }
+                .disabled(true)
+        }
         Button {
             play(request(for: episode, mode: DetailLines.startMode(episode)))
         } label: {
@@ -386,13 +571,7 @@ struct TitleView: View {
                 Label("Start over", systemImage: "arrow.counterclockwise")
             }
         }
-        if offline.row(forItem: episode.id) == nil {
-            Button {
-                downloadingEpisode = episode
-            } label: {
-                Label("Download episode", systemImage: "arrow.down.circle")
-            }
-        }
+        CardActionButtons(actions: cardActions(episode))
         Button {
             openRoute(.title(TitleRoute(itemId: episode.id, title: episode.title)))
         } label: {
@@ -485,6 +664,10 @@ struct TitleView: View {
     /// "Season 2 · 10 episodes" on the chosen pill, as on Android.
     private func seasonTitle(_ season: HubKit.LibraryItem) -> String {
         let name = season.title.isEmpty ? EpisodeLabel.season(season.indexNumber) : season.title
+        if downloads.selecting {
+            let ticks = downloads.ticks(season.id)
+            return ticks.of > 0 ? name + " · \(ticks.ticked)/\(ticks.of)" : name
+        }
         guard season.id == seasonId, !episodes.isEmpty, !loadingEpisodes, episodePage >= episodePages else { return name }
         return name + " · \(episodes.count) episode" + (episodes.count == 1 ? "" : "s")
     }
@@ -498,8 +681,11 @@ struct TitleView: View {
             item = response.item
             status = StatusMessage("")
             if response.item.type == "series" {
+                downloads.setSeries(id: response.item.id, title: response.item.title)
+                async let downloadsLoaded: Void = downloads.load(model.hub, seriesId: response.item.id)
                 await loadTarget()
                 await loadSeasons()
+                await downloadsLoaded
             }
             await loadSimilar()
         } catch {
@@ -517,6 +703,8 @@ struct TitleView: View {
         item = response.item
         guard response.item.type == "series" else { return }
         await loadTarget()
+        // What is watched now says what Keep ready does, and the sizes of what is left.
+        await downloads.load(model.hub, seriesId: response.item.id)
         let season = seasonId
         let pages = episodePage
         guard !season.isEmpty, pages > 0 else { return }
@@ -556,23 +744,31 @@ struct TitleView: View {
             seasonId = seasons.first(where: { $0.id == targetSeason })?.id
                 ?? (seasons.first { $0.indexNumber > 0 } ?? seasons.first)?.id ?? ""
         }
-        await loadEpisodes(reset: true)
+        await loadEpisodes(reset: true, keepVisible: true)
     }
 
-    private func loadEpisodes(reset: Bool) async {
+    /// `keepVisible`: the page is read again, so the cards shown stay until the new ones arrive (a pull
+    /// that is let go halfway never leaves the strip empty); a season chosen starts from nothing.
+    private func loadEpisodes(reset: Bool, keepVisible: Bool = false) async {
         if reset {
-            episodes = []
+            // Whatever was on its way for the season before is let go.
+            episodeGeneration += 1
+            loadingEpisodes = false
+            if !keepVisible { episodes = [] }
             episodePage = 0
             episodePages = 1
         }
         guard !seasonId.isEmpty, !loadingEpisodes, episodePage < episodePages else { return }
+        let generation = episodeGeneration
         loadingEpisodes = true
-        defer { loadingEpisodes = false }
+        defer { if generation == episodeGeneration { loadingEpisodes = false } }
         let season = seasonId
-        guard let response = try? await model.hub.fetch(
-            HubEndpoints.libraryEpisodes(seriesId: route.itemId, seasonId: season, page: episodePage + 1),
-            as: LibraryItemList.self), season == seasonId else { return }
-        episodes += response.items
+        let ask = HubEndpoints.libraryEpisodes(seriesId: route.itemId, seasonId: season, page: episodePage + 1)
+        var answer = try? await model.hub.fetch(ask, as: LibraryItemList.self)
+        // An ask shared with a page read that was let go can fail for both: once more, if this one was not let go.
+        if answer == nil, !Task.isCancelled { answer = try? await model.hub.fetch(ask, as: LibraryItemList.self) }
+        guard let response = answer, season == seasonId, generation == episodeGeneration else { return }
+        if episodePage == 0 { episodes = response.items } else { episodes += response.items }
         episodePage = response.page
         episodePages = max(1, response.totalPages)
     }

@@ -114,11 +114,33 @@ struct ReadAlongTests {
 
     @Test func theSentenceGlowsInTheAccentItIsGiven() {
         let gold: UInt32 = 0xE3B341
-        #expect(ReadAlongGlow.rgba(gold, ReadAlongGlow.wash) == "rgba(227, 179, 65, 0.28)")
+        #expect(ReadAlongGlow.rgba(gold, 0.28) == "rgba(227, 179, 65, 0.28)")
         let element = ReadAlongGlow.element(tint: gold)
-        #expect(element.hasPrefix(#"<div class="pocket-narration""#))
-        #expect(element.contains("box-shadow: 0 0 0 3px rgba(227, 179, 65, 0.22), 0 0 14px 4px rgba(227, 179, 65, 0.42)"))
-        #expect(ReadAlongGlow.stylesheet.hasPrefix(".pocket-narration {"))
+        #expect(element == #"<div class="pocket-narration" style="background-color: rgb(227, 179, 65) !important;"></div>"#)
+        let sheet = ReadAlongGlow.stylesheet(tint: gold)
+        #expect(sheet.hasPrefix(".pocket-narration {"))
+        #expect(sheet.contains("box-shadow: 0 -0.25em 0px rgb(227, 179, 65), 0 0.25em 0px rgb(227, 179, 65), "
+                               + "0 -0.25em 8px rgb(227, 179, 65), 0 0.25em 8px rgb(227, 179, 65) !important;"))
+        #expect(sheet.hasSuffix(#"div[data-style="pocket-narration"] { opacity: 0.30; }"#))
+    }
+
+    /// #52: where two lines' boxes meet the colour is not laid twice. Each box
+    /// is the solid accent, grown by a solid band that closes the gap to the
+    /// next line; the transparency is the sentence's container's, once over
+    /// all its boxes, so however they overlap they are one even tint.
+    @Test func overlappingLinesAreOneEvenTint() {
+        let gold: UInt32 = 0xE3B341
+        let sheet = ReadAlongGlow.stylesheet(tint: gold)
+        let all = ReadAlongGlow.element(tint: gold) + sheet
+        #expect(!all.contains("rgba"), "nothing carries a transparency of its own")
+        #expect(all.components(separatedBy: "opacity").count == 2, "the transparency is laid once")
+        #expect(!all.contains("filter"), "a filter places the boxes in its own box: WebKit drew a sliver of each line")
+        // The band is in the book's em, as deep as half the gap between lines at 1.8 spacing (a line's
+        // box is about 1.3 em of a 1.8 em line), up and down only: no shadow is spread sideways, where
+        // it reached into the page beside at 200%.
+        #expect(ReadAlongGlow.spread >= (1.8 - 1.3) / 2)
+        #expect(sheet.contains("0 -0.25em 0px") && sheet.contains("0 0.25em 0px"))
+        #expect(!sheet.contains("em rgb(227, 179, 65), 0 0 "), "no shadow spreads sideways")
     }
 
     // MARK: The place

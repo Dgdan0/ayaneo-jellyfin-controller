@@ -232,35 +232,73 @@ public struct ReadAlongSession: Sendable {
     public mutating func switchToText() { retained = nil }
 }
 
-/// The sentence being read, as Readium draws it (#16, X7): a soft wash of
-/// the accent with a glow round it, as the prototype's read-along has,
-/// instead of Readium's flat box. The tint is the Books accent, handed in
-/// with each highlight. Pure strings, so a test pins them; the reader gives
-/// them to Readium as its decoration template. Android's `ReadAlongGlow`.
+/// The sentence being read, as Readium draws it (#16, X7, #52): a soft wash
+/// of the accent with a glow round it, as the prototype's read-along has,
+/// instead of Readium's flat box. The tint is the Books accent, handed in with
+/// each highlight. Pure strings, so a test pins them; the reader gives them to
+/// Readium as its decoration template. Android's `ReadAlongGlow`.
+///
+/// Readium lays one box over each line of the sentence, and a line's box can
+/// reach into the next line's, at a tight line spacing or with a tall
+/// typeface. Each box was its own translucent wash and glow, so where two met
+/// the colour was laid twice: a darker band between the lines (#52). The
+/// boxes are now the solid accent, each grown up and down by a solid band of
+/// `spread` (in the book's own em, so it scales with the type) that closes the
+/// gap to the next line at the widest spacing, and not sideways, so no glow
+/// reaches into the page beside; the sentence's container (Readium's item
+/// container, whose `data-style` is the class) takes the transparency once,
+/// over all its boxes together. However the boxes overlap they are one solid
+/// shape, and one even tint. Only the soft outer edge of the glow is each
+/// box's own, beyond that shape.
+///
+/// A filter on the container (a drop shadow round the whole shape) was tried:
+/// a filter makes the container the box its lines are placed in, and WebKit
+/// drew only a sliver of each line.
 public enum ReadAlongGlow {
     public static let className = "pocket-narration"
-    /// How strong the wash under the words, the ring round them and the glow beyond.
-    public static let wash = 0.28
-    public static let ring = 0.22
-    public static let glow = 0.42
+    /// How strong the wash over the words: the sentence's opacity, once.
+    public static let wash = 0.3
+    /// The solid band above and below each line's box, in the book's em: half the gap between lines at 1.8 spacing.
+    public static let spread = 0.25
+    /// The soft edge beyond it, in points.
+    public static let glow = 8
 
     /// Readium lays one of these over each line of the sentence. `tint` is 0xRRGGBB.
     public static func element(tint: UInt32) -> String {
         #"<div class="\#(className)" style="\#(style(tint: tint))"></div>"#
     }
 
+    /// A line's box: the accent itself, solid; its transparency is the sentence's.
     public static func style(tint: UInt32) -> String {
-        "background-color: \(rgba(tint, wash)) !important; "
-            + "box-shadow: 0 0 0 3px \(rgba(tint, ring)), 0 0 14px 4px \(rgba(tint, glow)) !important;"
+        "background-color: \(rgb(tint)) !important;"
     }
 
-    /// The room round the words and the soft corners, as Readium's own highlight has.
-    public static let stylesheet = ".\(className) { margin-left: -3px; padding-right: 6px; margin-top: -1px; padding-bottom: 2px; "
-        + "border-radius: 5px; box-sizing: border-box; }"
+    /// The room round the words and the soft corners, as Readium's own
+    /// highlight has, the solid band and the glow; and the sentence's
+    /// container, which takes the wash once for all its boxes.
+    public static func stylesheet(tint: UInt32) -> String {
+        ".\(className) { margin-left: -3px; padding-right: 6px; margin-top: -1px; padding-bottom: 2px; "
+            + "border-radius: 5px; box-sizing: border-box; "
+            + "box-shadow: \(band(-1, blur: 0, tint)), \(band(1, blur: 0, tint)), \(band(-1, blur: glow, tint)), "
+            + "\(band(1, blur: glow, tint)) !important; } "
+            + #"div[data-style="\#(className)"] { opacity: \#(decimal(wash)); }"#
+    }
+
+    /// A copy of the line's box moved up (-1) or down (1) by `spread`, solid or blurred by `blur` points.
+    private static func band(_ direction: Int, blur: Int, _ tint: UInt32) -> String {
+        "0 \(direction < 0 ? "-" : "")\(decimal(spread))em \(blur)px \(rgb(tint))"
+    }
+
+    public static func rgb(_ color: UInt32) -> String {
+        "rgb(\((color >> 16) & 0xFF), \((color >> 8) & 0xFF), \(color & 0xFF))"
+    }
 
     public static func rgba(_ color: UInt32, _ alpha: Double) -> String {
-        "rgba(\((color >> 16) & 0xFF), \((color >> 8) & 0xFF), \(color & 0xFF), "
-            + String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), alpha) + ")"
+        "rgba(\((color >> 16) & 0xFF), \((color >> 8) & 0xFF), \(color & 0xFF), " + decimal(alpha) + ")"
+    }
+
+    private static func decimal(_ value: Double) -> String {
+        String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 }
 

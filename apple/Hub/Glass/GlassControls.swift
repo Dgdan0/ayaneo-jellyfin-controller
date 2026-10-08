@@ -12,6 +12,8 @@ struct ChoicePill: View {
     var systemImage: String?
     /// Its id for a controller's focus (#46).
     var pad: String?
+    /// A small ring before the words, filled to this much (0 to 1): how much of a season is ticked.
+    var ring: Double?
     let action: () -> Void
 
     var body: some View {
@@ -19,6 +21,15 @@ struct ChoicePill: View {
             HStack(spacing: 7) {
                 if let systemImage {
                     Image(systemName: systemImage).font(.system(size: 13, weight: .semibold))
+                }
+                if let ring {
+                    ZStack {
+                        Circle().stroke(lineWidth: 2).opacity(0.28)
+                        Circle().trim(from: 0, to: max(min(ring, 1), 0))
+                            .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 14, height: 14)
                 }
                 Text(title).font(HubType.body(14, weight: .semibold, relativeTo: .subheadline))
             }

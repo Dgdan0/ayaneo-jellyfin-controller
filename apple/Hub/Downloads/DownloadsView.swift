@@ -8,14 +8,6 @@ struct OfflineTitleRoute: Hashable {
     let title: String
 }
 
-/// The episodes of a series to download; from a season's Download season,
-/// that season's episodes ticked (#43).
-struct OfflinePickerRoute: Hashable {
-    let seriesId: String
-    let title: String
-    var seasonId = ""
-}
-
 /// The Media side's Downloads tab (#5; Android's offline screen): what is on
 /// this device, one poster per film or series under its library, A to Z,
 /// which plays with no hub; and the queue, a batch at a time, each download

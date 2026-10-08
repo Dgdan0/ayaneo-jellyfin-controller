@@ -591,7 +591,9 @@ a hub that cannot be asked offers the beginning, which writes nothing until the 
 **Read along (after phase 2, as on the Pocket, #21)**: the slim edition (`readingEpubFile(format:
 "readaloud", omitAudio: true)`) with its narration streamed from the audiobook's tracks; the
 narration's dock stands in the lower bar's place (`BookLowerBar`), the sentence read lit through
-Readium's decorations, and the time left the narration's own. While it plays the voice and the page
+Readium's decorations (`ReadAlongHighlight` with HubKit's `ReadAlongGlow`: solid line boxes grown up and
+down to meet, one transparency over the whole sentence, so a sentence over several lines is one even tint,
+#52), and the time left the narration's own. While it plays the voice and the page
 move each other (#49): the voice turns the page at the next page's first word, inside a sentence
 too (in two columns the page is the spread), and a page turned or jumped to by hand takes the voice
 to its first word unless the sentence spoken is still on it; paused, a turn moves nothing and Play
@@ -826,7 +828,10 @@ contract is in #5), so AVPlayer plays every download and there is one player.
 | The Downloads tab: one poster per film or series under its library, the queue a batch at a time | `Downloads/DownloadsView`; words in HubKit `OfflineCatalog`, `OfflineQueueLabels` ("Preparing on the PC · 40%", "Next on the PC", "2nd in line on the PC") and `OfflineAppleNotes` (what takes longer, what is left out) |
 | A downloaded title's page, played from its files: the library page's shape (faded backdrop, the name and its facts and overview, Play, Remove and more as round buttons, season pills and a strip of episode cards saying what is on the device) | `Downloads/OfflineTitleView` built from the shared title parts (above); seasons from the episodes that arrived (`OfflineCatalog.seasons`), the one to go on with from `playTarget`, a film's from `OfflineCatalog.filmTarget` |
 | A downloaded series' own facts, overview and pictures, kept beside its episodes (queued with its first episode; filled in for earlier downloads the next time the hub answers; with none kept the page is its name and episodes) | HubKit `OfflineSeriesSnapshot` and `OfflineSeriesStore` (`OfflineStore.series`: `snapshot`, `needing`, `artworkFile`, `prune`, which goes with the last episode); the app's `OfflineLibrary.keepSeriesSoon` / `seriesSnapshot` |
-| A series' episodes to download | `Downloads/OfflinePickerView` on `GET /v1/offline/series/{id}/selection?format=apple`; quick choices and words in HubKit `OfflineSelection` |
+| A series' episodes to download, on its own page (#48): a tap on a card's corner, "Season 2 · 4.9 GB", the round button's choices, select mode | `Downloads/SeriesDownloadsModel` (one per series page, on `GET /v1/offline/series/{id}/selection?format=apple`); the rules and words are HubKit `SeriesDownloads` (`episodes(from:)`, `badge`, `choices`, `seasonButton`, ticks), `KeepReady` and `StorageBar`; the parts are `Downloads/SeriesDownloadViews` (`DownloadBadgeButton`, `SelectTick`, `StorageBarView`, `DownloadBar`, `SeasonDownloadButton`, `SelectTopBar`, `SelectBottomBar`) and `SeriesDownloadPanel` (a side panel on an iPad and a Mac, a sheet on an iPhone). The old picker page is gone |
+| The storage bar: other apps, JellyHub, what is coming or being added (the theme accent, never under a few points), free; "2 coming · 1 on this iPad" | HubKit `StorageBar` (`widths`, `StorageBarWords`, `StorageBarVisibility`: up while a download is on its way, gone about 3 s after the last); the app's `StorageBarView`, from `OfflineLibrary.storageBar(adding:)` (the device's real capacity and free space; a demo run reports a 256 GB device), and `.downloadBar(scope:)` on a title's page |
+| Keep ready (a series' next N unwatched episodes kept on the device) | HubKit `KeepReady` (the window, and the only time an episode it downloaded goes: once the next one is finished, never during playback, never the person's own) and `KeepReadyStore` (`OfflineStore.keepReady`, per profile and series, with the episodes it downloaded itself); the app's `OfflineLibrary.keepReadyTick` (a page's listing, at launch, after the player is left: `playbackBegan` / `playbackEnded`). "Finished" is the hub's watched state, or a watch made here and not yet sent |
+| What a card offers on a hold (and to VoiceOver, and a controller's Ⓨ): Download / Stop / Remove, Select episodes | `CardAction` lists, one per card, from `EpisodeStrip(actions:)`; the strip also takes a control over the still's corner (`overlay:`), and select mode is `SeriesDownloadsModel.selecting` / `toggle` / `cancelSelecting` |
 | The Download button on a title page and its ring | `Downloads/DownloadButton`, its state and words in HubKit `OfflineTitleState`; an episode's menu has Download episode |
 | Asking before a download leaves the device | `offlineRemoval` (`OfflineRemoval`): Keep in the cancel role, Remove |
 | A download played | `PlayerModel` takes `OfflineLibrary.localPlan` before the hub; the file's audio is chosen by place when that is its language (two English dubs are told apart), its text subtitles by place with the language checked |
@@ -845,7 +850,7 @@ stayed unwatched on the server; the download was then removed.
 
 Debug launches take `HUB_DOWNLOAD=<item id>` (downloads it at launch; `<id>,<id>,<id>` queues a series' episodes as one batch),
 `HUB_DOWNLOAD=remove:<item id>`, `HUB_OFFLINE_TITLE=<film or series id>` (opens that title's page on this device) and
-`HUB_OFFLINE_WATCH=<item id>:<position ms>/<duration ms>[/done],…` (watches made on this device, so the cards say "16:12 left" and "watched"). The demo hub makes each MP4 in a few seconds, The Matrix's
+`HUB_OFFLINE_WATCH=<item id>:<position ms>/<duration ms>[/done],…` (watches made on this device, so the cards say "16:12 left" and "watched"), and `HUB_SERIES_DOWNLOADS=panel` (opens a series page's choices) or `select[:e1,s2e2]` (select mode with those ticked). The demo's Slow Horses has two seasons (3 and 4 episodes, ids `<id>-e1` and `<id>-s2e1`), and its episodes remember being watched. The demo hub makes each MP4 in a few seconds, The Matrix's
 (converted) in eight; Dune fails once until it is retried, and Inception has a French picture
 subtitle that is left out.
 

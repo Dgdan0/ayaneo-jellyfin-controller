@@ -249,6 +249,8 @@ final class PlayerModel {
         guard !request.itemId.isEmpty else { return }
         if self.request != nil { close() }
         self.request = request
+        // Nothing Keep ready downloaded is removed while this plays (#48).
+        OfflineLibrary.shared.playbackBegan()
         self.app = app
         stayHere = false
         hub = app.hub
@@ -323,6 +325,8 @@ final class PlayerModel {
             await pending?.value
             self?.closedCount += 1
             self?.endBackgroundWork()
+            // Keep ready tidies up now: the next episodes asked for, the finished ones that are past removed (#48).
+            if self?.isOpen == false { OfflineLibrary.shared.playbackEnded() }
         }
     }
 

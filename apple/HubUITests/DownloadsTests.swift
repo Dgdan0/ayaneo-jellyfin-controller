@@ -159,35 +159,6 @@ final class DownloadsTests: XCTestCase {
         XCTAssertTrue(text(app, containing: "Not on this device").waitForExistence(timeout: 5), "the film stayed on the device")
     }
 
-    /// A series: Download opens its episodes, Next 3 ticks three from where
-    /// Play would start, and one question queues them as one batch.
-    @MainActor
-    func testASeriesEpisodesArePickedAndQueuedAsOne() {
-        let app = launch(title: bleach)
-        let download = element(app, "title-download")
-        XCTAssertTrue(download.waitForExistence(timeout: 20), "the series' page has no Download: \(buttons(app))")
-        download.tap()
-        let next = element(app, "pick-next-3")
-        XCTAssertTrue(next.waitForExistence(timeout: 15), "the episodes to download did not open: \(buttons(app))")
-        next.tap()
-        let counter = element(app, "pick-counter")
-        XCTAssertTrue(waitUntil(5) { counter.label.hasPrefix("3 selected") }, "Next 3 did not tick three: \(counter.label)")
-        element(app, "pick-download").tap()
-        let alert = app.alerts.firstMatch
-        XCTAssertTrue(alert.waitForExistence(timeout: 5), "Download did not ask first")
-        XCTAssertTrue(alert.label.contains("Download 3 episodes?"), alert.label)
-        alert.buttons["Download"].tap()
-        XCTAssertTrue(text(app, containing: "On their way").waitForExistence(timeout: 10), "the episodes were not queued")
-        // What is coming cannot be ticked again.
-        XCTAssertTrue(text(app, containing: "On its way").exists || text(app, containing: "On this device").exists)
-
-        openDownloads(app)
-        element(app, "downloads-queue").tap()
-        XCTAssertTrue(text(app, containing: "Bleach").waitForExistence(timeout: 5), "the queue has no Bleach batch")
-        let words = app.staticTexts.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }.joined(separator: " | ")
-        XCTAssertTrue(text(app, containing: "/3 complete").exists, "the batch does not count its three: \(words)")
-    }
-
     /// A downloaded series' own page has the library page's shape: its name, the series' own
     /// facts and overview (kept beside its artwork when its first episode was queued), Play
     /// naming the episode, Remove and more as round buttons, the season's pill and a strip of
@@ -292,22 +263,6 @@ final class DownloadsTests: XCTestCase {
         element(app, "downloads-device").tap()
         let poster = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Dune'")).firstMatch
         XCTAssertTrue(poster.waitForExistence(timeout: 40), "Dune did not come after Retry: \(buttons(app))")
-    }
-
-    /// Download season (#43): a season's menu opens the picker with that
-    /// season's episodes ticked, ready for one question.
-    @MainActor
-    func testDownloadSeasonTicksTheSeasonsEpisodes() {
-        let app = launch(title: bleach)
-        let season = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Season 1")).firstMatch
-        XCTAssertTrue(season.waitForExistence(timeout: 20), "the series has no season: \(buttons(app))")
-        season.press(forDuration: 1.2)
-        let download = app.buttons["Download season"].firstMatch
-        XCTAssertTrue(download.waitForExistence(timeout: 5), "the season's menu has no Download season: \(buttons(app))")
-        download.tap()
-        let counter = element(app, "pick-counter")
-        XCTAssertTrue(counter.waitForExistence(timeout: 15), "the picker did not open")
-        XCTAssertTrue(waitUntil(10) { counter.label.hasPrefix("3 selected") }, "the season's episodes are not ticked: \(counter.label)")
     }
 
     /// The Books side's Downloads (#43): a book opened is kept on the device

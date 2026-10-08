@@ -4,9 +4,10 @@ import HubKit
 @preconcurrency import ReadiumShared
 import UIKit
 
-/// Read along's sentence as Readium draws it (#16, X7; Android's
+/// Read along's sentence as Readium draws it (#16, X7, #52; Android's
 /// `highlightNarration`): `ReadAlongGlow`'s soft wash and glow in the Books
-/// accent, one box per line of the sentence, instead of Readium's flat box.
+/// accent, one solid box per line of the sentence under one transparency and
+/// one glow for the whole sentence, so lines that meet are one even tint.
 /// The book reader opens a book to read along with `templates(tint:)` among
 /// its navigator's decoration templates (beside Readium's own, which its
 /// search and bookmarks may use), and applies `decorations(_:)` in `group`
@@ -20,7 +21,7 @@ enum ReadAlongHighlight {
     /// The sentence's template, in `tint` (an accent's colour, 0xAARRGGBB).
     static func templates(tint: UInt32) -> [Decoration.Style.Id: HTMLDecorationTemplate] {
         [style: HTMLDecorationTemplate(layout: .boxes, width: .wrap, element: ReadAlongGlow.element(tint: tint),
-                                       stylesheet: ReadAlongGlow.stylesheet)]
+                                       stylesheet: ReadAlongGlow.stylesheet(tint: tint))]
     }
 
     /// Readium's own templates with the sentence's: what a read-along
