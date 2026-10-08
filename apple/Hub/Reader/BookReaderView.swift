@@ -125,7 +125,7 @@ struct BookReaderScreen: View {
                     BookReaderBars(reader: reader, layout: layout, leave: leave, topBar: $topBar, bottomBar: $bottomBar)
                         .transition(.opacity)
                 }
-                // Kindle's corners, and reading along the narration's pill, while the bars are away (#42).
+                // Kindle's corners while the bars are away (#42), reading along too (#49).
                 if reader.sheet == nil && !reader.controlsVisible && reader.phase == .reading {
                     BookReaderCorners(reader: reader, layout: layout)
                         .transition(.opacity)
@@ -149,6 +149,15 @@ struct BookReaderScreen: View {
                 }
                 // Comfort over the whole reader, page and controls (#37).
                 ComfortLayer(comfort: comfort.value)
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["HUB_DEBUG_READALONG"] == "1" {
+                    Text(reader.debugReadAlong)
+                        .font(.caption2)
+                        .opacity(0.02)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("debug-readalong")
+                }
+                #endif
             }
             .coordinateSpace(.named(Self.space))
             .ignoresSafeArea()
@@ -213,6 +222,8 @@ struct BookReaderScreen: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { reader.flushPlace() }
+            // The voice reads on with the screen locked; the page catches up once it shows again (#49).
+            reader.scene(active: phase != .background)
         }
         #if DEBUG
         .task(id: reader.phase == .reading) { await debugTour() }
@@ -288,7 +299,8 @@ struct BookReaderScreen: View {
             try? await Task.sleep(for: .milliseconds(900))
         }
         // HUB_BOOK_THEME=SEPIA|DARK|BLACK|LIGHT|BLUE, HUB_BOOK_COLUMNS=ONE|TWO|AUTO, HUB_BOOK_FONT=<typeface id> and
-        // HUB_BOOK_SIZE=1.3 set the look first, as Appearance would, and keep it as it keeps it (#47).
+        // HUB_BOOK_SIZE=1.3 set the look first, as Appearance would, and keep it as it keeps it (#47);
+        // with HUB_BOOK_LOOK_ONCE=1 for this launch only, so a UI test leaves no look behind for the next (#49).
         var look = reader.preferences
         if let theme = environment["HUB_BOOK_THEME"].flatMap(EpubTheme.init(rawValue:)) { look.theme = theme }
         if let columns = environment["HUB_BOOK_COLUMNS"].flatMap(EpubColumns.init(rawValue:)) {
@@ -296,8 +308,10 @@ struct BookReaderScreen: View {
         }
         if let face = environment["HUB_BOOK_FONT"], EpubTypefaces.typeface(face) != nil { look = EpubAppearance.typeface(look, face) }
         if let size = environment["HUB_BOOK_SIZE"].flatMap(Double.init) { look.fontScale = size }
+        // HUB_BOOK_SPACING=1.3|1.5|1.8, the line spacing (#52).
+        if let spacing = environment["HUB_BOOK_SPACING"].flatMap(Double.init) { look.lineHeight = spacing }
         if look != reader.preferences {
-            reader.setPreferences(look)
+            if environment["HUB_BOOK_LOOK_ONCE"] == "1" { reader.debugAppearance(look) } else { reader.setPreferences(look) }
             try? await Task.sleep(for: .milliseconds(900))
         }
         if let percent = environment["HUB_BOOK_AT"].flatMap(Double.init) {

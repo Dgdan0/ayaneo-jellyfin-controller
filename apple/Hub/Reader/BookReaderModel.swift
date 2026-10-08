@@ -114,6 +114,8 @@ final class BookReaderModel {
     let sourceItemId: String
     let title: String
     let cover: String
+    /// "Blake Crouch": the lock screen shows it under the narration (#49).
+    let author: String
     /// Reading along (#16, #19): the read-along edition without its audio,
     /// the narration streamed from the audiobook's tracks, the sentence spoken
     /// glowing and the page following the voice; nil for the ebook alone.
@@ -238,6 +240,8 @@ final class BookReaderModel {
         self.sourceItemId = sourceItemId
         title = work.title
         cover = work.artwork
+        author = (work.authors.isEmpty ? work.authorRefs.map(\.name) : work.authors)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.joined(separator: ", ")
         bookPages = PageInfo.bookPages(work, sourceItemId: sourceItemId)
         // The place goes through the reading outbox, as the listening place
         // does: the demo's in a folder of its own (`ListeningStore`).
@@ -272,17 +276,25 @@ final class BookReaderModel {
         if let reading = self.readAlong { connect(reading) }
     }
 
-    /// Read along's hold on the page: the glow, the scripts, the page following the voice.
+    /// Read along's hold on the page: the glow, the scripts, the voice and the page moving each other (#49).
     private func connect(_ reading: ReadAlongReader) {
         let navigator = navigator
         reading.highlight = { [weak self] segment in
             navigator.highlight(segment)
             self?.updateLines()
         }
-        reading.onScreen = { fragment in await navigator.evaluate(ReadAlongPageScript.visible(fragment)) as? Bool ?? false }
-        reading.firstOnScreen = { ids in await navigator.evaluate(ReadAlongPageScript.firstVisible(ids)) as? String }
+        reading.edges = { ids in await navigator.evaluate(ReadAlongPageScript.edges(ids)) }
         reading.go = { json in await navigator.go(to: json) }
+        reading.turn = { delta in
+            if delta > 0 { return await navigator.goForward() }
+            return await navigator.goBackward()
+        }
+        reading.scrolls = { [weak self] in self?.preferences.scrolls ?? false }
         reading.pageHref = { [weak self] in self?.place?.href }
+        reading.chapter = { [weak self] in
+            guard let self, let place = self.place else { return nil }
+            return place.title ?? self.contents.first { $0.href == place.href }?.title
+        }
         reading.keepPlace = { [weak self] in
             self?.moved = true
             self?.keepSoon()
@@ -447,7 +459,8 @@ final class BookReaderModel {
         phase = .reading
         if let readAlong {
             if let prepared {
-                readAlong.start(prepared, workId: workId, token: app.storedToken(), at: locator)
+                readAlong.start(prepared, workId: workId, token: app.storedToken(), at: locator,
+                                book: NarrationModel.Book(title: title, author: author, artwork: cover))
                 self.prepared = nil
             } else if !readAlong.note.isEmpty {
                 say(readAlong.note)
@@ -457,10 +470,10 @@ final class BookReaderModel {
 
     // MARK: Leaving
 
-    /// The app went to the background: what is waiting goes now, and the
-    /// narration stops, its place kept with it.
+    /// The app is leaving the screen: what is waiting goes now. The narration
+    /// plays on with the screen locked and in the background (#49), its place
+    /// kept as it goes; `stop()` ends it.
     func flushPlace() {
-        readAlong?.pause()
         let places = places
         let last = moved && readAlong?.canKeepPage != false ? place.map { keptPlace($0.json) } : nil
         flushTask?.cancel()
@@ -468,6 +481,11 @@ final class BookReaderModel {
             if let last { await places.reached(last) }
             await places.flush()
         }
+    }
+
+    /// In the background the voice reads on and the page waits; back, it catches up with the voice.
+    func scene(active: Bool) {
+        readAlong?.scene(active: active)
     }
 
     func stop() {
@@ -1119,6 +1137,20 @@ final class BookReaderModel {
     }
 
     // MARK: Appearance
+
+    #if DEBUG
+    /// Debug builds' UI tests (`HUB_BOOK_LOOK_ONCE`): the page drawn in this
+    /// look, not kept, so no other test opens its books that way.
+    func debugAppearance(_ look: EpubReaderPreferences) {
+        preferences = look
+        navigator.submit(rendering)
+    }
+
+    /// Where the page is, what the voice and the page last did to each other, and who has the lock screen.
+    var debugReadAlong: String {
+        "\(positionLine) · \(readAlong?.debugLine ?? "none") · \(NowPlaying.shared.summary)"
+    }
+    #endif
 
     /// Applied at once and kept for every book.
     func setPreferences(_ next: EpubReaderPreferences) {

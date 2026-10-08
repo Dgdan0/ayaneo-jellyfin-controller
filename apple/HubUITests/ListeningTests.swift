@@ -55,6 +55,35 @@ final class ListeningTests: XCTestCase {
         return play
     }
 
+    /// Seconds into the chapter playing, from the line's "0:12 of 1:30".
+    @MainActor
+    private func seconds(_ app: XCUIApplication) -> Int {
+        let line = app.descendants(matching: .any).matching(identifier: "player-timeline").firstMatch
+        let clock = (line.value as? String)?.components(separatedBy: " of ").first ?? ""
+        let parts = clock.split(separator: ":").compactMap { Int($0) }
+        return parts.count == 2 ? parts[0] * 60 + parts[1] : -1
+    }
+
+    /// With the app in the background (Home, as the screen locking does) the
+    /// audiobook plays on (#49): the app is not suspended, and back in it the
+    /// book is further on.
+    @MainActor
+    func testAnAudiobookPlaysOnInTheBackground() {
+        let app = launch(open: "book:rw_demo_alloy")
+        let play = listening(app)
+        XCTAssertTrue(waitUntil(10) { seconds(app) >= 1 }, "the line does not move")
+        let before = seconds(app)
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10), "the app did not go to the background: \(app.state.rawValue)")
+        RunLoop.current.run(until: Date().addingTimeInterval(12))
+        XCTAssertEqual(app.state, .runningBackground, "the app was suspended in the background: the book stopped")
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        XCTAssertTrue(waitUntil(5) { seconds(app) >= before + 10 }, "the book did not play on in the background: \(before)s, now \(seconds(app))s")
+        XCTAssertEqual(play.label, "Pause")
+        play.tap()
+    }
+
     @MainActor
     func testAnAudiobookPlaysOnUnderTheMiniPlayerUntilItIsStopped() {
         let app = launch(open: "book:rw_demo_alloy")

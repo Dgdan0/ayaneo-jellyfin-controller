@@ -268,7 +268,9 @@ public enum DemoReadAlong {
     /// The demo's words: a stand-in for a novel, a sentence at a time.
     private static let words = [
         "The kitchen light was still on when he came up the front steps.",
-        "Somewhere down the street a dog barked twice and then thought better of it.",
+        // Long enough to run over three lines or more: the sentence the book opens on lit (#52).
+        "Somewhere down the street a dog barked twice and then thought better of it, and the quiet that came after "
+            + "was so complete that he could hear the lake moving against the pilings a mile away.",
         "He had walked this way home a thousand times and never once looked up.",
         "The lake was flat and black, and the city leaned over it like a reader.",
         "She laughed at something on the radio and turned it down to hear him.",
