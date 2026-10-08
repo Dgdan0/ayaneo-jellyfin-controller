@@ -1079,9 +1079,9 @@ class EpubReaderScreen(
         if (backgrounded) return
         highlightJob = uiScope.launch {
             val reader = navigator ?: return@launch
-            if (segment == null) { reader.applyDecorations(emptyList(), "readalong"); return@launch }
+            if (segment == null) { reader.applyDecorations(emptyList(), ReadAlongGlow.GROUP); return@launch }
             val locator = segmentLocator(segment) ?: return@launch
-            reader.applyDecorations(listOf(Decoration("narration", locator, Decoration.Style.Highlight(colors.accent, isActive = true))), "readalong")
+            reader.applyDecorations(listOf(Decoration("narration", locator, Decoration.Style.Highlight(colors.accent, isActive = true))), ReadAlongGlow.GROUP)
         }
     }
 
