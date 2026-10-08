@@ -533,6 +533,7 @@ speaks Readium (`@preconcurrency` imports; the EPUB opened off the main actor an
 | How a book looks: theme, typeface, size, spacing, margins, columns, scrolling | HubKit `EpubReaderPreferences`, `EpubLayoutPolicy`, `EpubChromePolicy`, `EpubPreferenceState`, `EpubPagePalette`, `EpubRendering`, `EpubAppearance`, `EpubAppearanceStore` (`Rules/EpubAppearance`) |
 | A place as Readium's locator JSON: its label, its anchor, the same place | HubKit `BookLocator` |
 | The EPUB kept on the device, a partial download never opened | HubKit `EpubPackageCache` |
+| A kept EPUB or read-along edition checked with the hub as it opens: its ETag kept beside it, `If-None-Match`, 304 opens it, 200 replaces it, an outage opens it at once (#41) | HubKit `EpubPackageCache.open` with the rule `EpubFreshness` and `HubClient.file` |
 | Bookmarks per hub, profile and edition | HubKit `EpubBookmarks` (named as phase 2's `ReadingCheckpointKey` names records) |
 | The routes: the EPUB, the place read and sent | HubKit `HubEndpoints.readingEpubFile`, `readingEpubPosition`, `saveReadingEpubPosition`, `EpubPosition`, `EpubPositionBody` (`Net/BookEndpoints`) |
 | Where a book opens and where it was left | HubKit `BookPlaceKeeper`, kept by `CheckpointBookPlaces` through phase 2's reading outbox (`ListeningStore.shared`, `ReadingCheckpointKey` kind `epub`) |

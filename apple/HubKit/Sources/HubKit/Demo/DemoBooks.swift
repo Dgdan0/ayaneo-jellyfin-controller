@@ -38,7 +38,10 @@ public enum DemoBooks {
         case ("GET", "file"):
             let format = value("format", in: query) ?? ""
             guard format.isEmpty || format == "ebook" else { return failure(404, "not_found", "Not in the demo hub yet") }
-            return DemoTransport.Answer(200, data: epub(book), type: "application/epub+zip")
+            let file = epub(book)
+            var answer = DemoTransport.Answer(200, data: file, type: "application/epub+zip")
+            answer.headers = ["ETag": DemoTransport.etag(file)]
+            return answer
         case ("GET", "position"):
             let place = place(book, sourceItemId)
             var fields: [String: Any] = ["workId": book.workId, "sourceItemId": sourceItemId,
