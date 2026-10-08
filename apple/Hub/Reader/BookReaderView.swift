@@ -314,6 +314,11 @@ struct BookReaderScreen: View {
             if environment["HUB_BOOK_LOOK_ONCE"] == "1" { reader.debugAppearance(look) } else { reader.setPreferences(look) }
             try? await Task.sleep(for: .milliseconds(900))
         }
+        // The sentence HUB_READALONG_SENTENCE lit, on the page of the look just set (#52).
+        if environment["HUB_READALONG_SENTENCE"] != nil {
+            reader.readAlong?.follow()
+            try? await Task.sleep(for: .milliseconds(900))
+        }
         if let percent = environment["HUB_BOOK_AT"].flatMap(Double.init) {
             reader.seek(percent / 100)
             try? await Task.sleep(for: .milliseconds(900))

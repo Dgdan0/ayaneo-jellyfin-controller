@@ -183,6 +183,14 @@ extension ReadAlongTimeline {
         return tracks.last?.segments.last
     }
 
+    /// The first sentence after every sentence of `href`, in the order the
+    /// narration reads: where the voice goes on from past the end of a part.
+    public func sentence(after href: String) -> ReadAlongSegment? {
+        let all = tracks.flatMap(\.segments)
+        guard let last = all.lastIndex(where: { $0.textHref == href }), last + 1 < all.count else { return nil }
+        return all[last + 1]
+    }
+
     // MARK: Inside
 
     private struct Place {
@@ -274,6 +282,17 @@ public enum ReadAlongPageFollow {
 }
 
 extension ReadAlongPageScript {
+    /// The first of `ids` (in reading order) that lies wholly beyond the page
+    /// on screen: where the narration goes on from a page that shows none of
+    /// them, as a part's heading page at a large size does. "" when every one
+    /// is before the page (the part's narration is behind it), null when none
+    /// is laid out yet.
+    public static func firstAfter(_ ids: [String]) -> String {
+        "(function(){var ids=\(json(ids)),W=innerWidth,H=innerHeight,laid=false;for(var i=0;i<ids.length;i++){"
+            + "var e=document.getElementById(ids[i]);if(!e)continue;var b=e.getClientRects();if(!b.length)continue;laid=true;"
+            + "if(b[0].left>=W||b[0].top>=H)return ids[i];}return laid?'':null;})()"
+    }
+
     /// Where the page on screen begins and ends among the narrated sentences
     /// `ids` (in reading order): the first and the last of them on screen, the
     /// offset of the first visible character of the first and the offset just

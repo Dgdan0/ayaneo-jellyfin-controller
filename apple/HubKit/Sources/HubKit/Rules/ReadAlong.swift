@@ -232,61 +232,68 @@ public struct ReadAlongSession: Sendable {
     public mutating func switchToText() { retained = nil }
 }
 
-/// The sentence being read, as Readium draws it (#16, X7, #52): a soft wash
-/// of the accent with a glow round it, as the prototype's read-along has,
-/// instead of Readium's flat box. The tint is the Books accent, handed in with
-/// each highlight. Pure strings, so a test pins them; the reader gives them to
-/// Readium as its decoration template. Android's `ReadAlongGlow`.
+/// The sentence being read, as Readium draws it (#16, X7, #52): one opaque
+/// wash of the Books accent under its words, as the Pocket draws it (0.4.23).
+/// Pure strings and sums, so tests pin them; the reader gives the template to
+/// Readium and runs the fitting script after each sentence. Android's
+/// `ReadAlongGlow`.
 ///
-/// Readium lays one box over each line of the sentence, and a line's box can
-/// reach into the next line's, at a tight line spacing or with a tall
-/// typeface. Each box was its own translucent wash and glow, so where two met
-/// the colour was laid twice: a darker band between the lines (#52). The
-/// boxes are now the solid accent, each grown up and down by a solid band of
-/// `spread` (in the book's own em, so it scales with the type) that closes the
-/// gap to the next line at the widest spacing, and not sideways, so no glow
-/// reaches into the page beside; the sentence's container (Readium's item
-/// container, whose `data-style` is the class) takes the transparency once,
-/// over all its boxes together. However the boxes overlap they are one solid
-/// shape, and one even tint. Only the soft outer edge of the glow is each
-/// box's own, beyond that shape.
-///
-/// A filter on the container (a drop shadow round the whole shape) was tried:
-/// a filter makes the container the box its lines are placed in, and WebKit
-/// drew only a sliver of each line.
+/// Readium lays one box over each line of the sentence, as tall as the words
+/// (their font's height), which at a tight spacing reaches into the next line's
+/// and at a loose one leaves a gap. The owner's notes on #52:
+/// - **Behind the words, in an opaque colour.** The boxes sit at `z-index: -1`,
+///   under the page's text, and are the accent mixed into the page's colour
+///   (`wash`): up to `most` of the way, less where the ink would lose its
+///   contrast (Dim and Dark). No translucent layer over the text, so the words
+///   keep their ink, and nothing is laid twice, so the tint is even.
+/// - **Each row its own line, joined to the next.** The page script
+///   (`ReadAlongPageScript.fitNarration`) makes each row of the sentence one box
+///   as tall as its words and fills the gap to the sentence's next row with a
+///   join only as wide as the two rows share, so the rows meet with no gap at
+///   any spacing and the wash is never under another sentence's ink: at a tight
+///   spacing a line box reaches into the descenders of the words before the
+///   sentence on its first line, which a halfway join would have washed.
+/// - **No glow and no ring:** any soft edge tinted the next sentence's first letters.
+/// - **Corners** are square where two rows join and round only on the outside of the shape.
 public enum ReadAlongGlow {
     public static let className = "pocket-narration"
-    /// How strong the wash over the words: the sentence's opacity, once.
-    public static let wash = 0.3
-    /// The solid band above and below each line's box, in the book's em: half the gap between lines at 1.8 spacing.
-    public static let spread = 0.25
-    /// The soft edge beyond it, in points.
-    public static let glow = 8
+    /// How far the wash goes from the page's colour towards the accent, at most.
+    public static let most = 0.45
+    /// The contrast the words keep against the wash (WCAG AA for body text).
+    public static let contrast = 4.5
+    /// How far the wash reaches past the words at either end of a row, in points.
+    public static let side = 2
+    /// The rounding of an outside corner, in points.
+    public static let corner = 4
+    /// How far a row's box stays inside its words' height where another
+    /// sentence's line is above or below, in the book's em: past the descenders
+    /// of the line above, which reach beyond their face's declared height.
+    public static let overflow = 0.15
 
-    /// Readium lays one of these over each line of the sentence. `tint` is 0xRRGGBB.
+    /// The wash: `accent` mixed into `page` as far as `most`, or less, so
+    /// that `ink` keeps `contrast` against it. Opaque.
+    public static func wash(accent: UInt32, page: UInt32, ink: UInt32) -> UInt32 {
+        var share = most
+        while share > 0 {
+            let mixed = GlassColors.mix(page | 0xFF00_0000, accent | 0xFF00_0000, share)
+            if GlassColors.contrast(ink | 0xFF00_0000, mixed) >= contrast { return mixed }
+            share -= 0.01
+        }
+        return page | 0xFF00_0000
+    }
+
+    /// Readium lays one of these over each line of the sentence and places
+    /// it; the page script fits it to its line.
     public static func element(tint: UInt32) -> String {
-        #"<div class="\#(className)" style="\#(style(tint: tint))"></div>"#
+        #"<div class="\#(className)"></div>"#
     }
 
-    /// A line's box: the accent itself, solid; its transparency is the sentence's.
-    public static func style(tint: UInt32) -> String {
-        "background-color: \(rgb(tint)) !important;"
-    }
-
-    /// The room round the words and the soft corners, as Readium's own
-    /// highlight has, the solid band and the glow; and the sentence's
-    /// container, which takes the wash once for all its boxes.
+    /// The boxes under the words, in the wash the page script sets
+    /// (`--pocket-narration-wash`; clear until it has). Selected strongly enough
+    /// to win over ReadiumCSS's rule that clears every element's background.
     public static func stylesheet(tint: UInt32) -> String {
-        ".\(className) { margin-left: -3px; padding-right: 6px; margin-top: -1px; padding-bottom: 2px; "
-            + "border-radius: 5px; box-sizing: border-box; "
-            + "box-shadow: \(band(-1, blur: 0, tint)), \(band(1, blur: 0, tint)), \(band(-1, blur: glow, tint)), "
-            + "\(band(1, blur: glow, tint)) !important; } "
-            + #"div[data-style="\#(className)"] { opacity: \#(decimal(wash)); }"#
-    }
-
-    /// A copy of the line's box moved up (-1) or down (1) by `spread`, solid or blurred by `blur` points.
-    private static func band(_ direction: Int, blur: Int, _ tint: UInt32) -> String {
-        "0 \(direction < 0 ? "-" : "")\(decimal(spread))em \(blur)px \(rgb(tint))"
+        #"div[data-style="\#(className)"] > div.\#(className) { z-index: -1 !important; "#
+            + "background-color: var(--pocket-narration-wash, transparent) !important; }"
     }
 
     public static func rgb(_ color: UInt32) -> String {
@@ -294,11 +301,70 @@ public enum ReadAlongGlow {
     }
 
     public static func rgba(_ color: UInt32, _ alpha: Double) -> String {
-        "rgba(\((color >> 16) & 0xFF), \((color >> 8) & 0xFF), \(color & 0xFF), " + decimal(alpha) + ")"
+        "rgba(\((color >> 16) & 0xFF), \((color >> 8) & 0xFF), \(color & 0xFF), "
+            + String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), alpha) + ")"
     }
+}
 
-    private static func decimal(_ value: Double) -> String {
-        String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value)
+extension ReadAlongPageScript {
+    /// Fits the sentence's boxes to its lines and sets the wash (#52). Readium
+    /// draws each box as tall as the words, and leaves the gap between lines
+    /// open. This makes each row of the sentence one box, `side` points past
+    /// its words, and fills the gap to the sentence's row below with a join as
+    /// wide as the two rows share: the rows meet with no gap, and the join never
+    /// reaches what is beside the sentence (the descenders of the words before
+    /// it on its first line, the next sentence's capitals after it on its last).
+    /// Where a row has another sentence's words above or below it, its box also
+    /// stops short of their line's words' height (one line pitch away, the
+    /// sentence's own or the line height), which a tight spacing makes overlap
+    /// with its own, and `ReadAlongGlow.overflow` short of its own: a text
+    /// face's descenders reach past the height it declares (Literata's by a
+    /// tenth of an em), into the line below.
+    /// Corners round only on the outside of the shape. Readium lays the boxes
+    /// out again when the page reflows, and the script, which stays in the
+    /// page, fits them again then.
+    public static func fitNarration(wash: UInt32) -> String {
+        let colour = ReadAlongGlow.rgb(wash)
+        let side = ReadAlongGlow.side
+        let corner = ReadAlongGlow.corner
+        let name = ReadAlongGlow.className
+        return "(function(){document.documentElement.style.setProperty('--pocket-narration-wash','\(colour)');"
+            + "if(window.__pocketNarration){window.__pocketNarration();return true;}"
+            + "function fit(){var items=document.querySelectorAll('div[data-style=\"\(name)\"]');"
+            + "for(var n=0;n<items.length;n++){var item=items[n];"
+            + "Array.prototype.slice.call(item.querySelectorAll('[data-join]')).forEach(function(j){j.remove();});"
+            + "var rows=[];Array.prototype.slice.call(item.children).forEach(function(b){"
+            + "if(b.dataset.t===undefined){b.dataset.t=parseFloat(b.style.top);b.dataset.h=parseFloat(b.style.height);"
+            + "b.dataset.l=parseFloat(b.style.left);b.dataset.w=parseFloat(b.style.width);}"
+            + "var t=+b.dataset.t,h=+b.dataset.h,l=+b.dataset.l,w=+b.dataset.w,c=t+h/2,row=null;"
+            + "for(var k=0;k<rows.length;k++){if(Math.abs(rows[k].c-c)<Math.min(rows[k].h,h)/2){row=rows[k];break;}}"
+            + "if(row){row.boxes.push(b);row.l=Math.min(row.l,l)-0;row.r=Math.max(row.r,l+w);"
+            + "row.t=Math.min(row.t,t);row.b=Math.max(row.b,t+h);}"
+            + "else rows.push({c:c,h:h,t:t,b:t+h,l:l,r:l+w,boxes:[b]});});"
+            + "rows.forEach(function(r){r.l-=\(side);r.r+=\(side);});"
+            + "function near(a,b){return b.r>a.l&&b.l<a.r&&Math.abs(a.c-b.c)<2.2*Math.max(a.h,b.h);}"
+            + "rows.forEach(function(r){r.up=null;r.down=null;});"
+            + "rows.forEach(function(r){rows.forEach(function(o){if(o===r||!near(r,o))return;"
+            + "if(o.c>r.c&&(!r.down||o.c<r.down.c))r.down=o;});if(r.down&&(!r.down.up||r.c>r.down.up.c))r.down.up=r;});"
+            + "var lh=parseFloat(getComputedStyle(item).lineHeight),steps=[];rows.forEach(function(r){if(r.down)steps.push(r.down.c-r.c);});"
+            + "var a=\(ReadAlongGlow.overflow)*(parseFloat(getComputedStyle(item).fontSize)||16);"
+            + "var p=steps.length?steps.sort(function(a,b){return a-b;})[steps.length>>1]:(lh>0?lh:rows[0].h);"
+            + "rows.forEach(function(r){var up=r.up,down=r.down;"
+            + "var tl=!up||up.l>r.l+1,tr=!up||up.r<r.r-1,bl=!down||down.l>r.l+1,br=!down||down.r<r.r-1;"
+            + "r.t=(tl||tr)?Math.max(r.t+a,r.c-p+r.h/2+1):r.t;r.b=(bl||br)?Math.min(r.b-a,r.c+p-r.h/2-1):r.b;});"
+            + "rows.forEach(function(r){var up=r.up,down=r.down;"
+            + "var tl=!up||up.l>r.l+1,tr=!up||up.r<r.r-1,bl=!down||down.l>r.l+1,br=!down||down.r<r.r-1;"
+            + "r.boxes.forEach(function(b,i){if(i>0){b.style.display='none';return;}"
+            + "b.style.top=r.t+'px';b.style.height=(r.b-r.t)+'px';b.style.left=r.l+'px';b.style.width=(r.r-r.l)+'px';"
+            + "b.style.borderRadius=(tl?'\(corner)px ':'0 ')+(tr?'\(corner)px ':'0 ')+(br?'\(corner)px ':'0 ')+(bl?'\(corner)px':'0');});"
+            + "if(down&&down.t>r.b){var j=r.boxes[0].cloneNode(false),jl=Math.max(r.l,down.l),jr=Math.min(r.r,down.r);"
+            + "if(jr>jl){j.dataset.join='1';j.removeAttribute('data-t');j.style.display='';j.style.borderRadius='0';"
+            + "j.style.top=(r.b-0.5)+'px';j.style.height=(down.t-r.b+1)+'px';j.style.left=jl+'px';j.style.width=(jr-jl)+'px';"
+            + "item.appendChild(j);}}});}}"
+            + "window.__pocketNarration=fit;"
+            + "new MutationObserver(function(list){for(var m=0;m<list.length;m++){for(var a=0;a<list[m].addedNodes.length;a++){"
+            + "var node=list[m].addedNodes[a];if(!(node.dataset&&node.dataset.join)){fit();return;}}}})"
+            + ".observe(document.body,{childList:true,subtree:true});fit();return true;})()"
     }
 }
 

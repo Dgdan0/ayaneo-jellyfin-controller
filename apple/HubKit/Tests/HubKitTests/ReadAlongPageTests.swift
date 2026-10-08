@@ -192,6 +192,16 @@ struct ReadAlongPageTests {
         #expect(timeline.begin(of: ReadAlongSegment(textHref: "x", fragment: "y", audioHref: "", beginMs: 0, endMs: 1)) == nil)
     }
 
+    @Test func pastAPartTheNarrationGoesOnToTheNextPartsFirstSentence() {
+        #expect(timeline.sentence(after: "one.xhtml")?.fragment == "t0")
+        #expect(timeline.sentence(after: "two.xhtml") == nil, "nothing after the last")
+        #expect(timeline.sentence(after: "front.xhtml") == nil, "a part with no narration has no place in it")
+        let script = ReadAlongPageScript.firstAfter(["s1", #"a"b"#])
+        #expect(script.contains(#"var ids=["s1","a\"b"]"#))
+        #expect(script.contains("b[0].left>=W||b[0].top>=H"))
+        #expect(script.contains("return laid?'':null;"), "behind the page, or not laid out yet")
+    }
+
     // MARK: The demo's edition
 
     @Test func theDemosSentencesArePlacedInsideTheirFiveSecondClips() throws {

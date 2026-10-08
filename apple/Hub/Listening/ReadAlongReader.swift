@@ -41,6 +41,8 @@ final class ReadAlongReader {
     @ObservationIgnored var highlight: @MainActor (ReadAlongSegment?) -> Void = { _ in }
     /// The page script's answer to `ReadAlongPageScript.edges` for those ids.
     @ObservationIgnored var edges: @MainActor ([String]) async -> Any? = { _ in nil }
+    /// The page script's answer to `ReadAlongPageScript.firstAfter` for those ids.
+    @ObservationIgnored var firstAfter: @MainActor ([String]) async -> Any? = { _ in nil }
     /// Takes the page to a place (a locator, as JSON), as the voice moves on.
     @ObservationIgnored var go: @MainActor (String) async -> Bool = { _ in false }
     /// Turns the page on (1) or back (-1), as a reader turns it.
@@ -107,6 +109,16 @@ final class ReadAlongReader {
         self.narration = narration
         session.ready(resume)
         if let segment = narration.segment { highlight(segment) }
+        #if DEBUG
+        // HUB_READALONG_SENTENCE=<id>, debug builds: the narration paused at that sentence, lit and on
+        // the page, for UI tests to look at a sentence where they choose (#52).
+        if let id = ProcessInfo.processInfo.environment["HUB_READALONG_SENTENCE"],
+           let segment = prepared.timeline.tracks.flatMap(\.segments).first(where: { $0.fragment == id }),
+           let target = prepared.timeline.begin(of: segment) {
+            matchToPage = false
+            narration.seek(to: target)
+        }
+        #endif
     }
 
     /// The book opened without its narration, and why.
@@ -355,26 +367,48 @@ final class ReadAlongReader {
             // the simulator: over a second), and a page being laid out shows
             // nothing: it is asked again, for up to six seconds.
             var span: ReadAlongPageSpan?
+            var next: ReadAlongPosition?
             for attempt in 0..<15 {
                 if attempt > 0 { try? await Task.sleep(for: .milliseconds(400)) }
                 span = await measure()
+                // A narrated part's page with none of its sentences on it (its
+                // heading at a large size, a picture): the next sentence of it.
+                if span == nil { next = await sentenceAfterPage() }
                 #if DEBUG
                 NSLog("readalong: listen from the page: %@, %@", pageHref() ?? "no page", span.map { "\($0.start)" } ?? "nothing narrated")
                 #endif
-                if span != nil { break }
+                if span != nil || next != nil { break }
             }
-            guard let span else {
+            guard let start = span?.start ?? next else {
                 say("No narrated sentence on this page. Turn to a narrated page and try again.")
                 return
             }
             matchToPage = false
             completed = false
-            narration.seek(to: span.start)
-            turnAt = scrolls() ? nil : span.end
-            session.record(span.start)
+            narration.seek(to: start)
+            turnAt = scrolls() ? nil : span?.end
+            session.record(start)
             keepPlace()
             if play && !narration.playing { narration.play() }
+            // From a sentence beyond the page, the page goes to it.
+            if span == nil { followVoice() }
         }
+    }
+
+    /// Where the narration goes on from a page of a narrated part that shows
+    /// none of its sentences: the part's first sentence beyond the page, else
+    /// the first after the part. Nil for a part with no narration, or a page
+    /// that has not been laid out yet.
+    private func sentenceAfterPage() async -> ReadAlongPosition? {
+        guard let narration, let href = pageHref() else { return nil }
+        let ids = narration.timeline.fragments(in: href)
+        guard !ids.isEmpty else { return nil }
+        // Null: the page is not laid out yet, asked again.
+        guard let id = await firstAfter(ids) as? String else { return nil }
+        if let segment = narration.timeline.tracks.flatMap(\.segments).first(where: { $0.textHref == href && $0.fragment == id }) {
+            return narration.timeline.begin(of: segment)
+        }
+        return narration.timeline.sentence(after: href).flatMap { narration.timeline.begin(of: $0) }
     }
 
     // MARK: The lock screen and the background

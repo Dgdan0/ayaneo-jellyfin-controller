@@ -591,9 +591,10 @@ a hub that cannot be asked offers the beginning, which writes nothing until the 
 **Read along (after phase 2, as on the Pocket, #21)**: the slim edition (`readingEpubFile(format:
 "readaloud", omitAudio: true)`) with its narration streamed from the audiobook's tracks; the
 narration's dock stands in the lower bar's place (`BookLowerBar`), the sentence read lit through
-Readium's decorations (`ReadAlongHighlight` with HubKit's `ReadAlongGlow`: solid line boxes grown up and
-down to meet, one transparency over the whole sentence, so a sentence over several lines is one even tint,
-#52), and the time left the narration's own. While it plays the voice and the page
+Readium's decorations (`ReadAlongHighlight` with HubKit's `ReadAlongGlow`, as the Pocket draws it, #52: an
+opaque wash, the accent mixed into the page as far as the ink keeps 4.5:1, under the words at `z-index: -1`;
+each row its own line's box, fitted by `ReadAlongPageScript.fitNarration`, rows meeting halfway and never
+reaching another line; no glow), and the time left the narration's own. While it plays the voice and the page
 move each other (#49): the voice turns the page at the next page's first word, inside a sentence
 too (in two columns the page is the spread), and a page turned or jumped to by hand takes the voice
 to its first word unless the sentence spoken is still on it; paused, a turn moves nothing and Play

@@ -284,6 +284,7 @@ final class BookReaderModel {
             self?.updateLines()
         }
         reading.edges = { ids in await navigator.evaluate(ReadAlongPageScript.edges(ids)) }
+        reading.firstAfter = { ids in await navigator.evaluate(ReadAlongPageScript.firstAfter(ids)) }
         reading.go = { json in await navigator.go(to: json) }
         reading.turn = { delta in
             if delta > 0 { return await navigator.goForward() }

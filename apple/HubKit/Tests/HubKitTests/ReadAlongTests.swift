@@ -112,35 +112,56 @@ struct ReadAlongTests {
         #expect(ReadAlongDockText.fraction(at(3, 0), parts(60)) == 0)
     }
 
-    @Test func theSentenceGlowsInTheAccentItIsGiven() {
+    /// #52, the owner's notes and the Pocket's design (0.4.23): an opaque
+    /// wash under the words, each row its own line box, no glow.
+    @Test func theWashIsTheAccentInThePageAsFarAsTheInkKeepsItsContrast() {
         let gold: UInt32 = 0xE3B341
-        #expect(ReadAlongGlow.rgba(gold, 0.28) == "rgba(227, 179, 65, 0.28)")
-        let element = ReadAlongGlow.element(tint: gold)
-        #expect(element == #"<div class="pocket-narration" style="background-color: rgb(227, 179, 65) !important;"></div>"#)
-        let sheet = ReadAlongGlow.stylesheet(tint: gold)
-        #expect(sheet.hasPrefix(".pocket-narration {"))
-        #expect(sheet.contains("box-shadow: 0 -0.25em 0px rgb(227, 179, 65), 0 0.25em 0px rgb(227, 179, 65), "
-                               + "0 -0.25em 8px rgb(227, 179, 65), 0 0.25em 8px rgb(227, 179, 65) !important;"))
-        #expect(sheet.hasSuffix(#"div[data-style="pocket-narration"] { opacity: 0.30; }"#))
+        // Paper and Sepia: 45% of the way to the gold, the ink still well clear.
+        for theme in [EpubTheme.light, .sepia] {
+            let (page, ink) = EpubPagePalette.of(theme)!
+            let wash = ReadAlongGlow.wash(accent: gold, page: page, ink: ink)
+            #expect(wash == GlassColors.mix(page, gold | 0xFF00_0000, 0.45), "\(theme)")
+            #expect(GlassColors.contrast(ink, wash) >= 4.5, "\(theme)")
+        }
+        // Dim, Dark and Blue: less, as far as the light ink keeps 4.5:1.
+        for theme in [EpubTheme.dark, .black, .blue] {
+            let (page, ink) = EpubPagePalette.of(theme)!
+            let wash = ReadAlongGlow.wash(accent: gold, page: page, ink: ink)
+            #expect(GlassColors.contrast(ink, wash) >= 4.5, "\(theme)")
+            #expect(wash != page, "\(theme) shows no wash")
+            #expect(GlassColors.contrast(ink, GlassColors.mix(page, gold | 0xFF00_0000, 0.45)) < 4.5
+                    || wash == GlassColors.mix(page, gold | 0xFF00_0000, 0.45), "\(theme)")
+        }
+        #expect(GlassColors.alpha(ReadAlongGlow.wash(accent: gold, page: 0xFF000000, ink: 0xFFAFAFAF)) == 0xFF, "opaque")
+        // A page where no share keeps the contrast is left as it is.
+        #expect(ReadAlongGlow.wash(accent: 0xFFFFFF, page: 0xFF808080, ink: 0xFF909090) == 0xFF808080)
     }
 
-    /// #52: where two lines' boxes meet the colour is not laid twice. Each box
-    /// is the solid accent, grown by a solid band that closes the gap to the
-    /// next line; the transparency is the sentence's container's, once over
-    /// all its boxes, so however they overlap they are one even tint.
-    @Test func overlappingLinesAreOneEvenTint() {
+    @Test func theBoxesAreUnderTheWordsInTheWashAndNothingElse() {
         let gold: UInt32 = 0xE3B341
+        #expect(ReadAlongGlow.element(tint: gold) == #"<div class="pocket-narration"></div>"#)
         let sheet = ReadAlongGlow.stylesheet(tint: gold)
-        let all = ReadAlongGlow.element(tint: gold) + sheet
-        #expect(!all.contains("rgba"), "nothing carries a transparency of its own")
-        #expect(all.components(separatedBy: "opacity").count == 2, "the transparency is laid once")
-        #expect(!all.contains("filter"), "a filter places the boxes in its own box: WebKit drew a sliver of each line")
-        // The band is in the book's em, as deep as half the gap between lines at 1.8 spacing (a line's
-        // box is about 1.3 em of a 1.8 em line), up and down only: no shadow is spread sideways, where
-        // it reached into the page beside at 200%.
-        #expect(ReadAlongGlow.spread >= (1.8 - 1.3) / 2)
-        #expect(sheet.contains("0 -0.25em 0px") && sheet.contains("0 0.25em 0px"))
-        #expect(!sheet.contains("em rgb(227, 179, 65), 0 0 "), "no shadow spreads sideways")
+        #expect(sheet == #"div[data-style="pocket-narration"] > div.pocket-narration { z-index: -1 !important; "#
+                + "background-color: var(--pocket-narration-wash, transparent) !important; }")
+        // No translucent layer over the text, no group opacity, no glow, no ring.
+        for word in ["opacity", "rgba", "box-shadow", "filter", "border:", "blend"] { #expect(!sheet.contains(word), "\(word)") }
+    }
+
+    @Test func theFittingScriptSetsTheWashAndFitsEachRowToItsLine() {
+        let script = ReadAlongPageScript.fitNarration(wash: 0xFFF5E0B4)
+        #expect(script.contains("setProperty('--pocket-narration-wash','rgb(245, 224, 180)')"))
+        // A row is as tall as its words; the gap to the next row is a join as wide as the two rows share.
+        #expect(script.contains("b.style.top=r.t+'px';b.style.height=(r.b-r.t)+'px';"))
+        #expect(script.contains("jl=Math.max(r.l,down.l),jr=Math.min(r.r,down.r);"))
+        // A row with another sentence's words above or below stops short of their line's words.
+        #expect(script.contains("r.t=(tl||tr)?Math.max(r.t+a,r.c-p+r.h/2+1):r.t;r.b=(bl||br)?Math.min(r.b-a,r.c+p-r.h/2-1):r.b;"))
+        #expect(script.contains("var a=0.15*(parseFloat(getComputedStyle(item).fontSize)||16);"))
+        // Its own joins do not set it off again.
+        #expect(script.contains("if(!(node.dataset&&node.dataset.join)){fit();return;}"))
+        // It stays in the page and fits again when Readium lays the boxes out again.
+        #expect(script.contains("new MutationObserver") && script.contains("window.__pocketNarration=fit;"))
+        // Corners round only on the outside of the shape.
+        #expect(script.contains("var tl=!up||up.l>r.l+1,tr=!up||up.r<r.r-1,bl=!down||down.l>r.l+1,br=!down||down.r<r.r-1;"))
     }
 
     // MARK: The place

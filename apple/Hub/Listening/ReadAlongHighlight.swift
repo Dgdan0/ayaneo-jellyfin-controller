@@ -5,9 +5,9 @@ import HubKit
 import UIKit
 
 /// Read along's sentence as Readium draws it (#16, X7, #52; Android's
-/// `highlightNarration`): `ReadAlongGlow`'s soft wash and glow in the Books
-/// accent, one solid box per line of the sentence under one transparency and
-/// one glow for the whole sentence, so lines that meet are one even tint.
+/// `highlightNarration`): `ReadAlongGlow`'s opaque wash of the Books accent
+/// under the words, each row of the sentence its own line's box, fitted by
+/// the page script the navigator runs (`BookNavigator.fitNarration`).
 /// The book reader opens a book to read along with `templates(tint:)` among
 /// its navigator's decoration templates (beside Readium's own, which its
 /// search and bookmarks may use), and applies `decorations(_:)` in `group`

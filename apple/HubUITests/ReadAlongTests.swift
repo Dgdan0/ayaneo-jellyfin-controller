@@ -28,6 +28,12 @@ final class ReadAlongTests: XCTestCase {
         app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", words)).firstMatch
     }
 
+    /// Every text on screen on one line, for a failure's message (the reader's notices among them).
+    @MainActor
+    private func texts(_ app: XCUIApplication) -> String {
+        app.staticTexts.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }.joined(separator: " | ")
+    }
+
     @MainActor
     private func buttons(_ app: XCUIApplication) -> String {
         app.buttons.allElementsBoundByIndex.map { $0.label }.filter { !$0.isEmpty }.joined(separator: " | ")
@@ -312,6 +318,38 @@ final class ReadAlongTests: XCTestCase {
         }
     }
 
+    /// The sentence lit keeps its words' ink and tints no other sentence's
+    /// words (#52, the owner's notes from the Pocket): the tint is behind the
+    /// words, one line tall per line. A sentence that starts and ends mid-line
+    /// ("He had walked this way home…", the second of the chapter's first
+    /// paragraph), paused there, in Paper, Sepia, Dim and Dark, at 130% and
+    /// 200%, at spacing 1.3 and 1.8: the attachments
+    /// "readalong-ink-<theme>-<size>-<spacing>", which the ink and the
+    /// neighbours' words are measured on. On an iPad, two columns.
+    @MainActor
+    func testTheSentenceLitKeepsItsInkAndTintsNoOtherWords() {
+        // An iPad also held sideways, where its page is two columns.
+        let ways = UIDevice.current.userInterfaceIdiom == .pad ? ["", "columns-"] : [""]
+        for way in ways {
+            if !way.isEmpty { XCUIDevice.shared.orientation = .landscapeLeft }
+            for theme in ["LIGHT", "SEPIA", "DARK", "BLACK"] {
+                for size in ["1.3", "2.0"] {
+                    for spacing in ["1.3", "1.8"] {
+                        let app = launchReadingAlong(Self.largeType.merging(
+                            ["HUB_BOOK_THEME": theme, "HUB_BOOK_SIZE": size, "HUB_BOOK_SPACING": spacing,
+                             "HUB_BOOK_COLUMNS": way.isEmpty ? "AUTO" : "TWO", "HUB_BOOK_CHROME": "",
+                             "HUB_READALONG_SENTENCE": "one-s2"]) { $1 })
+                        XCTAssertTrue(waitUntil(30) { debug(app).label.contains("% of book") }, "the page did not say where it is: \(debug(app).label)")
+                        // The look is set a moment after the book opens, and the sentence lit again on the new layout.
+                        RunLoop.current.run(until: Date().addingTimeInterval(3))
+                        keep(app, "readalong-ink-\(way)\(theme)-\(size)-\(spacing)")
+                        app.terminate()
+                    }
+                }
+            }
+        }
+    }
+
     /// With the app in the background (Home, as the screen locking does) the
     /// voice reads on: the app is not suspended, the narration has the lock
     /// screen, and back in the app the voice is further on and the page with it.
@@ -321,7 +359,8 @@ final class ReadAlongTests: XCTestCase {
         let play = app.buttons["readalong-play"]
         XCTAssertTrue(play.waitForExistence(timeout: 20))
         play.tap()
-        XCTAssertTrue(waitUntil(15) { play.label == "Pause narration" }, "the narration did not play")
+        XCTAssertTrue(waitUntil(15) { play.label == "Pause narration" },
+                      "the narration did not play: \(debug(app).label); \(texts(app))")
         XCTAssertTrue(waitUntil(10) { debug(app).label.hasSuffix("narration · Dark Matter") },
                       "the lock screen is not the narration's: \(debug(app).label)")
         let time = app.staticTexts["readalong-time"]

@@ -77,6 +77,9 @@ final class BookNavigator: NSObject {
 
     private var publication: Publication?
     private var controller: EPUBNavigatorViewController?
+    /// Reading along: the accent the sentence is washed in, and the wash for the page's colours (#52).
+    private var narrationTint: UInt32?
+    private var narrationWash: UInt32?
     /// The note whose card is open: where "Go to the note" goes.
     private var noteLink: ReadiumShared.Link?
 
@@ -131,12 +134,24 @@ final class BookNavigator: NSObject {
         navigator.delegate = self
         publication = loaded.publication
         controller = navigator
+        narrationTint = narration
+        narrationWash = Self.wash(narration, rendering)
         return navigator
     }
 
-    /// The appearance changed: Readium lays the book out again where it is.
+    /// The appearance changed: Readium lays the book out again where it is,
+    /// and the sentence's wash follows the page's colours.
     func submit(_ rendering: EpubRendering) {
         controller?.submitPreferences(Self.preferences(rendering))
+        narrationWash = Self.wash(narrationTint, rendering)
+        fitNarration()
+    }
+
+    /// The accent mixed into the page under its ink (`ReadAlongGlow.wash`).
+    private static func wash(_ tint: UInt32?, _ rendering: EpubRendering) -> UInt32? {
+        guard let tint, let page = EpubPagePalette.argb(rendering.background),
+              let ink = EpubPagePalette.argb(rendering.text) else { return nil }
+        return ReadAlongGlow.wash(accent: tint, page: page, ink: ink)
     }
 
     @discardableResult
@@ -160,6 +175,18 @@ final class BookNavigator: NSObject {
     /// The sentence spoken glows, or nothing does.
     func highlight(_ segment: ReadAlongSegment?) {
         controller?.apply(decorations: ReadAlongHighlight.decorations(segment), in: ReadAlongHighlight.group)
+        fitNarration()
+    }
+
+    /// The sentence's boxes fitted to its lines in the wash (#52,
+    /// `ReadAlongPageScript.fitNarration`). The script stays in the page and
+    /// fits Readium's boxes again whenever it lays them out; run again here as
+    /// the sentence or the page's colours change, and as a part opens, whose
+    /// page has not had it yet.
+    func fitNarration() {
+        guard let controller, let wash = narrationWash else { return }
+        let script = ReadAlongPageScript.fitNarration(wash: wash)
+        Task { _ = await controller.evaluateJavaScript(script) }
     }
 
     /// A script's answer from the page on screen (`ReadAlongPageScript`), or nil.
@@ -328,6 +355,7 @@ final class BookNavigator: NSObject {
 
 extension BookNavigator: EPUBNavigatorDelegate {
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+        fitNarration()
         guard let json = try? locator.jsonString() else { return }
         onPlace(BookPlaceOnPage(json: json, href: BookSections.path(locator.href.string), title: locator.title,
                                 progression: locator.locations.progression ?? 0,
