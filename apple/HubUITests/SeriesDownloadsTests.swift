@@ -18,10 +18,11 @@ final class SeriesDownloadsTests: XCTestCase {
     private let series = "000000000000000000000000deb00012"
 
     @MainActor
-    private func launch(download: [String] = []) -> XCUIApplication {
+    private func launch(download: [String] = [], pinnedBar: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo"]
         app.launchEnvironment = ["HUB_SECTION": "library", "HUB_SIDE": "media", "HUB_TITLE": series]
+        if pinnedBar { app.launchEnvironment["HUB_BAR_PINNED"] = "1" }
         if !download.isEmpty { app.launchEnvironment["HUB_DOWNLOAD"] = download.map { "\(series)-\($0)" }.joined(separator: ",") }
         app.launch()
         // The page settles once the hub's listing is in (the season button takes its place); then the
@@ -89,6 +90,16 @@ final class SeriesDownloadsTests: XCTestCase {
         }
     }
 
+    /// A tap on an episode's corner, once more if the first was lost (never twice: a second tap stops it).
+    @MainActor
+    private func startDownload(_ app: XCUIApplication, _ episode: String) {
+        let target = corner(app, episode)
+        XCTAssertTrue(target.waitForExistence(timeout: 25), "no corner for \(episode): \(buttons(app))")
+        target.tap()
+        if !waitUntil(4, { target.label != "Download" }) { target.tap() }
+        XCTAssertTrue(waitUntil(5) { target.label != "Download" }, "\(episode) did not start: \(target.label)")
+    }
+
     /// What an episode's corner says, scrolling the strip to it: the strip builds only the cards at the screen.
     @MainActor
     private func cornerLabel(_ app: XCUIApplication, _ episode: String) -> String {
@@ -118,7 +129,15 @@ final class SeriesDownloadsTests: XCTestCase {
             .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
         RunLoop.current.run(until: Date().addingTimeInterval(0.6))
         target.press(forDuration: 1.2)
-        if !menuItem.waitForExistence(timeout: 4) { target.press(forDuration: 1.8) }
+        if !menuItem.waitForExistence(timeout: 4) {
+            // A hold taken for a tap plays the card: out of the player, and once more.
+            let app = XCUIApplication()
+            if app.buttons["Lock controls"].exists {
+                app.buttons["Back"].firstMatch.tap()
+                _ = app.buttons["Lock controls"].waitForNonExistence(timeout: 10)
+            }
+            target.press(forDuration: 1.8)
+        }
     }
 
     @MainActor
@@ -339,7 +358,7 @@ final class SeriesDownloadsTests: XCTestCase {
         for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
             XCUIDevice.shared.orientation = orientation
             Thread.sleep(forTimeInterval: 1.5)
-            let app = launch(download: ["e1", "e2", "e3", "s2e1", "s2e2", "s2e3", "s2e4"])
+            let app = launch(pinnedBar: true)
             let bar = element(app, "storage-bar")
             XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar did not rise (\(orientation.rawValue))")
             // All the way down the page.
@@ -367,10 +386,7 @@ final class SeriesDownloadsTests: XCTestCase {
     func testSelectModeTicksAcrossSeasonsAndDownloadsWhatIsTicked() {
         let app = launch()
         // One is on its way already: it cannot be ticked.
-        let first = corner(app, "e1")
-        XCTAssertTrue(first.waitForExistence(timeout: 25))
-        first.tap()
-        XCTAssertTrue(waitUntil(5) { first.label != "Download" })
+        startDownload(app, "e1")
 
         openPanel(app)
         element(app, "choose-episodes").tap()

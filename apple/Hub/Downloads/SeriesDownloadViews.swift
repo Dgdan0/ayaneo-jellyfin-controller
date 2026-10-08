@@ -256,6 +256,13 @@ struct DownloadBarHost: ViewModifier {
     }
 
     private func follow() async {
+        #if DEBUG
+        // HUB_BAR_PINNED=1 keeps it up, for measuring where it sits against the page.
+        if ProcessInfo.processInfo.environment["HUB_BAR_PINNED"] == "1" {
+            visible = true
+            return
+        }
+        #endif
         let coming = offline.counts(scope: scope).coming
         visibility.update(coming: coming, now: Date())
         withAnimation(.snappy(duration: 0.3)) { visible = visibility.isVisible(at: Date()) }
