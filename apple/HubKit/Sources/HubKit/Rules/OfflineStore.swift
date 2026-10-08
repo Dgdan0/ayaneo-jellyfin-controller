@@ -234,6 +234,65 @@ public final class OfflineStore: @unchecked Sendable {
         subtitleFolder.appendingPathComponent("\(Self.safe(row.id))-\(track.index).\(Self.subtitleExtension(track.codec))")
     }
 
+    // MARK: Subtitles kept beside an Apple download (#45)
+
+    /// Where `key`'s WebVTT is kept: under the download's name, so removing it removes them.
+    public func keptSubtitleFile(_ row: OfflineRow, key: String) -> URL {
+        subtitleFolder.appendingPathComponent("\(Self.safe(row.id))-kept-\(Self.safe(key)).vtt")
+    }
+
+    private func keptSubtitlesFile(_ row: OfflineRow) -> URL {
+        subtitleFolder.appendingPathComponent("\(Self.safe(row.id))-kept.json")
+    }
+
+    /// What the download keeps of its subtitles; nil when the hub was never asked.
+    public func keptSubtitles(_ row: OfflineRow) -> OfflineKeptSubtitles? {
+        guard let data = try? Data(contentsOf: keptSubtitlesFile(row)) else { return nil }
+        return try? JSONDecoder().decode(OfflineKeptSubtitles.self, from: data)
+    }
+
+    /// Written only while the download is here: one removed during a refresh
+    /// is left with nothing behind it.
+    public func saveKeptSubtitles(_ row: OfflineRow, _ value: OfflineKeptSubtitles) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard rowsById[row.id] != nil else { return }
+        save(value, to: keptSubtitlesFile(row))
+    }
+
+    public func hasKeptSubtitle(_ row: OfflineRow, key: String) -> Bool {
+        FileManager.default.fileExists(atPath: keptSubtitleFile(row, key: key).path)
+    }
+
+    /// `data` as `key`'s file: written to a temporary name, then put in place
+    /// whole; nothing while the download is not here.
+    public func writeKeptSubtitle(_ row: OfflineRow, key: String, data: Data) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard rowsById[row.id] != nil else { return }
+        let target = keptSubtitleFile(row, key: key)
+        let temporary = target.appendingPathExtension("part")
+        try? FileManager.default.removeItem(at: temporary)
+        try data.write(to: temporary)
+        if FileManager.default.fileExists(atPath: target.path) {
+            _ = try FileManager.default.replaceItemAt(target, withItemAt: temporary)
+        } else {
+            try FileManager.default.moveItem(at: temporary, to: target)
+        }
+    }
+
+    public func removeKeptSubtitle(_ row: OfflineRow, key: String) {
+        try? FileManager.default.removeItem(at: keptSubtitleFile(row, key: key))
+    }
+
+    /// The kept subtitles whose files are there, with their files, in order.
+    public func keptSubtitleFiles(_ row: OfflineRow) -> [(track: OfflineKeptSubtitle, file: URL)] {
+        (keptSubtitles(row)?.tracks ?? []).compactMap { track in
+            let file = keptSubtitleFile(row, key: track.key)
+            return FileManager.default.fileExists(atPath: file.path) ? (track, file) : nil
+        }
+    }
+
     /// "poster", "thumb" or "backdrop".
     public func artworkFile(_ row: OfflineRow, kind: String) -> URL {
         artworkFolder.appendingPathComponent("\(Self.safe(row.id))-\(Self.safe(kind)).img")

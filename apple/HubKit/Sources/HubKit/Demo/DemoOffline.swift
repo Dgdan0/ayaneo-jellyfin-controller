@@ -16,6 +16,11 @@ import Synchronization
 /// (`ffmpeg_failed`, retryable) until it is retried, and Inception has a
 /// French picture subtitle that is left out. A grant without a format is the
 /// original, an MP4 here with an SRT beside it.
+///
+/// An Apple grant's subtitles as they are now (#45): an English and a
+/// Hebrew sidecar as WebVTT, each with its signature as its ETag. The tests
+/// replace, add and take away tracks (`setSubtitles`) and let a grant expire
+/// (`expire`), which renewing undoes.
 enum DemoOffline {
     /// A grant: its item, its manifest as JSON, and where its MP4 is.
     private struct Grant {
@@ -32,6 +37,56 @@ enum DemoOffline {
     }
 
     private static let grants = Mutex<[String: Grant]>([:])
+
+    /// A subtitle of the demo's source: its key, facts and WebVTT.
+    struct Subtitle: Sendable {
+        var key: String
+        var language: String
+        var label: String
+        var rtl: Bool
+        var text: String
+
+        init(key: String, language: String, label: String, rtl: Bool = false, text: String) {
+            self.key = key
+            self.language = language
+            self.label = label
+            self.rtl = rtl
+            self.text = text
+        }
+    }
+
+    /// Every Apple grant's subtitles, until a test says otherwise.
+    static let standardSubtitles = [
+        Subtitle(key: "ext-eng", language: "eng", label: "English - SubRip - External",
+                 text: "WEBVTT\n\n00:00:00.500 --> 00:00:04.000\nA subtitle kept beside the download.\n\n"
+                     + "00:00:04.500 --> 00:00:09.000\nIt plays with no network.\n"),
+        Subtitle(key: "ext-heb", language: "heb", label: "Hebrew - SubRip - External", rtl: true,
+                 text: "WEBVTT\n\n00:00:00.500 --> 00:00:04.000\nכתובית שנשמרה ליד ההורדה\n\n"
+                     + "00:00:04.500 --> 00:00:09.000\nהיא מוצגת גם בלי רשת\n"),
+    ]
+    private static let subtitleSets = Mutex<[String: [Subtitle]]>([:])
+    private static let expired = Mutex<Set<String>>([])
+
+    /// A grant's subtitles from now on, for the tests: replaced, added or taken away.
+    static func setSubtitles(_ grantId: String, _ subtitles: [Subtitle]) {
+        subtitleSets.withLock { $0[grantId] = subtitles }
+    }
+
+    /// The grant expires: its routes answer 410 until it is renewed.
+    static func expire(_ grantId: String) {
+        _ = expired.withLock { $0.insert(grantId) }
+    }
+
+    /// A WebVTT's signature: 32 hexadecimal characters, as the hub's.
+    static func signature(_ text: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        var second: UInt64 = 0x8422_2325_cbf2_9ce4
+        for byte in text.utf8 {
+            hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3
+            second = (second &+ UInt64(byte)) &* 0x9e37_79b9_7f4a_7c15
+        }
+        return String(format: "%016llx%016llx", hash, second)
+    }
     /// The watches the demo hub was sent, for the tests: clientEventKey to itemId.
     static let synced = Mutex<[String: String]>([:])
 
@@ -74,7 +129,12 @@ enum DemoOffline {
                 return failure(404, "not_found", "no such offline subtitle")
             }
             return DemoTransport.Answer(200, data: Data(subtitles.utf8), type: "application/x-subrip")
+        case ("GET", 5, "grants") where parts[4] == "subtitle-tracks":
+            return subtitleTracks(parts[3])
+        case ("GET", 6, "grants") where parts[4] == "subtitle-tracks", ("HEAD", 6, "grants") where parts[4] == "subtitle-tracks":
+            return subtitleTrack(parts[3], key: parts[5])
         case ("POST", 5, "grants") where parts[4] == "renew":
+            _ = expired.withLock { $0.remove(parts[3]) }
             guard let grant = grant(parts[3]),
                   var manifest = (try? JSONSerialization.jsonObject(with: grant.manifest)) as? [String: Any] else {
                 return failure(404, "not_found", "no such offline grant")
@@ -88,6 +148,40 @@ enum DemoOffline {
         default:
             return nil
         }
+    }
+
+    // MARK: Subtitles kept beside an Apple download (#45)
+
+    private static func subtitles(of grantId: String) -> [Subtitle] {
+        subtitleSets.withLock { $0[grantId] } ?? standardSubtitles
+    }
+
+    private static func subtitleTracks(_ grantId: String) -> DemoTransport.Answer {
+        guard let grant = grant(grantId), grant.apple else { return failure(404, "not_found", "no such offline grant") }
+        if expired.withLock({ $0.contains(grantId) }) { return failure(410, "grant_expired", "the offline grant has expired") }
+        let tracks = subtitles(of: grantId).map { subtitle -> [String: Any] in
+            ["key": subtitle.key, "sourceIndex": 0, "language": subtitle.language, "title": "", "label": subtitle.label,
+             "codec": "subrip", "external": true, "default": false, "forced": false, "hearingImpaired": false,
+             "rtl": subtitle.rtl, "signature": signature(subtitle.text),
+             "url": "/v1/offline/grants/\(grantId)/subtitle-tracks/\(subtitle.key)"]
+        }
+        var omitted: [[String: Any]] = []
+        if grant.itemId == inception {
+            omitted.append(["sourceIndex": 3, "language": "fra", "label": "French - PGSSUB", "codec": "hdmv_pgs_subtitle",
+                            "external": false, "reason": "picture_subtitle"])
+        }
+        return json(["grantId": grantId, "format": OfflineFormat.apple, "tracks": tracks, "omitted": omitted])
+    }
+
+    private static func subtitleTrack(_ grantId: String, key: String) -> DemoTransport.Answer {
+        guard let grant = grant(grantId), grant.apple,
+              let subtitle = subtitles(of: grantId).first(where: { $0.key == key }) else {
+            return failure(404, "not_found", "no such offline subtitle")
+        }
+        if expired.withLock({ $0.contains(grantId) }) { return failure(410, "grant_expired", "the offline grant has expired") }
+        var answer = DemoTransport.Answer(200, data: Data(subtitle.text.utf8), type: "text/vtt; charset=utf-8")
+        answer.headers = ["ETag": "\"\(signature(subtitle.text))\"", "Cache-Control": "private, no-store"]
+        return answer
     }
 
     // MARK: Answers

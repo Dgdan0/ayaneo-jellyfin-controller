@@ -29,6 +29,8 @@ final class OfflineLibrary {
     @ObservationIgnored private var engine: OfflineDownloader?
     @ObservationIgnored private var hub: HubClient?
     @ObservationIgnored private var syncing: Task<Void, Never>?
+    /// A refresh of the kept subtitles under way: another waits for it.
+    @ObservationIgnored private var refreshing: Task<Bool, Never>?
 
     init(root: URL) {
         store = OfflineStore(root: root)
@@ -48,6 +50,9 @@ final class OfflineLibrary {
     var downloader: OfflineDownloader {
         if let engine { return engine }
         let made = OfflineDownloader(store: store) { [weak self] in self?.revision += 1 }
+        made.finished = { [weak self] row in
+            Task { await self?.refreshSubtitles(itemId: row.itemId) }
+        }
         engine = made
         return made
     }
@@ -172,7 +177,49 @@ final class OfflineLibrary {
         guard let row = store.completedForItem(itemId, userId: userId, now: OfflineDownloader.now()) else { return nil }
         let saved = store.progress(itemIds: [itemId], userId: userId)[itemId]
         return OfflinePlayback.plan(row, file: store.mediaFile(row), saved: saved, mode: mode,
-                                    siblings: store.completed(userId: userId), subtitles: [:])
+                                    siblings: store.completed(userId: userId), subtitles: [:],
+                                    kept: store.keptSubtitleFiles(row))
+    }
+
+    /// The download's subtitle choices as they are kept now (after a refresh).
+    func localSubtitles(itemId: String, userId: String) -> [PlaybackTrack]? {
+        localPlan(itemId: itemId, mode: .resume, userId: userId)?.subtitleTracks
+    }
+
+    // MARK: Subtitles kept beside a download (#45)
+
+    /// This profile's downloads' subtitles brought up to date with the hub,
+    /// each not asked about for a while (`OfflineSubtitleSync.due`; for one
+    /// title, as it arrives or before it plays, a minute), quietly: nothing
+    /// is said, and an unreachable hub stops it for now. Whether anything
+    /// kept changed.
+    @discardableResult
+    func refreshSubtitles(itemId: String? = nil) async -> Bool {
+        // One at a time; a change another made while this waited counts too.
+        var before = false
+        while let running = refreshing { before = await running.value || before }
+        guard let hub else { return before }
+        let rows = store.completed(userId: userId).filter { $0.isApple && (itemId == nil || $0.itemId == itemId) }
+        guard !rows.isEmpty else { return before }
+        let store = store
+        let fresh = itemId == nil ? OfflineSubtitleSync.recheckMillis : OfflineSubtitleSync.playRecheckMillis
+        let task = Task { () -> Bool in
+            var changed = false
+            for row in rows {
+                switch await OfflineSubtitleSync.refresh(row, store: store, hub: hub, now: OfflineDownloader.now(),
+                                                         freshMillis: fresh) {
+                case .changed: changed = true
+                case .unchanged: break
+                case .unreachable: return changed
+                }
+            }
+            return changed
+        }
+        refreshing = task
+        let changed = await task.value
+        refreshing = nil
+        if changed { revision += 1 }
+        return changed || before
     }
 
     /// The downloaded episode of a series to go on with, by the same rules as playback.

@@ -63,7 +63,11 @@ struct DownloadsView: View {
             }
             .padding(.bottom, 28)
         }
-        .task { offline.syncSoon() }
+        .task {
+            offline.syncSoon()
+            // The downloads' subtitles brought up to date with the hub, quietly (#45).
+            await offline.refreshSubtitles()
+        }
         .offlineRemoval($removing)
     }
 

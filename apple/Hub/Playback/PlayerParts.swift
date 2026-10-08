@@ -285,8 +285,29 @@ struct SubtitleOverlay: View {
             }
         }
         .allowsHitTesting(false)
-        // They change several times a minute; VoiceOver would chase them.
-        .accessibilityHidden(true)
+        .modifier(CueAccessibility(words: words))
+    }
+}
+
+/// Drawn subtitles change several times a minute and VoiceOver would chase
+/// them, so they are hidden from it. A debug build run with
+/// HUB_PLAY_CUES=read shows the cue as one element, for the UI tests.
+private struct CueAccessibility: ViewModifier {
+    let words: String
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["HUB_PLAY_CUES"] == "read" {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(words)
+                .accessibilityIdentifier("subtitle-cue")
+        } else {
+            content.accessibilityHidden(true)
+        }
+        #else
+        content.accessibilityHidden(true)
+        #endif
     }
 }
 

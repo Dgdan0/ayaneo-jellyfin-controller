@@ -411,9 +411,16 @@ final class PlayerModel {
                     mode = .resume
                 }
             }
-            // Downloaded for this profile: from its file, with nothing asked of the hub.
-            if let local = offline.localPlan(itemId: itemId, mode: mode, userId: user) {
+            // Downloaded for this profile: from its file, with nothing asked of the hub
+            // but whether its subtitles have changed (#45), quietly, and for a moment
+            // only: an answer later than that reaches the player as it plays.
+            if offline.localPlan(itemId: itemId, mode: mode, userId: user) != nil {
+                let refresh = Task { await offline.refreshSubtitles(itemId: itemId) }
+                let answered = await Self.within(.milliseconds(1_500), refresh)
+                guard generation == self.generation,
+                      let local = offline.localPlan(itemId: itemId, mode: mode, userId: user) else { return }
                 loadOffline(local, generation: generation)
+                if answered == nil { refreshKeptSubtitles(refresh, itemId: itemId, generation: generation) }
                 return
             }
             let body = PlaybackPrepareBody(startMode: mode, device: PlaybackDeviceInfo.device(),
@@ -445,6 +452,42 @@ final class PlayerModel {
         }
     }
 
+    /// The download's subtitles brought up to date while it plays (#45): one
+    /// changed or come since is a choice at once, and the one showing stays
+    /// chosen (by its language, were its place to change), read again from its file.
+    private func refreshKeptSubtitles(_ refresh: Task<Bool, Never>, itemId: String, generation: Int) {
+        let offline = OfflineLibrary.shared
+        let user = user
+        Task {
+            guard await refresh.value, generation == self.generation, isOffline,
+                  var current = plan, current.item.id == itemId,
+                  let tracks = offline.localSubtitles(itemId: itemId, userId: user) else { return }
+            let chosen = current.subtitleTracks.first { $0.index == current.selectedSubtitleIndex }
+            current.subtitleTracks = tracks
+            if let chosen, !tracks.contains(where: { $0.index == chosen.index }) {
+                current.selectedSubtitleIndex = tracks.first { $0.language == chosen.language }?.index
+            }
+            plan = current
+            subtitleKey = ""
+            prepareSubtitles(current)
+            if let item = player.currentItem { applyLegibleChoice(to: item) }
+        }
+    }
+
+    /// `task`'s answer if it comes within `limit`; nil otherwise, and the task
+    /// goes on. Not a task group: a group waits for all of its children, and
+    /// waiting on a task's value does not stop when cancelled.
+    private static func within<T: Sendable>(_ limit: Duration, _ task: Task<T, Never>) async -> T? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<T?, Never>) in
+            let first = FirstAnswer(continuation)
+            Task { first.give(await task.value) }
+            Task {
+                try? await Task.sleep(for: limit)
+                first.give(nil)
+            }
+        }
+    }
+
     /// Plays a download from its file. This profile's last audio and subtitle
     /// languages for the series or film are chosen before the first frame, as
     /// for a stream; the file's own options are selected when it is ready.
@@ -460,6 +503,8 @@ final class PlayerModel {
         }
         self.plan = plan
         planShown()
+        // A subtitle kept beside the file is drawn by the app (#45).
+        prepareSubtitles(plan)
         guard let url = URL(string: plan.mediaUrl) else {
             phase = .failed("This download cannot be found on this device.")
             return
@@ -934,6 +979,7 @@ final class PlayerModel {
         edit(&next)
         plan = next
         remember(next)
+        prepareSubtitles(next)
         guard let item = player.currentItem else { return }
         applyAudioChoice(to: item)
         applyLegibleChoice(to: item)
@@ -1072,11 +1118,21 @@ final class PlayerModel {
         subtitleTask?.cancel()
         subtitleTimeline = nil
         subtitleLines = []
-        guard let track, let hub else { return }
+        guard let track else { return }
+        // A download's kept subtitle is a file on this device (#45); a stream's is the hub's.
+        let local = track.externalUrl.hasPrefix("file:") ? URL(string: track.externalUrl) : nil
+        guard local != nil || hub != nil else { return }
         let request = HubEndpoints.playbackFile(track.externalUrl, user: user)
         let codec = track.codec
+        let hub = hub
         subtitleTask = Task {
-            guard let bytes = try? await hub.data(request), !Task.isCancelled, subtitleKey == key else { return }
+            let read: Data?
+            if let local {
+                read = await Task.detached(priority: .userInitiated) { try? Data(contentsOf: local) }.value
+            } else {
+                read = try? await hub?.data(request)
+            }
+            guard let bytes = read, !Task.isCancelled, subtitleKey == key else { return }
             let windows = await Task.detached(priority: .userInitiated) {
                 SubtitleParser.parse(String(decoding: bytes, as: UTF8.self), codec: codec)
             }.value
@@ -1376,6 +1432,24 @@ extension PlayerModel: NowPlayingClient {
     }
 
     func publishNowPlaying() { updateNowPlaying() }
+}
+
+/// Hands a waiting continuation the first of several answers, once.
+private final class FirstAnswer<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiting: CheckedContinuation<T?, Never>?
+
+    init(_ continuation: CheckedContinuation<T?, Never>) {
+        waiting = continuation
+    }
+
+    func give(_ value: T?) {
+        lock.lock()
+        let continuation = waiting
+        waiting = nil
+        lock.unlock()
+        continuation?.resume(returning: value)
+    }
 }
 
 /// Picture in picture's news, carried to the model on the main actor.

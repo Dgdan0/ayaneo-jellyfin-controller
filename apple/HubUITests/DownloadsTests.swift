@@ -15,10 +15,11 @@ final class DownloadsTests: XCTestCase {
     private let bleach = "000000000000000000000000deb00003"
 
     @MainActor
-    private func launch(title: String) -> XCUIApplication {
+    private func launch(title: String, environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo"]
         app.launchEnvironment = ["HUB_SECTION": "library", "HUB_SIDE": "media", "HUB_TITLE": title]
+            .merging(environment) { _, given in given }
         app.launch()
         return app
     }
@@ -87,6 +88,63 @@ final class DownloadsTests: XCTestCase {
         XCTAssertTrue(lock.waitForNonExistence(timeout: 10), "Back left the player open")
 
         // Removed: asked first, then gone.
+        app.buttons["Remove"].firstMatch.tap()
+        let ask = app.alerts.firstMatch
+        XCTAssertTrue(ask.waitForExistence(timeout: 5), "removing did not ask first")
+        ask.buttons["Remove"].tap()
+        XCTAssertTrue(text(app, containing: "Not on this device").waitForExistence(timeout: 5), "the film stayed on the device")
+    }
+
+    /// Subtitles kept beside a download (#45): the demo hub's English and
+    /// Hebrew sidecars come with the film as WebVTT, though its MP4 has none,
+    /// are choices in Audio & subtitles, and the Hebrew is drawn by the app
+    /// from its file (HUB_PLAY_SUBTITLE=heb turns it on as the film opens;
+    /// HUB_PLAY_CUES=read lets the test read the line drawn).
+    @MainActor
+    func testADownloadsSubtitlesComeBesideItAndAreDrawnFromTheirFiles() {
+        let app = launch(title: inception, environment: ["HUB_PLAY_SUBTITLE": "heb", "HUB_PLAY_CUES": "read"])
+        let download = element(app, "title-download")
+        XCTAssertTrue(download.waitForExistence(timeout: 20), "the film's page has no Download: \(buttons(app))")
+        download.tap()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "Download did not ask first")
+        alert.buttons["Download"].tap()
+        XCTAssertTrue(waitUntil(30) { download.label == "Downloaded" }, "the film did not arrive: \(download.label)")
+
+        // Opening Downloads brings them up to date too.
+        openDownloads(app)
+        element(app, "downloads-device").tap()
+        let poster = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Inception'")).firstMatch
+        XCTAssertTrue(poster.waitForExistence(timeout: 10), "Inception is not on the device: \(buttons(app))")
+        poster.tap()
+        let play = element(app, "offline-play")
+        XCTAssertTrue(play.waitForExistence(timeout: 10), "the downloaded film's page did not open")
+        play.tap()
+
+        // The Hebrew line, drawn from the kept WebVTT, as it is written. Matched
+        // in one query: a cue comes and goes, so its label is not read apart.
+        let cue = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == 'subtitle-cue' AND (label CONTAINS %@ OR label CONTAINS %@)",
+            "כתובית שנשמרה ליד ההורדה", "היא מוצגת גם בלי רשת")).firstMatch
+        XCTAssertTrue(cue.waitForExistence(timeout: 10), "the kept Hebrew was not drawn")
+
+        // Both are choices, though the MP4 holds no subtitles; the Hebrew is ticked.
+        app.buttons["Audio & subtitles"].firstMatch.tap()
+        let heading = app.staticTexts.matching(identifier: "panel-heading").firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 5), "Audio & subtitles did not open")
+        let hebrew = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Hebrew")).firstMatch
+        let english = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "English")).firstMatch
+        XCTAssertTrue(hebrew.waitForExistence(timeout: 5), "the kept Hebrew is not a choice: \(buttons(app))")
+        XCTAssertTrue(english.exists, "the kept English is not a choice: \(buttons(app))")
+        XCTAssertTrue(hebrew.isSelected || hebrew.wait(for: \.isSelected, toEqual: true, timeout: 5), "the Hebrew is not ticked")
+        english.tap()
+        XCTAssertTrue(english.wait(for: \.isSelected, toEqual: true, timeout: 5), "the English could not be chosen")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(heading.waitForNonExistence(timeout: 5), "the panel did not close")
+        app.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Lock controls"].waitForNonExistence(timeout: 10), "Back left the player open")
+
+        // Removed with the film.
         app.buttons["Remove"].firstMatch.tap()
         let ask = app.alerts.firstMatch
         XCTAssertTrue(ask.waitForExistence(timeout: 5), "removing did not ask first")

@@ -97,10 +97,13 @@ public struct PlaybackTrack: Decodable, Equatable, Sendable {
     public var hearingImpaired: Bool
     public var external: Bool
     public var externalUrl: String
+    /// A download's track: which of the MP4's own subtitle options it is
+    /// (#45); nil for one the app draws, or a stream's. Never from the hub.
+    public var fileOption: Int?
 
     public init(index: Int = -1, type: String = "", label: String = "", language: String = "", codec: String = "",
                 channels: Int = 0, channelLayout: String = "", isDefault: Bool = false, forced: Bool = false,
-                hearingImpaired: Bool = false, external: Bool = false, externalUrl: String = "") {
+                hearingImpaired: Bool = false, external: Bool = false, externalUrl: String = "", fileOption: Int? = nil) {
         self.index = index
         self.type = type
         self.label = label
@@ -113,6 +116,7 @@ public struct PlaybackTrack: Decodable, Equatable, Sendable {
         self.hearingImpaired = hearingImpaired
         self.external = external
         self.externalUrl = externalUrl
+        self.fileOption = fileOption
     }
 
     enum CodingKeys: String, CodingKey {
