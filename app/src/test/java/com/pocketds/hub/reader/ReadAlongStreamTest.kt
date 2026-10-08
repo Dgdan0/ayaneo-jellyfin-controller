@@ -7,6 +7,7 @@ import com.pocketds.hub.model.ReadingAudioTrack
 import com.pocketds.hub.net.FailureKind
 import com.pocketds.hub.net.HubResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -34,6 +35,56 @@ class ReadAlongStreamTest {
         assertEquals(listOf(0L, 3_600_000L, 0L), sources.map { it.startMs })
         // The bytes are the audiobook's own, cached under the same key as when it is listened to.
         assertEquals(AudiobookStream.cacheKey("3726292328809367", tracks[1]), sources[0].cacheKey)
+    }
+
+    private fun sentence(href: String, id: String, begin: Long, end: Long) = ReadAlongSegment("OEBPS/text/one.xhtml", id, href, begin, end)
+
+    /**
+     * A sentence past its file's audio skips itself, not the edition: a file's audio is its window of the track,
+     * up to the next file mapped there or the track's end. One that runs past the window ends there, so the voice
+     * never reads on into the next file's words (Apple's `fitted`, #52).
+     */
+    @Test fun `a sentence past its file's audio is skipped and one running past it ends there`() {
+        val first = "OEBPS/Audio/00001-00001.mp3"
+        val second = "OEBPS/Audio/00001-00002.mp3"
+        val third = "/OEBPS/Audio/00002-00001.mp3"
+        val timeline = ReadAlongTimeline(listOf(
+            // The first file's window is the first hour of track 1, up to where the second file begins.
+            ReadAlongTrack(first, listOf(sentence(first, "a", 2_000, 5_000), sentence(first, "b", 3_599_000, 3_601_000),
+                sentence(first, "c", 3_600_000, 3_602_000), sentence(first, "d", 3_700_000, 3_701_000))),
+            // The second file's window is the rest of track 1: an hour.
+            ReadAlongTrack(second, listOf(sentence(second, "e", 1_000, 2_000))),
+            // Track 0 is 4,610,652 ms long: nothing of this stretch is in it.
+            ReadAlongTrack(third, listOf(sentence(third, "f", 4_610_652, 4_612_000), sentence(third, "g", 4_700_000, 4_701_000)))
+        ))
+        val fitted = ReadAlongStream.fitted(timeline, manifest)!!
+        assertEquals("a stretch left with no sentence goes", listOf(first, second), fitted.tracks.map { it.audioHref })
+        assertEquals(listOf("a", "b"), fitted.tracks[0].segments.map { it.fragment })
+        assertEquals("it ends where the next file's audio begins", 3_600_000L, fitted.tracks[0].segments[1].endMs)
+        assertEquals(timeline.tracks[1], fitted.tracks[1])
+        // The fitted timeline still maps, each stretch onto its own file.
+        val sources = ReadAlongStream.sources(fitted, manifest, "3726292328809367", ::url)
+        assertEquals(listOf(0L, 3_600_000L), sources.map { it.startMs })
+    }
+
+    @Test fun `a file whose audio cannot be measured is left as it is`() {
+        // Unmapped (`sources` refuses it), or on a track of unknown length with no file after it.
+        val unmapped = ReadAlongTimeline(listOf(ReadAlongTrack("OEBPS/Audio/00009-00001.mp3",
+            listOf(sentence("OEBPS/Audio/00009-00001.mp3", "x", 9_000_000, 9_001_000)))))
+        assertEquals(unmapped, ReadAlongStream.fitted(unmapped, manifest))
+        val unknown = manifest.copy(tracks = listOf(tracks[0].copy(durationMs = 0), tracks[1]))
+        val third = "OEBPS/Audio/00002-00001.mp3"
+        val late = ReadAlongTimeline(listOf(ReadAlongTrack(third, listOf(sentence(third, "y", 9_000_000, 9_001_000)))))
+        assertEquals(late, ReadAlongStream.fitted(late, unknown))
+        // A file mapped to a track the manifest does not have is as unmeasurable.
+        val nowhere = manifest.copy(alignment = ReadingAudioAlignment(listOf(ReadingAlignedAudio(third, 7, 0))))
+        assertEquals(late, ReadAlongStream.fitted(late, nowhere))
+    }
+
+    @Test fun `an edition with nothing left to play has no narration`() {
+        val third = "OEBPS/Audio/00002-00001.mp3"
+        val past = ReadAlongTimeline(listOf(ReadAlongTrack(third, listOf(sentence(third, "z", 5_000_000, 5_001_000)))))
+        assertNull(ReadAlongStream.fitted(past, manifest))
     }
 
     @Test fun `a file the hub did not map is no narration at all, never another file's`() {

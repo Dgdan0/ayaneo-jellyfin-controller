@@ -44,6 +44,32 @@ object ReadAlongStream {
     }
 
     /**
+     * The [timeline] as the audio the hub mapped can play it: a sentence that begins at or past the end of its
+     * file's audio is skipped, and one that runs past it ends there, rather than the voice reading on into the next
+     * file's words (or the edition refused). A file's audio is its window of the track the hub mapped it to: from its
+     * `startMs` to where the next file mapped to that track begins, else to the track's end. A file the hub did not
+     * map, or on a track of unknown length, is left as it is ([sources] refuses the first). A stretch left with no
+     * sentence goes; null when none is left, which is an edition with no narration. For an edition kept on the
+     * device before the hub mended its clips, and for any the hub cannot mend.
+     */
+    fun fitted(timeline: ReadAlongTimeline, manifest: ReadingAudioManifest): ReadAlongTimeline? {
+        val files = manifest.alignment?.audio.orEmpty()
+        fun length(href: String): Long? {
+            val file = files.firstOrNull { it.href.trimStart('/') == href.trimStart('/') } ?: return null
+            val track = manifest.tracks.getOrNull(file.track) ?: return null
+            val start = file.startMs.coerceAtLeast(0)
+            files.filter { it.track == file.track && it.startMs > file.startMs }.minOfOrNull { it.startMs }?.let { return it - start }
+            return if (track.durationMs > start) track.durationMs - start else null
+        }
+        val tracks = timeline.tracks.mapNotNull { stretch ->
+            val end = length(stretch.audioHref) ?: return@mapNotNull stretch
+            val kept = stretch.segments.filter { it.beginMs < end }.map { if (it.endMs > end) it.copy(endMs = end) else it }
+            if (kept.isEmpty()) null else ReadAlongTrack(stretch.audioHref, kept)
+        }
+        return if (tracks.isEmpty()) null else ReadAlongTimeline(tracks)
+    }
+
+    /**
      * Each stretch of the [timeline] where it is heard: the track the hub
      * mapped its audio file to, under the manifest's revision ([url], which
      * only the hub's endpoints build), and where in the track that file begins.

@@ -69,14 +69,14 @@ class ReadAlongPackageTest {
     }
 
     private fun book(audio: String = "../audio/voice.mp3", begin: String = "1s", end: String = "2s", doctype: String = "",
-                     withAudio: Boolean = true, withText: Boolean = true): File {
+                     withAudio: Boolean = true, withText: Boolean = true, secondBegin: String = "3s", secondEnd: String = "4s"): File {
         val file = File.createTempFile("readalong-", ".epub").apply { deleteOnExit() }
         ZipOutputStream(file.outputStream()).use { zip ->
             val entries = mutableMapOf(
                 "META-INF/container.xml" to "<container><rootfiles><rootfile full-path='EPUB/package.opf'/></rootfiles></container>",
                 "EPUB/package.opf" to "<package><manifest><item id='c' href='chapter.xhtml' media-overlay='s'/><item id='s' href='overlays/one.smil'/></manifest><spine><itemref idref='c'/></spine></package>",
                 "EPUB/chapter.xhtml" to "<html><body><p id='sentence1'>A test.</p><p id='sentence2'>Another.</p></body></html>",
-                "EPUB/overlays/one.smil" to "$doctype<smil><body><seq><par><text src='../chapter.xhtml#sentence1'/><audio src='$audio' clipBegin='$begin' clipEnd='$end'/></par><par><text src='../chapter.xhtml#sentence2'/><audio src='$audio' clipBegin='3s' clipEnd='4s'/></par></seq></body></smil>",
+                "EPUB/overlays/one.smil" to "$doctype<smil><body><seq><par><text src='../chapter.xhtml#sentence1'/><audio src='$audio' clipBegin='$begin' clipEnd='$end'/></par><par><text src='../chapter.xhtml#sentence2'/><audio src='$audio' clipBegin='$secondBegin' clipEnd='$secondEnd'/></par></seq></body></smil>",
                 "EPUB/audio/voice.mp3" to "test audio"
             )
             if (!withAudio) entries.remove("EPUB/audio/voice.mp3")
@@ -118,10 +118,27 @@ class ReadAlongPackageTest {
         for (audio in listOf("https://evil/audio.mp3", "../../../outside.mp3", "../audio/missing.mp3", "file:///secret.mp3")) {
             assertTrue(audio, runCatching { ReadAlongPackage.read(book(audio)) }.isFailure)
         }
-        for ((begin, end) in listOf("2s" to "1s", "-1s" to "2s", "NaN" to "2s")) {
+        for ((begin, end) in listOf("-1s" to "2s", "NaN" to "2s")) {
             assertTrue(runCatching { ReadAlongPackage.read(book(begin = begin, end = end)) }.isFailure)
         }
         assertTrue(runCatching { ReadAlongPackage.read(book(doctype = "<!DOCTYPE smil [<!ENTITY x SYSTEM 'file:///secret'>]>")) }.isFailure)
+    }
+
+    /**
+     * A clip that ends before it begins (an older aligner's; the hub mends those it serves now, but an edition kept
+     * from before has them) skips its one sentence, as a clip of no length does; the edition reads on. Only an
+     * edition of nothing but such clips has no narration.
+     */
+    @Test fun aClipEndingBeforeItBeginsSkipsItsSentenceNotTheEdition() {
+        val timeline = ReadAlongPackage.read(book(begin = "2s", end = "1s"))
+        assertEquals(1, timeline.tracks.size)
+        assertEquals(listOf("sentence2"), timeline.tracks[0].segments.map { it.fragment })
+        assertEquals(3_000L, timeline.tracks[0].startMs)
+        assertEquals(1_000L, timeline.tracks[0].durationMs)
+        // A clip of no length is skipped the same way.
+        assertEquals(listOf("sentence2"), ReadAlongPackage.read(book(begin = "2s", end = "2s")).tracks[0].segments.map { it.fragment })
+        val none = runCatching { ReadAlongPackage.read(book(begin = "2s", end = "1s", secondBegin = "5s", secondEnd = "4s")) }
+        assertEquals("This edition has no aligned narration", none.exceptionOrNull()?.message)
     }
 
     /** #19: the hub's slim edition keeps its SMIL but not its audio, which streams from the tracks. */

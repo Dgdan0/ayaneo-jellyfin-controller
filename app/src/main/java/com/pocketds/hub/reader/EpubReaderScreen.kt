@@ -1030,7 +1030,9 @@ class EpubReaderScreen(
         val (timeline, sources) = withContext(Dispatchers.IO) {
             val context = coroutineContext
             if (manifest != null) {
-                val timeline = ReadAlongPackage.read(file, requireAudio = false)
+                // A sentence past its file's audio is skipped, not the edition refused (an edition kept from before the hub mended its clips).
+                val timeline = ReadAlongStream.fitted(ReadAlongPackage.read(file, requireAudio = false), manifest)
+                    ?: error("This edition has no aligned narration")
                 timeline to ReadAlongStream.sources(timeline, manifest, sourceItemId) {
                     readingSession.api.readingAudioTrackUrl(workId, sourceItemId, it, manifest.revision)
                 }

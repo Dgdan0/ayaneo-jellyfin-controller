@@ -137,11 +137,14 @@ object ReadAlongPackage {
                 require(zip.getEntry(href) != null && (!requireAudio || zip.getEntry(audioHref) != null)) { "Missing narration resource" }
                 val begin = clock(audio.getAttribute("clipBegin").ifBlank { "0s" })
                 val end = clock(audio.getAttribute("clipEnd"))
-                // Word alignment can legitimately emit a zero-length boundary
-                // for an unmatched word. It has no audio to highlight; keep
-                // the rest of the edition playable.
-                if (end == begin) continue
-                require(end > begin) { "Invalid narration interval" }
+                // Word alignment can emit a boundary of no length for a word
+                // it did not match, and an older aligner a clip that ends
+                // before it begins (the hub mends those it serves now, but an
+                // edition kept on the device from before still has them).
+                // Neither has audio to highlight: that one sentence is skipped
+                // and the rest of the edition plays. Only an edition made of
+                // nothing else has no narration (below).
+                if (end <= begin) continue
                 segments += ReadAlongSegment(href, fragment, audioHref, begin, end)
                 require(segments.size <= 200_000) { "Narration timeline is too large" }
             }
