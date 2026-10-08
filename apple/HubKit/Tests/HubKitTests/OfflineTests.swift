@@ -359,7 +359,12 @@ struct OfflineTests {
         let batch = OfflineSelection.batchKey(now: 1_790_000_000_000, for: "8f2c-41ab/x")
         #expect(batch == "offline-1790000000000-8f2c41ab")
         let item = OfflineSelection.itemKey(batchKey: batch, itemId: "0123456789abcdef0123")
-        #expect(item == batch + "-0123456789ab")
+        #expect(item == batch + "-0123456789abcdef0123")
+        // Ids that start alike are still two keys.
+        #expect(OfflineSelection.itemKey(batchKey: batch, itemId: "000000000000000000000000deb00003-e1")
+                != OfflineSelection.itemKey(batchKey: batch, itemId: "000000000000000000000000deb00003-e2"))
+        let longest = OfflineSelection.itemKey(batchKey: batch, itemId: String(repeating: "a", count: 200))
+        #expect(longest.wholeMatch(of: try Regex("^[A-Za-z0-9._:-]{1,120}$")) != nil)
         let allowed = try Regex("^[A-Za-z0-9._:-]{1,120}$")
         #expect(item.wholeMatch(of: allowed) != nil)
         #expect(OfflinePlayback.eventKey(itemId: "0123456789abcdef", now: 5).wholeMatch(of: allowed) != nil)

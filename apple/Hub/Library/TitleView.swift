@@ -34,6 +34,9 @@ struct TitleView: View {
     @State private var episodePages = 1
     @State private var loadingEpisodes = false
     @State private var revealedTarget = ""
+    /// An episode held in the strip and chosen to download, waiting for its answer (#5).
+    @State private var downloadingEpisode: HubKit.LibraryItem?
+    @State private var offline = OfflineLibrary.shared
 
     enum TitleTab: Hashable { case episodes, similar, cast, details }
 
@@ -93,6 +96,24 @@ struct TitleView: View {
         .onChange(of: model.libraryChanges) { _, _ in Task { await load() } }
         .onChange(of: tabs.map(\.id)) { _, ids in
             if let first = ids.first, !tabChosen || !ids.contains(tab) { tab = first }
+        }
+        .alert(OfflineTitleState.confirmTitle(downloadingEpisode.map {
+            EpisodeLabel.of(season: $0.seasonNumber, episode: $0.indexNumber, title: $0.title)
+        } ?? ""), isPresented: Binding(get: { downloadingEpisode != nil }, set: { if !$0 { downloadingEpisode = nil } })) {
+            // The harmless answer in the cancel role: without one, iOS 26 adds a Cancel of its own.
+            Button("Not now", role: .cancel) { downloadingEpisode = nil }
+            Button("Download") {
+                guard let episode = downloadingEpisode else { return }
+                downloadingEpisode = nil
+                Task {
+                    let title = episode.seriesTitle.isEmpty ? (item?.title ?? episode.title) : episode.seriesTitle
+                    let problem = await offline.download(itemIds: [episode.id], title: title,
+                                                         seriesId: episode.seriesId.isEmpty ? (item?.id ?? "") : episode.seriesId)
+                    status = problem.map { StatusMessage($0, tone: .error) } ?? StatusMessage("On its way · Downloads shows how far")
+                }
+            }
+        } message: {
+            Text(OfflineTitleState.confirmDetail(free: offline.freeBytes))
         }
     }
 
@@ -207,6 +228,9 @@ struct TitleView: View {
                 Task { await change(.favorite(!item.favorite)) }
             }
             .disabled(saving)
+            if item.type != "season" {
+                DownloadButton(item: item, size: metrics.small ? 42 : 46)
+            }
             more(item)
         }
     }
@@ -395,6 +419,13 @@ struct TitleView: View {
                 play(request(for: episode, mode: .restart))
             } label: {
                 Label("Start over", systemImage: "arrow.counterclockwise")
+            }
+        }
+        if offline.row(forItem: episode.id) == nil {
+            Button {
+                downloadingEpisode = episode
+            } label: {
+                Label("Download episode", systemImage: "arrow.down.circle")
             }
         }
         Button {

@@ -63,6 +63,11 @@ enum AppRoute: Hashable {
     // Library upkeep (#34).
     case subtitles(SubtitlesRoute)
     case removal(RemovalRoute)
+    // Downloads for watching away from the hub (#5).
+    case offlineTitle(OfflineTitleRoute)
+    case offlinePicker(OfflinePickerRoute)
+    /// The Downloads page on its queue, from a title's Download button.
+    case offlineQueue
 
     /// What the back pill calls this page from the one above it.
     var name: String {
@@ -87,6 +92,9 @@ enum AppRoute: Hashable {
         case .licence(let route): Licences.all.first { $0.id == route.id }?.name ?? "Licence"
         case .subtitles: "Subtitles"
         case .removal: RemovalLines.heading
+        case .offlineTitle(let route): route.title
+        case .offlinePicker: "Download episodes"
+        case .offlineQueue: "Downloads"
         }
     }
 }
@@ -255,6 +263,9 @@ struct MainView: View {
     @State private var debugPlay = ""
     /// Debug builds: HUB_TITLE=<item id>[|subtitles|removal] opens that library title, and on from it, on the first section's stack (#34).
     @State private var debugTitle = ""
+    /// Debug builds: HUB_DOWNLOAD=<item id> downloads that film or episode at launch, and
+    /// HUB_DOWNLOAD=remove:<item id> takes it off this device (#5).
+    @State private var debugDownload = ""
 
     private var key: StackKey { StackKey(side: side, section: section) }
     /// Something over the pages and bars: the player or a reader.
@@ -346,6 +357,29 @@ struct MainView: View {
                 guard !Task.isCancelled, debugPlay == itemId else { return }
                 debugPlay = ""
                 player.open(PlayRequest(itemId: itemId), app: model)
+            }
+            .task(id: debugDownload) {
+                let itemId = debugDownload
+                guard !itemId.isEmpty else { return }
+                // Once the downloads are attached to the hub.
+                try? await Task.sleep(for: .milliseconds(1500))
+                guard !Task.isCancelled, debugDownload == itemId else { return }
+                debugDownload = ""
+                // Its own task: clearing the id ends this one.
+                let hub = model.hub
+                Task {
+                    // "remove:<id>" takes it off this device again.
+                    if itemId.hasPrefix("remove:") {
+                        let target = String(itemId.dropFirst("remove:".count))
+                        if let row = OfflineLibrary.shared.row(forItem: target) { OfflineLibrary.shared.remove(row.id) }
+                        NSLog("offline: debug removal of %@", target)
+                        return
+                    }
+                    let item = try? await hub.fetch(HubEndpoints.libraryItem(itemId), as: LibraryItemResponse.self).item
+                    let title = item.map { $0.seriesTitle.isEmpty ? $0.title : $0.seriesTitle } ?? "Download"
+                    let problem = await OfflineLibrary.shared.download(itemIds: [itemId], title: title, seriesId: item?.seriesId ?? "")
+                    NSLog("offline: debug download of %@: %@", itemId, problem ?? "queued")
+                }
             }
             .task(id: debugTitle) {
                 let itemId = debugTitle
@@ -495,6 +529,7 @@ struct MainView: View {
         case (.media?, .discover): DiscoverView()
         case (.media?, .library): LibraryView()
         case (.media?, .activity): ActivityView()
+        case (.media?, .downloads): DownloadsView()
         case (.books?, .home): BooksHomeView()
         case (.books?, .discover): BooksDiscoverView()
         case (.books?, .library): BooksLibraryView()
@@ -528,6 +563,9 @@ struct MainView: View {
         case .licence(let licence): LicenceView(route: licence)
         case .subtitles(let subtitles): SubtitlesView(route: subtitles)
         case .removal(let removal): RemovalView(route: removal)
+        case .offlineTitle(let offline): OfflineTitleView(route: offline)
+        case .offlinePicker(let picker): OfflinePickerView(route: picker)
+        case .offlineQueue: DownloadsView(startOn: .queue)
         }
     }
 
@@ -635,6 +673,7 @@ struct MainView: View {
         if environment["HUB_SHEET"] == "profiles" { debugSheet = true }
         if let itemId = environment["HUB_PLAY"], !itemId.isEmpty { debugPlay = itemId }
         if let itemId = environment["HUB_TITLE"], !itemId.isEmpty { debugTitle = itemId }
+        if let itemId = environment["HUB_DOWNLOAD"], !itemId.isEmpty { debugDownload = itemId }
     }
     #endif
 }

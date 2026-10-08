@@ -780,3 +780,38 @@ which opens that library title on the first section's stack.
 Differences from Android, on purpose: no per-subtitle rating kept on the device and no offline subtitle copy (those wait for
 Downloads' subtitle sync); a result opens in place under its row rather than in a side panel; the deletion's confirmation is
 a native alert whose Cancel has the cancel role (iOS 26 places it last), with Cancel first on the page itself.
+
+## Downloads for watching away from the hub (#5)
+
+The hub repackages each title as an MP4 for this device (`"format": "apple"` on prepare; the
+contract is in #5), so AVPlayer plays every download and there is one player.
+
+| Behaviour | Owner |
+|---|---|
+| What is kept, coming and watched offline, per profile | HubKit `OfflineStore` (files, not SQLite), the app's one `Downloads/OfflineLibrary.shared` with its background `URLSession` (`OfflineDownloader`) |
+| A download's next step, and what a failed request means (409 `offline_preparing` waits on the PC) | HubKit `OfflineTransfer` |
+| The Downloads tab: one poster per film or series under its library, the queue a batch at a time | `Downloads/DownloadsView`; words in HubKit `OfflineCatalog`, `OfflineQueueLabels` ("Preparing on the PC · 40%", "Next on the PC", "2nd in line on the PC") and `OfflineAppleNotes` (what takes longer, what is left out) |
+| A downloaded title's page, played from its files | `Downloads/OfflineTitleView`; seasons from the episodes that arrived (`OfflineCatalog.seasons`), the one to go on with from `playTarget` |
+| A series' episodes to download | `Downloads/OfflinePickerView` on `GET /v1/offline/series/{id}/selection?format=apple`; quick choices and words in HubKit `OfflineSelection` |
+| The Download button on a title page and its ring | `Downloads/DownloadButton`, its state and words in HubKit `OfflineTitleState`; an episode's menu has Download episode |
+| Asking before a download leaves the device | `offlineRemoval` (`OfflineRemoval`): Keep in the cancel role, Remove |
+| A download played | `PlayerModel` takes `OfflineLibrary.localPlan` before the hub; the file's audio is chosen by place when that is its language (two English dubs are told apart), its text subtitles by place with the language checked |
+| A watch made offline | kept on the device and sent with `POST /v1/offline/progress/sync` as the profile that made it |
+
+Each item's key is the batch's and the whole Jellyfin id (`OfflineSelection.itemKey`), not its
+first twelve characters as on Android: ids that start alike were one key, and only one of a series'
+episodes was queued.
+
+Checked against the live hub on 2026-10-08 with Vinland Saga S1E1 (unwatched, at 0:00): the PC
+made a 627 MB MP4 in under a minute and a half (picture and sound copied); the player listed its
+three audio tracks (two English dubs and Japanese) and two text subtitles, the two picture
+subtitles left out, and AVPlayer's own options matched. Played for under 30 seconds, the episode
+stayed unwatched on the server; the download was then removed.
+
+Debug launches take `HUB_DOWNLOAD=<item id>` (downloads it at launch) and
+`HUB_DOWNLOAD=remove:<item id>`. The demo hub makes each MP4 in a few seconds, The Matrix's
+(converted) in eight; Dune fails once until it is retried, and Inception has a French picture
+subtitle that is left out.
+
+Differences from Android, on purpose: the hub's MP4, not the original file; no storage location to
+choose (the app's own Application Support, kept out of backups); Books' offline copies are #37's.

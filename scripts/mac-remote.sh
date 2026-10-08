@@ -137,7 +137,7 @@ run() {
     HUB_SEEN_DWELL_MS=$(printf '%q' "${HUB_SEEN_DWELL_MS:-}") \
     HUB_HERO=$(printf '%q' "${HUB_HERO:-}") \
     HUB_TITLE=$(printf '%q' "${HUB_TITLE:-}") HUB_SUBTITLES=$(printf '%q' "${HUB_SUBTITLES:-}") \
-    HUB_REMOVAL=$(printf '%q' "${HUB_REMOVAL:-}") \
+    HUB_REMOVAL=$(printf '%q' "${HUB_REMOVAL:-}") HUB_DOWNLOAD=$(printf '%q' "${HUB_DOWNLOAD:-}") \
     SHOT_SIMS=$(printf '%q' "${SHOT_SIMS:-}") SHOT_WAIT=$(printf '%q' "${SHOT_WAIT:-3}") \
     SHOT_STATE=$(printf '%q' "${SHOT_STATE:-}") SHOT_TIMES=$(printf '%q' "${SHOT_TIMES:-}") \
     ${BUILD_NUMBER:+BUILD_NUMBER=$(printf '%q' "$BUILD_NUMBER")} \

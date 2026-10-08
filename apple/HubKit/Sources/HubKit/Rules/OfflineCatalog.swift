@@ -277,8 +277,11 @@ public enum OfflineSelection {
         "offline-\(now)-" + keyPart(id, 8)
     }
 
+    /// The whole id, not its first twelve as on Android: ids that share
+    /// their start (the demo hub's do) were one key, and only one of them
+    /// was queued. At most 80, inside the hub's 120 with the batch's key.
     public static func itemKey(batchKey: String, itemId: String) -> String {
-        batchKey + "-" + keyPart(itemId, 12)
+        batchKey + "-" + keyPart(itemId, 80)
     }
 
     private static func keyPart(_ value: String, _ length: Int) -> String {

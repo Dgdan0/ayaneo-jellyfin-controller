@@ -453,7 +453,7 @@ final class PlayerModel {
         var plan = local
         selection = PlaybackMemory.selection(user: user, scope: PlaybackChoices.scope(plan.item))
         subtitleOffsetMillis = selection.subtitleOffsetMillis
-        if let wanted = PlaybackChoices.wanted(plan, selection) {
+        if let wanted = wantedTracks(plan) {
             if let audio = wanted.audio, plan.audioTracks.contains(where: { $0.index == audio }) { plan.selectedAudioIndex = audio }
             let subtitle = wanted.subtitle ?? -1
             plan.selectedSubtitleIndex = plan.subtitleTracks.contains { $0.index == subtitle } ? subtitle : nil
@@ -994,8 +994,10 @@ final class PlayerModel {
         }
     }
 
-    /// A file played as it is, with several audio tracks, plays the one chosen
-    /// by its language; a converted stream carries only the one chosen.
+    /// A file played as it is, with several audio tracks, plays the one chosen:
+    /// the file's track at its place when that is its language (two English
+    /// dubs are told apart by place, not language), else the first of its
+    /// language. A converted stream carries only the one chosen.
     private func applyAudioChoice(to item: AVPlayerItem) {
         guard let plan, plan.audioTracks.count > 1,
               let chosen = plan.audioTracks.first(where: { $0.index == plan.selectedAudioIndex }) else { return }
@@ -1006,12 +1008,17 @@ final class PlayerModel {
             let options = group.options
             // Jellyfin writes ISO 639-2 ("jpn"), AVFoundation BCP 47 ("ja").
             func code(_ tag: String) -> String? { Locale.Language(identifier: tag).languageCode?.identifier(.alpha2) }
-            let wanted = code(chosen.language)
-            let byLanguage = options.first { option in
-                guard let wanted, let tag = option.extendedLanguageTag ?? option.locale?.identifier else { return false }
-                return code(tag) == wanted
+            func language(_ option: AVMediaSelectionOption) -> String? {
+                (option.extendedLanguageTag ?? option.locale?.identifier).flatMap(code)
             }
-            let pick = byLanguage ?? (position < options.count ? options[position] : nil)
+            let wanted = code(chosen.language)
+            let atPlace = position < options.count ? options[position] : nil
+            let pick: AVMediaSelectionOption?
+            if let atPlace, wanted == nil || language(atPlace) == nil || language(atPlace) == wanted {
+                pick = atPlace
+            } else {
+                pick = options.first { wanted != nil && language($0) == wanted } ?? atPlace
+            }
             if let pick, self.player.currentItem === item { item.select(pick, in: group) }
         }
     }
