@@ -19,6 +19,7 @@ struct ReadingListsView: View {
     @Environment(\.glassMetrics) private var metrics
     @Environment(\.read) private var read
     @Environment(\.readerClosed) private var readerClosed
+    @Environment(\.openRoute) private var openRoute
 
     @State private var lists: [ServerReadingList]?
     @State private var entries: [ServerReadingListEntry]?
@@ -55,6 +56,9 @@ struct ReadingListsView: View {
                             }
                             .buttonStyle(GlassCardStyle())
                             .accessibilityIdentifier("reading-list-\(list.id)")
+                            .padFocusable("\(list.id)", ring: .card, scroll: list.id) {
+                                openRoute(.readingLists(ReadingListsRoute(list: list, artwork: route.artwork)))
+                            }
                         }
                     } else {
                         let shown = entries ?? []
@@ -72,15 +76,24 @@ struct ReadingListsView: View {
                             .buttonStyle(GlassCardStyle())
                             .accessibilityLabel(ServerReadingLists.entryLabel(index, entry))
                             .accessibilityIdentifier("reading-list-entry-\(index)")
+                            .padFocusable("\(index)", ring: .card) {
+                                if let run = ReadingListRun(title: route.list?.title ?? "", entries: shown, index: index) {
+                                    read(.list(run))
+                                }
+                            }
                         }
                     }
                 }
+                // A controller goes down the lists, or the list's issues, one by one (#46).
+                .padGroup("rows", .column, members: route.list == nil ? (lists ?? []).map { "\($0.id)" }
+                          : (entries ?? []).indices.map { "\($0)" })
                 .frame(maxWidth: 720, alignment: .leading)
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 16)
                 .padding(.bottom, 30)
             }
         }
+        .padPage(route.list.map { "reading-list:\($0.id)" } ?? "reading-lists")
         .ambientArtwork(route.artwork)
         .refreshable { await load() }
         // Again when a reader closes: the issues read show how far they went.

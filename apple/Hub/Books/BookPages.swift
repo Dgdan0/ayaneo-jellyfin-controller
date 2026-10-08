@@ -9,6 +9,7 @@ struct MissingBookView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.glassMetrics) private var metrics
     @Environment(\.glassAccent) private var accent
+    @Environment(\.openRoute) private var openRoute
     let route: MissingBookRoute
 
     @State private var editions: [ReadingItem]?
@@ -43,14 +44,17 @@ struct MissingBookView: View {
                                 EditionRow(item: found)
                             }
                             .buttonStyle(GlassCardStyle())
+                            .padFocusable("\(found.id)", ring: .card) { openRoute(.bookRequest(BookRequestRoute(item: found))) }
                         }
                     }
+                    .padGroup("editions", .grid(columns: 0), members: editions.map { "\($0.id)" })
                     .padding(.horizontal, metrics.margin)
                     .padding(.top, 12)
                 }
             }
             .padding(.bottom, 28)
         }
+        .padPage("missing-book:\(item.workId)\(item.title)")
         .ambientArtwork(item.artwork)
     }
 
@@ -93,6 +97,7 @@ struct MissingBookView: View {
                 }
                 .buttonStyle(PrimaryPillStyle(accent: accent))
                 .disabled(searching)
+                .padFocusable("find") { if !searching { Task { await search() } } }
                 .padding(.top, 4)
                 .accessibilityIdentifier("find-this-book")
             }

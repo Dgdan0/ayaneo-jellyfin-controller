@@ -377,6 +377,7 @@ struct BookRequestView: View {
             }
             .padding(.bottom, 28)
         }
+        .padPage("book-request:\(item.id)")
         .ambientArtwork(item.cover)
         .task(id: "\(item.id)·\(follow)") { await followRequest() }
         .sheet(isPresented: $sheetOpen) {
@@ -437,6 +438,7 @@ struct BookRequestView: View {
                             .font(HubType.body(13, weight: .bold, relativeTo: .footnote))
                             .foregroundStyle(.white.opacity(0.7))
                             .buttonStyle(.plain)
+                            .padFocusable("read-more", ring: .rounded(4)) { expanded.toggle() }
                     }
                 }
                 if !resolving, ReadingRequestActionPolicy.showAction(tracked: item.inLibrary, canRequest: item.canRequest,
@@ -445,6 +447,7 @@ struct BookRequestView: View {
                         Label(actionLabel, systemImage: requested ? "arrow.down.circle" : "magnifyingglass")
                     }
                     .buttonStyle(PrimaryPillStyle(accent: accent))
+                    .padFocusable("request", press: act)
                     .padding(.top, 4)
                     .accessibilityIdentifier("book-request")
                 }
@@ -583,6 +586,8 @@ struct BookRequestSheet: View {
                 .padding(.top, 6)
         }
         .foregroundStyle(.white)
+        // A page of its own while it shows: Ⓑ goes back a step, then closes it (#46).
+        .padPage("book-request-sheet", modal: true) { if !working { back() } }
         .presentationBackground { GlassSheetFill() }
         .presentationCornerRadius(sizeClass == .compact ? 32 : 28)
         #if os(iOS)
@@ -609,10 +614,10 @@ struct BookRequestSheet: View {
             }
             Spacer(minLength: 8)
             if case .form = step {
-                GlassRoundButton(systemImage: "xmark", label: "Close", size: 38) { dismiss() }
+                GlassRoundButton(systemImage: "xmark", label: "Close", size: 38, pad: "close") { dismiss() }
                     .disabled(working)
             } else {
-                GlassRoundButton(systemImage: "chevron.left", label: "Back", size: 38) { back() }
+                GlassRoundButton(systemImage: "chevron.left", label: "Back", size: 38, pad: "close") { back() }
                     .disabled(working)
             }
         }
@@ -648,6 +653,7 @@ struct BookRequestSheet: View {
                     tickRow(label: scope.name, detail: ReadingRequestDraft.scopeDetail(scope), on: index == chosen) {
                         step = .scopes(response, chosen: index)
                     }
+                    .padFocusable("scope-\(index)", ring: .inside(12)) { step = .scopes(response, chosen: index) }
                 }
             }
         case .books(let scope, let selection, let from):
@@ -663,8 +669,15 @@ struct BookRequestSheet: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(book.inLibrary)
+                    .padFocusable("\(index)", ring: .rounded(10)) {
+                        guard !book.inLibrary else { return }
+                        var next = selection
+                        next.toggle(index)
+                        step = .books(scope, next, from: from)
+                    }
                 }
             }
+            .padGroup("books", .grid(columns: 0), members: selection.books.indices.map { "\($0)" })
         }
     }
 
@@ -677,6 +690,7 @@ struct BookRequestSheet: View {
             }
             .buttonStyle(PrimaryPillStyle(accent: accent))
             .disabled(working || !(draft?.usable ?? false))
+            .padFocusable("submit") { if !working && draft?.usable == true { submitForm() } }
         case .scopes(let response, let chosen):
             let scope = response.scopes[min(chosen, response.scopes.count - 1)]
             Button {
@@ -685,6 +699,7 @@ struct BookRequestSheet: View {
                 Text("Review \(ReadingBookFacts.plural(scope.books.count, "book"))").frame(maxWidth: .infinity)
             }
             .buttonStyle(PrimaryPillStyle(accent: accent))
+            .padFocusable("review") { step = .books(scope, ReadingSeriesSelection(books: scope.books), from: response) }
         case .books(let scope, let selection, let from):
             HStack(spacing: 10) {
                 Button("Select missing") {
@@ -693,6 +708,11 @@ struct BookRequestSheet: View {
                     step = .books(scope, next, from: from)
                 }
                 .buttonStyle(GlassPillStyle())
+                .padFocusable("select-missing") {
+                    var next = selection
+                    next.toggleAllMissing()
+                    step = .books(scope, next, from: from)
+                }
                 Button {
                     guard let body = draft?.body(seriesId: scope.seriesId, bookIds: selection.selectedIds) else { return }
                     Task { await submit(body) }
@@ -701,6 +721,11 @@ struct BookRequestSheet: View {
                 }
                 .buttonStyle(PrimaryPillStyle(accent: accent))
                 .disabled(working || selection.selectedIds.isEmpty)
+                .padFocusable("download") {
+                    guard !working, let body = draft?.body(seriesId: scope.seriesId, bookIds: selection.selectedIds),
+                          !selection.selectedIds.isEmpty else { return }
+                    Task { await submit(body) }
+                }
             }
         }
     }
@@ -708,7 +733,11 @@ struct BookRequestSheet: View {
     private func form(_ draft: ReadingRequestDraft) -> some View {
         group {
             choiceRow(label: "What to download", detail: draft.mode?.requiresSeriesPreview == true ? "You tick the series' books next" : "",
-                      value: draft.mode?.label ?? "") {
+                      value: draft.mode?.label ?? "",
+                      pad: ("mode", PadMenu(title: "What to download", choices: draft.options.modes.indices.map { index in
+                          PadChoice(id: "mode-\(index)", title: draft.options.modes[index].label,
+                                    checked: index == draft.modeIndex) { self.draft?.modeIndex = index }
+                      }))) {
                 Picker("What to download", selection: binding(\.modeIndex)) {
                     ForEach(draft.options.modes.indices, id: \.self) { index in
                         Text(draft.options.modes[index].label).tag(index)
@@ -716,7 +745,11 @@ struct BookRequestSheet: View {
                 }
             }
             Divider().overlay(Color.white.opacity(0.08))
-            choiceRow(label: "Quality profile", detail: "", value: draft.profile?.label ?? "") {
+            choiceRow(label: "Quality profile", detail: "", value: draft.profile?.label ?? "",
+                      pad: ("profile", PadMenu(title: "Quality profile", choices: draft.options.qualityProfiles.indices.map { index in
+                          PadChoice(id: "profile-\(index)", title: draft.options.qualityProfiles[index].label,
+                                    checked: index == draft.profileIndex) { self.draft?.profileIndex = index }
+                      }))) {
                 Picker("Quality profile", selection: binding(\.profileIndex)) {
                     ForEach(draft.options.qualityProfiles.indices, id: \.self) { index in
                         Text(draft.options.qualityProfiles[index].label).tag(index)
@@ -736,7 +769,8 @@ struct BookRequestSheet: View {
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private func choiceRow<Choices: View>(label: String, detail: String, value: String,
+    /// A value chosen from a menu; a controller's Ⓐ opens the same choices as the panel (#46).
+    private func choiceRow<Choices: View>(label: String, detail: String, value: String, pad: (id: String, menu: PadMenu),
                                           @ViewBuilder choices: () -> Choices) -> some View {
         Menu {
             choices()
@@ -758,6 +792,7 @@ struct BookRequestSheet: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .accessibilityValue(value)
+        .padFocusable(pad.id, ring: .inside(12)) { PadFocusCenter.shared.present(pad.menu) }
     }
 
     private func tickRow(label: String, detail: String, on: Bool, action: @escaping () -> Void) -> some View {

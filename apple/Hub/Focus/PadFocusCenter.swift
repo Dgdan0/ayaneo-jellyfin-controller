@@ -36,6 +36,14 @@ final class PadPage {
     let isBar: Bool
     /// A sheet's Ⓑ and Escape: what closes it.
     var back: (() -> Void)?
+    /// Shows a menu over this page (`PadMenuPanel`): set by `padPage`.
+    var present: ((PadMenu) -> Void)?
+    /// Where focus starts on a first visit, when not the top line's first.
+    var initial: String?
+    /// When it appeared, against what was presented over it (`padCloses`).
+    var stamp = 0
+    /// The ring has been on it: it has a place of its own now.
+    var visited = false
 
     /// Each item's frame, in the window (`.global`), so the bar and a page can
     /// be measured against each other.
@@ -129,6 +137,10 @@ final class PadFocusCenter {
     /// Every press this does not take: the shell's Back and sections (#46, A).
     @ObservationIgnored var unhandled: (PadAction) -> Void = { _ in }
     @ObservationIgnored private var settling: Task<Void, Never>?
+    /// What is presented over the pages and is not a page of its own (an
+    /// alert, a dialog), the last on top: how each closes, and when it came.
+    @ObservationIgnored private var closers: [(token: UUID, stamp: Int, close: () -> Void)] = []
+    @ObservationIgnored private var stamps = 0
 
     /// The page the keys move on now: a sheet over the pages, else the last
     /// page of the stack in front.
@@ -150,6 +162,8 @@ final class PadFocusCenter {
             return
         }
         pages.removeAll { $0 === page }
+        stamps += 1
+        page.stamp = stamps
         pages.append(page)
         settleSoon()
     }
@@ -193,7 +207,7 @@ final class PadFocusCenter {
                 if let focus = self.focus, focus.page == ObjectIdentifier(page) || self.bar.map(ObjectIdentifier.init) == focus.page {
                     return
                 }
-                if let place = self.memory.returning(to: page.key, in: page.map) {
+                if let place = self.place(on: page) {
                     self.set(place, on: page)
                     return
                 }
@@ -211,6 +225,19 @@ final class PadFocusCenter {
     /// Whether the focus took `action`.
     func handle(_ action: PadAction) -> Bool {
         guard !covered else { return false }
+        // An alert or a dialog over the page: Ⓑ closes it, and nothing under it moves.
+        if let top = closers.last, top.stamp > (activePage?.modal == true ? activePage!.stamp : 0) {
+            switch action {
+            case .back:
+                closers.removeLast()
+                top.close()
+                return true
+            case .step, .activate, .secondary:
+                return true
+            default:
+                return false
+            }
+        }
         switch action {
         case .step(let direction):
             move(direction)
@@ -255,9 +282,15 @@ final class PadFocusCenter {
         return (page, focus.id)
     }
 
+    /// Where focus goes on `page` now: its place, else where it starts.
+    private func place(on page: PadPage) -> String? {
+        if !page.visited, let initial = page.initial, page.map.contains(initial) { return initial }
+        return memory.returning(to: page.key, in: page.map)
+    }
+
     @discardableResult
     private func settleNow() -> Bool {
-        guard let page = activePage, let place = memory.returning(to: page.key, in: page.map) else {
+        guard let page = activePage, let place = place(on: page) else {
             guard let bar, let first = PadFocus.first(in: bar.map) else { return false }
             set(first, on: bar)
             return true
@@ -312,11 +345,54 @@ final class PadFocusCenter {
     }
 
     private func returnFocus(to page: PadPage) {
-        if let place = memory.returning(to: page.key, in: page.map) { set(place, on: page) }
+        if let place = place(on: page) { set(place, on: page) }
+    }
+
+    // MARK: Menus and what is presented
+
+    /// `menu` over the page the keys move on, as rows the ring walks.
+    func present(_ menu: PadMenu) {
+        activePage?.present?(menu)
+    }
+
+    /// A confirmation, as the menu panel while the ring is in use (an alert is
+    /// UIKit's, and a controller cannot answer it). False when the pointer is,
+    /// for the caller's alert.
+    func confirm(_ menu: PadMenu) -> Bool {
+        guard input.showsRing, let page = activePage, page.present != nil else { return false }
+        page.present?(menu)
+        return true
+    }
+
+    /// Focus on `id` of the page the keys move on, once it is laid out (a
+    /// submenu's first choice, drawn a moment after it was chosen).
+    func focus(_ id: String) {
+        Task { [weak self] in
+            for _ in 0..<10 {
+                guard let self, let page = self.activePage else { return }
+                if page.frames[id] != nil {
+                    self.set(id, on: page)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+    }
+
+    /// Something not a page of its own was presented (`padCloses`).
+    func opened(_ token: UUID, close: @escaping () -> Void) {
+        closers.removeAll { $0.token == token }
+        stamps += 1
+        closers.append((token, stamps, close))
+    }
+
+    func closed(_ token: UUID) {
+        closers.removeAll { $0.token == token }
     }
 
     /// Focus on `id` of `page`: remembered, and scrolled into view.
     func set(_ id: String, on page: PadPage) {
+        page.visited = true
         focus = PadFocusMark(page: ObjectIdentifier(page), id: id)
         if !page.isBar { memory.focused(id, page: page.key, in: page.map) }
         PadScroller.reveal(id, on: page)

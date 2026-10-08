@@ -96,7 +96,10 @@ struct BooksHomeView: View {
             // A controller goes row by row (#46): the books also being read, your
             // series, the shelves, then New list; the hero's are above them.
             .padGroup("rows", .column, members: ["also", "series"]
-                      + shelves.filter { !$0.items.isEmpty }.map { "shelf-\($0.id)" } + ["new-list"], prefix: false)
+                      + shelves.flatMap { shelf -> [String] in
+                          let own = shelf.isOwnList && shelf.id != ReadingListsState.wantToReadId
+                          return (own ? ["list-actions-\(shelf.id)"] : []) + (shelf.items.isEmpty ? [] : ["shelf-\(shelf.id)"])
+                      } + ["new-list"], prefix: false)
             .padding(.bottom, 28)
         }
         .padPage("books-home")
@@ -108,6 +111,9 @@ struct BooksHomeView: View {
             appeared = true
         }
         .task(id: hero?.id) { if let hero { await loadHeroDetail(hero) } }
+        // Ⓑ closes them (#46).
+        .padCloses(naming != nil) { naming = nil }
+        .padCloses(deleting != nil) { deleting = nil }
         .alert(naming?.listId == nil ? "New reading list" : "Rename reading list", isPresented: Binding(
             get: { naming != nil }, set: { if !$0 { naming = nil } })) {
             TextField("List name", text: Binding(get: { naming?.name ?? "" }, set: { naming?.name = $0 }))
@@ -149,8 +155,9 @@ struct BooksHomeView: View {
                     }
                     .buttonStyle(GlassCardStyle())
                     .previewsWhenFocused { lit = work.artwork }
-                    .contextMenu { listMenu(work, row: nil) }
-                    .padFocusable(work.id, ring: .card) { openRoute(.book(BookRoute(workId: work.id, title: work.title))) }
+                    .padFocusable(work.id, ring: .card, menu: { listMenu(work, row: nil) }) {
+                        openRoute(.book(BookRoute(workId: work.id, title: work.title)))
+                    }
                 }
             }
             .padGroup("also", .grid(columns: 0), members: others.map(\.id))
@@ -224,9 +231,8 @@ struct BooksHomeView: View {
                                 }
                                 .buttonStyle(GlassCardStyle())
                                 .previewsWhenFocused { lit = work.artwork }
-                                .contextMenu { listMenu(work, row: row) }
                                 .id(index)
-                                .padFocusable("\(index)", ring: .card, scroll: index) {
+                                .padFocusable("\(index)", ring: .card, scroll: index, menu: { listMenu(work, row: row) }) {
                                     openRoute(.book(BookRoute(workId: work.id, title: work.title)))
                                 }
                             }
@@ -254,7 +260,7 @@ struct BooksHomeView: View {
                 Label("Rename list", systemImage: "pencil")
             }
             Button(role: .destructive) {
-                deleting = row
+                askDelete(row)
             } label: {
                 Label("Delete list", systemImage: "trash")
             }
@@ -268,39 +274,52 @@ struct BooksHomeView: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .accessibilityLabel("Manage \(row.title)")
+        // A controller's Ⓐ: the same two as the menu's (#46).
+        .padFocusable("list-actions-\(row.id)", ring: .circle) {
+            PadFocusCenter.shared.present(PadMenu(title: row.title, choices: [
+                PadChoice(id: "rename", title: "Rename list", systemImage: "pencil") {
+                    naming = ListNaming(listId: row.id, name: row.title)
+                },
+                PadChoice(id: "delete", title: "Delete list", systemImage: "trash", role: .destructive) { askDelete(row) },
+            ]))
+        }
     }
 
-    /// A book's list actions, on a long press or a secondary click: Android's
-    /// Ⓨ "List actions".
-    @ViewBuilder private func listMenu(_ work: ReadingWork, row: ReadingShelfRow?) -> some View {
+    /// Delete a list, asked first: the panel while the ring is in use, else the alert.
+    private func askDelete(_ row: ReadingShelfRow) {
+        let asked = PadFocusCenter.shared.confirm(PadMenu(title: "Delete \(row.title)?", message: "The books remain in your library.",
+                                                          choices: [
+            PadChoice(id: "keep", title: "Keep the list"),
+            PadChoice(id: "delete", title: "Delete list", role: .destructive) { books.updateLists { $0.delete(row.id) } },
+        ]))
+        if !asked { deleting = row }
+    }
+
+    /// A book's list actions, on a long press, a secondary click or Ⓨ:
+    /// Android's Ⓨ "List actions".
+    private func listMenu(_ work: ReadingWork, row: ReadingShelfRow?) -> PadMenu {
+        var choices: [PadChoice] = []
         let started = (work.progress?.percentage ?? 0) > 0 || work.progress?.completed == true
         if row?.id != ReadingListsState.wantToReadId && !started && !books.isWanted(work.id) {
-            Button {
+            choices.append(PadChoice(id: "want", title: "Add to Want to Read", systemImage: "bookmark") {
                 books.updateLists { $0.add(ReadingListsState.wantToReadId, ReadingListEntry.from(work)) }
-            } label: {
-                Label("Add to Want to Read", systemImage: "bookmark")
-            }
+            })
         }
         if let row, row.isOwnList {
-            Button {
+            choices.append(PadChoice(id: "remove", title: "Remove from \(row.title)", systemImage: "minus.circle") {
                 books.updateLists { $0.remove(row.id, workId: work.id) }
-            } label: {
-                Label("Remove from \(row.title)", systemImage: "minus.circle")
-            }
+            })
             if row.id != ReadingListsState.wantToReadId {
-                Button {
+                choices.append(PadChoice(id: "earlier", title: "Move earlier", systemImage: "arrow.left") {
                     books.updateLists { $0.move(row.id, workId: work.id, by: -1) }
-                } label: {
-                    Label("Move earlier", systemImage: "arrow.left")
-                }
-                Button {
+                })
+                choices.append(PadChoice(id: "later", title: "Move later", systemImage: "arrow.right") {
                     books.updateLists { $0.move(row.id, workId: work.id, by: 1) }
-                } label: {
-                    Label("Move later", systemImage: "arrow.right")
-                }
+                })
             }
         }
-        ReadingListsMenu(work: work) { naming = ListNaming(listId: nil, name: "", adding: work) }
+        choices.append(ReadingListChoices.addToList(work, books: books) { naming = ListNaming(listId: nil, name: "", adding: work) })
+        return PadMenu(title: work.title, choices: choices)
     }
 
     private func saveNaming() {
@@ -618,31 +637,28 @@ struct AlsoReadingRow: View {
 }
 
 /// "Add to a list": each of the person's lists, ticked where the book is on
-/// it, and a new list.
+/// it, and a new list. One list of choices for a menu, a context menu and Ⓨ.
+enum ReadingListChoices {
+    @MainActor
+    static func addToList(_ work: ReadingWork, books: BooksModel, newList: @escaping () -> Void) -> PadChoice {
+        let lists = books.lists.lists.map { list in
+            let included = list.items.contains { $0.workId == work.id }
+            return PadChoice(id: "list-\(list.id)", title: list.name, checked: included) {
+                books.updateLists { included ? $0.remove(list.id, workId: work.id) : $0.add(list.id, ReadingListEntry.from(work)) }
+            }
+        }
+        return PadChoice(id: "add-to-list", title: "Add to a list", systemImage: "list.bullet",
+                         children: lists + [PadChoice(id: "new-list", title: "New list", systemImage: "plus", action: newList)])
+    }
+}
+
+/// "Add to a list" as a menu.
 struct ReadingListsMenu: View {
     let work: ReadingWork
     let newList: () -> Void
     @Environment(BooksModel.self) private var books
 
     var body: some View {
-        Menu {
-            ForEach(books.lists.lists) { list in
-                let included = list.items.contains { $0.workId == work.id }
-                Button {
-                    books.updateLists { included ? $0.remove(list.id, workId: work.id) : $0.add(list.id, ReadingListEntry.from(work)) }
-                } label: {
-                    if included {
-                        Label(list.name, systemImage: "checkmark")
-                    } else {
-                        Text(list.name)
-                    }
-                }
-            }
-            Button(action: newList) {
-                Label("New list", systemImage: "plus")
-            }
-        } label: {
-            Label("Add to a list", systemImage: "list.bullet")
-        }
+        PadChoicesMenu(choices: [ReadingListChoices.addToList(work, books: books, newList: newList)])
     }
 }

@@ -34,6 +34,8 @@ struct ServerMonitorView: View {
             .padding(.bottom, 28)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         }
+        // Refresh, then the cards, which take the ring so a controller can read down the page (#46).
+        .padPage("server-monitor")
         .refreshable { await load() }
         .task(id: "\(polls)·\(isEnabled)") {
             guard isEnabled else { return }
@@ -59,7 +61,7 @@ struct ServerMonitorView: View {
                     .accessibilityIdentifier("monitor-status")
             }
             Spacer(minLength: 0)
-            GlassRoundButton(systemImage: "arrow.clockwise", label: "Refresh", size: 44) { polls += 1 }
+            GlassRoundButton(systemImage: "arrow.clockwise", label: "Refresh", size: 44, pad: "refresh") { polls += 1 }
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(loading)
         }
@@ -118,6 +120,7 @@ struct ServerMonitorView: View {
             }
         }
         .accessibilityIdentifier("card-disks")
+        .padFocusable("disks", ring: .rounded(20), press: nil)
     }
 
     private func playing(_ monitor: ServerMonitor) -> some View {
@@ -131,6 +134,7 @@ struct ServerMonitorView: View {
             }
         }
         .accessibilityIdentifier("card-playing")
+        .padFocusable("playing", ring: .rounded(20), press: nil)
     }
 
     private func containers(_ monitor: ServerMonitor) -> some View {
@@ -143,6 +147,7 @@ struct ServerMonitorView: View {
             }
         }
         .accessibilityIdentifier("card-containers")
+        .padFocusable("containers", ring: .rounded(20), press: nil)
     }
 
     private func trailing(_ text: String) -> some View {

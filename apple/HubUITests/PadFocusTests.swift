@@ -14,11 +14,16 @@ final class PadFocusTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// `pad` is a controller's presses (`HUB_PAD`, one a second from `padDelay` seconds after launch).
     @MainActor
-    private func launch(side: String, section: String) -> XCUIApplication {
+    private func launch(side: String, section: String, pad: String = "", padDelay: Int = 6) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo"]
         app.launchEnvironment = ["HUB_SECTION": section, "HUB_SIDE": side]
+        if !pad.isEmpty {
+            app.launchEnvironment["HUB_PAD"] = pad
+            app.launchEnvironment["HUB_PAD_DELAY"] = String(padDelay)
+        }
         app.launch()
         XCTAssertTrue(app.staticTexts["pad-focus"].firstMatch.waitForExistence(timeout: 20), "no focus probe")
         return app
@@ -183,8 +188,84 @@ final class PadFocusTests: XCTestCase {
         XCTAssertTrue(pill("downloads-books").wait(for: \.isSelected, toEqual: true, timeout: 5), "Space did not choose Books")
     }
 
-    /// A book's page: down to ⋯, whose Return opens its choices as a dialog;
-    /// Finished there opens the Finished panel, which takes the ring.
+    /// The panel a hold menu or ⋯ opens: its heading.
+    @MainActor
+    private func menuTitle(_ app: XCUIApplication) -> XCUIElement {
+        app.staticTexts["pad-menu-title"].firstMatch
+    }
+
+    /// Waits until `element` exists with `label`, or no longer exists when `label` is nil.
+    @MainActor
+    private func waitLabel(_ element: XCUIElement, _ label: String?, _ seconds: TimeInterval = 10) -> Bool {
+        let end = Date().addingTimeInterval(seconds)
+        while Date() < end {
+            if let label { if element.exists && element.label == label { return true } } else if !element.exists { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        }
+        return false
+    }
+
+    /// Ⓨ on a book opens its hold menu (#46, D): the context menu's choices as
+    /// rows the ring walks. Ⓐ on Add to a list opens its lists in place, Ⓑ goes
+    /// back out of them, Ⓑ again closes the menu, and the ring is on the book.
+    @MainActor
+    func testYOpensABooksHoldMenuThatTheRingWalksAndBClosesIt() {
+        let app = launch(side: "books", section: "home", pad: "DOWN,DOWN,DOWN,Y,A,B,B")
+        XCTAssertTrue(app.buttons["books-resume"].waitForExistence(timeout: 20), "Books home did not load")
+        let title = menuTitle(app)
+        XCTAssertTrue(waitLabel(title, "Light Bringer", 15), "Y did not open the book's hold menu: \(focus(app))")
+        XCTAssertTrue(app.buttons["pad-choice-add-to-list"].exists, "the hold menu has no Add to a list")
+        XCTAssertTrue(focus(app).hasPrefix("ring menu:") && focus(app).hasSuffix(" choices/add-to-list"),
+                      "the ring did not start on the menu's first choice: \(focus(app))")
+        XCTAssertTrue(waitLabel(title, "Add to a list"), "A did not open Add to a list's lists")
+        XCTAssertTrue(app.buttons["pad-choice-new-list"].exists, "Add to a list has no New list")
+        XCTAssertTrue(waitLabel(title, "Light Bringer"), "B did not go back out of the lists")
+        XCTAssertTrue(waitLabel(title, nil), "B did not close the menu")
+        XCTAssertTrue(waitFor(app) { $0 == "ring books-home also/rw_demo_rr6" }, "the ring is not back on the book: \(focus(app))")
+    }
+
+    /// Ⓑ closes what a page presents before anything else: an alert stays
+    /// over the page, which neither moves nor goes back under it.
+    @MainActor
+    func testBClosesAnAlertFirst() {
+        let app = launch(side: "books", section: "home", pad: "DOWN,B,B", padDelay: 14)
+        XCTAssertTrue(app.buttons["books-resume"].waitForExistence(timeout: 20))
+        // New list asks its name in an alert.
+        app.buttons["books-new-list"].firstMatch.tap()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "New list did not ask for a name")
+        // DOWN does nothing under it; the first B closes it; the second has nothing to close, and Home has nowhere to go back to.
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 20), "B did not close the alert")
+        XCTAssertEqual(focus(app), "none", "the ring moved under the alert")
+        XCTAssertTrue(app.buttons["books-resume"].exists, "B went away from Home")
+    }
+
+    /// A confirmation asked while the ring is in use comes as rows the ring
+    /// walks, the harmless answer first (a controller cannot answer an alert):
+    /// Cancel transfer on the Books side's Activity, kept.
+    @MainActor
+    func testAConfirmationIsAPanelWhileTheRingIsInUse() {
+        let app = launch(side: "books", section: "activity")
+        let cancel = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'cancel-'")).firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 20), "the Books side's Activity has no transfer to cancel")
+        var steps = 0
+        while !focus(app).contains(" cancel-"), steps < 12 {
+            press(app, .downArrow)
+            if !focus(app).contains(" cancel-") { press(app, .rightArrow) }
+            steps += 1
+        }
+        XCTAssertTrue(focus(app).contains(" cancel-"), "the keys did not reach Cancel transfer: \(focus(app))")
+        pressReturn(app)
+        XCTAssertTrue(waitLabel(menuTitle(app), "Cancel transfer?"), "Cancel transfer did not ask as the panel")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "it asked with an alert as well")
+        XCTAssertTrue(waitFor(app) { $0.hasSuffix(" choices/keep") }, "the harmless answer is not first: \(focus(app))")
+        pressReturn(app)
+        XCTAssertTrue(waitLabel(menuTitle(app), nil), "Keep transfer did not close the panel")
+        XCTAssertTrue(cancel.exists, "keeping the transfer cancelled it")
+    }
+
+    /// A book's page: down to ⋯, whose Return opens its choices as rows the
+    /// ring walks; Finished there opens the Finished panel, which takes the ring.
     @MainActor
     func testABooksMoreOpensItsChoicesAndTheFinishedPanel() {
         let app = launch(side: "books", section: "home")
@@ -201,9 +282,14 @@ final class PadFocusTests: XCTestCase {
         }
         XCTAssertTrue(focus(app).hasSuffix(" more"), "the keys did not reach ⋯: \(focus(app))")
         pressReturn(app)
-        let finished = app.buttons["Finished"].firstMatch
-        XCTAssertTrue(finished.waitForExistence(timeout: 5), "⋯ did not open its choices")
-        finished.tap()
+        XCTAssertTrue(waitLabel(menuTitle(app), "More actions for Dark Matter"),
+                      "⋯ did not open its choices: \(focus(app)) · \(menuTitle(app).exists ? menuTitle(app).label : "no menu")")
+        XCTAssertTrue(waitFor(app) { $0.hasSuffix(" choices/finished") }, "the ring did not start on Finished: \(focus(app))")
+        // Down the choices and back: Return on Finished chooses it.
+        press(app, .downArrow)
+        XCTAssertTrue(focus(app).hasSuffix(" choices/want"), "down did not reach Want to read: \(focus(app))")
+        press(app, .upArrow)
+        pressReturn(app)
         XCTAssertTrue(app.staticTexts["When did you finish?"].waitForExistence(timeout: 5), "Finished did not open its panel")
         press(app, .downArrow)
         XCTAssertTrue(waitFor(app) { $0.hasPrefix("ring finished ") }, "the panel did not take the ring: \(focus(app))")

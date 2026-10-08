@@ -47,15 +47,14 @@ struct KeptBooksView: View {
                         }
                         .buttonStyle(GlassCardStyle())
                         .accessibilityIdentifier("kept-book-" + book.workId)
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                removing = book
-                            } label: {
-                                Label("Remove offline copy", systemImage: "trash")
-                            }
-                        }
-                        // Ⓨ is the hold's Remove offline copy (#46).
-                        .padFocusable(book.workId, ring: .card, hold: { removing = book }) {
+                        // Held, or Ⓨ (#46): Remove offline copy.
+                        .padFocusable(book.workId, ring: .card, menu: {
+                            PadMenu(title: book.title, choices: [
+                                PadChoice(id: "remove", title: "Remove offline copy", systemImage: "trash", role: .destructive) {
+                                    askRemove(book)
+                                },
+                            ])
+                        }) {
                             openRoute(.book(BookRoute(workId: book.workId, title: book.title)))
                         }
                     }
@@ -70,20 +69,39 @@ struct KeptBooksView: View {
             }
         }
         .task(id: "\(model.address)·\(model.userId)·\(reloads)") { await load() }
+        // Ⓑ keeps it (#46).
+        .padCloses(removing != nil) { removing = nil }
         .alert("Remove offline copy?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
                presenting: removing) { book in
             // The harmless answer in the cancel role: without one, iOS 26 adds a Cancel of its own.
             Button("Keep offline copy", role: .cancel) { removing = nil }
             Button("Remove from this device", role: .destructive) {
                 removing = nil
-                Task {
-                    await ReadingOffline.remove(workId: book.workId, sourceItemIds: book.sourceItemIds, app: model)
-                    reloads += 1
-                }
+                remove(book)
             }
         } message: { book in
-            Text("\(book.title) · \(Fmt.bytes(sizes[book.workId] ?? 0)) on this device. Removes downloaded text, audio and cached comic pages for this title. Server files, bookmarks and reading progress are kept.")
+            Text(message(book))
         }
+    }
+
+    /// Remove offline copy, asked first: the panel while the ring is in use, else the alert.
+    private func askRemove(_ book: ReadingKeptBook) {
+        let asked = PadFocusCenter.shared.confirm(PadMenu(title: "Remove offline copy?", message: message(book), choices: [
+            PadChoice(id: "keep", title: "Keep offline copy"),
+            PadChoice(id: "remove", title: "Remove from this device", role: .destructive) { remove(book) },
+        ]))
+        if !asked { removing = book }
+    }
+
+    private func remove(_ book: ReadingKeptBook) {
+        Task {
+            await ReadingOffline.remove(workId: book.workId, sourceItemIds: book.sourceItemIds, app: model)
+            reloads += 1
+        }
+    }
+
+    private func message(_ book: ReadingKeptBook) -> String {
+        "\(book.title) · \(Fmt.bytes(sizes[book.workId] ?? 0)) on this device. Removes downloaded text, audio and cached comic pages for this title. Server files, bookmarks and reading progress are kept."
     }
 
     /// "Ebook · Audiobook · 120 MB".

@@ -131,15 +131,14 @@ struct DownloadsView: View {
                             OfflinePosterCard(entry: entry, store: offline.store)
                         }
                         .buttonStyle(GlassCardStyle())
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                askRemove(entry)
-                            } label: {
-                                Label("Remove download", systemImage: "trash")
-                            }
-                        }
-                        // Ⓨ is the hold's Remove download (#46).
-                        .padFocusable(entry.key, ring: .card, hold: { askRemove(entry) }) {
+                        // Held, or Ⓨ (#46): Remove download.
+                        .padFocusable(entry.key, ring: .card, menu: {
+                            PadMenu(title: entry.title, choices: [
+                                PadChoice(id: "remove", title: "Remove download", systemImage: "trash", role: .destructive) {
+                                    askRemove(entry)
+                                },
+                            ])
+                        }) {
                             openRoute(.offlineTitle(OfflineTitleRoute(key: entry.key, title: entry.title)))
                         }
                     }
@@ -152,8 +151,9 @@ struct DownloadsView: View {
     }
 
     private func askRemove(_ entry: OfflineCatalogEntry) {
-        removing = OfflineRemoval(id: entry.key, title: "Remove \(entry.title)?",
-                                  detail: OfflineRemoval.detail(entry)) { offline.removeTitle(entry) }
+        OfflineRemoval(id: entry.key, title: "Remove \(entry.title)?",
+                       detail: OfflineRemoval.detail(entry)) { offline.removeTitle(entry) }
+            .ask($removing)
     }
 
     // MARK: The queue
@@ -167,15 +167,17 @@ struct DownloadsView: View {
         }
         ForEach(batches) { batch in
             OfflineBatchCard(batch: batch, offline: offline) { row in
-                removing = OfflineRemoval(id: row.id, title: "Remove this download?",
-                                          detail: OfflineQueueRow.title(row) + " · " + OfflineQueueLabels.figures(row)) {
+                OfflineRemoval(id: row.id, title: "Remove this download?",
+                               detail: OfflineQueueRow.title(row) + " · " + OfflineQueueLabels.figures(row)) {
                     offline.remove(row.id)
                 }
+                .ask($removing)
             } cancel: {
-                removing = OfflineRemoval(id: batch.id, title: "Cancel \(batch.title)?",
-                                          detail: "The downloads not yet finished stop and go; the finished ones stay.") {
+                OfflineRemoval(id: batch.id, title: "Cancel \(batch.title)?",
+                               detail: "The downloads not yet finished stop and go; the finished ones stay.") {
                     offline.cancelBatch(batch.id, keepFinished: true)
                 }
+                .ask($removing)
             }
             .padding(.horizontal, metrics.margin)
             .padding(.top, 14)
@@ -193,6 +195,17 @@ struct OfflineRemoval: Identifiable {
     let detail: String
     let action: @MainActor () -> Void
 
+    /// Asked: as the panel while the ring is in use (a controller cannot answer
+    /// an alert, #46), else by `offlineRemoval`'s alert.
+    @MainActor
+    func ask(_ removing: Binding<OfflineRemoval?>) {
+        let asked = PadFocusCenter.shared.confirm(PadMenu(title: title, message: detail, choices: [
+            PadChoice(id: "keep", title: "Keep"),
+            PadChoice(id: "remove", title: "Remove", role: .destructive, action: action),
+        ]))
+        if !asked { removing.wrappedValue = self }
+    }
+
     /// "2 episodes · 1.4 GB gone from this device. The library keeps it on the PC."
     static func detail(_ entry: OfflineCatalogEntry) -> String {
         let size = Fmt.bytes(entry.rows.reduce(0) { $0 + $1.totalBytes })
@@ -205,7 +218,9 @@ extension View {
     /// Asks before a download leaves this device: Keep, the harmless answer,
     /// in the cancel role (without one iOS 26 adds a Cancel of its own), or Remove.
     func offlineRemoval(_ removing: Binding<OfflineRemoval?>) -> some View {
-        alert(removing.wrappedValue?.title ?? "", isPresented: Binding(get: { removing.wrappedValue != nil },
+        // Ⓑ is Keep (#46).
+        padCloses(removing.wrappedValue != nil) { removing.wrappedValue = nil }
+        .alert(removing.wrappedValue?.title ?? "", isPresented: Binding(get: { removing.wrappedValue != nil },
                                                                      set: { if !$0 { removing.wrappedValue = nil } }),
               presenting: removing.wrappedValue) { removal in
             Button("Keep", role: .cancel) { removing.wrappedValue = nil }

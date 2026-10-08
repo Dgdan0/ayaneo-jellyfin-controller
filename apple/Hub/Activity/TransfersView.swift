@@ -21,6 +21,7 @@ struct TransfersView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.glassMetrics) private var metrics
+    @Environment(\.openRoute) private var openRoute
     /// False while another section or the player is in front: nothing is asked for then.
     @Environment(\.isEnabled) private var isEnabled
 
@@ -81,6 +82,9 @@ struct TransfersView: View {
             }
             .padding(.bottom, 28)
         }
+        // A controller walks the filters and each transfer's buttons by looking (#46).
+        .padPage("transfers")
+        .padCloses(confirming != nil) { confirming = nil }
         .refreshable { polls += 1 }
         .task(id: "\(polls)·\(includeFinished)·\(isEnabled)") {
             guard isEnabled else { return }
@@ -110,19 +114,23 @@ struct TransfersView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 let broken = activity?.items.filter(\.isBroken).count ?? 0
-                ChoicePill(title: TransferPresentation.attentionFilter(count: broken, on: attentionOnly), selected: attentionOnly) {
+                ChoicePill(title: TransferPresentation.attentionFilter(count: broken, on: attentionOnly), selected: attentionOnly,
+                           pad: "attention") {
                     attentionOnly.toggle()
                 }
                 .accessibilityIdentifier("attention-filter")
-                ChoicePill(title: "Show finished", selected: includeFinished) { includeFinished.toggle() }
+                ChoicePill(title: "Show finished", selected: includeFinished, pad: "finished") { includeFinished.toggle() }
                     .accessibilityIdentifier("show-finished")
                 NavigationLink(value: AppRoute.speedLimits) {
                     Label("Speed limits", systemImage: "gauge.with.dots.needle.33percent")
                 }
                 .buttonStyle(GlassControlStyle())
                 .accessibilityIdentifier("speed-limits")
+                .padFocusable("speed-limits") { openRoute(.speedLimits) }
             }
+            .padding(.vertical, 6)
         }
+        .padGroup("filters", .row, members: ["attention", "finished", "speed-limits"], prefix: false, strip: true)
         .scrollClipDisabled()
         .contentMargins(.horizontal, metrics.margin, for: .scrollContent)
     }
@@ -135,7 +143,15 @@ struct TransfersView: View {
         case "details": sheet = .details(item)
         default:
             if choice.danger {
-                confirming = Pending(item: item, choice: choice)
+                // The panel while the ring is in use (a controller cannot answer an alert), else the alert.
+                let asked = PadFocusCenter.shared.confirm(PadMenu(
+                    title: choice.label + "?", message: item.headline + " · " + choice.detail, choices: [
+                        PadChoice(id: "cancel", title: "Cancel"),
+                        PadChoice(id: choice.id, title: choice.label, role: .destructive) {
+                            Task { await run(choice.id, on: item) }
+                        },
+                    ]))
+                if !asked { confirming = Pending(item: item, choice: choice) }
             } else {
                 Task { await run(choice.id, on: item) }
             }
@@ -322,19 +338,18 @@ struct TransferRow: View {
                     .buttonStyle(GlassControlStyle())
                     .disabled(working)
                     .accessibilityIdentifier("\(toggle.id)-\(item.id)")
+                    .padFocusable("toggle") { if !working { act(toggle) } }
             }
             if item.isBroken, let diagnosis = choices.first {
                 Button(why) { act(diagnosis) }
                     .buttonStyle(GlassControlStyle())
                     .accessibilityLabel(diagnosis.label)
                     .accessibilityIdentifier("diagnosis-\(item.id)")
+                    .padFocusable("why") { act(diagnosis) }
             }
+            let more = moreChoices(choices, toggle: toggle)
             Menu {
-                ForEach(choices.filter { $0.id != toggle?.id && !(item.isBroken && $0.id == "diagnosis") }) { choice in
-                    Button(role: choice.danger ? .destructive : nil) { act(choice) } label: {
-                        Label(choice.label, systemImage: Self.symbol(choice.id))
-                    }
-                }
+                PadChoicesMenu(choices: more)
             } label: {
                 Label("More", systemImage: "ellipsis")
             }
@@ -342,8 +357,22 @@ struct TransferRow: View {
             .buttonStyle(GlassControlStyle())
             .disabled(working)
             .accessibilityIdentifier("more-\(item.id)")
+            // A controller's Ⓐ: the menu's choices as the panel (#46).
+            .padFocusable("more") {
+                if !working { PadFocusCenter.shared.present(PadMenu(title: item.headline, choices: more)) }
+            }
         }
+        .padGroup("transfer-\(item.id)", .row, members: (toggle == nil ? [] : ["toggle"])
+                  + (item.isBroken && !choices.isEmpty ? ["why"] : []) + ["more"])
         .fixedSize()
+    }
+
+    /// More's choices: what the buttons beside it do not already offer.
+    private func moreChoices(_ choices: [TransferPresentation.Choice], toggle: TransferPresentation.Choice?) -> [PadChoice] {
+        choices.filter { $0.id != toggle?.id && !(item.isBroken && $0.id == "diagnosis") }.map { choice in
+            PadChoice(id: choice.id, title: choice.label, systemImage: Self.symbol(choice.id),
+                      role: choice.danger ? .destructive : nil) { act(choice) }
+        }
     }
 
     /// Each choice's mark in the menu.
@@ -398,7 +427,7 @@ struct TransferSheetView: View {
                         .foregroundStyle(.white.opacity(0.7))
                 }
                 Spacer(minLength: 8)
-                GlassRoundButton(systemImage: "xmark", label: "Close", size: 40) { dismiss() }
+                GlassRoundButton(systemImage: "xmark", label: "Close", size: 40, pad: "close") { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
             .padding(20)
@@ -420,6 +449,8 @@ struct TransferSheetView: View {
                     .padding(.vertical, 14)
             }
         }
+        // A page of its own while it shows: Ⓑ closes it (#46).
+        .padPage("transfer-sheet", modal: true) { dismiss() }
         .presentationBackground { GlassSheetFill() }
         .presentationDetents(sizeClass == .compact ? [.medium, .large] : [.large])
         // A page's height on an iPad and the Mac: an explanation is for reading.
@@ -462,6 +493,10 @@ struct TransferSheetView: View {
                 Label("Refresh status", systemImage: "arrow.clockwise")
             }
             .buttonStyle(GlassControlStyle())
+            .padFocusable("refresh") {
+                refresh()
+                dismiss()
+            }
             // Only the harmless action the hub itself offers for it.
             if item.diagnosis?.action == "start" && item.can("start") {
                 Button {
@@ -472,6 +507,10 @@ struct TransferSheetView: View {
                 }
                 .buttonStyle(PrimaryPillStyle())
                 .accessibilityIdentifier("resume-transfer")
+                .padFocusable("resume") {
+                    resume(item)
+                    dismiss()
+                }
             }
             Spacer(minLength: 0)
         }
