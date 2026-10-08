@@ -1004,13 +1004,10 @@ class EpubReaderScreen(
     private fun control(glyph: String, label: String, click: () -> Unit): TextView =
         TextView(host.viewContext).apply {
             val icon = when (glyph) { "×" -> AppIcon.CLOSE; "☷" -> AppIcon.CONTENTS; "search" -> AppIcon.SEARCH; "return" -> AppIcon.PREVIOUS_ITEM; "☆" -> AppIcon.BOOKMARK; "Aa" -> AppIcon.APPEARANCE; "‹" -> AppIcon.PREVIOUS; "▣" -> AppIcon.BOOK; "pad" -> AppIcon.PAD; "comfort" -> AppIcon.COMFORT; else -> AppIcon.NEXT }
-            setCompoundDrawables(AppIconDrawable(icon, Color.WHITE).apply { setBounds(0,0,dp(20),dp(20)) },null,null,null)
-            // A 44dp disc with the 20dp icon in its middle.
-            setPadding(dp(12),0,0,0)
-            gravity = Gravity.CENTER_VERTICAL
             setTextColor(Color.WHITE)
             contentDescription = label
-            com.pocketds.hub.ui.OverlayButtons.dressDisc(this, colors.focusRing)
+            // A 44dp disc with the 20dp icon in its middle (the layout params below say 44dp).
+            com.pocketds.hub.ui.OverlayButtons.iconDisc(this, icon, colors.focusRing)
             Styler.makeFocusable(this)
             FocusDecorator.attach(this, ringVisible, scale = false)
             FocusDecorator.listen(this, ringVisible) { view, focused ->
@@ -1073,15 +1070,26 @@ class EpubReaderScreen(
         setControlsVisible(true)
     }
 
-    /** The glow on the sentence being read. Where the page goes is [followVoice]'s. */
+    /** The sentence being read, as it was last handed to [highlightNarration]: a new look for the page draws it again. */
+    private var highlightedSegment: ReadAlongSegment? = null
+
+    /**
+     * The wash on the sentence being read, behind its words (#52). Where the page goes is [followVoice]'s. The tint
+     * is the accent let into this page's colour ([ReadAlongGlow.wash]), so it is drawn again when the theme changes.
+     */
     private fun highlightNarration(segment: ReadAlongSegment?) {
         highlightJob?.cancel()
+        highlightedSegment = segment
         if (backgrounded) return
         highlightJob = uiScope.launch {
             val reader = navigator ?: return@launch
             if (segment == null) { reader.applyDecorations(emptyList(), ReadAlongGlow.GROUP); return@launch }
             val locator = segmentLocator(segment) ?: return@launch
-            reader.applyDecorations(listOf(Decoration("narration", locator, Decoration.Style.Highlight(colors.accent, isActive = true))), ReadAlongGlow.GROUP)
+            val (page, ink) = pageColors()
+            val tint = ReadAlongGlow.wash(colors.accent, page, ink)
+            reader.applyDecorations(listOf(Decoration("narration", locator, Decoration.Style.Highlight(tint, isActive = true))), ReadAlongGlow.GROUP)
+            // Each box made its line's line box, once the boxes are on the page (and again when it reflows): no gaps, nothing over the lines round it.
+            runCatching { reader.evaluateJavascript(ReadAlongGlow.fitScript(segment.fragment)) }
         }
     }
 
@@ -1448,7 +1456,7 @@ class EpubReaderScreen(
         val saved = runCatching { latestLocator?.let { bookmarks.contains(checkpointKey, locatorJson(it)) } == true }
             .getOrDefault(false)
         bookmarkButton.contentDescription = if (saved) "Remove bookmark" else "Add bookmark"
-        bookmarkButton.setCompoundDrawables(AppIconDrawable(if (saved) AppIcon.BOOKMARK_FILLED else AppIcon.BOOKMARK, Color.WHITE).apply { setBounds(0,0,dp(20),dp(20)) },null,null,null)
+        com.pocketds.hub.ui.OverlayButtons.setDiscIcon(bookmarkButton, if (saved) AppIcon.BOOKMARK_FILLED else AppIcon.BOOKMARK)
     }
 
     private fun toggleBookmark() {
@@ -1668,6 +1676,8 @@ class EpubReaderScreen(
         navigator?.submitPreferences(readiumPreferences(preferences))
         // A reflow moves every page break: the page is looked at again once it has settled.
         if (narration != null) { pageSpan = null; scheduleProbe(REFLOW_PROBE_MS) }
+        // The wash is mixed with the page's colour: a new theme draws the sentence again.
+        if (narration != null) highlightedSegment?.let(::highlightNarration)
         // The corners' ink and the strips' colour follow the page.
         if (::pageInfo.isInitialized) applyPageInfo()
     }

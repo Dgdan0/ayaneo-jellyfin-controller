@@ -157,6 +157,13 @@ class ConsolidationGuardTest {
         Rule(Regex("""\bisComplete\([^)]*\)\s*\)\s*return\s+\w+\.completeFile"""),
             "EpubEdition.open: a book that is kept is asked about when it opens (If-None-Match against the ETag kept), " +
                 "so a copy from before the hub rewrote font sizes is replaced rather than reused for ever (#41)"),
+        Rule(Regex("""setCompoundDrawables\(AppIconDrawable\([^\n]*dp\(20\)"""),
+            "OverlayButtons.iconDisc / setDiscIcon: a disc's face replaces a view's padding, so an icon is centred by padding set after " +
+                "the face; the book reader's own, set before it, drew every icon 8dp left of centre (#53)",
+            setOf("ui/OverlayButtons.kt")),
+        Rule(Regex("""Style\.Highlight\(colors\.accent"""),
+            "ReadAlongGlow.wash: the sentence's tint is the accent let into the page, opaque and behind the words; the bare accent, " +
+                "translucent and over them, washed the words out and spilled on the sentences round it (#52)"),
     )
 
     @Test
