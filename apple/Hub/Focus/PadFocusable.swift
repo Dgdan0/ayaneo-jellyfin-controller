@@ -81,8 +81,10 @@ extension View {
     /// An item a controller or a keyboard can focus: Ⓐ or Return runs `press`,
     /// Ⓨ `hold` (its menu). `scroll` is what its scroll view knows it by when
     /// that is not `id`; `scrolls: false` for an item no scroll view holds (a
-    /// sheet's picker, a toolbar's button), which then keeps its identity. Nil
-    /// `id` leaves the view as it is.
+    /// sheet's picker, a toolbar's button). The item itself is never given an
+    /// id or a frame reader (a clear view behind it has them), so a Menu, a
+    /// Toggle or a text field behaves as it does without this. Nil `id`
+    /// leaves the view as it is.
     func padFocusable(_ id: String?, ring: PadRing = .capsule, scroll: AnyHashable? = nil, scrolls: Bool = true,
                       hold: (() -> Void)? = nil, press: (() -> Void)?) -> some View {
         modifier(PadFocusableModifier(id: id, ring: ring, scroll: scroll, scrolls: scrolls,
@@ -217,26 +219,45 @@ private struct PadFocusableModifier: ViewModifier {
             let lit = PadFocusCenter.shared.lit(padId, on: page)
             let _ = page.actions[padId] = actions
             let _ = scroll.map { page.scrollIds[padId] = $0 }
-            if scrolls {
-                registered(content.id(scroll ?? AnyHashable(id)), page: page, padId: padId, lit: lit)
-            } else {
-                registered(content, page: page, padId: padId, lit: lit)
-            }
+            // The item keeps its own identity: its scroll id and its frame are a
+            // clear view's behind it. Given to a Menu, a Toggle or a text field
+            // itself, they lost a menu's choice and a switch's turn under a
+            // finger (the series' ⋯, Settings › Home's switches).
+            content
+                .environment(\.padLit, lit)
+                .overlay { PadRingView(ring: ring, lit: lit) }
+                .background {
+                    PadAnchor(page: page, padId: padId, scrollId: scrolls ? (scroll ?? AnyHashable(id)) : nil)
+                }
         } else {
             content
         }
     }
+}
 
-    private func registered(_ view: some View, page: PadPage, padId: String, lit: Bool) -> some View {
-        view
-            .environment(\.padLit, lit)
-            .overlay { PadRingView(ring: ring, lit: lit) }
+/// Where an item is, for the engine and its scroll view: a clear view the
+/// item's size behind it, with the item's scroll id, that measures its frame.
+private struct PadAnchor: View {
+    let page: PadPage
+    let padId: String
+    let scrollId: AnyHashable?
+
+    var body: some View {
+        anchored
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                 page.frames[padId] = frame
             }
-            .onDisappear {
-                page.frames[padId] = nil
-            }
+            .onDisappear { page.frames[padId] = nil }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private var anchored: some View {
+        if let scrollId {
+            Color.clear.id(scrollId)
+        } else {
+            Color.clear
+        }
     }
 }
 
