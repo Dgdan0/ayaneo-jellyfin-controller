@@ -273,13 +273,15 @@ public enum SeriesBookLabels {
         return nil
     }
 
-    /// "#2 · 40% · Audio", "#3 · Missing", "Completed".
-    public static func subtitle(number: String, available: Bool, progress: ReadingProgress?, formats: [String]) -> String {
+    /// "#2 · 40% · Audio", "#3 · Missing", "Completed". `finished`: the book
+    /// is finished (#63), which a place short of the end does not say.
+    public static func subtitle(number: String, available: Bool, progress: ReadingProgress?, formats: [String],
+                                finished: Bool? = nil) -> String {
         var out: [String] = []
         if !ReadingBookFacts.blank(number) { out.append("#\(number)") }
         if !available {
             out.append("Missing")
-        } else if progress?.completed == true {
+        } else if finished ?? (progress?.completed == true) {
             out.append("Completed")
         } else if let p = progress, p.percentage > 0 {
             out.append(Fmt.readingPercentLabel(p.percentage))
@@ -291,7 +293,8 @@ public enum SeriesBookLabels {
     /// A book outside any series, as a book of a row.
     public static func item(of work: ReadingWork) -> ReadingSectionItem {
         ReadingSectionItem(workId: work.id, title: work.title, kind: work.kind, artwork: work.artwork, authors: work.authors,
-                           progress: work.progress, availability: "available", formats: work.availability)
+                           progress: work.progress, availability: "available", formats: work.availability,
+                           status: ReadingStatus.of(work))
     }
 }
 

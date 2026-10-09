@@ -70,6 +70,8 @@ public struct ReadingCompletionState: Codable, Equatable, Sendable {
         }
         if !collection, let status {
             projected.progress = progress(status, work.progress, updatedAt[work.id])
+            // Marked read here says finished (#63), so the hub's older word does not take the tick away.
+            if status == Self.read { projected.status = ReadingStatus.finished }
         }
         return projected
     }
@@ -79,6 +81,7 @@ public struct ReadingCompletionState: Codable, Equatable, Sendable {
         guard let status = states[item.workId] else { return item }
         var item = item
         item.progress = progress(status, item.progress, updatedAt[item.workId])
+        if status == Self.read { item.status = ReadingStatus.finished }
         return item
     }
 

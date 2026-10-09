@@ -61,6 +61,18 @@ final class BookPageTests: XCTestCase {
         choice.tap()
     }
 
+    /// ⋯ › Reading status › `status` (#63): the one row, its four choices under it.
+    @MainActor
+    private func status(_ app: XCUIApplication, _ title: String, _ status: String) {
+        app.buttons["More actions for \(title)"].tap()
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Reading status'")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "⋯ has no Reading status: \(buttons(app))")
+        row.tap()
+        let choice = app.buttons[status]
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), "Reading status has no \(status): \(buttons(app))")
+        choice.tap()
+    }
+
     /// "Oct 2026": this month as the page says it.
     private var thisMonth: String {
         let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -106,9 +118,10 @@ final class BookPageTests: XCTestCase {
         XCTAssertTrue(waitUntil(5) { stars.label == "Not rated" }, "the same star did not take it away: \(stars.label)")
     }
 
-    /// ⋯ › Finished asks when, this month to begin with; marked, the cover
-    /// says so and asks for a rating, and the book is read; undone at once,
-    /// its place comes back. Another month can be chosen.
+    /// ⋯ › Reading status › Finished asks when, this month to begin with;
+    /// marked, the cover says so and asks for a rating, and the book is read;
+    /// Reading straight after gives its place back (#63: a finish of this
+    /// visit is taken back whole). Another month can be chosen.
     @MainActor
     func testFinishedAsksWhenAndUndoGivesThePlaceBack() {
         let app = launch(open: "book:rw_demo_rr6")
@@ -116,7 +129,7 @@ final class BookPageTests: XCTestCase {
         XCTAssertTrue(waitUntil(10) { entry.label.contains("49%") }, "Light Bringer is not half read: \(entry.label)")
         XCTAssertTrue(entry.label.hasPrefix("Resume"), entry.label)
 
-        more(app, "Light Bringer", "Finished")
+        status(app, "Light Bringer", "Finished")
         let confirm = app.buttons["finish-confirm"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "When did you finish? did not open")
         XCTAssertTrue(app.navigationBars["When did you finish?"].exists || text(app, containing: "When did you finish?").exists)
@@ -129,13 +142,13 @@ final class BookPageTests: XCTestCase {
         XCTAssertFalse(entry.label.contains("49%"), "a finished book still resumes: \(entry.label)")
         keep(app, "finished")
 
-        more(app, "Light Bringer", "Undo finished")
-        XCTAssertTrue(text(app, containing: "Previous reading position restored").waitForExistence(timeout: 5))
-        XCTAssertTrue(waitUntil(5) { entry.label.contains("49%") }, "undoing did not give back the place: \(entry.label)")
-        XCTAssertTrue(waitUntil(5) { !line.exists }, "the finish stayed after undoing")
+        status(app, "Light Bringer", "Reading")
+        XCTAssertTrue(text(app, containing: "Reading status · Reading").waitForExistence(timeout: 5))
+        XCTAssertTrue(waitUntil(5) { entry.label.contains("49%") }, "Reading did not give back the place: \(entry.label)")
+        XCTAssertTrue(waitUntil(5) { !line.exists }, "the finish stayed after Reading")
 
         // Another month: January of last year.
-        more(app, "Light Bringer", "Finished")
+        status(app, "Light Bringer", "Finished")
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         let year = Calendar.current.component(.year, from: Date()) - 1
         element(app, "finish-year").tap()
@@ -149,7 +162,67 @@ final class BookPageTests: XCTestCase {
         confirm.tap()
         XCTAssertTrue(waitUntil(5) { line.exists && line.label == "Finished Jan \(year) · rate it?" },
                       "another month was not kept: \(line.label)")
-        more(app, "Light Bringer", "Undo finished")
+        status(app, "Light Bringer", "Reading")
         XCTAssertTrue(waitUntil(5) { entry.label.contains("49%") })
+    }
+
+    /// The reading status (#63): Not reading takes a book off Continue
+    /// reading and keeps its place; opening it again makes it Reading; the row
+    /// says the status it holds, and the ✓ goes on a finished cover.
+    @MainActor
+    func testNotReadingTakesABookOffContinueReadingAndKeepsItsPlace() {
+        let app = launch(open: "book:rw_demo_rr6")
+        let entry = app.buttons["book-entry"]
+        XCTAssertTrue(waitUntil(10) { entry.label.contains("49%") }, "Light Bringer is not half read: \(entry.label)")
+        app.buttons["More actions for Light Bringer"].tap()
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Reading status'")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "⋯ has no Reading status: \(buttons(app))")
+        XCTAssertTrue(row.label.hasPrefix("Reading status · Reading"), "a book half read is not Reading: \(row.label)")
+        row.tap()
+        for choice in ["Want to read", "Reading", "Finished", "Not reading"] {
+            XCTAssertTrue(app.buttons[choice].waitForExistence(timeout: 5), "Reading status has no \(choice): \(buttons(app))")
+        }
+        app.buttons["Not reading"].tap()
+        XCTAssertTrue(text(app, containing: "Reading status · Not reading").waitForExistence(timeout: 5), "Not reading said nothing")
+        XCTAssertTrue(entry.label.contains("49%"), "Not reading lost the place: \(entry.label)")
+        keep(app, "not-reading")
+        // Off Continue reading: Books Home's row no longer has it.
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Back to'")).firstMatch.tap()
+        let card = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Light Bringer, Red Rising #6'")).firstMatch
+        XCTAssertTrue(app.buttons["books-resume"].waitForExistence(timeout: 10), "Books Home did not come back: \(buttons(app))")
+        XCTAssertFalse(waitUntil(4) { card.exists }, "a book put down is still in Continue reading")
+    }
+
+    /// Finished by status puts the ✓ on its cover wherever it is listed, and
+    /// says the month under it (#63).
+    @MainActor
+    func testFinishedPutsTheTickOnTheCoverAndChangingTheDateKeepsIt() {
+        let app = launch(open: "book:rw_demo_rr6")
+        let entry = app.buttons["book-entry"]
+        XCTAssertTrue(waitUntil(10) { entry.label.contains("49%") }, "Light Bringer is not half read: \(entry.label)")
+        status(app, "Light Bringer", "Finished")
+        let confirm = app.buttons["finish-confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "When did you finish? did not open")
+        confirm.tap()
+        let line = element(app, "book-you-line")
+        XCTAssertTrue(waitUntil(5) { line.exists && line.label.hasPrefix("Finished \(self.thisMonth)") }, "not finished: \(line.label)")
+        // The row now holds Finished, with the month to put right.
+        app.buttons["More actions for Light Bringer"].tap()
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Reading status'")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.label.hasPrefix("Reading status · Finished"), row.label)
+        row.tap()
+        app.buttons["Finished"].tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Finished again did not ask the month, to put the date right")
+        confirm.tap()
+        XCTAssertTrue(waitUntil(5) { line.exists && line.label.hasPrefix("Finished") }, "the finish went: \(line.label)")
+        // Its series lists it finished, the tick on its cover.
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Back to'")).firstMatch.tap()
+        let series = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Red Rising, 6 books'")).firstMatch
+        XCTAssertTrue(series.waitForExistence(timeout: 10), "Red Rising is not on Books Home: \(buttons(app))")
+        series.tap()
+        let book = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Light Bringer'")).firstMatch
+        XCTAssertTrue(book.waitForExistence(timeout: 10), "Light Bringer is not in its series: \(buttons(app))")
+        XCTAssertTrue(book.label.contains("Completed") || book.label.hasPrefix("Finished"), "not finished in its series: \(book.label)")
     }
 }

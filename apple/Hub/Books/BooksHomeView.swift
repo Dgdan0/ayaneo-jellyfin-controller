@@ -303,11 +303,14 @@ struct BooksHomeView: View {
         if row?.id != ReadingListsState.wantToReadId && !started && !books.isWanted(work.id) {
             choices.append(PadChoice(id: "want", title: "Add to Want to Read", systemImage: "bookmark") {
                 books.updateLists { $0.add(ReadingListsState.wantToReadId, ReadingListEntry.from(work)) }
+                // Want to read is the reading status too (#63): the hub is told.
+                if books.isWanted(work.id) { writeStatus(work, ReadingStatus.want) }
             })
         }
         if let row, row.isOwnList {
             choices.append(PadChoice(id: "remove", title: "Remove from \(row.title)", systemImage: "minus.circle") {
                 books.updateLists { $0.remove(row.id, workId: work.id) }
+                if row.id == ReadingListsState.wantToReadId && ReadingStatus.of(work) == ReadingStatus.want { writeStatus(work, nil) }
             })
             if row.id != ReadingListsState.wantToReadId {
                 choices.append(PadChoice(id: "earlier", title: "Move earlier", systemImage: "arrow.left") {
@@ -320,6 +323,22 @@ struct BooksHomeView: View {
         }
         choices.append(ReadingListChoices.addToList(work, books: books) { naming = ListNaming(listId: nil, name: "", adding: work) })
         return PadMenu(title: work.title, choices: choices)
+    }
+
+    /// Tells the hub the book's reading status, nil taking the choice back, as the book page does (#63).
+    private func writeStatus(_ work: ReadingWork, _ next: String?) {
+        var change = ReadingYouChange(status: .clear)
+        if let next { change.status = .set(next) }
+        let request = HubEndpoints.readingYou(work.id, change)
+        let hub = model.hub
+        Task {
+            do throws(HubFailure) {
+                _ = try await hub.fetch(request, as: ReadingYouResponse.self)
+            } catch {
+                guard error.kind != .cancelled else { return }
+                status = StatusMessage("Your reading status could not be saved · " + error.message, tone: .warning)
+            }
+        }
     }
 
     private func saveNaming() {

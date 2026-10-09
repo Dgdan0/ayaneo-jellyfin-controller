@@ -160,7 +160,8 @@ struct BookView: View {
 
     /// Under the cover, what is about you (#39).
     private func you(_ work: ReadingWork) -> some View {
-        BookYouBlock(you: work.you) { star in rate(work, star) }
+        // A book not finished does not carry the month it was once finished (#63).
+        BookYouBlock(you: ReadingStatus.youForLine(work)) { star in rate(work, star) }
     }
 
     @ViewBuilder private func cover(_ work: ReadingWork) -> some View {
@@ -499,23 +500,9 @@ struct BookView: View {
     private func moreChoices(_ work: ReadingWork) -> [PadChoice] {
         var choices: [PadChoice] = []
         if isBook(work) {
-            if finishUndo != nil {
-                choices.append(PadChoice(id: "undo-finished", title: "Undo finished", systemImage: "arrow.uturn.backward") {
-                    undoFinished(work)
-                })
-            } else {
-                choices.append(PadChoice(id: "finished", title: "Finished", systemImage: "checkmark.circle") { finishing = true })
-            }
-            if books.completion.isRead(work.id) && finishUndo == nil {
-                // Only the undo of a finish marked here (#60): the place stays.
-                choices.append(PadChoice(id: "unread", title: ReadingStartOver.unmark, detail: ReadingStartOver.unmarkDetail,
-                                         systemImage: "circle") { toggleRead(work) })
-            }
+            // One Reading status row (#63) holds what Finished, Mark unread and Want to read were three rows for.
+            choices.append(statusChoice(work))
             choices += startOverChoice(work)
-            let wanted = books.isWanted(work.id)
-            choices.append(PadChoice(id: "want", title: "Want to read", systemImage: wanted ? nil : "bookmark", checked: wanted) {
-                notice = books.toggleWanted(work) ? "Added to Want to Read" : "Removed from Want to Read"
-            })
         } else {
             choices += startOverChoice(work)
         }
@@ -533,9 +520,65 @@ struct BookView: View {
         return choices
     }
 
+    /// The Reading status row (#63): Want to read, Reading, Finished and Not
+    /// reading, the current one ticked; a submenu under a finger, the next list
+    /// of the panel under a controller.
+    private func statusChoice(_ work: ReadingWork) -> PadChoice {
+        let current = ReadingStatus.of(work)
+        return PadChoice(id: "status", title: ReadingStatus.rowLabel(current), detail: ReadingStatus.rowDetail(current, work.you),
+                         systemImage: "books.vertical", children: ReadingStatus.choices.map { next in
+                             PadChoice(id: "status-" + next, title: ReadingStatus.label(next), detail: ReadingStatus.detail(next),
+                                       checked: next == current) { choose(next, for: work) }
+                         })
+    }
+
+    /// A status chosen in the row: Finished asks the month (again, to put a
+    /// date right); the one the book has does nothing; any other is set.
+    private func choose(_ next: String, for work: ReadingWork) {
+        let current = ReadingStatus.of(work)
+        switch ReadingStatus.action(next, current: current) {
+        case .askMonth: finishing = true
+        case .nothing: break
+        case .set: setStatus(next, from: current, work)
+        }
+    }
+
+    /// A status set (#63): shown at once and written to the hub, and what it
+    /// does here done with it. Want to read is the list on this device (any
+    /// other status takes the book off it), and Finished is marked read here
+    /// as the read toggle does, which leaving Finished takes away. A finish
+    /// marked in this visit is taken back whole, the page going back to what it
+    /// had; one from an earlier visit stays as the book's history.
+    private func setStatus(_ next: String, from current: String, _ work: ReadingWork) {
+        let wasFinished = current == ReadingStatus.finished
+        var undo: ReadingYouChange?
+        if wasFinished, let marked = finishUndo {
+            finishUndo = nil
+            undo = BookPage.undoing(marked.you)
+        }
+        let effects = ReadingStatus.effects(next, wasFinished: wasFinished)
+        var session = completionSession
+        switch effects.localRead {
+        case .mark: books.updateCompletion { session.markRead($0, work.id) }
+        case .unmark: books.updateCompletion { session.unmark($0, work.id) }
+        case .keep: break
+        }
+        completionSession = session
+        if effects.wantList != books.isWanted(work.id) {
+            if effects.wantList {
+                books.updateLists { $0.add(ReadingListsState.wantToReadId, ReadingListEntry.from(work)) }
+            } else {
+                books.updateLists { $0.remove(ReadingListsState.wantToReadId, workId: work.id) }
+            }
+        }
+        let settled = ReadingStatus.settle(next, work.progress)
+        saveYou(work, BookPage.choosing(next, undo: undo), status: settled, failure: "Your reading status could not be saved")
+        notice = "Reading status · " + ReadingStatus.label(settled)
+    }
+
     /// Start over in a ⋯ (#60), while the book has a place to forget or a finish to take away.
     private func startOverChoice(_ work: ReadingWork) -> [PadChoice] {
-        guard ReadingStartOver.offered(hasPlace: hasPlace(work), finished: work.progress?.completed == true) else { return [] }
+        guard ReadingStartOver.offered(hasPlace: hasPlace(work), finished: ReadingStatus.isFinished(work)) else { return [] }
         return [PadChoice(id: "start-over", title: ReadingStartOver.action, detail: ReadingStartOver.menuDetail,
                           systemImage: "arrow.counterclockwise") { askStartOver(work) }]
     }
@@ -575,6 +618,10 @@ struct BookView: View {
     /// Opens a book the way it was chosen, and remembers that way (Android's
     /// `launchEntry`): reading keeps the narration listened to last.
     private func launch(_ work: ReadingWork, _ choice: ReadingEntryChoice, remembered: ReadingEntryPreference?) {
+        // Opening a book that was put down is coming back to it: it is Reading again (#63).
+        if ReadingStatus.of(work) == ReadingStatus.notReading {
+            setStatus(ReadingStatus.reading, from: ReadingStatus.notReading, work)
+        }
         // Opening a reader ends the undo window, as leaving the page does.
         completionSession.leave()
         switch choice.mode {
@@ -847,40 +894,32 @@ struct BookView: View {
             books.updateCompletion { session.markRead($0, work.id) }
             completionSession = session
         }
-        saveYou(work, BookPage.finishing(work.you, on: date), failure: "Your finish could not be saved")
+        saveYou(work, BookPage.finishing(work.you, on: date), status: ReadingStatus.finished,
+                failure: "Your finish could not be saved")
         notice = "Marked finished · " + (BookPage.finishedLabel(date.value)?.replacingOccurrences(of: "Finished ", with: "") ?? date.value)
-    }
-
-    /// Undone on the same visit: the finish and the read as they were, the place back.
-    private func undoFinished(_ work: ReadingWork) {
-        guard let undo = finishUndo else { return }
-        finishUndo = nil
-        if !undo.wasRead {
-            var session = completionSession
-            books.updateCompletion { session.unmark($0, work.id) }
-            completionSession = session
-            notice = books.completion.notice(work.id)
-        } else {
-            notice = "Finish undone"
-        }
-        saveYou(work, BookPage.undoing(undo.you), failure: "The finish could not be undone")
     }
 
     /// Shown at once as the hub will make it; the hub's own answer then, or
     /// back as it was with a word on why.
-    private func saveYou(_ work: ReadingWork, _ change: ReadingYouChange, failure: String) {
+    /// `status`, when the change sets one (#63), is the book's status shown at
+    /// once; the hub's answer then says it.
+    private func saveYou(_ work: ReadingWork, _ change: ReadingYouChange, status: String? = nil, failure: String) {
         guard !change.isEmpty, var shown = loaded, shown.id == work.id else { return }
-        let before = shown.you
-        shown.you = change.applied(to: before)
+        let before = (you: shown.you, status: shown.status)
+        shown.you = change.applied(to: before.you)
+        if let status { shown.status = status }
         loaded = shown
         let request = HubEndpoints.readingYou(work.id, change)
         Task {
             do throws(HubFailure) {
                 let answer = try await model.hub.fetch(request, as: ReadingYouResponse.self)
-                if loaded?.id == work.id { loaded?.you = answer.you }
+                guard loaded?.id == work.id else { return }
+                loaded?.you = answer.you
+                if !answer.status.isEmpty { loaded?.status = answer.status }
             } catch {
                 guard error.kind != .cancelled, loaded?.id == work.id else { return }
-                loaded?.you = before
+                loaded?.you = before.you
+                loaded?.status = before.status
                 notice = failure
             }
         }

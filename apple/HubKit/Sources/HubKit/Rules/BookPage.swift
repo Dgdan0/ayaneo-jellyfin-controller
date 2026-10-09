@@ -146,11 +146,23 @@ public enum BookPage {
     }
 
     /// Marked finished: a first read leaves the count to the hub; a book
-    /// finished before is read once more.
+    /// finished before is read once more. It says the status too (#63),
+    /// which a hub before it ignores and a month finished alone still means.
     public static func finishing(_ you: ReadingYou?, on date: FinishDate) -> ReadingYouChange {
         let again = you?.finished != nil
         return ReadingYouChange(finished: .set(date.value),
-                                readCount: again ? .set(min((you?.readCount ?? 1) + 1, 99)) : .keep)
+                                readCount: again ? .set(min((you?.readCount ?? 1) + 1, 99)) : .keep,
+                                status: .set(ReadingStatus.finished))
+    }
+
+    /// A reading status chosen (#63). `undo` is what taking back a finish
+    /// marked in this visit writes (`undoing`): the page goes back to what it
+    /// had, and the new status is said with it. Without it the month and the
+    /// count stay as the book's history.
+    public static func choosing(_ status: String, undo: ReadingYouChange? = nil) -> ReadingYouChange {
+        var change = undo ?? ReadingYouChange()
+        change.status = .set(status)
+        return change
     }
 
     /// Undone at once: back to what was there.

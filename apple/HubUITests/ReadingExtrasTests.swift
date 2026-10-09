@@ -45,20 +45,24 @@ final class ReadingExtrasTests: XCTestCase {
 
     // MARK: Read and unread
 
-    /// Light Bringer is half read: marked finished it is read, and undone
-    /// straight after its place comes back; finished again and the page
-    /// left, Mark unread takes the finish away and its place is back too
-    /// (#37, through #39's ⋯ › Finished; #60: only Start over starts it again).
+    /// Light Bringer is half read: finished it is read, and Reading straight
+    /// after gives its place back; finished again and the page left, Reading
+    /// takes the finish away and its place is back too (#37; #63's Reading
+    /// status row; #60: only Start over starts it again).
     @MainActor
     func testABookMarkedReadAndUnreadKeepsOrStartsAgain() {
         let app = launch(open: "book:rw_demo_rr6")
         let entry = app.buttons["book-entry"]
         XCTAssertTrue(entry.waitForExistence(timeout: 15), "the book's page did not open: \(buttons(app))")
         XCTAssertTrue(waitUntil(10) { entry.label.contains("49%") }, "Light Bringer is not half read: \(entry.label)")
-        func more(_ item: String) {
+        // ⋯ › Reading status › `status` (#63).
+        func more(_ status: String) {
             app.buttons["More actions for Light Bringer"].tap()
-            let choice = app.buttons[item]
-            XCTAssertTrue(choice.waitForExistence(timeout: 5), "⋯ has no \(item): \(buttons(app))")
+            let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Reading status'")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 5), "⋯ has no Reading status: \(buttons(app))")
+            row.tap()
+            let choice = app.buttons[status]
+            XCTAssertTrue(choice.waitForExistence(timeout: 5), "Reading status has no \(status): \(buttons(app))")
             choice.tap()
         }
         func finish() {
@@ -71,10 +75,10 @@ final class ReadingExtrasTests: XCTestCase {
 
         finish()
         XCTAssertFalse(entry.label.contains("49%"), "a book marked read still resumes: \(entry.label)")
-        // Undone at once: its place comes back.
-        more("Undo finished")
-        XCTAssertTrue(text(app, containing: "Previous reading position restored").waitForExistence(timeout: 5))
-        XCTAssertTrue(waitUntil(5) { entry.label.contains("49%") }, "undoing the mark did not give back the place")
+        // Reading at once: the finish of this visit is taken back whole, its place with it.
+        more("Reading")
+        XCTAssertTrue(text(app, containing: "Reading status · Reading").waitForExistence(timeout: 5))
+        XCTAssertTrue(waitUntil(5) { entry.label.contains("49%") }, "Reading did not give back the place")
 
         // Read, the page left and opened again, then unread: the book starts again.
         finish()
@@ -97,8 +101,8 @@ final class ReadingExtrasTests: XCTestCase {
         again.tap()
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
         XCTAssertFalse(entry.label.contains("49%"), "the mark did not last: \(entry.label)")
-        more("Mark unread")
-        XCTAssertTrue(text(app, containing: "Finish taken away").waitForExistence(timeout: 5), "unread after leaving said nothing")
+        more("Reading")
+        XCTAssertTrue(text(app, containing: "Reading status · Reading").waitForExistence(timeout: 5), "Reading after leaving said nothing")
         XCTAssertTrue(waitUntil(5) { entry.label.contains("49%") }, "taking the finish away lost the place: \(entry.label)")
     }
 
@@ -167,9 +171,13 @@ final class ReadingExtrasTests: XCTestCase {
         keep(app, "start-over-done")
         // Nothing left to start over.
         more.tap()
-        XCTAssertTrue(app.buttons["Want to read"].waitForExistence(timeout: 5), "⋯ did not open: \(buttons(app))")
+        let statusRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Reading status'")).firstMatch
+        XCTAssertTrue(statusRow.waitForExistence(timeout: 5), "⋯ did not open: \(buttons(app))")
         XCTAssertFalse(app.buttons["Start over"].firstMatch.exists, "Start over is offered for a book not started")
-        app.buttons["Want to read"].tap()
+        // Out of the menu by its one harmless row: Reading, which says nothing of a place.
+        statusRow.tap()
+        XCTAssertTrue(app.buttons["Reading"].waitForExistence(timeout: 5), "Reading status has no Reading: \(buttons(app))")
+        app.buttons["Reading"].tap()
         // The reader opens at the first page: neither the hub's place nor this device's is left.
         read({ $0.hasPrefix("Page 1 of") }, "the reader did not open at the beginning")
     }

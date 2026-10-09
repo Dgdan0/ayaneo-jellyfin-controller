@@ -324,11 +324,12 @@ final class PadFocusTests: XCTestCase {
         pressReturn(app)
         XCTAssertTrue(waitLabel(menuTitle(app), "More actions for Dark Matter"),
                       "⋯ did not open its choices: \(focus(app)) · \(menuTitle(app).exists ? menuTitle(app).label : "no menu")")
-        XCTAssertTrue(waitFor(app) { $0.hasSuffix(" choices/finished") }, "the ring did not start on Finished: \(focus(app))")
-        // Down the choices and back: Return on Finished chooses it.
-        press(app, .downArrow)
-        XCTAssertTrue(focus(app).hasSuffix(" choices/want"), "down did not reach Want to read: \(focus(app))")
-        press(app, .upArrow)
+        XCTAssertTrue(waitFor(app) { $0.hasSuffix(" choices/status") }, "the ring did not start on Reading status: \(focus(app))")
+        // Return opens the status's four in place; down them to Finished, which chooses it.
+        pressReturn(app)
+        XCTAssertTrue(waitFor(app) { $0.hasSuffix(" choices/status-want") }, "Reading status did not open its choices: \(focus(app))")
+        press(app, .downArrow, times: 2)
+        XCTAssertTrue(focus(app).hasSuffix(" choices/status-finished"), "down did not reach Finished: \(focus(app))")
         pressReturn(app)
         XCTAssertTrue(app.staticTexts["When did you finish?"].waitForExistence(timeout: 5), "Finished did not open its panel")
         press(app, .downArrow)

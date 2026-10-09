@@ -256,9 +256,10 @@ public enum ReadingShelves {
             }
         }
         var seen = Set<String>()
+        // A book put down (Not reading, #63) or finished is not being read, whatever its place says; one
+        // chosen as Reading stays, even from the end of it.
         let reading = books.filter { work in
-            guard !work.id.trimmingCharacters(in: .whitespaces).isEmpty, let p = work.progress, !p.completed,
-                  p.percentage > 0 else { return false }
+            guard !work.id.trimmingCharacters(in: .whitespaces).isEmpty, ReadingStatus.continues(work) else { return false }
             return seen.insert(work.id).inserted
         }
         return reading.enumerated()
@@ -283,7 +284,7 @@ public enum ReadingShelves {
     public static func onNumber(_ series: ReadingWork) -> String {
         if let number = series.continueAt?.number, !number.trimmingCharacters(in: .whitespaces).isEmpty { return number }
         let books = series.sections.flatMap(\.items)
-        return books.last { ($0.progress?.percentage ?? 0) > 0 && $0.progress?.completed != true }?.number ?? ""
+        return books.last(where: ReadingStatus.continues)?.number ?? ""
     }
 
     /// A series' covers for a fan: the book being read in front, then its
@@ -323,8 +324,10 @@ public enum ReadingShelves {
         let found: [(Int64, SeriesShelfItem)] = collections.compactMap { series in
             guard series.isSeries, seen.insert(series.id).inserted else { return nil }
             let books = series.sections.flatMap(\.items)
-            guard books.contains(where: { ($0.progress?.percentage ?? 0) > 0 || $0.progress?.completed == true }) else { return nil }
-            if !books.isEmpty && books.allSatisfy({ $0.progress?.completed == true }) { return nil }
+            // A book put down is not one begun (#63); one finished by status or import counts though it has no place.
+            guard books.contains(where: { ReadingStatus.of($0) != ReadingStatus.notReading
+                && (($0.progress?.percentage ?? 0) > 0 || ReadingStatus.isFinished($0)) }) else { return nil }
+            if !books.isEmpty && books.allSatisfy(ReadingStatus.isFinished) { return nil }
             let on = onNumber(series)
             let count = series.bookCount > 0 ? series.bookCount : books.count
             let line = [count > 0 ? "\(count) \(count == 1 ? "book" : "books")" : nil, on.isEmpty ? nil : "on #\(on)"]
@@ -343,12 +346,12 @@ public enum ReadingShelves {
         let found: [(Int64, ReadingWork)] = collections.compactMap { series in
             guard series.isSeries else { return nil }
             let books = series.sections.flatMap(\.items)
-            if books.contains(where: { if let p = $0.progress { !p.completed && p.percentage > 0 } else { false } }) {
-                return nil
-            }
-            guard let last = books.lastIndex(where: { $0.progress?.completed == true }) else { return nil }
-            guard let next = books.dropFirst(last + 1).first(where: { $0.isAvailable && $0.progress?.completed != true })
-            else { return nil }
+            if books.contains(where: ReadingStatus.continues) { return nil }
+            guard let last = books.lastIndex(where: ReadingStatus.isFinished) else { return nil }
+            // Not one the person put down: it is not next, it is set aside (#63).
+            guard let next = books.dropFirst(last + 1).first(where: {
+                $0.isAvailable && !ReadingStatus.isFinished($0) && ReadingStatus.of($0) != ReadingStatus.notReading
+            }) else { return nil }
             return (timestamp(books[last].progress?.updatedAt), asWork(next, of: series))
         }
         return stableSortedDescending(found).map(\.1)
@@ -358,12 +361,12 @@ public enum ReadingShelves {
     /// one where the row opens.
     public static func listRow(_ list: ReadingList, resolved: [String: ReadingWork]) -> ReadingShelfRow {
         let items = list.items.map { resolved[$0.workId] ?? snapshot($0) }
-        let next = items.firstIndex { $0.progress?.completed != true } ?? max(items.count - 1, 0)
+        let next = items.firstIndex { !ReadingStatus.isFinished($0) } ?? max(items.count - 1, 0)
         let serverActivity = items.map { timestamp($0.progress?.updatedAt) }.max() ?? 0
         let localActivity = list.items.map(\.lastReadAt).max() ?? 0
         let readActivity = max(serverActivity, localActivity)
         return ReadingShelfRow(id: list.id, title: list.name, items: items, nextIndex: next,
-                               readCount: items.filter { $0.progress?.completed == true }.count,
+                               readCount: items.filter(ReadingStatus.isFinished).count,
                                activity: readActivity > 0 ? readActivity : list.updatedAt,
                                hasReadingActivity: readActivity > 0)
     }
@@ -383,8 +386,10 @@ public enum ReadingShelves {
             ReadingShelfRow(id: nextInSeriesId, title: "Next in series", items: next.filter { !readingIds.contains($0.id) }),
             ReadingShelfRow(id: comics, title: comicsTitle, items: comicRows),
         ].filter { !$0.items.isEmpty }
+        // A book the hub says is being read, finished or put down is off the list, whatever else this device holds (#63).
         let wanted = state.wantToRead.map { resolved[$0.workId] ?? snapshot($0) }.filter { work in
             if let p = work.progress, p.completed || p.percentage > 0 { return false }
+            if ReadingStatus.offTheList.contains(ReadingStatus.of(work)) { return false }
             return !readingIds.contains(work.id)
         }
         let wantRow = ReadingShelfRow(id: ReadingListsState.wantToReadId, title: "Want to Read", items: wanted)
@@ -420,7 +425,8 @@ public enum ReadingShelves {
     static func asWork(_ item: ReadingSectionItem, of series: ReadingWork) -> ReadingWork {
         ReadingWork(id: item.workId, libraryId: series.libraryId, entityType: "work", kind: item.kind, title: item.title,
                     authors: item.authors, series: series.title, seriesIndex: Double(item.number) ?? 0,
-                    artwork: item.artwork.isEmpty ? series.artwork : item.artwork, progress: item.progress)
+                    artwork: item.artwork.isEmpty ? series.artwork : item.artwork, progress: item.progress,
+                    status: item.status)
     }
 
     /// A list entry the hub has not answered for: what the device last saw.

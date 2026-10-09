@@ -196,7 +196,8 @@ struct BookCard: View {
                 .overlay(alignment: .bottomLeading) {
                     if let pill { CoverPill(text: pill).padding(6).padding(.bottom, progress > 0 && progress < 1 ? 10 : 0) }
                 }
-                .overlay(alignment: .topTrailing) { if work.progress?.completed == true { ReadTick().padding(6) } }
+                // The tick is for every finished book (#63): read to the end, marked Finished, or imported as read.
+                .overlay(alignment: .topTrailing) { if ReadingStatus.isFinished(work) { ReadTick().padding(6) } }
                 .litArtwork(corner: 9)
             if caption {
                 CardCaption(title: work.title, detail: detail ?? (ReadingBookFacts.kindTag(work.kind) != nil
@@ -224,11 +225,12 @@ struct SeriesBookCard: View {
         VStack(alignment: .leading, spacing: 8) {
             BookCover(path: item.artwork, square: item.kind == "audiobook", dimmed: !item.isAvailable)
                 .overlay { BookProgressBar(fraction: progress) }
-                .overlay(alignment: .topTrailing) { if item.progress?.completed == true { ReadTick().padding(6) } }
+                .overlay(alignment: .topTrailing) { if ReadingStatus.isFinished(item) { ReadTick().padding(6) } }
                 .litArtwork(corner: 9)
             CardCaption(title: item.title,
                         detail: current ? "This book" : SeriesBookLabels.subtitle(number: item.number, available: item.isAvailable,
-                                                                                 progress: item.progress, formats: item.formats))
+                                                                                 progress: item.progress, formats: item.formats,
+                                                                                 finished: ReadingStatus.isFinished(item)))
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)

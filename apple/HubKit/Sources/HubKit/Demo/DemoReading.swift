@@ -328,10 +328,23 @@ public enum DemoReading {
             fields["seriesIndex"] = work.seriesIndex
         }
         // Started over (#60): not started, wherever it is listed.
-        if work.progress > 0 && DemoStartOver.stamp(work.id) == 0 {
+        let begun = work.progress > 0 && DemoStartOver.stamp(work.id) == 0
+        if begun {
             fields["progress"] = progressFields(work.progress, updatedAt: work.updatedAt)
         }
+        // The reading status the hub stamps on every work (#63).
+        if work.entityType != "collection" {
+            let status = DemoBookPage.status(workId: work.id, percentage: begun ? work.progress : 0)
+            if !status.isEmpty { fields["status"] = status }
+        }
         return fields
+    }
+
+    /// A book's place as the demo lists it, for the reading status a `PATCH …/you` answers with (#63).
+    static func progressOf(_ workId: String) -> ReadingProgress? {
+        guard DemoStartOver.stamp(workId) == 0 else { return nil }
+        if let work = findWork(workId), work.progress > 0 { return ReadingProgress(percentage: work.progress) }
+        return nil
     }
 
     private static func detailFields(_ work: Work) -> [String: Any] {
@@ -356,8 +369,13 @@ public enum DemoReading {
                                            "authors": work.authors.map(\.name), "availability": book.available ? "available" : "missing",
                                            "formats": book.formats]
                 if book.pages > 0 { item["pageCount"] = book.pages }
-                if book.progress > 0 && DemoStartOver.stamp(book.workId) == 0 {
+                let begun = book.progress > 0 && DemoStartOver.stamp(book.workId) == 0
+                if begun {
                     item["progress"] = progressFields(book.progress, updatedAt: book.updatedAt)
+                }
+                if !book.workId.isEmpty {
+                    let status = DemoBookPage.status(workId: book.workId, percentage: begun ? book.progress : 0)
+                    if !status.isEmpty { item["status"] = status }
                 }
                 return item
             }]]

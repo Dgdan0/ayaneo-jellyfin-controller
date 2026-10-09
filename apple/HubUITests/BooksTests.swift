@@ -120,23 +120,24 @@ final class BooksTests: XCTestCase {
 
     // MARK: A book
 
-    /// ⋯ › Want to read (#39 moved it there) puts a book on Home's row and takes it off.
+    /// ⋯ › Reading status › Want to read (#63) puts a book on Home's row, and
+    /// another status takes it off.
     @MainActor
     func testWantToReadPutsABookOnHomesRowAndTakesItOff() {
         let app = launch("home", open: "book:rw_demo_recursion")
         let more = app.buttons["More actions for Recursion"]
         XCTAssertTrue(more.waitForExistence(timeout: 15), "the book page did not open: \(buttons(app))")
-        func want() {
+        func status(_ choice: String) {
             app.buttons["More actions for Recursion"].tap()
-            let item = app.buttons["Want to read"]
-            XCTAssertTrue(item.waitForExistence(timeout: 5), "⋯ has no Want to read: \(buttons(app))")
+            let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Reading status'")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 5), "⋯ has no Reading status: \(buttons(app))")
+            row.tap()
+            let item = app.buttons[choice]
+            XCTAssertTrue(item.waitForExistence(timeout: 5), "Reading status has no \(choice): \(buttons(app))")
             item.tap()
         }
-        // From whatever an earlier run left: on, then checked on Home.
-        want()
-        let added = text(app, containing: "Added to Want to Read")
-        if !added.waitForExistence(timeout: 3) { want() }
-        XCTAssertTrue(added.waitForExistence(timeout: 5))
+        status("Want to read")
+        XCTAssertTrue(text(app, containing: "Reading status · Want to read").waitForExistence(timeout: 5))
 
         app.buttons["Home"].firstMatch.tap()
         app.buttons["Home"].firstMatch.tap()
@@ -146,8 +147,8 @@ final class BooksTests: XCTestCase {
         XCTAssertTrue(reveal(card, in: app), "Recursion is not on Want to Read: \(buttons(app))")
         card.tap()
         XCTAssertTrue(app.buttons["More actions for Recursion"].waitForExistence(timeout: 10))
-        want()
-        XCTAssertTrue(text(app, containing: "Removed from Want to Read").waitForExistence(timeout: 5))
+        status("Reading")
+        XCTAssertTrue(text(app, containing: "Reading status · Reading").waitForExistence(timeout: 5))
     }
 
     @MainActor
