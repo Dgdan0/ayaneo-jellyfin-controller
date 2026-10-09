@@ -43,6 +43,9 @@ type epubUpstreamState struct {
 	// the book's file in Storyteller's filesystem. Empty is the bare ebook that
 	// older tests use, which has no path.
 	ebookJSON string
+	// bookUUID is book 12's uuid beside an audio edition, which names its read-along pack
+	// (#66); empty is "book-12", which names none.
+	bookUUID string
 	// positions, when set, is Storyteller's real position table for book 12,
 	// with the rules of its database/positions.ts, in place of the fixed
 	// locator and the one-shot conflict switch of the older tests.
@@ -148,7 +151,11 @@ func newEpubUpstream(t *testing.T, state *epubUpstreamState) *httptest.Server {
 				if state.readaloudJSON != "" {
 					readaloud = `,"readaloud":` + state.readaloudJSON
 				}
-				_, _ = io.WriteString(w, `{"id":12,"uuid":"book-12","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"narrators":`+narrators+
+				bookUUID := state.bookUUID
+				if bookUUID == "" {
+					bookUUID = "book-12"
+				}
+				_, _ = io.WriteString(w, `{"id":12,"uuid":"`+bookUUID+`","title":"Red Rising","authors":[{"name":"Pierce Brown"}],"narrators":`+narrators+
 					`,"series":[{"uuid":"series-red","name":"Red Rising","position":1}],"ebook":`+ebook+`,"audiobook":`+state.audio+readaloud+`}`)
 				return
 			}

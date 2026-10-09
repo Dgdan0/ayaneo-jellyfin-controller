@@ -453,9 +453,9 @@ func TestAudioManifestReadsEachEditionOnceAndAgainWhenItChanges(t *testing.T) {
 	env := newAlignedTrackedEnv(t, alignedOptions{})
 	var reads atomic.Int32
 	real := env.server.readAlignment
-	env.server.readAlignment = func(file io.ReaderAt, size int64) (*readingdomain.Alignment, error) {
+	env.server.readAlignment = func(file io.ReaderAt, size int64, overlay *readingdomain.Overlay) (*readingdomain.Alignment, error) {
 		reads.Add(1)
-		return real(file, size)
+		return real(file, size, overlay)
 	}
 	first := env.manifest()
 	env.forget()

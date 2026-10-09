@@ -29,6 +29,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"ayaneohub/internal/adapters/storyteller"
 	readingdomain "ayaneohub/internal/reading"
 )
 
@@ -41,8 +42,9 @@ var slimUnavailableMessages = map[string]string{
 
 // serveSlimReadaloud answers `?format=readaloud&audio=omit`. ctx is the budget
 // for finding the edition and, when it has not been done for this file, reading
-// its text.
-func (s *Server) serveSlimReadaloud(w http.ResponseWriter, r *http.Request, ctx context.Context, bookID int64, byteRange string) {
+// its text. granularity is the set of the book's read-along pack it is made with,
+// when it has one that can be used (reading_readalong.go, #66).
+func (s *Server) serveSlimReadaloud(w http.ResponseWriter, r *http.Request, ctx context.Context, bookID int64, byteRange, granularity string) {
 	record, _, err := s.storytellerBookRecord(ctx, bookID)
 	if err != nil {
 		writeStorytellerError(w, r, err)
@@ -60,7 +62,7 @@ func (s *Server) serveSlimReadaloud(w http.ResponseWriter, r *http.Request, ctx 
 	}
 	defer file.Close()
 
-	copied, err := s.epubCopyOf(ctx, file, readingdomain.CopyOptions{OmitAudio: true, Restyle: true, MendNarration: true}, "slim", book.ID)
+	copied, err := s.readaloudCopy(ctx, book, file, readingdomain.CopyOptions{OmitAudio: true, Restyle: true, MendNarration: true}, "slim", granularity)
 	if err != nil {
 		switch {
 		case errors.Is(err, readingdomain.ErrCopyTooLarge):
@@ -87,7 +89,7 @@ func writeEditionNotReady(w http.ResponseWriter, r *http.Request) {
 // not mapped or not there, the copy would hold too much), nothing has been
 // written and Storyteller's file goes through as it always did. The reason is
 // logged, and names no path.
-func (s *Server) serveWholeReadaloud(w http.ResponseWriter, r *http.Request, ctx context.Context, bookID int64, byteRange string) bool {
+func (s *Server) serveWholeReadaloud(w http.ResponseWriter, r *http.Request, ctx context.Context, bookID int64, byteRange, granularity string) bool {
 	unavailable := func(reason string) bool {
 		slog.Warn("read-along reading copy unavailable, passing Storyteller's file through", "book", bookID, "reason", reason, "requestId", RequestIDFrom(r.Context()))
 		return false
@@ -105,7 +107,7 @@ func (s *Server) serveWholeReadaloud(w http.ResponseWriter, r *http.Request, ctx
 		return unavailable(reason)
 	}
 	defer file.Close()
-	copied, err := s.epubCopyOf(ctx, file, readingdomain.CopyOptions{Restyle: true, MendNarration: true}, "readaloud", book.ID)
+	copied, err := s.readaloudCopy(ctx, book, file, readingdomain.CopyOptions{Restyle: true, MendNarration: true}, "readaloud", granularity)
 	switch {
 	case err == nil:
 		s.serveEPUBCopy(w, r, copied, file, byteRange)
@@ -119,6 +121,43 @@ func (s *Server) serveWholeReadaloud(w http.ResponseWriter, r *http.Request, ctx
 		return true
 	}
 	return unavailable(alignReasonUnreadable)
+}
+
+// readaloudCopy is the reading copy of a read-along edition, made with the set of
+// the book's pack that granularity asks for when there is one that can be used
+// (copyOverlay, #66). A copy that cannot be made with the set (a pack that cannot be
+// read after all, one that would hold too much) is made without it: the edition as
+// it was served before there were packs. Only the end of ctx stops that.
+func (s *Server) readaloudCopy(ctx context.Context, book storyteller.Book, file readingdomain.MediaFile, options readingdomain.CopyOptions, kind, granularity string) (*epubCopy, error) {
+	overlay, err := s.copyOverlay(ctx, book, file, granularity)
+	if err != nil {
+		return nil, err
+	}
+	if overlay != nil {
+		options.Overlay = overlay
+		copied, err := s.epubCopyOf(ctx, file, options, kind, book.ID)
+		if err == nil || ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return copied, err
+		}
+		slog.Warn("read-along pack could not be applied, serving the edition as it is", "book", book.ID, "granularity", overlay.Granularity, "kind", kind, "reason", copyFailure(err))
+		options.Overlay = nil
+	}
+	return s.epubCopyOf(ctx, file, options, kind, book.ID)
+}
+
+// copyFailure names why a copy failed, for the log, in words that name no path.
+func copyFailure(err error) string {
+	switch {
+	case errors.Is(err, readingdomain.ErrCopyTooLarge):
+		return "too_large"
+	case errors.Is(err, readingdomain.ErrOverlayMismatch):
+		return "pack_does_not_fit"
+	case errors.Is(err, readingdomain.ErrNotAnEPUB):
+		return "not_an_epub"
+	case errors.Is(err, readingdomain.ErrBadAlignment):
+		return "pack_unreadable"
+	}
+	return "unreadable"
 }
 
 func (s *Server) writeSlimUnavailable(w http.ResponseWriter, r *http.Request, bookID int64, reason string) {

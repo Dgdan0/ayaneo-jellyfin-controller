@@ -58,9 +58,15 @@ type epubCopy struct {
 }
 
 // epubCopyKey names a copy as its file was when it was read: a different size or
-// time is a different book.
-func epubCopyKey(kind string, file readingdomain.MediaFile) string {
-	return "epub-copy:" + kind + ":" + file.Path + "\x00" + strconv.FormatInt(file.Size, 10) + "\x00" + strconv.FormatInt(file.ModTime.UnixNano(), 10)
+// time is a different book. A copy made with a read-along pack's set (#66) is named
+// by the set too, its granularity and its fingerprint, so the sentence and the word
+// copies are two, and a pack built again is copied again.
+func epubCopyKey(kind string, file readingdomain.MediaFile, overlay *readingdomain.Overlay) string {
+	key := "epub-copy:" + kind + ":" + file.Path + "\x00" + strconv.FormatInt(file.Size, 10) + "\x00" + strconv.FormatInt(file.ModTime.UnixNano(), 10)
+	if overlay != nil {
+		key += "\x00" + overlay.Granularity + "\x00" + overlay.Fingerprint
+	}
+	return key
 }
 
 // epubCopyOf plans the copy of an open EPUB, or finds it planned. ctx is the
@@ -69,7 +75,7 @@ func epubCopyKey(kind string, file readingdomain.MediaFile) string {
 // the log (never the path).
 func (s *Server) epubCopyOf(ctx context.Context, file readingdomain.MediaFile, options readingdomain.CopyOptions, kind string, book int64) (*epubCopy, error) {
 	options.MaxHeld = maxEPUBCopyBytes
-	built, _, err := cache.Fetch(ctx, s.cache, epubCopyKey(kind, file), cache.ReadingEPUBCopy,
+	built, _, err := cache.Fetch(ctx, s.cache, epubCopyKey(kind, file, options.Overlay), cache.ReadingEPUBCopy,
 		func(fetchCtx context.Context) (*epubCopy, error) {
 			// Whoever asks first builds it for everyone asking while it is built.
 			buildCtx, cancel := context.WithTimeout(context.WithoutCancel(fetchCtx), copyBudget(file, options))
@@ -81,7 +87,7 @@ func (s *Server) epubCopyOf(ctx context.Context, file readingdomain.MediaFile, o
 			report := plan.Report
 			slog.Info("built a reading copy", "kind", kind, "book", book, "bytes", plan.Size, "held", plan.Held(),
 				"fontSizes", report.FontSizes, "lineHeights", report.LineHeights, "styled", report.Styled, "languages", report.Languages, "aligned", report.Aligned, "fontsDecoded", report.FontsDecoded, "fontKeysRecovered", report.KeysRecovered, "edited", report.Edited,
-				"omitted", len(report.Omitted), "left", len(report.Left), "fixedLayout", report.FixedLayout, "mended", report.Mended)
+				"omitted", len(report.Omitted), "left", len(report.Left), "fixedLayout", report.FixedLayout, "mended", report.Mended, "overlaid", report.Overlaid)
 			return &epubCopy{plan: plan, hash: hex.EncodeToString(plan.SHA256[:])}, nil
 		})
 	return built, err

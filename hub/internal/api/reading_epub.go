@@ -14,6 +14,7 @@ import (
 	"ayaneohub/internal/adapters/storyteller"
 	"ayaneohub/internal/cache"
 	"ayaneohub/internal/httpx"
+	readingdomain "ayaneohub/internal/reading"
 )
 
 var singleByteRange = regexp.MustCompile(`^bytes=(?:[0-9]+-[0-9]*|-[0-9]+)$`)
@@ -71,6 +72,17 @@ func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
 		}
 		omitAudio = true
 	}
+	// granularity picks the set of the book's read-along pack the edition is served with (#66,
+	// reading_readalong.go): the sentences (the default, and what today's apps get) or the words.
+	granularity := readingdomain.GranularitySentence
+	if value := r.URL.Query().Get("granularity"); value != "" {
+		parsed, valid := readingGranularity(value)
+		if !valid || format != "readaloud" {
+			writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "granularity is sentence or word, for the read-along edition only"})
+			return
+		}
+		granularity = parsed
+	}
 	byteRange, ifRange, ok := requireSingleByteRange(w, r)
 	if !ok {
 		return
@@ -78,13 +90,13 @@ func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := timeoutFor(r, s.cfg.Server.RequestTimeout.OrDefault(25*time.Second))
 	bookID, ok := s.resolveStorytellerEbook(w, r, ctx)
 	if ok && omitAudio {
-		s.serveSlimReadaloud(w, r, ctx, bookID, byteRange)
+		s.serveSlimReadaloud(w, r, ctx, bookID, byteRange, granularity)
 	}
 	// The ebook is served as the reading copy of the file on this PC (reading_epub_copy.go).
 	// When that cannot be, nothing has been written and Storyteller's file goes through.
 	copied := ok && !omitAudio && (format == "" || format == "ebook") && s.serveReadingCopy(w, r, ctx, bookID, byteRange)
 	// So is the whole read-along edition (reading_audio_slim.go).
-	copied = copied || ok && !omitAudio && format == "readaloud" && s.serveWholeReadaloud(w, r, ctx, bookID, byteRange)
+	copied = copied || ok && !omitAudio && format == "readaloud" && s.serveWholeReadaloud(w, r, ctx, bookID, byteRange, granularity)
 	cancel()
 	if !ok || omitAudio || copied {
 		return

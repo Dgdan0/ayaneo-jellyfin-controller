@@ -20,7 +20,6 @@ import (
 	"strconv"
 	"strings"
 
-	"ayaneohub/internal/cache"
 	readingdomain "ayaneohub/internal/reading"
 
 	"ayaneohub/internal/adapters/storyteller"
@@ -268,17 +267,20 @@ func (s *Server) alignPlan(ctx context.Context, book storyteller.Book, plan *aud
 	}
 	defer file.Close()
 
-	narration, _, err := cache.Fetch(ctx, s.cache, alignmentKey(file), cache.ReadingAlignment,
-		func(fetchCtx context.Context) (*readingdomain.Alignment, error) {
-			narration, err := s.readAlignment(contextReaderAt{ReaderAt: file, ctx: fetchCtx}, file.Size)
-			if err == nil && fetchCtx.Err() != nil {
-				// The edition's contents are read last and an edition without them is still
-				// an edition, so a read cut short there would succeed without them and be
-				// kept, for hours, as the edition's.
-				return nil, fetchCtx.Err()
-			}
-			return narration, err
-		})
+	// The book's read-along pack (#66): its sentence set is the narration when it narrates the
+	// edition's pieces, and its word set is offered when that does too.
+	pack := s.readalongPack(book, file)
+	sentenceSet, wordSet := pack.Overlay(readingdomain.GranularitySentence), pack.Overlay(readingdomain.GranularityWord)
+	for _, set := range []**readingdomain.Overlay{&sentenceSet, &wordSet} {
+		usable, err := s.overlayUsable(ctx, book.ID, file, *set)
+		if err != nil {
+			return err
+		}
+		if !usable {
+			*set = nil
+		}
+	}
+	narration, err := s.narrationOf(ctx, file, sentenceSet)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -309,6 +311,18 @@ func (s *Server) alignPlan(ctx context.Context, book storyteller.Book, plan *aud
 			"tracks", len(plan.tracks), "unnarratedTracks", mapped.unnarrated, "sentencesPastEnd", narration.PastEnd, "sentencesCutAtEnd", narration.CutAtEnd)
 	}
 	mapped.edition = strconv.FormatInt(file.Size, 10) + "\x00" + strconv.FormatInt(file.ModTime.UnixNano(), 10)
+	// A pack's sets are part of what the manifest says: the sentences its places are read by, and
+	// whether the words can be asked for. A pack built again is another revision.
+	if sentenceSet != nil {
+		mapped.edition += "\x00sentence\x00" + sentenceSet.Fingerprint
+	}
+	if wordSet != nil {
+		mapped.edition += "\x00word\x00" + wordSet.Fingerprint
+		plan.wordLevel = true
+	}
+	if sentenceSet != nil || wordSet != nil {
+		slog.Info("read-along pack in use", "book", book.ID, "sentences", sentenceSet != nil, "words", wordSet != nil)
+	}
 	plan.alignment = mapped
 	plan.revision = audioRevision(plan.tracks, mapped.edition)
 	// The edition's own table of contents, placed by its narration, is the book's

@@ -403,9 +403,9 @@ func TestAudioPlanKeepsNoEditionReadWhileItsRequestEnded(t *testing.T) {
 	real := env.server.readAlignment
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	env.server.readAlignment = func(file io.ReaderAt, size int64) (*readingdomain.Alignment, error) {
+	env.server.readAlignment = func(file io.ReaderAt, size int64, overlay *readingdomain.Overlay) (*readingdomain.Alignment, error) {
 		reads.Add(1)
-		narration, err := real(file, size)
+		narration, err := real(file, size, overlay)
 		cancel()
 		return narration, err
 	}

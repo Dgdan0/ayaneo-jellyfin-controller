@@ -40,6 +40,11 @@ type CopyOptions struct {
 	// MaxHeld is the most a plan keeps in memory: the entries it rewrote, its zip
 	// headers and the small entries copied as they were. Zero is no limit.
 	MaxHeld int64
+	// Overlay is one set of a read-along pack (readalong_pack.go, #66): each entry it
+	// holds is written in place of the edition's of the same name (and restyled, mended,
+	// as the edition's would be), and everything else is copied as it was. Every entry it
+	// holds must be one of the edition's (ErrOverlayMismatch). Nil is the edition as it is.
+	Overlay *Overlay
 }
 
 // CopyReport says what a copy did, in counts and in entry names (never a path).
@@ -73,6 +78,8 @@ type CopyReport struct {
 	// Mended is how many sentences of a read-along edition's SMIL were given no
 	// length or ended at the end of their audio (MendNarration).
 	Mended int
+	// Overlaid is how many entries a read-along pack's set replaced (Overlay).
+	Overlaid int
 	// Edited is how many entries have other bytes than they had.
 	Edited int
 	// FixedLayout: the package is pre-paginated, whose pages are laid out by the
@@ -255,6 +262,15 @@ func PlanReadingEPUB(src io.ReaderAt, size int64, options CopyOptions) (*EPUBCop
 	if err != nil || len(archive.File) > maxEntries {
 		return nil, ErrNotAnEPUB
 	}
+	if options.Overlay != nil {
+		names := make(map[string]bool, len(archive.File))
+		for _, entry := range archive.File {
+			names[entry.Name] = true
+		}
+		if err := options.Overlay.fits(func(name string) bool { return names[name] }); err != nil {
+			return nil, err
+		}
+	}
 	sink := &copySink{sum: sha256.New(), limit: options.MaxHeld}
 	writer := zip.NewWriter(sink)
 	if err := writer.SetComment(archive.Comment); err != nil {
@@ -278,11 +294,17 @@ func PlanReadingEPUB(src io.ReaderAt, size int64, options CopyOptions) (*EPUBCop
 	}
 	var mend *narrationMend
 	if options.MendNarration {
-		mend = planNarrationMend(src, size)
+		mend = planNarrationMend(src, size, options.Overlay)
 	}
 	for _, entry := range archive.File {
 		if _, audio := AudioKindOf(entry.Name); audio && options.OmitAudio {
 			report.Omitted = append(report.Omitted, entry.Name)
+			continue
+		}
+		if options.Overlay.Has(entry.Name) {
+			if err := overlayEntry(writer, entry, options.Overlay, kinds[entry.Name], language, styles, mend, &report); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		if mend != nil {
@@ -322,6 +344,51 @@ func PlanReadingEPUB(src io.ReaderAt, size int64, options CopyOptions) (*EPUBCop
 	copied := &EPUBCopy{Size: sink.size, Report: report, pieces: sink.pieces, held: sink.held}
 	copy(copied.SHA256[:], sink.sum.Sum(nil))
 	return copied, nil
+}
+
+// overlayEntry writes a read-along pack's entry in place of the edition's (#66), as
+// the edition's would have been written: a SMIL mended as the narration says, a
+// document restyled (one that cannot be restyled goes as the pack has it). It is
+// always deflated, under the header the edition's entry had.
+func overlayEntry(writer *zip.Writer, entry *zip.File, overlay *Overlay, kind entryKind, language string, styles *bookStyles, mend *narrationMend, report *CopyReport) error {
+	data, err := overlay.read(entry.Name)
+	if err != nil {
+		return err
+	}
+	if mend != nil && mend.overlays[entry.Name] {
+		mended, count := mendSMIL(data, entry.Name, mend.ends)
+		data = mended
+		report.Mended += count
+	}
+	if kind != kindOther && !report.FixedLayout {
+		var rewritten []byte
+		var result documentResult
+		if kind == kindSheet {
+			rewritten, result = restyleSheet(data)
+		} else {
+			rewritten, result = restyleDocument(data, documentContext{language: language, name: entry.Name, styles: styles})
+		}
+		if result.left != "" {
+			report.Left = append(report.Left, LeftAlone{entry.Name, result.left})
+		} else {
+			data = rewritten
+			report.FontSizes += result.fontSizes
+			report.LineHeights += result.lineHeights
+			if result.styled {
+				report.Styled++
+			}
+			if result.language {
+				report.Languages++
+			}
+			report.Aligned += result.aligned
+		}
+	}
+	if err := writeRewritten(writer, entry, zip.Deflate, data); err != nil {
+		return err
+	}
+	report.Overlaid++
+	report.Edited++
+	return nil
 }
 
 // WriteReadingEPUB writes the copy PlanReadingEPUB plans to dst, and says what it

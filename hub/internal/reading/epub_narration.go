@@ -27,11 +27,12 @@ type narrationMend struct {
 	overlays map[string]bool
 }
 
-// planNarrationMend reads the edition's narration and answers what its SMIL must
-// say differently, or nil when nothing (an edition that is not read-along, one
-// that cannot be read, one with no sentence past the end of its audio).
-func planNarrationMend(src io.ReaderAt, size int64) *narrationMend {
-	alignment, err := ReadAlignment(src, size)
+// planNarrationMend reads the edition's narration, as overlay rewrites it when
+// there is one (#66), and answers what its SMIL must say differently, or nil when
+// nothing (an edition that is not read-along, one that cannot be read, one with no
+// sentence past the end of its audio: a pack's sets never have one).
+func planNarrationMend(src io.ReaderAt, size int64, overlay *Overlay) *narrationMend {
+	alignment, err := ReadOverlaidAlignment(src, size, overlay)
 	if err != nil || len(alignment.audioEnds) == 0 {
 		return nil
 	}

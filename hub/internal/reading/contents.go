@@ -18,7 +18,6 @@ package reading
 // or declares a DTD gives no contents.
 
 import (
-	"archive/zip"
 	"bytes"
 	"encoding/xml"
 	"sort"
@@ -87,13 +86,13 @@ const ncxMediaType = "application/x-dtbncx+xml"
 // readContents reads the table of contents the package names: its EPUB 3
 // navigation document, else its NCX. An edition that has neither, or whose
 // contents cannot be read, has none: that is not an error of its narration.
-func readContents(entries map[string]*zip.File, packagePath string, items map[string]packageItem, order []string, ncxID string) []ContentsEntry {
+func readContents(entries archive, packagePath string, items map[string]packageItem, order []string, ncxID string) []ContentsEntry {
 	read := func(item packageItem, parse func([]byte, string) ([]ContentsEntry, error)) []ContentsEntry {
 		documentPath, _, ok := resolveRef(packagePath, item.href)
 		if !ok {
 			return nil
 		}
-		data, err := readXMLEntry(entries, documentPath)
+		data, err := entries.xml(documentPath)
 		if err != nil {
 			return nil
 		}
@@ -320,7 +319,7 @@ func cleanTitle(raw string) string {
 // document has nothing to begin with, the first narrated sentence of the documents
 // after it that no entry points at. An entry with none is not narrated and has no
 // chapter.
-func (a *Alignment) placeChapters(entries map[string]*zip.File) []Chapter {
+func (a *Alignment) placeChapters(entries archive) []Chapter {
 	if len(a.Contents) == 0 {
 		return nil
 	}
@@ -392,11 +391,10 @@ func (a *Alignment) placeChapters(entries map[string]*zip.File) []Chapter {
 			return found
 		}
 		scanned[document] = nil
-		file := entries[document]
-		if file == nil || int64(file.UncompressedSize64) > budget {
+		if !entries.has(document) || entries.size(document) > budget {
 			return nil
 		}
-		data, err := readXMLEntry(entries, document)
+		data, err := entries.xml(document)
 		if err != nil {
 			return nil
 		}
