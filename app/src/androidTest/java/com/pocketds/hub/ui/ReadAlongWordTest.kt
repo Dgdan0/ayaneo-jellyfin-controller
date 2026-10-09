@@ -343,6 +343,8 @@ class ReadAlongWordTest {
             delay(400)
             withContext(Dispatchers.Main) {
                 android.util.Log.i("WORDTEST", "setting opened, focus on ${panel.findFocus()?.tag}")
+                // Not the row the Themes tab was left on: its rows are another page's.
+                assertEquals("the cursor starts on the page's own theme", "highlight-theme:${EpubTheme.SEPIA}", panel.findFocus()?.tag)
                 val rect = android.graphics.Rect()
                 for (tag in listOf("highlight-theme:${EpubTheme.SEPIA}", "highlight-preview")) {
                     val view = find(panel, tag)!!
@@ -401,8 +403,10 @@ class ReadAlongWordTest {
             assertEquals(ReadAlongWordHighlight.defaultLook(EpubTheme.SEPIA), kept.of(EpubTheme.SEPIA))
             assertEquals(HighlightLook(HighlightColor.LAVENDER, 40), kept.of(EpubTheme.BLACK))
             until("the default written to disk") { !file.readText().contains("readalong.color.SEPIA") }
-            // B goes back to the Themes tab.
+            // B goes back to the Themes tab, onto the row the page was opened from.
             withContext(Dispatchers.Main) { assertTrue(panel.onPad(PadAction.Back)); assertNotNull(find(panel, "highlight")) }
+            ins.waitForIdleSync(); delay(200)
+            withContext(Dispatchers.Main) { assertEquals("highlight", panel.findFocus()?.tag) }
         } finally {
             ReadAlongHighlightStore.save(activity, original)
             withContext(Dispatchers.Main) { activity.finish() }

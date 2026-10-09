@@ -95,7 +95,9 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
         val focusKey = findFocus()?.tag
         resetBody()
         val tab = when (section) { "spacing" -> "font"; "highlight" -> "themes"; else -> section }
-        tabs(listOf("font" to "Font", "layout" to "Layout", "themes" to "Themes", "info" to "Page info"), tab, dividers = true) { section = it; render() }
+        // The highlight's page is a menu of its own: the Themes row it was opened from is not one of its rows.
+        tabs(listOf("font" to "Font", "layout" to "Layout", "themes" to "Themes", "info" to "Page info"), tab, dividers = true,
+            page = if (section == "highlight") section else tab) { section = it; render() }
         // Kindle's brightness, fixed at the foot of every tab (#47).
         if (hasBrightness) footer.addView(ValueAdjusterView(context, colors, "Brightness", ScreenComfort.BRIGHTNESS_RANGE, brightness, ScreenComfort::brightnessLabel, AdjusterStyle.FOOT) {
             brightness = it; brightnessChanged(it)
@@ -185,7 +187,7 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
                 choice("Reset text style", EpubLayoutPolicy.textStyleSummary()) { update(EpubLayoutPolicy.resetTextStyle(value)) }.tag = "reset-text-style"
             }
         }
-        // The highlight's page opens on the theme being set, at its top: the row the Themes tab last chose is another page's.
+        // The highlight's page opens on the theme being set, at its top.
         focusBody(getFocusables(FOCUS_FORWARD).firstOrNull { focusKey != null && it.tag == focusKey }
             ?: if (section == "highlight") findViewWithTag<View>("highlight-theme:$highlightTheme") else null)
     }
