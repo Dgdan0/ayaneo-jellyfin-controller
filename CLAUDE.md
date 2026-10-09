@@ -706,6 +706,7 @@ Most of these exist because several screens had drifted copies of the same thing
 | A Glass button's face: glass, or white while lit | `ui/glass/GlassButtonBackground` (`attach(view, colors, corner, ring, lit)`, then `lit`): `PillButton` and `DetailStyler.glassToggle`, a title's round toggles that turn white while on; one GlassPage.follow per view |
 | A rounded or round drawable from palette colours | `ThemeGradientDrawable.rounded` / `.oval`: inside `ThemeGradientDrawable().apply {}` a bare `colors` is GradientDrawable's own array |
 | Fading the page colour into artwork | `ui/ScrimDrawable` |
+| Each Readium decoration once on the page (a highlight applied while its page loaded was drawn twice, and Remove left one) | `reader/DecorationsOnce` (`script`, `run` over every loaded page; the reader's `keepDecorationsOnce` after a draw and on a page change) |
 | A vertical list of places with the blob (Settings' sections) | `ui/SideNavView` (each place has its icon, `Item.icon`, and the chosen one is lit white) |
 | A settings panel, an on/off row, colour swatches | `ui/SettingsCard`, `SwitchRowView`, `SwatchRowView`. The card is the prototype's (`.scard2`, `.dcard`): page glass with 15dp corners, and `attention(true)` edges it in amber; Activity, Server monitor and Settings take them from here |
 | How subtitles look | `SubtitleSettings` (style, size, lift) applied by `playback/SubtitleLooks` in the player and the Settings preview |
