@@ -164,10 +164,11 @@ struct BookView: View {
     }
 
     @ViewBuilder private func cover(_ work: ReadingWork) -> some View {
-        if work.isSeries {
-            CoverFan(covers: ReadingShelves.fanCovers(work), coverWidth: metrics.short ? 80 : metrics.centred ? 96 : 118)
+        if work.isSeries, let plan = SeriesFan.plan(work, maxSlots: SeriesFan.smallSlots) {
+            // Its books fanned as in the Series view (#54), three of them about the one you are on.
+            SeriesFanView(plan: plan, cover: metrics.short ? 72 : metrics.centred ? 88 : 104, slots: SeriesFan.smallSlots)
         } else {
-            let square = work.kind == "audiobook"
+            let square = ReadingBookFacts.coverShape(work) == .square
             BookCover(path: work.artwork, square: square, width: 600)
                 .overlay(alignment: .bottomLeading) {
                     if let kind = ReadingBookFacts.kindTag(work.kind) { CoverPill(text: kind).padding(8) }
@@ -618,7 +619,8 @@ struct BookView: View {
                     RowHeading(title: work.isSeries && shown.count == 1 ? "In reading order" : section.title,
                                count: work.isSeries ? nil : "\(section.items.count)")
                         .padding(.horizontal, metrics.margin)
-                    SeriesBookStrip(items: section.items, current: work.id, pad: "section-\(index)")
+                    SeriesBookStrip(items: section.items, current: work.id, pad: "section-\(index)",
+                                    start: work.isSeries ? route.startNumber : nil)
                 }
                 .padding(.top, 20)
             }

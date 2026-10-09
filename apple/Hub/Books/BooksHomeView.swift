@@ -176,13 +176,18 @@ struct BooksHomeView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: metrics.small ? 4 : 10) {
                     ForEach(series) { item in
-                        let width: CGFloat = metrics.small ? 80 : 96
+                        // Three of its books about the one you are on, as the Series view fans them (#54).
+                        let cover: CGFloat = metrics.small ? 60 : 72
+                        let box = SeriesFanView.box(cover: cover, slots: SeriesFan.smallSlots)
+                        let width = SeriesFan.fanWidth(cover: cover, slots: SeriesFan.smallSlots)
                         NavigationLink(value: AppRoute.book(BookRoute(workId: item.id, title: item.title))) {
                             VStack(alignment: .leading, spacing: 10) {
-                                CoverFan(covers: item.covers, coverWidth: width)
+                                if let plan = item.plan {
+                                    SeriesFanView(plan: plan, cover: cover, slots: SeriesFan.smallSlots, room: width / 2)
+                                        .frame(width: width, height: box.height)
+                                }
                                 CardCaption(title: item.title, detail: item.line)
-                                    .padding(.leading, CoverFan.inset(coverWidth: width))
-                                    .frame(width: CoverFan.size(coverWidth: width).width, alignment: .leading)
+                                    .frame(width: width, alignment: .leading)
                             }
                             .contentShape(Rectangle())
                         }
@@ -192,7 +197,7 @@ struct BooksHomeView: View {
                         .padFocusable(item.id, ring: .card) { openRoute(.book(BookRoute(workId: item.id, title: item.title))) }
                     }
                 }
-                .padding(.horizontal, max(0, metrics.margin - CoverFan.inset(coverWidth: metrics.small ? 80 : 96)))
+                .padding(.horizontal, metrics.margin)
                 .padding(.top, 18)
                 .padding(.bottom, 18)
             }
@@ -531,7 +536,7 @@ struct ContinueReadingHero: View {
             : AnyLayout(HStackLayout(alignment: .bottom, spacing: metrics.small ? 20 : 30))
         layout {
             NavigationLink(value: AppRoute.book(BookRoute(workId: work.id, title: work.title))) {
-                BookCover(path: work.artwork, square: work.kind == "audiobook", width: 480)
+                BookCover(path: work.artwork, square: ReadingBookFacts.coverShape(work) == .square, width: 480)
                     .frame(width: metrics.short ? 120 : metrics.centred ? 170 : 196)
                     .shadow(color: .black.opacity(0.55), radius: 30, y: 34)
                     .litArtwork(corner: 12)
@@ -608,7 +613,7 @@ struct AlsoReadingRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            BookCover(path: work.artwork, square: work.kind == "audiobook", width: 160)
+            BookCover(path: work.artwork, square: ReadingBookFacts.coverShape(work) == .square, width: 160)
                 .frame(width: 52)
                 .shadow(color: .black.opacity(0.4), radius: 8, y: 8)
             VStack(alignment: .leading, spacing: 4) {

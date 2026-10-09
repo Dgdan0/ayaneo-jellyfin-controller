@@ -362,19 +362,16 @@ struct ReadingWorksGrid: View {
             StatusLine(message: status) { Task { await loadNext(retry: true) } }
                 .padding(.horizontal, metrics.margin)
                 .padding(.top, 8)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: metrics.small ? 100 : 112, maximum: 180),
-                                         spacing: metrics.small ? 12 : 18, alignment: .top)],
-                      alignment: .leading, spacing: 20) {
+            LazyVGrid(columns: [fans ? GridItem(.adaptive(minimum: Self.fanCell(metrics), maximum: Self.fanCell(metrics) * 1.3),
+                                                spacing: metrics.small ? 8 : 14, alignment: .top)
+                                     : GridItem(.adaptive(minimum: metrics.small ? 100 : 112, maximum: 180),
+                                                spacing: metrics.small ? 12 : 18, alignment: .top)],
+                      alignment: .leading, spacing: fans ? 26 : 20) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, work in
-                    NavigationLink(value: AppRoute.book(BookRoute(workId: work.id, title: work.title))) {
-                        BookCard(work: books.project(work))
-                    }
-                    .buttonStyle(GlassCardStyle())
-                    .previewsWhenFocused { lit = work.artwork }
-                    .onAppear {
-                        if let page = paging.next(lastVisible: index, count: items.count) { Task { await fetch(page) } }
-                    }
-                    .padFocusable(work.id, ring: .card) { openRoute(.book(BookRoute(workId: work.id, title: work.title))) }
+                    card(work)
+                        .onAppear {
+                            if let page = paging.next(lastVisible: index, count: items.count) { Task { await fetch(page) } }
+                        }
                 }
             }
             .padGroup("grid", .grid(columns: 0), members: items.map(\.id))
@@ -384,6 +381,48 @@ struct ReadingWorksGrid: View {
         }
         .ambientArtwork(lit ?? items.first?.artwork ?? library.artwork)
         .task { await loadNext(retry: false) }
+    }
+
+    /// The Series view's series as fans of their books (#54); every book on its own stays a cover.
+    private var fans: Bool { !works && items.contains(where: SeriesFan.hasFan) }
+
+    /// A fan's cell: five slots of `fanCover` and the room they lean into.
+    static func fanCell(_ metrics: GlassMetrics) -> CGFloat { metrics.small ? 168 : 196 }
+    static func fanCover(_ metrics: GlassMetrics) -> CGFloat { metrics.small ? 44 : 52 }
+
+    @ViewBuilder private func card(_ work: ReadingWork) -> some View {
+        let route = AppRoute.book(BookRoute(workId: work.id, title: work.title))
+        if fans, SeriesFan.hasFan(work), let plan = SeriesFan.plan(work) {
+            // A tap opens the series at the book you are on, or asks for a front book you do not have.
+            let target = fanRoute(work, plan.target)
+            NavigationLink(value: target) {
+                SeriesFanCard(series: work, plan: plan, cover: Self.fanCover(metrics), width: Self.fanCell(metrics))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(GlassCardStyle())
+            .previewsWhenFocused { lit = plan.slots.first(where: \.front)?.book.cover ?? work.artwork }
+            .padFocusable(work.id, ring: .card) { openRoute(target) }
+        } else {
+            NavigationLink(value: route) {
+                BookCard(work: books.project(work))
+                    .frame(maxWidth: fans ? Self.fanCover(metrics) * 2.3 : .infinity)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(GlassCardStyle())
+            .previewsWhenFocused { lit = work.artwork }
+            .padFocusable(work.id, ring: .card) { openRoute(route) }
+        }
+    }
+
+    private func fanRoute(_ series: ReadingWork, _ target: SeriesFan.Target) -> AppRoute {
+        switch target {
+        case .openSeries(let number):
+            return .book(BookRoute(workId: series.id, title: series.title, startNumber: number))
+        case .request(let book):
+            return .missingBook(MissingBookRoute(item: ReadingSectionItem(
+                title: book.title, number: book.number, kind: book.kind, artwork: book.cover, authors: series.authors,
+                availability: "missing")))
+        }
     }
 
     private func loadNext(retry: Bool) async {

@@ -297,3 +297,29 @@ struct SeriesFanTests {
         #expect(SeriesFan.coverHeight(76, square: false) == 114 && SeriesFan.coverHeight(76, square: true) == 76)
     }
 }
+
+/// The demo hub's Series view lists each series with its books as the hub
+/// does (#54), so the app's fans stand on what a real listing carries.
+struct SeriesFanDemoTests {
+    @Test func theDemoListingCarriesEachSeriesBooks() async throws {
+        let hub = HubClient(credentials: HubCredentials(baseURL: DemoTransport.address, token: DemoTransport.token),
+                            screens: DemoTransport(), sleep: { _ in })
+        let listing = try await hub.fetch(HubEndpoints.readingLibraryItems(libraryId: "storyteller:books"),
+                                          as: ReadingLibraryItemsResponse.self)
+        let series = Dictionary(uniqueKeysWithValues: listing.items.filter(SeriesFan.hasFan).map { ($0.id, $0) })
+        // Red Rising: on Light Bringer (#6), Dark Age (#5) not in the library; the last five, #6 lit at the right.
+        let redRising = try #require(series["rw_demo_redrising"].flatMap { SeriesFan.plan($0) })
+        #expect(redRising.slots.map(\.book.number) == ["2", "3", "4", "5", "6"])
+        #expect(redRising.slots.firstIndex(where: \.lit) == 4 && redRising.slots[3].dimmed)
+        #expect(redRising.caption == "6 books · on #6" && redRising.target == .openSeries(number: "6"))
+        // Mistborn: on #1, and The Alloy of Law an audiobook only, square in its slot.
+        let mistborn = try #require(series["rw_demo_mistborn"].flatMap { SeriesFan.plan($0) })
+        #expect(mistborn.slots.map(\.square) == [false, false, false, true] && mistborn.slots[0].lit)
+        // Licanius: not started, with the two books Hardcover knows and the library does not have.
+        let licanius = try #require(series["rw_demo_licanius"].flatMap { SeriesFan.plan($0) })
+        #expect(licanius.caption == "3 books" && licanius.slots.map(\.dimmed) == [false, true, true])
+        #expect(licanius.bar == .segments([.toRead, .missing, .missing]))
+        // A book on its own is a cover, not a fan.
+        #expect(listing.items.contains { $0.id == "rw_demo_darkmatter" && !SeriesFan.hasFan($0) })
+    }
+}

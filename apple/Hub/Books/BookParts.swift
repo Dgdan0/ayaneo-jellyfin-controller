@@ -20,6 +20,8 @@ struct BookRoute: Hashable {
     let workId: String
     let title: String
     var openEntry = false
+    /// A series opened from its fan (#54): its books' row starts at this one, the book you are on.
+    var startNumber: String?
 }
 
 /// An author's shelf in one library.
@@ -130,7 +132,8 @@ struct BookProgressBar: View {
     }
 }
 
-/// A word on a cover's foot (`.pic .kind`): "Comic", "Manga", "Audio", "Read along".
+/// A word on a cover's foot (`.pic .kind`): "Comic", "Manga". A book's formats
+/// are a mark, never words (#54: `FormatMarkView`).
 struct CoverPill: View {
     let text: String
 
@@ -175,29 +178,12 @@ struct BookCard: View {
         return p.completed ? 1 : p.percentage
     }
 
-    /// A Storyteller book that is only audio says so on its cover; one with a
-    /// read-along edition says that.
-    private var pill: String? {
-        if showKind, let kind = ReadingBookFacts.kindTag(work.kind) { return kind }
-        // A series is many books: no one format speaks for it.
-        guard !work.isSeries else { return nil }
-        let formats = ReadingBookFacts.formats(work)
-        if work.kind == "audiobook" || (!formats.isEmpty && !formats.contains("ebook") && formats.contains("audiobook")) {
-            return "Audio"
-        }
-        if formats.contains("readaloud") { return "Read along" }
-        return nil
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            BookCover(path: work.artwork, square: work.kind == "audiobook")
-                .overlay { BookProgressBar(fraction: progress) }
-                .overlay(alignment: .bottomLeading) {
-                    if let pill { CoverPill(text: pill).padding(6).padding(.bottom, progress > 0 && progress < 1 ? 10 : 0) }
-                }
-                .overlay(alignment: .topTrailing) { if work.progress?.completed == true { ReadTick().padding(6) } }
-                .litArtwork(corner: 9)
+            // Its formats on the cover (#54): square for an audiobook, a small mark for both.
+            FormatCover(path: work.artwork, shape: ReadingBookFacts.coverShape(work), mark: ReadingBookFacts.formatMark(work),
+                        progress: progress, finished: work.progress?.completed == true,
+                        pill: showKind ? ReadingBookFacts.kindTag(work.kind) : nil)
             if caption {
                 CardCaption(title: work.title, detail: detail ?? (ReadingBookFacts.kindTag(work.kind) != nil
                                                                   ? ReadingBookFacts.comicLine(work.progress) : work.cardSubtitle))
@@ -222,10 +208,9 @@ struct SeriesBookCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            BookCover(path: item.artwork, square: item.kind == "audiobook", dimmed: !item.isAvailable)
-                .overlay { BookProgressBar(fraction: progress) }
-                .overlay(alignment: .topTrailing) { if item.progress?.completed == true { ReadTick().padding(6) } }
-                .litArtwork(corner: 9)
+            FormatCover(path: item.artwork, shape: ReadingBookFacts.coverShape(item),
+                        mark: item.isAvailable ? ReadingBookFacts.formatMark(item) : .none,
+                        progress: progress, finished: item.progress?.completed == true, dimmed: !item.isAvailable)
             CardCaption(title: item.title,
                         detail: current ? "This book" : SeriesBookLabels.subtitle(number: item.number, available: item.isAvailable,
                                                                                  progress: item.progress, formats: item.formats))
@@ -244,88 +229,39 @@ struct SeriesBookStrip: View {
     var current = ""
     /// Its group's id for a controller's focus (#46): a row of its books, by position.
     var pad: String?
+    /// The number of the book the row starts at, scrolled to (#54: a series opened from its fan).
+    var start: String?
     @Environment(\.glassMetrics) private var metrics
     @Environment(\.openRoute) private var openRoute
 
     var body: some View {
         let opened = items.indices.filter { current.isEmpty || items[$0].workId != current }
-        ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(alignment: .top, spacing: metrics.gap) {
-                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                    if !current.isEmpty && item.workId == current {
-                        SeriesBookCard(item: item, current: true).frame(width: metrics.poster)
-                    } else {
-                        NavigationLink(value: item.route) {
-                            SeriesBookCard(item: item).frame(width: metrics.poster)
+        let first = start.flatMap { number in items.firstIndex { $0.number == number } }
+        ScrollViewReader { reader in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: metrics.gap) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                        Group {
+                            if !current.isEmpty && item.workId == current {
+                                SeriesBookCard(item: item, current: true).frame(width: metrics.poster)
+                            } else {
+                                NavigationLink(value: item.route) {
+                                    SeriesBookCard(item: item).frame(width: metrics.poster)
+                                }
+                                .buttonStyle(GlassCardStyle())
+                                .padFocusable(pad == nil ? nil : "\(index)", ring: .card, scroll: index) { openRoute(item.route) }
+                            }
                         }
-                        .buttonStyle(GlassCardStyle())
-                        .padFocusable(pad == nil ? nil : "\(index)", ring: .card, scroll: index) { openRoute(item.route) }
+                        .id(index)
                     }
                 }
+                .padding(.horizontal, metrics.margin)
+                .padding(.top, 12)
+                .padding(.bottom, 16)
             }
-            .padding(.horizontal, metrics.margin)
-            .padding(.top, 12)
-            .padding(.bottom, 16)
+            .padGroup(pad, .row, members: opened.map { "\($0)" }, strip: true, scrollIds: opened.map { AnyHashable($0) })
+            .onAppear { if let first, first > 0 { reader.scrollTo(first, anchor: .leading) } }
         }
-        .padGroup(pad, .row, members: opened.map { "\($0)" }, strip: true, scrollIds: opened.map { AnyHashable($0) })
-    }
-}
-
-// MARK: A series' fan
-
-/// A series as a fan of up to four covers leaning about their feet, the book
-/// being read on top at the right (`.fan`; Android's `CoverFanView`). Lit, the
-/// outer two lean further and the fan lifts.
-struct CoverFan: View {
-    /// Front first: the book being read, then the series' first books (`ReadingShelves.fanCovers`).
-    let covers: [String]
-    var coverWidth: CGFloat = 96
-    @Environment(\.cardLit) private var lit
-
-    private static let lean: [Double] = [-13, -5, 4, 12]
-    private static let step: [CGFloat] = [0, 0.333, 0.667, 0.98]
-
-    /// Room either side for the outer covers' lean: a cover turned 13° about
-    /// its foot reaches a third of its width past where it stands.
-    static func inset(coverWidth: CGFloat) -> CGFloat { coverWidth * 0.36 }
-
-    /// The fan's own size for a cover this wide, its lean included.
-    static func size(coverWidth: CGFloat) -> CGSize {
-        CGSize(width: coverWidth * 1.98 + inset(coverWidth: coverWidth) * 2, height: coverWidth * 1.5 + coverWidth * 0.18)
-    }
-
-    var body: some View {
-        let shown = Array(covers.prefix(4).reversed())
-        let size = Self.size(coverWidth: coverWidth)
-        ZStack(alignment: .bottomLeading) {
-            ForEach(Array(shown.enumerated()), id: \.offset) { index, path in
-                let slot = shown.count == 1 ? 1 : index
-                BookCover(path: path, width: 240)
-                    .frame(width: coverWidth)
-                    .shadow(color: .black.opacity(lit ? 0.6 : 0.5), radius: lit ? 13 : 11, x: -6, y: lit ? 12 : 10)
-                    .rotationEffect(.degrees(angle(slot, count: shown.count)), anchor: .bottom)
-                    .offset(x: Self.inset(coverWidth: coverWidth) + Self.step[slot] * coverWidth, y: -4)
-                    .overlay(alignment: .bottomLeading) {
-                        if lit && index == shown.count - 1 {
-                            BookShape().stroke(.white, lineWidth: 3)
-                                .frame(width: coverWidth, height: coverWidth * 1.5)
-                                .rotationEffect(.degrees(angle(slot, count: shown.count)), anchor: .bottom)
-                                .offset(x: Self.inset(coverWidth: coverWidth) + Self.step[slot] * coverWidth, y: -4)
-                        }
-                    }
-            }
-        }
-        .frame(width: size.width, height: size.height, alignment: .bottomLeading)
-        .offset(y: lit ? -3 : 0)
-        .animation(.easeOut(duration: 0.3), value: lit)
-        .accessibilityHidden(true)
-    }
-
-    private func angle(_ slot: Int, count: Int) -> Double {
-        var degrees = Self.lean[slot]
-        if lit && slot == 0 && count > 1 { degrees = -18 }
-        if lit && slot == 3 { degrees = 17 }
-        return degrees
     }
 }
 

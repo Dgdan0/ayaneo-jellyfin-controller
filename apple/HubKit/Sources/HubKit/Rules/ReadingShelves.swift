@@ -307,12 +307,15 @@ public enum ReadingShelves {
         public let title: String
         public let covers: [String]
         public let line: String
+        /// Its fan (#54): three of its books about the one you are on, as the Series view stands them.
+        public let plan: SeriesFan.Plan?
 
-        public init(id: String, title: String, covers: [String], line: String) {
+        public init(id: String, title: String, covers: [String], line: String, plan: SeriesFan.Plan? = nil) {
             self.id = id
             self.title = title
             self.covers = covers
             self.line = line
+            self.plan = plan
         }
     }
 
@@ -331,7 +334,8 @@ public enum ReadingShelves {
                 .compactMap { $0 }.joined(separator: " · ")
             let last = books.isEmpty ? timestamp(series.progress?.updatedAt)
                 : books.map { timestamp($0.progress?.updatedAt) }.max() ?? 0
-            return (last, SeriesShelfItem(id: series.id, title: series.title, covers: fanCovers(series), line: line))
+            return (last, SeriesShelfItem(id: series.id, title: series.title, covers: fanCovers(series), line: line,
+                                          plan: SeriesFan.plan(series, maxSlots: SeriesFan.smallSlots)))
         }
         return stableSortedDescending(found).map(\.1)
     }

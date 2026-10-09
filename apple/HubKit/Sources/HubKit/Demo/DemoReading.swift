@@ -192,8 +192,9 @@ public enum DemoReading {
     private static let mistbornBooks = [
         Book(workId: "rw_demo_mb1", sourceItemId: "mb1", title: "The Final Empire", number: "1", kind: "book", pages: 541,
              progress: 0.0034, updatedAt: "2026-10-03 13:07:02", formats: ["ebook", "audiobook", "readaloud"]),
+        // An ebook and an audiobook not aligned for read along: the headphones mark (#54).
         Book(workId: "rw_demo_mb2", sourceItemId: "mb2", title: "The Well of Ascension", number: "2", kind: "book", pages: 590,
-             progress: 0, updatedAt: "", formats: ["ebook"]),
+             progress: 0, updatedAt: "", formats: ["ebook", "audiobook"]),
         Book(workId: "rw_demo_mb3", sourceItemId: "mb3", title: "The Hero of Ages", number: "3", kind: "book", pages: 572,
              progress: 0, updatedAt: "", formats: ["ebook"]),
         Book(workId: "rw_demo_alloy", sourceItemId: "demo-alloy", title: "The Alloy of Law", number: "4", kind: "audiobook",
@@ -327,11 +328,38 @@ public enum DemoReading {
             fields["series"] = work.series
             fields["seriesIndex"] = work.seriesIndex
         }
+        // A series' books for its fan (#54), as the hub lists them in the listing.
+        if work.entityType == "collection" { fields["seriesBooks"] = seriesBooks(work) }
         // Started over (#60): not started, wherever it is listed.
         if work.progress > 0 && DemoStartOver.stamp(work.id) == 0 {
             fields["progress"] = progressFields(work.progress, updatedAt: work.updatedAt)
         }
         return fields
+    }
+
+    /// The books the hub's Hardcover lookup adds to a series as missing (#54):
+    /// main numbered books that are out and that the library does not have.
+    private static let hardcoverMissing: [String: [(number: String, title: String)]] = [
+        "rw_demo_licanius": [("2", "An Echo of Things to Come"), ("3", "The Light of All That Falls")],
+    ]
+
+    /// A series' books in order, as the hub's `seriesBooks` (#54): the ones
+    /// the library has, the one being read "on", and the ones it does not have.
+    private static func seriesBooks(_ work: Work) -> [[String: Any]] {
+        let owned = work.books.map { book -> [String: Any] in
+            var fields: [String: Any] = ["number": book.number, "title": book.title,
+                                         "kind": book.formats == ["audiobook"] ? "audiobook" : "book",
+                                         "owned": book.available, "released": true,
+                                         "cover": art(book.available ? book.sourceItemId : "missing")]
+            if book.available && book.number == work.continueNumber && DemoStartOver.stamp(book.workId) == 0 {
+                fields["state"] = "on"
+            }
+            return fields
+        }
+        let missing = (hardcoverMissing[work.id] ?? []).map { book -> [String: Any] in
+            ["number": book.number, "title": book.title, "kind": "book", "owned": false, "released": true, "cover": art("missing")]
+        }
+        return owned + missing
     }
 
     private static func detailFields(_ work: Work) -> [String: Any] {
