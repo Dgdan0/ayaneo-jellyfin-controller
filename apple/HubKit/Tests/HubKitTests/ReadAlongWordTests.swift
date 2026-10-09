@@ -90,6 +90,77 @@ struct ReadAlongWordTests {
         #expect(timeline.words(of: segments[2]).map(\.fragment) == ["s2-w0"])
     }
 
+    /// The contract (#66): word clips run on a little and voices overlap, so
+    /// each word begins and ends no earlier than the one before, and a new
+    /// stretch starts only where a sentence begins more than 10 s before the
+    /// stretch's end. A word going back inside its sentence is not a second
+    /// sentence, and an overlap is not heard twice.
+    @Test func wordClipsRunForwardAndAStretchEndsOnlyWhereTheNarrationGoesBackFar() throws {
+        let smil = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body>
+            <seq id="c" epub:textref="../c.xhtml">
+            <seq id="s0-seq" epub:textref="../c.xhtml#s0">
+            <par id="s0-w0"><text src="../c.xhtml#s0-w0"/><audio src="../a.mp3" clipBegin="10s" clipEnd="10.6s"/></par>
+            <par id="s0-w1"><text src="../c.xhtml#s0-w1"/><audio src="../a.mp3" clipBegin="10.4s" clipEnd="11s"/></par>
+            <par id="s0-w2"><text src="../c.xhtml#s0-w2"/><audio src="../a.mp3" clipBegin="11.1s" clipEnd="12s"/></par>
+            </seq>
+            <seq id="s1-seq" epub:textref="../c.xhtml#s1">
+            <par id="s1-w0"><text src="../c.xhtml#s1-w0"/><audio src="../a.mp3" clipBegin="11.5s" clipEnd="12.5s"/></par>
+            <par id="s1-w1"><text src="../c.xhtml#s1-w1"/><audio src="../a.mp3" clipBegin="12.5s" clipEnd="13s"/></par>
+            </seq>
+            <seq id="s2-seq" epub:textref="../c.xhtml#s2">
+            <par id="s2-w0"><text src="../c.xhtml#s2-w0"/><audio src="../a.mp3" clipBegin="1s" clipEnd="1.5s"/></par>
+            </seq></seq></body></smil>
+            """
+        let page = #"<p><span id="s0"><span id="s0-w0">One</span> <span id="s0-w1">two</span> <span id="s0-w2">three</span>.</span> "#
+            + #"<span id="s1"><span id="s1-w0">Four</span> <span id="s1-w1">five</span>.</span> "#
+            + #"<span id="s2"><span id="s2-w0">Back</span>.</span></p>"#
+        let timeline = try ReadAlongPackage.read(Self.edition(smil: smil, page: page), requireAudio: false)
+        // s1 begins half a second before s0 has ended: the same stretch. s2 goes back 12 s: a stretch of its own.
+        #expect(timeline.tracks.map { $0.segments.map(\.fragment) } == [["s0", "s1"], ["s2"]])
+        let s0 = timeline.tracks[0].segments[0]
+        let s1 = timeline.tracks[0].segments[1]
+        // s0's second word, placed early, is moved on rather than starting a second s0.
+        #expect(timeline.words(of: s0).map(\.beginMs) == [10_000, 10_400, 11_100])
+        #expect(timeline.words(of: s0).map(\.endMs) == [10_600, 11_000, 12_000], "no word ends before the one ahead of it")
+        // s1's first word begins no earlier than the word before it in the text, and the stretch only goes on.
+        #expect(timeline.words(of: s1).map(\.beginMs) == [11_500, 12_500])
+        #expect(timeline.words(of: s1).first.map(\.endMs) == 12_500)
+        #expect(s0.beginMs == 10_000 && s0.endMs == 12_000 && s1.beginMs == 11_500 && s1.endMs == 13_000)
+        let words = timeline.tracks[0].segments.flatMap { timeline.words(of: $0) }
+        #expect(zip(words, words.dropFirst()).allSatisfy { $0.beginMs <= $1.beginMs && $0.endMs <= $1.endMs }, "it only runs forward")
+        // A sentence edition's stretches are what they always were: one that begins before the last has ended is a new one.
+        let sentences = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <smil xmlns="http://www.w3.org/ns/SMIL" version="3.0"><body><seq id="c">
+            <par id="s0"><text src="../c.xhtml#s0"/><audio src="../a.mp3" clipBegin="10s" clipEnd="12s"/></par>
+            <par id="s1"><text src="../c.xhtml#s1"/><audio src="../a.mp3" clipBegin="11.5s" clipEnd="13s"/></par>
+            </seq></body></smil>
+            """
+        let plain = try ReadAlongPackage.read(Self.edition(smil: sentences, page: #"<p><span id="s0">One.</span> <span id="s1">Two.</span></p>"#),
+                                              requireAudio: false)
+        #expect(plain.tracks.map { $0.segments.map(\.fragment) } == [["s0"], ["s1"]])
+        #expect(!plain.timesWords)
+    }
+
+    /// The contract (#66): a word's sentence anchors every place. Saved
+    /// mid-word it is the sentence (`aPlaceSavedMidWordIsItsSentence`); and a
+    /// place that holds a word's id, as an early word build on any device could
+    /// have saved, resumes at that word's sentence rather than nowhere.
+    @Test func aPlaceHoldingAWordsIdResumesAtItsSentence() {
+        let word = #"{"href":"c.xhtml","type":"application/xhtml+xml","locations":{"fragments":["s1-w1"]}}"#
+        #expect(ReadAlongLocation.resume(word, timeline) == ReadAlongPosition(track: 0, offsetMs: 2_500))
+        #expect(ReadAlongLocation.sentence(ofWord: "s1-w1") == "s1")
+        #expect(ReadAlongLocation.sentence(ofWord: "sentence12-w104") == "sentence12")
+        #expect(ReadAlongLocation.sentence(ofWord: "s1") == nil && ReadAlongLocation.sentence(ofWord: "-w2") == nil)
+        #expect(ReadAlongLocation.sentence(ofWord: "show-wide") == nil, "a word's id ends in its number")
+        // Every segment of a word edition is a sentence, so every place saved from it is too.
+        for segment in wordLevel.tracks.flatMap(\.segments) {
+            #expect(ReadAlongLocation.sentence(ofWord: segment.fragment) == nil, "\(segment.fragment) is a word's id")
+        }
+    }
+
     @Test func aWordEditionMayHoldMoreParsThanASentenceOne() {
         #expect(ReadAlongPackage.wordLimit >= 1_000_000 && ReadAlongPackage.segmentLimit == 200_000)
     }
@@ -200,12 +271,21 @@ struct ReadAlongWordTests {
         #expect(abs(gold.trailStrength(.black) - 0.168) < 1e-9, "40% of 0.42")
         #expect(ReadAlongHighlightStyle(colour: .gold, trail: 0).trailStrength(.light) == 0)
         #expect(ReadAlongHighlightStyle(colour: .gold, trail: 100).trailStrength(.light) == 0.62)
-        // The mix held to 4.5:1 steps down 0.02 at a time.
+        // The mix held to 4.5:1 is lowered 0.02 at a time while it is over 0.06 (the contract's rule, #66).
         let (page, ink) = palette(.light)
         let held = ReadAlongHighlightStyle.hold(0xFFF0_C96A, page: page, ink: ink, strength: 0.62)
         var share = 0.62
-        while GlassColors.contrast(ink | 0xFF00_0000, GlassColors.mix(page | 0xFF00_0000, 0xFFF0_C96A, share)) < 4.5 { share -= 0.02 }
+        while share > 0.06,
+              GlassColors.contrast(ink | 0xFF00_0000, GlassColors.mix(page | 0xFF00_0000, 0xFFF0_C96A, share)) < 4.5 { share -= 0.02 }
         #expect(held == GlassColors.mix(page | 0xFF00_0000, 0xFFF0_C96A, share))
+        // A sentence edition's wash is 0.45, held the same way.
+        #expect(ReadAlongGlow.most == 0.45)
+        #expect(gold.sentence(page: page, ink: ink) == ReadAlongHighlightStyle.hold(0xFFF0_C96A, page: page, ink: ink, strength: 0.45))
+        // Where no strength keeps 4.5:1, the wash stops at its weakest rather than going on to nothing.
+        var weakest = 0.62
+        while weakest > 0.06 { weakest -= 0.02 }
+        #expect(ReadAlongHighlightStyle.hold(0xFFFF_FFFF, page: 0xFF80_8080, ink: 0xFF90_9090, strength: 0.62)
+                == GlassColors.mix(0xFF80_8080, 0xFFFF_FFFF, weakest))
         // The colours, as approved.
         #expect(ReadAlongHighlightStyle.Colour.allCases.map(\.rgb) == [0xFFF0_C96A, 0xFFDE_8C4C, 0xFFE9_8FA8, 0xFFB3_9DEB,
                                                                      0xFF7D_B7E8, 0xFF5C_C2B5, 0xFF9A_D47E, 0xFFBE_C4D6])
@@ -215,6 +295,7 @@ struct ReadAlongWordTests {
         #expect(ReadAlongHighlightStyle.standard(for: .light) == ReadAlongHighlightStyle(colour: .gold, trail: 40))
         #expect(ReadAlongHighlightStyle.standard(for: .sepia).colour == .gold)
         #expect(ReadAlongHighlightStyle.standard(for: .dark).colour == .ember && ReadAlongHighlightStyle.standard(for: .black).colour == .ember)
+        #expect(ReadAlongHighlightStyle.standard(for: .blue).colour == .ember, "Blue is a dark page: Ember")
         #expect(ReadAlongHighlightStyle.stepped(42) == 40 && ReadAlongHighlightStyle.stepped(103) == 100 && ReadAlongHighlightStyle.stepped(-3) == 0)
         let defaults = try #require(UserDefaults(suiteName: "highlight-\(UUID().uuidString)"))
         let store = ReadAlongHighlightStore(defaults: defaults)
@@ -258,7 +339,22 @@ struct ReadAlongWordTests {
                 }
             }
         }
-        #expect(timeline.timesWords && sentences > 20_000 && words > 150_000, "\(sentences) sentences, \(words) words")
+        // Each sentence once (#66): a word placed early no longer starts its sentence a second time, which
+        // counted 2,000 and more sentences twice in this book before its clips were made to run forward.
+        // Twice only where a sentence is read across two of the audio's pieces, a run in each.
+        let runs = Dictionary(grouping: timeline.tracks.flatMap(\.segments)) { $0.textHref + "#" + $0.fragment }
+        for (sentence, segments) in runs where segments.count > 1 {
+            #expect(Set(segments.map(\.audioHref)).count == segments.count, "\(sentence) is heard twice in one piece")
+            // Each piece's run has its own words, in its own time, and between them every word once.
+            for segment in segments {
+                #expect(timeline.words(of: segment).allSatisfy { $0.beginMs >= segment.beginMs && $0.endMs <= segment.endMs },
+                        "\(sentence) has the other piece's words")
+            }
+            let spoken = segments.flatMap { timeline.words(of: $0) }
+            #expect(Set(spoken.map(\.fragment)).count == spoken.count, "\(sentence) says a word twice")
+        }
+        #expect(sentences - runs.count < 10, "\(sentences - runs.count) sentences in two pieces")
+        #expect(timeline.timesWords && sentences > 19_000 && words > 150_000, "\(sentences) sentences, \(words) words")
         print("The Final Empire (Dramatized), word by word: \(sentences) sentences, \(words) words")
     }
 

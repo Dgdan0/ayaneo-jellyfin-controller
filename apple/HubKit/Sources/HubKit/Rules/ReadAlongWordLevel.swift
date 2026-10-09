@@ -28,6 +28,13 @@ extension ReadAlongTimeline {
     /// Where a sentence's words are kept: its document and its element's id.
     public static func wordKey(_ textHref: String, _ fragment: String) -> String { textHref + "#" + fragment }
 
+    /// The same in one of the audio's pieces: a sentence read across two
+    /// pieces is a segment in each, with its own words (two sentences of The
+    /// Final Empire, #66).
+    public static func wordKey(_ textHref: String, _ fragment: String, audio: String) -> String {
+        wordKey(textHref, fragment) + "@" + audio
+    }
+
     /// Whether the edition times its words.
     public var timesWords: Bool { !words.isEmpty }
 
@@ -35,7 +42,8 @@ extension ReadAlongTimeline {
     /// none for a sentence-level edition, or a sentence that could not be cut
     /// into words.
     public func words(of segment: ReadAlongSegment) -> [ReadAlongWord] {
-        words[Self.wordKey(segment.textHref, segment.fragment)] ?? []
+        words[Self.wordKey(segment.textHref, segment.fragment, audio: segment.audioHref)]
+            ?? words[Self.wordKey(segment.textHref, segment.fragment)] ?? []
     }
 
     /// The word of `segment` spoken at `position`: the last one begun, so a
@@ -159,21 +167,22 @@ public struct ReadAlongHighlightStyle: Equatable, Sendable {
         trail > 0 ? Self.hold(colour.rgb, page: page, ink: ink, strength: trailStrength(theme)) : nil
     }
 
-    /// A sentence-level book's sentence: #52's wash, in this colour.
+    /// A sentence-level book's sentence: #52's wash at 0.45, in this colour.
     public func sentence(page: UInt32, ink: UInt32) -> UInt32 {
         ReadAlongGlow.wash(accent: colour.rgb, page: page, ink: ink)
     }
 
-    /// `colour` mixed into `page` at `strength`, stepped down 0.02 at a time
-    /// until `ink` keeps 4.5:1 against it. Opaque.
+    /// The weakest a wash is held to: it is lowered only while above this.
+    public static let weakest = 0.06
+
+    /// `colour` mixed into `page` at `strength`, lowered 0.02 at a time while
+    /// it is over 0.06 and `ink` is under 4.5:1 against it (the contract, #66,
+    /// as the Pocket's `ReadAlongGlow.wash`). Opaque.
     public static func hold(_ colour: UInt32, page: UInt32, ink: UInt32, strength: Double) -> UInt32 {
+        func mixed(_ share: Double) -> UInt32 { GlassColors.mix(page | 0xFF00_0000, colour | 0xFF00_0000, share) }
         var share = strength
-        while share > 0 {
-            let mixed = GlassColors.mix(page | 0xFF00_0000, colour | 0xFF00_0000, share)
-            if GlassColors.contrast(ink | 0xFF00_0000, mixed) >= contrast { return mixed }
-            share -= holdStep
-        }
-        return page | 0xFF00_0000
+        while share > weakest && GlassColors.contrast(ink | 0xFF00_0000, mixed(share)) < contrast { share -= holdStep }
+        return mixed(share)
     }
 }
 

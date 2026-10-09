@@ -140,7 +140,8 @@ struct BookHrefTests {
                 if !(item.attributes["media-overlay"] ?? "").isEmpty { overlaid.append(spelled) }
             }
             let sentences = timeline.tracks.reduce(0) { $0 + $1.segments.count }
-            #expect(!overlaid.isEmpty && sentences > 20_000, "\(url.lastPathComponent): \(overlaid.count) overlays, \(sentences) sentences")
+            // The word edition has each sentence once (#66): 19,760 of them, against its sentence set's 21,867.
+            #expect(!overlaid.isEmpty && sentences > 19_000, "\(url.lastPathComponent): \(overlaid.count) overlays, \(sentences) sentences")
             for page in order {
                 if overlaid.contains(page) {
                     #expect(!timeline.fragments(in: page).isEmpty, "\(url.lastPathComponent): no sentences for \(page)")

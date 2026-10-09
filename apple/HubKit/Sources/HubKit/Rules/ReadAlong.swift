@@ -206,7 +206,21 @@ public enum ReadAlongLocation {
         for fragment in fragments {
             if let position = timeline.find(href: href, fragment: fragment) { return position }
         }
+        // A word's id (`<sentence>-wN`), which no place should hold (#66): its sentence.
+        for fragment in fragments {
+            if let sentence = sentence(ofWord: fragment), let position = timeline.find(href: href, fragment: sentence) {
+                return position
+            }
+        }
         return nil
+    }
+
+    /// The sentence of a word's element id, `<sentence>-wN`; nil for anything else.
+    public static func sentence(ofWord fragment: String) -> String? {
+        guard let dash = fragment.range(of: "-w", options: .backwards), dash.lowerBound > fragment.startIndex else { return nil }
+        let number = fragment[dash.upperBound...]
+        guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
+        return String(fragment[..<dash.lowerBound])
     }
 
     /// The page's locator moved to the sentence playing at `point`, finished
@@ -310,16 +324,11 @@ public enum ReadAlongGlow {
     /// of the line above, which reach beyond their face's declared height.
     public static let overflow = 0.15
 
-    /// The wash: `accent` mixed into `page` as far as `most`, or less, so
-    /// that `ink` keeps `contrast` against it. Opaque.
+    /// The wash: `accent` mixed into `page` at `most`, held as every
+    /// read-along wash is so that `ink` keeps `contrast` against it
+    /// (`ReadAlongHighlightStyle.hold`, the #66 contract). Opaque.
     public static func wash(accent: UInt32, page: UInt32, ink: UInt32) -> UInt32 {
-        var share = most
-        while share > 0 {
-            let mixed = GlassColors.mix(page | 0xFF00_0000, accent | 0xFF00_0000, share)
-            if GlassColors.contrast(ink | 0xFF00_0000, mixed) >= contrast { return mixed }
-            share -= 0.01
-        }
-        return page | 0xFF00_0000
+        ReadAlongHighlightStyle.hold(accent, page: page, ink: ink, strength: most)
     }
 
     /// Readium lays one of these over each line of the sentence and places

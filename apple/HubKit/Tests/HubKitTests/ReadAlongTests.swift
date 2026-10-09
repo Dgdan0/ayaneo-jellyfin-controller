@@ -133,8 +133,11 @@ struct ReadAlongTests {
                     || wash == GlassColors.mix(page, gold | 0xFF00_0000, 0.45), "\(theme)")
         }
         #expect(GlassColors.alpha(ReadAlongGlow.wash(accent: gold, page: 0xFF000000, ink: 0xFFAFAFAF)) == 0xFF, "opaque")
-        // A page where no share keeps the contrast is left as it is.
-        #expect(ReadAlongGlow.wash(accent: 0xFFFFFF, page: 0xFF808080, ink: 0xFF909090) == 0xFF808080)
+        // A page where no share keeps the contrast: held at its weakest, lowered 0.02 at a time while over 0.06 (#66).
+        var weakest = 0.45
+        while weakest > 0.06 { weakest -= 0.02 }
+        #expect(ReadAlongGlow.wash(accent: 0xFFFFFF, page: 0xFF808080, ink: 0xFF909090)
+                == GlassColors.mix(0xFF808080, 0xFFFFFFFF, weakest))
     }
 
     @Test func theBoxesAreUnderTheWordsInTheWashAndNothingElse() {
