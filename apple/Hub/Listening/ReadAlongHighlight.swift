@@ -31,14 +31,16 @@ enum ReadAlongHighlight {
     }
 
     /// The sentence spoken, or none in a pause: what to apply in `group`.
-    static func decorations(_ segment: ReadAlongSegment?) -> [Decoration] {
-        guard let segment, let locator = locator(segment) else { return [] }
+    /// Its file as Readium spells it (`hrefs`, #61).
+    static func decorations(_ segment: ReadAlongSegment?, hrefs: BookHrefs) -> [Decoration] {
+        guard let segment, let locator = locator(segment, hrefs: hrefs) else { return [] }
         return [Decoration(id: "narration", locator: locator, style: Decoration.Style(id: style))]
     }
 
-    /// Where the sentence is, as Readium finds it: its file and its element's id.
-    static func locator(_ segment: ReadAlongSegment) -> Locator? {
-        let fields: [String: Any] = ["href": segment.textHref, "type": "application/xhtml+xml",
+    /// Where the sentence is, as Readium finds it: its file, in Readium's own
+    /// spelling, and its element's id.
+    static func locator(_ segment: ReadAlongSegment, hrefs: BookHrefs) -> Locator? {
+        let fields: [String: Any] = ["href": hrefs.readium(segment.textHref), "type": "application/xhtml+xml",
                                      "locations": ["fragments": [segment.fragment]]]
         guard let data = try? JSONSerialization.data(withJSONObject: fields), let json = String(data: data, encoding: .utf8) else {
             return nil

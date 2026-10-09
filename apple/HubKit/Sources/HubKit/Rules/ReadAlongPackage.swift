@@ -64,7 +64,9 @@ public enum ReadAlongPackage {
                 // to light: that one sentence is skipped and the rest of the
                 // edition still plays.
                 if end <= begin { continue }
-                segments.append(ReadAlongSegment(textHref: words.path, fragment: words.fragment, audioHref: audioHref,
+                // In the key's form, as every page href is compared (#61).
+                segments.append(ReadAlongSegment(textHref: BookHref.normalized(words.path), fragment: words.fragment,
+                                                 audioHref: audioHref,
                                                  beginMs: begin, endMs: end))
                 guard segments.count <= segmentLimit else { throw ReadAlongError("Narration timeline is too large") }
             }

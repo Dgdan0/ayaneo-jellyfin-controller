@@ -497,6 +497,7 @@ final class BookReaderModel {
         countContentsPages()
         phase = .reading
         if let readAlong {
+            readAlong.hrefs = navigator.hrefs
             if let prepared {
                 readAlong.start(prepared, workId: workId, token: app.storedToken(), at: locator,
                                 book: NarrationModel.Book(title: title, author: author, artwork: cover))
