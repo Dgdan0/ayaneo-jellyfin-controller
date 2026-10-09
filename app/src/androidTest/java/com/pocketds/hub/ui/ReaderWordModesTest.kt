@@ -540,6 +540,8 @@ class ReaderWordModesTest {
             for (i in 0 until 50) { notes = count("[data-group=\"annotation-notes\"] [data-style]"); if (notes > 0) break; delay(100) }
             val noteBoxes = js("""(function(){return JSON.stringify([].map.call(document.querySelectorAll('[data-group="annotation-notes"] .pd-note'),function(e){var r=e.getBoundingClientRect();return [r.left,r.top,r.width,r.height];}));})()""")
             val (upFirst, upLast, _) = lines("stair wound up")
+            if (notes != 1) android.util.Log.i("WORDMODES", "note items: " +
+                js("""(function(){return JSON.stringify(readium.getDecorations('annotation-notes').items.map(function(i){return i.decoration.id;}));})()"""))
             assertEquals("the note's mark, one: $noteBoxes (the passage from $upFirst to $upLast)", 1, notes)
             assertEquals("one box, so one mark is drawn: $noteBoxes (the passage from $upFirst to $upLast)", 1, count("[data-group=\"annotation-notes\"] .pd-note"))
             shot("word-highlights-ebook")
