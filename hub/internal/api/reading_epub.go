@@ -50,6 +50,10 @@ type ReadingEpubPosition struct {
 	// ResetAt is when the book was last started over (the hub's milliseconds), so a device that
 	// has not seen it drops the place it kept (#60). Absent when it never was.
 	ResetAt int64 `json:"resetAt,omitempty"`
+	// Device is the label of the token that wrote this place, when the hub did and it is still the one held (#62), and
+	// ByThisDevice whether that token is the one asking.
+	Device       string `json:"device,omitempty"`
+	ByThisDevice bool   `json:"byThisDevice,omitempty"`
 }
 
 func (s *Server) handleReadingEpubFile(w http.ResponseWriter, r *http.Request) {
@@ -192,6 +196,7 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 		if sentence, audio := s.textPlaceOfAudio(ctx, bookID, position); sentence != nil {
 			shown.Locator, shown.Audio = sentence, audio
 		}
+		shown.Device, shown.ByThisDevice = s.placeDevice(r, bookID, position.Timestamp)
 		writeJSON(w, http.StatusOK, shown)
 		return
 	}
@@ -255,6 +260,7 @@ func (s *Server) handleReadingEpubPosition(w http.ResponseWriter, r *http.Reques
 		writeUpstreamError(w, r, "storyteller", err)
 		return
 	}
+	s.placeWriters.note("storyteller", strconv.FormatInt(bookID, 10), TokenFrom(r.Context()).Label, stamp)
 	s.invalidateStorytellerWork(sourceItemID)
 	s.cache.Invalidate(storytellerBooksKey)
 	writeJSON(w, http.StatusOK, struct {
