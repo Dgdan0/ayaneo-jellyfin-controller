@@ -52,20 +52,32 @@ class PageSwipeTest {
 
     @Test fun `a flick is a quick, mostly sideways swipe, the kind Readium's pager turns by itself`() {
         val density = 2.25f
+        val longPress = 500L
         // 768 px (about 340 dp) in 90 ms: quick and far.
-        assertTrue(PageSwipe.isFlick(-768f, 0f, 90, density))
-        assertTrue(PageSwipe.isFlick(768f, 40f, 90, density))
+        assertTrue(PageSwipe.isFlick(-768f, 0f, 90, density, longPress))
+        assertTrue(PageSwipe.isFlick(768f, 40f, 90, density, longPress))
         // A short flick: 80 px, a little over 32 dp, in 60 ms.
-        assertTrue(PageSwipe.isFlick(-80f, 0f, 60, density))
+        assertTrue(PageSwipe.isFlick(-80f, 0f, 60, density, longPress))
         // Not far enough: under 32 dp (72 px).
-        assertFalse(PageSwipe.isFlick(-60f, 0f, 30, density))
+        assertFalse(PageSwipe.isFlick(-60f, 0f, 30, density, longPress))
         // Not quick enough: 300 dp a second is 675 px a second, so 300 px in 600 ms (500 px/s) is a drag.
-        assertFalse(PageSwipe.isFlick(-300f, 0f, 600, density))
-        assertTrue(PageSwipe.isFlick(-300f, 0f, 400, density))
+        assertFalse(PageSwipe.isFlick(-300f, 0f, 600, density, longPress))
+        assertTrue(PageSwipe.isFlick(-300f, 0f, 400, density, longPress))
         // More up or down than across is a scroll.
-        assertFalse(PageSwipe.isFlick(-300f, 300f, 90, density))
+        assertFalse(PageSwipe.isFlick(-300f, 300f, 90, density, longPress))
         // A touch with no time is not a divide by zero.
-        assertTrue(PageSwipe.isFlick(-300f, 0f, 0, density))
+        assertTrue(PageSwipe.isFlick(-300f, 0f, 0, density, longPress))
+    }
+
+    @Test fun `a touch held as long as a long press is a selection being extended and never a flick`() {
+        val density = 2.25f
+        val longPress = 500L
+        // A long press on a word and a drag along the line as one touch: 700 ms hold, then 1700 px in 300 ms. From its start that is
+        // 1700 px in a second, far over 300 dp a second, and it must not turn the page.
+        assertFalse(PageSwipe.isFlick(-1700f, 0f, 1_000, density, longPress))
+        // Just under a long press it is still a flick; at it, it is not.
+        assertTrue(PageSwipe.isFlick(-1700f, 0f, 499, density, longPress))
+        assertFalse(PageSwipe.isFlick(-1700f, 0f, 500, density, longPress))
     }
 
     @Test fun `leftwards turns on in a book read from the left and back in one read from the right`() {

@@ -358,7 +358,7 @@ class EpubReaderScreen(
                 val from = flickFrom ?: return false
                 val dx = event.x - flickDownX
                 val dy = event.y - flickDownY
-                if (!PageSwipe.isFlick(dx, dy, event.eventTime - event.downTime, resources.displayMetrics.density)) return false
+                if (!PageSwipe.isFlick(dx, dy, event.eventTime - event.downTime, resources.displayMetrics.density, ViewConfiguration.getLongPressTimeout().toLong())) return false
                 val rtl = navigator?.overflow?.value?.readingProgression == org.readium.r2.navigator.preferences.ReadingProgression.RTL
                 val delta = if (PageSwipe.forward(dx < 0, rtl)) 1 else -1
                 // Where the account says the page is, if a burst is running: the pager may not be there yet.
@@ -383,7 +383,7 @@ class EpubReaderScreen(
                 flickFrom = null
                 val dx = event.x - flickDownX
                 val dy = event.y - flickDownY
-                if (!PageSwipe.isFlick(dx, dy, event.eventTime - event.downTime, resources.displayMetrics.density)) { turnLedger.end(); return }
+                if (!PageSwipe.isFlick(dx, dy, event.eventTime - event.downTime, resources.displayMetrics.density, ViewConfiguration.getLongPressTimeout().toLong())) { turnLedger.end(); return }
                 val rtl = navigator?.overflow?.value?.readingProgression == org.readium.r2.navigator.preferences.ReadingProgression.RTL
                 val target = turnLedger.flick(from, if (PageSwipe.forward(dx < 0, rtl)) 1 else -1, SystemClock.uptimeMillis()) ?: return
                 fun keep() {

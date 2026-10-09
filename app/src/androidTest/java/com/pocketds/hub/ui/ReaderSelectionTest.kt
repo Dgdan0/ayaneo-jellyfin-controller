@@ -100,6 +100,28 @@ class ReaderSelectionTest {
         }
     }
 
+    /**
+     * A long press on a word and a drag along the line, as one touch, is a selection and not a swipe (#62 with #64's swipes): it
+     * lasts as long as a long press and goes the way a quick swipe does, and the page must stay where it is.
+     */
+    @Test fun aDragThatExtendsASelectionNeverTurnsThePage() = runBlocking {
+        withSelectionBook {
+            val locator = { current.field<org.readium.r2.shared.publication.Locator?>("latestLocator") }
+            until("the page's place is known") { locator() != null }
+            val before = withContext(Dispatchers.Main) { locator()!!.locations.progression }
+            val from = rectOf("stone")
+            val to = rectOf("harbor")
+            // Leftwards, which turns on in a book read from the left: the wrong turn would show as a move forward.
+            drag(from.centerX(), from.centerY(), to.left, to.centerY(), holdMs = 700, moveMs = 300)
+            delay(1_500)
+            val after = withContext(Dispatchers.Main) { locator()!!.locations.progression }
+            shot("selection-drag")
+            assertEquals("the page turned under a selection drag ($before, then $after)", before, after)
+            // The long press did what it does with a finger: the words under it are selected and the card is open.
+            assertTrue("the long press selected nothing", withContext(Dispatchers.Main) { card.isOpen })
+        }
+    }
+
     @Test fun copyPutsTheWordsOnTheClipboardAndClosesTheCard() = runBlocking {
         withSelectionBook {
             selectAndWait("lighthouse door")

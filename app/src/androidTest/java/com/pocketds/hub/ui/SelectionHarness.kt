@@ -136,6 +136,23 @@ class SelectionBook(
         ins.sendPointerSync(event(android.view.MotionEvent.ACTION_UP, down + 60))
     }
 
+    /**
+     * A finger down at ([fromX], [fromY]) that stays [holdMs] (a long press), then goes to ([toX], [toY]) over [moveMs] and lifts: the
+     * drag that extends a selection, as a person makes it. Real touch events, so the reader's own touch handling sees them as it does.
+     */
+    suspend fun drag(fromX: Float, fromY: Float, toX: Float, toY: Float, holdMs: Long, moveMs: Long) {
+        val down = android.os.SystemClock.uptimeMillis()
+        fun event(action: Int, x: Float, y: Float) = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action, x, y, 0)
+        ins.sendPointerSync(event(android.view.MotionEvent.ACTION_DOWN, fromX, fromY))
+        delay(holdMs)
+        val steps = 12
+        for (i in 1..steps) {
+            delay(moveMs / steps)
+            ins.sendPointerSync(event(android.view.MotionEvent.ACTION_MOVE, fromX + (toX - fromX) * i / steps, fromY + (toY - fromY) * i / steps))
+        }
+        ins.sendPointerSync(event(android.view.MotionEvent.ACTION_UP, toX, toY))
+    }
+
     /** How many elements the page has for a CSS [selector]. */
     suspend fun count(selector: String): Int = js("document.querySelectorAll(${org.json.JSONObject.quote(selector)}).length").trim('"').toIntOrNull() ?: 0
 
