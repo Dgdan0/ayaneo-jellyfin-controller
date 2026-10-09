@@ -34,11 +34,13 @@ final class ReadAlongReader {
     /// last turn of the page, and what the last page turned by hand did.
     private(set) var debugTurn = "none"
     private(set) var debugHand = "none"
-    var debugLine: String { "\(debugTurn) · \(debugHand)" }
+    /// The sentence the place kept last names (#66: a sentence, never a word).
+    private(set) var debugPlace = "none"
+    var debugLine: String { "\(debugTurn) · \(debugHand) · place \(debugPlace)" }
     #endif
 
-    /// Lights the sentence spoken, or nothing.
-    @ObservationIgnored var highlight: @MainActor (ReadAlongSegment?) -> Void = { _ in }
+    /// Washes the voice's moment (the sentence, or the word and the trail, #66), or nothing.
+    @ObservationIgnored var highlight: @MainActor (ReadAlongMark?) -> Void = { _ in }
     /// The page script's answer to `ReadAlongPageScript.edges` for those ids.
     @ObservationIgnored var edges: @MainActor ([String]) async -> Any? = { _ in nil }
     /// The page script's answer to `ReadAlongPageScript.firstAfter` for those ids.
@@ -96,6 +98,7 @@ final class ReadAlongReader {
         matchToPage = locator != nil && resume == nil
         let narration = NarrationModel(prepared, workId: workId, token: token, initial: resume, book: book)
         narration.onSegment = { [weak self] segment in self?.spoken(segment) }
+        narration.onMark = { [weak self] mark in self?.marked(mark) }
         narration.onSave = { [weak self] point, completed in
             guard let self else { return }
             self.session.record(point)
@@ -110,7 +113,7 @@ final class ReadAlongReader {
         narration.chapter = { [weak self] in self?.chapter() }
         self.narration = narration
         session.ready(resume)
-        if let segment = narration.segment { highlight(segment) }
+        if let mark = narration.mark { highlight(mark) }
         #if DEBUG
         // HUB_READALONG_SENTENCE=<id>, debug builds: the narration paused at that sentence, lit and on
         // the page, for UI tests to look at a sentence where they choose (#52).
@@ -118,7 +121,14 @@ final class ReadAlongReader {
            let segment = prepared.timeline.tracks.flatMap(\.segments).first(where: { $0.fragment == id }),
            let target = prepared.timeline.begin(of: segment) {
             matchToPage = false
-            narration.seek(to: target)
+            // HUB_READALONG_WORD=<n>: a moment into that sentence's word n (#66), its trail before it.
+            if let word = ProcessInfo.processInfo.environment["HUB_READALONG_WORD"].flatMap(Int.init),
+               prepared.timeline.words(of: segment).indices.contains(word) {
+                let begin = prepared.timeline.words(of: segment)[word].beginMs
+                narration.seek(to: ReadAlongPosition(track: target.track, offsetMs: target.offsetMs + begin - segment.beginMs + 1))
+            } else {
+                narration.seek(to: target)
+            }
         }
         #endif
     }
@@ -144,7 +154,12 @@ final class ReadAlongReader {
         guard let narration, let point = session.pointForSave(narration.playing ? narration.position : nil) else {
             return pageLocator
         }
-        return ReadAlongLocation.save(pageLocator, narration.timeline, point: point, completed: completed, hrefs: hrefs)
+        let saved = ReadAlongLocation.save(pageLocator, narration.timeline, point: point, completed: completed, hrefs: hrefs)
+        #if DEBUG
+        let object = (try? JSONSerialization.jsonObject(with: Data(saved.utf8))) as? [String: Any]
+        debugPlace = ((object?["locations"] as? [String: Any])?["fragments"] as? [String])?.first ?? "none"
+        #endif
+        return saved
     }
 
     // MARK: The voice and the page
@@ -163,12 +178,17 @@ final class ReadAlongReader {
         return TimeLeft.ofNarration(narration.timeline, narration.position, speed: narration.speed)
     }
 
-    /// The sentence spoken changed: it glows, and the page goes to the voice
-    /// when it is not on the page.
+    /// The sentence spoken changed: the page goes to the voice when it is
+    /// not on the page. What is washed follows each word (`marked`).
     private func spoken(_ segment: ReadAlongSegment?) {
         guard !away else { return }
-        highlight(segment)
         if segment != nil { followVoice() }
+    }
+
+    /// The word spoken, or the sentence, changed: the page washes it (#66).
+    private func marked(_ mark: ReadAlongMark?) {
+        guard !away else { return }
+        highlight(mark)
     }
 
     /// Ten times a second while the voice reads: at the next page's first word, the page turns.
@@ -345,6 +365,9 @@ final class ReadAlongReader {
     /// Play or pause; from the page when the narration's place was let go.
     func togglePlay() {
         guard let narration else { return }
+        #if DEBUG
+        if !narration.playing { FrameMonitor.shared.reset() }
+        #endif
         if matchToPage && !narration.playing {
             listenFromPage(play: true)
         } else {
@@ -462,7 +485,7 @@ final class ReadAlongReader {
             checkAgain = false
             turnAt = nil
         } else if let narration, !matchToPage {
-            highlight(narration.segment)
+            highlight(narration.mark)
             followVoice()
         }
     }

@@ -118,7 +118,7 @@ public enum ReadAlongStream {
             }
             if !kept.isEmpty { tracks.append(ReadAlongTrack(audioHref: track.audioHref, segments: kept)) }
         }
-        return tracks.isEmpty ? nil : ReadAlongTimeline(tracks: tracks)
+        return tracks.isEmpty ? nil : ReadAlongTimeline(tracks: tracks, words: timeline.words)
     }
 
     private static func trimmed(_ href: String) -> String {

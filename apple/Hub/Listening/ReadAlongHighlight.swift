@@ -13,15 +13,31 @@ import UIKit
 /// search and bookmarks may use), and applies `decorations(_:)` in `group`
 /// as the voice moves; nil clears it.
 enum ReadAlongHighlight {
-    /// The style Readium knows the sentence by, ReadAlongGlow's class.
+    /// The style Readium knows the sentence by, ReadAlongGlow's class: the
+    /// whole sentence in a sentence-level edition, the trail through it in a
+    /// word-level one (#66).
     static let style = Decoration.Style.Id(rawValue: ReadAlongGlow.className)
-    /// The decoration group of the sentence being read.
+    /// The word spoken's (#66).
+    static let wordStyle = Decoration.Style.Id(rawValue: ReadAlongGlow.wordClassName)
+    /// The decoration group of the sentence being read, and of the word.
     static let group: DecorationGroup = "readalong"
+    static let wordGroup: DecorationGroup = "readalong-word"
 
-    /// The sentence's template, in `tint` (an accent's colour, 0xAARRGGBB).
+    /// The sentence's template and the word's, each washed by the page script.
     static func templates(tint: UInt32) -> [Decoration.Style.Id: HTMLDecorationTemplate] {
         [style: HTMLDecorationTemplate(layout: .boxes, width: .wrap, element: ReadAlongGlow.element(tint: tint),
-                                       stylesheet: ReadAlongGlow.stylesheet(tint: tint))]
+                                       stylesheet: ReadAlongGlow.stylesheet(tint: tint)),
+         wordStyle: HTMLDecorationTemplate(layout: .boxes, width: .wrap, element: ReadAlongGlow.wordElement(),
+                                           stylesheet: ReadAlongGlow.wordStylesheet())]
+    }
+
+    /// The word spoken, `fragment` in the sentence's document (#66).
+    static func word(_ fragment: String, of segment: ReadAlongSegment, hrefs: BookHrefs) -> [Decoration] {
+        let fields: [String: Any] = ["href": hrefs.readium(segment.textHref), "type": "application/xhtml+xml",
+                                     "locations": ["fragments": [fragment]]]
+        guard let data = try? JSONSerialization.data(withJSONObject: fields), let json = String(data: data, encoding: .utf8),
+              let locator = try? Locator(jsonString: json) else { return [] }
+        return [Decoration(id: "word", locator: locator, style: Decoration.Style(id: wordStyle))]
     }
 
     /// Readium's own templates with the sentence's: what a read-along

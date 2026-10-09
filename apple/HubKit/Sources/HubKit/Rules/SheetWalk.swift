@@ -146,7 +146,8 @@ public enum ComicDisplayLine: Hashable, Sendable {
 /// Appearance's pages (`BookAppearanceSheet`): four tabs, and Spacing, which
 /// Font's own row opens and which has its own way back (#47).
 public enum BookAppearancePage: Int, CaseIterable, Sendable {
-    case font, layout, themes, comfort, spacing
+    /// `highlight`: Themes' page of the read-along highlight (#66), as Spacing is Font's.
+    case font, layout, themes, comfort, spacing, highlight
 
     /// The pages that are tabs.
     public static let tabs: [BookAppearancePage] = [.font, .layout, .themes, .comfort]
@@ -167,6 +168,9 @@ public enum BookAppearanceLine: Hashable, Sendable {
     /// The page colours in rows of two.
     case themes(Int)
     case systemColours
+    /// The read-along highlight (#66): Themes' row that opens its page; on it the
+    /// page colours as tabs, the eight colours, the trail and Use the default.
+    case highlightPage, highlightThemes, highlightColours, highlightTrail, highlightDefault
     case comfort(ComfortLine)
 
     /// The page colours, two to a row, as the tab shows them.
@@ -187,9 +191,10 @@ public enum BookAppearanceLine: Hashable, Sendable {
         case .layout:
             body = [.columns, .automaticColumns, .scroll, .publisher, .justified, .hyphenation,
                     .resetTextStyle, .clock, .percentage] + PageInfoPlace.allCases.map { .place($0) }
-        case .themes: body = themeRows.indices.map { .themes($0) } + [.systemColours]
+        case .themes: body = themeRows.indices.map { .themes($0) } + [.systemColours, .highlightPage]
         case .comfort: body = [.comfort(.warmth), .comfort(.awake)]
         case .spacing: return [.back, .spacing, .margins, brightness]
+        case .highlight: return [.back, .highlightThemes, .highlightColours, .highlightTrail, .highlightDefault, brightness]
         }
         return [.tabs] + body + [brightness]
     }
@@ -202,10 +207,12 @@ public enum BookAppearanceLine: Hashable, Sendable {
         case .margins: .choices(EpubAppearance.margins.count)
         case .spacing: .choices(EpubAppearance.spacing.count)
         case .themes(let row): .choices(Self.themeRows.indices.contains(row) ? Self.themeRows[row].count : 1)
-        case .size: .value
+        case .highlightThemes: .choices(ReadAlongHighlightStyle.themes.count)
+        case .highlightColours: .choices(ReadAlongHighlightStyle.Colour.allCases.count)
+        case .size, .highlightTrail: .value
         case .comfort(let line): line.shape
         case .onePage, .automaticColumns, .scroll, .publisher, .justified, .hyphenation, .resetTextStyle,
-             .systemColours, .clock, .percentage, .place, .spacingPage, .back: .row
+             .systemColours, .clock, .percentage, .place, .spacingPage, .back, .highlightPage, .highlightDefault: .row
         }
     }
 
@@ -251,7 +258,8 @@ public enum BookAppearanceLine: Hashable, Sendable {
             var next = value
             next.theme = .system
             return next
-        case .tabs, .size, .comfort, .clock, .percentage, .place, .spacingPage, .back:
+        case .tabs, .size, .comfort, .clock, .percentage, .place, .spacingPage, .back,
+             .highlightPage, .highlightThemes, .highlightColours, .highlightTrail, .highlightDefault:
             return nil
         }
     }

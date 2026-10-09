@@ -38,7 +38,7 @@ struct BookReaderSheetView: View {
         switch sheet {
         case .contents, .bookmarks: "Contents"
         case .search: "Search this book"
-        case .appearance: reader.appearanceSpacing ? "Spacing" : "Appearance"
+        case .appearance: reader.appearanceHighlight ? "Read-along highlight" : reader.appearanceSpacing ? "Spacing" : "Appearance"
         case .keys: "Keys"
         }
     }
@@ -162,7 +162,9 @@ struct BookAppearanceSheet: View {
     private var value: EpubReaderPreferences { reader.preferences }
 
     var body: some View {
-        if reader.appearanceSpacing {
+        if reader.appearanceHighlight {
+            highlightPage
+        } else if reader.appearanceSpacing {
             spacingPage
         } else {
             HStack(spacing: 8) {
@@ -395,6 +397,69 @@ struct BookAppearanceSheet: View {
         SheetGroup {
             row(.systemColours, "Use system colours", detail: "Paper by day, Dark at night", checked: value.theme == .system)
         }
+        // Read along's highlight (#66), its own for each page colour.
+        let page = reader.rendering.page
+        let style = reader.highlightStyle(page)
+        SheetGroup {
+            row(.highlightPage, "Read-along highlight", detail: "The word read, and the trail through its sentence",
+                value: "\(style.colour.label) · \(HighlightLabels.trail(style.trail))", chevron: true)
+        }
+    }
+
+    // MARK: Read-along highlight (#66)
+
+    /// Themes' page of the highlight: the page colours as tabs, each showing
+    /// its colour; a sentence in it on that page; the eight colours, the
+    /// default marked; the trail; and Use the default. Applied at once, kept per page.
+    @ViewBuilder private var highlightPage: some View {
+        let theme = reader.highlightTheme
+        let style = reader.highlightStyle(theme)
+        let standard = ReadAlongHighlightStyle.standard(for: theme)
+        Button {
+            reader.pressAppearance(.back)
+        } label: {
+            Label("Themes", systemImage: "chevron.left")
+        }
+        .buttonStyle(GlassControlStyle())
+        .readerRing(ringed?.line == .back, corner: 21)
+        .accessibilityIdentifier("appearance-back")
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Array(ReadAlongHighlightStyle.themes.enumerated()), id: \.offset) { column, page in
+                    HighlightThemeTab(theme: page, style: reader.highlightStyle(page), selected: theme == page) {
+                        reader.pressAppearance(.highlightThemes, column: column)
+                    }
+                    .readerRing(isRinged(.highlightThemes, column), corner: 20)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .id(Self.id(.highlightThemes))
+        HighlightPreview(theme: theme, style: style)
+        SheetLabel(text: "Colour")
+        HStack(spacing: 0) {
+            ForEach(Array(ReadAlongHighlightStyle.Colour.allCases.enumerated()), id: \.offset) { column, colour in
+                HighlightSwatch(colour: colour, theme: theme, selected: style.colour == colour, standard: standard.colour == colour) {
+                    reader.pressAppearance(.highlightColours, column: column)
+                }
+                .readerRing(isRinged(.highlightColours, column), corner: 20)
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .id(Self.id(.highlightColours))
+        SheetLabel(text: "Trail")
+        HighlightTrailSlider(trail: style.trail) { percent in
+            var next = style
+            next.trail = percent
+            reader.setHighlight(next, for: theme)
+        }
+        .readerRing(ringed?.line == .highlightTrail, corner: 14)
+        .id(Self.id(.highlightTrail))
+        SheetGroup {
+            row(.highlightDefault, "Use the default", detail: "\(standard.colour.label), the trail at \(standard.trail)%",
+                checked: reader.isStandardHighlight(theme))
+        }
+        SheetNote(text: "Reading along, the word being read is washed strongly and the words of its sentence already read lightly. A book read along by the sentence washes its sentence in the same colour.")
     }
 }
 

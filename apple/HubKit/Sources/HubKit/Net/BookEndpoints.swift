@@ -7,11 +7,14 @@ extension HubEndpoints {
     /// An edition's EPUB, whole (`…/file`). Read along will ask for
     /// `format=readaloud` with `audio=omit`: the slim edition, its narration
     /// streamed from the audiobook's tracks instead.
+    /// `granularity` "word" asks for our word overlay (#66) where the hub has
+    /// one; a hub without one, or before it knew the word, sends the sentences.
     public static func readingEpubFile(workId: String, sourceItemId: String, format: String = "",
-                                       omitAudio: Bool = false) -> HubRequest {
+                                       omitAudio: Bool = false, granularity: String = "") -> HubRequest {
         var query: [String] = []
         if !format.isEmpty { query.append("format=" + encode(format)) }
         if omitAudio { query.append("audio=omit") }
+        if !granularity.isEmpty { query.append("granularity=" + encode(granularity)) }
         return HubRequest(publicationPath(workId: workId, sourceItemId: sourceItemId) + "/file"
                           + (query.isEmpty ? "" : "?" + query.joined(separator: "&")), slow: true)
     }

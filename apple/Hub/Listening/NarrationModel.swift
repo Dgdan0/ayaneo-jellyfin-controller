@@ -48,11 +48,15 @@ final class NarrationModel {
     private(set) var position: ReadAlongPosition
     /// The sentence spoken now; nil in a pause between two.
     private(set) var segment: ReadAlongSegment?
+    /// What the page washes now (#66): the sentence, the word spoken in it and whether a trail runs before it.
+    @ObservationIgnored private(set) var mark: ReadAlongMark?
     private(set) var speed: Float
     /// Played to its end.
     private(set) var completed = false
 
     @ObservationIgnored var onSegment: ((ReadAlongSegment?) -> Void)?
+    /// The word spoken changed, or the sentence did (#66): what the page washes.
+    @ObservationIgnored var onMark: ((ReadAlongMark?) -> Void)?
     /// The place to keep, and whether the narration is finished.
     @ObservationIgnored var onSave: ((ReadAlongPosition, Bool) -> Void)?
     @ObservationIgnored var onError: (() -> Void)?
@@ -119,10 +123,13 @@ final class NarrationModel {
         loadArtwork()
         load(position, play: false)
         segment = timeline.active(track: position.track, offsetMs: position.offsetMs)
+        mark = ReadAlongMark.at(position, in: timeline, trailPercent: 100)
+        // Word by word (#66) the page follows three to five words a second: asked twice as often.
+        let interval = timeline.timesWords ? 50 : 100
         poll = Task { [weak self] in
             while !Task.isCancelled {
                 self?.tick()
-                try? await Task.sleep(for: .milliseconds(100))
+                try? await Task.sleep(for: .milliseconds(interval))
             }
         }
     }
@@ -179,7 +186,16 @@ final class NarrationModel {
         let now = timeline.active(track: position.track, offsetMs: position.offsetMs)
         segment = now
         onSegment?(now)
+        marked()
         updateNowPlaying()
+    }
+
+    /// The word spoken, or the sentence, has changed: the page washes it (#66).
+    private func marked() {
+        let now = ReadAlongMark.at(position, in: timeline, trailPercent: 100)
+        guard now != mark else { return }
+        mark = now
+        onMark?(now)
     }
 
     /// By `deltaMs` of narration, across stretches (−10 and +10).
@@ -304,6 +320,7 @@ final class NarrationModel {
             segment = now
             onSegment?(now)
         }
+        marked()
         guard playing else { return }
         onTick?(position)
         if ContinuousClock.now - lastSave >= .seconds(10) { save() }
@@ -333,6 +350,8 @@ final class NarrationModel {
         completed = true
         segment = nil
         onSegment?(nil)
+        mark = nil
+        onMark?(nil)
         SoundGuard.shared.stopped(.narration)
         save()
         updateNowPlaying()
@@ -493,7 +512,8 @@ enum ReadAlongEdition {
         do {
             return try await cache.open(workId: workId, sourceItemId: sourceItemId,
                                         request: HubEndpoints.readingEpubFile(workId: workId, sourceItemId: sourceItemId,
-                                                                              format: "readaloud", omitAudio: true),
+                                                                              format: "readaloud", omitAudio: true,
+                                                                              granularity: "word"),
                                         hub: app.hub, force: force)
         } catch let failure as HubFailure {
             throw ReadAlongError(failure.message)

@@ -66,8 +66,14 @@ struct SheetWalkTests {
         // Brightness is fixed at the bottom of every page (#47); Spacing is a page of Font's, with its own way back.
         #expect(BookAppearanceLine.lines(.font) == [.tabs, .typeface, .size, .spacingPage, .onePage, brightness])
         #expect(BookAppearanceLine.lines(.comfort) == [.tabs, .comfort(.warmth), .comfort(.awake), brightness])
-        #expect(BookAppearanceLine.lines(.themes).dropLast().last == .systemColours)
+        // Themes ends on its page of the read-along highlight (#66), which has its own way back.
+        #expect(Array(BookAppearanceLine.lines(.themes).suffix(3)) == [.systemColours, .highlightPage, brightness])
         #expect(BookAppearanceLine.lines(.spacing) == [.back, .spacing, .margins, brightness])
+        #expect(BookAppearanceLine.lines(.highlight)
+            == [.back, .highlightThemes, .highlightColours, .highlightTrail, .highlightDefault, brightness])
+        #expect(BookAppearanceLine.highlightThemes.shape == .choices(5) && BookAppearanceLine.highlightColours.shape == .choices(8))
+        #expect(BookAppearanceLine.highlightTrail.shape == .value && BookAppearanceLine.highlightDefault.shape == .row)
+        #expect(BookAppearanceLine.highlightPage.press(EpubReaderPreferences()) == nil, "the model opens the page")
         for page in BookAppearancePage.allCases { #expect(BookAppearanceLine.lines(page).last == brightness, "\(page)") }
         #expect(BookAppearancePage.tabs == [.font, .layout, .themes, .comfort])
         #expect(BookAppearanceLine.tabs.shape == .choices(4))

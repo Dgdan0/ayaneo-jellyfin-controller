@@ -8,8 +8,10 @@ import Foundation
 public enum ReadAlongPackage {
     /// The most of one XML document read.
     static let xmlLimit = 4 * 1_024 * 1_024
-    /// The most sentences (or words) a narration may hold.
+    /// The most sentences a narration may hold.
     static let segmentLimit = 200_000
+    /// The most words an edition read word by word may hold (#66): a 50-hour book has about half a million.
+    static let wordLimit = 2_000_000
 
     /// The narration's timeline from the edition at `url`.
     public static func read(_ url: URL, requireAudio: Bool = true) throws(ReadAlongError) -> ReadAlongTimeline {
@@ -37,6 +39,9 @@ public enum ReadAlongPackage {
         var manifest: [String: XMLElements.Element] = [:]
         for item in opf.named("item") { manifest[item.attributes["id"] ?? ""] = item }
         var segments: [ReadAlongSegment] = []
+        // Word by word (#66): each par's sentence, from the `<seq epub:textref="doc#sentence">` round it.
+        var sentenceOf: [String] = []
+        var nested = false
         for ref in opf.named("itemref") {
             guard let chapter = manifest[ref.attributes["idref"] ?? ""] else { continue }
             let overlayId = chapter.attributes["media-overlay"] ?? ""
@@ -64,14 +69,43 @@ public enum ReadAlongPackage {
                 // to light: that one sentence is skipped and the rest of the
                 // edition still plays.
                 if end <= begin { continue }
+                let sentence = try Self.sentence(of: par, in: smil, smilPath: smilPath, href: words.path)
+                if sentence != nil { nested = true }
                 // In the key's form, as every page href is compared (#61).
                 segments.append(ReadAlongSegment(textHref: BookHref.normalized(words.path), fragment: words.fragment,
                                                  audioHref: audioHref,
                                                  beginMs: begin, endMs: end))
-                guard segments.count <= segmentLimit else { throw ReadAlongError("Narration timeline is too large") }
+                sentenceOf.append(sentence ?? words.fragment)
+                guard segments.count <= (nested ? wordLimit : segmentLimit) else {
+                    throw ReadAlongError("Narration timeline is too large")
+                }
             }
         }
         guard !segments.isEmpty else { throw ReadAlongError("This edition has no aligned narration") }
+        // Word by word: the words of one sentence, one after another in one file, are that sentence.
+        var words: [String: [ReadAlongWord]] = [:]
+        if nested {
+            var sentences: [ReadAlongSegment] = []
+            for (index, word) in segments.enumerated() {
+                let sentence = sentenceOf[index]
+                guard sentence != word.fragment else {
+                    sentences.append(word)
+                    continue
+                }
+                let key = ReadAlongTimeline.wordKey(word.textHref, sentence)
+                if let last = sentences.last, last.textHref == word.textHref, last.fragment == sentence,
+                   last.audioHref == word.audioHref, word.beginMs >= last.endMs - 1, words[key] != nil {
+                    sentences[sentences.count - 1] = ReadAlongSegment(textHref: last.textHref, fragment: sentence,
+                                                                      audioHref: last.audioHref, beginMs: last.beginMs,
+                                                                      endMs: max(last.endMs, word.endMs))
+                } else {
+                    sentences.append(ReadAlongSegment(textHref: word.textHref, fragment: sentence, audioHref: word.audioHref,
+                                                      beginMs: word.beginMs, endMs: word.endMs))
+                }
+                words[key, default: []].append(ReadAlongWord(fragment: word.fragment, beginMs: word.beginMs, endMs: word.endMs))
+            }
+            segments = sentences
+        }
         // A stretch is one audio file read on: a new file, or a clip earlier
         // than the one before, starts the next.
         var tracks: [ReadAlongTrack] = []
@@ -84,7 +118,25 @@ public enum ReadAlongPackage {
             group.append(segment)
         }
         if let first = group.first { tracks.append(ReadAlongTrack(audioHref: first.audioHref, segments: group)) }
-        return ReadAlongTimeline(tracks: tracks)
+        return ReadAlongTimeline(tracks: tracks, words: words)
+    }
+
+    /// The sentence a word's par belongs to (#66): the fragment of the
+    /// nearest `<seq epub:textref="doc#sentence">` round it, when that names
+    /// the word's own document; nil for a par that is a sentence itself.
+    static func sentence(of par: XMLElements.Element, in smil: XMLElements, smilPath: String,
+                         href: String) throws(ReadAlongError) -> String? {
+        var parent = par.parent
+        while let index = parent {
+            let element = smil.elements[index]
+            if element.name == "seq", let reference = element.attributes["epub:textref"] ?? element.attributes["textref"],
+               reference.contains("#") {
+                let resolved = try resolve(smilPath, reference)
+                return resolved.path == href && !resolved.fragment.isEmpty ? resolved.fragment : nil
+            }
+            parent = element.parent
+        }
+        return nil
     }
 
     /// A SMIL clock value in milliseconds: "01:02:03.250", "npt=1.25s",

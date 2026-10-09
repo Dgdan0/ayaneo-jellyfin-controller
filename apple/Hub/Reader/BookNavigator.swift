@@ -81,10 +81,28 @@ final class BookNavigator: NSObject {
     private var publication: Publication?
     private var controller: EPUBNavigatorViewController?
     /// Reading along: the accent the sentence is washed in, and the wash for the page's colours (#52).
+    /// Reading along: the navigator has the narration's templates.
     private var narrationTint: UInt32?
-    private var narrationWash: UInt32?
-    /// The element of the sentence lit, whose words its boxes are trimmed to (#56).
-    private var narrationFragment: String?
+    /// The page's colours, for the washes.
+    private var rendering: EpubRendering?
+    /// What is washed now (#52, #56, #66): the sentence, or the word spoken and the trail before it.
+    private var mark: ReadAlongMark?
+    /// The edition times its words (#66): a sentence without words is then washed as a word.
+    var wordLevel = false
+    /// The colour and trail chosen for each page (#66).
+    private let highlightStore = ReadAlongHighlightStore()
+    #if DEBUG
+    /// The washes drawn now, for UI tests: "trail F2DCB0 word EFC981".
+    private(set) var debugWashes = ""
+    /// How often the word changed, and how long the page took to fit each (#66's smoothness).
+    private(set) var debugWordChanges = 0
+    private(set) var debugFitTotal: Double = 0
+    private(set) var debugFitWorst: Double = 0
+    var debugFits: String {
+        let average = debugWordChanges > 0 ? debugFitTotal / Double(debugWordChanges) : 0
+        return String(format: "words %d fit avg %.1fms worst %.1fms", debugWordChanges, average * 1_000, debugFitWorst * 1_000)
+    }
+    #endif
     /// The book's documents as Readium spells them: what a locator made from
     /// the narration's path names (#61).
     private(set) var hrefs = BookHrefs(readingOrder: [])
@@ -146,7 +164,7 @@ final class BookNavigator: NSObject {
         controller = navigator
         hrefs = BookHrefs(readingOrder: loaded.readingOrder)
         narrationTint = narration
-        narrationWash = Self.wash(narration, rendering)
+        self.rendering = rendering
         return navigator
     }
 
@@ -154,15 +172,9 @@ final class BookNavigator: NSObject {
     /// and the sentence's wash follows the page's colours.
     func submit(_ rendering: EpubRendering) {
         controller?.submitPreferences(Self.preferences(rendering))
-        narrationWash = Self.wash(narrationTint, rendering)
-        fitNarration()
-    }
-
-    /// The accent mixed into the page under its ink (`ReadAlongGlow.wash`).
-    private static func wash(_ tint: UInt32?, _ rendering: EpubRendering) -> UInt32? {
-        guard let tint, let page = EpubPagePalette.argb(rendering.background),
-              let ink = EpubPagePalette.argb(rendering.text) else { return nil }
-        return ReadAlongGlow.wash(accent: tint, page: page, ink: ink)
+        self.rendering = rendering
+        // Each page its own highlight (#66): the trail may be drawn there or not.
+        if narrationTint != nil { restyleHighlight() }
     }
 
     @discardableResult
@@ -183,11 +195,41 @@ final class BookNavigator: NSObject {
 
     // MARK: Read along
 
-    /// The sentence spoken glows, or nothing does.
-    func highlight(_ segment: ReadAlongSegment?) {
-        narrationFragment = segment?.fragment
-        controller?.apply(decorations: ReadAlongHighlight.decorations(segment, hrefs: hrefs), in: ReadAlongHighlight.group)
+    /// What the page washes of the voice's moment, or nothing (#66, style A):
+    /// in a word-level edition the word spoken, and the trail through the
+    /// sentence's words before it; in a sentence-level one the sentence. True
+    /// when the sentence changed.
+    @discardableResult
+    func highlight(_ mark: ReadAlongMark?) -> Bool {
+        let changed = mark?.sentence != self.mark?.sentence
+        #if DEBUG
+        if mark?.word != nil && mark?.word != self.mark?.word { debugWordChanges += 1; fitStarted = .now }
+        #endif
+        self.mark = mark
+        var sentence: [Decoration] = []
+        var word: [Decoration] = []
+        if let mark {
+            if let fragment = mark.word {
+                if mark.trail && highlightStyle.trail > 0 { sentence = ReadAlongHighlight.decorations(mark.sentence, hrefs: hrefs) }
+                word = ReadAlongHighlight.word(fragment, of: mark.sentence, hrefs: hrefs)
+            } else {
+                sentence = ReadAlongHighlight.decorations(mark.sentence, hrefs: hrefs)
+            }
+        }
+        controller?.apply(decorations: sentence, in: ReadAlongHighlight.group)
+        controller?.apply(decorations: word, in: ReadAlongHighlight.wordGroup)
         fitNarration()
+        return changed
+    }
+
+    /// The highlight chosen for the page shown.
+    private var highlightStyle: ReadAlongHighlightStyle {
+        highlightStore.style(for: rendering?.page ?? .light)
+    }
+
+    /// The highlight was chosen again (#66): drawn again in it.
+    func restyleHighlight() {
+        highlight(mark)
     }
 
     /// The sentence's boxes fitted to its lines in the wash (#52,
@@ -196,10 +238,46 @@ final class BookNavigator: NSObject {
     /// the sentence or the page's colours change, and as a part opens, whose
     /// page has not had it yet.
     func fitNarration() {
-        guard let controller, let wash = narrationWash else { return }
-        let script = ReadAlongPageScript.fitNarration(wash: wash, fragment: narrationFragment)
-        Task { _ = await controller.evaluateJavaScript(script) }
+        guard let controller, narrationTint != nil, let rendering,
+              let page = EpubPagePalette.argb(rendering.background), let ink = EpubPagePalette.argb(rendering.text) else { return }
+        let style = highlightStyle
+        var fits: [ReadAlongFit] = []
+        if let mark {
+            if let word = mark.word {
+                if mark.trail, let trail = style.trail(rendering.page, page: page, ink: ink) {
+                    fits.append(ReadAlongFit(style: ReadAlongGlow.className, wash: trail, fragment: mark.sentence.fragment, until: word))
+                }
+                fits.append(ReadAlongFit(style: ReadAlongGlow.wordClassName, wash: style.word(rendering.page, page: page, ink: ink),
+                                         fragment: word))
+            } else {
+                // A sentence-level book's sentence in #52's wash; a word-level book's sentence without words as a word.
+                let wash = wordLevel ? style.word(rendering.page, page: page, ink: ink) : style.sentence(page: page, ink: ink)
+                fits.append(ReadAlongFit(style: ReadAlongGlow.className, wash: wash, fragment: mark.sentence.fragment))
+            }
+        }
+        let script = ReadAlongPageScript.fitMarks(fits)
+        #if DEBUG
+        let started = fitStarted
+        fitStarted = nil
+        debugWashes = fits.map { "\($0.style == ReadAlongGlow.wordClassName ? "word" : $0.until == nil ? "sentence" : "trail") "
+            + String(format: "%06X", $0.wash & 0xFF_FFFF) }.joined(separator: " ")
+        #endif
+        Task {
+            _ = await controller.evaluateJavaScript(script)
+            #if DEBUG
+            if let started {
+                let took = ContinuousClock.now - started
+                let seconds = Double(took.components.seconds) + Double(took.components.attoseconds) / 1e18
+                debugFitTotal += seconds
+                debugFitWorst = max(debugFitWorst, seconds)
+            }
+            #endif
+        }
     }
+
+    #if DEBUG
+    private var fitStarted: ContinuousClock.Instant?
+    #endif
 
     /// A script's answer from the page on screen (`ReadAlongPageScript`), or nil.
     func evaluate(_ script: String) async -> Any? {

@@ -139,8 +139,25 @@ final class BookReaderModel {
     var appearanceTab = AppearanceTab.font
     /// Spacing, Font's page of line spacing and margins, is open (#47).
     var appearanceSpacing = false
+    /// Themes' page of the read-along highlight is open (#66), and the page colour whose highlight it shows.
+    var appearanceHighlight = false
+    var highlightTheme: EpubTheme = .light
+    /// Counts the highlight's changes, for the sheet that shows them.
+    private(set) var highlightRevision = 0
+    @ObservationIgnored private let highlightStore: ReadAlongHighlightStore = {
+        let store = ReadAlongHighlightStore()
+        #if DEBUG
+        // HUB_HIGHLIGHT_RESET=1, for UI tests: every page colour's highlight back to its default.
+        if ProcessInfo.processInfo.environment["HUB_HIGHLIGHT_RESET"] == "1" {
+            for theme in ReadAlongHighlightStyle.themes { store.reset(theme) }
+        }
+        #endif
+        return store
+    }()
     /// The page of Appearance the sheet shows, and a controller walks.
-    var appearancePage: BookAppearancePage { appearanceSpacing ? .spacing : appearanceTab.page }
+    var appearancePage: BookAppearancePage {
+        appearanceHighlight ? .highlight : appearanceSpacing ? .spacing : appearanceTab.page
+    }
     /// Where a controller's ring is in Appearance, and which part of Keys it is on (#25).
     var appearanceWalk = SheetWalk()
     var keysPart = 0
@@ -285,9 +302,9 @@ final class BookReaderModel {
     /// Read along's hold on the page: the glow, the scripts, the voice and the page moving each other (#49).
     private func connect(_ reading: ReadAlongReader) {
         let navigator = navigator
-        reading.highlight = { [weak self] segment in
-            navigator.highlight(segment)
-            self?.updateLines()
+        // Word by word the wash moves three to five times a second (#66): the lines change with the sentence.
+        reading.highlight = { [weak self] mark in
+            if navigator.highlight(mark) { self?.updateLines() }
         }
         reading.edges = { ids in await navigator.evaluate(ReadAlongPageScript.edges(ids)) }
         reading.firstAfter = { ids in await navigator.evaluate(ReadAlongPageScript.firstAfter(ids)) }
@@ -498,6 +515,8 @@ final class BookReaderModel {
         phase = .reading
         if let readAlong {
             readAlong.hrefs = navigator.hrefs
+            // Word by word when the edition times its words (#66).
+            navigator.wordLevel = prepared?.timeline.timesWords ?? false
             if let prepared {
                 readAlong.start(prepared, workId: workId, token: app.storedToken(), at: locator,
                                 book: NarrationModel.Book(title: title, author: author, artwork: cover))
@@ -675,6 +694,9 @@ final class BookReaderModel {
         if key == .escape {
             if footnote != nil {
                 footnote = nil
+            } else if sheet == .appearance && appearanceHighlight {
+                // The highlight is a page of Themes': Escape goes back to Themes first (#66).
+                leaveHighlight()
             } else if sheet == .appearance && appearanceSpacing {
                 // Spacing is a page of Font's: Escape goes back to Font first (#47).
                 leaveSpacing()
@@ -955,7 +977,9 @@ final class BookReaderModel {
             refreshBookmarks()
             sheetCursor = 0
         case .search: sheetCursor = 0
-        case .appearance: appearanceSpacing = false
+        case .appearance:
+            appearanceSpacing = false
+            appearanceHighlight = false
         default: break
         }
         sheet = next
@@ -968,7 +992,13 @@ final class BookReaderModel {
         switch action {
         case .back:
             // Spacing is a page of Font's: Ⓑ goes back to Font before it leaves Appearance (#47).
-            if open == .appearance && appearanceSpacing { leaveSpacing() } else { sheet = nil }
+            if open == .appearance && appearanceHighlight {
+                leaveHighlight()
+            } else if open == .appearance && appearanceSpacing {
+                leaveSpacing()
+            } else {
+                sheet = nil
+            }
         case .step(let direction) where open == .contents || open == .bookmarks:
             let count = open == .contents ? contents.count : bookmarks.count
             switch direction {
@@ -1009,6 +1039,7 @@ final class BookReaderModel {
             let index = (tabs.firstIndex(of: appearanceTab) ?? 0) + delta
             if tabs.indices.contains(index) {
                 appearanceSpacing = false
+                appearanceHighlight = false
                 appearanceTab = tabs[index]
             }
         case .activate where open == .appearance:
@@ -1042,13 +1073,30 @@ final class BookReaderModel {
         case .tabs:
             if AppearanceTab.allCases.indices.contains(column) {
                 appearanceSpacing = false
+                appearanceHighlight = false
                 appearanceTab = AppearanceTab.allCases[column]
             }
         case .spacingPage:
             appearanceSpacing = true
             appearanceWalk = SheetWalk()
+        case .highlightPage:
+            // The page shown's highlight first.
+            highlightTheme = ReadAlongHighlightStyle.themes.contains(rendering.page) ? rendering.page : .light
+            appearanceHighlight = true
+            appearanceWalk = SheetWalk()
         case .back:
-            leaveSpacing()
+            if appearanceHighlight { leaveHighlight() } else { leaveSpacing() }
+        case .highlightThemes:
+            if ReadAlongHighlightStyle.themes.indices.contains(column) { highlightTheme = ReadAlongHighlightStyle.themes[column] }
+        case .highlightColours:
+            let colours = ReadAlongHighlightStyle.Colour.allCases
+            if colours.indices.contains(column) {
+                var style = highlightStyle(highlightTheme)
+                style.colour = colours[column]
+                setHighlight(style, for: highlightTheme)
+            }
+        case .highlightDefault:
+            resetHighlight(highlightTheme)
         case .comfort(let comfort):
             ReaderComfort.shared.set(comfort.press(ReaderComfort.shared.value))
         default:
@@ -1058,6 +1106,47 @@ final class BookReaderModel {
                 setPageInfo(next)
             }
         }
+    }
+
+    /// Back from the highlight to Themes, the ring on the row that opened it.
+    func leaveHighlight() {
+        appearanceHighlight = false
+        let themes = BookAppearanceLine.lines(.themes)
+        appearanceWalk = SheetWalk(line: themes.firstIndex(of: .highlightPage) ?? 0)
+    }
+
+    // MARK: The read-along highlight (#66)
+
+    /// The highlight chosen for `theme`'s page.
+    func highlightStyle(_ theme: EpubTheme) -> ReadAlongHighlightStyle {
+        _ = highlightRevision
+        return highlightStore.style(for: theme)
+    }
+
+    func isStandardHighlight(_ theme: EpubTheme) -> Bool {
+        _ = highlightRevision
+        return highlightStore.isStandard(theme)
+    }
+
+    /// Kept for `theme` and shown at once.
+    func setHighlight(_ style: ReadAlongHighlightStyle, for theme: EpubTheme) {
+        highlightStore.set(style, for: theme)
+        highlightRevision += 1
+        navigator.restyleHighlight()
+    }
+
+    /// Use the default: the colour and the trail both.
+    func resetHighlight(_ theme: EpubTheme) {
+        highlightStore.reset(theme)
+        highlightRevision += 1
+        navigator.restyleHighlight()
+    }
+
+    /// The trail of the highlight shown a step weaker or stronger.
+    func adjustTrail(by delta: Int) {
+        var style = highlightStyle(highlightTheme)
+        style.trail = ReadAlongHighlightStyle.stepped(style.trail + delta * ReadAlongHighlightStyle.trailStep)
+        setHighlight(style, for: highlightTheme)
     }
 
     /// Back from Spacing to Font, the ring on the row that opened it.
@@ -1077,7 +1166,9 @@ final class BookReaderModel {
 
     /// A value of Appearance a step down or up: the size, or Comfort's brightness and warmth.
     func adjustAppearance(_ line: BookAppearanceLine, by delta: Int) {
-        if case .comfort(let comfort) = line {
+        if line == .highlightTrail {
+            adjustTrail(by: delta)
+        } else if case .comfort(let comfort) = line {
             ReaderComfort.shared.set(comfort.adjust(ReaderComfort.shared.value, by: delta))
         } else if let next = line.adjust(preferences, by: delta) {
             setPreferences(next)
@@ -1189,7 +1280,8 @@ final class BookReaderModel {
 
     /// Where the page is, what the voice and the page last did to each other, and who has the lock screen.
     var debugReadAlong: String {
-        "\(positionLine) · \(readAlong?.debugLine ?? "none") · \(NowPlaying.shared.summary)"
+        "\(positionLine) · \(readAlong?.debugLine ?? "none") · washes \(navigator.debugWashes) · \(navigator.debugFits) · "
+            + "\(FrameMonitor.shared.summary) · \(NowPlaying.shared.summary)"
     }
     #endif
 
