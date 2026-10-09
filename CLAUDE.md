@@ -1106,9 +1106,13 @@ restores today's behaviour exactly.
 **The hub** (`internal/reading/readalong_pack.go`, `internal/api/reading_readalong.go`). A pack is used
 when `FindPack` holds (manifest `passes` and `retimed`, its uuid the book's, `source.size` and
 `source.mtime` (whole seconds) the edition's as it is now, nothing in it written in the last 10 minutes,
-only SMIL and XHTML in its sets, every one an entry of the edition) and a set narrates the same audio
-pieces as the edition with the same last clipEnd each (`overlayUsable`, `Alignment.SamePieces`,
-checked once per edition and set and cached). The edition's own past-the-end markers
+only SMIL and XHTML in its sets, every one an entry of the edition). Each set holds or fails on its own
+(`Pack.Skipped`): The Dark Forest's word SMIL runs to 10-11.6 MB a chapter, over the 4 MB a file may
+be, so that book is read along by its corrected sentences and its manifest has no `wordLevel`. The
+sentence set must narrate the same audio pieces as the edition with the same last clipEnd each
+(`Alignment.SamePieces`); the word set the same pieces with none ending later
+(`Alignment.NarratesWithin`: A Parade of Horribles' piece 69 drops a last word that ran past the audio).
+Both are checked once per edition and set and cached (`overlayUsable`). The edition's own past-the-end markers
 (`endAudioAt`) hold for the pack too: The Dungeon Anarchist's Cookbook's piece 18 is 2011.824 s of
 audio and both Storyteller and the pack write its last clip ending at 2017.630; the hub ends it at the
 audio, as it mends Storyteller's. Anything else is today's edition, byte for byte. With a pack in use:
