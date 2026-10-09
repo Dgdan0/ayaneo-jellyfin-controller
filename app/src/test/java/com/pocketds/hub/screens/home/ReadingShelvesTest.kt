@@ -4,6 +4,7 @@ import com.pocketds.hub.model.ReadingProgress
 import com.pocketds.hub.model.ReadingSection
 import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.model.ReadingWork
+import com.pocketds.hub.model.ReadingYou
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -250,5 +251,85 @@ class ReadingShelvesTest {
         assertEquals(listOf("/art/1", "/art/2", "/art/3"), shelf[1].plan.slots.map { it.book.cover })
         assertTrue(shelf[1].plan.slots[0].lit && shelf[1].plan.slots[0].front)
         assertEquals("3 books · on #1", shelf[1].line)
+    }
+
+    // ------------------------------------------------------------------ reading status (#63)
+
+    @Test fun `a book put down is off Currently reading with its place kept, and Reading brings it back`() {
+        val started = work("a", .4, "2026-09-21T12:00:00Z")
+        assertEquals(listOf("a"), ReadingShelves.current(listOf(started)).map { it.id })
+        assertTrue(ReadingShelves.current(listOf(started.copy(status = "not-reading"))).isEmpty())
+        assertEquals(listOf("a"), ReadingShelves.current(listOf(started.copy(status = "reading"))).map { it.id })
+        // The row that is made of it leaves too.
+        val rows = ReadingShelves.rows(listOf(started.copy(status = "not-reading")), ReadingListsState(), emptyMap())
+        assertTrue(rows.none { it.id == ReadingShelves.CURRENTLY_READING })
+    }
+
+    @Test fun `a book finished by hand or by import is not being read, though its place stops short of the end`() {
+        assertTrue(ReadingShelves.current(listOf(work("a", .4).copy(status = "finished"))).isEmpty())
+        assertTrue(ReadingShelves.current(listOf(work("a", .4).copy(you = ReadingYou(status = "read", finished = "2025-09")))).isEmpty())
+    }
+
+    @Test fun `a book chosen as Reading stays when its place is the end, which is reading it again`() {
+        val again = work("a", 1.0).copy(status = "reading")
+        assertEquals(listOf("a"), ReadingShelves.current(listOf(again)).map { it.id })
+        assertTrue(ReadingShelves.current(listOf(work("a", 1.0))).isEmpty())
+    }
+
+    @Test fun `the books of a series carry their status into Currently reading`() {
+        val collection = series("Red Rising",
+            ReadingSectionItem(workId = "one", title = "One", progress = ReadingProgress(.3), status = "not-reading"),
+            ReadingSectionItem(workId = "two", title = "Two", progress = ReadingProgress(.5), status = "reading"),
+            ReadingSectionItem(workId = "three", title = "Three", progress = ReadingProgress(.2), status = "finished"))
+        val current = ReadingShelves.current(listOf(collection))
+        assertEquals(listOf("two"), current.map { it.id })
+        assertEquals("reading", current.single().status)
+    }
+
+    @Test fun `a series is not being read when the only book begun was put down`() {
+        fun part(id: String, n: String, percent: Double, status: String = "") =
+            ReadingSectionItem(workId = id, title = id, number = n, artwork = "/art/$id", progress = if (percent > 0) ReadingProgress(percent) else null, status = status)
+        val putDown = series("Mistborn", part("m1", "1", .3, "not-reading"), part("m2", "2", 0.0))
+        assertTrue(ReadingShelves.yourSeries(listOf(putDown)).isEmpty())
+        val reading = series("Mistborn", part("m1", "1", .3, "not-reading"), part("m2", "2", .1))
+        assertEquals(listOf("Mistborn"), ReadingShelves.yourSeries(listOf(reading)).map { it.title })
+        assertEquals("2", ReadingShelves.onNumber(reading))
+        // Every book finished, however: an import that says read has no place to count.
+        val allRead = series("Mistborn", part("m1", "1", 0.0, "finished"), part("m2", "2", 0.0, "finished"))
+        assertTrue(ReadingShelves.yourSeries(listOf(allRead)).isEmpty())
+        // One finished by status and the rest untouched: the series is begun.
+        val begun = series("Mistborn", part("m1", "1", 0.0, "finished"), part("m2", "2", 0.0))
+        assertEquals(listOf("Mistborn"), ReadingShelves.yourSeries(listOf(begun)).map { it.title })
+    }
+
+    @Test fun `next in series counts a finish by status and does not offer a book put down`() {
+        fun part(id: String, n: String, status: String = "", percent: Double = 0.0) =
+            ReadingSectionItem(workId = id, title = id, number = n, availability = "available", status = status,
+                progress = if (percent > 0) ReadingProgress(percent) else null)
+        val imported = series("Mistborn", part("a", "1", "finished"), part("b", "2"), part("c", "3"))
+        assertEquals(listOf("b"), ReadingShelves.nextInSeries(listOf(imported)).map { it.id })
+        val skip = series("Stormlight", part("a", "1", "finished"), part("b", "2", "not-reading", .2), part("c", "3"))
+        assertEquals(listOf("c"), ReadingShelves.nextInSeries(listOf(skip)).map { it.id })
+        // A book being read is the series' place; a book put down is not.
+        val reading = series("Red Rising", part("a", "1", "finished"), part("b", "2", "reading", .4), part("c", "3"))
+        assertTrue(ReadingShelves.nextInSeries(listOf(reading)).isEmpty())
+    }
+
+    @Test fun `Want to read leaves out a book the hub says is being read, finished or put down`() {
+        val state = ReadingListsState(wantToRead = listOf("w", "r", "f", "n", "none").map { ReadingListEntry(it, it) })
+        val resolved = mapOf(
+            "w" to work("w").copy(status = "want"), "r" to work("r").copy(status = "reading"),
+            "f" to work("f").copy(status = "finished"), "n" to work("n").copy(status = "not-reading"), "none" to work("none")
+        )
+        val row = ReadingShelves.rows(emptyList(), state, resolved).first { it.id == ReadingListsState.WANT_TO_READ }
+        assertEquals(listOf("w", "none"), row.items.map { it.id })
+    }
+
+    @Test fun `a list counts finished books by their status too`() {
+        val list = ReadingList("l", "L", listOf(ReadingListEntry("a", "A"), ReadingListEntry("b", "B"), ReadingListEntry("c", "C")))
+        val resolved = mapOf("a" to work("a").copy(status = "finished"), "b" to work("b"), "c" to work("c"))
+        val row = ReadingShelves.listRow(list, resolved)
+        assertEquals(1, row.readCount)
+        assertEquals(1, row.nextIndex)
     }
 }

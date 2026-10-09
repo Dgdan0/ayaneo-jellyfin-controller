@@ -3,6 +3,7 @@ package com.pocketds.hub.reader
 import android.content.Context
 import com.pocketds.hub.model.ReadingProgress
 import com.pocketds.hub.model.ReadingWork
+import com.pocketds.hub.screens.library.ReadingStatus
 import com.pocketds.hub.settings.HubSettings
 import com.pocketds.hub.settings.Prefs
 import java.security.MessageDigest
@@ -33,19 +34,28 @@ data class ReadingCompletionState(
     fun pageResume(id: String, pageIndex: Int): Int =
         if (shouldStartAtBeginning(id)) 0 else pageIndex
 
+    /**
+     * [work] as this device sees it: a book marked read here has a finished place, and says it is finished (#63), so the
+     * hub's older word for it (reading, wanted) does not take the tick from its cover.
+     */
     fun project(work: ReadingWork): ReadingWork {
         val projectedSections = work.sections.map { section -> section.copy(items = section.items.map { item ->
             val status = states[item.workId]
-            if (status == null) item else item.copy(progress = progress(status, item.progress, updatedAt[item.workId]))
+            if (status == null) item else item.copy(progress = progress(status, item.progress, updatedAt[item.workId]),
+                status = statusFor(status, item.status))
         }) }
         val status = states[work.id]
         val continuation = work.continueAt?.takeUnless { states[it.workId] != null ||
             (work.entityType != "collection" && status != null) }
         return work.copy(
             progress = if (work.entityType != "collection" && status != null) progress(status, work.progress, updatedAt[work.id]) else work.progress,
+            status = if (work.entityType != "collection" && status != null) statusFor(status, work.status) else work.status,
             continueAt = continuation, sections = projectedSections
         )
     }
+
+    /** Marked read: finished. The legacy reset leaves the hub's word, which says nothing of a place started over here. */
+    private fun statusFor(mark: String, hub: String): String = if (mark == READ) ReadingStatus.FINISHED else hub
 
     private fun progress(status: String, original: ReadingProgress?, time: Long?): ReadingProgress = when (status) {
         READ -> ReadingProgress(1.0, true, original?.total ?: 0, original?.total ?: 0,

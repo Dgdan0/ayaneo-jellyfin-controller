@@ -30,6 +30,9 @@ type ReadingYou struct {
 	Shelves []string `json:"shelves"`
 	// Status is "read", "to-read" or "currently-reading".
 	Status string `json:"status,omitempty"`
+	// Chosen is the reading status the person chose from an app (#63): want, reading, finished
+	// or not-reading. It outranks everything the hub could work out ([effectiveReadingStatus]).
+	Chosen string `json:"chosen,omitempty"`
 	// Source is "app" when anything shown was set from an app, else "goodreads".
 	Source string `json:"source"`
 }
@@ -46,6 +49,9 @@ type ReadingCommunity struct {
 type ReadingYouResponse struct {
 	WorkID string      `json:"workId"`
 	You    *ReadingYou `json:"you"`
+	// Status is the book's reading status now, as far as "you" tells it (#63): a place begun, which the
+	// work's own response counts, is not known here.
+	Status string `json:"status,omitempty"`
 }
 
 const (
@@ -84,7 +90,11 @@ func mergeYou(record *youRecord, edit *youEdit) *ReadingYou {
 			}
 		}
 	}
-	if you.Rating == 0 && you.Finished == "" && you.ReadCount == 0 && len(you.Shelves) == 0 && you.Status == "" {
+	if edit != nil && edit.Status != nil && !edit.Status.Cleared && validReadingStatus(edit.Status.Value) {
+		you.Chosen = edit.Status.Value
+		you.Source = youSourceApp
+	}
+	if you.Rating == 0 && you.Finished == "" && you.ReadCount == 0 && len(you.Shelves) == 0 && you.Status == "" && you.Chosen == "" {
 		return nil
 	}
 	return you
@@ -108,8 +118,14 @@ func parseYouMonth(value, current string) bool {
 func (s *Server) readingProfile(r *http.Request) (string, bool) { return s.libraryOrderProfile(r) }
 
 // handleReadingYou serves PATCH /v1/reading/works/{workId}/you: set or clear the rating,
-// the month finished and the read count. A key in the body that is present sets, null
-// clears, absent is left alone.
+// the month finished, the read count and the reading status. A key in the body that is
+// present sets, null clears, absent is left alone.
+//
+// The status (#63) is want, reading, finished or not-reading. "finished" is also the month
+// finished (this month, unless the book already has one) and one time read, as "Mark
+// finished" always was; the others leave the month and the count, which are the book's
+// history, as they are. A month finished set without a status is a finish, which is the
+// status finished, and one taken away takes a finished status with it.
 func (s *Server) handleReadingYou(w http.ResponseWriter, r *http.Request) {
 	if !s.requireReading(w, r) {
 		return
@@ -138,13 +154,13 @@ func (s *Server) handleReadingYou(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for key := range body {
-		if key != "rating" && key != "finished" && key != "readCount" {
+		if key != "rating" && key != "finished" && key != "readCount" && key != "status" {
 			bad("unknown field " + strconv.Quote(key))
 			return
 		}
 	}
 	if len(body) == 0 {
-		bad("nothing to change: send rating, finished or readCount")
+		bad("nothing to change: send rating, finished, readCount or status")
 		return
 	}
 
@@ -162,7 +178,7 @@ func (s *Server) handleReadingYou(w http.ResponseWriter, r *http.Request) {
 		return parsed, err == nil && parsed >= low && parsed <= high
 	}
 	var rating, readCount *editInt
-	var finished *editString
+	var finished, status *editString
 	if value, present := body["rating"]; present {
 		if isNull(value) {
 			rating = &editInt{Cleared: true}
@@ -196,6 +212,19 @@ func (s *Server) handleReadingYou(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if value, present := body["status"]; present {
+		var word string
+		switch {
+		case isNull(value):
+			status = &editString{Cleared: true}
+		case json.Unmarshal(value, &word) == nil && validReadingStatus(word):
+			status = &editString{Value: word}
+		default:
+			bad(`status must be "want", "reading", "finished" or "not-reading", or null`)
+			return
+		}
+	}
+
 	record, edit, err := s.readingYou.update(profile, workID, func(record *youRecord, edit *youEdit) {
 		if rating != nil {
 			edit.Rating = rating
@@ -203,8 +232,27 @@ func (s *Server) handleReadingYou(w http.ResponseWriter, r *http.Request) {
 		if readCount != nil {
 			edit.ReadCount = readCount
 		}
+		// Finished by status: this month, unless the book already has a month it was finished.
+		if status != nil && status.Value == statusFinished && finished == nil {
+			if merged := mergeYou(record, edit); merged == nil || merged.Finished == "" {
+				finished = &editString{Value: s.now().Format("2006-01")}
+			}
+		}
 		if finished != nil {
 			edit.Finished = finished
+		}
+		switch {
+		case status != nil && status.Cleared:
+			edit.Status = nil
+		case status != nil:
+			edit.Status = status
+		case finished != nil && !finished.Cleared && edit.Status != nil:
+			// A month finished, said without a status, is a finish: it takes the place of a status chosen before (a client that
+			// knows no statuses says "finished" this way). Where nothing was chosen, a month finished is the status already.
+			edit.Status = &editString{Value: statusFinished}
+		case finished != nil && finished.Cleared && edit.Status != nil && edit.Status.Value == statusFinished:
+			// And a finish taken away takes the status it made with it.
+			edit.Status = nil
 		}
 		// A finished month is at least one time read, unless the person says how many.
 		if finished != nil && !finished.Cleared && readCount == nil {
@@ -219,5 +267,6 @@ func (s *Server) handleReadingYou(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Add("Vary", jellyfinUserHeader)
-	writeJSON(w, http.StatusOK, ReadingYouResponse{WorkID: workID, You: mergeYou(record, edit)})
+	you := mergeYou(record, edit)
+	writeJSON(w, http.StatusOK, ReadingYouResponse{WorkID: workID, You: you, Status: effectiveReadingStatus(you, nil)})
 }

@@ -229,6 +229,10 @@ func (s *Server) addPersonalFields(ctx context.Context, r *http.Request, work *R
 		record, edit = s.readingYou.view(profile, work.ID)
 		work.You = mergeYou(record, edit)
 	}
+	// The one status, for the book and for each book inside a series (#63).
+	one := []ReadingWork{*work}
+	s.stampReadingStatus(r, one)
+	work.Status, work.Sections = one[0].Status, one[0].Sections
 	if work.EntityType == "collection" || (work.Kind != "book" && work.Kind != "audiobook") {
 		return
 	}

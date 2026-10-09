@@ -1201,7 +1201,9 @@ class ReadingWorkScreen(
         val header = detailHeader
         header.ratingView.rating = work.you?.rating ?: 0
         header.ratingView.visibility = View.VISIBLE
-        val finished = ReadingBookPage.finished(work.you, finished = work.progress?.completed == true)
+        // Finished for every book that is (#63): read to the end, marked, or imported as read; a book put down or read again
+        // does not carry the month it was once finished.
+        val finished = ReadingBookPage.finished(ReadingStatus.youForLine(work), finished = ReadingStatus.isFinished(work))
         header.finishedView.text = finished.orEmpty()
         header.finishedView.visibility = if (finished == null) View.GONE else View.VISIBLE
         val shelves = ReadingBookPage.shelves(work.you)
@@ -1210,10 +1212,10 @@ class ReadingWorkScreen(
         header.requestLayout()
     }
 
-    /** What the page shows of "you", changed at once; the hub's word follows (#39). */
-    private fun setYou(you: ReadingYou?) {
+    /** What the page shows of "you", changed at once; the hub's word follows (#39). [status] changes the book's reading status with it (#63). */
+    private fun setYou(you: ReadingYou?, status: String? = null) {
         val shown = lastWork ?: return
-        val next = shown.copy(you = you)
+        val next = shown.copy(you = you, status = status ?: shown.status)
         lastWork = next
         if (visible && host != null && ::detailHeader.isInitialized) bindYou(projected(next))
     }
@@ -1249,22 +1251,17 @@ class ReadingWorkScreen(
     private fun showMore(work: ReadingWork) {
         val context = requireNotNull(host).viewContext
         val you = lastWork?.you
-        val finished = work.progress?.completed == true
-        val wanted = ReadingListsRepository.get(context).wantToRead.any { it.workId == work.id }
         val narrations = ReadingWorkPresentation.audiobooks(work).size > 1 || ReadingWorkPresentation.readAlongEditions(work).size > 1
         val hasPlace = com.pocketds.hub.reader.ReadingStartOver.hasPlace(work, com.pocketds.hub.reader.ReadingStartOver.keptHere(context, work))
-        val markedFinished = ReadingCompletionRepository.get(context).isRead(work.id)
         listOverlay.show("More actions", work.title,
-            ReadingMoreMenu.entries(you, finished, wanted, narrations, hasPlace, markedFinished).map {
+            ReadingMoreMenu.entries(ReadingStatus.of(work), you, narrations, hasPlace).map {
                 ChoiceOverlay.Choice(it.id, it.label, it.detail, danger = it.danger)
             },
             onCancel = { actionViews["list:more"]?.requestFocus(); host?.refreshHints() }) { id ->
             when (id) {
-                ReadingMoreMenu.FINISHED -> showFinished(work, finished)
-                ReadingMoreMenu.UNREAD -> markUnread(work)
+                ReadingMoreMenu.STATUS -> showReadingStatus(work)
                 ReadingMoreMenu.START_OVER -> confirmStartOver(work)
                 ReadingMoreMenu.NARRATION -> showFormatMenu(work, ReadingFormatMenu.forWork(work, ReadingEntryPreferences.get(context, work.id)))
-                ReadingMoreMenu.WANT -> toggleWant(work)
                 ReadingMoreMenu.LISTS -> showReadingLists(work)
                 ReadingMoreMenu.OFFLINE -> removeOfflineReading(requireNotNull(host), listOverlay, work, scope)
                 ReadingMoreMenu.SERVER -> { refreshOnShow = true; host?.push(MediaRemovalScreen(api, "reading", work.id, ringVisible)) }
@@ -1272,6 +1269,67 @@ class ReadingWorkScreen(
             host?.refreshHints()
         }
         host?.refreshHints()
+    }
+
+    /**
+     * The Reading status row (#63): Want to read, Reading, Finished and Not reading, the current one checked. Finished
+     * asks the month; any other is chosen at once. [ReadingStatus] decides what choosing each does.
+     */
+    private fun showReadingStatus(work: ReadingWork) {
+        val current = ReadingStatus.of(work)
+        listOverlay.pickValue("Reading status", work.title, ReadingStatus.CHOICES, current,
+            label = { ReadingStatus.label(it) }, detail = { ReadingStatus.detail(it) },
+            onCancel = { actionViews["list:more"]?.requestFocus(); host?.refreshHints() }) { next ->
+            when (ReadingStatus.action(next, current)) {
+                ReadingStatus.Action.ASK_MONTH -> showFinished(work, finishedNow = current == ReadingStatus.FINISHED)
+                ReadingStatus.Action.SET -> chooseStatus(work, next, current)
+                ReadingStatus.Action.NOTHING -> actionViews["list:more"]?.requestFocus()
+            }
+            host?.refreshHints()
+        }
+        host?.refreshHints()
+    }
+
+    /**
+     * A status chosen (#63): shown at once and written to the hub, and what it does here done with it: Want to read is the
+     * list on this device (any other status takes the book off it), and Finished is marked read here as the page's read toggle
+     * always did, which leaving Finished takes away. A finish marked in this visit is taken back whole, the page going back to
+     * what it had; one from an earlier visit stays as the book's history, the month and the count not touched.
+     * [focus] is where focus returns, left alone when null.
+     */
+    private fun chooseStatus(work: ReadingWork, next: String, current: String, focus: String? = "list:more") {
+        val shown = lastWork ?: return
+        val context = requireNotNull(host).viewContext
+        val wasFinished = current == ReadingStatus.FINISHED
+        val from = finishedFrom
+        val undo = if (wasFinished && finishedMarked) ReadingYouEdits.unfinish(shown.you, from) else null
+        var you = shown.you ?: ReadingYou()
+        if (wasFinished && finishedMarked) {
+            you = you.copy(finished = from?.finished.orEmpty(), readCount = from?.readCount ?: 0, status = from?.status.orEmpty())
+            finishedMarked = false
+            finishedFrom = null
+        }
+        val settled = ReadingStatus.settle(next, work.progress)
+        setYou(you.copy(chosen = next), settled)
+        val effects = ReadingStatus.effects(next, wasFinished)
+        when (effects.localRead) {
+            ReadingStatus.LocalRead.MARK -> markReadHere(work, read = true)
+            ReadingStatus.LocalRead.UNMARK -> markReadHere(work, read = false)
+            ReadingStatus.LocalRead.KEEP -> Unit
+        }
+        ReadingListsRepository.update(context) { state ->
+            if (effects.wantList) state.add(ReadingListsState.WANT_TO_READ, ReadingListEntry.from(work))
+            else state.remove(ReadingListsState.WANT_TO_READ, work.id)
+        }
+        saveYou(work.id, ReadingYouEdits.status(next, undo), "Your reading status")
+        focus?.let { lastActionKey = it }
+        lastWork?.let(::render)
+        host?.notify("Reading status · ${ReadingStatus.label(settled)}")
+    }
+
+    /** Opening a book that was put down is coming back to it: it is Reading again (#63). */
+    private fun comeBackTo(work: ReadingWork) {
+        if (ReadingStatus.of(work) == ReadingStatus.NOT_READING) chooseStatus(work, ReadingStatus.READING, ReadingStatus.NOT_READING, focus = null)
     }
 
     /**
@@ -1305,9 +1363,9 @@ class ReadingWorkScreen(
     }
 
     /**
-     * Mark finished in [month]: the date and the count go to the hub, and the book is marked read here
+     * Finished in [month]: the date, the count and the status go to the hub, and the book is marked read here
      * as the page's read toggle always did (the hub has no route that marks a book read in Kavita or
-     * Storyteller). The page keeps what it had, so Mark unread can put it back.
+     * Storyteller). The page keeps what it had, so choosing another status in this visit can put it back.
      */
     private fun markFinished(work: ReadingWork, month: YearMonth, finishedNow: Boolean) {
         val shown = lastWork ?: return
@@ -1315,35 +1373,13 @@ class ReadingWorkScreen(
         if (!finishedMarked) { finishedMarked = true; finishedFrom = before }
         val patch = ReadingYouEdits.finish(before, month, finishedNow)
         val count = (patch.readCount as? YouEdit.To)?.value ?: (before?.readCount ?: 0).coerceAtLeast(1)
-        setYou((before ?: ReadingYou()).copy(finished = month.toString(), readCount = count, status = "read"))
+        setYou((before ?: ReadingYou()).copy(finished = month.toString(), readCount = count, status = "read", chosen = ReadingStatus.FINISHED),
+            ReadingStatus.FINISHED)
         saveYou(work.id, patch, "The date you finished")
         if (!finishedNow) markReadHere(work, read = true)
         lastActionKey = "list:more"
         lastWork?.let(::render)
         host?.notify("Marked finished · ${ReadingBookPage.monthLabel(month.toString())}")
-    }
-
-    /**
-     * Mark unread: takes away a finish that was marked, and leaves the place where it was (#60). This visit's
-     * finish goes back to what the page had; one marked on an earlier visit loses its month. The book is not
-     * taken back to the beginning: only Start over does that, on every device and in every format.
-     */
-    private fun markUnread(work: ReadingWork) {
-        if (finishedMarked) {
-            val from = finishedFrom
-            ReadingYouEdits.unfinish(lastWork?.you, from)?.let { patch ->
-                setYou((lastWork?.you ?: ReadingYou()).copy(finished = from?.finished.orEmpty(), readCount = from?.readCount ?: 0,
-                    status = from?.status.orEmpty()))
-                saveYou(work.id, patch, "The date you finished")
-            }
-            finishedMarked = false
-            finishedFrom = null
-        } else lastWork?.you?.takeIf { it.finished.isNotBlank() }?.let { you ->
-            setYou(you.copy(finished = "", status = if (you.status == "read") "" else you.status))
-            saveYou(work.id, ReadingYouPatch(finished = YouEdit.Clear), "The date you finished")
-        }
-        lastActionKey = "list:more"
-        toggleRead(work)
     }
 
     /**
@@ -1527,6 +1563,7 @@ class ReadingWorkScreen(
     }
 
     private fun launchEntry(work: ReadingWork, choice: ReadingEntryChoice) {
+        comeBackTo(work)
         when (choice.mode) {
             ReadingEntryMode.READ -> choice.text?.let { openPublication(work, it.sourceItemId, work.title, it.source) }
             ReadingEntryMode.LISTEN -> choice.audio?.let { openAudiobook(work, it) }

@@ -6,6 +6,7 @@ import com.pocketds.hub.model.ReadingSection
 import com.pocketds.hub.model.ReadingSectionItem
 import com.pocketds.hub.model.ReadingWork
 import com.pocketds.hub.screens.home.ReadingShelves
+import com.pocketds.hub.screens.library.ReadingStatus
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -66,5 +67,22 @@ class ReadingCompletionStateTest {
         val projected = ReadingCompletionState().markRead(book.id).project(collection)
         assertTrue(projected.sections[0].items[0].progress!!.completed)
         assertNull(projected.sections[0].items[1].progress)
+    }
+
+    @Test fun `a book marked read here is finished by status too, so its cover shows the tick even over another word (#63)`() {
+        val state = ReadingCompletionState().markRead(book.id)
+        // The hub, not knowing of the mark, may still say the book is being read or wanted.
+        listOf("", "reading", "want", "not-reading").forEach { word ->
+            val projected = state.project(book.copy(status = word))
+            assertEquals(word, "finished", projected.status)
+            assertTrue(ReadingStatus.isFinished(projected))
+        }
+        val collection = ReadingWork(id = "series", entityType = "collection", sections = listOf(ReadingSection(items = listOf(
+            ReadingSectionItem(workId = book.id, title = book.title, status = "reading"),
+            ReadingSectionItem(workId = "next", title = "Next", status = "reading")))))
+        val items = state.project(collection).sections.single().items
+        assertEquals(listOf("finished", "reading"), items.map { it.status })
+        // A book not marked keeps what the hub said.
+        assertEquals("reading", ReadingCompletionState().project(book.copy(status = "reading")).status)
     }
 }

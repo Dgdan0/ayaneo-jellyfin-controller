@@ -256,8 +256,10 @@ class PosterCardView(
         posterWrap.ratio = coverRatio(facts.coverShape(work))
         setFormatMark(mark)
         subtitle.ellipsize=android.text.TextUtils.TruncateAt.END
-        showProgress(if (work.progress?.completed == true) 0.0 else work.progress?.percentage ?: 0.0)
-        if (work.progress?.completed == true) {
+        // The tick is for every finished book (#63): read to the end, marked Finished, or imported as read.
+        val finished = com.pocketds.hub.screens.library.ReadingStatus.isFinished(work)
+        showProgress(if (finished || work.progress?.completed == true) 0.0 else work.progress?.percentage ?: 0.0)
+        if (finished) {
             roundBadge("✓")
         } else if (work.entityType == "collection" && work.bookCount > 0) {
             roundBadge(work.bookCount.toString())
