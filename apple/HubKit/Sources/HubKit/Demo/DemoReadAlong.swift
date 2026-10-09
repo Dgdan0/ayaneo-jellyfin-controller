@@ -46,8 +46,14 @@ public enum DemoReadAlong {
         let name: String
         let stretches: [Stretch]
         /// Its text's file: the demo ebook's own (`DemoEpub`), so a place kept in
-        /// the ebook opens in the read-along edition, as one book's do.
-        var file: String { String(format: "chapter-%02ld.xhtml", (DemoReadAlong.chapters.firstIndex { $0.name == name } ?? 0) + 1) }
+        /// the ebook opens in the read-along edition, as one book's do. Two's
+        /// holds spaces, brackets and an accented letter (#61).
+        var file: String { DemoEpub.chapterFile(DemoReadAlong.chapters.firstIndex { $0.name == name } ?? 0, identifier: DemoReadAlong.workId) }
+
+        /// The file as its overlay names it. Two's is percent-encoded, as some
+        /// tools write a media overlay; the package itself names it raw, as
+        /// Mistborn's does.
+        var smilFile: String { name == "two" ? BookHref.spelled(file) : file }
     }
 
     /// The chapters and where they are spoken. The audiobook's tracks are 90,
@@ -243,7 +249,7 @@ public enum DemoReadAlong {
 
     private static func overlay(_ chapter: Int) -> String {
         let name = chapters[chapter].name
-        let file = chapters[chapter].file
+        let file = chapters[chapter].smilFile
         let pars = sentences(chapter).map { sentence in
             let audio = files[sentence.file].href.replacingOccurrences(of: "OEBPS/", with: "../")
             return #"<par id="\#(sentence.id)-par"><text src="../\#(file)#\#(sentence.id)"/>"#

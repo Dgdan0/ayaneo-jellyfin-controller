@@ -83,10 +83,12 @@ public struct ReadAlongTimeline: Equatable, Sendable {
         return value.segments[high]
     }
 
-    /// Where the sentence `fragment` of `href` starts.
+    /// Where the sentence `fragment` of `href` starts. `href` as Readium or
+    /// a kept locator spells it: compared by its `BookHref.key` (#61).
     public func find(href: String, fragment: String) -> ReadAlongPosition? {
+        let key = BookHref.key(href)
         for (index, track) in tracks.enumerated() {
-            if let segment = track.segments.first(where: { $0.textHref == href && $0.fragment == fragment }) {
+            if let segment = track.segments.first(where: { $0.textHref == key && $0.fragment == fragment }) {
                 return ReadAlongPosition(track: index, offsetMs: segment.beginMs - track.startMs)
             }
         }
@@ -118,8 +120,35 @@ public struct ReadAlongTimeline: Equatable, Sendable {
     }
 
     /// Some sentence of `href`'s text is narrated: the page can be followed.
+    /// `href` as Readium spells it (#61).
     public func narrates(_ href: String) -> Bool {
-        tracks.contains { track in track.segments.contains { $0.textHref == href } }
+        let key = BookHref.key(href)
+        return tracks.contains { track in track.segments.contains { $0.textHref == key } }
+    }
+
+    /// Where Play starts on a page of a part the narration never reads (#61):
+    /// the first sentence of the next part in `readingOrder` that it does
+    /// read, else the last sentence of the nearest one before. A part it
+    /// reads gives its own first sentence; a page not in the reading order,
+    /// the narration's first. Both spelled as Readium spells them.
+    public func nearest(to href: String, readingOrder: [String]) -> ReadAlongSegment? {
+        var first: [String: ReadAlongSegment] = [:]
+        var last: [String: ReadAlongSegment] = [:]
+        for segment in tracks.flatMap(\.segments) {
+            if first[segment.textHref] == nil { first[segment.textHref] = segment }
+            last[segment.textHref] = segment
+        }
+        let page = BookHref.key(href)
+        if let own = first[page] { return own }
+        let order = readingOrder.map(BookHref.key)
+        guard let here = order.firstIndex(of: page) else { return tracks.first?.segments.first }
+        for part in order[(here + 1)...] {
+            if let segment = first[part] { return segment }
+        }
+        for part in order[..<here].reversed() {
+            if let segment = last[part] { return segment }
+        }
+        return tracks.first?.segments.first
     }
 }
 
@@ -179,8 +208,10 @@ public enum ReadAlongLocation {
     /// The page's locator moved to the sentence playing at `point`, finished
     /// when `completed`: its part and fragment, no stale selector, no text,
     /// no private offset. A point the timeline does not hold leaves it as it was.
+    /// The part keeps Readium's spelling (#61): the page's own when the
+    /// sentence is in it, else `hrefs`'.
     public static func save(_ locator: String, _ timeline: ReadAlongTimeline, point: ReadAlongPosition,
-                            completed: Bool) -> String {
+                            completed: Bool, hrefs: BookHrefs = BookHrefs(readingOrder: [])) -> String {
         guard timeline.tracks.indices.contains(point.track), var object = BookLocator.object(locator) else { return locator }
         let track = timeline.tracks[point.track]
         let segment = timeline.active(track: point.track, offsetMs: point.offsetMs)
@@ -191,7 +222,9 @@ public enum ReadAlongLocation {
         locations.removeValue(forKey: "pocketdsAudio")
         locations["fragments"] = [segment.fragment]
         if completed { locations["totalProgression"] = 1.0 }
-        object["href"] = segment.textHref
+        if (object["href"] as? String).map(BookHref.key) != segment.textHref {
+            object["href"] = hrefs.readium(segment.textHref)
+        }
         object["locations"] = locations
         object.removeValue(forKey: "text")
         return BookLocator.canonical(object) ?? locator
@@ -392,10 +425,12 @@ extension ReadAlongPageScript {
 
 extension ReadAlongTimeline {
     /// The narrated sentences of `href`, in the order they are read, each
-    /// once: what "Listen from this page" looks for on the page.
+    /// once: what "Listen from this page" looks for on the page. `href` as
+    /// Readium spells it (#61).
     public func fragments(in href: String) -> [String] {
+        let key = BookHref.key(href)
         var seen = Set<String>()
-        return tracks.flatMap(\.segments).filter { $0.textHref == href && seen.insert($0.fragment).inserted }.map(\.fragment)
+        return tracks.flatMap(\.segments).filter { $0.textHref == key && seen.insert($0.fragment).inserted }.map(\.fragment)
     }
 }
 

@@ -85,6 +85,9 @@ final class BookNavigator: NSObject {
     private var narrationWash: UInt32?
     /// The element of the sentence lit, whose words its boxes are trimmed to (#56).
     private var narrationFragment: String?
+    /// The book's documents as Readium spells them: what a locator made from
+    /// the narration's path names (#61).
+    private(set) var hrefs = BookHrefs(readingOrder: [])
     /// The note whose card is open: where "Go to the note" goes.
     private var noteLink: ReadiumShared.Link?
 
@@ -141,6 +144,7 @@ final class BookNavigator: NSObject {
         navigator.delegate = self
         publication = loaded.publication
         controller = navigator
+        hrefs = BookHrefs(readingOrder: loaded.readingOrder)
         narrationTint = narration
         narrationWash = Self.wash(narration, rendering)
         return navigator
@@ -182,7 +186,7 @@ final class BookNavigator: NSObject {
     /// The sentence spoken glows, or nothing does.
     func highlight(_ segment: ReadAlongSegment?) {
         narrationFragment = segment?.fragment
-        controller?.apply(decorations: ReadAlongHighlight.decorations(segment), in: ReadAlongHighlight.group)
+        controller?.apply(decorations: ReadAlongHighlight.decorations(segment, hrefs: hrefs), in: ReadAlongHighlight.group)
         fitNarration()
     }
 

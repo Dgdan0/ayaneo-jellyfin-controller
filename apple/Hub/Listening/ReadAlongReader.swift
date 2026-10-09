@@ -57,6 +57,8 @@ final class ReadAlongReader {
     @ObservationIgnored var keepPlace: @MainActor () -> Void = {}
     @ObservationIgnored var say: @MainActor (String) -> Void = { _ in }
 
+    /// The book's documents as Readium spells them, in reading order (#61).
+    @ObservationIgnored var hrefs = BookHrefs(readingOrder: [])
     @ObservationIgnored private var session = ReadAlongSession()
     @ObservationIgnored private var completed = false
     /// What the page is doing for the voice or after the hand, one thing at a
@@ -142,7 +144,7 @@ final class ReadAlongReader {
         guard let narration, let point = session.pointForSave(narration.playing ? narration.position : nil) else {
             return pageLocator
         }
-        return ReadAlongLocation.save(pageLocator, narration.timeline, point: point, completed: completed)
+        return ReadAlongLocation.save(pageLocator, narration.timeline, point: point, completed: completed, hrefs: hrefs)
     }
 
     // MARK: The voice and the page
@@ -225,7 +227,7 @@ final class ReadAlongReader {
                 guard await turn(move == .forward ? 1 : -1) else { return }
             case .go:
                 guard let segment = narration.timeline.sentence(atOrAfter: now),
-                      let locator = BookLocator.canonical(["href": segment.textHref, "type": "application/xhtml+xml",
+                      let locator = BookLocator.canonical(["href": hrefs.readium(segment.textHref), "type": "application/xhtml+xml",
                                                            "locations": ["fragments": [segment.fragment]]]) else { return }
                 movedForVoice = .now
                 guard await go(locator) else { return }
@@ -368,6 +370,7 @@ final class ReadAlongReader {
             // nothing: it is asked again, for up to six seconds.
             var span: ReadAlongPageSpan?
             var next: ReadAlongPosition?
+            var elsewhere = false
             for attempt in 0..<15 {
                 if attempt > 0 { try? await Task.sleep(for: .milliseconds(400)) }
                 span = await measure()
@@ -378,6 +381,14 @@ final class ReadAlongReader {
                 NSLog("readalong: listen from the page: %@, %@", pageHref() ?? "no page", span.map { "\($0.start)" } ?? "nothing narrated")
                 #endif
                 if span != nil || next != nil { break }
+                // A part the narration never reads (a title page, a part's
+                // opening, front matter): the nearest narration, at once (#61).
+                if let href = pageHref(), !narration.timeline.narrates(href) {
+                    next = narration.timeline.nearest(to: href, readingOrder: hrefs.readingOrder)
+                        .flatMap { narration.timeline.begin(of: $0) }
+                    elsewhere = next != nil
+                    break
+                }
             }
             guard let start = span?.start ?? next else {
                 say("No narrated sentence on this page. Turn to a narrated page and try again.")
@@ -392,6 +403,7 @@ final class ReadAlongReader {
             if play && !narration.playing { narration.play() }
             // From a sentence beyond the page, the page goes to it.
             if span == nil { followVoice() }
+            if elsewhere { say("This page has no narration, so the voice starts at the nearest narrated page") }
         }
     }
 
@@ -405,9 +417,7 @@ final class ReadAlongReader {
         guard !ids.isEmpty else { return nil }
         // Null: the page is not laid out yet, asked again.
         guard let id = await firstAfter(ids) as? String else { return nil }
-        if let segment = narration.timeline.tracks.flatMap(\.segments).first(where: { $0.textHref == href && $0.fragment == id }) {
-            return narration.timeline.begin(of: segment)
-        }
+        if let start = narration.timeline.find(href: href, fragment: id) { return start }
         return narration.timeline.sentence(after: href).flatMap { narration.timeline.begin(of: $0) }
     }
 

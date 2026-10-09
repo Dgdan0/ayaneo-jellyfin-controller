@@ -47,7 +47,8 @@ public enum DemoEpub {
             let share = Double(chapter.bytes) / total
             if fraction < start + share || chapter == chapters.last {
                 let progression = share > 0 ? min(max((fraction - start) / share, 0), 1) : 0
-                return ["href": "OEBPS/" + chapter.file, "type": "application/xhtml+xml", "title": chapter.title,
+                // As Readium spells a file whose name holds spaces (#61).
+                return ["href": BookHref.spelled("OEBPS/" + chapter.file), "type": "application/xhtml+xml", "title": chapter.title,
                         "locations": ["progression": progression, "totalProgression": fraction]]
             }
             start += share
@@ -72,6 +73,16 @@ public enum DemoEpub {
 
     private static let numbers = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight"]
 
+    /// Chapter `index`'s file ("chapter-03.xhtml"). Dark Matter's second is
+    /// named as Calibre and Storyteller name Mistborn's, with spaces,
+    /// brackets and an accented letter (#61), in its ebook and its read-along
+    /// edition alike, so its place is one place in both: the reader and read
+    /// along must find it however Readium spells it.
+    static func chapterFile(_ index: Int, identifier: String) -> String {
+        if identifier == DemoReadAlong.workId && index == 1 { return "Blake Crouch - [Matière Noire 01] - Dark Matter_split_002.xhtml" }
+        return String(format: "chapter-%02ld.xhtml", index + 1)
+    }
+
     private static func book(title: String, author: String, identifier: String) -> Made {
         var random = Random(seed: DemoReading.fnv(identifier))
         var files: [File] = [File(name: "about.xhtml", title: "About this edition", xhtml: page(
@@ -85,7 +96,7 @@ public enum DemoEpub {
             </section>
             """))]
         for (index, name) in numbers.enumerated() {
-            let file = String(format: "chapter-%02ld.xhtml", index + 1)
+            let file = chapterFile(index, identifier: identifier)
             let target = 9_000 + Int(random.next() % 9_000)
             var body = "<section epub:type=\"chapter\" id=\"chapter-\(index + 1)\">\n<h1>\(name)</h1>\n"
             switch index {
@@ -304,12 +315,14 @@ enum StoredZip {
         let date: UInt16 = UInt16((2026 - 1980) << 9 | 10 << 5 | 6)
         for entry in entries {
             let name = Data(entry.name.utf8)
+            // A name beyond ASCII says it is UTF-8 (bit 11), or a reader takes it as code page 437.
+            let flags: UInt16 = entry.name.unicodeScalars.allSatisfy(\.isASCII) ? 0 : 0x0800
             let crc = CRC32.checksum(entry.data)
             let size = UInt32(entry.data.count)
             let offset = UInt32(out.count)
             out.le32(0x0403_4B50)
             out.le16(10)
-            out.le16(0)
+            out.le16(flags)
             out.le16(0)
             out.le16(time)
             out.le16(date)
@@ -324,7 +337,7 @@ enum StoredZip {
             central.le32(0x0201_4B50)
             central.le16(20)
             central.le16(10)
-            central.le16(0)
+            central.le16(flags)
             central.le16(0)
             central.le16(time)
             central.le16(date)

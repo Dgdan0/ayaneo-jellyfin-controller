@@ -144,10 +144,11 @@ extension ReadAlongTimeline {
     /// last characters are. A moment inside a sentence is its clip's start
     /// plus the share of its letters before the word, of the clip's length:
     /// `clipBegin + share × (clipEnd − clipBegin)`. Nil when the page's
-    /// sentences are not the narration's.
+    /// sentences are not the narration's. `href` as Readium spells it (#61).
     public func span(href: String, edges: ReadAlongPageEdges) -> ReadAlongPageSpan? {
-        guard let first = locate(href: href, fragment: edges.first.fragment),
-              let last = locate(href: href, fragment: edges.last.fragment) else { return nil }
+        let key = BookHref.key(href)
+        guard let first = locate(href: key, fragment: edges.first.fragment),
+              let last = locate(href: key, fragment: edges.last.fragment) else { return nil }
         let opening = segment(first)
         let closing = segment(last)
         let start = moment(first, ReadAlongWords.wordStart(edges.first.text, at: edges.first.offset)
@@ -186,8 +187,9 @@ extension ReadAlongTimeline {
     /// The first sentence after every sentence of `href`, in the order the
     /// narration reads: where the voice goes on from past the end of a part.
     public func sentence(after href: String) -> ReadAlongSegment? {
+        let key = BookHref.key(href)
         let all = tracks.flatMap(\.segments)
-        guard let last = all.lastIndex(where: { $0.textHref == href }), last + 1 < all.count else { return nil }
+        guard let last = all.lastIndex(where: { $0.textHref == key }), last + 1 < all.count else { return nil }
         return all[last + 1]
     }
 
@@ -198,6 +200,7 @@ extension ReadAlongTimeline {
         let index: Int
     }
 
+    /// `href` in the narration's own spelling (a `BookHref.key`).
     private func locate(href: String, fragment: String) -> Place? {
         for (track, value) in tracks.enumerated() {
             if let index = value.segments.firstIndex(where: { $0.textHref == href && $0.fragment == fragment }) {

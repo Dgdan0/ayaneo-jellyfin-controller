@@ -90,6 +90,74 @@ final class ReadAlongTests: XCTestCase {
         XCTAssertLessThanOrEqual(seconds(time), paused + 1, "it went on after Pause: \(time.label)")
     }
 
+    // MARK: File names and pages with no narration (#61)
+
+    /// The demo's chapter Two is named as Mistborn's documents are (spaces,
+    /// brackets and an accented letter, raw in the package and
+    /// percent-encoded in its overlay). The voice's sentence there takes the
+    /// page to it and is lit; the dock says the page follows, and Play reads
+    /// on without a word about a page with no narration.
+    @MainActor
+    func testAChapterWhoseFileNameHoldsSpacesAndBracketsIsReadAlong() {
+        let app = launchReadingAlong(["HUB_READALONG_SENTENCE": "two-s2", "HUB_BOOK_CHROME": "", "HUB_DEBUG_READALONG": "1"])
+        XCTAssertTrue(waitUntil(15) { place(app).hasPrefix("Two") }, "the page did not go to Two's sentence: \(place(app))")
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        keep(app, "readalong-awkward-name-lit")
+        let page = app.descendants(matching: .any).matching(identifier: "book-page").firstMatch
+        page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let play = app.buttons["readalong-play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 10), "a tap did not bring the dock: \(buttons(app))")
+        XCTAssertFalse(text(app, containing: "Alignment unavailable").exists, "Two's page found no narration: \(texts(app))")
+        play.tap()
+        XCTAssertTrue(waitUntil(15) { play.label == "Pause narration" }, "the narration did not play")
+        XCTAssertTrue(text(app, containing: "Read along · Following").waitForExistence(timeout: 5), "the dock: \(texts(app))")
+        let time = app.staticTexts["readalong-time"]
+        let started = seconds(time)
+        XCTAssertTrue(waitUntil(15) { seconds(time) >= started + 3 }, "the voice did not move on: \(time.label)")
+        XCTAssertFalse(text(app, containing: "has no narration").exists, "a narrated page was said to have none: \(texts(app))")
+        XCTAssertTrue(place(app).hasPrefix("Two"), "the page left Two: \(place(app))")
+        play.tap()
+        XCTAssertTrue(waitUntil(5) { play.label == "Play narration" }, "the narration did not pause")
+    }
+
+    /// The contents go to that chapter too, and give it its page.
+    @MainActor
+    func testTheContentsGoToTheChapterWhoseFileNameHoldsSpacesAndBrackets() {
+        let app = launchReadingAlong(["HUB_BOOK_SHEET": "contents", "HUB_BOOK_CHROME": "", "HUB_DEBUG_READALONG": "1"])
+        let two = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Two")).firstMatch
+        XCTAssertTrue(two.waitForExistence(timeout: 15), "the contents did not open: \(buttons(app))")
+        XCTAssertTrue(waitUntil(10) { (two.value as? String ?? "").hasPrefix("page ") }, "Two has no page: \(String(describing: two.value))")
+        two.tap()
+        XCTAssertTrue(waitUntil(10) { place(app).hasPrefix("Two") }, "the contents did not go to Two: \(place(app))")
+    }
+
+    /// Play on a page the narration never reads (the title page, turned back
+    /// to by hand) starts at the nearest narration, chapter One's first
+    /// sentence: the page goes there and a note says so.
+    @MainActor
+    func testPlayOnAPageWithNoNarrationStartsAtTheNearest() {
+        let app = launchReadingAlong(["HUB_BOOK_CHROME": "", "HUB_DEBUG_READALONG": "1"])
+        XCTAssertTrue(waitUntil(15) { place(app).hasPrefix("One") }, "the book did not open in One: \(place(app))")
+        // Back past One's first page, to the title page.
+        for _ in 0..<4 where place(app).hasPrefix("One") {
+            app.typeKey(XCUIKeyboardKey.leftArrow, modifierFlags: [])
+            RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        }
+        XCTAssertFalse(place(app).hasPrefix("One"), "the page did not turn back to the title page: \(place(app))")
+        let page = app.descendants(matching: .any).matching(identifier: "book-page").firstMatch
+        page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let play = app.buttons["readalong-play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 5), "a tap did not bring the dock")
+        play.tap()
+        XCTAssertTrue(text(app, containing: "nearest narrated page").waitForExistence(timeout: 10),
+                      "no note that the voice starts elsewhere: \(texts(app))")
+        XCTAssertTrue(waitUntil(15) { play.label == "Pause narration" }, "the narration did not play")
+        XCTAssertTrue(waitUntil(10) { place(app).hasPrefix("One") }, "the page did not go to the narration: \(place(app))")
+        keep(app, "readalong-nearest")
+        play.tap()
+        XCTAssertTrue(waitUntil(5) { play.label == "Play narration" }, "the narration did not pause")
+    }
+
     // MARK: The voice and the page (#49)
 
     /// The demo's chapters are a page or two at the usual size: drawn larger
