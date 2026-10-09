@@ -88,6 +88,8 @@ final class BookNavigator: NSObject {
     /// The book's documents as Readium spells them: what a locator made from
     /// the narration's path names (#61).
     private(set) var hrefs = BookHrefs(readingOrder: [])
+    /// Makes the turns, one at a time (#64).
+    private var turner: PageTurner?
     /// The note whose card is open: where "Go to the note" goes.
     private var noteLink: ReadiumShared.Link?
 
@@ -144,6 +146,18 @@ final class BookNavigator: NSObject {
         navigator.delegate = self
         publication = loaded.publication
         controller = navigator
+        // Every turn asked for is made, however fast they come (#64).
+        turner = PageTurner(host: navigator.view, scrolls: { [weak navigator] in navigator?.settings.scroll ?? false },
+                            scrollViews: { [weak self] in self?.scrollViews() ?? [] }) { [weak navigator] turn, animated in
+            guard let navigator else { return false }
+            let options = NavigatorGoOptions(animated: animated)
+            switch turn {
+            case .forward: return await navigator.goForward(options: options)
+            case .backward: return await navigator.goBackward(options: options)
+            case .left: return await navigator.goLeft(options: options)
+            case .right: return await navigator.goRight(options: options)
+            }
+        }
         hrefs = BookHrefs(readingOrder: loaded.readingOrder)
         narrationTint = narration
         narrationWash = Self.wash(narration, rendering)
@@ -165,14 +179,28 @@ final class BookNavigator: NSObject {
         return ReadAlongGlow.wash(accent: tint, page: page, ink: ink)
     }
 
+    /// On a page, after every turn asked for before it (#64).
     @discardableResult
     func goForward() async -> Bool {
-        await controller?.goForward(options: NavigatorGoOptions(animated: true)) ?? false
+        await turner?.turn(.forward) ?? false
     }
 
+    /// Back a page, after every turn asked for before it (#64).
     @discardableResult
     func goBackward() async -> Bool {
-        await controller?.goBackward(options: NavigatorGoOptions(animated: true)) ?? false
+        await turner?.turn(.backward) ?? false
+    }
+
+    /// Every scroll view of the page, Readium's paging between parts and each part's own.
+    private func scrollViews() -> [UIScrollView] {
+        guard let root = controller?.view else { return [] }
+        var found: [UIScrollView] = []
+        func walk(_ view: UIView) {
+            if let scroll = view as? UIScrollView { found.append(scroll) }
+            for child in view.subviews { walk(child) }
+        }
+        walk(root)
+        return found
     }
 
     /// To a place given as a Readium locator's JSON.
@@ -305,6 +333,7 @@ final class BookNavigator: NSObject {
 
     func close() {
         controller?.delegate = nil
+        turner = nil
         controller = nil
         publication = nil
     }
