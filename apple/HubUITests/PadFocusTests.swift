@@ -70,6 +70,17 @@ final class PadFocusTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
     }
 
+    /// Whether `condition` comes true within `seconds`.
+    @MainActor
+    private func waitUntil(_ seconds: TimeInterval, _ condition: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(seconds)
+        while Date() < end {
+            if condition() { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        return condition()
+    }
+
     /// Waits until the focus satisfies `condition`.
     @MainActor
     private func waitFor(_ app: XCUIApplication, _ seconds: TimeInterval = 8, _ condition: (String) -> Bool) -> Bool {
@@ -196,6 +207,49 @@ final class PadFocusTests: XCTestCase {
                       "down did not reach the authors: \(focus(app))")
         press(app, .upArrow, times: 2)
         XCTAssertTrue(focus(app).hasPrefix("ring library:storyteller:books views/"), "up did not come back to the views: \(focus(app))")
+    }
+
+    /// The Series view's fans (#54): the keys reach a series' fan, which opens
+    /// while the ring is on it and closes again as the ring leaves, and
+    /// Return opens the series at the book you are on.
+    @MainActor
+    func testASeriesFanOpensUnderTheRingAndReturnOpensTheSeries() {
+        let app = launch(side: "books", section: "library")
+        XCTAssertTrue(app.buttons["reading-lists"].waitForExistence(timeout: 20), "the libraries did not load")
+        press(app, .downArrow, times: 2)
+        press(app, .leftArrow, until: "ring books-libraries libraries/storyteller:books", limit: 4)
+        press(app, .upArrow, until: "ring books-libraries libraries/storyteller:books", limit: 2)
+        XCTAssertEqual(focus(app), "ring books-libraries libraries/storyteller:books")
+        pressReturn(app)
+        XCTAssertTrue(waitFor(app) { $0 == "ring library:storyteller:books views/series" }, "the library did not open: \(focus(app))")
+        let fan = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Red Rising, 6 books'")).firstMatch
+        XCTAssertTrue(fan.waitForExistence(timeout: 10), "Red Rising is not a fan")
+        XCTAssertEqual(fan.value as? String, "fan at rest", "the fan is open before the ring is on it")
+        // Down into the grid, then along it to Red Rising.
+        press(app, .downArrow, until: "ring library:storyteller:books grid/", limit: 3)
+        XCTAssertTrue(focus(app).hasPrefix("ring library:storyteller:books grid/"), "down did not reach the grid: \(focus(app))")
+        for key in [XCUIKeyboardKey.rightArrow, .downArrow, .leftArrow, .downArrow, .rightArrow] {
+            press(app, key, until: "ring library:storyteller:books grid/rw_demo_redrising", limit: 4)
+        }
+        XCTAssertEqual(focus(app), "ring library:storyteller:books grid/rw_demo_redrising")
+        XCTAssertTrue(waitUntil(5) { (fan.value as? String) == "fan open" }, "the fan did not open under the ring: \(String(describing: fan.value))")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "series-fan-open"
+        shot.lifetime = .keepAlways
+        add(shot)
+        // The ring moves on: it closes.
+        press(app, .leftArrow)
+        if focus(app).hasSuffix("grid/rw_demo_redrising") { press(app, .rightArrow) }
+        XCTAssertTrue(waitUntil(5) { (fan.value as? String) == "fan at rest" }, "the fan stayed open: \(focus(app))")
+        // Back, and Return: the series, its books' row at Light Bringer (#6).
+        press(app, .rightArrow, until: "ring library:storyteller:books grid/rw_demo_redrising", limit: 2)
+        press(app, .leftArrow, until: "ring library:storyteller:books grid/rw_demo_redrising", limit: 2)
+        pressReturn(app)
+        let lightBringer = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Light Bringer, #6'")).firstMatch
+        XCTAssertTrue(lightBringer.waitForExistence(timeout: 10), "Return did not open Red Rising")
+        let window = app.windows.firstMatch.frame
+        XCTAssertTrue(waitUntil(5) { lightBringer.frame.minX >= window.minX - 1 && lightBringer.frame.maxX <= window.maxX + 1 },
+                      "the row is not at Light Bringer: \(lightBringer.frame)")
     }
 
     /// Downloads: its three pills in a row, each chosen with Return.

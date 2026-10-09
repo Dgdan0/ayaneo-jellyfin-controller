@@ -207,6 +207,7 @@ struct SeriesFanCard: View {
     /// The height of a book's cover in the same grid: the fan stands at its
     /// foot, so the names of a row line up whether a card is a fan or a cover.
     var coverHeight: CGFloat?
+    @Environment(\.cardLit) private var lit
 
     var body: some View {
         let rest = SeriesFanView.box(cover: cover, slots: SeriesFan.slots).width
@@ -230,5 +231,9 @@ struct SeriesFanCard: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(series.title), \(plan.caption)")
+        #if DEBUG
+        // For the controller's UI test: the fan opens while its card is lit (`SeriesFan.opening`).
+        .accessibilityValue(lit ? "fan open" : "fan at rest")
+        #endif
     }
 }
