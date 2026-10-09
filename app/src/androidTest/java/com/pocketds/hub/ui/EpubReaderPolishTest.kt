@@ -69,7 +69,8 @@ class EpubReaderPolishTest {
             while (!target.isClickable) target = target.parent as View
             target.requestFocus(); target.performClick()
         }
-        suspend fun until(check: suspend () -> Boolean) { withTimeout(15_000) { while (!check()) delay(100) } }
+        var step = 0
+        suspend fun until(check: suspend () -> Boolean) { val at = ++step; try { withTimeout(15_000) { while (!check()) delay(100) } } catch (e: kotlinx.coroutines.TimeoutCancellationException) { throw AssertionError("Timed out at wait $at", e) } }
         fun reader() = activity.supportFragmentManager.fragments.filterIsInstance<EpubNavigatorFragment>().firstOrNull()
         suspend fun screenshot(name: String) {
             ins.waitForIdleSync(); delay(250)
