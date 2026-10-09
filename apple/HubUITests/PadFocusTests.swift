@@ -29,6 +29,26 @@ final class PadFocusTests: XCTestCase {
         return app
     }
 
+    /// An iPad lays Books home's hero out sideways: the cover with Resume and
+    /// Details to its right, so Right, not Down, goes from the cover to Resume.
+    private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+
+    /// From the hero's cover (the first press) to Resume reading.
+    @MainActor
+    private func coverToResume(_ app: XCUIApplication) {
+        press(app, isPad ? .rightArrow : .downArrow)
+    }
+
+    /// Presses `key` until the focus starts with `prefix`, at most `limit` times.
+    @MainActor
+    private func press(_ app: XCUIApplication, _ key: XCUIKeyboardKey, until prefix: String, limit: Int) {
+        var steps = 0
+        while !focus(app).hasPrefix(prefix), steps < limit {
+            press(app, key)
+            steps += 1
+        }
+    }
+
     /// Where the focus is, as the probe says.
     @MainActor
     private func focus(_ app: XCUIApplication) -> String {
@@ -72,7 +92,7 @@ final class PadFocusTests: XCTestCase {
         XCTAssertEqual(focus(app), "none", "focus showed before a key was pressed")
         press(app, .downArrow)
         XCTAssertEqual(focus(app), "ring books-home hero-cover", "the first press did not show the page's first item")
-        press(app, .downArrow)
+        coverToResume(app)
         XCTAssertEqual(focus(app), "ring books-home hero-resume")
         press(app, .rightArrow)
         XCTAssertEqual(focus(app), "ring books-home hero-details")
@@ -80,7 +100,8 @@ final class PadFocusTests: XCTestCase {
         XCTAssertEqual(focus(app), "ring books-home hero-details", "right went past the end of the hero's pair")
         press(app, .downArrow)
         XCTAssertTrue(focus(app).hasPrefix("ring books-home also/"), "down did not reach Also reading: \(focus(app))")
-        press(app, .downArrow, times: 2)
+        // Also reading is a grid: two lines of it on a phone, one on an iPad.
+        press(app, .downArrow, until: "ring books-home series/", limit: 3)
         XCTAssertTrue(focus(app).hasPrefix("ring books-home series/"), "down did not reach Your series: \(focus(app))")
         // Into the first shelf at the book nearest the series card, which on a
         // wider phone (the Pro Max) is its second; left to its first.
@@ -119,14 +140,19 @@ final class PadFocusTests: XCTestCase {
     func testTheBarsAreReachedAndLeftWithTheArrows() {
         let app = launch(side: "books", section: "home")
         XCTAssertTrue(app.buttons["books-resume"].waitForExistence(timeout: 20))
-        press(app, .downArrow, times: 2)
+        press(app, .downArrow)
+        coverToResume(app)
         XCTAssertEqual(focus(app), "ring books-home hero-resume")
-        press(app, .upArrow, times: 2)
+        press(app, .upArrow, until: "ring bar bar-", limit: 3)
         XCTAssertTrue(focus(app).hasPrefix("ring bar bar-"), "up did not reach the top bar: \(focus(app))")
         press(app, .rightArrow)
         XCTAssertTrue(focus(app).hasPrefix("ring bar bar-"), "right left the bar: \(focus(app))")
         press(app, .downArrow)
-        XCTAssertEqual(focus(app), "ring books-home hero-cover", "down from the bar did not return to the page")
+        // Where the page was left: the cover on a phone (up passes it), Resume on an iPad.
+        XCTAssertTrue(["ring books-home hero-cover", "ring books-home hero-resume"].contains(focus(app)),
+                      "down from the bar did not return to the page: \(focus(app))")
+        // An iPad has no tab bar at the foot: the rest is the iPhone's.
+        guard !isPad else { return }
         // To the foot of the page, then the tab bar, and back.
         press(app, .downArrow, times: 12)
         XCTAssertTrue(focus(app).hasPrefix("ring bar tab-"), "down past the page did not reach the tab bar: \(focus(app))")
@@ -150,6 +176,10 @@ final class PadFocusTests: XCTestCase {
         press(app, .downArrow)
         XCTAssertEqual(focus(app), "ring books-libraries arrange")
         press(app, .downArrow)
+        XCTAssertTrue(focus(app).hasPrefix("ring books-libraries libraries/"), "down did not reach the libraries: \(focus(app))")
+        // Into the grid at the library nearest Arrange: on an iPad's wider grid not the first, so left to it.
+        press(app, .leftArrow, until: "ring books-libraries libraries/storyteller:books", limit: 4)
+        press(app, .upArrow, until: "ring books-libraries libraries/storyteller:books", limit: 2)
         XCTAssertEqual(focus(app), "ring books-libraries libraries/storyteller:books")
         pressReturn(app)
         XCTAssertTrue(waitFor(app) { $0 == "ring library:storyteller:books views/series" },
@@ -218,7 +248,8 @@ final class PadFocusTests: XCTestCase {
     /// back out of them, Ⓑ again closes the menu, and the ring is on the book.
     @MainActor
     func testYOpensABooksHoldMenuThatTheRingWalksAndBClosesIt() {
-        let app = launch(side: "books", section: "home", pad: "DOWN,DOWN,DOWN,Y,A,B,B")
+        // To the first book also being read: past Resume on a phone; on an iPad Resume is beside the cover.
+        let app = launch(side: "books", section: "home", pad: isPad ? "DOWN,DOWN,Y,A,B,B" : "DOWN,DOWN,DOWN,Y,A,B,B")
         XCTAssertTrue(app.buttons["books-resume"].waitForExistence(timeout: 20), "Books home did not load")
         let title = menuTitle(app)
         XCTAssertTrue(waitLabel(title, "Light Bringer", 15), "Y did not open the book's hold menu: \(focus(app))")
@@ -278,7 +309,8 @@ final class PadFocusTests: XCTestCase {
     func testABooksMoreOpensItsChoicesAndTheFinishedPanel() {
         let app = launch(side: "books", section: "home")
         XCTAssertTrue(app.buttons["books-resume"].waitForExistence(timeout: 20))
-        press(app, .downArrow, times: 2)
+        press(app, .downArrow)
+        coverToResume(app)
         press(app, .rightArrow)
         XCTAssertEqual(focus(app), "ring books-home hero-details")
         pressReturn(app)
@@ -332,7 +364,8 @@ final class PadFocusTests: XCTestCase {
         XCTAssertTrue(activity.descendants(matching: .any)["all-transfers"].firstMatch.waitForExistence(timeout: 20))
         press(activity, .downArrow)
         XCTAssertTrue(focus(activity).hasPrefix("ring activity transfer-"), "the first press did not show a transfer: \(focus(activity))")
-        press(activity, .downArrow, times: 3)
+        // Past the transfers and, on an iPad's wider page, the services beside them.
+        press(activity, .downArrow, until: "ring activity speed/", limit: 10)
         XCTAssertTrue(focus(activity).hasPrefix("ring activity speed/"), "down did not reach the speed choice: \(focus(activity))")
         press(activity, .rightArrow)
         XCTAssertTrue(focus(activity).hasPrefix("ring activity speed/"), "right left the speed choice: \(focus(activity))")

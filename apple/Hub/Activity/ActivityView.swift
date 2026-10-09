@@ -109,22 +109,52 @@ struct ActivityView: View {
         let needs = AttentionCard(entries: attention)
         let upcoming = DashboardCard(title: "Upcoming", trailing: { EmptyView() }) { agendaRows }
         let services = DashboardCard(title: "Services", trailing: { servicesSummary }) { serviceRows }
+        // A controller goes down a column, not to the line nearest below in the
+        // column beside it (an iPad's two columns had Down from a transfer land
+        // on a service, #46); left and right still find the row beside.
+        let (first, middle, last) = (downloadingPads + needsPads, upcomingPads, servicesPads + storagePads)
         switch count {
         case 3:
             HStack(alignment: .top, spacing: 12) {
                 VStack(spacing: 12) { downloading; needs }.frame(maxWidth: .infinity)
+                    .padGroup("column-1", .column, members: first, prefix: false)
                 VStack(spacing: 12) { upcoming }.frame(maxWidth: .infinity)
+                    .padGroup("column-2", .column, members: middle, prefix: false)
                 VStack(spacing: 12) { services; storage }.frame(maxWidth: .infinity)
+                    .padGroup("column-3", .column, members: last, prefix: false)
             }
         case 2:
             HStack(alignment: .top, spacing: 12) {
                 VStack(spacing: 12) { downloading; needs; upcoming }.frame(maxWidth: .infinity)
+                    .padGroup("column-1", .column, members: first + middle, prefix: false)
                 VStack(spacing: 12) { services; storage }.frame(maxWidth: .infinity)
+                    .padGroup("column-2", .column, members: last, prefix: false)
             }
         default:
             VStack(spacing: 12) { downloading; needs; upcoming; services; storage }
+                .padGroup("column-1", .column, members: first + middle + last, prefix: false)
         }
     }
+
+    // The cards' focusable rows, top to bottom (a column keeps only those drawn).
+    private var downloadingPads: [String] {
+        (activity.map { ActivityDashboard.transfers($0) } ?? []).map { "transfer-\($0.id)" } + ["speed", "all-transfers"]
+    }
+
+    private var needsPads: [String] {
+        attention.filter { !$0.transferId.isEmpty }.map { "why-\($0.transferId)" }
+    }
+
+    private var upcomingPads: [String] {
+        (agenda ?? []).filter { !$0.media.key.isEmpty }.map { "agenda-\($0.id)" }
+    }
+
+    private var servicesPads: [String] {
+        (health?.services ?? []).filter { $0.state != "disabled" }
+            .sorted { ServiceNames.rank($0.name) < ServiceNames.rank($1.name) }.map { "service-\($0.name)" }
+    }
+
+    private var storagePads: [String] { disks.isEmpty ? [] : ["storage"] }
 
     // MARK: Downloading
 

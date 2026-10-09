@@ -16,6 +16,8 @@ final class SeriesDownloadsTests: XCTestCase {
     }
 
     private let series = "000000000000000000000000deb00012"
+    /// What the page calls this device: "on this iPad" on an iPad.
+    private var device: String { UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone" }
 
     @MainActor
     private func launch(download: [String] = [], pinnedBar: Bool = false) -> XCUIApplication {
@@ -175,7 +177,7 @@ final class SeriesDownloadsTests: XCTestCase {
         XCTAssertTrue(waitUntil(5) { line.label.contains("1 coming") }, "the bar says \(line.label)")
         XCTAssertNotEqual(first.label, "Download", "the corner shows it is on its way")
         XCTAssertTrue(waitUntil(60) { first.label == "Downloaded" }, "the episode did not arrive: \(first.label)")
-        XCTAssertTrue(waitUntil(3) { line.label == "1 on this iPhone" || !line.exists }, "the bar says \(line.label)")
+        XCTAssertTrue(waitUntil(3) { !line.exists || line.label == "1 on this \(device)" }, "the bar says \(line.label)")
         // It fades about three seconds after the last one.
         XCTAssertTrue(line.waitForNonExistence(timeout: 12), "the bar stayed up")
     }
@@ -201,7 +203,7 @@ final class SeriesDownloadsTests: XCTestCase {
         XCTAssertTrue(season.waitForExistence(timeout: 25), "no season button: \(buttons(app))")
         XCTAssertTrue(season.label.hasPrefix("Season 1 · "), season.label)
         season.tap()
-        XCTAssertTrue(waitUntil(10) { season.label == "Season 1 on this iPhone" }, "the button says \(season.label)")
+        XCTAssertTrue(waitUntil(10) { season.label == "Season 1 on this \(device)" }, "the button says \(season.label)")
         for episode in ["e1", "e2", "e3"] {
             XCTAssertTrue(waitUntil(90) { self.cornerLabel(app, episode) == "Downloaded" },
                           "\(episode) did not arrive: \(cornerLabel(app, episode))")
@@ -224,7 +226,7 @@ final class SeriesDownloadsTests: XCTestCase {
         download.tap()
         XCTAssertFalse(app.alerts.firstMatch.waitForExistence(timeout: 1), "the shortcut asks nothing")
         second.tap()
-        XCTAssertTrue(waitUntil(10) { self.element(app, "download-season").label == "Season 2 on this iPhone" },
+        XCTAssertTrue(waitUntil(10) { self.element(app, "download-season").label == "Season 2 on this \(device)" },
                       "Season 2 was not asked for: \(element(app, "download-season").label)")
     }
 
