@@ -129,6 +129,43 @@ public struct ReadingEdition: Decodable, Equatable, Sendable, Hashable {
     }
 }
 
+/// A book of a series, for its fan (#54): one the library has, or a main
+/// numbered one it does not (the hub's `seriesBooks` on a series in the
+/// library's listing, Hardcover's missing books among them).
+public struct ReadingSeriesBook: Decodable, Equatable, Sendable, Hashable {
+    /// Its place in the series: "3", or "2.5" for a novella; blank for a book with no place.
+    public var number: String
+    public var title: String
+    /// A hub image path, or blank for a book with no picture.
+    public var cover: String
+    /// "audiobook" for a book that is only an audiobook (a square cover), else "book".
+    public var kind: String
+    public var owned: Bool
+    /// False for a book announced and not out; only books that are out are listed as missing.
+    public var released: Bool
+    /// "read" for a book finished, "on" for the one you are on, blank for the rest.
+    public var state: String
+
+    public init(number: String = "", title: String = "", cover: String = "", kind: String = "book", owned: Bool = false,
+                released: Bool = true, state: String = "") {
+        self.number = number
+        self.title = title
+        self.cover = cover
+        self.kind = kind
+        self.owned = owned
+        self.released = released
+        self.state = state
+    }
+
+    enum CodingKeys: String, CodingKey { case number, title, cover, kind, owned, released, state }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(number: c.value(.number, ""), title: c.value(.title, ""), cover: c.value(.cover, ""), kind: c.value(.kind, "book"),
+                  owned: c.value(.owned, false), released: c.value(.released, true), state: c.value(.state, ""))
+    }
+}
+
 /// A book of a series, or an issue of a comic run, on its parent's page.
 public struct ReadingSectionItem: Decodable, Equatable, Sendable, Hashable {
     public var sourceItemId: String
@@ -295,6 +332,10 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
     /// When the work was last started over (#60), the hub's milliseconds; 0
     /// when it never was. Only on the work's own page.
     public var resetAt: Int64
+    /// A series' books in order, for the library's Series view as a fan
+    /// (#54): the ones the library has and, as far as Hardcover says, the main
+    /// numbered ones it does not. Only on a series in a library's listing.
+    public var seriesBooks: [ReadingSeriesBook]
 
     public init(id: String = "", libraryId: String = "", entityType: String = "work", kind: String = "book", title: String = "",
                 sortTitle: String = "", authors: [String] = [], series: String = "", seriesIndex: Double = 0,
@@ -303,7 +344,7 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
                 editions: [ReadingEdition] = [], progress: ReadingProgress? = nil, availability: [String] = [],
                 sections: [ReadingSection] = [], continueAt: ReadingContinue? = nil, partial: [Partial] = [],
                 cache: CacheInfo = CacheInfo(), community: ReadingCommunity? = nil, you: ReadingYou? = nil,
-                resetAt: Int64 = 0) {
+                resetAt: Int64 = 0, seriesBooks: [ReadingSeriesBook] = []) {
         self.id = id
         self.libraryId = libraryId
         self.entityType = entityType
@@ -332,6 +373,7 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
         self.community = community
         self.you = you
         self.resetAt = resetAt
+        self.seriesBooks = seriesBooks
     }
 
     public var isSeries: Bool { entityType == "collection" }
@@ -366,7 +408,7 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, libraryId, entityType, kind, title, sortTitle, authors, series, seriesIndex, seriesId, authorRefs, overview,
              artwork, genres, year, addedAt, bookCount, languages, editions, progress, availability, sections, partial, cache,
-             community, you, resetAt
+             community, you, resetAt, seriesBooks
         case continueAt = "continue"
     }
 
@@ -382,7 +424,7 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
             editions: c.value(.editions, []), progress: c.optional(.progress), availability: c.value(.availability, []),
             sections: c.value(.sections, []), continueAt: c.optional(.continueAt), partial: c.value(.partial, []),
             cache: c.value(.cache, CacheInfo()), community: c.optional(.community), you: c.optional(.you),
-            resetAt: c.value(.resetAt, 0))
+            resetAt: c.value(.resetAt, 0), seriesBooks: c.value(.seriesBooks, []))
     }
 }
 
