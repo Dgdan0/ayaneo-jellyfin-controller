@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -336,6 +337,61 @@ func TestTheWordCopyIsTheEditionWithThePacksEntries(t *testing.T) {
 	}
 	if count != len(world.pack.Words) {
 		t.Fatalf("the whole word copy narrates %d words, want %d", count, len(world.pack.Words))
+	}
+}
+
+// A pack that copied the last clipEnd of a piece Storyteller's aligner ran past (The Dungeon Anarchist's Cookbook's
+// piece 18: 2017.630 s written, 2011.824 s of audio) is measured by where the edition says that piece ends: the
+// piece is the edition's length, the clip ends there in the copy, and the pack is used.
+func TestAPackThatRunsPastAPiecesAudioEndsWhereTheEditionSaysItEnds(t *testing.T) {
+	world := newPackWorld(t, ReadalongPackOptions{ShiftMs: 400, Overrun: map[string]int64{"OEBPS/Audio/00002-00002.mp4": 800}})
+	pack, reason := world.find(t)
+	if pack == nil {
+		t.Fatalf("no pack: %s", reason)
+	}
+	plain, err := ReadAlignment(world.file, world.file.Size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, granularity := range []string{GranularitySentence, GranularityWord} {
+		set, err := ReadOverlaidAlignment(world.file, world.file.Size, pack.Overlay(granularity))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !set.SamePieces(plain) || set.CutAtEnd != 1 {
+			t.Fatalf("%s: pieces %v, cut %d", granularity, set.Files, set.CutAtEnd)
+		}
+	}
+	var copied bytes.Buffer
+	report, err := WriteReadingEPUB(&copied, world.file, world.file.Size, CopyOptions{OmitAudio: true, Restyle: true, MendNarration: true, Overlay: pack.Overlay(GranularityWord)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Mended == 0 {
+		t.Fatal("nothing was mended")
+	}
+	reader, _ := zip.NewReader(bytes.NewReader(copied.Bytes()), int64(copied.Len()))
+	clips := regexp.MustCompile(`src="[^"]*00002-00002\.mp4" clipBegin="([0-9.]+)s" clipEnd="([0-9.]+)s"`)
+	seen := 0
+	for _, file := range reader.File {
+		if !strings.HasSuffix(file.Name, ".smil") {
+			continue
+		}
+		stream, _ := file.Open()
+		data, _ := io.ReadAll(stream)
+		stream.Close()
+		for _, match := range clips.FindAllStringSubmatch(string(data), -1) {
+			seen++
+			begin, _ := parseClock(match[1])
+			end, _ := parseClock(match[2])
+			// Nothing is heard past the piece's 30 s: a word that would begin there has no length, one that runs over ends there.
+			if end < begin || end != begin && end > 30_000 {
+				t.Fatalf("%s: %s", file.Name, match[0])
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no clip of the piece in the copy")
 	}
 }
 

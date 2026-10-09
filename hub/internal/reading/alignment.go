@@ -257,6 +257,21 @@ func ReadOverlaidAlignment(file io.ReaderAt, size int64, overlay *Overlay) (*Ali
 		if err != nil {
 			return nil, err
 		}
+		if entries.overlay.Has(smilPath) {
+			// Where an audio file ends is a fact of the audio, which Storyteller's own SMIL records (a sentence that
+			// ends before it begins, endAudioAt) and a pack's, copied from its last clipEnd, may not (#66: The Dungeon
+			// Anarchist's Cookbook's piece 18 is 2011.824 s long and both say its last sentence ends at 2017.630). The
+			// edition's ends hold for the pack's narration too, so its pieces are measured as the edition's are.
+			if original, err := readXMLEntry(entries.files, smilPath); err == nil {
+				if theirs, err := readSMIL(original, smilPath, archive{files: entries.files}); err == nil {
+					for _, sentence := range theirs {
+						if end, seen := audioEnds[sentence.audio]; sentence.end < sentence.begin && (!seen || sentence.end < end) {
+							audioEnds[sentence.audio] = sentence.end
+						}
+					}
+				}
+			}
+		}
 		for _, sentence := range sentences {
 			if sentence.end < sentence.begin {
 				// Where its audio ends; the earliest, should a file have two.

@@ -79,15 +79,21 @@ type sweepResult struct {
 	// Pieces that end past their audio as ffprobe measures it (when it is there).
 	PiecesPastAudio int
 	ProbedPieces    int
+	// Word clips past the end of their audio as ffprobe measures it: in the copy the Pocket gets (0 wanted), and in the
+	// pack as wordsync wrote it (which the hub mends).
+	CopyClipsPastAudio, PackClipsPastAudio int
 	// The word copy (audio omitted, restyled) as the Pocket would get it.
 	CopyBytes, CopyHeld int64
 	CopyOverlaid        int
-	Seconds             float64
-	Problems            []string
+	// Word clips the hub ended at their audio's end (or gave no length) in the copy.
+	EndedAtAudio, CopyMended int
+	Seconds                  float64
+	Problems                 []string
 }
 
 var smilClip = regexp.MustCompile(`clipBegin="([^"]*)"[^>]*clipEnd="([^"]*)"`)
 var elementID = regexp.MustCompile(`\sid="([^"]+)"`)
+var smilClipSource = regexp.MustCompile(`src="([^"]+)" clipBegin="([^"]*)" clipEnd="([^"]*)"`)
 
 func sweepPack(t *testing.T, dir, uuid, assets, out string) (result sweepResult) {
 	started := time.Now()
@@ -153,15 +159,14 @@ func sweepPack(t *testing.T, dir, uuid, assets, out string) (result sweepResult)
 		return
 	}
 	result.EditionSentences, result.Sentences, result.WordPars = count(plain), count(sentences), count(words)
+	// Clips the hub ends where the edition says a piece ends (a pack that copied a last clipEnd the aligner ran past): told, not wrong.
+	result.EndedAtAudio = words.PastEnd + words.CutAtEnd
 	result.SentencePiecesDiffer, result.WordPiecesDiffer = piecesDiffer(plain, sentences), piecesDiffer(plain, words)
 	result.Pieces = len(plain.Files)
 	if sources, err := plain.Sources(); err == nil {
 		result.Sources, result.Layout = len(sources), "files"
 	} else {
 		result.Layout = "pieces placed on the tracks (" + err.Error() + ")"
-	}
-	if words.PastEnd+words.CutAtEnd+sentences.PastEnd+sentences.CutAtEnd > 0 {
-		problem("past the end: %d/%d sentences, %d/%d words", sentences.PastEnd, sentences.CutAtEnd, words.PastEnd, words.CutAtEnd)
 	}
 	// Clips as written, in both sets.
 	for _, set := range []*Overlay{sentenceSet, wordSet} {
@@ -189,7 +194,7 @@ func sweepPack(t *testing.T, dir, uuid, assets, out string) (result sweepResult)
 		result.Reason = "word copy: " + err.Error()
 		return result
 	}
-	result.CopyBytes, result.CopyHeld, result.CopyOverlaid = plan.Size, plan.Held(), plan.Report.Overlaid
+	result.CopyBytes, result.CopyHeld, result.CopyOverlaid, result.CopyMended = plan.Size, plan.Held(), plan.Report.Overlaid, plan.Report.Mended
 	var copied bytes.Buffer
 	if _, err := io.Copy(&copied, plan.Reader(handle)); err != nil {
 		t.Fatal(err)
@@ -250,22 +255,49 @@ func sweepPack(t *testing.T, dir, uuid, assets, out string) (result sweepResult)
 		}
 		want, _ := wordSet.read(name)
 		got, err := fromCopy(name)
-		if err != nil || !bytes.Equal(got, want) {
+		if err != nil || plan.Report.Mended == 0 && !bytes.Equal(got, want) {
 			problem("%s is not the pack's in the copy", name)
 		}
 	}
 	// Each piece's narration against the audio itself, when ffprobe is there.
 	if ffprobe := os.Getenv("POCKETDS_FFPROBE"); ffprobe != "" {
 		audioDir := filepath.Join(filepath.Dir(filepath.Dir(editionPath)), "transcoded audio")
+		lengths := map[string]float64{}
 		for _, file := range plain.Files {
 			seconds, err := probeSeconds(ffprobe, filepath.Join(audioDir, path.Base(file.Entry)))
 			if err != nil {
 				continue
 			}
+			lengths[path.Base(file.Entry)] = seconds * 1000
 			result.ProbedPieces++
 			if float64(file.LengthMs) > seconds*1000+50 {
 				result.PiecesPastAudio++
 			}
+		}
+		// Clips that run on past the audio they name: in the copy the Pocket gets (mended by the hub), and in the pack as written.
+		pastIn := func(documents map[string][]byte) int {
+			past := 0
+			for _, data := range documents {
+				for _, match := range smilClipSource.FindAllSubmatch(data, -1) {
+					begin, _ := parseClock(string(match[2]))
+					end, _ := parseClock(string(match[3]))
+					if length, known := lengths[path.Base(string(match[1]))]; known && end > begin && float64(end) > length+50 {
+						past++
+					}
+				}
+			}
+			return past
+		}
+		copySMIL, packSMIL := map[string][]byte{}, map[string][]byte{}
+		for _, name := range wordSet.Names() {
+			if strings.HasSuffix(strings.ToLower(name), ".smil") {
+				copySMIL[name], _ = fromCopy(name)
+				packSMIL[name], _ = wordSet.read(name)
+			}
+		}
+		result.CopyClipsPastAudio, result.PackClipsPastAudio = pastIn(copySMIL), pastIn(packSMIL)
+		if result.CopyClipsPastAudio > 0 {
+			problem("%d clips of the word copy run past their audio", result.CopyClipsPastAudio)
 		}
 	}
 	if result.MissingIDs > 0 {
@@ -292,6 +324,14 @@ func sweepPack(t *testing.T, dir, uuid, assets, out string) (result sweepResult)
 			return r
 		}, manifest.Title)
 		if err := os.WriteFile(filepath.Join(out, name+".word.epub"), copied.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// And the sentence copy, what an app that does not ask for words gets, for the app's sweep to set beside it.
+		var sentenceCopy bytes.Buffer
+		if _, err := WriteReadingEPUB(&sentenceCopy, handle, edition.Size, CopyOptions{OmitAudio: true, Restyle: true, MendNarration: true, Overlay: sentenceSet}); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(out, name+".sentence.epub"), sentenceCopy.Bytes(), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

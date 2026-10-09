@@ -40,6 +40,9 @@ type ReadalongPackOptions struct {
 	Extra map[string]map[string][]byte
 	// WordStart puts the word spans of the text at this number instead of 0.
 	WordStart int
+	// Overrun is, by audio entry, how far past the end of that piece its last sentence is written to end: what a pack
+	// copies from an edition the aligner ran past (Storyteller's last clipEnd, kept as the pack's).
+	Overrun map[string]int64
 }
 
 // FixtureWord is one timed word of a generated pack's word set.
@@ -133,6 +136,12 @@ func GenerateReadalongPack(dir string, edition AlignedEPUBFixture, options Reada
 		begin := min(par.BeginMs+options.ShiftMs, par.EndMs-1)
 		timed := par
 		timed.BeginMs = begin
+		for _, chunk := range edition.Chunks {
+			if chunk.Entry == par.Audio && chunk.LengthMs == par.EndMs && options.Overrun[par.Audio] > 0 {
+				par.EndMs += options.Overrun[par.Audio]
+				timed.EndMs = par.EndMs
+			}
+		}
 		if _, seen := byText[par.Text]; !seen {
 			textOrder = append(textOrder, par.Text)
 			data, err := readXMLEntry(byName, par.Text)
