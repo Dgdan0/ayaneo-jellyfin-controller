@@ -53,11 +53,13 @@ public struct ReadingPublicationManifest: Decodable, Equatable, Sendable {
     public var pages: [ReadingPublicationPage]
     public var previousSourceItemId: String
     public var nextSourceItemId: String
+    /// When the series was last started over (#60); 0 when it never was.
+    public var resetAt: Int64
 
     public init(workId: String = "", source: String = "", sourceItemId: String = "", kind: String = "comic",
                 title: String = "", seriesTitle: String = "", number: String = "", pageCount: Int = 0,
                 currentPage: Int = 0, direction: String = "ltr", pages: [ReadingPublicationPage] = [],
-                previousSourceItemId: String = "", nextSourceItemId: String = "") {
+                previousSourceItemId: String = "", nextSourceItemId: String = "", resetAt: Int64 = 0) {
         self.workId = workId
         self.source = source
         self.sourceItemId = sourceItemId
@@ -71,11 +73,12 @@ public struct ReadingPublicationManifest: Decodable, Equatable, Sendable {
         self.pages = pages
         self.previousSourceItemId = previousSourceItemId
         self.nextSourceItemId = nextSourceItemId
+        self.resetAt = resetAt
     }
 
     enum CodingKeys: String, CodingKey {
         case workId, source, sourceItemId, kind, title, seriesTitle, number, pageCount, currentPage, direction, pages,
-             previousSourceItemId, nextSourceItemId
+             previousSourceItemId, nextSourceItemId, resetAt
     }
 
     public init(from decoder: any Decoder) throws {
@@ -85,7 +88,7 @@ public struct ReadingPublicationManifest: Decodable, Equatable, Sendable {
                   number: c.value(.number, ""), pageCount: c.value(.pageCount, 0), currentPage: c.value(.currentPage, 0),
                   direction: c.value(.direction, "ltr"), pages: c.value(.pages, []),
                   previousSourceItemId: c.value(.previousSourceItemId, ""),
-                  nextSourceItemId: c.value(.nextSourceItemId, ""))
+                  nextSourceItemId: c.value(.nextSourceItemId, ""), resetAt: c.value(.resetAt, 0))
     }
 
     /// Which way it reads: the series' own choice (`ComicView.direction`)
@@ -107,9 +110,13 @@ public struct ReadingPublicationManifest: Decodable, Equatable, Sendable {
 public struct ReadingPublicationProgressBody: Encodable, Equatable, Sendable {
     public var pageIndex: Int
     public var expectedPage: Int?
+    /// The start over this device last applied (#60): a page from before a
+    /// later one is refused as `reading_position_reset`.
+    public var resetSeen: Int64?
 
-    public init(pageIndex: Int, expectedPage: Int? = nil) {
+    public init(pageIndex: Int, expectedPage: Int? = nil, resetSeen: Int64? = nil) {
         self.pageIndex = pageIndex
         self.expectedPage = expectedPage
+        self.resetSeen = resetSeen
     }
 }

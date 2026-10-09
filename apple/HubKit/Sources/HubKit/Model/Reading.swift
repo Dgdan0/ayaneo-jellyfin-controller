@@ -292,6 +292,9 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
     /// This profile's rating, finish date, read count, status and shelves (#39);
     /// only on the book's own page, nil when there is nothing to say.
     public var you: ReadingYou?
+    /// When the work was last started over (#60), the hub's milliseconds; 0
+    /// when it never was. Only on the work's own page.
+    public var resetAt: Int64
 
     public init(id: String = "", libraryId: String = "", entityType: String = "work", kind: String = "book", title: String = "",
                 sortTitle: String = "", authors: [String] = [], series: String = "", seriesIndex: Double = 0,
@@ -299,7 +302,8 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
                 genres: [String] = [], year: Int = 0, addedAt: String = "", bookCount: Int = 0, languages: [String] = [],
                 editions: [ReadingEdition] = [], progress: ReadingProgress? = nil, availability: [String] = [],
                 sections: [ReadingSection] = [], continueAt: ReadingContinue? = nil, partial: [Partial] = [],
-                cache: CacheInfo = CacheInfo(), community: ReadingCommunity? = nil, you: ReadingYou? = nil) {
+                cache: CacheInfo = CacheInfo(), community: ReadingCommunity? = nil, you: ReadingYou? = nil,
+                resetAt: Int64 = 0) {
         self.id = id
         self.libraryId = libraryId
         self.entityType = entityType
@@ -327,6 +331,7 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
         self.cache = cache
         self.community = community
         self.you = you
+        self.resetAt = resetAt
     }
 
     public var isSeries: Bool { entityType == "collection" }
@@ -361,7 +366,7 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, libraryId, entityType, kind, title, sortTitle, authors, series, seriesIndex, seriesId, authorRefs, overview,
              artwork, genres, year, addedAt, bookCount, languages, editions, progress, availability, sections, partial, cache,
-             community, you
+             community, you, resetAt
         case continueAt = "continue"
     }
 
@@ -376,7 +381,8 @@ public struct ReadingWork: Decodable, Equatable, Sendable, Identifiable {
             addedAt: c.value(.addedAt, ""), bookCount: c.value(.bookCount, 0), languages: c.value(.languages, []),
             editions: c.value(.editions, []), progress: c.optional(.progress), availability: c.value(.availability, []),
             sections: c.value(.sections, []), continueAt: c.optional(.continueAt), partial: c.value(.partial, []),
-            cache: c.value(.cache, CacheInfo()), community: c.optional(.community), you: c.optional(.you))
+            cache: c.value(.cache, CacheInfo()), community: c.optional(.community), you: c.optional(.you),
+            resetAt: c.value(.resetAt, 0))
     }
 }
 
@@ -1402,18 +1408,22 @@ public struct ReadingAudioPositionResponse: Decodable, Equatable, Sendable {
     public var workId: String
     public var sourceItemId: String
     public var position: ReadingAudioPosition?
+    /// When the book was last started over (#60); 0 when it never was.
+    public var resetAt: Int64
 
-    public init(workId: String = "", sourceItemId: String = "", position: ReadingAudioPosition? = nil) {
+    public init(workId: String = "", sourceItemId: String = "", position: ReadingAudioPosition? = nil, resetAt: Int64 = 0) {
         self.workId = workId
         self.sourceItemId = sourceItemId
         self.position = position
+        self.resetAt = resetAt
     }
 
-    enum CodingKeys: String, CodingKey { case workId, sourceItemId, position }
+    enum CodingKeys: String, CodingKey { case workId, sourceItemId, position, resetAt }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(workId: c.value(.workId, ""), sourceItemId: c.value(.sourceItemId, ""), position: c.optional(.position))
+        self.init(workId: c.value(.workId, ""), sourceItemId: c.value(.sourceItemId, ""), position: c.optional(.position),
+                  resetAt: c.value(.resetAt, 0))
     }
 }
 

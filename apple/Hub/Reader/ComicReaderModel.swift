@@ -35,12 +35,15 @@ enum ComicReaderSettings {
     }
 
     static func place(workId: String) -> ComicPlace? {
-        ComicPlace.decode(defaults.string(forKey: "comic.place." + workId))
+        ComicPlace.decode(defaults.string(forKey: placeKey(workId: workId)))
     }
 
     static func setPlace(_ place: ComicPlace, workId: String) {
-        defaults.set(place.encode(), forKey: "comic.place." + workId)
+        defaults.set(place.encode(), forKey: placeKey(workId: workId))
     }
+
+    /// Where a series' place is kept; Start over (#60) forgets it.
+    nonisolated static func placeKey(workId: String) -> String { "comic.place." + workId }
 }
 
 /// The comic and manga reader's state (#25, phase 3; Android's
@@ -295,6 +298,8 @@ final class ComicReaderModel {
                 guard let manifest = try? JSONDecoder().decode(ReadingPublicationManifest.self, from: answer) else {
                     throw HubFailure(.badResponse)
                 }
+                // The series started over on any device (#60): this device's place in it goes first.
+                ReadingResetCenter.notice(scope: key.scope, workId: key.workId, resetAt: manifest.resetAt)
                 guard !Task.isCancelled else { return }
                 // Kept to reopen the issue in an outage (#37), and listed with the books kept here (#43).
                 try? manifests?.save(key, answer: answer)
@@ -859,6 +864,18 @@ final class ComicReaderModel {
         }
     }
 
+    /// A save was refused for a start over (#60): the issue's page list is read
+    /// again, which applies it here.
+    private func noticeStartOver(_ publication: String) {
+        let request = HubEndpoints.readingPublication(workId: workId, sourceItemId: publication)
+        let scope = scope
+        let run = workId
+        Task { [hub] in
+            guard let answer = try? await hub.fetch(request, as: ReadingPublicationManifest.self) else { return }
+            ReadingResetCenter.notice(scope: scope, workId: run, resetAt: answer.resetAt)
+        }
+    }
+
     /// Leaving, a new issue, the end of one, the app going away: now.
     func flushPlace() {
         saving?.cancel()
@@ -866,23 +883,32 @@ final class ComicReaderModel {
     }
 
     private func sendPlace() {
-        guard let manifest, let body = outbox.next() else { return }
+        guard let manifest, var body = outbox.next() else { return }
+        // The start over this device last applied (#60): a page from before a later one is refused.
+        body.resetSeen = ReadingResetCenter.seen(scope: scope, workId: workId)
         let request = HubEndpoints.saveReadingPublicationProgress(workId: workId, sourceItemId: manifest.sourceItemId, body)
         let publication = manifest.sourceItemId
         let run = workId
         Task { [weak self, hub] in
             var ok = false
             var conflict = false
+            var startedOver = false
             do throws(HubFailure) {
                 try await hub.send(request)
                 ok = true
             } catch {
                 conflict = error.status == 409
+                startedOver = error.code == ReadingResets.code
             }
             guard let self, self.manifest?.sourceItemId == publication else { return }
             if ok { self.onKept?(run) }
             self.outbox.answered(ok: ok, conflict: conflict)
-            if conflict {
+            if startedOver {
+                // Started over on another device (#60): the series is read again, which drops
+                // this device's place in it; this page is not sent again.
+                self.say("This book was started over on another device, so your page here was not saved")
+                self.noticeStartOver(publication)
+            } else if conflict {
                 self.say("This issue was read on another device since, so your page here was not saved")
             } else if ok, self.outbox.pending {
                 // Read on while that one was on its way: the newer page now.

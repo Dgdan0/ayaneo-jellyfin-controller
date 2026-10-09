@@ -430,10 +430,14 @@ public struct AudioPlace: Equatable, Hashable, Sendable {
         return .object(fields)
     }
 
-    /// The write for an `audio` checkpoint in the outbox, or nil for one that holds no place.
-    public static func body(_ checkpoint: ReadingCheckpoint) -> JSONValue? {
+    /// The write for an `audio` checkpoint in the outbox, or nil for one that
+    /// holds no place; with the start over this device last applied (#60), when given.
+    public static func body(_ checkpoint: ReadingCheckpoint, resetSeen: Int64? = nil) -> JSONValue? {
         guard let local = of(checkpoint.local) else { return nil }
-        return body(local, base: of(checkpoint.base), baseKnown: checkpoint.baseKnown)
+        let place = body(local, base: of(checkpoint.base), baseKnown: checkpoint.baseKnown)
+        guard let resetSeen, case .object(var fields) = place else { return place }
+        fields["resetSeen"] = .int(resetSeen)
+        return .object(fields)
     }
 
     /// A place in words for the sheet that asks which: "Part 3 of 8 · 1:02:13", "Finished".

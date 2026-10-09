@@ -36,6 +36,20 @@ public struct ReadingManifestCache: Sendable {
         try? FileManager.default.removeItem(at: file(key))
     }
 
+    /// The book `workId` was started over (#60): every page list kept of it
+    /// opens at its first page again. The rest of each answer stays as it came.
+    public func dropPlace(workId: String) {
+        let files = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: file),
+                  var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  object["workId"] as? String == workId,
+                  (object["currentPage"] as? NSNumber)?.intValue ?? 0 != 0 else { continue }
+            object["currentPage"] = 0
+            if let changed = try? JSONSerialization.data(withJSONObject: object) { try? changed.write(to: file, options: .atomic) }
+        }
+    }
+
     func file(_ key: ReadingCheckpointKey) -> URL {
         root.appendingPathComponent(key.fileName + ".json")
     }

@@ -280,6 +280,9 @@ public enum DemoReading {
              progress: book.progress, updatedAt: book.updatedAt)
     }
 
+    /// A work the demo hub has a page for (#60's Start over).
+    static func knows(_ id: String) -> Bool { findWork(id) != nil }
+
     private static func findWork(_ id: String) -> Work? {
         if let work = works.first(where: { $0.id == id }) { return work }
         for series in works where series.entityType == "collection" {
@@ -291,7 +294,10 @@ public enum DemoReading {
     private static func work(_ id: String) -> DemoTransport.Answer {
         guard let work = findWork(id) else { return failure(404, "not_found", "No such book") }
         // The book page's community, you and genres (#39): on this route only.
-        return json(DemoBookPage.decorate(detailFields(work), workId: work.id))
+        var fields = DemoBookPage.decorate(detailFields(work), workId: work.id)
+        // When it was last started over (#60): on the work's own page.
+        if DemoStartOver.stamp(work.id) > 0 { fields["resetAt"] = DemoStartOver.stamp(work.id) }
+        return json(fields)
     }
 
     private static func progressFields(_ percentage: Double, updatedAt: String, completed: Bool = false) -> [String: Any] {
@@ -321,7 +327,10 @@ public enum DemoReading {
             fields["series"] = work.series
             fields["seriesIndex"] = work.seriesIndex
         }
-        if work.progress > 0 { fields["progress"] = progressFields(work.progress, updatedAt: work.updatedAt) }
+        // Started over (#60): not started, wherever it is listed.
+        if work.progress > 0 && DemoStartOver.stamp(work.id) == 0 {
+            fields["progress"] = progressFields(work.progress, updatedAt: work.updatedAt)
+        }
         return fields
     }
 
@@ -347,10 +356,13 @@ public enum DemoReading {
                                            "authors": work.authors.map(\.name), "availability": book.available ? "available" : "missing",
                                            "formats": book.formats]
                 if book.pages > 0 { item["pageCount"] = book.pages }
-                if book.progress > 0 { item["progress"] = progressFields(book.progress, updatedAt: book.updatedAt) }
+                if book.progress > 0 && DemoStartOver.stamp(book.workId) == 0 {
+                    item["progress"] = progressFields(book.progress, updatedAt: book.updatedAt)
+                }
                 return item
             }]]
-            if let on = work.books.first(where: { $0.number == work.continueNumber && $0.available }) {
+            if let on = work.books.first(where: { $0.number == work.continueNumber && $0.available }),
+               DemoStartOver.stamp(on.workId) == 0 {
                 fields["continue"] = ["workId": on.workId, "source": "storyteller", "sourceItemId": on.sourceItemId, "title": on.title,
                                       "number": on.number, "percentage": on.progress, "artwork": art(on.sourceItemId), "kind": on.kind]
             }
@@ -358,7 +370,7 @@ public enum DemoReading {
             fields["sections"] = work.volumes.map { volume -> [String: Any] in
                 ["id": "demo-volume:\(work.id):\(volume.number)", "title": volume.title, "number": volume.number,
                  "items": volume.issues.map { issue -> [String: Any] in
-                     let reading = "\(issue.number)" == work.continueNumber
+                     let reading = "\(issue.number)" == work.continueNumber && DemoStartOver.stamp(work.id) == 0
                      var item: [String: Any] = ["sourceItemId": "\(work.id)-\(issue.number)", "title": "\(issue.number)",
                                                 "number": "\(issue.number)", "kind": work.kind,
                                                 "artwork": HubEndpoints.kavitaChapterCover("\(work.id)-\(issue.number)"),
@@ -368,7 +380,7 @@ public enum DemoReading {
                      return item
                  }]
             }
-            if !work.continueNumber.isEmpty {
+            if !work.continueNumber.isEmpty && DemoStartOver.stamp(work.id) == 0 {
                 fields["continue"] = ["source": "kavita", "sourceItemId": "\(work.id)-\(work.continueNumber)",
                                       "title": work.continueNumber, "number": work.continueNumber, "percentage": work.progress,
                                       "kind": work.kind]
@@ -658,14 +670,20 @@ public enum DemoReading {
     }
 
     private static func positionFields(_ book: Audiobook) -> [String: Any] {
-        guard let place = places.withLock({ $0[book.sourceItemId] }) else {
-            return ["workId": book.workId, "sourceItemId": book.sourceItemId, "position": NSNull()]
-        }
+        var fields: [String: Any] = ["workId": book.workId, "sourceItemId": book.sourceItemId, "position": NSNull()]
+        if DemoStartOver.stamp(book.workId) > 0 { fields["resetAt"] = DemoStartOver.stamp(book.workId) }
+        guard let place = places.withLock({ $0[book.sourceItemId] }) else { return fields }
         let before = book.tracksMs.prefix(place.track).reduce(0, +)
-        return ["workId": book.workId, "sourceItemId": book.sourceItemId,
-                "position": ["trackId": trackId(book.sourceItemId, place.track), "track": place.track, "offsetMs": place.offsetMs,
-                             "globalMs": before + place.offsetMs, "completed": place.completed, "exact": true, "form": "audio",
-                             "timestamp": 1_791_000_000_000] as [String: Any]]
+        fields["position"] = ["trackId": trackId(book.sourceItemId, place.track), "track": place.track, "offsetMs": place.offsetMs,
+                              "globalMs": before + place.offsetMs, "completed": place.completed, "exact": true, "form": "audio",
+                              "timestamp": 1_791_000_000_000] as [String: Any]
+        return fields
+    }
+
+    /// Start over (#60): the work's audiobooks have no listening place.
+    static func forgetListening(workId: String) {
+        let ids = audiobooks.filter { $0.workId == workId }.map(\.sourceItemId)
+        places.withLock { places in for id in ids { places[id] = nil } }
     }
 
     /// The hub's rules: a known track and an offset within it; `expected`
@@ -673,13 +691,14 @@ public enum DemoReading {
     /// the place held now (409 `reading_position_conflict` otherwise).
     private static func savePosition(_ book: Audiobook, body: Data?) -> DemoTransport.Answer {
         guard let body, let fields = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              Set(fields.keys).isSubset(of: ["trackId", "offsetMs", "completed", "timestamp", "expected"]),
+              Set(fields.keys).isSubset(of: ["trackId", "offsetMs", "completed", "timestamp", "expected", "resetSeen"]),
               let trackId = fields["trackId"] as? String, let offset = (fields["offsetMs"] as? NSNumber)?.int64Value, offset >= 0,
               let track = book.tracksMs.indices.first(where: { self.trackId(book.sourceItemId, $0) == trackId }),
               offset <= book.tracksMs[track] + 1_000 else {
             return failure(400, "invalid_request", "invalid audiobook reading position")
         }
         let completed = (fields["completed"] as? Bool) ?? false
+        if DemoStartOver.refuses(book.workId, fields) { return DemoStartOver.refusal() }
         return places.withLock { all -> DemoTransport.Answer in
             let held = all[book.sourceItemId]
             if let expected = fields["expected"] {
