@@ -82,8 +82,16 @@ final class PadFocusTests: XCTestCase {
         XCTAssertTrue(focus(app).hasPrefix("ring books-home also/"), "down did not reach Also reading: \(focus(app))")
         press(app, .downArrow, times: 2)
         XCTAssertTrue(focus(app).hasPrefix("ring books-home series/"), "down did not reach Your series: \(focus(app))")
+        // Into the first shelf at the book nearest the series card, which on a
+        // wider phone (the Pro Max) is its second; left to its first.
         press(app, .downArrow)
-        XCTAssertEqual(focus(app), "ring books-home shelf-comics/0", "down did not reach the first shelf's first book")
+        XCTAssertTrue(focus(app).hasPrefix("ring books-home shelf-comics/"), "down did not reach the first shelf: \(focus(app))")
+        var steps = 0
+        while focus(app) != "ring books-home shelf-comics/0", steps < 4 {
+            press(app, .leftArrow)
+            steps += 1
+        }
+        XCTAssertEqual(focus(app), "ring books-home shelf-comics/0", "left did not reach the first shelf's first book")
         press(app, .rightArrow)
         XCTAssertEqual(focus(app), "ring books-home shelf-comics/1", "right did not go along the shelf by position")
         // Past the empty Want to Read, to the next shelf with books.
