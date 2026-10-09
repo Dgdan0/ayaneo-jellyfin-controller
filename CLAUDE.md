@@ -91,7 +91,7 @@ The durable reader checkpoint candidate and acceptance status are in `READING_CH
 Native Apple clients (iPad, iPhone, Mac; SwiftUI, TestFlight) are planned in `APPLE_PLAN.md`;
 that work happens on branch `apple/client`, edited here and built on the MacBook with
 `scripts/mac-remote.sh`, and it talks to this same hub.
-Native UI tests run only against the isolated `.uitest` application with `scripts/dev.sh test-ui`.
+Native UI tests run only against the isolated `.uitest` application with `scripts/dev.sh test-ui`. Start the emulator they run on with `-gpu swangle_indirect`: the AVD's `hw.gpu.mode=swiftshader_indirect` is not a valid mode for emulator 37.x, which then falls back to the host's GPU, and several emulators on it at once (every agent has one) end with the emulator's system server dead (`DeadSystemException`), after which the tests that follow fail for no reason of their own (touch injection "not directed at a window owned by" the app, a null screenshot, a launch that times out). The same 120 reader tests passed in sequence on the software GPU where 15 failed on the host's.
 Gradle uninstalls instrumentation targets after testing: never target the user's normal app,
 uninstall it, or clear its data as part of device verification. Use `adb install -r` for updates.
 
@@ -1147,7 +1147,7 @@ Edit note, Remove) and a note puts a mark at its end. The Navigator has a Highli
 
 **The mode button** shows only the mode you are in (Ebook, Audio, Read along: only the formats the book has) and opens out to the others; one rule says where a switch starts: the sentence of the words
 just selected, else where the voice stopped if it was heard on this page (the page shows "Heard to here"), else the top of the page. Back to the ebook the page opens where the voice was, with "Heard to here" at
-that sentence, found in the ebook's text by the sentence's words (`AlignedBook.anchorOf`). The mark never sits on a word: an underline in the accent under the sentence
+that sentence, found in the ebook's text by the sentence's words (`AlignedBook.anchorOf`). The mark never sits on a word (Readium lays the Pocket's 838px page out in one column whatever is asked, as its stylesheet needs 960px for two; a wider page has them and the tab stands in the margin of the column its line is in): an underline in the accent under the sentence
 and a small rounded tab in the page's side margin beside its first line (a screen reader says "Heard to here" there), and one toast as the page comes up that names it. An
 Apple client draws the same: a tab in the margin, an underline, and the words only as accessibility text and the toast. Between Audio and Read along the voice keeps going. Where the audiobook's place is a sentence of the read-along edition,
 the hub's `GET …/audio` (`alignment.audio`: each audio file of the edition, the track it is in and where it begins) maps the two; `AlignedPlaces` is the Pocket's.
