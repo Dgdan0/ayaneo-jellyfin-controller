@@ -144,7 +144,15 @@ final class ActivityTabTests: XCTestCase {
         XCTAssertTrue(download.waitForExistence(timeout: 5), "the editor did not open")
         download.tap()
         download.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "100")
+        // What was typed is in the field before Apply is pressed.
+        let typedBy = Date().addingTimeInterval(5)
+        while (download.value as? String) != "100", Date() < typedBy {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertEqual(download.value as? String, "100", "the field does not read what was typed")
         app.buttons["apply-limits"].tap()
-        XCTAssertTrue(text(app, containing: "100 KiB/s").waitForExistence(timeout: 10), "the new cap is not shown")
+        let texts = { app.staticTexts.allElementsBoundByIndex.prefix(40).map(\.label).joined(separator: " | ") }
+        XCTAssertTrue(text(app, containing: "100 KiB/s").waitForExistence(timeout: 10),
+                      "the new cap is not shown: field \(download.exists ? (download.value as? String ?? "?") : "gone"); editor \(app.buttons["apply-limits"].exists); \(texts())")
     }
 }
