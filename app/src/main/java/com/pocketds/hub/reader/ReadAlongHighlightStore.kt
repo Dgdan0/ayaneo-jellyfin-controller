@@ -19,7 +19,7 @@ object ReadAlongHighlightStore {
     /** What [store] holds; a colour that is not one of the eight, or a trail out of range, is the theme's default. */
     fun decode(store: SharedPreferences): ReadAlongHighlights {
         val looks = EpubTheme.entries.mapNotNull { theme ->
-            val color = HighlightColor.of(store.getString(colorKey(theme), null))
+            val color = ReadAlongColor.of(store.getString(colorKey(theme), null))
             val trail = if (store.contains(trailKey(theme))) store.getInt(trailKey(theme), ReadAlongWordHighlight.DEFAULT_TRAIL) else null
             if (color == null && trail == null) null
             else theme to HighlightLook(color ?: ReadAlongWordHighlight.defaultColor(theme),

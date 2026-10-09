@@ -131,8 +131,14 @@ object PageSwipe {
      * A flick: the kind of swipe Readium's pager turns the page for by itself (it asks for 25 dp across and 200 dp a second). One
      * that is that, and that Readium did not turn, was dropped, and is turned for it ([PageTurns.place] says whether it was). A
      * slower drag, which it snaps back by its own rule (less than half a page), is left alone. [density] is the screen's, in px per dp.
+     *
+     * A touch that stayed down as long as a long press ([longPressMs]) is not one, however far and fast it went at the end: it is a
+     * selection being extended (a long press on a word and a drag along the line, as one touch, which the page's own web view
+     * takes), and turning the page under it threw the words away (#62). Measured on the emulator: a drag of 300 ms after a 700 ms
+     * hold counted as a flick of over 800 dp a second, from the touch's start.
      */
-    fun isFlick(dx: Float, dy: Float, durationMs: Long, density: Float): Boolean {
+    fun isFlick(dx: Float, dy: Float, durationMs: Long, density: Float, longPressMs: Long): Boolean {
+        if (durationMs >= longPressMs) return false
         val across = abs(dx)
         if (across < FLICK_DP * density || across < SIDEWAYS * abs(dy)) return false
         return across / (maxOf(1L, durationMs) / 1000f) >= FLICK_SPEED_DP * density

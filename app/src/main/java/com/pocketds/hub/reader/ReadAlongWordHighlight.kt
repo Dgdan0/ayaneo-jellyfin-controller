@@ -4,7 +4,7 @@ package com.pocketds.hub.reader
  * The read-along highlight's colours (#66), fixed and the same on the Pocket and Apple: the owner's approved demo
  * (`word-trail.html`) gives these numbers, and both apps copy them exactly.
  */
-enum class HighlightColor(val id: String, val label: String, val rgb: Int) {
+enum class ReadAlongColor(val id: String, val label: String, val rgb: Int) {
     GOLD("gold", "Gold", 0xF0C96A),
     EMBER("ember", "Ember", 0xDE8C4C),
     ROSE("rose", "Rose", 0xE98FA8),
@@ -18,12 +18,12 @@ enum class HighlightColor(val id: String, val label: String, val rgb: Int) {
     val argb: Int get() = (0xFF shl 24) or rgb
 
     companion object {
-        fun of(id: String?): HighlightColor? = entries.firstOrNull { it.id == id }
+        fun of(id: String?): ReadAlongColor? = entries.firstOrNull { it.id == id }
     }
 }
 
 /** One page theme's highlight: its colour, and how strong the trail is as a share of the word's strength (0 to 100). */
-data class HighlightLook(val color: HighlightColor, val trailPercent: Int)
+data class HighlightLook(val color: ReadAlongColor, val trailPercent: Int)
 
 /** The highlight of each page theme, as this device keeps it; a theme with none kept has its default. */
 data class ReadAlongHighlights(val looks: Map<EpubTheme, HighlightLook> = emptyMap()) {
@@ -54,7 +54,7 @@ object ReadAlongWordHighlight {
     const val DEFAULT_TRAIL = 40
     const val TRAIL_STEP = 5
 
-    fun defaultColor(theme: EpubTheme): HighlightColor = if (isDark(theme)) HighlightColor.EMBER else HighlightColor.GOLD
+    fun defaultColor(theme: EpubTheme): ReadAlongColor = if (isDark(theme)) ReadAlongColor.EMBER else ReadAlongColor.GOLD
     fun defaultLook(theme: EpubTheme): HighlightLook = HighlightLook(defaultColor(theme), DEFAULT_TRAIL)
     fun isDefault(theme: EpubTheme, look: HighlightLook): Boolean = look == defaultLook(theme)
 

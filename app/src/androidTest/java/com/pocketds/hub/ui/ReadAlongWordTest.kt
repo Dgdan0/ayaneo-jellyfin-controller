@@ -21,7 +21,7 @@ import com.pocketds.hub.reader.EpubPagePalette
 import com.pocketds.hub.reader.EpubReaderPreferences
 import com.pocketds.hub.reader.EpubReaderScreen
 import com.pocketds.hub.reader.EpubTheme
-import com.pocketds.hub.reader.HighlightColor
+import com.pocketds.hub.reader.ReadAlongColor
 import com.pocketds.hub.reader.HighlightLook
 import com.pocketds.hub.reader.PageSpan
 import com.pocketds.hub.reader.ReadAlongGlow
@@ -292,14 +292,14 @@ class ReadAlongWordTest {
     }
 
     @Test fun aTrailAtNoneDrawsOnlyTheWordAndAnotherColourIsDrawnInIt(): Unit = runBlocking {
-        val problems = pixels(EpubTheme.LIGHT, HighlightLook(HighlightColor.GOLD, 0), "paper-no-trail") +
-            pixels(EpubTheme.BLACK, HighlightLook(HighlightColor.SKY, 100), "dark-sky-full-trail")
+        val problems = pixels(EpubTheme.LIGHT, HighlightLook(ReadAlongColor.GOLD, 0), "paper-no-trail") +
+            pixels(EpubTheme.BLACK, HighlightLook(ReadAlongColor.SKY, 100), "dark-sky-full-trail")
         assertTrue(problems.joinToString("\n"), problems.isEmpty())
     }
 
     /** A book with no pack (Storyteller's sentence edition) washes the sentence whole, in the colour chosen for the page. */
     @Test fun aSentenceEditionWashesItsSentenceInTheChosenColour(): Unit = runBlocking {
-        val look = HighlightLook(HighlightColor.ROSE, 40)
+        val look = HighlightLook(ReadAlongColor.ROSE, 40)
         withBook(ReaderFixtures.longEpub(sentences = 12), EpubReaderPreferences(theme = EpubTheme.LIGHT, columns = EpubColumns.ONE),
             ReadAlongHighlights().with(EpubTheme.LIGHT, look), "sentence") {
             assertFalse(withContext(Dispatchers.Main) { voice().timeline.wordLevel })
@@ -354,7 +354,7 @@ class ReadAlongWordTest {
             withContext(Dispatchers.Main) {
                 // The page themes as tabs, the preview, the eight colours, the trail, the default.
                 assertEquals(EpubPagePalette.CHOICES.map { "highlight-theme:$it" }, all(panel).mapNotNull { it.tag as? String }.filter { it.startsWith("highlight-theme:") })
-                assertEquals(HighlightColor.entries.map { "highlight-color:${it.id}" }, all(panel).mapNotNull { it.tag as? String }.filter { it.startsWith("highlight-color:") })
+                assertEquals(ReadAlongColor.entries.map { "highlight-color:${it.id}" }, all(panel).mapNotNull { it.tag as? String }.filter { it.startsWith("highlight-color:") })
                 assertNotNull(find(panel, "highlight-preview")); assertNotNull(find(panel, "highlight-trail")); assertNotNull(find(panel, "highlight-default"))
                 // Gold marked as the default on Sepia, and chosen.
                 val gold = find(panel, "highlight-color:gold")!!
@@ -366,14 +366,14 @@ class ReadAlongWordTest {
                 find(panel, "highlight-color:teal")!!.performClick()
                 (all(find(panel, "highlight-trail")!!).first { it is SeekBar } as SeekBar).progress = 12  // 60%
             }
-            assertEquals(HighlightLook(HighlightColor.TEAL, 60), kept.of(EpubTheme.SEPIA))
+            assertEquals(HighlightLook(ReadAlongColor.TEAL, 60), kept.of(EpubTheme.SEPIA))
             assertEquals("Other themes keep theirs", ReadAlongWordHighlight.defaultLook(EpubTheme.LIGHT), kept.of(EpubTheme.LIGHT))
             // The preview is drawn in the new colour and trail on the theme's own page.
             withContext(Dispatchers.Main) {
                 val preview = find(panel, "highlight-preview") as android.widget.TextView
                 val spans = (preview.text as android.text.Spanned).getSpans(0, preview.text.length, android.text.style.BackgroundColorSpan::class.java).map { it.backgroundColor }.toSet()
                 val (page, ink) = EpubPagePalette.of(EpubTheme.SEPIA)
-                val tints = ReadAlongWordHighlight.tints(HighlightLook(HighlightColor.TEAL, 60), page, ink, false)
+                val tints = ReadAlongWordHighlight.tints(HighlightLook(ReadAlongColor.TEAL, 60), page, ink, false)
                 assertEquals(setOf(tints.word, tints.trail!!), spans)
             }
             ins.waitForIdleSync(); delay(300)
@@ -391,7 +391,7 @@ class ReadAlongWordTest {
             }
             ins.waitForIdleSync(); delay(300)
             shell("screencap -p /sdcard/Download/readalong-setting-3-dark.png")
-            assertEquals(HighlightLook(HighlightColor.LAVENDER, 40), kept.of(EpubTheme.BLACK))
+            assertEquals(HighlightLook(ReadAlongColor.LAVENDER, 40), kept.of(EpubTheme.BLACK))
             // Kept on the device: the preferences file on disk holds it, which is what a restarted app reads.
             val file = File(activity.applicationInfo.dataDir, "shared_prefs/epub-reader.xml")
             until("the setting written to disk") { file.readText().let { "readalong.color.SEPIA\">teal" in it && "readalong.trail.SEPIA\" value=\"60\"" in it } }
@@ -401,7 +401,7 @@ class ReadAlongWordTest {
             ins.waitForIdleSync()
             withContext(Dispatchers.Main) { find(panel, "highlight-default")!!.performClick() }
             assertEquals(ReadAlongWordHighlight.defaultLook(EpubTheme.SEPIA), kept.of(EpubTheme.SEPIA))
-            assertEquals(HighlightLook(HighlightColor.LAVENDER, 40), kept.of(EpubTheme.BLACK))
+            assertEquals(HighlightLook(ReadAlongColor.LAVENDER, 40), kept.of(EpubTheme.BLACK))
             until("the default written to disk") { !file.readText().contains("readalong.color.SEPIA") }
             // B goes back to the Themes tab, onto the row the page was opened from.
             withContext(Dispatchers.Main) { assertTrue(panel.onPad(PadAction.Back)); assertNotNull(find(panel, "highlight")) }
@@ -424,9 +424,9 @@ class ReadAlongWordTest {
             assertEquals(ReadAlongGlow.rgb(ReadAlongWordHighlight.tints(ReadAlongWordHighlight.defaultLook(EpubTheme.LIGHT), page, ink, false).word), js(strong()).trim('"'))
             withContext(Dispatchers.Main) {
                 screen.javaClass.getDeclaredMethod("setHighlights", ReadAlongHighlights::class.java).apply { isAccessible = true }
-                    .invoke(screen, ReadAlongHighlights().with(EpubTheme.LIGHT, HighlightLook(HighlightColor.MINT, 40)))
+                    .invoke(screen, ReadAlongHighlights().with(EpubTheme.LIGHT, HighlightLook(ReadAlongColor.MINT, 40)))
             }
-            val want = ReadAlongGlow.rgb(ReadAlongWordHighlight.tints(HighlightLook(HighlightColor.MINT, 40), page, ink, false).word)
+            val want = ReadAlongGlow.rgb(ReadAlongWordHighlight.tints(HighlightLook(ReadAlongColor.MINT, 40), page, ink, false).word)
             until("the page redrawn in mint", 5_000) { true }
             withTimeout(5_000) { while (js(strong()).trim('"') != want) delay(100) }
         }

@@ -220,7 +220,7 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
             text = previewText(ReadAlongWordHighlight.tints(look, page, ink, ReadAlongWordHighlight.isDark(theme)))
         }, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(3), dp(6), dp(3), dp(8)) })
         heading("Colour")
-        val swatches = HighlightColor.entries.map { color ->
+        val swatches = ReadAlongColor.entries.map { color ->
             val wash = ReadAlongGlow.wash(color.argb, page, ink, ReadAlongWordHighlight.wordStrength(ReadAlongWordHighlight.isDark(theme)))
             val isDefault = color == ReadAlongWordHighlight.defaultColor(theme)
             sample(if (isDefault) "${color.label}\ndefault" else color.label, "highlight-color:${color.id}", color == look.color, View(context).apply {

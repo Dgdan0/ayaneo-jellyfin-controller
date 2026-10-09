@@ -3,7 +3,7 @@ package com.pocketds.hub.ui
 import android.graphics.*
 import android.graphics.drawable.Drawable
 
-enum class AppIcon { CLOSE, CONTENTS, APPEARANCE, PREVIOUS, NEXT, PREVIOUS_ITEM, NEXT_ITEM, THIRDS, FIT, DIRECTION, ZOOM_IN, ZOOM_OUT, SEARCH, OPEN, REFRESH, BOOK, HEADPHONES, READ_ALONG, BOOKMARK, BOOKMARK_FILLED, COMIC, MOVIE, TV, SETTINGS, CHECK, MEDIA, SORT, PANEL, PLAY, INFO, PERSON, SERIES, ADD, STAR, HOME, SUBTITLES, DOWNLOAD, MORE, ARRANGE, GRIP, PAD, COMFORT, PAGES, SPEED, SLEEP, STOP;
+enum class AppIcon { CLOSE, CONTENTS, APPEARANCE, PREVIOUS, NEXT, PREVIOUS_ITEM, NEXT_ITEM, THIRDS, FIT, DIRECTION, ZOOM_IN, ZOOM_OUT, SEARCH, OPEN, REFRESH, BOOK, HEADPHONES, READ_ALONG, BOOKMARK, BOOKMARK_FILLED, COMIC, MOVIE, TV, SETTINGS, CHECK, MEDIA, SORT, PANEL, PLAY, INFO, PERSON, SERIES, ADD, STAR, HOME, SUBTITLES, DOWNLOAD, MORE, ARRANGE, GRIP, PAD, COMFORT, PAGES, SPEED, SLEEP, STOP, NOTE, COPY, SPEAKER, TRASH, HIGHLIGHTS;
     companion object {
         /** The star, on the icons' 24 x 24 grid: a rating draws it filled as well as in outline (#39). */
         const val STAR_PATH = "M12 3.6l2.5 5.2 5.7.8-4.1 4 1 5.7L12 16.6l-5.1 2.7 1-5.7-4.1-4 5.7-.8z"
@@ -69,6 +69,15 @@ class AppIconDrawable(private val icon: AppIcon, color: Int) : Drawable() {
             AppIcon.SLEEP->path("M20 14.5A8.5 8.5 0 1 1 9.5 4a6.6 6.6 0 0 0 10.5 10.5Z")
             // A square: stop listening, the book off the player (#16, A1).
             AppIcon.STOP->canvas.drawRoundRect(6.5f,6.5f,17.5f,17.5f,2.2f,2.2f,paint)
+            // A page with a turned corner: a note on a highlight (#62).
+            AppIcon.NOTE->path("M5 4h14v12l-4 4H5ZM15 20v-4h4")
+            // Two sheets: copy the selected words (#62).
+            AppIcon.COPY->{canvas.drawRoundRect(8f,8f,20f,20f,2f,2f,paint);path("M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3")}
+            // A loudspeaker and its sound: say the word (#62).
+            AppIcon.SPEAKER->path("M4 9v6h4l5 4V5L8 9ZM16 9a4 4 0 0 1 0 6")
+            AppIcon.TRASH->path("M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13")
+            // A marker over a line of text: the book's highlights (#62).
+            AppIcon.HIGHLIGHTS->{path("M4 20h16");path("M8 16l-1 1-2-2 1-1 8-8 3 3-8 8ZM13 7l3 3")}
             // Two columns of three dots: something that can be held and moved (#15).
             AppIcon.GRIP->{paint.style=Paint.Style.FILL;for(x in listOf(8.5f,15.5f))for(y in listOf(5f,12f,19f))canvas.drawCircle(x,y,2.1f,paint);paint.style=Paint.Style.STROKE}
         }

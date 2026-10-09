@@ -15,21 +15,21 @@ class ReadAlongWordHighlightTest {
     // ------------------------------------------------------------------ the colours: the owner's demo, number for number
 
     @Test fun `the eight colours are the demo's`() {
-        assertEquals(listOf("Gold", "Ember", "Rose", "Lavender", "Sky", "Teal", "Mint", "Moon"), HighlightColor.entries.map { it.label })
+        assertEquals(listOf("Gold", "Ember", "Rose", "Lavender", "Sky", "Teal", "Mint", "Moon"), ReadAlongColor.entries.map { it.label })
         assertEquals(listOf(
             Triple(240, 201, 106), Triple(222, 140, 76), Triple(233, 143, 168), Triple(179, 157, 235),
             Triple(125, 183, 232), Triple(92, 194, 181), Triple(154, 212, 126), Triple(190, 196, 214)
-        ), HighlightColor.entries.map { Triple((it.argb shr 16) and 0xFF, (it.argb shr 8) and 0xFF, it.argb and 0xFF) })
-        assertEquals(HighlightColor.EMBER, HighlightColor.of("ember"))
-        assertNull(HighlightColor.of("teal-ish"))
+        ), ReadAlongColor.entries.map { Triple((it.argb shr 16) and 0xFF, (it.argb shr 8) and 0xFF, it.argb and 0xFF) })
+        assertEquals(ReadAlongColor.EMBER, ReadAlongColor.of("ember"))
+        assertNull(ReadAlongColor.of("teal-ish"))
     }
 
     @Test fun `paper and sepia default to gold, dim, dark and blue to ember, each with a 40 percent trail`() {
-        assertEquals(HighlightLook(HighlightColor.GOLD, 40), ReadAlongWordHighlight.defaultLook(EpubTheme.LIGHT))
-        assertEquals(HighlightLook(HighlightColor.GOLD, 40), ReadAlongWordHighlight.defaultLook(EpubTheme.SEPIA))
-        assertEquals(HighlightLook(HighlightColor.EMBER, 40), ReadAlongWordHighlight.defaultLook(EpubTheme.DARK))
-        assertEquals(HighlightLook(HighlightColor.EMBER, 40), ReadAlongWordHighlight.defaultLook(EpubTheme.BLACK))
-        assertEquals(HighlightLook(HighlightColor.EMBER, 40), ReadAlongWordHighlight.defaultLook(EpubTheme.BLUE))
+        assertEquals(HighlightLook(ReadAlongColor.GOLD, 40), ReadAlongWordHighlight.defaultLook(EpubTheme.LIGHT))
+        assertEquals(HighlightLook(ReadAlongColor.GOLD, 40), ReadAlongWordHighlight.defaultLook(EpubTheme.SEPIA))
+        assertEquals(HighlightLook(ReadAlongColor.EMBER, 40), ReadAlongWordHighlight.defaultLook(EpubTheme.DARK))
+        assertEquals(HighlightLook(ReadAlongColor.EMBER, 40), ReadAlongWordHighlight.defaultLook(EpubTheme.BLACK))
+        assertEquals(HighlightLook(ReadAlongColor.EMBER, 40), ReadAlongWordHighlight.defaultLook(EpubTheme.BLUE))
     }
 
     @Test fun `light pages ask 0_62 for the word, dark pages 0_42, and the trail is the word's times its percent`() {
@@ -46,20 +46,20 @@ class ReadAlongWordHighlightTest {
     /** Colours worked out by the demo's own JavaScript loop (its `wash`) on the app's page colours: what Apple must draw too. */
     @Test fun `the washes are the demo's to the level`() {
         fun hex(color: Int) = "%06X".format(color and 0xFFFFFF)
-        fun tints(theme: EpubTheme, color: HighlightColor, trail: Int) =
+        fun tints(theme: EpubTheme, color: ReadAlongColor, trail: Int) =
             ReadAlongWordHighlight.tints(ReadAlongHighlights().with(theme, HighlightLook(color, trail)), theme)
-        tints(EpubTheme.LIGHT, HighlightColor.GOLD, 40).let { assertEquals("F4DC9F", hex(it.word)); assertEquals("F8EED3", hex(it.trail!!)); assertEquals("F6E4B7", hex(it.sentence)) }
-        tints(EpubTheme.SEPIA, HighlightColor.EMBER, 40).let { assertEquals("E9B282", hex(it.word)); assertEquals("F5D7B6", hex(it.trail!!)) }
-        tints(EpubTheme.DARK, HighlightColor.EMBER, 40).let { assertEquals("6C4B32", hex(it.word)); assertEquals("403227", hex(it.trail!!)); assertEquals("6E4C32", hex(it.sentence)) }
-        tints(EpubTheme.BLACK, HighlightColor.EMBER, 40).let { assertEquals("5D3B20", hex(it.word)); assertEquals("25180D", hex(it.trail!!)) }
-        tints(EpubTheme.BLACK, HighlightColor.MOON, 100).let { assertEquals("414349", hex(it.word)); assertEquals("414349", hex(it.trail!!)) }
-        tints(EpubTheme.BLUE, HighlightColor.GOLD, 40).let { assertEquals("69674D", hex(it.word)); assertEquals("404A45", hex(it.trail!!)) }
+        tints(EpubTheme.LIGHT, ReadAlongColor.GOLD, 40).let { assertEquals("F4DC9F", hex(it.word)); assertEquals("F8EED3", hex(it.trail!!)); assertEquals("F6E4B7", hex(it.sentence)) }
+        tints(EpubTheme.SEPIA, ReadAlongColor.EMBER, 40).let { assertEquals("E9B282", hex(it.word)); assertEquals("F5D7B6", hex(it.trail!!)) }
+        tints(EpubTheme.DARK, ReadAlongColor.EMBER, 40).let { assertEquals("6C4B32", hex(it.word)); assertEquals("403227", hex(it.trail!!)); assertEquals("6E4C32", hex(it.sentence)) }
+        tints(EpubTheme.BLACK, ReadAlongColor.EMBER, 40).let { assertEquals("5D3B20", hex(it.word)); assertEquals("25180D", hex(it.trail!!)) }
+        tints(EpubTheme.BLACK, ReadAlongColor.MOON, 100).let { assertEquals("414349", hex(it.word)); assertEquals("414349", hex(it.trail!!)) }
+        tints(EpubTheme.BLUE, ReadAlongColor.GOLD, 40).let { assertEquals("69674D", hex(it.word)); assertEquals("404A45", hex(it.trail!!)) }
     }
 
     /** All eight colours on every page, at a trail of 0, 40 and 100: the page's ink always reads at 4.5:1 or better. */
     @Test fun `every colour on every page at every trail keeps the ink at 4_5 to 1`() {
         var lowest = Double.MAX_VALUE
-        for (theme in themes) for (color in HighlightColor.entries) for (trail in listOf(0, 40, 100)) {
+        for (theme in themes) for (color in ReadAlongColor.entries) for (trail in listOf(0, 40, 100)) {
             val (page, ink) = EpubPagePalette.of(theme)
             val tints = ReadAlongWordHighlight.tints(HighlightLook(color, trail), page, ink, ReadAlongWordHighlight.isDark(theme))
             val label = "$theme $color $trail%"
@@ -89,8 +89,8 @@ class ReadAlongWordHighlightTest {
         assertEquals(100, ReadAlongWordHighlight.stepped(140))
         assertEquals("None", ReadAlongWordHighlight.trailLabel(0))
         assertEquals("40%", ReadAlongWordHighlight.trailLabel(40))
-        assertEquals("Gold · trail 40%", ReadAlongWordHighlight.summary(HighlightLook(HighlightColor.GOLD, 40)))
-        assertEquals("Ember · no trail", ReadAlongWordHighlight.summary(HighlightLook(HighlightColor.EMBER, 0)))
+        assertEquals("Gold · trail 40%", ReadAlongWordHighlight.summary(HighlightLook(ReadAlongColor.GOLD, 40)))
+        assertEquals("Ember · no trail", ReadAlongWordHighlight.summary(HighlightLook(ReadAlongColor.EMBER, 0)))
     }
 
     // ------------------------------------------------------------------ the setting, kept per theme
@@ -123,22 +123,22 @@ class ReadAlongWordHighlightTest {
     @Test fun `each theme keeps its own colour and trail, and the default is nothing kept`() {
         val store = Store()
         assertEquals(ReadAlongHighlights(), ReadAlongHighlightStore.decode(store))
-        val set = ReadAlongHighlights().with(EpubTheme.SEPIA, HighlightLook(HighlightColor.ROSE, 65)).with(EpubTheme.BLACK, HighlightLook(HighlightColor.SKY, 0))
+        val set = ReadAlongHighlights().with(EpubTheme.SEPIA, HighlightLook(ReadAlongColor.ROSE, 65)).with(EpubTheme.BLACK, HighlightLook(ReadAlongColor.SKY, 0))
         ReadAlongHighlightStore.encode(store, set)
         assertEquals("rose", store.values["readalong.color.SEPIA"])
         assertEquals(65, store.values["readalong.trail.SEPIA"])
         val read = ReadAlongHighlightStore.decode(store)
         assertEquals(set, read)
-        assertEquals(HighlightLook(HighlightColor.ROSE, 65), read.of(EpubTheme.SEPIA))
-        assertEquals(HighlightLook(HighlightColor.GOLD, 40), read.of(EpubTheme.LIGHT))
+        assertEquals(HighlightLook(ReadAlongColor.ROSE, 65), read.of(EpubTheme.SEPIA))
+        assertEquals(HighlightLook(ReadAlongColor.GOLD, 40), read.of(EpubTheme.LIGHT))
         // "Use the default" is both, for that theme only, and nothing of it is left kept.
         ReadAlongHighlightStore.encode(store, read.reset(EpubTheme.SEPIA))
         assertFalse(store.values.keys.any { it.endsWith(".SEPIA") })
-        assertEquals(HighlightLook(HighlightColor.GOLD, 40), ReadAlongHighlightStore.decode(store).of(EpubTheme.SEPIA))
-        assertEquals(HighlightLook(HighlightColor.SKY, 0), ReadAlongHighlightStore.decode(store).of(EpubTheme.BLACK))
+        assertEquals(HighlightLook(ReadAlongColor.GOLD, 40), ReadAlongHighlightStore.decode(store).of(EpubTheme.SEPIA))
+        assertEquals(HighlightLook(ReadAlongColor.SKY, 0), ReadAlongHighlightStore.decode(store).of(EpubTheme.BLACK))
         // A colour this build does not know is the theme's default colour; a trail off its steps is stepped.
         store.values["readalong.color.DARK"] = "ultraviolet"; store.values["readalong.trail.DARK"] = 37
-        assertEquals(HighlightLook(HighlightColor.EMBER, 35), ReadAlongHighlightStore.decode(store).of(EpubTheme.DARK))
+        assertEquals(HighlightLook(ReadAlongColor.EMBER, 35), ReadAlongHighlightStore.decode(store).of(EpubTheme.DARK))
     }
 
     // ------------------------------------------------------------------ what is lit: style A's bookkeeping
@@ -197,13 +197,13 @@ class ReadAlongWordHighlightTest {
     }
 
     @Test fun `a trail at 0 percent draws nothing for the trail, and a sentence edition washes its sentence whole`() {
-        val tints = ReadAlongWordHighlight.tints(HighlightLook(HighlightColor.GOLD, 0), 0xFFFBFAF6.toInt(), 0xFF282B29.toInt(), dark = false)
+        val tints = ReadAlongWordHighlight.tints(HighlightLook(ReadAlongColor.GOLD, 0), 0xFFFBFAF6.toInt(), 0xFF282B29.toInt(), dark = false)
         assertNull(tints.trail)
         val word = ReadAlongWordHighlight.paint(ReadAlongWordHighlight.mark(at(600))!!, tints)
         assertFalse(word.trail)
         assertEquals("s0-w1", word.word)
         assertEquals(tints.word, word.wordTint)
-        val withTrail = ReadAlongWordHighlight.tints(HighlightLook(HighlightColor.GOLD, 40), 0xFFFBFAF6.toInt(), 0xFF282B29.toInt(), dark = false)
+        val withTrail = ReadAlongWordHighlight.tints(HighlightLook(ReadAlongColor.GOLD, 40), 0xFFFBFAF6.toInt(), 0xFF282B29.toInt(), dark = false)
         val trailed = ReadAlongWordHighlight.paint(ReadAlongWordHighlight.mark(at(600))!!, withTrail)
         assertTrue(trailed.trail)
         assertEquals(withTrail.trail, trailed.decorationTint)

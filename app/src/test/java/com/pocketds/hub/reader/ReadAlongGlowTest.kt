@@ -19,7 +19,7 @@ class ReadAlongGlowTest {
         }.filterNotNull().max()
 
     @Test fun `a light page takes all the strength asked for, a dark page what leaves its ink readable`() {
-        val gold = HighlightColor.GOLD.argb
+        val gold = ReadAlongColor.GOLD.argb
         val (paper, paperInk) = EpubPagePalette.of(EpubTheme.LIGHT)
         val (sepia, sepiaInk) = EpubPagePalette.of(EpubTheme.SEPIA)
         assertEquals(ReadAlongGlow.mix(paper, gold, 0.45), ReadAlongGlow.wash(gold, paper, paperInk, 0.45))
@@ -35,7 +35,7 @@ class ReadAlongGlowTest {
     @Test fun `every theme and every colour keeps the page's ink readable on the wash, which is opaque and not the page`() {
         themes.forEach { theme ->
             val (page, ink) = EpubPagePalette.of(theme)
-            (HighlightColor.entries.map { it.argb } + AccentPreset.entries.map { it.color }).forEach { color ->
+            (ReadAlongColor.entries.map { it.argb } + AccentPreset.entries.map { it.color }).forEach { color ->
                 val wash = ReadAlongGlow.wash(color, page, ink, ReadAlongWordHighlight.SENTENCE)
                 val label = "$theme ${ReadAlongGlow.rgb(color)}: ${ReadAlongGlow.rgb(wash)} on ${ReadAlongGlow.rgb(page)}"
                 assertEquals(label, 0xFF, wash ushr 24)

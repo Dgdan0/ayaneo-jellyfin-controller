@@ -15,10 +15,6 @@ class NarrationSelectionGate {
         return playing
     }
 
-    fun playFromSelection() {
-        resumeOnDismiss = false
-    }
-
     fun dismiss(): Boolean {
         val resume = selected && resumeOnDismiss
         selected = false
@@ -30,12 +26,6 @@ class NarrationSelectionGate {
         selected = false
         resumeOnDismiss = false
     }
-}
-
-object ReadAlongSelectionTarget {
-    /** Ancestors are ordered from the selected word outward to its paragraph. */
-    fun find(timeline: ReadAlongTimeline, href: String, ancestors: List<String>): ReadAlongPosition? =
-        ancestors.firstNotNullOfOrNull { fragment -> timeline.find(href, fragment) }
 }
 
 object DictionaryTerms {
@@ -61,7 +51,7 @@ object DictionaryTerms {
                     if (root.length >= 2 && root.last() == root[root.lastIndex - 1]) add(root.dropLast(1))
                     add(word.dropLast(1))
                 }
-                word.endsWith("es") && word.length > 4 -> add(word.dropLast(2))
+                word.endsWith("es") && word.length > 4 -> { add(word.dropLast(2)); add(word.dropLast(1)) }
                 word.endsWith("s") && word.length > 3 -> add(word.dropLast(1))
             }
         }.distinct()

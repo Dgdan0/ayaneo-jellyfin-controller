@@ -92,7 +92,9 @@ class AudiobookScreen(
     private val alignedOptions: List<ReadingEdition>,
     private val onProgressChanged: () -> Unit = {},
     /** The book, when the caller has it: its cover and its place in a series. Read from the hub otherwise. */
-    work: ReadingWork? = null
+    work: ReadingWork? = null,
+    /** Where this screen opens when it is the result of a switch of mode (#62): the sentence or the place the voice begins at. */
+    private val entry: ModeEntry = ModeEntry()
 ) : Screen {
     override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val immersive = true
@@ -127,6 +129,10 @@ class AudiobookScreen(
     private lateinit var eyebrow: TextView
     private lateinit var facts: TextView
     private lateinit var remaining: TextView
+    /** The one mode button (#62), at the top right, and the name it shows while open. */
+    private lateinit var modeButton: ModeButtonView
+    private lateinit var modeCaption: TextView
+    private var modeJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var loadJob: Job? = null
     private var watchJob: Job? = null
@@ -171,6 +177,31 @@ class AudiobookScreen(
         // What the keys do: the app's own hint bar is hidden while a reader is open.
         keys = ReaderKeys.row(context, colors) { onPad(it) }
         root.addView(keys, FrameLayout.LayoutParams(MATCH, Styler.dpInt(context, ReaderKeys.ROW_DP.toFloat()), Gravity.BOTTOM))
+        // The one mode button (#62): the mode you are in, in the accent; it opens out to the others the book has.
+        modeButton = ModeButtonView(context, colors, ringVisible).apply {
+            onPick = ::switchMode
+            onPickCurrent = { if (narrations.size > 1) chooseNarration() }
+            onCaption = ::showModeCaption
+            onChanged = { keys.setHints(ReaderPadMap.hints(padState())) }
+            onFocus = { view -> focusedControl = controls.indexOf(view).coerceAtLeast(0) }
+            configure(ReadingMode.available(ebook = ebook != null, audio = true, aligned = aligned != null), ReadingMode.AUDIO)
+        }
+        root.addView(modeButton, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, dp(44), Gravity.TOP or Gravity.END).apply {
+            topMargin = dp(10); marginEnd = dp(16)
+        })
+        modeButton.attachScrim(root, modeButton)
+        modeCaption = TextView(context).apply {
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+            background = ThemeGradientDrawable().apply { setColor(0xE60A0D12.toInt()); cornerRadius = dp(10).toFloat() }
+            elevation = dp(6).toFloat()
+            visibility = View.GONE
+        }
+        root.addView(modeCaption, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply {
+            topMargin = dp(10 + 44 + 6); marginEnd = dp(16)
+        })
+        if (modeButton.worthShowing) modeButton.currentSegment?.let { controls += it }
         overlay = ChoiceOverlay(context, colors, ringVisible, sidePanel = true)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
         // Comfort (#16, X3): the same dim and warmth as every reader, over the whole screen.
@@ -284,7 +315,7 @@ class AudiobookScreen(
             register(OverlayButtons.pill(context, ring, label, description, icon, click)).also {
                 tools.addView(it, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44)).apply { marginStart = dp(3); marginEnd = dp(3) })
             }
-        if (ebook != null || narrations.size > 1) pill("Reading & listening", "Reading & listening", AppIcon.READ_ALONG) { showReadingModes() }
+        if (narrations.size > 1) pill("Narration", "Choose the narration", AppIcon.HEADPHONES) { chooseNarration() }
         partsButton = pill("Parts", "Parts", AppIcon.CONTENTS) { act { showParts() } }
         speedButton = pill("Speed 1×", "Speed", AppIcon.SPEED) { act { showSpeeds() } }
         sleepButton = pill("Sleep", "Sleep timer", AppIcon.SLEEP) { act { showSleep() } }
@@ -303,7 +334,8 @@ class AudiobookScreen(
     }
 
     private fun padState() = ReaderPadState(ReaderKind.AUDIOBOOK, controlsVisible = true,
-        loading = !mine, seekSeconds = seekSeconds, chapters = noun == "chapter")
+        loading = !mine, seekSeconds = seekSeconds, chapters = noun == "chapter",
+        modes = ::modeButton.isInitialized && modeButton.worthShowing, picking = ::modeButton.isInitialized && modeButton.isOpen)
 
     private fun showKeys() = ReaderKeys.show(overlay, padState())
 
@@ -323,6 +355,7 @@ class AudiobookScreen(
     override fun onHide() {
         // The book plays on (A1): only this screen stops watching it.
         watchJob?.cancel()
+        if (::modeButton.isInitialized) modeButton.close()
         if (::overlay.isInitialized) overlay.dismiss()
         onProgressChanged()
     }
@@ -332,7 +365,11 @@ class AudiobookScreen(
         controls.clear()
     }
 
-    override fun onSystemBack(): Boolean = if (overlay.isOpen) { overlay.dismiss(); true } else false
+    override fun onSystemBack(): Boolean = when {
+        ::modeButton.isInitialized && modeButton.isOpen -> { modeButton.close(); true }
+        overlay.isOpen -> { overlay.dismiss(); true }
+        else -> false
+    }
     override fun hints(): List<ButtonHint> = ReaderPadMap.hints(padState())
     override fun requestInitialFocus(): Boolean = playButton.requestFocus()
 
@@ -351,7 +388,11 @@ class AudiobookScreen(
             ReaderCommand.PlayPause -> ReadingAudio.toggle()
             is ReaderCommand.Chapter -> ReadingAudio.part(command.delta)
             is ReaderCommand.Seek -> ReadingAudio.seekBy(command.seconds * 1_000L)
-            ReaderCommand.Formats -> if (ebook != null || narrations.size > 1) showReadingModes()
+            ReaderCommand.Formats -> if (narrations.size > 1) chooseNarration()
+            ReaderCommand.Mode -> modeButton.open()
+            is ReaderCommand.ModeMove -> modeButton.move(command.delta)
+            ReaderCommand.ModePick -> modeButton.pick()
+            ReaderCommand.ModeClose -> modeButton.close()
             ReaderCommand.Keys -> showKeys()
             ReaderCommand.Retry -> if (loadJob?.isActive != true && !mine) load()
             // Taken here: nothing reaches the app, whose shoulders and triggers would switch tabs.
@@ -391,19 +432,49 @@ class AudiobookScreen(
         val key = session.key(workId, edition.sourceItemId, AudioPlace.KIND)
         withContext(Dispatchers.IO) { retireDevicePlace(context, progress, session, key, manifest.tracks) }
         status.text = "Finding your place…"
+        // A switch of mode names the place (#62): the sentence of the words selected, where the voice stopped, or where it is.
+        val begun = if (entry.from != null) entryPlace(manifest) else null
+        // The place this device had settled on, before the hub's is read: another device may have listened further (#62).
+        val settled = runCatching { progress.store.read(key)?.takeIf { !it.pending }?.local }.getOrNull()
         val resume = try { progress.resume(session, key) }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { status.text = "Your listening place could not be read. It has been kept · Select retries"; return }
-        val chosen = chooseReadingResume(overlay, progress, key, resume) { AudioPlace.label(it, manifest.tracks) }
-            ?: run { status.text = "Choose where to listen from · Select retries"; return }
+        val chosen = if (begun != null) ReadingResume(begun.location(begun.progress(manifest.tracks)))
+            else chooseReadingResume(overlay, progress, key, resume) { AudioPlace.label(it, manifest.tracks) }
+                ?: run { status.text = "Choose where to listen from · Select retries"; return }
         var place = AudioPlace.of(chosen.location)
-        // A place the hub worked out from a reader's page in a book it cannot align is a guess: ask first.
+        if (begun == null && entry.from == null && !resume.conflict && settled != null) {
+            val away = AwayPrompt.forAudio(manifest, AudioPlace.of(settled), place, progress.writerOf(key), System.currentTimeMillis())
+            if (away != null && !AwayPrompt.ask(overlay, away, null)) {
+                // Stay here: the hub's place becomes this device's.
+                place = AudioPlace.of(settled)
+                progress.save(key, settled)
+            }
+        }
+        // A place the hub worked out from a reader's page in a book it cannot align is a guess: ask first, unless the person has just
+        // chosen to listen from their page.
         val answered = progress.lastAudioPosition(key)
-        if (place != null && answered != null && !answered.exact && place == AudioPlace.fromServer(answered) &&
+        if (begun == null && entry.from == null && place != null && answered != null && !answered.exact && place == AudioPlace.fromServer(answered) &&
             !listenFromEstimate(place, manifest)) place = null
         val (part, offset) = place?.openAt(manifest.tracks) ?: (0 to 0L)
-        ReadingAudio.open(context, streamedAudiobook(api, workId, edition.sourceItemId, title, key, manifest, reopen()), part, offset)
+        ReadingAudio.open(context, streamedAudiobook(api, workId, edition.sourceItemId, title, key, manifest, reopen()), part, offset, play = entry.from != null && entry.playing)
+        if (begun != null) AudioPlace.kept(manifest.tracks, part, offset)?.let { progress.save(key, it) }
+        if (entry.from != null) host.notify(ModePlace.note(if (begun != null) entry.start else ModePlace.Start.TOP_OF_PAGE, ReadingMode.AUDIO))
         status.text = ""
+    }
+
+    /** The place in the audiobook a switch of mode names: a place already (from Read along), or the sentence of some words (from the ebook), found in the read-along edition's text. */
+    private suspend fun entryPlace(manifest: ReadingAudioManifest): AudioPlace? {
+        entry.audioPlace?.let { return it }
+        val anchor = entry.anchor ?: return null
+        val aligned = aligned ?: return null
+        val session = ReadingProgress.get(host.viewContext).session()
+        status.text = "Finding the sentence…"
+        val file = AlignedEditionFile.slim(host.viewContext, session, workId, aligned.sourceItemId) ?: return null
+        return withContext(Dispatchers.IO) {
+            val timeline = runCatching { ReadAlongStream.fitted(ReadAlongPackage.read(file, requireAudio = false), manifest) }.getOrNull() ?: return@withContext null
+            AlignedBook(timeline, EpubMarkup(file)::read).sentenceOf(anchor.document, anchor.quote)?.let { AlignedPlaces.audioPlace(manifest, it) }
+        }
     }
 
     /**
@@ -596,7 +667,49 @@ class AudiobookScreen(
         host.back()
     }
 
-    private fun openReader(readAlong: Boolean) {
+    private fun showModeCaption(name: String) {
+        if (name.isEmpty()) { modeCaption.visibility = View.GONE; return }
+        modeCaption.text = name
+        modeCaption.visibility = View.VISIBLE
+    }
+
+    /**
+     * A switch of mode (#62). To Read along the voice keeps going: the sentence it is on is where the page opens, and it plays on. To
+     * the ebook the page opens where the voice was, found by the words of that sentence, with "Heard to here" at it; the audio stops,
+     * its place kept.
+     */
+    private fun switchMode(to: ReadingMode) {
+        if (to == ReadingMode.AUDIO) return
+        modeJob?.cancel()
+        val state = listening
+        val playingHere = mine
+        modeJob = scope.launch {
+            val made = if (!playingHere) ModeEntry(ReadingMode.AUDIO)
+            else {
+                status.text = "Finding where you were…"
+                val place = AudioPlace.canonical(state.book?.tracks.orEmpty(), state.part, state.positionMs)
+                val anchor = if (to == ReadingMode.EBOOK) place?.let { voiceAnchor(it) } else null
+                status.text = ""
+                ModeEntry(ReadingMode.AUDIO, ModePlace.Start.WHERE_VOICE_STOPPED, anchor, audioPlace = place.takeIf { to == ReadingMode.ALONG }, playing = state.playing)
+            }
+            openReader(to == ReadingMode.ALONG, made)
+        }
+    }
+
+    /** The words of the sentence being heard at [place], from the read-along edition's text; null where the book has no such edition or the place is not in it. */
+    private suspend fun voiceAnchor(place: AudioPlace): SentenceAnchor? {
+        val aligned = aligned ?: return null
+        val manifest = (api.readingAudioManifest(workId, edition.sourceItemId) as? HubResult.Ok)?.value ?: return null
+        val session = ReadingProgress.get(host.viewContext).session()
+        val file = AlignedEditionFile.slim(host.viewContext, session, workId, aligned.sourceItemId) ?: return null
+        return withContext(Dispatchers.IO) {
+            val timeline = runCatching { ReadAlongStream.fitted(ReadAlongPackage.read(file, requireAudio = false), manifest) }.getOrNull() ?: return@withContext null
+            val track = manifest.tracks.indexOfFirst { it.id == place.trackId }
+            AlignedPlaces.segmentAt(manifest, timeline, track, place.offsetMs)?.let { AlignedBook(timeline, EpubMarkup(file)::read).anchorOf(it) }
+        }
+    }
+
+    private fun openReader(readAlong: Boolean, made: ModeEntry = ModeEntry()) {
         val target = if (readAlong) aligned else ebook
         if (target == null) return
         // Reading takes over from listening: the book stops, its place kept.
@@ -607,22 +720,8 @@ class AudiobookScreen(
             alignedEditions = alignedOptions, audioEditions = narrations,
             ebookSourceItemId = ebook?.sourceItemId ?: target.sourceItemId,
             // The book's own page count, as its page and Resume say it (#42).
-            bookPages = com.pocketds.hub.screens.library.ReadingBookFacts.pages(book?.editions ?: (listOfNotNull(ebook) + alignedOptions))))
-    }
-
-    private fun showReadingModes() {
-        val choices = buildList {
-            if (ebook != null) add(ChoiceOverlay.Choice("read", "Read", "Open ebook at your saved place"))
-            if (aligned != null) add(ChoiceOverlay.Choice("along", "Read along", "Synchronized text and narration"))
-            if (narrations.size > 1) add(ChoiceOverlay.Choice("narration", "Narration", "Choose audiobook edition"))
-        }
-        overlay.show("Reading & listening", "Switch format for $title", choices) { selected ->
-            when (selected) {
-                "read" -> openReader(false)
-                "along" -> openReader(true)
-                "narration" -> chooseNarration()
-            }
-        }
+            bookPages = com.pocketds.hub.screens.library.ReadingBookFacts.pages(book?.editions ?: (listOfNotNull(ebook) + alignedOptions)),
+            entry = made))
     }
 
     private fun chooseNarration() {
