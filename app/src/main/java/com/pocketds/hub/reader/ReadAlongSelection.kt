@@ -61,7 +61,7 @@ object DictionaryTerms {
                     if (root.length >= 2 && root.last() == root[root.lastIndex - 1]) add(root.dropLast(1))
                     add(word.dropLast(1))
                 }
-                word.endsWith("es") && word.length > 4 -> add(word.dropLast(2))
+                word.endsWith("es") && word.length > 4 -> { add(word.dropLast(2)); add(word.dropLast(1)) }
                 word.endsWith("s") && word.length > 3 -> add(word.dropLast(1))
             }
         }.distinct()

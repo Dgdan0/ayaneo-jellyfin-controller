@@ -61,6 +61,11 @@ import kotlin.coroutines.coroutineContext
 import com.pocketds.hub.playback.PlayerControlIcon
 import com.pocketds.hub.playback.PlayerIconButton
 import org.readium.r2.navigator.Decoration
+import org.readium.r2.navigator.DecorableNavigator
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import com.pocketds.hub.settings.HighlightSettings
 import org.readium.r2.navigator.html.HtmlDecorationTemplate
 import org.readium.r2.navigator.html.HtmlDecorationTemplates
 import com.pocketds.hub.settings.ComfortSettings
@@ -202,6 +207,19 @@ class EpubReaderScreen(
     private lateinit var dictionaryCard: DictionaryCard
     private lateinit var dictionary: OfflineEnglishDictionary
     private val selectionGate = NarrationSelectionGate()
+    /** This profile's highlights of the book (#62), what is drawn of them, and the card's state (#62). */
+    private lateinit var annotations: AnnotationShelf
+    private var annotationJob: Job? = null
+    private var drawnAnnotations: List<ReadingAnnotation> = emptyList()
+    private var selection: ReaderSelection? = null
+    private var shownHighlight: ReadingAnnotation? = null
+    private var phraseAnswer: PhraseLookup.Answer? = null
+    private var voice: SpeechVoice? = null
+    /** The controller's text cursor (#62): set while the person is choosing words with the D-pad. */
+    private var cursorWords: TextCursor? = null
+    private var cursorJob: Job? = null
+    /** How the speaker is made; a test sets a stand-in. */
+    internal var voiceFactory: (Context, (String) -> Unit) -> SpeechVoice = { context, problem -> ReaderVoice(context, problem) }
     private var selectionJob: Job? = null
     private var dictionaryJob: Job? = null
     private var dockJob: Job? = null
@@ -257,6 +275,7 @@ class EpubReaderScreen(
         progress = ReadingProgress.get(host.viewContext)
         readingSession = progress.session()
         checkpointKey = readingSession.key(workId, sourceItemId, "epub")
+        annotations = AnnotationRepository.get(host.viewContext).shelf(readingSession, workId)
         bookmarks = EpubBookmarkStore(File(host.viewContext.filesDir, "reading-bookmarks"))
         colors = Theme.colors(host.viewContext)
         root = FrameLayout(host.viewContext).apply { setBackgroundColor(Color.BLACK) }
@@ -341,9 +360,14 @@ class EpubReaderScreen(
         appearance = EpubAppearancePanel(host.viewContext, colors, ringVisible)
         root.addView(appearance, FrameLayout.LayoutParams(MATCH, MATCH))
         dictionary = OfflineEnglishDictionary(host.viewContext)
-        dictionaryCard = DictionaryCard(host.viewContext).apply {
+        dictionaryCard = DictionaryCard(host.viewContext, colors, ringVisible).apply {
             onClose = { closeDictionary(resumeNarration = true) }
-            onPlay = { playFromSelection() }
+            onColor = { color -> shownHighlight?.let { recolour(it, color) } ?: highlightSelection(color, thenNote = false) }
+            onNote = { shownHighlight?.let(::editNote) ?: highlightSelection(HighlightSettings.color(host.viewContext), thenNote = true) }
+            onCopy = ::copySelection
+            onSay = ::say
+            onLookUp = ::lookUpSelection
+            onRemove = { shownHighlight?.let(::removeHighlight) }
         }
         root.addView(dictionaryCard, FrameLayout.LayoutParams(MATCH, MATCH))
         footnoteCard = FootnoteCard(host.viewContext, colors, ringVisible).apply {
@@ -394,7 +418,9 @@ class EpubReaderScreen(
     override fun onHide() {
         pageInfo.stop()
         cancelSearch()
+        stopCursor()
         closeDictionary(resumeNarration = false)
+        voice?.stop()
         if (::footnoteCard.isInitialized) footnoteCard.dismiss()
         stepAnimator?.end()
         // Leaving the book pauses the voice; the screen going off does not (#49): it plays on, held by NarrationService.
@@ -420,6 +446,9 @@ class EpubReaderScreen(
         pagePreview.dispose()
         selectionJob?.cancel()
         dictionaryJob?.cancel()
+        annotationJob?.cancel()
+        voice?.release()
+        voice = null
         dockJob?.cancel()
         followJob?.cancel()
         probeJob?.cancel()
@@ -463,7 +492,7 @@ class EpubReaderScreen(
     } else if (::appearance.isInitialized && appearance.isOpen) {
         listOf(ButtonHint.activate("Adjust"), ButtonHint.back("Close appearance"))
     } else if (::dictionaryCard.isInitialized && dictionaryCard.isOpen) {
-        listOf(ButtonHint.activate("Choose"), ButtonHint.back("Close definition"))
+        listOf(ButtonHint.activate("Choose"), ButtonHint.back(if (dictionaryCard.showsDefinitions) "Close definition" else "Close"))
     } else if (::overlay.isInitialized && overlay.isOpen) {
         listOf(
             ButtonHint.activate("Choose"),
@@ -476,7 +505,9 @@ class EpubReaderScreen(
         controlsVisible = controlsVisible,
         scrolling = preferences.scroll && !preferences.onePagePerScreen,
         narration = narration != null,
-        loading = navigator == null
+        loading = navigator == null,
+        cursor = cursorWords != null,
+        anchored = cursorWords?.selecting == true
     )
 
     override fun onPad(action: PadAction): Boolean {
@@ -492,7 +523,7 @@ class EpubReaderScreen(
         }
         when (val command = ReaderPadMap.command(padState(), action)) {
             ReaderCommand.Forward -> turn(1)
-            is ReaderCommand.Page -> turn(command.delta)
+            is ReaderCommand.Page -> if (cursorWords != null) pageCursor(command.delta) else turn(command.delta)
             is ReaderCommand.Chapter -> changeChapter(if (command.delta > 0) Direction.DOWN else Direction.UP)
             is ReaderCommand.Controls -> setControlsVisible(command.visible)
             ReaderCommand.Leave -> host.back()
@@ -523,6 +554,11 @@ class EpubReaderScreen(
             }
             ReaderCommand.Keys -> showKeys()
             ReaderCommand.NextPageInfo -> cyclePageInfo()
+            ReaderCommand.SelectText -> startCursor()
+            is ReaderCommand.Cursor -> moveCursor(command.direction)
+            is ReaderCommand.CursorAnchor -> anchorCursor(command.finish)
+            is ReaderCommand.CursorGrow -> growCursor(command.paragraph)
+            is ReaderCommand.CursorCancel -> if (command.anchored) cancelSelection() else stopCursor()
             else -> Unit
         }
         return true
@@ -566,13 +602,24 @@ class EpubReaderScreen(
         (android.content.res.Resources.getSystem().configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
 
-    /** Readium's highlight, as the read-along's glow ([ReadAlongGlow]): narration is its only highlight. */
-    private fun narrationTemplates(): HtmlDecorationTemplates = HtmlDecorationTemplates.defaultTemplates().copy().apply {
+    /**
+     * Readium's highlight is the read-along's glow ([ReadAlongGlow]): narration is its only highlight. Its underline is the
+     * reader's marks (#62): the person's highlights, their note marks and "Heard to here", told apart by the decoration's kind.
+     */
+    private fun decorationTemplates(): HtmlDecorationTemplates = HtmlDecorationTemplates.defaultTemplates().copy().apply {
         set(Decoration.Style.Highlight::class, HtmlDecorationTemplate(
             layout = HtmlDecorationTemplate.Layout.BOXES,
             width = HtmlDecorationTemplate.Width.WRAP,
             element = { decoration -> ReadAlongGlow.element((decoration.style as? Decoration.Style.Highlight)?.tint ?: colors.accent) },
             stylesheet = ReadAlongGlow.STYLESHEET
+        ))
+        set(Decoration.Style.Underline::class, HtmlDecorationTemplate(
+            layout = HtmlDecorationTemplate.Layout.BOXES,
+            width = HtmlDecorationTemplate.Width.WRAP,
+            element = { decoration ->
+                ReaderMarks.element(decoration.extras[ReaderMarks.KIND] as? String, (decoration.style as? Decoration.Style.Underline)?.tint ?: colors.accent)
+            },
+            stylesheet = ReaderMarks.STYLESHEET
         ))
     }
 
@@ -778,7 +825,9 @@ class EpubReaderScreen(
             initialPreferences = readiumPreferences(preferences),
             listener = linkListener,
             configuration = EpubNavigatorFragment.Configuration(
-                decorationTemplates = narrationTemplates(),
+                decorationTemplates = decorationTemplates(),
+                // The card is what a selection opens (#62): the system's own toolbar (Copy, Share, Select all) over it only gets in its way.
+                selectionActionModeCallback = quietSelectionMenu,
                 // Half the gap between two columns, in each column's padding: the rest of the outer margin is the
                 // inset of pageHost (PageGeometry, #47). The CSS pixel is the dp.
                 readiumCssRsProperties = RsProperties(pageGutter = Length.Px(PageGeometry.GUTTER_DP.toDouble()))
@@ -801,6 +850,11 @@ class EpubReaderScreen(
             .add(pageHost.id, fragment, fragmentTag())
             .commitNowAllowingStateLoss()
         navigator = fragment
+        fragment.addDecorationListener(ReaderMarks.GROUP, decorationTap)
+        fragment.addDecorationListener(ReaderMarks.NOTES_GROUP, decorationTap)
+        annotationJob?.cancel()
+        annotationJob = uiScope.launch { annotations.live.collect { drawnAnnotations = it; drawAnnotations() } }
+        syncAnnotations()
         fragment.addInputListener(object : org.readium.r2.navigator.input.InputListener {
             /** A drag began since the finger went down: Readium sends an End with every tap too (#21). */
             private var dragging = false
@@ -1311,6 +1365,7 @@ class EpubReaderScreen(
      * decides, once it shows (#49).
      */
     private fun movedByHand() {
+        stopCursor()
         cancelPlace()
         if (narration?.isOn == true) closeDictionary(resumeNarration = false) else switchToReading()
     }
@@ -1323,35 +1378,364 @@ class EpubReaderScreen(
         updateDock()
     }
 
+    /**
+     * What is selected on the page (#62), once it has settled: one word opens the dictionary card at once, a phrase the dictionary
+     * has as one entry opens it too, any other phrase gets the bar with Look up. A tap that selected nothing is [onNoSelection]'s.
+     */
     private fun inspectSelection(onNoSelection: (() -> Unit)? = null) {
         selectionJob?.cancel()
         selectionJob = uiScope.launch {
             delay(160)
             val reader = navigator ?: return@launch
-            val selection = runCatching { reader.currentSelection() }.getOrNull()
-            val word = selection?.locator?.text?.highlight?.trim().orEmpty()
-            if (selection == null || word.isBlank() || word.length > 80) {
+            val found = runCatching { reader.currentSelection() }.getOrNull()
+            val text = found?.locator?.text?.highlight?.trim().orEmpty()
+            if (found == null || text.isBlank()) {
                 if (!dictionaryCard.isOpen) onNoSelection?.invoke()
                 return@launch
             }
             if (dictionaryCard.isOpen) return@launch
-            val audio = narration
-            if (selectionGate.begin(audio?.isPlaying == true)) audio?.pause(settle = false)
-            val ancestors = readSelectionAncestors(reader)
-            selectedNarrationTarget = audio?.timeline?.let {
-                ReadAlongSelectionTarget.find(it, selection.locator.document, ancestors)
+            openSelection(reader, found)
+        }
+    }
+
+    private suspend fun openSelection(reader: EpubNavigatorFragment, found: org.readium.r2.navigator.Selection) {
+        val locator = found.locator
+        val quote = AnnotationQuotes.of(locator.text.before, locator.text.highlight.orEmpty(), locator.text.after)
+        if (quote.highlight.isBlank()) return
+        val audio = narration
+        if (selectionGate.begin(audio?.isPlaying == true)) audio?.pause(settle = false)
+        val ancestors = readSelectionAncestors(reader)
+        selectedNarrationTarget = audio?.timeline?.let { ReadAlongSelectionTarget.find(it, locator.document, ancestors) }
+        val chosen = ReaderSelection(quote.highlight, quote, locator.document, JSONObject(locator.toJSON().toString()), pageRectToRoot(found.rect))
+        selection = chosen
+        shownHighlight = null
+        phraseAnswer = null
+        dictionaryCard.setInsets(cardTopInset(), cardBottomInset())
+        val words = PhraseLookup.words(chosen.text)
+        val last = HighlightSettings.color(host.viewContext)
+        if (words.size == 1) {
+            dictionaryCard.showLoading(words[0], chosen.rect, false, last)
+            lookUp(chosen, force = true)
+        } else {
+            val worth = words.size in 2..PhraseLookup.MAX_PHRASE_WORDS
+            dictionaryCard.showBar(chosen.text, chosen.rect, last, canLookUp = worth)
+            if (worth) lookUp(chosen, force = false)
+        }
+        host.refreshHints()
+    }
+
+    /**
+     * The dictionary's answer ([PhraseLookup]). [force]: a word, or Look up pressed, shows the card whatever the answer; otherwise
+     * only a phrase the dictionary has as one entry does, and any other leaves the bar as it is, with its Look up.
+     */
+    private fun lookUp(chosen: ReaderSelection, force: Boolean) {
+        val generation = ++selectionGeneration
+        dictionaryJob?.cancel()
+        dictionaryJob = uiScope.launch {
+            val answer = runCatching { PhraseLookup.answer(chosen.text) { requested, terms -> dictionary.lookupTerms(requested, terms) } }.getOrNull()
+            if (generation != selectionGeneration || !dictionaryCard.isOpen) return@launch
+            if (answer == null) {
+                if (force) dictionaryCard.showFailure("Offline dictionary could not be opened")
+                return@launch
             }
-            dictionaryCard.showLoading(word, RectF(selection.rect), audio != null)
-            val generation = ++selectionGeneration
-            dictionaryJob?.cancel()
-            dictionaryJob = uiScope.launch {
-                val entry = runCatching { dictionary.lookup(word) }.getOrNull()
-                if (generation == selectionGeneration && dictionaryCard.isOpen) {
-                    if (entry == null) dictionaryCard.showFailure("Offline dictionary could not be opened")
-                    else dictionaryCard.show(entry)
-                }
-            }
+            phraseAnswer = answer
+            if (force || answer.opensCard) dictionaryCard.show(answer, chosen.text)
             host.refreshHints()
+        }
+    }
+
+    /** Look up on the bar: the answer already found, else asked for now. The card says what it found, or that it found nothing. */
+    private fun lookUpSelection() {
+        val chosen = selection ?: return
+        val answer = phraseAnswer
+        if (answer != null) dictionaryCard.show(answer, chosen.text) else lookUp(chosen, force = true)
+        host.refreshHints()
+    }
+
+    /** The selection's rectangle, which Readium gives in its own view, in the screen's own. */
+    private fun pageRectToRoot(rect: RectF?): RectF {
+        // Readium gives no rectangle for a selection it could not measure: the middle of the page, a line tall.
+        val source = rect ?: RectF(root.width / 2f - 1f, root.height / 3f, root.width / 2f + 1f, root.height / 3f + dp(20))
+        val page = navigator?.view ?: return RectF(source)
+        val at = IntArray(2); val base = IntArray(2)
+        page.getLocationInWindow(at); root.getLocationInWindow(base)
+        return RectF(source).apply { offset((at[0] - base[0]).toFloat(), (at[1] - base[1]).toFloat()) }
+    }
+
+    /** The room the card keeps clear of the bars when the menu is up. */
+    private fun cardTopInset(): Int = if (controlsVisible) bars.top.height else 0
+    private fun cardBottomInset(): Int = if (controlsVisible) bars.bottom.height else 0
+
+    /** A colour chosen for what is selected: the highlight is kept (made, or recoloured if the passage already has one), and remembered as the next. */
+    private fun highlightSelection(color: HighlightColor, thenNote: Boolean) {
+        val chosen = selection ?: return
+        HighlightSettings.setColor(host.viewContext, color)
+        val existing = annotations.live.value.firstOrNull { it.document == chosen.document && it.quote.highlight == chosen.quote.highlight && it.quote.before == chosen.quote.before }
+        val base = existing ?: ReadingAnnotation(id = AnnotationIds.new(), document = chosen.document, quote = chosen.quote, locator = locatorHint(chosen))
+        val kept = annotations.save(base.copy(color = color.id))
+        if (kept == null) { host.notify("Highlight could not be saved on this device"); return }
+        closeDictionary(resumeNarration = !thenNote)
+        if (thenNote) editNote(kept) else host.notify("Highlighted")
+    }
+
+    // ---------------------------------------------------------------- the controller's text cursor (#62)
+
+    /** The words of the page in front, from the page itself; null when the page has none. */
+    private suspend fun readWords(): List<PageWord>? {
+        val reader = navigator ?: return null
+        val raw = runCatching { reader.evaluateJavascript(ReaderWordsScript.PAGE) }.getOrNull()
+        coroutineContext.ensureActive()
+        return ReaderWordsScript.parse(raw)?.takeIf { page -> page.any { it.visible } }
+    }
+
+    /** Ⓧ: the cursor comes to the first word on the page, or goes away again. */
+    private fun startCursor() {
+        if (cursorWords != null) return stopCursor()
+        if (navigator == null || dictionaryCard.isOpen) return
+        setControlsVisible(false)
+        cursorJob?.cancel()
+        cursorJob = uiScope.launch {
+            val page = readWords() ?: return@launch host.notify("There is no text on this page to select")
+            cursorWords = TextCursor(page)
+            drawCursor()
+            host.refreshHints()
+        }
+    }
+
+    /** The cursor and the selection it has started, drawn on the page. */
+    private fun drawCursor() {
+        val cursor = cursorWords ?: return
+        val reader = navigator ?: return
+        val (at, anchor) = cursor.carry()
+        uiScope.launch { runCatching { reader.evaluateJavascript(ReaderWordsScript.draw(at, anchor ?: -1, colors.accent)) } }
+    }
+
+    private fun stopCursor() {
+        cursorJob?.cancel()
+        if (cursorWords == null) return
+        cursorWords = null
+        if (::host.isInitialized) host.refreshHints()
+        val reader = navigator ?: return
+        uiScope.launch { runCatching { reader.evaluateJavascript(ReaderWordsScript.CLEAR) } }
+    }
+
+    private fun moveCursor(direction: Direction) {
+        val cursor = cursorWords ?: return
+        when (val step = when (direction) {
+            Direction.LEFT -> cursor.previous()
+            Direction.RIGHT -> cursor.next()
+            Direction.UP -> cursor.line(down = false)
+            Direction.DOWN -> cursor.line(down = true)
+        }) {
+            TextCursor.Step.Moved -> drawCursor()
+            TextCursor.Step.Stuck -> Unit
+            is TextCursor.Step.TurnPage -> turnCursorPage(step)
+        }
+    }
+
+    /** The cursor reached the edge of the page: the next page is turned to, and the cursor goes on from its first word (the selection started goes with it). */
+    private fun turnCursorPage(step: TextCursor.Step.TurnPage) {
+        val reader = navigator ?: return
+        val anchor = cursorWords?.carry()?.second
+        val document = latestLocator?.document
+        cursorJob?.cancel()
+        cursorJob = uiScope.launch {
+            val moved = if (step.forward) reader.goForward(animated = false) else reader.goBackward(animated = false)
+            if (!moved) return@launch host.notify(if (step.forward) "End of book" else "Start of book")
+            val page = awaitWords { words -> words.any { it.visible } && (document != latestLocator?.document || words.any { it.index == step.cursor && it.visible }) }
+                ?: return@launch stopCursor()
+            val sameFile = document == latestLocator?.document
+            cursorWords = if (sameFile) TextCursor.restoring(page, step.cursor, anchor)
+                else TextCursor(page, startIndex = if (step.forward) null else page.lastOrNull { it.visible }?.index)
+            drawCursor()
+            host.refreshHints()
+        }
+    }
+
+    /** L2 and R2 with the cursor on: a whole page on or back, the cursor on its first word. */
+    private fun pageCursor(delta: Int) {
+        val reader = navigator ?: return
+        cursorJob?.cancel()
+        cursorJob = uiScope.launch {
+            val moved = if (delta >= 0) reader.goForward(animated = false) else reader.goBackward(animated = false)
+            if (!moved) return@launch host.notify(if (delta >= 0) "End of book" else "Start of book")
+            val page = awaitWords { it.any { word -> word.visible } } ?: return@launch stopCursor()
+            cursorWords = TextCursor(page)
+            drawCursor()
+            host.refreshHints()
+        }
+    }
+
+    /** The page's words once the page has settled and [ready] likes them: a turn of the page takes a moment to be drawn. */
+    private suspend fun awaitWords(ready: (List<PageWord>) -> Boolean): List<PageWord>? {
+        delay(CURSOR_SETTLE_MS)
+        repeat(CURSOR_TRIES) {
+            readWords()?.takeIf(ready)?.let { return it }
+            delay(CURSOR_SETTLE_MS)
+        }
+        return null
+    }
+
+    /** Ⓐ: the first press starts a selection at the cursor, the second finishes it and hands the words to the card, as a finger's selection is. */
+    private fun anchorCursor(finish: Boolean) {
+        val cursor = cursorWords ?: return
+        if (!finish) {
+            cursor.start()
+            drawCursor()
+            host.refreshHints()
+            return
+        }
+        val range = cursor.finish() ?: return
+        val reader = navigator ?: return
+        cursorWords = null
+        cursorJob?.cancel()
+        cursorJob = uiScope.launch {
+            runCatching { reader.evaluateJavascript(ReaderWordsScript.select(range.first, range.last)) }
+            host.refreshHints()
+            inspectSelection()
+        }
+    }
+
+    private fun growCursor(paragraph: Boolean) {
+        val cursor = cursorWords ?: return
+        if ((if (paragraph) cursor.paragraph() else cursor.sentence()) == TextCursor.Step.Moved) {
+            drawCursor()
+            host.refreshHints()
+        }
+    }
+
+    /** Ⓑ with a selection started: it is dropped and the cursor stays where it is. */
+    private fun cancelSelection() {
+        val cursor = cursorWords ?: return
+        cursor.cancelSelection()
+        drawCursor()
+        host.refreshHints()
+    }
+
+    /** Readium's locator for the selection, as a hint for the next time this app opens the same edition. */
+    private fun locatorHint(chosen: ReaderSelection) = runCatching { json.parseToJsonElement(chosen.locator.toString()).jsonObject }.getOrNull()
+
+    private fun recolour(annotation: ReadingAnnotation, color: HighlightColor) {
+        HighlightSettings.setColor(host.viewContext, color)
+        if (annotations.save(annotation.copy(color = color.id)) == null) host.notify("Highlight could not be saved on this device")
+        closeDictionary(resumeNarration = true)
+    }
+
+    private fun removeHighlight(annotation: ReadingAnnotation) {
+        closeDictionary(resumeNarration = true)
+        if (annotations.remove(annotation.id) == null) host.notify("Highlight could not be removed on this device") else host.notify("Highlight removed")
+    }
+
+    private fun copySelection() {
+        val chosen = selection ?: return
+        val clipboard = host.viewContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Selected text", chosen.text))
+        closeDictionary(resumeNarration = true)
+        host.notify("Copied")
+    }
+
+    private fun say(text: String) {
+        val speaker = voice ?: voiceFactory(host.viewContext) { problem -> root.post { host.notify(problem) } }.also { voice = it }
+        speaker.say(text)
+    }
+
+    /** The note's sheet (#62): the passage, a field, Save, and Remove note where there is one. */
+    private fun editNote(annotation: ReadingAnnotation) {
+        closeDictionary(resumeNarration = false)
+        overlay.resetBody()
+        overlay.open("Note", "\u201C${annotation.quote.highlight.take(160)}\u201D", onDismiss = { host.refreshHints() })
+        val field = EditText(host.viewContext).apply {
+            hint = "Write a note"; contentDescription = "Note"
+            setTextColor(colors.primaryText); setHintTextColor(colors.mutedText)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            minLines = 3; gravity = Gravity.TOP or Gravity.START; minimumHeight = dp(96)
+            filters = arrayOf(android.text.InputFilter.LengthFilter(NOTE_CHARS))
+            setText(annotation.note); setSelection(text.length)
+        }
+        overlay.body.addView(field)
+        fun keep(note: String) {
+            (host.viewContext.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                .hideSoftInputFromWindow(field.windowToken, 0)
+            val text = AnnotationLimits.clip(note.trim(), AnnotationLimits.NOTE_BYTES)
+            if (annotations.save(annotation.copy(note = text)) == null) host.notify("Note could not be saved on this device")
+            else host.notify(if (text.isNotEmpty()) "Note saved" else "Note removed")
+            overlay.dismiss()
+        }
+        overlay.choice("Save") { keep(field.text.toString()) }
+        if (annotation.hasNote) overlay.choice("Remove note", danger = true) { keep("") }
+        overlay.choice("Cancel") { overlay.dismiss() }
+        overlay.focusBody(field); host.refreshHints()
+    }
+
+    /** A selection's own menu, emptied: the handles stay to drag, and the card is the menu (#62). */
+    private val quietSelectionMenu = object : android.view.ActionMode.Callback {
+        override fun onCreateActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean { menu.clear(); return true }
+        override fun onPrepareActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean { menu.clear(); return true }
+        override fun onActionItemClicked(mode: android.view.ActionMode, item: android.view.MenuItem): Boolean = false
+        override fun onDestroyActionMode(mode: android.view.ActionMode) = Unit
+    }
+
+    /** A tap on a highlight (or on its note mark): the menu to recolour it, write or change its note, or remove it. */
+    private val decorationTap = object : DecorableNavigator.Listener {
+        override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
+            if (dictionaryCard.isOpen) return false
+            val found = annotations[event.decoration.id.removePrefix("note:")]?.takeUnless { it.deleted } ?: return false
+            val rect = pageRectToRoot(event.rect)
+            root.post { openHighlightMenu(found, rect) }
+            return true
+        }
+    }
+
+    private fun openHighlightMenu(annotation: ReadingAnnotation, rect: RectF) {
+        if (dictionaryCard.isOpen) return
+        selection = null
+        phraseAnswer = null
+        shownHighlight = annotation
+        dictionaryCard.setInsets(cardTopInset(), cardBottomInset())
+        dictionaryCard.showHighlight(annotation, rect)
+        host.refreshHints()
+    }
+
+    /** The passage as a locator Readium finds by its text, in the book's own spelling of the file (#62). */
+    private fun annotationLocator(annotation: ReadingAnnotation, quote: AnnotationQuote = annotation.quote): Locator? =
+        Locator.fromJSON(JSONObject().put("href", spellDocument(annotation.document)).put("type", "application/xhtml+xml")
+            .put("text", JSONObject().put("before", quote.before).put("highlight", quote.highlight).put("after", quote.after)))
+
+    /** The last word of a highlight, as a locator: where its note mark sits. */
+    private fun endOfAnnotation(annotation: ReadingAnnotation): Locator? {
+        val words = annotation.quote.highlight.trimEnd()
+        val cut = words.lastIndexOf(' ') + 1
+        val tail = words.substring(cut)
+        val lead = AnnotationQuotes.tail(annotation.quote.before + " " + words.substring(0, cut), AnnotationQuotes.CONTEXT)
+        return annotationLocator(annotation, AnnotationQuote(lead, tail, annotation.quote.after))
+    }
+
+    /** Draws the person's highlights and the marks of their notes (#62); Readium finds each by its text and draws it when its file is on screen. */
+    private fun drawAnnotations() {
+        val reader = navigator ?: return
+        val (page, ink) = pageColors()
+        val highlights = ArrayList<Decoration>()
+        val marks = ArrayList<Decoration>()
+        drawnAnnotations.forEach { annotation ->
+            val locator = annotationLocator(annotation) ?: return@forEach
+            highlights += Decoration(annotation.id, locator, Decoration.Style.Underline(ReaderMarks.tint(annotation.highlightColor, page, ink)),
+                mapOf(ReaderMarks.KIND to ReaderMarks.HIGHLIGHT))
+            if (annotation.hasNote) endOfAnnotation(annotation)?.let { end ->
+                marks += Decoration("note:" + annotation.id, end, Decoration.Style.Underline(ReaderMarks.base(annotation.highlightColor)),
+                    mapOf(ReaderMarks.KIND to ReaderMarks.NOTE))
+            }
+        }
+        uiScope.launch {
+            reader.applyDecorations(highlights, ReaderMarks.GROUP)
+            reader.applyDecorations(marks, ReaderMarks.NOTES_GROUP)
+        }
+    }
+
+    /** One pass with the hub for this book's highlights: what waits to be sent, then what the other devices did. */
+    private fun syncAnnotations() {
+        uiScope.launch {
+            val result = withContext(Dispatchers.IO) { annotations.syncNow(readingSession.api.annotationRemote()) }
+            if (result.retry) progress.requestSync()
         }
     }
 
@@ -1373,14 +1757,19 @@ class EpubReaderScreen(
         if (!dictionaryCard.isOpen) { selectionGate.cancel(); return }
         selectionGeneration++
         dictionaryJob?.cancel()
+        voice?.stop()
         dictionaryCard.dismiss()
         navigator?.clearSelection()
         selectedNarrationTarget = null
+        selection = null
+        shownHighlight = null
+        phraseAnswer = null
         val resume = if (resumeNarration) selectionGate.dismiss() else { selectionGate.cancel(); false }
         if (resume && narration?.isPlaying == false) narration?.toggle()
         host.refreshHints()
     }
 
+    /** The voice starts at the sentence of the words just selected, or at the top of the page when the text has no sentence there (#62). */
     private fun playFromSelection() {
         val audio = narration ?: return closeDictionary(resumeNarration = false)
         val target = selectedNarrationTarget
@@ -1713,8 +2102,8 @@ class EpubReaderScreen(
             catch (_: Exception) { return host.notify("Bookmarks could not be read on this device") }
         overlay.resetBody()
         overlay.open("Navigator", "${entries.size} saved locations", onDismiss = { host.refreshHints() })
-        overlay.tabs(listOf("contents" to "Contents", "bookmarks" to "Bookmarks"), "bookmarks") {
-            if (it == "contents") showTableOfContents() else showBookmarks()
+        overlay.tabs(NAVIGATOR_TABS, "bookmarks") {
+            if (it == "contents") showTableOfContents() else showHighlights()
         }
         if (entries.isEmpty()) overlay.choice("No bookmarks in this book") { Unit }
         entries.forEach { entry ->
@@ -1744,6 +2133,105 @@ class EpubReaderScreen(
         host.refreshHints()
     }
 
+    /**
+     * The book's highlights and notes (#62): the quote in its colour, the note under it, the page. A row jumps to the passage; a passage
+     * the book's text no longer holds is kept and listed with "Can't find this passage". Filters: All, a colour, With notes.
+     */
+    private fun showHighlights(filter: HighlightFilter = HighlightFilter.ALL) {
+        cancelSearch()
+        val book = publication ?: return host.notify("The book is still opening")
+        val all = annotations.live.value
+        val shown = filter.apply(all)
+        overlay.resetBody()
+        overlay.open("Navigator", "${all.size} highlights", onDismiss = { host.refreshHints() })
+        overlay.tabs(NAVIGATOR_TABS, "highlights") {
+            if (it == "contents") showTableOfContents() else showBookmarks()
+        }
+        val chips = LinearLayout(host.viewContext).apply { orientation = LinearLayout.HORIZONTAL }
+        HighlightFilter.entries.forEach { option ->
+            val chip = TextView(host.viewContext).apply {
+                text = option.label
+                contentDescription = option.description
+                com.pocketds.hub.ui.PillButton.control(this, colors)
+                com.pocketds.hub.ui.PillButton.setPrimary(this, option == filter)
+                Styler.makeFocusable(this)
+                FocusDecorator.attach(this, ringVisible, scale = false)
+                activateOnTap { showHighlights(option) }
+            }
+            chips.addView(chip, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = dp(2) })
+        }
+        overlay.body.addView(com.pocketds.hub.ui.FocusHorizontalScrollView(host.viewContext).apply {
+            isHorizontalScrollBarEnabled = false; addView(chips)
+        }, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(6) })
+        if (shown.isEmpty()) overlay.choice(if (all.isEmpty()) "No highlights in this book" else "Nothing with this filter",
+            if (all.isEmpty()) "Select words and pick a colour, and they show here on every device." else "") { Unit }
+        val rows = ArrayList<Pair<View, ReadingAnnotation>>()
+        shown.forEach { annotation ->
+            val dot = ThemeGradientDrawable.oval(ReaderMarks.base(annotation.highlightColor))
+            val row = overlay.choice("\u201C" + annotation.quote.highlight.take(140) + "\u201D", annotation.note.take(160),
+                icon = dot, trailing = "", trailingSpoken = "") {
+                openHighlight(annotation)
+            }
+            rows += row to annotation
+        }
+        overlay.focusBody(rows.firstOrNull()?.first)
+        host.refreshHints()
+        // Each passage is looked for in its file's text, once, off the main thread: a page number for the ones found, and a note under the rest.
+        val generation = ++highlightRowsGeneration
+        highlightRowsJob?.cancel()
+        highlightRowsJob = uiScope.launch {
+            val places = withContext(Dispatchers.Default) { placeHighlights(book, shown) }
+            if (generation != highlightRowsGeneration || !overlay.isOpen) return@launch
+            rows.forEach { (row, annotation) ->
+                val place = places[annotation.id]
+                if (place == null) overlay.setDetail(row, "Can\u2019t find this passage", warn = true)
+                else if (place.page != null) overlay.setTrailing(row, place.page.toString(), "page ${place.page}")
+            }
+        }
+    }
+
+    private var highlightRowsJob: Job? = null
+    private var highlightRowsGeneration = 0
+
+    /** Where each highlight is in the book now: the page it is on, or null for a passage this edition's text does not hold. */
+    private suspend fun placeHighlights(book: Publication, list: List<ReadingAnnotation>): Map<String, HighlightPlace?> {
+        val texts = HashMap<String, String?>()
+        val found = HashMap<String, HighlightPlace?>()
+        for (annotation in list) {
+            coroutineContext.ensureActive()
+            val link = book.readingOrder.firstOrNull { DocumentPath.of(it.href.toString()) == annotation.document }
+            val text = texts.getOrPut(annotation.document) { link?.let { documentText(book, it.url()) } }
+            val at = text?.let { AnnotationFinder.find(it, annotation.quote, annotation.locator?.let(::progressionOf)) }
+            found[annotation.id] = if (at == null) null else HighlightPlace(pageAt(annotation.document, at.share))
+        }
+        return found
+    }
+
+    private fun progressionOf(locator: kotlinx.serialization.json.JsonObject): Double? =
+        ((locator["locations"] as? kotlinx.serialization.json.JsonObject)?.get("progression") as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()
+
+    /** The page of the book the part [share] of the way through a document is on, by the corners' own count (#42). */
+    private fun pageAt(document: String, share: Double): Int? {
+        if (bookPages <= 0) return null
+        val section = bookSections.indexOfFirst { it.document == document }
+        val (start, end) = PageInfo.sectionSpan(sectionStarts, section) ?: return null
+        val through = (start + (end - start) * share).coerceIn(0.0, 1.0)
+        return (through * bookPages).toInt().coerceIn(0, bookPages - 1) + 1
+    }
+
+    /** A document's text for the search for a passage in it (#62): markup and entities taken out, as the page shows it. */
+    private suspend fun documentText(book: Publication, href: org.readium.r2.shared.util.Url): String? =
+        readText(book, href)?.let(DocumentText::plain)
+
+    private data class HighlightPlace(val page: Int?)
+
+    /** Goes to a highlight: the passage on the page, as a search result is. */
+    private fun openHighlight(annotation: ReadingAnnotation) {
+        val target = annotationLocator(annotation) ?: return host.notify("This highlight could not be opened")
+        if (!jumpTo(target)) return
+        overlay.dismiss()
+    }
+
     private fun showTableOfContents() {
         cancelSearch()
         val book = publication ?: return host.notify("The book is still opening")
@@ -1751,8 +2239,8 @@ class EpubReaderScreen(
         val currentHref = latestLocator?.href?.toString()
         overlay.resetBody()
         overlay.open("Navigator", "${links.size} sections", onDismiss = { host.refreshHints() })
-        overlay.tabs(listOf("contents" to "Contents", "bookmarks" to "Bookmarks"), "contents") {
-            if (it == "bookmarks") showBookmarks() else showTableOfContents()
+        overlay.tabs(NAVIGATOR_TABS, "contents") {
+            if (it == "bookmarks") showBookmarks() else showHighlights()
         }
         var currentRow: View? = null
         if (links.isEmpty()) overlay.choice("This book has no table of contents") { Unit }
@@ -1851,6 +2339,8 @@ class EpubReaderScreen(
         if (narration != null) highlightedSegment?.let(::highlightNarration)
         // The corners' ink and the strips' colour follow the page.
         if (::pageInfo.isInitialized) applyPageInfo()
+        // The highlights are mixed with the page's colour too (#62).
+        drawAnnotations()
     }
 
     /** The page, and the ink on it. */
@@ -1935,6 +2425,7 @@ class EpubReaderScreen(
     )
 
     private fun setControlsVisible(visible: Boolean) {
+        if (visible) stopCursor()
         controlsVisible = visible
         // The bars, the narration's dock among them, show and hide together.
         pagePreview.setControlsVisible(visible)
@@ -2109,5 +2600,11 @@ class EpubReaderScreen(
         const val OWN_MOVE_MS = 1_500L
         /** After the place in a file has been gone to, the page is drawn this long before it is shown again (#59). */
         const val PLACE_SETTLE_MS = 120L
+        /** The cursor's turn of a page: how long it waits for the page to be drawn, and how many times it looks. */
+        const val CURSOR_SETTLE_MS = 160L
+        const val CURSOR_TRIES = 12
+        /** A note's room in the field, in characters; the hub keeps [AnnotationLimits.NOTE_BYTES] bytes of it. */
+        const val NOTE_CHARS = 1_500
+        val NAVIGATOR_TABS = listOf("contents" to "Contents", "highlights" to "Highlights", "bookmarks" to "Bookmarks")
     }
 }

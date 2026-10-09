@@ -18,13 +18,21 @@ class OfflineEnglishDictionary(context: Context) {
     }
     private var database: SQLiteDatabase? = null
 
-    suspend fun lookup(selectedText: String): DictionaryEntry = withContext(Dispatchers.IO) {
+    suspend fun lookup(selectedText: String): DictionaryEntry = lookupTerms(selectedText, DictionaryTerms.candidates(selectedText))
+
+    /**
+     * The first of [terms] the dictionary has an entry for (#62): a word's base forms, or a phrase's ("pulled off", "pull off").
+     * [requested] is what was selected and is what the answer is cached under; an entry whose [DictionaryEntry.headword] is
+     * blank means none of the terms is there.
+     */
+    suspend fun lookupTerms(requested: String, terms: List<String>): DictionaryEntry = withContext(Dispatchers.IO) {
         synchronized(this@OfflineEnglishDictionary) {
-            cache[selectedText]?.let { return@synchronized it }
+            val key = requested + "\u0000" + terms.joinToString("|")
+            cache[key]?.let { return@synchronized it }
             val db = openDatabase()
             var matched = ""
             var definitions = emptyList<DictionaryDefinition>()
-            for (candidate in DictionaryTerms.candidates(selectedText)) {
+            for (candidate in terms) {
                 val found = mutableListOf<DictionaryDefinition>()
                 db.rawQuery("SELECT part_of_speech, definition FROM definitions WHERE lemma = ? ORDER BY rank LIMIT 6",
                     arrayOf(candidate)).use { cursor ->
@@ -32,7 +40,7 @@ class OfflineEnglishDictionary(context: Context) {
                 }
                 if (found.isNotEmpty()) { matched = candidate; definitions = found; break }
             }
-            DictionaryEntry(selectedText, matched, definitions).also { cache[selectedText] = it }
+            DictionaryEntry(requested, matched, definitions).also { cache[key] = it }
         }
     }
 

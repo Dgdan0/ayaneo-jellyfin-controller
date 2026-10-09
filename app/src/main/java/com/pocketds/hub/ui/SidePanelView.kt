@@ -238,6 +238,18 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
         }
         return row
     }
+    /**
+     * Sets the line under a [choice] row's label, which the row had none of or had another in (a highlight whose passage is no longer in
+     * the book, found out after the list is on screen, #62). [warn] draws it in the colour of a danger.
+     */
+    fun setDetail(row:View,text:String,warn:Boolean=false) {
+        val group=row as? ViewGroup ?: return
+        val copy=(0 until group.childCount).map(group::getChildAt).firstOrNull {it is LinearLayout} as? LinearLayout ?: return
+        val label=(copy.getChildAt(0) as? TextView)?.text?.toString().orEmpty()
+        val line=(copy.getChildAt(1) as? TextView) ?: TextView(context).apply {textSize=12f;setPadding(0,dp(2),0,0)}.also {copy.addView(it)}
+        line.text=text;line.setTextColor(if(warn) colors.dangerText else colors.mutedText)
+        row.contentDescription=listOf(label,text).filter(String::isNotBlank).joinToString(", ")
+    }
     /** A row's trailing figure: where it is on screen, and how the row reads without it. */
     private class Trailing(val view:TextView,val described:String)
     private val trailers=mutableMapOf<View,Trailing>()

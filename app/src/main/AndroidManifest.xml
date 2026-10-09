@@ -34,6 +34,10 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="video/*" />
         </intent>
+        <!-- The speaker in the dictionary card (#62): Android 11 and later list a text-to-speech engine only to an app that asks. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
     </queries>
 
     <application

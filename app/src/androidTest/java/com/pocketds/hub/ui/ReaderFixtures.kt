@@ -345,6 +345,59 @@ object ReaderFixtures {
         }.array()
     }
 
+    /** The sentences of [selectionEpub], in the order they are read: paragraph one has the first two, and so on. */
+    val SELECTION_PARAGRAPHS: List<List<String>> = listOf(
+        listOf("The harbor bells were still ringing when Maren climbed the last of the stone steps.",
+            "Ash had fallen through the night, soft as flour, and it lay in the gutters and on the shoulders of the men who waited by the boats."),
+        listOf("She did not stop to look at them.",
+            "In spite of the cold, she pulled off her gloves and set her palm against the lighthouse door.",
+            "The iron was warm.",
+            "Somewhere above her, the lantern was still burning."),
+        listOf("\u201CThey said it would take off on its own,\u201D her brother had told her, \u201Cthe old light, like a bird.\u201D",
+            "She had laughed at him then.",
+            "She was not laughing now."),
+        listOf("Inside, the stair wound up into darkness.",
+            "Maren counted the steps the way their father had taught her, and listened for anything that was not the sea.")
+    )
+
+    /**
+     * A short book of made-up sentences for selecting words, phrases and sentences (#62): a dictionary word ("lantern"), phrases the
+     * dictionary has as one entry ("take off", "pulled off"), a phrase it has not ("harbor bells were"), a name it does not know
+     * ("Maren"), and enough passages after them to run to several pages. With [aligned] every sentence is its own element, narrated
+     * [sentenceSeconds] long over generated silence (without the audio when [withAudio] is false, as the hub's slim edition).
+     */
+    fun selectionEpub(aligned: Boolean = false, sentenceSeconds: Int = 1, withAudio: Boolean = true): ByteArray {
+        val output = ByteArrayOutputStream()
+        val flat = SELECTION_PARAGRAPHS.flatten()
+        var n = 0
+        val text = SELECTION_PARAGRAPHS.joinToString("") { paragraph ->
+            "<p>" + paragraph.joinToString(" ") { sentence ->
+                val id = n++
+                if (aligned) "<span id=\"s$id\">$sentence</span>" else sentence
+            } + "</p>"
+        } + (1..40).joinToString("") { "<p>The observatory kept its light on through the night. This is passage $it.</p>" }
+        val overlay = if (aligned) " media-overlay=\"mo1\"" else ""
+        val extra = if (aligned) """<item id="mo1" href="one.smil" media-type="application/smil+xml"/><item id="voice" href="voice.wav" media-type="audio/wav"/>""" else ""
+        ZipOutputStream(output).use { zip ->
+            val files = mutableMapOf(
+                "mimetype" to "application/epub+zip".toByteArray(),
+                "META-INF/container.xml" to """<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""".toByteArray(),
+                "EPUB/package.opf" to """<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">urn:reader-selection</dc:identifier><dc:title>The Lantern Keeper</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-10-09T00:00:00Z</meta></metadata><manifest><item id="one" href="one.xhtml" media-type="application/xhtml+xml"$overlay/>$extra<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest><spine><itemref idref="one"/></spine></package>""".toByteArray(),
+                "EPUB/one.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter One</title></head><body><h1>Chapter One</h1>$text</body></html>""".toByteArray(),
+                "EPUB/nav.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol><li><a href="one.xhtml">Chapter One</a></li></ol></nav></body></html>""".toByteArray()
+            )
+            if (aligned) {
+                val pars = flat.indices.joinToString("") {
+                    "<par id=\"p$it\"><text src=\"one.xhtml#s$it\"/><audio src=\"voice.wav\" clipBegin=\"${it * sentenceSeconds}s\" clipEnd=\"${(it + 1) * sentenceSeconds}s\"/></par>"
+                }
+                files["EPUB/one.smil"] = """<smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><seq epub:textref="one.xhtml">$pars</seq></body></smil>""".toByteArray()
+                if (withAudio) files["EPUB/voice.wav"] = silence(seconds = flat.size * sentenceSeconds)
+            }
+            files.forEach { (name, bytes) -> zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry() }
+        }
+        return output.toByteArray()
+    }
+
     /** A local hub serving one file for every `/file` route and saving nothing anywhere. */
     fun fileServer(archive: ByteArray, contentType: String = "application/epub+zip") = MockWebServer().apply {
         dispatcher = object : Dispatcher() {

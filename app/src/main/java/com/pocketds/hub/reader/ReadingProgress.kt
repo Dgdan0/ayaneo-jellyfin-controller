@@ -153,6 +153,8 @@ class ReadingProgress private constructor(private val context: Context) {
                 if (session().identity != bound.identity) break
                 if (synchronizer.sync(checkpoint.key)==CheckpointSyncResult.RETRY) retry=true
             }
+            // Highlights and notes ride the same pass (#62): the same job, the same network rule, nothing of their own to schedule.
+            if (session().identity == bound.identity && AnnotationRepository.get(context).flush(bound)) retry=true
             retry
         }
     }

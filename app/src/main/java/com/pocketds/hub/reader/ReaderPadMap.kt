@@ -22,7 +22,15 @@ data class ReaderPadState(
     /** Audiobooks: how far L2 and R2 jump. */
     val seekSeconds: Int = 10,
     /** Audiobooks: the book has chapters (#31), so L1 and R1 step by chapter rather than by part. */
-    val chapters: Boolean = false
+    val chapters: Boolean = false,
+    /** The book has more than one way to take it in (#62), so Ⓨ opens the mode button. */
+    val modes: Boolean = false,
+    /** The mode button is open: ◀▶ choose, Ⓐ switches, Ⓑ closes. */
+    val picking: Boolean = false,
+    /** Books: the controller's text cursor is on (#62). */
+    val cursor: Boolean = false,
+    /** Books: a selection has been started with the cursor, and Ⓐ finishes it. */
+    val anchored: Boolean = false
 )
 
 /** What a key does in a reader, whichever reader it is. Each reader carries these out its own way. */
@@ -70,6 +78,23 @@ sealed interface ReaderCommand {
     data object Retry : ReaderCommand
     /** Taken by the reader and left alone: never handed on to the app (a tab switch would close it). */
     data object Ignore : ReaderCommand
+    /** Ⓨ: open the mode button (#62), the one place to switch between the ebook, the audio and read along. */
+    data object Mode : ReaderCommand
+    /** The mode button is open: ◀ or ▶ to the mode before or after. */
+    data class ModeMove(val delta: Int) : ReaderCommand
+    /** The mode button is open: switch to the mode in focus. */
+    data object ModePick : ReaderCommand
+    data object ModeClose : ReaderCommand
+    /** Ⓧ while reading: the text cursor comes on (#62), and goes off again. */
+    data object SelectText : ReaderCommand
+    /** The cursor is on: the D-pad moves it a word or a line, or grows the selection already started. */
+    data class Cursor(val direction: Direction, val grow: Boolean) : ReaderCommand
+    /** The cursor is on: Ⓐ starts a selection, or finishes the one started. */
+    data class CursorAnchor(val finish: Boolean) : ReaderCommand
+    /** The cursor is on: L1 selects the sentence, R1 the paragraph. */
+    data class CursorGrow(val paragraph: Boolean) : ReaderCommand
+    /** The cursor is on: Ⓑ drops the selection started, else puts the cursor away. */
+    data class CursorCancel(val anchored: Boolean) : ReaderCommand
 }
 
 /** One line of the Controls sheet: the keys, drawn as caps, and what they do. */
@@ -114,11 +139,40 @@ object ReaderPadMap {
         }
     }
 
-    private fun book(state: ReaderPadState, action: PadAction): ReaderCommand = when (action) {
+    /** The mode button open (#62): its keys are all that work until it closes. */
+    private fun picking(action: PadAction): ReaderCommand = when (action) {
+        is PadAction.Step -> when (action.direction) {
+            Direction.LEFT, Direction.UP -> ReaderCommand.ModeMove(-1)
+            Direction.RIGHT, Direction.DOWN -> ReaderCommand.ModeMove(1)
+        }
+        PadAction.Activate -> ReaderCommand.ModePick
+        PadAction.Back, PadAction.Secondary -> ReaderCommand.ModeClose
+        else -> ReaderCommand.Ignore
+    }
+
+    /** The text cursor on (#62): the D-pad moves it, Ⓐ starts and finishes, L1 and R1 grow, Ⓑ cancels; the rest is the book's. */
+    private fun cursor(state: ReaderPadState, action: PadAction): ReaderCommand? = when (action) {
+        is PadAction.Step -> ReaderCommand.Cursor(action.direction, state.anchored)
+        PadAction.Activate -> ReaderCommand.CursorAnchor(state.anchored)
+        PadAction.Back, PadAction.Primary -> ReaderCommand.CursorCancel(state.anchored)
+        is PadAction.Section -> ReaderCommand.CursorGrow(paragraph = action.delta > 0)
+        is PadAction.Page -> ReaderCommand.Page(if (action.direction == Direction.DOWN) 1 else -1)
+        PadAction.Secondary -> if (state.modes) ReaderCommand.Mode else ReaderCommand.Ignore
+        else -> null
+    }
+
+    private fun book(state: ReaderPadState, action: PadAction): ReaderCommand {
+        if (state.picking) return picking(action)
+        if (state.cursor && !state.controlsVisible) cursor(state, action)?.let { return it }
+        return bookKeys(state, action)
+    }
+
+    private fun bookKeys(state: ReaderPadState, action: PadAction): ReaderCommand = when (action) {
         PadAction.Activate -> if (state.controlsVisible) ReaderCommand.Choose else ReaderCommand.Forward
         PadAction.Back -> if (state.controlsVisible) ReaderCommand.Leave else ReaderCommand.Controls(true)
-        PadAction.Primary -> ReaderCommand.Bookmark
-        PadAction.Secondary -> ReaderCommand.Contents
+        // Reading, Ⓧ brings the text cursor (#62); in the menu it is still the bookmark.
+        PadAction.Primary -> if (state.controlsVisible) ReaderCommand.Bookmark else ReaderCommand.SelectText
+        PadAction.Secondary -> if (state.modes) ReaderCommand.Mode else ReaderCommand.Contents
         // Read along, the shoulders step through the narration a sentence at a time (A5).
         is PadAction.Section -> if (state.narration && !state.controlsVisible) ReaderCommand.Sentence(action.delta) else ReaderCommand.Page(action.delta)
         // Held: the reader asks for a deliberate hold before a chapter jumps.
@@ -142,11 +196,16 @@ object ReaderPadMap {
         }
     }
 
-    private fun audiobook(state: ReaderPadState, action: PadAction): ReaderCommand = when (action) {
+    private fun audiobook(state: ReaderPadState, action: PadAction): ReaderCommand {
+        if (state.picking) return picking(action)
+        return audiobookKeys(state, action)
+    }
+
+    private fun audiobookKeys(state: ReaderPadState, action: PadAction): ReaderCommand = when (action) {
         PadAction.Activate -> ReaderCommand.Choose
         PadAction.Back -> ReaderCommand.Leave
         PadAction.Primary -> ReaderCommand.PlayPause
-        PadAction.Secondary -> ReaderCommand.Formats
+        PadAction.Secondary -> if (state.modes) ReaderCommand.Mode else ReaderCommand.Formats
         is PadAction.Section -> ReaderCommand.Chapter(action.delta)
         is PadAction.Page -> ReaderCommand.Seek(if (action.direction == Direction.DOWN) state.seekSeconds else -state.seekSeconds)
         is PadAction.Step -> ReaderCommand.Focus(action.direction)
@@ -194,13 +253,22 @@ object ReaderPadMap {
         ReaderCommand.Formats -> "Reading and listening"
         ReaderCommand.Retry -> "Retry"
         ReaderCommand.Ignore -> ""
+        ReaderCommand.Mode -> "Mode"
+        is ReaderCommand.ModeMove -> "Choose a mode"
+        ReaderCommand.ModePick -> "Switch"
+        ReaderCommand.ModeClose -> "Close"
+        ReaderCommand.SelectText -> "Select text"
+        is ReaderCommand.Cursor -> if (command.grow) "Grow the selection" else "Move the cursor"
+        is ReaderCommand.CursorAnchor -> if (command.finish) "Finish" else "Start selecting"
+        is ReaderCommand.CursorGrow -> if (command.paragraph) "Paragraph" else "Sentence"
+        is ReaderCommand.CursorCancel -> if (command.anchored) "Cancel" else "Stop selecting"
     }
 
     /**
      * The hint row inside the controls (the app's own hint bar is hidden in
      * a reader): what the main keys do now. Each chip is also a button.
      */
-    fun hints(state: ReaderPadState): List<ButtonHint> = HINT_KEYS.getValue(state.kind).mapNotNull { (glyph, action) ->
+    fun hints(state: ReaderPadState): List<ButtonHint> = hintKeys(state).mapNotNull { (glyph, action) ->
         describe(state.kind, command(state, action), state.chapters).takeIf(String::isNotBlank)?.let { ButtonHint(glyph, it, action) }
     }
 
@@ -242,6 +310,11 @@ object ReaderPadMap {
         line(listOf(R3), PadAction.Click(Stick.RIGHT))
         line(listOf(START), PadAction.Menu)
         line(listOf(SELECT), PadAction.Refresh)
+        // The text cursor comes with Ⓧ (#62): what its keys do is listed here, since the sheet shows the keys of the page.
+        if (kind == ReaderKind.BOOK && state.kind == ReaderKind.BOOK) {
+            add(ReaderKeyLine(listOf(X, A), "Start selecting; Ⓐ again finishes"))
+            add(ReaderKeyLine(listOf(X, L1, R1), "Select the sentence or the paragraph"))
+        }
     }
 
     /** "Previous page, Next page" reads "Previous page, next page". */
@@ -268,6 +341,20 @@ object ReaderPadMap {
     const val DPAD_ENDS = "D-pad ↑ ↓"
     const val RIGHT_STICK = "Right stick"
 
+    /** The keys the hint row names now: the mode button's while it is open, the cursor's while it is on, else the reader's. */
+    private fun hintKeys(state: ReaderPadState): List<Pair<String, PadAction>> = when {
+        state.picking -> PICKING_HINT_KEYS
+        state.kind == ReaderKind.BOOK && state.cursor && !state.controlsVisible ->
+            if (state.anchored) CURSOR_ANCHORED_HINT_KEYS else CURSOR_HINT_KEYS
+        else -> HINT_KEYS.getValue(state.kind)
+    }
+
+    private val PICKING_HINT_KEYS = listOf(DPAD_SIDES to PadAction.Step(Direction.RIGHT), A to PadAction.Activate, B to PadAction.Back)
+    private val CURSOR_HINT_KEYS = listOf(DPAD to PadAction.Step(Direction.RIGHT), A to PadAction.Activate,
+        L1 to PadAction.Section(-1), R1 to PadAction.Section(1), Y to PadAction.Secondary, B to PadAction.Back)
+    private val CURSOR_ANCHORED_HINT_KEYS = listOf(DPAD to PadAction.Step(Direction.RIGHT), L1 to PadAction.Section(-1),
+        R1 to PadAction.Section(1), A to PadAction.Activate, B to PadAction.Back)
+
     /** The keys the hint row names, per reader, in the order the row shows them. */
     private val HINT_KEYS: Map<ReaderKind, List<Pair<String, PadAction>>> = mapOf(
         ReaderKind.COMIC to listOf(A to PadAction.Activate, B to PadAction.Back, X to PadAction.Primary,
@@ -275,7 +362,7 @@ object ReaderPadMap {
         ReaderKind.BOOK to listOf(A to PadAction.Activate, B to PadAction.Back, X to PadAction.Primary,
             Y to PadAction.Secondary, START to PadAction.Menu, SELECT to PadAction.Refresh,
             L3 to PadAction.Click(Stick.LEFT), R3 to PadAction.Click(Stick.RIGHT)),
-        ReaderKind.AUDIOBOOK to listOf(A to PadAction.Activate, B to PadAction.Back, X to PadAction.Primary,
+        ReaderKind.AUDIOBOOK to listOf(A to PadAction.Activate, B to PadAction.Back, X to PadAction.Primary, Y to PadAction.Secondary,
             L1 to PadAction.Section(-1), R1 to PadAction.Section(1), L2 to PadAction.Page(Direction.UP),
             R2 to PadAction.Page(Direction.DOWN), R3 to PadAction.Click(Stick.RIGHT))
     )
