@@ -57,12 +57,16 @@ public struct ReadAlongTrack: Equatable, Sendable {
 /// The narration, stretch by stretch, in the order the book is read.
 public struct ReadAlongTimeline: Equatable, Sendable {
     public let tracks: [ReadAlongTrack]
+    /// Each sentence's words in the order spoken, by `wordKey`, for an edition
+    /// read word by word (#66); empty for one read by the sentence.
+    public let words: [String: [ReadAlongWord]]
 
     /// Further into a sentence than this, back goes to its start rather than the sentence before.
     public static let restartMs: Int64 = 1_500
 
-    public init(tracks: [ReadAlongTrack]) {
+    public init(tracks: [ReadAlongTrack], words: [String: [ReadAlongWord]] = [:]) {
         self.tracks = tracks
+        self.words = words
     }
 
     /// The sentence spoken at `offsetMs` into stretch `track`, or nil in a
@@ -202,7 +206,21 @@ public enum ReadAlongLocation {
         for fragment in fragments {
             if let position = timeline.find(href: href, fragment: fragment) { return position }
         }
+        // A word's id (`<sentence>-wN`), which no place should hold (#66): its sentence.
+        for fragment in fragments {
+            if let sentence = sentence(ofWord: fragment), let position = timeline.find(href: href, fragment: sentence) {
+                return position
+            }
+        }
         return nil
+    }
+
+    /// The sentence of a word's element id, `<sentence>-wN`; nil for anything else.
+    public static func sentence(ofWord fragment: String) -> String? {
+        guard let dash = fragment.range(of: "-w", options: .backwards), dash.lowerBound > fragment.startIndex else { return nil }
+        let number = fragment[dash.upperBound...]
+        guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
+        return String(fragment[..<dash.lowerBound])
     }
 
     /// The page's locator moved to the sentence playing at `point`, finished
@@ -289,7 +307,10 @@ public struct ReadAlongSession: Sendable {
 /// - **No glow and no ring:** any soft edge tinted the next sentence's first letters.
 /// - **Corners** are square where two rows join and round only on the outside of the shape.
 public enum ReadAlongGlow {
+    /// The sentence's boxes, or the trail's through it (#66).
     public static let className = "pocket-narration"
+    /// The word spoken's (#66), drawn over the trail where the two meet.
+    public static let wordClassName = "pocket-word"
     /// How far the wash goes from the page's colour towards the accent, at most.
     public static let most = 0.45
     /// The contrast the words keep against the wash (WCAG AA for body text).
@@ -303,16 +324,11 @@ public enum ReadAlongGlow {
     /// of the line above, which reach beyond their face's declared height.
     public static let overflow = 0.15
 
-    /// The wash: `accent` mixed into `page` as far as `most`, or less, so
-    /// that `ink` keeps `contrast` against it. Opaque.
+    /// The wash: `accent` mixed into `page` at `most`, held as every
+    /// read-along wash is so that `ink` keeps `contrast` against it
+    /// (`ReadAlongHighlightStyle.hold`, the #66 contract). Opaque.
     public static func wash(accent: UInt32, page: UInt32, ink: UInt32) -> UInt32 {
-        var share = most
-        while share > 0 {
-            let mixed = GlassColors.mix(page | 0xFF00_0000, accent | 0xFF00_0000, share)
-            if GlassColors.contrast(ink | 0xFF00_0000, mixed) >= contrast { return mixed }
-            share -= 0.01
-        }
-        return page | 0xFF00_0000
+        ReadAlongHighlightStyle.hold(accent, page: page, ink: ink, strength: most)
     }
 
     /// Readium lays one of these over each line of the sentence and places
@@ -324,9 +340,21 @@ public enum ReadAlongGlow {
     /// The boxes under the words, in the wash the page script sets
     /// (`--pocket-narration-wash`; clear until it has). Selected strongly enough
     /// to win over ReadiumCSS's rule that clears every element's background.
+    /// The sentence's (or trail's) a layer below the word's, so the word's
+    /// air lies over the trail's end whichever Readium laid out first (#66).
     public static func stylesheet(tint: UInt32) -> String {
-        #"div[data-style="\#(className)"] > div.\#(className) { z-index: -1 !important; "#
+        #"div[data-style="\#(className)"] > div.\#(className) { z-index: -2 !important; "#
             + "background-color: var(--pocket-narration-wash, transparent) !important; }"
+    }
+
+    /// The word spoken's box (#66), in `--pocket-word-wash`.
+    public static func wordElement() -> String {
+        #"<div class="\#(wordClassName)"></div>"#
+    }
+
+    public static func wordStylesheet() -> String {
+        #"div[data-style="\#(wordClassName)"] > div.\#(wordClassName) { z-index: -1 !important; "#
+            + "background-color: var(--pocket-word-wash, transparent) !important; }"
     }
 
     public static func rgb(_ color: UInt32) -> String {
@@ -366,21 +394,39 @@ extension ReadAlongPageScript {
     /// none of them (a line holding only the space) gets no box. Without the
     /// element on the page, Readium's own extents stand.
     public static func fitNarration(wash: UInt32, fragment: String? = nil) -> String {
-        let colour = ReadAlongGlow.rgb(wash)
+        fitMarks([ReadAlongFit(style: ReadAlongGlow.className, wash: wash, fragment: fragment)])
+    }
+
+    /// The same fitting for every wash on the page at once (#66): the
+    /// sentence's (or the trail through it), and the word's. Each `fits`
+    /// entry names its boxes' style, its wash and the element its rows are
+    /// trimmed to. A trail is trimmed from the sentence's first word to just
+    /// before the word spoken (`until`), so it never reaches past it, and is
+    /// none at the sentence's first word. The word's rows take the trail's
+    /// height where they share its line, so the two meet as one band.
+    public static func fitMarks(_ fits: [ReadAlongFit]) -> String {
+        let config = fits.map { fit -> String in
+            "{s:\(json(fit.style)),v:'--\(fit.style)-wash',c:'\(ReadAlongGlow.rgb(fit.wash))',id:\(json(fit.fragment ?? "")),"
+                + "until:\(json(fit.until ?? ""))}"
+        }.joined(separator: ",")
         let side = ReadAlongGlow.side
         let corner = ReadAlongGlow.corner
-        let name = ReadAlongGlow.className
-        return "(function(){document.documentElement.style.setProperty('--pocket-narration-wash','\(colour)');"
-            + "window.__pocketNarrationId=\(json(fragment ?? ""));"
+        let word = ReadAlongGlow.wordClassName
+        return "(function(){var fits=[\(config)];"
+            + "fits.forEach(function(f){document.documentElement.style.setProperty(f.v,f.c);});"
+            + "window.__pocketFits=fits;"
             + "if(window.__pocketNarration){window.__pocketNarration();return true;}"
-            + "function words(){var el=window.__pocketNarrationId?document.getElementById(window.__pocketNarrationId):null;"
-            + "if(!el)return null;var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null),n,a=null,z=null;"
-            + "while((n=w.nextNode())){var s=n.data;for(var i=0;i<s.length;i++){if(/\\S/.test(s.charAt(i))){if(!a)a=[n,i];z=[n,i+1];}}}"
-            + "if(!a)return [];var g=document.createRange();g.setStart(a[0],a[1]);g.setEnd(z[0],z[1]);"
+            + "function words(id,until){var el=id?document.getElementById(id):null;"
+            + "if(!el)return null;var stop=until?document.getElementById(until):null;"
+            + "var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null),n,a=null,z=null;"
+            + "while((n=w.nextNode())){if(stop&&(stop.contains(n)||(stop.compareDocumentPosition(n)&Node.DOCUMENT_POSITION_FOLLOWING)))break;"
+            + "var s=n.data;for(var i=0;i<s.length;i++){if(/\\S/.test(s.charAt(i))){if(!a)a=[n,i];z=[n,i+1];}}}"
+            + "if(!a)return [];var g=document.createRange();g.setStart(a[0],a[1]);if(stop)g.setEndBefore(stop);else g.setEnd(z[0],z[1]);"
             + "var se=document.scrollingElement||document.documentElement,ox=se.scrollLeft,oy=se.scrollTop;"
             + "return Array.prototype.slice.call(g.getClientRects()).filter(function(q){return q.width>0&&q.height>0;})"
             + ".map(function(q){return{l:q.left+ox,r:q.right+ox,c:(q.top+q.bottom)/2+oy};});}"
-            + "function fit(){var items=document.querySelectorAll('div[data-style=\"\(name)\"]'),own=words();"
+            + "function fit(){var lines=[];(window.__pocketFits||[]).forEach(function(f){"
+            + "var items=document.querySelectorAll('div[data-style=\"'+f.s+'\"]'),own=words(f.id,f.until);"
             + "for(var n=0;n<items.length;n++){var item=items[n];"
             + "Array.prototype.slice.call(item.querySelectorAll('[data-join]')).forEach(function(j){j.remove();});"
             + "var rows=[];Array.prototype.slice.call(item.children).forEach(function(b){"
@@ -396,6 +442,7 @@ extension ReadAlongPageScript {
             + "if(!on.length){r.boxes.forEach(function(b){b.style.display='none';});return false;}"
             + "r.l=Math.min.apply(null,on.map(function(q){return q.l;}));r.r=Math.max.apply(null,on.map(function(q){return q.r;}));"
             + "return true;});}"
+            + "if(!rows.length)continue;"
             + "rows.forEach(function(r){r.l-=\(side);r.r+=\(side);});"
             + "function near(a,b){return b.r>a.l&&b.l<a.r&&Math.abs(a.c-b.c)<2.2*Math.max(a.h,b.h);}"
             + "rows.forEach(function(r){r.up=null;r.down=null;});"
@@ -406,7 +453,9 @@ extension ReadAlongPageScript {
             + "var p=steps.length?steps.sort(function(a,b){return a-b;})[steps.length>>1]:(lh>0?lh:rows[0].h);"
             + "rows.forEach(function(r){var up=r.up,down=r.down;"
             + "var tl=!up||up.l>r.l+1,tr=!up||up.r<r.r-1,bl=!down||down.l>r.l+1,br=!down||down.r<r.r-1;"
-            + "r.t=(tl||tr)?Math.max(r.t+a,r.c-p+r.h/2+1):r.t;r.b=(bl||br)?Math.min(r.b-a,r.c+p-r.h/2-1):r.b;});"
+            + "r.t=(tl||tr)?Math.max(r.t+a,r.c-p+r.h/2+1):r.t;r.b=(bl||br)?Math.min(r.b-a,r.c+p-r.h/2-1):r.b;"
+            + "if(f.s==='\(word)'){for(var m=0;m<lines.length;m++){if(Math.abs(lines[m].c-r.c)<r.h/2){r.t=lines[m].t;r.b=lines[m].b;break;}}}"
+            + "else lines.push({c:r.c,t:r.t,b:r.b});});"
             + "rows.forEach(function(r){var up=r.up,down=r.down;"
             + "var tl=!up||up.l>r.l+1,tr=!up||up.r<r.r-1,bl=!down||down.l>r.l+1,br=!down||down.r<r.r-1;"
             + "r.boxes.forEach(function(b,i){if(i>0){b.style.display='none';return;}"
@@ -415,11 +464,28 @@ extension ReadAlongPageScript {
             + "if(down&&down.t>r.b){var j=r.boxes[0].cloneNode(false),jl=Math.max(r.l,down.l),jr=Math.min(r.r,down.r);"
             + "if(jr>jl){j.dataset.join='1';j.removeAttribute('data-t');j.style.display='';j.style.borderRadius='0';"
             + "j.style.top=(r.b-0.5)+'px';j.style.height=(down.t-r.b+1)+'px';j.style.left=jl+'px';j.style.width=(jr-jl)+'px';"
-            + "item.appendChild(j);}}});}}"
+            + "item.appendChild(j);}}});}});}"
             + "window.__pocketNarration=fit;"
             + "new MutationObserver(function(list){for(var m=0;m<list.length;m++){for(var a=0;a<list[m].addedNodes.length;a++){"
             + "var node=list[m].addedNodes[a];if(!(node.dataset&&node.dataset.join)){fit();return;}}}})"
             + ".observe(document.body,{childList:true,subtree:true});fit();return true;})()"
+    }
+}
+
+/// One wash the fitting script fits (#66): the boxes of `style`, washed in
+/// `wash`, trimmed to the element `fragment`, and for a trail no further than
+/// just before the element `until`.
+public struct ReadAlongFit: Equatable, Sendable {
+    public let style: String
+    public let wash: UInt32
+    public let fragment: String?
+    public let until: String?
+
+    public init(style: String, wash: UInt32, fragment: String?, until: String? = nil) {
+        self.style = style
+        self.wash = wash
+        self.fragment = fragment
+        self.until = until
     }
 }
 

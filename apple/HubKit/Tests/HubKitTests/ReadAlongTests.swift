@@ -133,23 +133,29 @@ struct ReadAlongTests {
                     || wash == GlassColors.mix(page, gold | 0xFF00_0000, 0.45), "\(theme)")
         }
         #expect(GlassColors.alpha(ReadAlongGlow.wash(accent: gold, page: 0xFF000000, ink: 0xFFAFAFAF)) == 0xFF, "opaque")
-        // A page where no share keeps the contrast is left as it is.
-        #expect(ReadAlongGlow.wash(accent: 0xFFFFFF, page: 0xFF808080, ink: 0xFF909090) == 0xFF808080)
+        // A page where no share keeps the contrast: held at its weakest, lowered 0.02 at a time while over 0.06 (#66).
+        var weakest = 0.45
+        while weakest > 0.06 { weakest -= 0.02 }
+        #expect(ReadAlongGlow.wash(accent: 0xFFFFFF, page: 0xFF808080, ink: 0xFF909090)
+                == GlassColors.mix(0xFF808080, 0xFFFFFFFF, weakest))
     }
 
     @Test func theBoxesAreUnderTheWordsInTheWashAndNothingElse() {
         let gold: UInt32 = 0xE3B341
         #expect(ReadAlongGlow.element(tint: gold) == #"<div class="pocket-narration"></div>"#)
         let sheet = ReadAlongGlow.stylesheet(tint: gold)
-        #expect(sheet == #"div[data-style="pocket-narration"] > div.pocket-narration { z-index: -1 !important; "#
+        #expect(sheet == #"div[data-style="pocket-narration"] > div.pocket-narration { z-index: -2 !important; "#
                 + "background-color: var(--pocket-narration-wash, transparent) !important; }")
+        // The word spoken's a layer above it (#66).
+        #expect(ReadAlongGlow.wordStylesheet() == #"div[data-style="pocket-word"] > div.pocket-word { z-index: -1 !important; "#
+                + "background-color: var(--pocket-word-wash, transparent) !important; }")
         // No translucent layer over the text, no group opacity, no glow, no ring.
         for word in ["opacity", "rgba", "box-shadow", "filter", "border:", "blend"] { #expect(!sheet.contains(word), "\(word)") }
     }
 
     @Test func theFittingScriptSetsTheWashAndFitsEachRowToItsLine() {
         let script = ReadAlongPageScript.fitNarration(wash: 0xFFF5E0B4)
-        #expect(script.contains("setProperty('--pocket-narration-wash','rgb(245, 224, 180)')"))
+        #expect(script.contains("v:'--pocket-narration-wash',c:'rgb(245, 224, 180)'"))
         // A row is as tall as its words; the gap to the next row is a join as wide as the two rows share.
         #expect(script.contains("b.style.top=r.t+'px';b.style.height=(r.b-r.t)+'px';"))
         #expect(script.contains("jl=Math.max(r.l,down.l),jr=Math.min(r.r,down.r);"))
@@ -158,6 +164,9 @@ struct ReadAlongTests {
         #expect(script.contains("var a=0.15*(parseFloat(getComputedStyle(item).fontSize)||16);"))
         // Its own joins do not set it off again.
         #expect(script.contains("if(!(node.dataset&&node.dataset.join)){fit();return;}"))
+        // The wash is set as each style's own variable, from the fits kept in the page (#66).
+        #expect(script.contains("{s:\"pocket-narration\",v:'--pocket-narration-wash',c:'rgb(245, 224, 180)'"))
+        #expect(script.contains("fits.forEach(function(f){document.documentElement.style.setProperty(f.v,f.c);});"))
         // It stays in the page and fits again when Readium lays the boxes out again.
         #expect(script.contains("new MutationObserver") && script.contains("window.__pocketNarration=fit;"))
         // Corners round only on the outside of the shape.
@@ -169,11 +178,11 @@ struct ReadAlongTests {
     @Test func eachRowIsTrimmedToTheSentencesWordsWithoutTheSpacesAround() {
         let script = ReadAlongPageScript.fitNarration(wash: 0xFFF5E0B4, fragment: #"one-s2"x"#)
         // The sentence's element, named safely, kept for the fits Readium's relayouts set off.
-        #expect(script.contains(#"window.__pocketNarrationId="one-s2\"x";"#))
+        #expect(script.contains(#"id:"one-s2\"x",until:"""#) && script.contains("window.__pocketFits=fits;"))
         // A Range from its first to its last character that is not a space, its text walked in order.
         #expect(script.contains("createTreeWalker(el,NodeFilter.SHOW_TEXT,null)"))
         #expect(script.contains(#"if(/\S/.test(s.charAt(i))){if(!a)a=[n,i];z=[n,i+1];}"#))
-        #expect(script.contains("g.setStart(a[0],a[1]);g.setEnd(z[0],z[1]);"))
+        #expect(script.contains("g.setStart(a[0],a[1]);if(stop)g.setEndBefore(stop);else g.setEnd(z[0],z[1]);"))
         // A row takes that Range's extent on its line; a row of only the space gets no box.
         #expect(script.contains("if(!on.length){r.boxes.forEach(function(b){b.style.display='none';});return false;}"))
         #expect(script.contains("r.l=Math.min.apply(null,on.map(function(q){return q.l;}));r.r=Math.max.apply(null,on.map(function(q){return q.r;}));"))
@@ -182,7 +191,7 @@ struct ReadAlongTests {
         let air = try! #require(script.range(of: "rows.forEach(function(r){r.l-=2;r.r+=2;});"))
         #expect(trim.lowerBound < air.lowerBound)
         // With no element named, Readium's own extents stand.
-        #expect(ReadAlongPageScript.fitNarration(wash: 0xFFF5E0B4).contains(#"window.__pocketNarrationId="";"#))
+        #expect(ReadAlongPageScript.fitNarration(wash: 0xFFF5E0B4).contains(#"id:"",until:"""#))
     }
 
     // MARK: The place

@@ -20,6 +20,11 @@ public enum DemoReadAlong {
     public static let workId = "rw_demo_darkmatter"
     public static let sourceItemId = "demo-dm"
 
+    /// Dark Matter's pack has a word set (#66): its manifest says `wordLevel`
+    /// and `granularity=word` is the word edition. HUB_DEMO_SENTENCES=1 makes
+    /// it a book without one, which the hub answers with its sentences.
+    public static var servesWords: Bool { ProcessInfo.processInfo.environment["HUB_DEMO_SENTENCES"] != "1" }
+
     /// One of the edition's audio files, and where in which track it begins.
     struct AudioFile {
         let href: String
@@ -127,15 +132,25 @@ public enum DemoReadAlong {
         guard value("audio", in: query) == "omit" else {
             return DemoTransport.Answer(404, #"{"error":{"code":"not_found","message":"The whole edition is not in the demo hub"}}"#)
         }
-        var answer = DemoTransport.Answer(200, data: slimEdition(), type: "application/epub+zip")
-        answer.headers = ["ETag": DemoTransport.etag(slimEdition())]
+        // Word by word when asked (#66), as the hub serves our word overlay; an older app asks for sentences.
+        let edition = value("granularity", in: query) == "word" && servesWords ? slimWordEdition() : slimEdition()
+        var answer = DemoTransport.Answer(200, data: edition, type: "application/epub+zip")
+        answer.headers = ["ETag": DemoTransport.etag(edition)]
         return answer
     }
 
     /// The edition without its audio, made once a run.
     public static func slimEdition() -> Data { made }
 
-    private static let made: Data = {
+    /// The same, word by word (#66): each word of a sentence an element
+    /// `<sentence>-wN`, and its overlay one `<par>` per word inside a
+    /// `<seq epub:textref="doc#sentence">` per sentence, as our word packs are.
+    public static func slimWordEdition() -> Data { madeWords }
+
+    private static let made: Data = edition(words: false)
+    private static let madeWords: Data = edition(words: true)
+
+    private static func edition(words: Bool) -> Data {
         var entries: [(name: String, data: Data)] = [
             ("mimetype", Data("application/epub+zip".utf8)),
             ("META-INF/container.xml", Data(container.utf8)),
@@ -145,11 +160,11 @@ public enum DemoReadAlong {
             ("OEBPS/about.xhtml", Data(titlePage.utf8)),
         ]
         for index in chapters.indices {
-            entries.append(("OEBPS/" + chapters[index].file, Data(page(index).utf8)))
-            entries.append(("OEBPS/Overlays/\(chapters[index].name).smil", Data(overlay(index).utf8)))
+            entries.append(("OEBPS/" + chapters[index].file, Data(page(index, words: words).utf8)))
+            entries.append(("OEBPS/Overlays/\(chapters[index].name).smil", Data(overlay(index, words: words).utf8)))
         }
         return StoredZip.archive(entries)
-    }()
+    }
 
     private static let container = """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -221,7 +236,7 @@ public enum DemoReadAlong {
         </html>
         """
 
-    private static func page(_ chapter: Int) -> String {
+    private static func page(_ chapter: Int, words: Bool = false) -> String {
         let said = sentences(chapter)
         // Three sentences to a paragraph. As Storyteller writes them, the space
         // between two sentences is inside one of their elements (#56): after
@@ -231,7 +246,8 @@ public enum DemoReadAlong {
         let paragraphs = stride(from: 0, to: said.count, by: 3).map { start in
             let group = Array(said[start..<min(start + 3, said.count)])
             return "<p>" + group.enumerated().map { index, sentence in
-                let text = before ? (index > 0 ? " " : "") + sentence.text : sentence.text + (index < group.count - 1 ? " " : "")
+                let said = words ? wrapped(sentence) : sentence.text
+                let text = before ? (index > 0 ? " " : "") + said : said + (index < group.count - 1 ? " " : "")
                 return #"<span id="\#(sentence.id)">\#(text)</span>"#
             }.joined() + "</p>"
         }
@@ -247,13 +263,20 @@ public enum DemoReadAlong {
             """
     }
 
-    private static func overlay(_ chapter: Int) -> String {
+    private static func overlay(_ chapter: Int, words: Bool = false) -> String {
         let name = chapters[chapter].name
         let file = chapters[chapter].smilFile
         let pars = sentences(chapter).map { sentence in
             let audio = files[sentence.file].href.replacingOccurrences(of: "OEBPS/", with: "../")
-            return #"<par id="\#(sentence.id)-par"><text src="../\#(file)#\#(sentence.id)"/>"#
-                + #"<audio src="\#(audio)" clipBegin="\#(seconds(sentence.beginMs))" clipEnd="\#(seconds(sentence.endMs))"/></par>"#
+            guard words else {
+                return #"<par id="\#(sentence.id)-par"><text src="../\#(file)#\#(sentence.id)"/>"#
+                    + #"<audio src="\#(audio)" clipBegin="\#(seconds(sentence.beginMs))" clipEnd="\#(seconds(sentence.endMs))"/></par>"#
+            }
+            let inner = wordTimes(sentence).enumerated().map { index, time in
+                #"<par id="\#(sentence.id)-w\#(index)"><text src="../\#(file)#\#(sentence.id)-w\#(index)"/>"#
+                    + #"<audio src="\#(audio)" clipBegin="\#(seconds(time.begin))" clipEnd="\#(seconds(time.end))"/></par>"#
+            }
+            return #"<seq id="\#(sentence.id)-seq" epub:textref="../\#(file)#\#(sentence.id)">"# + inner.joined() + "</seq>"
         }
         return """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -263,6 +286,53 @@ public enum DemoReadAlong {
             </seq></body>
             </smil>
             """
+    }
+
+    /// A sentence's words as our word packs write them: each run of letters,
+    /// digits and apostrophes an element `<sentence>-wN` from 0, the
+    /// punctuation and the spaces between them outside.
+    static func wrapped(_ sentence: Sentence) -> String {
+        var out = ""
+        var index = 0
+        for token in tokens(sentence.text) {
+            if token.word {
+                out += #"<span id="\#(sentence.id)-w\#(index)">\#(token.text)</span>"#
+                index += 1
+            } else {
+                out += token.text
+            }
+        }
+        return out
+    }
+
+    /// When each word of a sentence is spoken: its clip shared out by the words' letters, the last ending with it.
+    static func wordTimes(_ sentence: Sentence) -> [(begin: Int64, end: Int64)] {
+        let words = tokens(sentence.text).filter(\.word).map(\.text)
+        let total = max(1, words.reduce(0) { $0 + $1.count })
+        let length = sentence.endMs - sentence.beginMs
+        var times: [(begin: Int64, end: Int64)] = []
+        var letters = 0
+        for (index, word) in words.enumerated() {
+            let begin = sentence.beginMs + length * Int64(letters) / Int64(total)
+            letters += word.count
+            let end = index == words.count - 1 ? sentence.endMs : sentence.beginMs + length * Int64(letters) / Int64(total)
+            times.append((begin, max(end, begin + 1)))
+        }
+        return times
+    }
+
+    /// A sentence's text as runs of word and not word.
+    private static func tokens(_ text: String) -> [(text: String, word: Bool)] {
+        var out: [(text: String, word: Bool)] = []
+        for character in text {
+            let word = character.isLetter || character.isNumber || character == "'" || character == "\u{2019}"
+            if let last = out.last, last.word == word {
+                out[out.count - 1].text.append(character)
+            } else {
+                out.append((String(character), word))
+            }
+        }
+        return out
     }
 
     /// "52.000s", as Storyteller writes a clip.

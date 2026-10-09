@@ -151,11 +151,14 @@ struct BookReaderScreen: View {
                 ComfortLayer(comfort: comfort.value)
                 #if DEBUG
                 if ProcessInfo.processInfo.environment["HUB_DEBUG_READALONG"] == "1" {
-                    Text(reader.debugReadAlong)
-                        .font(.caption2)
-                        .opacity(0.02)
-                        .allowsHitTesting(false)
-                        .accessibilityIdentifier("debug-readalong")
+                    // Asked again each second: the frames and the fits are not observed.
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        Text(reader.debugReadAlong)
+                            .font(.caption2)
+                            .opacity(0.02)
+                            .allowsHitTesting(false)
+                            .accessibilityIdentifier("debug-readalong")
+                    }
                 }
                 #endif
             }
@@ -198,6 +201,9 @@ struct BookReaderScreen: View {
         .onChange(of: keys) { _, focused in NSLog("book: the screen %@ the keys", focused ? "holds" : "lost") }
         #endif
         .onAppear {
+            #if DEBUG
+            FrameMonitor.shared.start()
+            #endif
             keys = true
             reader.systemDark = colorScheme == .dark
             pad.start { action in reader.pad(action) }
@@ -344,6 +350,10 @@ struct BookReaderScreen: View {
             reader.appearanceTab = .font
             reader.openSheet(.appearance)
             reader.pressAppearance(.spacingPage)
+        case "highlight":
+            reader.appearanceTab = .themes
+            reader.openSheet(.appearance)
+            reader.pressAppearance(.highlightPage)
         case "keys": reader.openSheet(.keys)
         default: break
         }

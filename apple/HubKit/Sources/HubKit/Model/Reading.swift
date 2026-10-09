@@ -1310,12 +1310,16 @@ public struct ReadingAudioManifest: Decodable, Equatable, Sendable {
     public var chapters: [ReadingAudioChapter]
     public var alignment: ReadingAudioAlignment?
     public var alignmentReason: String
+    /// The book's read-along pack has a word set the hub serves (#66): the
+    /// edition is then asked for with `granularity=word`. Absent from a hub
+    /// before #66 and for a book without one, which are read by the sentence.
+    public var wordLevel: Bool
     public var cache: CacheInfo
 
     public init(workId: String = "", sourceItemId: String = "", revision: String = "", narrator: String = "",
                 totalMs: Int64 = 0, aligned: Bool = false, tracks: [ReadingAudioTrack] = [],
                 chapters: [ReadingAudioChapter] = [], alignment: ReadingAudioAlignment? = nil, alignmentReason: String = "",
-                cache: CacheInfo = CacheInfo()) {
+                wordLevel: Bool = false, cache: CacheInfo = CacheInfo()) {
         self.workId = workId
         self.sourceItemId = sourceItemId
         self.revision = revision
@@ -1326,11 +1330,12 @@ public struct ReadingAudioManifest: Decodable, Equatable, Sendable {
         self.chapters = chapters
         self.alignment = alignment
         self.alignmentReason = alignmentReason
+        self.wordLevel = wordLevel
         self.cache = cache
     }
 
     enum CodingKeys: String, CodingKey {
-        case workId, sourceItemId, revision, narrator, totalMs, aligned, tracks, chapters, alignment, alignmentReason, cache
+        case workId, sourceItemId, revision, narrator, totalMs, aligned, tracks, chapters, alignment, alignmentReason, wordLevel, cache
     }
 
     public init(from decoder: any Decoder) throws {
@@ -1338,7 +1343,8 @@ public struct ReadingAudioManifest: Decodable, Equatable, Sendable {
         self.init(workId: c.value(.workId, ""), sourceItemId: c.value(.sourceItemId, ""), revision: c.value(.revision, ""),
                   narrator: c.value(.narrator, ""), totalMs: c.value(.totalMs, 0), aligned: c.value(.aligned, false),
                   tracks: c.value(.tracks, []), chapters: c.value(.chapters, []), alignment: c.optional(.alignment),
-                  alignmentReason: c.value(.alignmentReason, ""), cache: c.value(.cache, CacheInfo()))
+                  alignmentReason: c.value(.alignmentReason, ""), wordLevel: c.value(.wordLevel, false),
+                  cache: c.value(.cache, CacheInfo()))
     }
 }
 

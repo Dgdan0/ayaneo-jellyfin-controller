@@ -680,6 +680,8 @@ public enum DemoReading {
             fields["aligned"] = true
             fields["alignment"] = DemoReadAlong.alignment()
             fields["chapters"] = DemoReadAlong.bookChapters()
+            // Its pack has a word set (#66), as the hub says it.
+            if DemoReadAlong.servesWords { fields["wordLevel"] = true }
         }
         return fields
     }

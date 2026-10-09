@@ -8,8 +8,10 @@ import Foundation
 public enum ReadAlongPackage {
     /// The most of one XML document read.
     static let xmlLimit = 4 * 1_024 * 1_024
-    /// The most sentences (or words) a narration may hold.
+    /// The most sentences a narration may hold.
     static let segmentLimit = 200_000
+    /// The most words an edition read word by word may hold (#66): a 50-hour book has about half a million.
+    static let wordLimit = 2_000_000
 
     /// The narration's timeline from the edition at `url`.
     public static func read(_ url: URL, requireAudio: Bool = true) throws(ReadAlongError) -> ReadAlongTimeline {
@@ -37,6 +39,9 @@ public enum ReadAlongPackage {
         var manifest: [String: XMLElements.Element] = [:]
         for item in opf.named("item") { manifest[item.attributes["id"] ?? ""] = item }
         var segments: [ReadAlongSegment] = []
+        // Word by word (#66): each par's sentence, from the `<seq epub:textref="doc#sentence">` round it.
+        var sentenceOf: [String] = []
+        var nested = false
         for ref in opf.named("itemref") {
             guard let chapter = manifest[ref.attributes["idref"] ?? ""] else { continue }
             let overlayId = chapter.attributes["media-overlay"] ?? ""
@@ -64,14 +69,24 @@ public enum ReadAlongPackage {
                 // to light: that one sentence is skipped and the rest of the
                 // edition still plays.
                 if end <= begin { continue }
+                let sentence = try Self.sentence(of: par, in: smil, smilPath: smilPath, href: words.path)
+                if sentence != nil { nested = true }
                 // In the key's form, as every page href is compared (#61).
                 segments.append(ReadAlongSegment(textHref: BookHref.normalized(words.path), fragment: words.fragment,
                                                  audioHref: audioHref,
                                                  beginMs: begin, endMs: end))
-                guard segments.count <= segmentLimit else { throw ReadAlongError("Narration timeline is too large") }
+                sentenceOf.append(sentence ?? words.fragment)
+                guard segments.count <= (nested ? wordLimit : segmentLimit) else {
+                    throw ReadAlongError("Narration timeline is too large")
+                }
             }
         }
         guard !segments.isEmpty else { throw ReadAlongError("This edition has no aligned narration") }
+        // Word by word (#66): stretches that run forward, each sentence its words.
+        if nested {
+            let built = wordStretches(segments, sentenceOf: sentenceOf)
+            return ReadAlongTimeline(tracks: built.tracks, words: built.words)
+        }
         // A stretch is one audio file read on: a new file, or a clip earlier
         // than the one before, starts the next.
         var tracks: [ReadAlongTrack] = []
@@ -85,6 +100,104 @@ public enum ReadAlongPackage {
         }
         if let first = group.first { tracks.append(ReadAlongTrack(audioHref: first.audioHref, segments: group)) }
         return ReadAlongTimeline(tracks: tracks)
+    }
+
+    /// How far a word edition's sentence may begin before the one ahead of
+    /// it has ended and still be heard in the same stretch (#66; the Pocket's
+    /// `WORD_OVERLAP_MS`). Voices overlap in a dramatization and the aligner's
+    /// word ends run on a little (The Final Empire, Dramatized: 227 of 258 such
+    /// places by a second or less, the largest 5.8 s), while a chapter told out
+    /// of order goes back an hour. A new stretch would play the overlap twice.
+    static let wordOverlapMs: Int64 = 10_000
+
+    /// A word edition's stretches and each sentence's words (#66, the
+    /// contract's rule and the Pocket's `stretches`): the pars in the order
+    /// the text reads them, one sentence's run of them in one file at a time.
+    /// A new stretch where the file changes or a run begins before the
+    /// stretch so far has ended, a run with words only when by more than
+    /// `wordOverlapMs`. A stretch with words runs forward: each par begins and
+    /// ends no earlier than the one before, so the highlight only goes on and
+    /// nothing is heard twice. Each sentence is then one segment, from its
+    /// first word's beginning to its last word's end; a par the pack could not
+    /// cut into words stays the sentence it is.
+    static func wordStretches(_ pars: [ReadAlongSegment], sentenceOf: [String])
+        -> (tracks: [ReadAlongTrack], words: [String: [ReadAlongWord]]) {
+        struct Run {
+            let pars: [ReadAlongSegment]
+            let sentence: String
+            let isWords: Bool
+        }
+        var runs: [Run] = []
+        var at = 0
+        while at < pars.count {
+            let first = pars[at]
+            var until = at + 1
+            while until < pars.count, pars[until].audioHref == first.audioHref, pars[until].textHref == first.textHref,
+                  sentenceOf[until] == sentenceOf[at] { until += 1 }
+            let isWords = (at..<until).contains { sentenceOf[$0] != pars[$0].fragment }
+            runs.append(Run(pars: Array(pars[at..<until]), sentence: sentenceOf[at], isWords: isWords))
+            at = until
+        }
+        var tracks: [ReadAlongTrack] = []
+        var words: [String: [ReadAlongWord]] = [:]
+        var group: [Run] = []
+        var groupEnd = Int64.min
+        var groupWords = false
+        func close() {
+            guard let audio = group.first?.pars.first?.audioHref else { return }
+            var begin = Int64.min
+            var end = Int64.min
+            var sentences: [ReadAlongSegment] = []
+            for run in group {
+                let forwarded = run.pars.map { par -> ReadAlongSegment in
+                    guard groupWords else { return par }
+                    begin = max(begin, par.beginMs)
+                    end = max(end, par.endMs)
+                    return ReadAlongSegment(textHref: par.textHref, fragment: par.fragment, audioHref: par.audioHref,
+                                            beginMs: begin, endMs: end)
+                }
+                guard run.isWords, let first = forwarded.first, let last = forwarded.last else {
+                    sentences += forwarded
+                    continue
+                }
+                words[ReadAlongTimeline.wordKey(first.textHref, run.sentence, audio: first.audioHref), default: []]
+                    += forwarded.map { ReadAlongWord(fragment: $0.fragment, beginMs: $0.beginMs, endMs: $0.endMs) }
+                sentences.append(ReadAlongSegment(textHref: first.textHref, fragment: run.sentence, audioHref: first.audioHref,
+                                                  beginMs: first.beginMs, endMs: last.endMs))
+            }
+            tracks.append(ReadAlongTrack(audioHref: audio, segments: sentences))
+            group = []
+            groupEnd = .min
+            groupWords = false
+        }
+        for run in runs {
+            let runBegin = run.pars.map(\.beginMs).min() ?? 0
+            let leeway = run.isWords ? wordOverlapMs : 0
+            if let last = group.last, last.pars[0].audioHref != run.pars[0].audioHref || runBegin < groupEnd - leeway { close() }
+            group.append(run)
+            groupEnd = max(groupEnd, run.pars.map(\.endMs).max() ?? 0)
+            groupWords = groupWords || run.isWords
+        }
+        close()
+        return (tracks, words)
+    }
+
+    /// The sentence a word's par belongs to (#66): the fragment of the
+    /// nearest `<seq epub:textref="doc#sentence">` round it, when that names
+    /// the word's own document; nil for a par that is a sentence itself.
+    static func sentence(of par: XMLElements.Element, in smil: XMLElements, smilPath: String,
+                         href: String) throws(ReadAlongError) -> String? {
+        var parent = par.parent
+        while let index = parent {
+            let element = smil.elements[index]
+            if element.name == "seq", let reference = element.attributes["epub:textref"] ?? element.attributes["textref"],
+               reference.contains("#") {
+                let resolved = try resolve(smilPath, reference)
+                return resolved.path == href && !resolved.fragment.isEmpty ? resolved.fragment : nil
+            }
+            parent = element.parent
+        }
+        return nil
     }
 
     /// A SMIL clock value in milliseconds: "01:02:03.250", "npt=1.25s",

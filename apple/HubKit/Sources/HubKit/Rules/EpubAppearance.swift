@@ -183,10 +183,13 @@ public struct EpubRendering: Equatable, Sendable {
     /// "start" or "justify".
     public let textAlign: String
     public let hyphens: Bool
+    /// The page colour shown, System's resolved: the read-along highlight is chosen per page (#66).
+    public let page: EpubTheme
 
     /// System colours follow the device: Paper by day, Dark after dark (#47).
     public init(_ value: EpubReaderPreferences, systemDark: Bool) {
         let theme: EpubTheme = value.theme == .system ? (systemDark ? .black : .light) : value.theme
+        page = theme
         self.theme = switch theme {
         case .light, .system: "light"
         case .sepia: "sepia"
