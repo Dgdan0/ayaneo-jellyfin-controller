@@ -87,8 +87,11 @@ class ReadingModesTest {
         assertEquals("Going on from where the voice stopped", ModePlace.note(ModePlace.Start.WHERE_VOICE_STOPPED, ReadingMode.ALONG))
         assertEquals("Listening from the top of your page", ModePlace.note(ModePlace.Start.TOP_OF_PAGE, ReadingMode.AUDIO))
         assertEquals("Reading along from the top of your page", ModePlace.note(ModePlace.Start.TOP_OF_PAGE, ReadingMode.ALONG))
-        assertEquals("The page opens where the voice was", ModePlace.noteToEbook(ReadingMode.AUDIO))
-        assertEquals("Paused. Your place is kept", ModePlace.noteToEbook(ReadingMode.ALONG))
+        assertEquals("Heard to here: the page opens where the voice was", ModePlace.noteToEbook(ReadingMode.AUDIO, marked = true))
+        assertEquals("Heard to here: paused, your place is kept", ModePlace.noteToEbook(ReadingMode.ALONG, marked = true))
+        // With no mark there is nothing to name: only what happened to the voice.
+        assertEquals("The voice's place is not in this edition: the page stays where you were", ModePlace.noteToEbook(ReadingMode.AUDIO, marked = false))
+        assertEquals("Paused. Your place is kept", ModePlace.noteToEbook(ReadingMode.ALONG, marked = false))
     }
 
     @Test fun theVoiceKeepsGoingBetweenAudioAndReadAlongAndNowhereElse() {

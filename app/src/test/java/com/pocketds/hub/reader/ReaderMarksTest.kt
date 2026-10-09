@@ -34,7 +34,30 @@ class ReaderMarksTest {
         assertTrue(ReaderMarks.element(null, tint).contains("pd-hl"))
         assertTrue(ReaderMarks.STYLESHEET.contains(".pd-hl { z-index: -1 !important;"))
         assertTrue(ReaderMarks.STYLESHEET.contains(".pd-note { z-index: 6"))
-        assertTrue(ReaderMarks.STYLESHEET.contains("Heard to here"))
+    }
+
+    @Test fun heardToHereIsAnUnderlineAndATabInTheMarginAndNeverAWordsOnThePage() {
+        val tint = ReaderMarks.tint(HighlightColor.YELLOW, paper, paperInk)
+        // Nothing of it is text drawn over the page: the old pill (a label above the first line) is gone from the stylesheets.
+        assertFalse(ReaderMarks.STYLESHEET.contains("Heard to here"))
+        assertFalse(ReaderMarks.TAB_STYLESHEET.contains("content:"))
+        assertTrue(ReaderMarks.STYLESHEET.contains(".pd-heard { z-index: 6 !important; background: transparent !important; border-bottom: 2px solid var(--heard)"))
+        // The tab is the first line's, in the margin of the column: 3px from its edge and 6px wide, inside the 16px the page keeps free.
+        assertTrue(ReaderMarks.TAB_STYLESHEET.contains(".pd-tab:not(:first-child) .pd-tab-bar { display: none; }"))
+        assertTrue(ReaderMarks.TAB_STYLESHEET.contains("left: 3px"))
+        assertTrue(ReaderMarks.TAB_STYLESHEET.contains("width: 6px"))
+        assertTrue(3 + 6 < PageGeometry.GUTTER_DP)
+        // Its words are the page's accessibility text, once, on the bar.
+        val tab = ReaderMarks.tabElement(tint)
+        assertTrue(tab, tab.contains("""role="img" aria-label="Heard to here""""))
+        assertEquals(1, Regex("aria-label").findAll(tab).count())
+        // Painted by the element itself, with !important: Readium's stylesheet blanks the background of every element otherwise.
+        assertTrue(tab, tab.contains("""style="background-color: ${ReadAlongGlow.rgb(tint)} !important;""""))
+        assertFalse(ReaderMarks.TAB_STYLESHEET.contains("var(--heard)"))
+        // The page is XHTML: an element Readium puts in it is parsed as XML, so every attribute has a value.
+        for (element in listOf(tab, ReaderMarks.element(ReaderMarks.HEARD, tint), ReaderMarks.element(ReaderMarks.NOTE, tint), ReaderMarks.element(null, tint))) {
+            assertFalse(element, Regex("""<[^>]*\s(hidden|disabled|checked|selected)(\s|/|>)""").containsMatchIn(element))
+        }
     }
 
     @Test fun markupBecomesTheTextThePageShows() {

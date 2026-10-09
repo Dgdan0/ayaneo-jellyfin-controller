@@ -90,8 +90,17 @@ object ModePlace {
         Start.TOP_OF_PAGE -> "${to.doing} from the top of your page"
     }
 
-    /** Leaving the voice for the page: what the screen says. */
-    fun noteToEbook(from: ReadingMode): String = if (from == ReadingMode.AUDIO) "The page opens where the voice was" else "Paused. Your place is kept"
+    /**
+     * Leaving the voice for the page: what the screen says, once, as the page comes up. With the mark drawn it names it ("Heard to here",
+     * which is also the mark's accessibility text), so a person who has not met the tab in the margin learns what it is; without
+     * one (the sentence is not in this edition) it says only what happened to the voice.
+     */
+    fun noteToEbook(from: ReadingMode, marked: Boolean): String = when {
+        marked && from == ReadingMode.AUDIO -> "Heard to here: the page opens where the voice was"
+        marked -> "Heard to here: paused, your place is kept"
+        from == ReadingMode.AUDIO -> "The voice's place is not in this edition: the page stays where you were"
+        else -> "Paused. Your place is kept"
+    }
 
     /** Between Audio and Read along the voice keeps going where it is; to or from the page it does not. */
     fun voiceKeepsGoing(from: ReadingMode, to: ReadingMode): Boolean =

@@ -184,8 +184,12 @@ class ReaderModesTest {
             assertTrue(words.toString(), words.any { it.contains("Inside, the stair wound up into darkness") || it.contains("Maren counted the steps") || it.contains("\u201C") })
             shot("along-away")
             withContext(Dispatchers.Main) { asked()!!.rows.first { row -> all(row).filterIsInstance<android.widget.TextView>().any { it.text == "Stay here" } }.performClick() }
+            // This device's place is kept and goes to the hub: it is the early one (the page goes there and Readium writes its own words for
+            // it, so how far through the book it is is what is compared, not the stand-in's locator), and not the iPad's, which is at 0.6.
+            fun share(place: com.pocketds.hub.reader.ReadingLocation?): Double? =
+                (((place?.locator?.get("locations") as? kotlinx.serialization.json.JsonObject)?.get("totalProgression")) as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()
             until("this device's place is kept", 20_000) {
-                com.pocketds.hub.reader.ReadingProgress.get(activity).store.read(key)?.let { it.pending && it.local == early } == true
+                com.pocketds.hub.reader.ReadingProgress.get(activity).store.read(key)?.let { it.pending && (share(it.local) ?: 1.0) < 0.3 } == true
             }
         }
     }
@@ -273,7 +277,8 @@ class ReaderModesTest {
             with(ebook) {
                 until("the sentence is marked", 30_000) { field<com.pocketds.hub.reader.SentenceAnchor?>("heardAnchor") != null }
             }
-            assertTrue(notes.toString(), notes.any { it == "Paused. Your place is kept" })
+            // Said once, as the page comes up, and it names the mark.
+            assertEquals(notes.toString(), 1, notes.count { it == "Heard to here: paused, your place is kept" })
             var marked = 0
             for (i in 0 until 60) {
                 marked = count("[data-group=\"heard\"] [data-style] > *")

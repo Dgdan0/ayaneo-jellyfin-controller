@@ -727,6 +727,12 @@ class EpubReaderScreen(
             },
             stylesheet = ReaderMarks.STYLESHEET
         ))
+        set(MarginTab::class, HtmlDecorationTemplate(
+            layout = HtmlDecorationTemplate.Layout.BOXES,
+            width = HtmlDecorationTemplate.Width.PAGE,
+            element = { decoration -> ReaderMarks.tabElement((decoration.style as? MarginTab)?.tint ?: colors.accent) },
+            stylesheet = ReaderMarks.TAB_STYLESHEET
+        ))
     }
 
     private fun refreshKeys() {
@@ -2054,7 +2060,6 @@ class EpubReaderScreen(
      */
     private fun openAtVoice(anchor: SentenceAnchor) {
         heardAnchor = anchor
-        host.notify(ModePlace.noteToEbook(entry.from ?: ReadingMode.ALONG))
         uiScope.launch {
             var target = if (anchor.document in documentOrder) annotationLocator(ReadingAnnotation(id = "heard", document = anchor.document, quote = anchor.quote)) else null
             if (target == null) {
@@ -2062,15 +2067,23 @@ class EpubReaderScreen(
                 target = if (book == null) null else runCatching { EpubBookSearch.find(book, anchor.quote.highlight.take(80), limit = 1).firstOrNull() }.getOrNull()
             }
             target?.let { goTo(it) }
+            // Said once, as the page comes up, and only when there is a mark to say it of.
+            host.notify(ModePlace.noteToEbook(entry.from ?: ReadingMode.ALONG, marked = target != null))
             drawHeard(target ?: return@launch)
         }
     }
 
-    /** "Heard to here" over the sentence, in the accent. */
+    /**
+     * "Heard to here" at the sentence (#62): an underline in the accent under all of it, and a tab in the page's side margin beside its first
+     * line. Nothing is drawn over a word, so it cannot cover one however large the text or tight the lines.
+     */
     private fun drawHeard(at: Locator) {
         val reader = navigator ?: return
         uiScope.launch {
-            reader.applyDecorations(listOf(Decoration("heard", at, Decoration.Style.Underline(colors.accent), mapOf(ReaderMarks.KIND to ReaderMarks.HEARD))), ReaderMarks.HEARD_GROUP)
+            reader.applyDecorations(listOf(
+                Decoration("heard", at, Decoration.Style.Underline(colors.accent), mapOf(ReaderMarks.KIND to ReaderMarks.HEARD)),
+                Decoration("heard-tab", at, MarginTab(colors.accent))
+            ), ReaderMarks.HEARD_GROUP)
         }
     }
 
@@ -2837,7 +2850,7 @@ class EpubReaderScreen(
         /** How long a switch of mode waits for the hub to take the place it kept, before it opens the next screen anyway. */
         const val FLUSH_MS = 2_500L
         /** Whether the "Heard to here" mark has a box on the page in front, as 1 or 0. */
-        const val HEARD_ON_PAGE = """(function(){var b=document.querySelectorAll('[data-group="heard"] [data-style] > *');
+        const val HEARD_ON_PAGE = """(function(){var b=document.querySelectorAll('[data-group="heard"] .pd-heard');
             for(var i=0;i<b.length;i++){var r=b[i].getBoundingClientRect();if(r.width>0&&r.right>0&&r.left<window.innerWidth&&r.bottom>0&&r.top<window.innerHeight)return 1;}return 0;})()"""
         /** The cursor's turn of a page: how long it waits for the page to be drawn, and how many times it looks. */
         const val CURSOR_SETTLE_MS = 160L
