@@ -61,25 +61,30 @@ class ReadAlongRealPacksTest {
                 // The sentences of the sentence edition, document by document, in the same order; a sentence the pack wrote no
                 // timed word for (an empty <seq>) is counted, not refused: the reader shows nothing while it is said.
                 val hrefs = segments.map { it.textHref }.distinct()
+                // A sentence the word set times and the sentence set leaves unspoken (A Parade of Horribles has some) is counted
+                // too: the place saved there is still a sentence of the book.
                 var wordless = 0
+                var wordsOnly = 0
                 hrefs.forEach { href ->
                     val theirs = sentences.fragments(href)
                     val ours = words.fragments(href)
-                    assertEquals("$title: the sentences of $href, in order", theirs.filter { it in ours.toSet() }, ours)
-                    wordless += theirs.size - ours.size
+                    val both = theirs.toSet().intersect(ours.toSet())
+                    assertEquals("$title: the sentences of $href, in order", theirs.filter { it in both }, ours.filter { it in both })
+                    wordless += theirs.count { it !in both }
+                    wordsOnly += ours.count { it !in both }
                 }
-                assertTrue("$title: $wordless sentences with no timed word", wordless * 200 < segments.size)
+                assertTrue("$title: $wordless sentences with no timed word, $wordsOnly with words and no sentence clip", (wordless + wordsOnly) * 200 < segments.size)
                 // A place saved by the sentence is found in both, and resumes at the start of that sentence's first word.
                 var found = 0
                 hrefs.forEach { href ->
                     words.fragments(href).forEach { sentence ->
                         assertNotNull("$title: $href#$sentence", words.find(href, sentence))
-                        assertNotNull("$title: $href#$sentence (sentence edition)", sentences.find(href, sentence))
+                        if (sentence in sentences.fragments(href)) assertNotNull("$title: $href#$sentence (sentence edition)", sentences.find(href, sentence))
                         found++
                     }
                 }
                 val wordTracks = words.tracks.size
-                val line = "$title: ${segments.size} segments ($wordCount words), $found sentences ($wordless with no timed word), " +
+                val line = "$title: ${segments.size} segments ($wordCount words), $found sentences ($wordless with no timed word, $wordsOnly timed by word only), " +
                     "${words.tracks.size} stretches (the sentence edition ${sentences.tracks.size}), parsed in $parseMs ms"
                 report.appendLine(line)
                 println(line)
