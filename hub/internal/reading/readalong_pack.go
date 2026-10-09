@@ -102,6 +102,8 @@ type PackSource struct {
 // Pack is a book's pack that holds for its edition as it is now: one Overlay per set it has.
 type Pack struct {
 	Manifest PackManifest
+	// Skipped are the sets the manifest lists that cannot be used, by granularity, and why.
+	Skipped  map[string]string
 	overlays map[string]*Overlay
 }
 
@@ -301,8 +303,12 @@ func readPack(dir, uuid string, edition MediaFile, now time.Time) (*Pack, string
 		return nil, PackStale
 	}
 	newest := info.ModTime()
-	pack := &Pack{Manifest: manifest, overlays: map[string]*Overlay{}}
+	pack := &Pack{Manifest: manifest, Skipped: map[string]string{}, overlays: map[string]*Overlay{}}
 	salt := hex.EncodeToString(sha256Sum(data))
+	// Each set holds or not on its own: a word set the hub cannot use (The Dark Forest's has overlays of 10 and
+	// 11.6 MB, past the 4 MB any narration document may be) leaves the sentence set in use. Why one is left
+	// out is in Skipped, for the log.
+	failure := PackNoSet
 	for _, granularity := range []string{GranularitySentence, GranularityWord} {
 		if !listsGranularity(manifest, granularity) {
 			continue
@@ -310,15 +316,18 @@ func readPack(dir, uuid string, edition MediaFile, now time.Time) (*Pack, string
 		setDir := filepath.Join(dir, granularity)
 		setInfo, err := os.Lstat(setDir)
 		if err != nil || !setInfo.IsDir() {
-			return nil, PackNoSet
+			pack.Skipped[granularity] = PackNoSet
+			continue
 		}
 		files := os.DirFS(setDir)
 		overlay, err := NewOverlay(granularity, files, salt)
 		if err != nil {
+			failure = PackUnreadable
 			if errors.Is(err, errPackUnexpected) {
-				return nil, PackUnexpected
+				failure = PackUnexpected
 			}
-			return nil, PackUnreadable
+			pack.Skipped[granularity] = failure
+			continue
 		}
 		if overlay.newest.After(newest) {
 			newest = overlay.newest
@@ -326,7 +335,7 @@ func readPack(dir, uuid string, edition MediaFile, now time.Time) (*Pack, string
 		pack.overlays[granularity] = overlay
 	}
 	if len(pack.overlays) == 0 {
-		return nil, PackNoSet
+		return nil, failure
 	}
 	if now.Sub(newest) < packSettle {
 		return nil, PackSettling

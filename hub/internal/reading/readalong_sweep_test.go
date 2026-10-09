@@ -71,6 +71,8 @@ type sweepResult struct {
 	BackwardClips int
 	// Pieces whose last clipEnd differs from the edition's, per set.
 	SentencePiecesDiffer, WordPiecesDiffer int
+	// Word-set pieces that stop short of the edition's end (a word left out past the end of the audio): told, not wrong.
+	WordPiecesShort int
 	// The edition's narrated pieces and the source files they make up: what the manifest maps onto
 	// the tracks, unchanged when no piece differs.
 	Pieces, Sources int
@@ -133,8 +135,8 @@ func sweepPack(t *testing.T, dir, uuid, assets, out string) (result sweepResult)
 		return result
 	}
 	sentenceSet, wordSet := pack.Overlay(GranularitySentence), pack.Overlay(GranularityWord)
-	if sentenceSet == nil || wordSet == nil {
-		result.Reason = "a set is missing"
+	if sentenceSet == nil {
+		result.Reason = "no sentence set: " + pack.Skipped[GranularitySentence]
 		return result
 	}
 	plain, err := ReadAlignment(handle, edition.Size)
@@ -145,6 +147,19 @@ func sweepPack(t *testing.T, dir, uuid, assets, out string) (result sweepResult)
 	sentences, err := ReadOverlaidAlignment(handle, edition.Size, sentenceSet)
 	if err != nil {
 		result.Reason = "sentence set unreadable: " + err.Error()
+		return result
+	}
+	if wordSet == nil {
+		// The word set cannot be used; the sentence set still is, when it narrates the edition's pieces.
+		for _, file := range plain.Files {
+			result.EditionSentences += len(file.Pars)
+		}
+		for _, file := range sentences.Files {
+			result.Sentences += len(file.Pars)
+		}
+		result.SentencePiecesDiffer = piecesDiffer(plain, sentences)
+		result.Used = sentences.SamePieces(plain)
+		result.Reason = "sentences only: the word set " + pack.Skipped[GranularityWord]
 		return result
 	}
 	words, err := ReadOverlaidAlignment(handle, edition.Size, wordSet)
@@ -161,7 +176,8 @@ func sweepPack(t *testing.T, dir, uuid, assets, out string) (result sweepResult)
 	result.EditionSentences, result.Sentences, result.WordPars = count(plain), count(sentences), count(words)
 	// Clips the hub ends where the edition says a piece ends (a pack that copied a last clipEnd the aligner ran past): told, not wrong.
 	result.EndedAtAudio = words.PastEnd + words.CutAtEnd
-	result.SentencePiecesDiffer, result.WordPiecesDiffer = piecesDiffer(plain, sentences), piecesDiffer(plain, words)
+	result.SentencePiecesDiffer, result.WordPiecesDiffer = piecesDiffer(plain, sentences), piecesPast(plain, words)
+	result.WordPiecesShort = piecesDiffer(plain, words) - result.WordPiecesDiffer
 	result.Pieces = len(plain.Files)
 	if sources, err := plain.Sources(); err == nil {
 		result.Sources, result.Layout = len(sources), "files"
@@ -312,7 +328,7 @@ func sweepPack(t *testing.T, dir, uuid, assets, out string) (result sweepResult)
 	if result.PiecesPastAudio > 0 {
 		problem("%d pieces end past their audio", result.PiecesPastAudio)
 	}
-	result.Used = sentences.SamePieces(plain) && words.SamePieces(plain)
+	result.Used = sentences.SamePieces(plain) && words.NarratesWithin(plain)
 	if !result.Used {
 		result.Reason = "pieces_differ"
 	}
@@ -336,6 +352,28 @@ func sweepPack(t *testing.T, dir, uuid, assets, out string) (result sweepResult)
 		}
 	}
 	return result
+}
+
+// piecesPast is how many of a's pieces b leaves out, adds, or runs past the end of.
+func piecesPast(a, b *Alignment) int {
+	lengths := map[string]int64{}
+	for _, file := range a.Files {
+		lengths[file.Entry] = file.LengthMs
+	}
+	past := 0
+	seen := map[string]bool{}
+	for _, file := range b.Files {
+		seen[file.Entry] = true
+		if length, found := lengths[file.Entry]; !found || file.LengthMs > length {
+			past++
+		}
+	}
+	for entry := range lengths {
+		if !seen[entry] {
+			past++
+		}
+	}
+	return past
 }
 
 // piecesDiffer is how many of a's pieces b narrates otherwise: missing, added or ending elsewhere.

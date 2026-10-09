@@ -223,13 +223,13 @@ func TestAWordSetThatDoesNotFitIsNotOffered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The piece's last word ends a tenth of a second early: every clip still runs forward, and the
-	// piece is no longer the length the manifest mapped.
+	// The piece's last word ends a tenth of a second past its end: the words would run on past the
+	// piece the manifest mapped, into whatever follows it on the track.
 	ends := regexp.MustCompile(`clipEnd="([0-9]+)\.([0-9]{3})s"`).FindAllSubmatchIndex(data, -1)
 	last := ends[len(ends)-1]
 	seconds, _ := strconv.Atoi(string(data[last[2]:last[3]]))
 	millis, _ := strconv.Atoi(string(data[last[4]:last[5]]))
-	early := seconds*1000 + millis - 100
+	early := seconds*1000 + millis + 100
 	broken := string(data[:last[0]]) + fmt.Sprintf(`clipEnd="%d.%03ds"`, early/1000, early%1000) + string(data[last[1]:])
 	if err := os.WriteFile(smil, []byte(broken), 0o644); err != nil {
 		t.Fatal(err)

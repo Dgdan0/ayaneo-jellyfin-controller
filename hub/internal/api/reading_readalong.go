@@ -36,6 +36,11 @@ func (s *Server) readalongPack(book storyteller.Book, file readingdomain.MediaFi
 	if pack == nil && reason != readingdomain.PackNone && reason != readingdomain.PackBadIdentity {
 		slog.Info("read-along pack not used", "book", book.ID, "reason", reason)
 	}
+	if pack != nil {
+		for granularity, why := range pack.Skipped {
+			slog.Info("read-along pack set not used", "book", book.ID, "granularity", granularity, "reason", why)
+		}
+	}
 	return pack
 }
 
@@ -66,8 +71,8 @@ type packCheck struct {
 	reason string
 }
 
-// overlayUsable says whether a set of a pack reads and narrates the same audio pieces as the
-// edition, each ending at the same moment (readingdomain.Alignment.SamePieces). It is worked out
+// overlayUsable says whether a set of a pack reads and narrates the edition's audio pieces: the sentence
+// set each ending at the same moment (SamePieces), the word set none past it (NarratesWithin). It is worked out
 // once per edition and set and kept; a word set is read for it and not kept, since only the
 // answer is needed (the app reads the words from its copy). Only the end of ctx is an error.
 func (s *Server) overlayUsable(ctx context.Context, book int64, file readingdomain.MediaFile, overlay *readingdomain.Overlay) (bool, error) {
@@ -100,7 +105,13 @@ func (s *Server) overlayUsable(ctx context.Context, book int64, file readingdoma
 				}
 				return refused("unreadable", err.Error())
 			}
-			if !set.SamePieces(plain) {
+			// The sentence set is what the manifest maps onto the tracks, so its pieces are the edition's exactly; the
+			// word set plays from that mapping, so none of its pieces may run past where the edition's ends.
+			fits := set.SamePieces(plain)
+			if overlay.Granularity == readingdomain.GranularityWord {
+				fits = set.NarratesWithin(plain)
+			}
+			if !fits {
 				return refused("pieces_differ", "")
 			}
 			return &packCheck{usable: true}, nil

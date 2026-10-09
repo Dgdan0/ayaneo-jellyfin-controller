@@ -103,7 +103,8 @@ func TestAPackThatDoesNotHoldIsNotUsed(t *testing.T) {
 		{"stale: built from another edition", ReadalongPackOptions{Stale: true}, PackStale},
 		{"still being written", ReadalongPackOptions{Written: time.Now().Add(-time.Minute)}, PackSettling},
 		{"another book's manifest", ReadalongPackOptions{UUID: "00000000-0000-0000-0000-000000000000"}, PackOtherBook},
-		{"a file that is not a document", ReadalongPackOptions{Extra: map[string]map[string][]byte{GranularityWord: {"OEBPS/Styles/x.css": []byte("p{}")}}}, PackUnexpected},
+		{"a file that is not a document in each set", ReadalongPackOptions{Extra: map[string]map[string][]byte{
+			GranularitySentence: {"OEBPS/Styles/x.css": []byte("p{}")}, GranularityWord: {"OEBPS/Styles/x.css": []byte("p{}")}}}, PackUnexpected},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			world := newPackWorld(t, test.options)
@@ -139,15 +140,55 @@ func TestAPackThatDoesNotHoldIsNotUsed(t *testing.T) {
 			t.Fatalf("got %v %q", pack, reason)
 		}
 	})
+	// A set that cannot be used leaves the other in use: the sentences are corrected though the words are not served.
 	t.Run("a set missing that the manifest lists", func(t *testing.T) {
 		world := newPackWorld(t, ReadalongPackOptions{})
 		if err := os.RemoveAll(filepath.Join(world.pack.Dir, GranularityWord)); err != nil {
 			t.Fatal(err)
 		}
-		if pack, reason := world.find(t); pack != nil || reason != PackNoSet {
-			t.Fatalf("got %v %q", pack, reason)
+		pack, reason := world.find(t)
+		if pack == nil || pack.Overlay(GranularityWord) != nil || pack.Overlay(GranularitySentence) == nil || pack.Skipped[GranularityWord] != PackNoSet {
+			t.Fatalf("got %+v %q", pack, reason)
 		}
 	})
+	t.Run("a word set with a document over the cap", func(t *testing.T) {
+		huge := []byte("<smil>" + strings.Repeat(" ", int(maxXMLBytes)) + "</smil>")
+		world := newPackWorld(t, ReadalongPackOptions{Extra: map[string]map[string][]byte{GranularityWord: {"OEBPS/MediaOverlays/Author - [Series 01] - Part_1.smil": huge}}})
+		pack, reason := world.find(t)
+		if pack == nil || pack.Overlay(GranularityWord) != nil || pack.Overlay(GranularitySentence) == nil || pack.Skipped[GranularityWord] != PackUnexpected {
+			t.Fatalf("got %+v %q", pack, reason)
+		}
+	})
+	t.Run("a word set with a stylesheet in it", func(t *testing.T) {
+		world := newPackWorld(t, ReadalongPackOptions{Extra: map[string]map[string][]byte{GranularityWord: {"OEBPS/Styles/x.css": []byte("p{}")}}})
+		if pack, _ := world.find(t); pack == nil || pack.Overlay(GranularityWord) != nil || pack.Skipped[GranularityWord] != PackUnexpected {
+			t.Fatalf("got %+v", pack)
+		}
+	})
+}
+
+// A word set may stop a little short of where a piece of the edition ends, never past it.
+func TestAWordSetNarratesWithinTheEditionsPieces(t *testing.T) {
+	piece := func(entry string, length int64) AlignedFile { return AlignedFile{Entry: entry, LengthMs: length} }
+	edition := &Alignment{Files: []AlignedFile{piece("a.mp4", 10_000), piece("b.mp4", 20_000)}}
+	for _, test := range []struct {
+		name  string
+		words []AlignedFile
+		fits  bool
+	}{
+		{"the same", []AlignedFile{piece("a.mp4", 10_000), piece("b.mp4", 20_000)}, true},
+		{"a little short", []AlignedFile{piece("a.mp4", 9_400), piece("b.mp4", 20_000)}, true},
+		{"past the end", []AlignedFile{piece("a.mp4", 10_001), piece("b.mp4", 20_000)}, false},
+		{"a piece missing", []AlignedFile{piece("a.mp4", 10_000)}, false},
+		{"another piece", []AlignedFile{piece("a.mp4", 10_000), piece("c.mp4", 20_000)}, false},
+	} {
+		if got := (&Alignment{Files: test.words}).NarratesWithin(edition); got != test.fits {
+			t.Errorf("%s: %v", test.name, got)
+		}
+	}
+	if !edition.SamePieces(edition) || (&Alignment{Files: []AlignedFile{piece("a.mp4", 9_400), piece("b.mp4", 20_000)}}).SamePieces(edition) {
+		t.Fatal("SamePieces is exact")
+	}
 }
 
 // The sentence set is read in place of the edition's SMIL: the pack's times, the pack's sentences,

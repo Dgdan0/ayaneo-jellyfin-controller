@@ -643,6 +643,27 @@ func (a *Alignment) SamePieces(b *Alignment) bool {
 	return true
 }
 
+// NarratesWithin says whether a narrates the pieces b does, every one of them, and none past where b
+// ends it: what a word set must do to play from the mapping b was given (#66). A word set's piece may
+// end a little earlier than the sentence set's, where the aligner ran past the end of the audio and the
+// sentence that runs over is cut at the end (endAudioAt) while the word that would have run over is
+// left out (A Parade of Horribles' piece 69): the words then stop just short of the end, which is harmless.
+func (a *Alignment) NarratesWithin(b *Alignment) bool {
+	if a == nil || b == nil || len(a.Files) != len(b.Files) {
+		return false
+	}
+	lengths := make(map[string]int64, len(b.Files))
+	for _, file := range b.Files {
+		lengths[file.Entry] = file.LengthMs
+	}
+	for _, file := range a.Files {
+		if length, found := lengths[file.Entry]; !found || file.LengthMs > length {
+			return false
+		}
+	}
+	return true
+}
+
 // index prepares the lookups from a place in the text.
 func (a *Alignment) index() {
 	a.finds = map[findKey]findLocation{}
