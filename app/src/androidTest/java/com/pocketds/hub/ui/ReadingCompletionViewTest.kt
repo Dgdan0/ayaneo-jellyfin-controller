@@ -46,11 +46,13 @@ class ReadingCompletionViewTest {
         } as ScreenHost
         fun all(view: View): List<View> = listOf(view) + (view as? ViewGroup)
             ?.let { group -> (0 until group.childCount).flatMap { all(group.getChildAt(it)) } }.orEmpty()
-        // Read is "Finished" in the ⋯ menu: the card asks when (this month), and Mark finished is its last button.
-        // Unread is "Mark unread", offered once the book is finished (#39).
+        // Read is Finished in the ⋯ menu's Reading status (#63): the card asks when (this month), and Mark finished is its
+        // last button. Unread is choosing another status, Reading here, which leaves the place where it was.
         fun chooseReadAction(screen: ReadingWorkScreen, root: View, label: String) {
             all(root).first { it.contentDescription == "More actions for Book" }.performClick()
-            all(root).first { it.contentDescription?.toString()?.startsWith(label) == true }.performClick()
+            all(root).first { it.contentDescription?.toString()?.startsWith("Reading status") == true }.performClick()
+            // A row's description is its words, its detail and "Selected" when it is the current one.
+            all(root).first { it.contentDescription?.toString()?.startsWith("$label,") == true }.performClick()
             if (label == "Finished") {
                 screen.onPad(PadAction.Step(Direction.DOWN))
                 screen.onPad(PadAction.Step(Direction.DOWN))
@@ -68,7 +70,7 @@ class ReadingCompletionViewTest {
             instrumentation.runOnMainSync {
                 chooseReadAction(screen, root, "Finished")
                 assertTrue(ReadingCompletionRepository.get(activity).project(work).progress!!.completed)
-                chooseReadAction(screen, root, "Mark unread")
+                chooseReadAction(screen, root, "Reading")
                 assertEquals(.5, ReadingCompletionRepository.get(activity).project(work).progress!!.percentage, 0.0)
                 chooseReadAction(screen, root, "Finished")
                 screen.onHide(); screen.onDestroyView()
@@ -77,9 +79,9 @@ class ReadingCompletionViewTest {
             }
             instrumentation.waitForIdleSync()
             instrumentation.runOnMainSync {
-                // A finish marked on an earlier visit is taken away and the place stays where it was (#60): Mark
-                // unread no longer starts the book over on this device alone; only Start over does, for every device.
-                chooseReadAction(screen, root, "Mark unread")
+                // A finish marked on an earlier visit is taken away and the place stays where it was (#60): choosing
+                // another status no longer starts the book over on this device alone; only Start over does, for every device.
+                chooseReadAction(screen, root, "Reading")
                 val completion = ReadingCompletionRepository.get(activity)
                 assertEquals(.5, completion.project(work).progress!!.percentage, 0.0)
                 assertFalse(completion.isRead(work.id))

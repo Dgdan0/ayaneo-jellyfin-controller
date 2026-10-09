@@ -18,6 +18,8 @@ import com.pocketds.hub.input.PadAction
 import com.pocketds.hub.ui.RowStep
 import com.pocketds.hub.input.Direction
 import com.pocketds.hub.model.ReadingWork
+import com.pocketds.hub.model.ReadingYouPatch
+import com.pocketds.hub.model.YouEdit
 import com.pocketds.hub.nav.ButtonHint
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubApi
@@ -45,6 +47,7 @@ import com.pocketds.hub.state.StatusTone
 import com.pocketds.hub.ui.ThemeGradientDrawable
 import com.pocketds.hub.ui.textWeight
 import com.pocketds.hub.screens.library.ReadingBookFacts
+import com.pocketds.hub.screens.library.ReadingStatus
 import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -724,8 +727,15 @@ class ReadingHomeView(
         overlay.show("${row.title} · ${work.title}", "Reading list actions", choices,
             onCancel = { host.refreshHints() }) { action ->
             when (action) {
-                "want" -> ReadingListsRepository.update(context) { it.add(ReadingListsState.WANT_TO_READ, ReadingListEntry.from(work)) }
-                "remove" -> ReadingListsRepository.update(context) { it.remove(row.id, work.id) }
+                "want" -> {
+                    val after = ReadingListsRepository.update(context) { it.add(ReadingListsState.WANT_TO_READ, ReadingListEntry.from(work)) }
+                    // Want to read is the reading status too (#63): the list takes only a book not begun, and then the hub is told.
+                    if (after.wantToRead.any { it.workId == work.id }) writeStatus(work, ReadingStatus.WANT)
+                }
+                "remove" -> {
+                    ReadingListsRepository.update(context) { it.remove(row.id, work.id) }
+                    if (row.id == ReadingListsState.WANT_TO_READ && ReadingStatus.of(work) == ReadingStatus.WANT) writeStatus(work, null)
+                }
                 "earlier", "later" -> ReadingListsRepository.update(context) {
                     it.move(row.id, work.id, if (action == "earlier") -1 else 1)
                 }
@@ -743,6 +753,15 @@ class ReadingHomeView(
             render(shelves())
         }
         host.refreshHints()
+    }
+
+    /** Tells the hub the book's reading status ([status] null takes the choice back), as the book page does (#63). */
+    private fun writeStatus(work: ReadingWork, status: String?) {
+        val patch = ReadingYouPatch(status = if (status == null) YouEdit.Clear else YouEdit.To(status))
+        scope.launch {
+            val result = api.updateReadingYou(work.id, patch)
+            if (result is HubResult.Failed) host.notify("Your reading status could not be saved · ${result.message}")
+        }
     }
 
     private fun promptName(title: String, existing: String, onName: (String) -> Unit) {

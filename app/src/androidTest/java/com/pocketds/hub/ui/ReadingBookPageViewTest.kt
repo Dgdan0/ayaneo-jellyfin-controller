@@ -150,7 +150,14 @@ class ReadingBookPageViewTest {
         }
         suspend fun openMore() {
             withContext(Dispatchers.Main) { actions()["list:more"]!!.performClick() }
-            until("the more menu") { shown(root, "Finished") }
+            until("the more menu") { shown(root, "Add to a list") }
+        }
+        /** The ⋯ menu's Reading status row (#63), then one of the four in the list it opens. */
+        suspend fun chooseStatus(current: String, next: String) {
+            openMore()
+            withContext(Dispatchers.Main) { row(root, "Reading status · $current")!!.performClick() }
+            until("the statuses") { shown(root, "Not reading") && shown(root, "Want to read") }
+            withContext(Dispatchers.Main) { row(root, next)!!.performClick() }
         }
         try {
             withContext(Dispatchers.Main) {
@@ -221,16 +228,40 @@ class ReadingBookPageViewTest {
             assertEquals(2, hub.youWrites[2].getInt("rating"))
             until("the hub's answer shown") { stars().rating == 2 && !header().finishedView.text.endsWith("rate it?") }
 
-            // ⋯: Finished, Want to read, Add to a list, Remove offline copy.
+            // ⋯ (#63): one Reading status row, which says what the book is (finished, by the import), a list and the offline copy.
+            // Finished, Mark unread and Want to read are choices of the status list, not rows of this menu.
             openMore()
             withContext(Dispatchers.Main) {
-                listOf("Finished", "Want to read", "Add to a list", "Remove offline copy").forEach { assertTrue(it, shown(root, it)) }
-                assertFalse("Not finished here, so nothing to mark unread", shown(root, "Mark unread"))
+                listOf("Reading status · Finished", "Finished Sep 2025 · change the date", "Add to a list", "Remove offline copy")
+                    .forEach { assertTrue(it, shown(root, it)) }
+                listOf("Finished", "Mark unread", "Want to read").forEach { assertFalse("$it is a status, not a row", shown(root, it)) }
             }
             shot(activity, "2-more")
 
+            // The row opens the four, the current one checked; Back closes it and writes nothing.
+            withContext(Dispatchers.Main) { row(root, "Reading status · Finished")!!.performClick() }
+            until("the statuses") { shown(root, "Not reading") && shown(root, "Want to read") }
+            withContext(Dispatchers.Main) {
+                listOf("Want to read", "Reading", "Finished", "Not reading").forEach { assertTrue(it, shown(root, it)) }
+                assertTrue("Not reading says it keeps the place", shown(root, "Take it off Continue reading and Home; your place stays"))
+            }
+            shot(activity, "2b-status")
+            withContext(Dispatchers.Main) { screen.onPad(PadAction.Back) }
+            withContext(Dispatchers.Main) { assertEquals("Back writes nothing", 3, hub.youWrites.size) }
+
+            // Reading, from finished by the import: the status alone is written, the month and the count are the book's history.
+            chooseStatus("Finished", "Reading")
+            until("the status sent") { hub.youWrites.size == 4 }
+            assertEquals("A status is all it writes", 1, hub.youWrites[3].length())
+            assertEquals("reading", hub.youWrites[3].getString("status"))
+            until("the page reading") { header().finishedView.text.toString() == "2nd time" }
+            withContext(Dispatchers.Main) {
+                assertEquals("Resume · Chapter 14 · 32%", resume())
+                assertEquals("Reading status · Reading", notices.last())
+            }
+
             // Finished: a small centred card, preset to this month; the year one back; Cancel first.
-            withContext(Dispatchers.Main) { row(root, "Finished")!!.performClick() }
+            chooseStatus("Reading", "Finished")
             val now = YearMonth.now()
             val monthName = Month.of(now.monthValue).getDisplayName(TextStyle.FULL, Locale.US)
             until("the card") { shown(root, "When did you finish?") }
@@ -244,10 +275,9 @@ class ReadingBookPageViewTest {
             withContext(Dispatchers.Main) { screen.onPad(PadAction.Back) }
             withContext(Dispatchers.Main) {
                 assertFalse("Back closes the card", shown(root, "When did you finish?"))
-                assertEquals("Cancel writes nothing", 3, hub.youWrites.size)
+                assertEquals("Cancel writes nothing", 4, hub.youWrites.size)
             }
-            openMore()
-            withContext(Dispatchers.Main) { row(root, "Finished")!!.performClick() }
+            chooseStatus("Reading", "Finished")
             until("the card again") { shown(root, "When did you finish?") }
             val earlier = now.minusYears(1)
             withContext(Dispatchers.Main) {
@@ -257,9 +287,10 @@ class ReadingBookPageViewTest {
                 screen.onPad(PadAction.Step(Direction.RIGHT))     // Mark finished, beside it
                 screen.onPad(PadAction.Activate)
             }
-            until("the finish sent") { hub.youWrites.size == 4 }
-            assertEquals(earlier.toString(), hub.youWrites[3].getString("finished"))
-            assertEquals("Read before and not finished now, so read again", 3, hub.youWrites[3].getInt("readCount"))
+            until("the finish sent") { hub.youWrites.size == 5 }
+            assertEquals(earlier.toString(), hub.youWrites[4].getString("finished"))
+            assertEquals("Read before and not finished now, so read again", 3, hub.youWrites[4].getInt("readCount"))
+            assertEquals("It says the status as well as the month", "finished", hub.youWrites[4].getString("status"))
             until("the page finished") { resume() == "Read again" }
             withContext(Dispatchers.Main) {
                 assertFalse(shown(root, "When did you finish?"))
@@ -269,17 +300,18 @@ class ReadingBookPageViewTest {
             }
             shot(activity, "4-finished")
 
-            // Mark unread puts back what this visit changed.
+            // Choosing another status in the same visit puts back what the finish changed, and says the new status.
+            chooseStatus("Finished", "Not reading")
+            until("the finish undone") { hub.youWrites.size == 6 }
+            assertEquals("2025-09", hub.youWrites[5].getString("finished"))
+            assertEquals(2, hub.youWrites[5].getInt("readCount"))
+            assertEquals("not-reading", hub.youWrites[5].getString("status"))
+            until("the page put down") { resume() == "Resume · Chapter 14 · 32%" }
+            withContext(Dispatchers.Main) { assertEquals("2nd time", header().finishedView.text.toString()) }
             openMore()
-            withContext(Dispatchers.Main) {
-                assertTrue(shown(root, "Mark unread"))
-                row(root, "Mark unread")!!.performClick()
-            }
-            until("the finish undone") { hub.youWrites.size == 5 }
-            assertEquals("2025-09", hub.youWrites[4].getString("finished"))
-            assertEquals(2, hub.youWrites[4].getInt("readCount"))
-            until("the page unread") { resume() == "Resume · Chapter 14 · 32%" }
-            withContext(Dispatchers.Main) { assertEquals("Finished Sep 2025 · 2nd time", header().finishedView.text.toString()) }
+            withContext(Dispatchers.Main) { assertTrue(shown(root, "Reading status · Not reading")) }
+            shot(activity, "4b-not-reading")
+            withContext(Dispatchers.Main) { screen.onPad(PadAction.Back) }
 
             // A hub that cannot save: the page says so and shows what the hub holds.
             hub.youRefused = 500 to "internal"

@@ -33,13 +33,13 @@ object SeriesBookLabels {
         }
     }
 
-    /** "#2 · 40% · Audio", "#3 · Missing", "Completed". */
-    fun subtitle(number: String, available: Boolean, progress: ReadingProgress?, formats: List<String>): String =
+    /** "#2 · 40% · Audio", "#3 · Missing", "Completed". [finished]: the book is finished (#63), which a place short of the end does not say. */
+    fun subtitle(number: String, available: Boolean, progress: ReadingProgress?, formats: List<String>, finished: Boolean = progress?.completed == true): String =
         buildList {
             if (number.isNotBlank()) add("#$number")
             when {
                 !available -> add("Missing")
-                progress?.completed == true -> add("Completed")
+                finished -> add("Completed")
                 (progress?.percentage ?: 0.0) > 0 -> add(com.pocketds.hub.state.Fmt.readingPercentLabel(progress?.percentage ?: 0.0))
             }
             if (available) formats(formats)?.let(::add)
@@ -83,9 +83,10 @@ object SeriesBookStrip {
                     layoutParams = LinearLayout.LayoutParams(dp(context, CARD_DP), ViewGroup.LayoutParams.WRAP_CONTENT)
                         .apply { marginEnd = dp(context, GAP_DP) }
                     titleView.text = item.title
-                    subtitleView.text = SeriesBookLabels.subtitle(item.number, item.isAvailable, item.progress, item.formats)
+                    val finished = ReadingStatus.isFinished(item)
+                    subtitleView.text = SeriesBookLabels.subtitle(item.number, item.isAvailable, item.progress, item.formats, finished)
                     available(item.isAvailable)
-                    marks(item.progress?.percentage ?: 0.0, item.progress?.completed == true)
+                    marks(item.progress?.percentage ?: 0.0, finished)
                     contentDescription = "${item.title}, ${subtitleView.text}"
                     DetailStyler.image(image, item.artwork.takeIf { it.isNotBlank() }?.let(api::imageUrl), Artwork.loader(api, context))
                     bind(this, item)
@@ -97,7 +98,8 @@ object SeriesBookStrip {
     /** A book outside any series, as the same kind of card. */
     fun itemOf(work: ReadingWork) = ReadingSectionItem(
         workId = work.id, title = work.title, kind = work.kind, artwork = work.artwork,
-        authors = work.authors, progress = work.progress, availability = "available", formats = work.availability
+        authors = work.authors, progress = work.progress, availability = "available", formats = work.availability,
+        status = ReadingStatus.of(work)
     )
 
     private fun dp(context: Context, value: Int) = Styler.dpInt(context, value.toFloat())

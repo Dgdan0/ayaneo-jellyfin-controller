@@ -298,7 +298,9 @@ data class ReadingSectionItem(
     val progress: ReadingProgress? = null,
     val availability: String = "available",
     /** What this book can be opened as: ebook, audiobook, readaloud. One book, all its editions. */
-    val formats: List<String> = emptyList()
+    val formats: List<String> = emptyList(),
+    /** This profile's reading status of the book (#63): want, reading, finished or not-reading; blank when the hub has nothing to say. */
+    val status: String = ""
 ) {
     val isAvailable: Boolean get() = availability.equals("available", ignoreCase = true) && workId.isNotBlank()
 }
@@ -346,6 +348,8 @@ data class ReadingWork(
     val languages: List<String> = emptyList(),
     val editions: List<ReadingEdition> = emptyList(),
     val progress: ReadingProgress? = null,
+    /** This profile's reading status of the book (#63): want, reading, finished or not-reading; blank when the hub has nothing to say. See [com.pocketds.hub.screens.library.ReadingStatus]. */
+    val status: String = "",
     val availability: List<String> = emptyList(),
     val sections: List<ReadingSection> = emptyList(),
     /** A series item's books in order for the library's fan (#54): the ones you have and the main ones you do not. */
@@ -426,12 +430,14 @@ data class ReadingYou(
     val readCount: Int = 0,
     val shelves: List<String> = emptyList(),
     val status: String = "",
-    val source: String = ""
+    val source: String = "",
+    /** The reading status the person chose from an app (#63); blank when they chose none. It outranks everything the hub works out. */
+    val chosen: String = ""
 )
 
-/** The answer to `PATCH /v1/reading/works/{id}/you`: what is left to say, null when nothing. */
+/** The answer to `PATCH /v1/reading/works/{id}/you`: what is left to say, null when nothing; [status] is the book's reading status now (#63). */
 @Serializable
-data class ReadingYouResponse(val workId: String = "", val you: ReadingYou? = null)
+data class ReadingYouResponse(val workId: String = "", val you: ReadingYou? = null, val status: String = "")
 
 /**
  * The answer to `POST /v1/reading/works/{id}/start-over` (#60): [resetAt] is the hub's stamp for it, which a device

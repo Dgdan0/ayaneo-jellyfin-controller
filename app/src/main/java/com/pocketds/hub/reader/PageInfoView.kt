@@ -4,6 +4,8 @@ import android.content.Context
 import android.text.TextUtils
 import android.text.format.DateFormat
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import android.widget.TextView
 import java.util.Calendar
@@ -24,6 +26,9 @@ class PageInfoView(context: Context) : FrameLayout(context) {
     /** A tap on the bottom left. */
     var onCycle: () -> Unit = {}
 
+    /** A swipe that began on the bottom left: [leftwards] when the finger went to the left (#64). */
+    var onSwipe: (Boolean) -> Unit = {}
+
     private val clock = corner(Gravity.TOP or Gravity.END, Gravity.END)
     private val title = corner(Gravity.TOP or Gravity.CENTER_HORIZONTAL, Gravity.CENTER_HORIZONTAL).apply {
         textSize = PageInfo.TITLE_SP
@@ -33,6 +38,22 @@ class PageInfoView(context: Context) : FrameLayout(context) {
     private val left = corner(Gravity.BOTTOM or Gravity.START, Gravity.START).apply {
         isClickable = true
         setOnClickListener { onCycle() }
+        // A tap here asks for the next choice, and a swipe that begins here turns the page (#64): the corner is a good part of the
+        // strip, and a thumb at the foot of the screen starts there, so it took the finger and the swipe was lost.
+        var downX = 0f
+        var downY = 0f
+        setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { downX = event.x; downY = event.y }
+                MotionEvent.ACTION_UP -> when (val outcome = PageSwipe.classify(event.x - downX, event.y - downY, event.eventTime - event.downTime,
+                    this@PageInfoView.width.toFloat(), ViewConfiguration.get(context).scaledTouchSlop.toFloat(), ViewConfiguration.getLongPressTimeout().toLong())) {
+                    PageSwipe.Outcome.Tap -> view.performClick()
+                    is PageSwipe.Outcome.Swipe -> onSwipe(outcome.leftwards)
+                    PageSwipe.Outcome.Nothing -> Unit
+                }
+            }
+            true
+        }
     }
     private val right = corner(Gravity.BOTTOM or Gravity.END, Gravity.END)
 

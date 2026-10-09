@@ -2,6 +2,7 @@ package com.pocketds.hub.screens.home
 
 import android.content.Context
 import com.pocketds.hub.model.ReadingWork
+import com.pocketds.hub.screens.library.ReadingStatus
 import com.pocketds.hub.screens.library.SeriesFan
 import com.pocketds.hub.model.ReadingProgress
 import com.pocketds.hub.model.ReadingSectionItem
@@ -147,13 +148,17 @@ object ReadingShelves {
     const val RECENTLY_ADDED = "recently-added"
     /** Rows the app fills itself; every other row is one of the person's own lists. */
     val BUILT_IN = setOf(CURRENTLY_READING, NEXT_IN_SERIES, COMICS, ReadingListsState.WANT_TO_READ, RECENTLY_ADDED)
+    private val OFF_THE_LIST = setOf(ReadingStatus.READING, ReadingStatus.FINISHED, ReadingStatus.NOT_READING)
 
-    /** Every book being read, newest first: series are opened up into their books. */
+    /**
+     * Every book being read, newest first: series are opened up into their books. A book put down (Not reading, #63) or
+     * finished is not being read, whatever its place says; a book chosen as Reading stays, even from the end of it.
+     */
     fun current(works: List<ReadingWork>): List<ReadingWork> = works.flatMap { work ->
         if (work.entityType == "collection") work.sections.flatMap { section -> section.items.mapNotNull { child ->
             if (child.workId.isBlank()) null else child.asWork(work)
         } } else listOf(work)
-    }.filter { work -> work.id.isNotBlank() && work.progress?.let { !it.completed && it.percentage > 0.0 } == true }
+    }.filter { work -> work.id.isNotBlank() && ReadingStatus.continues(work) }
         .distinctBy { it.id }
         .withIndex()
         .sortedWith(compareByDescending<IndexedValue<ReadingWork>> { timestamp(it.value.progress?.updatedAt) }
@@ -162,11 +167,11 @@ object ReadingShelves {
 
     fun listRow(list: ReadingList, resolved: Map<String, ReadingWork>): ReadingShelfRow {
         val items = list.items.map { entry -> resolved[entry.workId] ?: entry.snapshot() }
-        val next = items.indexOfFirst { it.progress?.completed != true }.let { if (it < 0) items.lastIndex.coerceAtLeast(0) else it }
+        val next = items.indexOfFirst { !ReadingStatus.isFinished(it) }.let { if (it < 0) items.lastIndex.coerceAtLeast(0) else it }
         val serverActivity = items.maxOfOrNull { timestamp(it.progress?.updatedAt) } ?: 0
         val localActivity = list.items.maxOfOrNull { it.lastReadAt } ?: 0
         val readActivity = maxOf(serverActivity, localActivity)
-        return ReadingShelfRow(list.id, list.name, items, next, items.count { it.progress?.completed == true },
+        return ReadingShelfRow(list.id, list.name, items, next, items.count(ReadingStatus::isFinished),
             if (readActivity > 0) readActivity else list.updatedAt, readActivity > 0)
     }
 
@@ -186,7 +191,7 @@ object ReadingShelves {
     fun onNumber(series: ReadingWork): String {
         val books = series.sections.flatMap { it.items }
         return series.continueAt?.number?.takeIf(String::isNotBlank)
-            ?: books.lastOrNull { (it.progress?.percentage ?: 0.0) > 0.0 && it.progress?.completed != true }?.number.orEmpty()
+            ?: books.lastOrNull(ReadingStatus::continues)?.number.orEmpty()
     }
 
     fun yourSeries(collections: List<ReadingWork>): List<SeriesShelfItem> = collections
@@ -194,8 +199,10 @@ object ReadingShelves {
         .distinctBy { it.id }
         .mapNotNull { series ->
             val books = series.sections.flatMap { it.items }
-            if (books.none { (it.progress?.percentage ?: 0.0) > 0.0 || it.progress?.completed == true }) return@mapNotNull null
-            if (books.isNotEmpty() && books.all { it.progress?.completed == true }) return@mapNotNull null
+            // A book put down is not one begun (#63); one finished by status or import counts though it has no place.
+            val begun = books.filter { ReadingStatus.of(it) != ReadingStatus.NOT_READING && ((it.progress?.percentage ?: 0.0) > 0.0 || ReadingStatus.isFinished(it)) }
+            if (begun.isEmpty()) return@mapNotNull null
+            if (books.isNotEmpty() && books.all(ReadingStatus::isFinished)) return@mapNotNull null
             val on = onNumber(series)
             // The same fan as the Series view's, with the room Home has for it (#54).
             val plan = SeriesFan.plan(series, SeriesFan.SMALL_SLOTS) ?: return@mapNotNull null
@@ -226,10 +233,13 @@ object ReadingShelves {
         .filter { it.entityType == "collection" }
         .mapNotNull { series ->
             val books = series.sections.flatMap { it.items }
-            if (books.any { it.progress?.let { p -> !p.completed && p.percentage > 0.0 } == true }) return@mapNotNull null
-            val last = books.indexOfLast { it.progress?.completed == true }
+            if (books.any(ReadingStatus::continues)) return@mapNotNull null
+            val last = books.indexOfLast(ReadingStatus::isFinished)
             if (last < 0) return@mapNotNull null
-            val next = books.drop(last + 1).firstOrNull { it.isAvailable && it.progress?.completed != true }
+            // Not one the person put down: it is not next, it is set aside.
+            val next = books.drop(last + 1).firstOrNull {
+                it.isAvailable && !ReadingStatus.isFinished(it) && ReadingStatus.of(it) != ReadingStatus.NOT_READING
+            }
                 ?: return@mapNotNull null
             timestamp(books[last].progress?.updatedAt) to next.asWork(series)
         }
@@ -256,7 +266,11 @@ object ReadingShelves {
             ReadingShelfRow(COMICS, comicsTitle, comics)
         ).filter { it.items.isNotEmpty() }
         val wanted = state.wantToRead.map { resolved[it.workId] ?: it.snapshot() }
-            .filterNot { work -> work.progress?.let { it.completed || it.percentage > 0.0 } == true || now.any { it.id == work.id } }
+            // A book the hub says is being read, finished or put down is off the list, whatever else this device holds (#63).
+            .filterNot { work ->
+                work.progress?.let { it.completed || it.percentage > 0.0 } == true || now.any { it.id == work.id } ||
+                    ReadingStatus.of(work) in OFF_THE_LIST
+            }
         val wantRow = ReadingShelfRow(ReadingListsState.WANT_TO_READ, "Want to Read", wanted)
         val lists = state.lists.map { listRow(it, resolved) }
             .sortedWith(compareByDescending<ReadingShelfRow> { it.hasReadingActivity }
@@ -268,7 +282,7 @@ object ReadingShelves {
     private fun ReadingSectionItem.asWork(series: ReadingWork) = ReadingWork(
         id = workId, entityType = "work", kind = kind, title = title, series = series.title,
         seriesIndex = number.toDoubleOrNull() ?: 0.0, authors = authors,
-        artwork = artwork.ifBlank { series.artwork }, progress = progress, libraryId = series.libraryId
+        artwork = artwork.ifBlank { series.artwork }, progress = progress, libraryId = series.libraryId, status = status
     )
 
     private fun ReadingListEntry.snapshot() = ReadingWork(
