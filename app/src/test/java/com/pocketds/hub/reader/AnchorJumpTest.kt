@@ -54,6 +54,31 @@ class AnchorJumpTest {
         assertFalse(AnchorJump.settled(ready.copy(width = 0), ready.copy(width = 0)))
     }
 
+    @Test fun `whether the element a place names is on the page is read from the answer, and asked about by its id`() {
+        assertEquals(true, AnchorJump.landed("\"in\""))
+        assertEquals(false, AnchorJump.landed("\"out\""))
+        listOf(null, "", "\"none\"", "null", "in out").forEach { assertNull(it, AnchorJump.landed(it)) }
+        val script = AnchorJump.landedScript("part'2")
+        assertTrue(script, "document.getElementById('part\\'2')" in script && "getBoundingClientRect" in script && "window.innerWidth" in script)
+        // Looked at until right twice running, within a few seconds at most: the page is hidden all that while.
+        assertTrue(AnchorJump.RIGHT_LOOKS in 1..3 && AnchorJump.RETRIES >= AnchorJump.RIGHT_LOOKS)
+        assertTrue(AnchorJump.RETRIES * AnchorJump.LOOK_AFTER_MS <= 1_500)
+    }
+
+    @Test fun `a place given by how far through the file is checked by the page's own report`() {
+        assertEquals(true, AnchorJump.landedByProgress(0.6, 0.58))
+        assertEquals(true, AnchorJump.landedByProgress(0.6, 0.31))
+        // The page still at the top of the file: the jump came too soon.
+        assertEquals(false, AnchorJump.landedByProgress(0.6, 0.0))
+        assertEquals(false, AnchorJump.landedByProgress(0.6, 0.1))
+        // Nothing to tell a place at the top from the top, and nothing said, are not "not landed".
+        assertNull(AnchorJump.landedByProgress(0.0, 0.0))
+        assertNull(AnchorJump.landedByProgress(0.04, 0.0))
+        assertNull(AnchorJump.landedByProgress(null, 0.5))
+        assertNull(AnchorJump.landedByProgress(0.6, null))
+        assertNull(AnchorJump.landedByProgress(0.6, Double.NaN))
+    }
+
     @Test fun `the script asks about the file by its path in the one spelling, quoted so a name cannot break out of it`() {
         val script = AnchorJump.script("EPUB/Text/Author - [Series 01] - O'Brien_split_010.htm")
         assertTrue(script, "var want = 'EPUB/Text/Author - [Series 01] - O\\'Brien_split_010.htm';" in script)

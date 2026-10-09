@@ -262,15 +262,29 @@ class EpubReaderScreen(
         root = FrameLayout(host.viewContext).apply { setBackgroundColor(Color.BLACK) }
         navigatorContainer = object : FrameLayout(host.viewContext) {
             private var longPressCheck: Runnable? = null
-            /** A touch that began in the side inset, which is not Readium's page: a tap there turns the page (#47). */
-            private var insetSide = PageGeometry.InsetTap.NONE
-            private var insetMoved = false
-            private var insetDownX = 0f
-            private var insetDownY = 0f
+            /**
+             * A touch that began where Readium's page is not (#47, #64): the side inset, or the strip above or below the page where the
+             * corners live. It is the reader's own: a tap in the side inset turns the page, and so does a swipe from anywhere there.
+             */
+            private var owned = false
+            private var ownedSide = PageGeometry.InsetTap.NONE
+            private var ownedDownX = 0f
+            private var ownedDownY = 0f
 
             override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-                if (insetSide != PageGeometry.InsetTap.NONE) return followInsetTouch(event)
+                if (owned) return followOwnTouch(event)
                 if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    // A turn still animating ends as the finger lands, so a quick swipe after a swipe turns the page it arrived on, not
+                    // the one it was leaving, which Readium's pager lets a finger catch half way (#64).
+                    PageTurns.finishRunning(this)
+                    var place = PageTurns.place(this)
+                    // In the middle of a burst the pager may have undone the last turn (it does, now and then): the page the account says first.
+                    val expected = turnLedger.expected(SystemClock.uptimeMillis())
+                    if (place != null && expected != null && place.item != expected && PageTurns.setItem(this, expected, smooth = false)) {
+                        place = place.copy(item = expected)
+                    }
+                    flickFrom = place
+                    flickDownX = event.x; flickDownY = event.y
                     longPressCheck?.let { removeCallbacks(it) }
                     longPressCheck = Runnable { inspectSelection() }.also {
                         postDelayed(it, ViewConfiguration.getLongPressTimeout().toLong() + 80)
@@ -282,31 +296,83 @@ class EpubReaderScreen(
                     longPressCheck?.let { removeCallbacks(it) }
                     longPressCheck = null
                 }
+                if (event.actionMasked == MotionEvent.ACTION_UP && turnPastTheEnd(event)) return true
                 val consumed = super.dispatchTouchEvent(event)
+                if (event.actionMasked == MotionEvent.ACTION_UP) countFlick(event)
+                if (event.actionMasked == MotionEvent.ACTION_CANCEL) flickFrom = null
                 if (inspect) postDelayed({ inspectSelection() }, 120)
-                // Nothing under the finger took it, and it is in the inset at a side: it is ours.
+                // Nothing under the finger took it: the margin or a strip, and it is ours.
                 if (!consumed && event.actionMasked == MotionEvent.ACTION_DOWN) {
-                    val side = PageGeometry.inset(event.x, width.toFloat(), insetPx.toFloat())
-                    if (side != PageGeometry.InsetTap.NONE) {
-                        insetSide = side; insetMoved = false; insetDownX = event.x; insetDownY = event.y
-                        return true
-                    }
+                    longPressCheck?.let { removeCallbacks(it) }
+                    longPressCheck = null
+                    owned = true
+                    ownedSide = PageGeometry.inset(event.x, width.toFloat(), insetPx.toFloat())
+                    ownedDownX = event.x; ownedDownY = event.y
+                    return true
                 }
                 return consumed
             }
 
-            private fun followInsetTouch(event: MotionEvent): Boolean {
+            /**
+             * A flick on the last page of a file, or the first, goes on into the next file or back into the one before. Readium's own
+             * swipe does that at its own pace and loses some of a quick burst (4 swipes of 10 across the end of a chapter), where its
+             * pad press, one for one, loses none. So the finger is let go of (cancelled, and the page springs back) and the reader makes
+             * the turn the pad's way. True when it did.
+             */
+            private fun turnPastTheEnd(event: MotionEvent): Boolean {
+                val from = flickFrom ?: return false
+                val dx = event.x - flickDownX
+                val dy = event.y - flickDownY
+                if (!PageSwipe.isFlick(dx, dy, event.eventTime - event.downTime, resources.displayMetrics.density)) return false
+                val rtl = navigator?.overflow?.value?.readingProgression == org.readium.r2.navigator.preferences.ReadingProgression.RTL
+                val delta = if (PageSwipe.forward(dx < 0, rtl)) 1 else -1
+                // Where the account says the page is, if a burst is running: the pager may not be there yet.
+                val at = turnLedger.expected(SystemClock.uptimeMillis()) ?: from.item
+                if (at + delta in 0 until from.pages) return false
+                flickFrom = null
+                val cancel = MotionEvent.obtain(event).apply { action = MotionEvent.ACTION_CANCEL }
+                super.dispatchTouchEvent(cancel)
+                cancel.recycle()
+                turn(delta)
+                return true
+            }
+
+            /**
+             * A flick is one turn, counted here ([TurnLedger]) and not by Readium's pager, which under quick swipes drops one now and then
+             * (the page drags and springs back) or takes one and undoes it a moment later. The page the account says is where the pager is
+             * put after the flick, and kept for a moment against a late undoing. A drag that is not a flick (the pager snaps it back by its
+             * own rule), the end of a file (the pager of files has the swipe) and a pad press end the account.
+             */
+            private fun countFlick(event: MotionEvent) {
+                val from = flickFrom ?: return
+                flickFrom = null
+                val dx = event.x - flickDownX
+                val dy = event.y - flickDownY
+                if (!PageSwipe.isFlick(dx, dy, event.eventTime - event.downTime, resources.displayMetrics.density)) { turnLedger.end(); return }
+                val rtl = navigator?.overflow?.value?.readingProgression == org.readium.r2.navigator.preferences.ReadingProgression.RTL
+                val target = turnLedger.flick(from, if (PageSwipe.forward(dx < 0, rtl)) 1 else -1, SystemClock.uptimeMillis()) ?: return
+                fun keep() {
+                    if (!turnLedger.stillWanted(target, SystemClock.uptimeMillis())) return
+                    val now = PageTurns.place(this) ?: return
+                    if (now.item != target) PageTurns.setItem(this, target, smooth = true)
+                }
+                keep()
+                for (after in TurnLedger.KEEP_AT_MS) postDelayed({ keep() }, after)
+            }
+
+            private fun followOwnTouch(event: MotionEvent): Boolean {
                 when (event.actionMasked) {
-                    MotionEvent.ACTION_MOVE -> {
-                        val slop = ViewConfiguration.get(context).scaledTouchSlop
-                        if (Math.abs(event.x - insetDownX) > slop || Math.abs(event.y - insetDownY) > slop) insetMoved = true
-                    }
                     MotionEvent.ACTION_UP -> {
-                        val side = insetSide
-                        insetSide = PageGeometry.InsetTap.NONE
-                        if (!insetMoved && event.eventTime - event.downTime < ViewConfiguration.getLongPressTimeout()) onInsetTap(side)
+                        owned = false
+                        val configuration = ViewConfiguration.get(context)
+                        when (val outcome = PageSwipe.classify(event.x - ownedDownX, event.y - ownedDownY, event.eventTime - event.downTime,
+                            width.toFloat(), configuration.scaledTouchSlop.toFloat(), ViewConfiguration.getLongPressTimeout().toLong())) {
+                            PageSwipe.Outcome.Tap -> if (ownedSide != PageGeometry.InsetTap.NONE) onInsetTap(ownedSide)
+                            is PageSwipe.Outcome.Swipe -> onSwipeTurn(outcome.leftwards)
+                            PageSwipe.Outcome.Nothing -> Unit
+                        }
                     }
-                    MotionEvent.ACTION_CANCEL -> insetSide = PageGeometry.InsetTap.NONE
+                    MotionEvent.ACTION_CANCEL -> owned = false
                 }
                 return true
             }
@@ -316,7 +382,7 @@ class EpubReaderScreen(
         }
         pageHost = FrameLayout(host.viewContext).apply { id = View.generateViewId() }
         navigatorContainer.addView(pageHost, FrameLayout.LayoutParams(MATCH, MATCH))
-        pageInfo = PageInfoView(host.viewContext).apply { onCycle = ::cyclePageInfo }
+        pageInfo = PageInfoView(host.viewContext).apply { onCycle = ::cyclePageInfo; onSwipe = ::onSwipeTurn }
         navigatorContainer.addView(pageInfo, FrameLayout.LayoutParams(MATCH, MATCH))
         pageChoice = PageInfoSettings.load(host.viewContext)
         root.addView(navigatorContainer, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -876,6 +942,22 @@ class EpubReaderScreen(
         turn(if (forward) 1 else -1)
     }
 
+    /** The turns of a burst of quick swipes (#64). */
+    private val turnLedger = TurnLedger()
+
+    /** Where Readium's page was as a finger came down, to see whether the swipe it made turned it (#64). */
+    private var flickFrom: PageTurns.Place? = null
+    private var flickDownX = 0f
+    private var flickDownY = 0f
+
+    /** A swipe that began in the margin or a strip (#64), where Readium's page never saw it: it turns the page the way the finger went. */
+    private fun onSwipeTurn(leftwards: Boolean) {
+        // This swipe is turned: it is not one Readium dropped (the pager may not have moved yet when its touch ends).
+        flickFrom = null
+        val rtl = navigator?.overflow?.value?.readingProgression == org.readium.r2.navigator.preferences.ReadingProgression.RTL
+        turn(if (PageSwipe.forward(leftwards, rtl)) 1 else -1)
+    }
+
     private fun changeChapter(direction: Direction) {
         val book = publication ?: return
         val current = book.readingOrder.indexOfFirst { it.href.toString().substringBefore('#') == latestLocator?.href?.toString()?.substringBefore('#') }
@@ -1312,6 +1394,7 @@ class EpubReaderScreen(
      */
     private fun movedByHand() {
         cancelPlace()
+        turnLedger.end()
         if (narration?.isOn == true) closeDictionary(resumeNarration = false) else switchToReading()
     }
 
@@ -1578,6 +1661,23 @@ class EpubReaderScreen(
             try {
                 awaitLaidOut(reader, target.document)
                 reader.go(target, animated = false)
+                // The element it names is on the page, or the jump is made again: with the machine busy the first has come before the page was ready.
+                val fragment = target.locations.fragments.firstOrNull { it.isNotBlank() }
+                // Looked at until it has been right twice running (200 ms apart): with the machine busy the page has been seen to put
+                // itself back at the top of the file a moment after the jump, which one look at the right page would have missed.
+                var tries = 0
+                var right = 0
+                while (right < AnchorJump.RIGHT_LOOKS && tries++ < AnchorJump.RETRIES) {
+                    delay(AnchorJump.LOOK_AFTER_MS)
+                    val landed = if (fragment != null)
+                        AnchorJump.landed(runCatching { reader.evaluateJavascript(AnchorJump.landedScript(fragment)) }.getOrNull())
+                    else AnchorJump.landedByProgress(target.locations.progression, reader.currentLocator.value.locations.progression)
+                    when (landed) {
+                        null -> right = AnchorJump.RIGHT_LOOKS
+                        true -> right++
+                        false -> { right = 0; reader.go(target, animated = false) }
+                    }
+                }
                 // The place is scrolled to once Readium has been told; a moment for it to be drawn before the page is shown.
                 delay(PLACE_SETTLE_MS)
             } finally {
