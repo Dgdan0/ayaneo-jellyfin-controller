@@ -56,6 +56,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
 import com.pocketds.hub.playback.PlayerControlIcon
@@ -138,7 +139,9 @@ class EpubReaderScreen(
      * The book's own page count from the hub ([ReadingBookFacts.pages]), 0 when it has none: the corners'
      * "Page in book" counts those pages, as the book's page and Resume do, and Readium's positions only without (#42).
      */
-    private val bookPages: Int = 0
+    private val bookPages: Int = 0,
+    /** Where this screen opens when it is the result of a switch of mode (#62): the sentence to begin at, or to mark. */
+    private val entry: ModeEntry = ModeEntry()
 ) : Screen {
     override val contentDomain = com.pocketds.hub.state.ContentMode.BOOKS
     override val immersive = true
@@ -215,6 +218,20 @@ class EpubReaderScreen(
     private var shownHighlight: ReadingAnnotation? = null
     private var phraseAnswer: PhraseLookup.Answer? = null
     private var voice: SpeechVoice? = null
+    /** The place another device reached, to ask about once the narration is ready: "You listened further on ..." (#62). */
+    private class AwayCandidate(val away: ListenedFurther.Away, val ours: ReadingLocation?)
+    private var awayCandidate: AwayCandidate? = null
+    /** The one mode button (#62), the name it shows while open, and the words just selected when it was opened. */
+    private lateinit var modeButton: ModeButtonView
+    private lateinit var modeCaption: TextView
+    private var capturedSelection: ReaderSelection? = null
+    private var modeJob: Job? = null
+    /** Where the voice stopped when the book was opened from Audio or Read along: the "Heard to here" mark (#62). */
+    private var heardAnchor: SentenceAnchor? = null
+    /** The read-along edition this screen narrates from, and the manifest that maps its audio onto the audiobook's tracks. */
+    private var alignedFile: File? = null
+    private var narrationManifest: ReadingAudioManifest? = null
+    private val currentMode: ReadingMode get() = if (readAlong) ReadingMode.ALONG else ReadingMode.EBOOK
     /** The controller's text cursor (#62): set while the person is choosing words with the D-pad. */
     private var cursorWords: TextCursor? = null
     private var cursorJob: Job? = null
@@ -223,7 +240,6 @@ class EpubReaderScreen(
     private var selectionJob: Job? = null
     private var dictionaryJob: Job? = null
     private var dockJob: Job? = null
-    private var selectedNarrationTarget: ReadAlongPosition? = null
     private var selectionGeneration = 0
     private var matchNarrationToPage = false
     /**
@@ -352,6 +368,16 @@ class EpubReaderScreen(
         buildBottomBar()
         root.addView(bars.top, bars.topParams())
         root.addView(bars.bottom, bars.bottomParams())
+        modeButton.attachScrim(root, bars.top)
+        modeCaption = TextView(host.viewContext).apply {
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+            background = ThemeGradientDrawable().apply { setColor(0xE60A0D12.toInt()); cornerRadius = dp(10).toFloat() }
+            elevation = dp(6).toFloat()
+            visibility = View.GONE
+        }
+        root.addView(modeCaption, FrameLayout.LayoutParams(WRAP, WRAP))
         buildNarrationDock()
         preferences = loadPreferences()
         preferenceState = EpubPreferenceState(preferences)
@@ -419,6 +445,7 @@ class EpubReaderScreen(
         pageInfo.stop()
         cancelSearch()
         stopCursor()
+        modeButton.close()
         closeDictionary(resumeNarration = false)
         voice?.stop()
         if (::footnoteCard.isInitialized) footnoteCard.dismiss()
@@ -477,6 +504,7 @@ class EpubReaderScreen(
         !appearance.isOpen && !overlay.isOpen && !dictionaryCard.isOpen && !footnoteCard.isOpen
 
     override fun onSystemBack(): Boolean {
+        if (::modeButton.isInitialized && modeButton.isOpen) { modeButton.close(); return true }
         if (::footnoteCard.isInitialized && footnoteCard.isOpen) { closeFootnote(); return true }
         if (::dictionaryCard.isInitialized && dictionaryCard.isOpen) { closeDictionary(resumeNarration = true); return true }
         if (::appearance.isInitialized && appearance.isOpen) { appearance.cancel(); return true }
@@ -492,7 +520,8 @@ class EpubReaderScreen(
     } else if (::appearance.isInitialized && appearance.isOpen) {
         listOf(ButtonHint.activate("Adjust"), ButtonHint.back("Close appearance"))
     } else if (::dictionaryCard.isInitialized && dictionaryCard.isOpen) {
-        listOf(ButtonHint.activate("Choose"), ButtonHint.back(if (dictionaryCard.showsDefinitions) "Close definition" else "Close"))
+        listOfNotNull(ButtonHint.activate("Choose"), ButtonHint.back(if (dictionaryCard.showsDefinitions) "Close definition" else "Close"),
+            ButtonHint.secondary("Mode").takeIf { ::modeButton.isInitialized && modeButton.worthShowing })
     } else if (::overlay.isInitialized && overlay.isOpen) {
         listOf(
             ButtonHint.activate("Choose"),
@@ -507,12 +536,19 @@ class EpubReaderScreen(
         narration = narration != null,
         loading = navigator == null,
         cursor = cursorWords != null,
-        anchored = cursorWords?.selecting == true
+        anchored = cursorWords?.selecting == true,
+        modes = ::modeButton.isInitialized && modeButton.worthShowing,
+        picking = ::modeButton.isInitialized && modeButton.isOpen
     )
 
     override fun onPad(action: PadAction): Boolean {
         if (::footnoteCard.isInitialized && footnoteCard.onPad(action)) {
             host.refreshHints()
+            return true
+        }
+        // Ⓨ on an open card is the mode button, with the words just selected the place the voice will start at (#62).
+        if (action == PadAction.Secondary && ::dictionaryCard.isInitialized && dictionaryCard.isOpen && ::modeButton.isInitialized && modeButton.worthShowing) {
+            openModes()
             return true
         }
         if (::dictionaryCard.isInitialized && dictionaryCard.onPad(action)) return true
@@ -559,6 +595,10 @@ class EpubReaderScreen(
             is ReaderCommand.CursorAnchor -> anchorCursor(command.finish)
             is ReaderCommand.CursorGrow -> growCursor(command.paragraph)
             is ReaderCommand.CursorCancel -> if (command.anchored) cancelSelection() else stopCursor()
+            ReaderCommand.Mode -> openModes()
+            is ReaderCommand.ModeMove -> modeButton.move(command.delta)
+            ReaderCommand.ModePick -> modeButton.pick()
+            ReaderCommand.ModeClose -> modeButton.close()
             else -> Unit
         }
         return true
@@ -709,6 +749,7 @@ class EpubReaderScreen(
             }
             if (file == null) { showFailure(lastDownload?.message ?: "The EPUB could not be downloaded"); return@launch }
             loading.text = "Opening book…"
+            val settled = runCatching { progress.store.read(checkpointKey)?.takeIf { !it.pending }?.local }.getOrNull()
             val resume = try { progress.resume(readingSession, checkpointKey) }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (_: Exception) { showFailure("The saved reading position could not be read. It has been preserved."); return@launch }
@@ -717,10 +758,13 @@ class EpubReaderScreen(
                 else chooseReadingResume(overlay, progress, checkpointKey, resume)
                 ?: run { showFailure("Choose a reading position to continue"); return@launch }
             val saved = choice.location?.locator?.let { parseSavedLocator(JSONObject(it.toString())) }
+            awayCandidate = if (readAlong && entry.from == null && !resume.conflict)
+                AwayPrompt.forText(settled, choice.location, progress.writerOf(checkpointKey), System.currentTimeMillis())?.let { AwayCandidate(it, settled) } else null
             if (readAlong) narrationCheckpoint.beginOpen()
             try {
                 runCatching { attachNavigator(file, saved) }
                     .onFailure { showFailure("This EPUB could not be opened") }
+                if (navigator != null && !readAlong) entry.anchor?.let { openAtVoice(it) }
                 val narrated = plan
                 if (navigator != null && readAlong) {
                     if (narrated is NarrationPlan.Unreachable) {
@@ -1004,20 +1048,17 @@ class EpubReaderScreen(
             showNavigator()
         }))
         topBar.addView(control("search", "Search this book", { showSearch() }))
-        if (audioEditions.isNotEmpty() || alignedEditions.isNotEmpty() || readAlong) {
-            topBar.addView(PlayerIconButton(host.viewContext, PlayerControlIcon.AUDIO).apply {
-                contentDescription = "Reading and listening"
-                com.pocketds.hub.ui.OverlayButtons.dressDisc(this, colors.focusRing)
-                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(4) }
-                Styler.makeFocusable(this)
-                FocusDecorator.attach(this, ringVisible, scale = false)
-                FocusDecorator.listen(this, ringVisible) { view, focused ->
-                    if (focused) focusedControl = controls.indexOf(view).coerceAtLeast(0)
-                }
-                activateOnTap { showReadingModes() }
-                controls += this
-            })
+        // The one mode button (#62): the mode you are in, in the accent; it opens out to the others the book has.
+        modeButton = ModeButtonView(host.viewContext, colors, ringVisible).apply {
+            onPick = ::switchMode
+            onPickCurrent = { if (readAlong && alignedEditions.size > 1) showNarrationChooser(ModeEntry()) }
+            onCaption = ::showModeCaption
+            onChanged = { host.refreshHints(); refreshKeys() }
+            onFocus = { view -> focusedControl = controls.indexOf(view).coerceAtLeast(0) }
+            configure(ReadingMode.available(ebook = true, audio = audioEditions.isNotEmpty(), aligned = alignedEditions.isNotEmpty() || readAlong), currentMode)
         }
+        topBar.addView(modeButton, LinearLayout.LayoutParams(WRAP, dp(44)).apply { marginStart = dp(4) })
+        modeButton.currentSegment?.let { controls += it }
         bookmarkButton = control("☆", "Add bookmark", click = { toggleBookmark() })
         topBar.addView(bookmarkButton)
         topBar.addView(control("Aa", "Reading appearance", { showAppearance() }))
@@ -1134,8 +1175,28 @@ class EpubReaderScreen(
                     .map { NarrationSource(android.net.Uri.fromFile(it).toString()) }
             }
         }
-        val resume = saved?.let { ReadAlongLocation.resume(locatorJson(it), timeline) }
-        matchNarrationToPage = saved != null && resume == null
+        alignedFile = file
+        narrationManifest = manifest
+        // A switch of mode names the sentence to begin at (#62): the words selected, where the voice stopped, or where it is.
+        val begun = if (entry.from != null) withContext(Dispatchers.IO) { entryPosition(timeline, file, manifest) } else null
+        var place = saved
+        awayCandidate?.let { candidate ->
+            awayCandidate = null
+            val there = saved?.let { ReadAlongLocation.resume(locatorJson(it), timeline) }
+            val quote = there?.let { timeline.active(it.track, it.offsetMs) }?.let { sentence ->
+                withContext(Dispatchers.IO) { AlignedBook(timeline, EpubMarkup(file)::read).anchorOf(sentence) }
+            }?.quote?.highlight
+            loading.visibility = View.GONE
+            if (!AwayPrompt.ask(overlay, candidate.away, quote)) {
+                // Stay here: the hub's place becomes this device's.
+                place = candidate.ours?.locator?.let { parseSavedLocator(JSONObject(it.toString())) }
+                candidate.ours?.let { progress.save(checkpointKey, it) }
+                place?.let { goTo(it) }
+            }
+            loading.visibility = View.VISIBLE
+        }
+        val resume = begun ?: place?.let { ReadAlongLocation.resume(locatorJson(it), timeline) }
+        matchNarrationToPage = begun == null && place != null && resume == null
         narration?.release()
         // Nothing known of the page belongs to the new voice (#49): it is looked at again below.
         pageSpan = null; pageKey = null; lastSent = null; turnedFrom = null; lastFollowed = null
@@ -1161,6 +1222,31 @@ class EpubReaderScreen(
         DebugLog.log("reader", "aligned narration ready: ${timeline.tracks.size} tracks, resumed=${resume != null}")
         loading.visibility = View.GONE
         setControlsVisible(true)
+        if (entry.from != null) beginFromSwitch(begun)
+    }
+
+    /** The sentence of the narration a switch of mode begins at: a place in the audiobook, else the words, found in this edition by their text. */
+    private fun entryPosition(timeline: ReadAlongTimeline, file: File, manifest: ReadingAudioManifest?): ReadAlongPosition? {
+        val place = entry.audioPlace
+        if (place != null && manifest != null) {
+            val track = manifest.tracks.indexOfFirst { it.id == place.trackId }
+            AlignedPlaces.segmentAt(manifest, timeline, track, place.offsetMs)?.let { return AlignedPlaces.position(timeline, it) }
+        }
+        val anchor = entry.anchor ?: return null
+        return AlignedBook(timeline, EpubMarkup(file)::read).sentenceOf(anchor.document, anchor.quote)?.let { AlignedPlaces.position(timeline, it) }
+    }
+
+    /** Read along, opened by a switch: the page goes to the sentence and the voice begins there, or at the top of the page when no sentence was named (#62). */
+    private fun beginFromSwitch(begun: ReadAlongPosition?) {
+        val audio = narration ?: return
+        val start = if (begun != null) entry.start else ModePlace.Start.TOP_OF_PAGE
+        host.notify(ModePlace.note(start, ReadingMode.ALONG))
+        if (begun != null) {
+            val sentence = audio.timeline.active(begun.track, begun.offsetMs)
+            highlightNarration(sentence)
+            if (sentence != null) { lastSent = sentence; sendPageTo(sentence) }
+            if (entry.playing && !audio.isPlaying) audio.toggle()
+        } else if (entry.playing) seekNarrationToPage(play = true)
     }
 
     /** The sentence being read, as it was last handed to [highlightNarration]: a new look for the page draws it again. */
@@ -1404,8 +1490,6 @@ class EpubReaderScreen(
         if (quote.highlight.isBlank()) return
         val audio = narration
         if (selectionGate.begin(audio?.isPlaying == true)) audio?.pause(settle = false)
-        val ancestors = readSelectionAncestors(reader)
-        selectedNarrationTarget = audio?.timeline?.let { ReadAlongSelectionTarget.find(it, locator.document, ancestors) }
         val chosen = ReaderSelection(quote.highlight, quote, locator.document, JSONObject(locator.toJSON().toString()), pageRectToRoot(found.rect))
         selection = chosen
         shownHighlight = null
@@ -1739,19 +1823,6 @@ class EpubReaderScreen(
         }
     }
 
-    private suspend fun readSelectionAncestors(reader: EpubNavigatorFragment): List<String> {
-        val script = """(function(){var s=window.getSelection();if(!s||!s.anchorNode)return '[]';
-            var e=s.anchorNode.nodeType===1?s.anchorNode:s.anchorNode.parentElement;
-            var ids=[];while(e&&ids.length<24){if(e.id)ids.push(e.id);e=e.parentElement;}
-            return JSON.stringify(ids);})()"""
-        val raw = runCatching { reader.evaluateJavascript(script) }.getOrNull() ?: "[]"
-        return runCatching {
-            val decoded = if (raw.startsWith('"')) JSONArray("[$raw]").getString(0) else raw
-            val values = JSONArray(decoded)
-            (0 until values.length()).map { values.getString(it) }
-        }.getOrDefault(emptyList())
-    }
-
     private fun closeDictionary(resumeNarration: Boolean) {
         if (!::dictionaryCard.isInitialized) return
         if (!dictionaryCard.isOpen) { selectionGate.cancel(); return }
@@ -1760,28 +1831,12 @@ class EpubReaderScreen(
         voice?.stop()
         dictionaryCard.dismiss()
         navigator?.clearSelection()
-        selectedNarrationTarget = null
         selection = null
         shownHighlight = null
         phraseAnswer = null
         val resume = if (resumeNarration) selectionGate.dismiss() else { selectionGate.cancel(); false }
         if (resume && narration?.isPlaying == false) narration?.toggle()
         host.refreshHints()
-    }
-
-    /** The voice starts at the sentence of the words just selected, or at the top of the page when the text has no sentence there (#62). */
-    private fun playFromSelection() {
-        val audio = narration ?: return closeDictionary(resumeNarration = false)
-        val target = selectedNarrationTarget
-        selectionGate.playFromSelection()
-        closeDictionary(resumeNarration = false)
-        if (target == null) {
-            host.notify("No exact alignment here; playing from the first sentence on this page")
-            seekNarrationToPage(play = true)
-            return
-        }
-        jumpVoice(audio, target)
-        if (!audio.isPlaying) audio.toggle()
     }
 
     private fun showNarrationOptions() {
@@ -1838,68 +1893,147 @@ class EpubReaderScreen(
         highlightNarration(null)
     }
 
-    private fun switchReaderMode(aligned: Boolean) {
-        if (aligned == readAlong) return
-        if (aligned && alignedEditions.size > 1) return showNarrationChooser()
-        val target = if (aligned) alignedEditions.firstOrNull()?.sourceItemId ?: sourceItemId else ebookSourceItemId
-        replaceReaderMode(aligned, target)
+    // ---------------------------------------------------------------- the mode button (#62)
+
+    /** Ⓨ: the button opens out, over the menu (the page makes room for it); the words just selected are kept for the voice to start at. */
+    private fun openModes() {
+        if (!::modeButton.isInitialized || !modeButton.worthShowing) return
+        capturedSelection = selection
+        if (dictionaryCard.isOpen) closeDictionary(resumeNarration = false)
+        stopCursor()
+        setControlsVisible(true)
+        modeButton.post { modeButton.open() }
     }
 
-    private fun showReadingModes() {
-        val choices = buildList {
-            if (readAlong) add(ChoiceOverlay.Choice("read", "Read", "Ebook without narration"))
-            if (audioEditions.isNotEmpty()) add(ChoiceOverlay.Choice("listen", "Listen", "Open audiobook player"))
-            if (alignedEditions.isNotEmpty() && !readAlong) add(ChoiceOverlay.Choice("along", "Read along", "Synchronized text and audio"))
-            if (readAlong && alignedEditions.size > 1) add(ChoiceOverlay.Choice("narration", "Narration", "Choose synchronized audiobook"))
+    /** The name of the mode in focus, under the button; nothing once it closes. */
+    private fun showModeCaption(name: String) {
+        if (name.isEmpty()) { modeCaption.visibility = View.GONE; return }
+        modeCaption.text = name
+        modeCaption.visibility = View.VISIBLE
+        modeCaption.post {
+            val at = IntArray(2); val base = IntArray(2)
+            modeButton.getLocationInWindow(at); root.getLocationInWindow(base)
+            modeCaption.x = (at[0] - base[0] + modeButton.width - modeCaption.width).toFloat().coerceAtLeast(dp(8).toFloat())
+            modeCaption.y = (at[1] - base[1] + modeButton.height + dp(6)).toFloat()
         }
-        if (choices.isEmpty()) return
-        overlay.show("Reading & listening", "Switch format for $title", choices) { selected ->
-            when (selected) {
-                "read" -> switchReaderMode(false)
-                "along" -> switchReaderMode(true)
-                "narration" -> showNarrationChooser()
-                "listen" -> showListeningEditions()
+    }
+
+    /**
+     * A switch of mode (#62), the place by one rule ([ModePlace]): from the page, the sentence of the words just selected, else where the
+     * voice stopped when it was heard on this page, else the top of it; from Read along, the page opens where the voice is; between
+     * Read along and Audio the voice keeps going. The place is kept and sent to the hub first, so the next screen finds it there.
+     */
+    private fun switchMode(to: ReadingMode) {
+        val from = currentMode
+        if (to == from) return
+        modeJob?.cancel()
+        val chosen = capturedSelection
+        capturedSelection = null
+        val audio = narration
+        val voicePlaying = audio?.isPlaying == true
+        val voiceSegment = audio?.let { it.timeline.active(it.position.track, it.position.offsetMs) ?: it.timeline.tracks.getOrNull(it.position.track)?.segments?.firstOrNull() }
+        val timeline = audio?.timeline
+        val file = alignedFile
+        val manifest = narrationManifest
+        modeJob = uiScope.launch {
+            val heard = if (from == ReadingMode.EBOOK) heardAnchor?.takeIf { heardOnPage() } else null
+            val made = withContext(Dispatchers.IO) {
+                when (from) {
+                    ReadingMode.EBOOK -> when (ModePlace.startingFromPage(chosen != null, heard != null)) {
+                        ModePlace.Start.SELECTED_SENTENCE -> ModeEntry(from, ModePlace.Start.SELECTED_SENTENCE, chosen?.let { SentenceAnchor(it.document, it.quote) }, playing = true)
+                        ModePlace.Start.WHERE_VOICE_STOPPED -> ModeEntry(from, ModePlace.Start.WHERE_VOICE_STOPPED, heard, playing = true)
+                        ModePlace.Start.TOP_OF_PAGE -> ModeEntry(from, ModePlace.Start.TOP_OF_PAGE, playing = true)
+                    }
+                    else -> {
+                        // Read along: where the voice is, as a place in the audiobook, or as words the ebook can find.
+                        if (to == ReadingMode.AUDIO) ModeEntry(from, ModePlace.Start.WHERE_VOICE_STOPPED,
+                            audioPlace = if (voiceSegment != null && manifest != null) AlignedPlaces.audioPlace(manifest, voiceSegment) else null, playing = voicePlaying)
+                        else ModeEntry(from, ModePlace.Start.WHERE_VOICE_STOPPED,
+                            anchor = if (voiceSegment != null && timeline != null && file != null) AlignedBook(timeline, EpubMarkup(file)::read).anchorOf(voiceSegment) else null)
+                    }
+                }
+            }
+            saveCurrent(immediate = true)
+            // The place is on the hub before the next screen asks it where the book is.
+            withTimeoutOrNull(FLUSH_MS) { withContext(Dispatchers.IO) { progress.flush() } }
+            when (to) {
+                ReadingMode.EBOOK -> replaceReaderMode(false, ebookSourceItemId, made)
+                ReadingMode.ALONG -> if (alignedEditions.size > 1) showNarrationChooser(made)
+                    else replaceReaderMode(true, alignedEditions.firstOrNull()?.sourceItemId ?: sourceItemId, made)
+                ReadingMode.AUDIO -> showListeningEditions(made)
             }
         }
     }
 
-    private fun showListeningEditions() {
-        if (audioEditions.size == 1) return openAudioEdition(audioEditions.first())
+    /**
+     * The ebook, opened from Audio or Read along (#62): the page is where the voice was, found by the words of its sentence (the
+     * edition's own ids are not this one's), and "Heard to here" marks the sentence. A book whose file names differ is searched for it.
+     */
+    private fun openAtVoice(anchor: SentenceAnchor) {
+        heardAnchor = anchor
+        host.notify(ModePlace.noteToEbook(entry.from ?: ReadingMode.ALONG))
+        uiScope.launch {
+            var target = if (anchor.document in documentOrder) annotationLocator(ReadingAnnotation(id = "heard", document = anchor.document, quote = anchor.quote)) else null
+            if (target == null) {
+                val book = publication
+                target = if (book == null) null else runCatching { EpubBookSearch.find(book, anchor.quote.highlight.take(80), limit = 1).firstOrNull() }.getOrNull()
+            }
+            target?.let { goTo(it) }
+            drawHeard(target ?: return@launch)
+        }
+    }
+
+    /** "Heard to here" over the sentence, in the accent. */
+    private fun drawHeard(at: Locator) {
+        val reader = navigator ?: return
+        uiScope.launch {
+            reader.applyDecorations(listOf(Decoration("heard", at, Decoration.Style.Underline(colors.accent), mapOf(ReaderMarks.KIND to ReaderMarks.HEARD))), ReaderMarks.HEARD_GROUP)
+        }
+    }
+
+    /** Whether the "Heard to here" mark is on the page in front. */
+    private suspend fun heardOnPage(): Boolean {
+        val reader = navigator ?: return false
+        val raw = runCatching { reader.evaluateJavascript(HEARD_ON_PAGE) }.getOrNull()
+        return raw?.trim('"') == "1"
+    }
+
+    private fun showListeningEditions(made: ModeEntry) {
+        if (audioEditions.size == 1) return openAudioEdition(audioEditions.first(), made)
         overlay.show("Audiobook editions", "Choose a narration", audioEditions.mapIndexed { index, edition ->
             ChoiceOverlay.Choice(index.toString(), edition.narrator.ifBlank { "Audio edition ${index + 1}" },
                 edition.format.ifBlank { "Audio" }.uppercase())
-        }) { selected -> audioEditions.getOrNull(selected.toIntOrNull() ?: -1)?.let(::openAudioEdition) }
+        }) { selected -> audioEditions.getOrNull(selected.toIntOrNull() ?: -1)?.let { openAudioEdition(it, made) } }
     }
 
-    private fun openAudioEdition(edition: ReadingEdition) {
-        saveCurrent(immediate = true)
+    private fun openAudioEdition(edition: ReadingEdition, made: ModeEntry) {
         narration?.pause()
         host.back()
         host.push(AudiobookScreen(api, workId, edition, title, ringVisible, audioEditions,
             ReadingEdition(source = edition.source, kind = "ebook", sourceItemId = ebookSourceItemId),
-            alignedEditions, onProgressChanged))
+            alignedEditions, onProgressChanged, entry = made))
     }
 
-    private fun showNarrationChooser() {
+    private fun showNarrationChooser(made: ModeEntry) {
         if (alignedEditions.isEmpty()) return
         overlay.show("Audiobook narration", "Choose the synchronized edition", alignedEditions.mapIndexed { index, edition ->
             ChoiceOverlay.Choice(index.toString(), edition.narrator.ifBlank { "Narration ${index + 1}" },
                 selected = edition.sourceItemId == sourceItemId)
         }) { selected ->
             alignedEditions.getOrNull(selected.toIntOrNull() ?: -1)?.let { choice ->
-                if (!readAlong || choice.sourceItemId != sourceItemId) replaceReaderMode(true, choice.sourceItemId)
+                if (!readAlong || choice.sourceItemId != sourceItemId) replaceReaderMode(true, choice.sourceItemId, made)
             }
         }
     }
 
-    private fun replaceReaderMode(aligned: Boolean, targetSourceItemId: String) {
+    private fun replaceReaderMode(aligned: Boolean, targetSourceItemId: String, made: ModeEntry) {
         saveCurrent(immediate = true)
         narration?.pause()
         host.back()
         host.push(EpubReaderScreen(api, workId, targetSourceItemId, title, ringVisible,
             onProgressChanged, readAlong = aligned, readAlongAvailable = readAlongAvailable,
             alignedEditions = alignedEditions, audioEditions = audioEditions, ebookSourceItemId = ebookSourceItemId,
-            bookPages = bookPages))
+            bookPages = bookPages, entry = made))
     }
 
     private fun locatorJson(locator: Locator): kotlinx.serialization.json.JsonObject =
@@ -2600,6 +2734,11 @@ class EpubReaderScreen(
         const val OWN_MOVE_MS = 1_500L
         /** After the place in a file has been gone to, the page is drawn this long before it is shown again (#59). */
         const val PLACE_SETTLE_MS = 120L
+        /** How long a switch of mode waits for the hub to take the place it kept, before it opens the next screen anyway. */
+        const val FLUSH_MS = 2_500L
+        /** Whether the "Heard to here" mark has a box on the page in front, as 1 or 0. */
+        const val HEARD_ON_PAGE = """(function(){var b=document.querySelectorAll('[data-group="heard"] [data-style] > *');
+            for(var i=0;i<b.length;i++){var r=b[i].getBoundingClientRect();if(r.width>0&&r.right>0&&r.left<window.innerWidth&&r.bottom>0&&r.top<window.innerHeight)return 1;}return 0;})()"""
         /** The cursor's turn of a page: how long it waits for the page to be drawn, and how many times it looks. */
         const val CURSOR_SETTLE_MS = 160L
         const val CURSOR_TRIES = 12

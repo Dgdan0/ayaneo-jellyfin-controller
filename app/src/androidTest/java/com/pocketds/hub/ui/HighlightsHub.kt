@@ -13,7 +13,7 @@ import org.json.JSONObject
  * highlights the way the hub does (last write wins on `updatedAt`, a delete is a tombstone, every version is stored at a later moment
  * than the one before), answering as the hub does so the app's outbox and merge are exercised for real.
  */
-class HighlightsHub(private val epub: ByteArray) {
+class HighlightsHub(private val epub: ByteArray, private val delegate: StandInHub? = null) {
     val server = MockWebServer()
     /** Every highlight route request, in order: "PUT an_…", "DELETE an_…", "GET ?since=…". */
     val log = ArrayList<String>()
@@ -32,6 +32,10 @@ class HighlightsHub(private val epub: ByteArray) {
                 val query = request.path.orEmpty().substringAfter('?', "")
                 return when {
                     path.contains("/annotations") -> annotations(request, path, query)
+                    // The reader's place in the text is kept as the hub keeps it, so a book opened again finds what was written.
+                    path.endsWith("/position") && !path.endsWith("/audio/position") -> textPlace(request)
+                    // The audiobook's and the book's other routes are the other stand-in's, when there is one.
+                    delegate != null -> delegate.server.dispatcher.dispatch(request)
                     path.endsWith("/file") -> MockResponse().setHeader("Content-Type", "application/epub+zip").setBody(Buffer().write(epub))
                     path.endsWith("/position") && request.method == "GET" -> json("""{"locator":null,"device":"$device","byThisDevice":$byThisDevice}""")
                     request.method == "POST" -> json("""{"ok":true}""")
@@ -40,6 +44,21 @@ class HighlightsHub(private val epub: ByteArray) {
             }
         }
         server.start()
+    }
+
+    private var place: String = "null"
+    /** When the text place was written, on the hub's clock. */
+    @Volatile var placeStamp = 0L
+
+    /** A text place another device wrote, as the hub would answer it. */
+    @Synchronized fun textPlaceFrom(locator: String, who: String, at: Long) { place = locator; device = who; byThisDevice = false; placeStamp = at }
+
+    @Synchronized private fun textPlace(request: RecordedRequest): MockResponse {
+        if (request.method == "POST") {
+            runCatching { JSONObject(request.body.readUtf8()).get("locator").toString() }.getOrNull()?.let { place = it }
+            return json("""{"ok":true,"action":"save_epub_position","timestamp":1}""")
+        }
+        return json("""{"locator":$place,"timestamp":$placeStamp,"device":"$device","byThisDevice":$byThisDevice}""")
     }
 
     private fun json(body: String, code: Int = 200) = MockResponse().setResponseCode(code).setHeader("Content-Type", "application/json").setBody(body)
@@ -90,5 +109,5 @@ class HighlightsHub(private val epub: ByteArray) {
             .put("createdAt", at).put("updatedAt", at).put("syncedAt", ++clock)
     }
 
-    fun shutdown() = server.shutdown()
+    fun shutdown() { server.shutdown(); delegate?.shutdown() }
 }

@@ -41,6 +41,11 @@ class StandInHub(
     }
     @Volatile var revision = "aaaaaaaaaaaa"
     @Volatile var held: Place? = null
+    /** The device that wrote the held place, and whether it is the one asking (#62): what the hub says with a place. */
+    @Volatile var device = ""
+    @Volatile var byThisDevice = false
+    /** When the held place was written, on the hub's clock. */
+    @Volatile var writtenAt = 1_764_000_000_000L
     val requests = CopyOnWriteArrayList<Request>()
     /**
      * The work's own page (#39): `GET /v1/reading/works/{work}` answers it, its "you" as `PATCH …/you` has left
@@ -199,8 +204,8 @@ class StandInHub(
             val track = tracks.indexOfFirst { it.id == place.trackId }
             JSONObject().put("trackId", place.trackId).put("track", track).put("offsetMs", place.offsetMs)
                 .put("globalMs", tracks.take(track).sumOf { it.durationMs } + place.offsetMs).put("completed", place.completed)
-                .put("exact", place.exact).put("form", if (place.exact) "audio" else "text").put("timestamp", 1_764_000_000_000L)
-        } ?: JSONObject.NULL).withReset()).also {
+                .put("exact", place.exact).put("form", if (place.exact) "audio" else "text").put("timestamp", writtenAt)
+        } ?: JSONObject.NULL).put("device", device).put("byThisDevice", byThisDevice).withReset()).also {
         if (startOverAfterNextRead) { startOverAfterNextRead = false; startOver() }
     }
 

@@ -116,30 +116,40 @@ object AnnotationFinder {
         val share: Double get() = if (length <= 0) 0.0 else start.toDouble() / length
     }
 
-    fun normalize(text: String): String {
-        val composed = Normalizer.normalize(text, Normalizer.Form.NFC)
-        val out = StringBuilder(composed.length)
-        var space = false
-        for (c in composed) {
-            val plain = when (c) {
-                '‘', '’', '‛', 'ʼ' -> '\''
-                '“', '”', '‟' -> '"'
-                '–', '—', '−' -> '-'
-                '…' -> null
-                else -> c
-            }
-            when {
-                c == '­' || c == '​' || c == '‌' || c == '‍' || c == '﻿' -> Unit
-                c.isWhitespace() || c == ' ' -> space = out.isNotEmpty()
-                c == '…' -> { if (space) out.append(' '); space = false; out.append("...") }
-                plain != null -> {
-                    if (space) out.append(' ')
-                    space = false
-                    out.append(Character.toLowerCase(plain))
+    fun normalize(text: String): String = TextNormalizer().apply { append(text) }.toString()
+
+    /**
+     * Streams text into the comparison form chunk by chunk, so a document's text can be built as its nodes are read and the place of
+     * each element in it noted ([length] is where the next character goes). A chunk's leading space is held until a character follows.
+     */
+    class TextNormalizer {
+        private val out = StringBuilder()
+        private var space = false
+
+        val length: Int get() = out.length
+
+        fun append(text: String) {
+            val composed = Normalizer.normalize(text, Normalizer.Form.NFC)
+            for (c in composed) {
+                when {
+                    c == '\u00AD' || c == '\u200B' || c == '\u200C' || c == '\u200D' || c == '\uFEFF' -> Unit
+                    c.isWhitespace() || c == '\u00A0' -> space = out.isNotEmpty()
+                    c == '\u2026' -> { if (space) out.append(' '); space = false; out.append("...") }
+                    else -> {
+                        if (space) out.append(' ')
+                        space = false
+                        out.append(Character.toLowerCase(when (c) {
+                            '\u2018', '\u2019', '\u201B', '\u02BC' -> '\''
+                            '\u201C', '\u201D', '\u201F' -> '"'
+                            '\u2013', '\u2014', '\u2212' -> '-'
+                            else -> c
+                        }))
+                    }
                 }
             }
         }
-        return out.toString()
+
+        override fun toString(): String = out.toString()
     }
 
     /**
@@ -147,8 +157,10 @@ object AnnotationFinder {
      * than one place the one whose neighbours agree best with the quote's wins, and between equals the one nearest [hint]
      * (how far through the document it was, 0 to 1) else the first.
      */
-    fun find(text: String, quote: AnnotationQuote, hint: Double? = null): Found? {
-        val document = normalize(text)
+    fun find(text: String, quote: AnnotationQuote, hint: Double? = null): Found? = findIn(normalize(text), quote, hint)
+
+    /** [find] in a document's text that is already in the comparison form ([normalize]). */
+    fun findIn(document: String, quote: AnnotationQuote, hint: Double? = null): Found? {
         val passage = normalize(quote.highlight).trim()
         if (passage.isEmpty() || document.isEmpty()) return null
         val before = normalize(quote.before)

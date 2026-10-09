@@ -6,6 +6,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.test.platform.app.InstrumentationRegistry
+import com.pocketds.hub.model.ReadingEdition
 import com.pocketds.hub.nav.ScreenHost
 import com.pocketds.hub.net.HubClient
 import com.pocketds.hub.reader.DictionaryCard
@@ -45,17 +46,23 @@ class SelectionBook(
     val root: View,
     val hub: HighlightsHub,
     val workId: String,
-    val voice: RecordingVoice
+    val voice: RecordingVoice,
+    /** The screens the reader asked the app to open (a switch of mode), and what it said to the person. */
+    val pushed: MutableList<Any> = ArrayList(),
+    val notes: MutableList<String> = ArrayList()
 ) {
     private val ins = InstrumentationRegistry.getInstrumentation()
+
+    /** The screen on show: the one the reader was opened as, then each one a switch of mode opened (the app lets the one before go). */
+    var current: com.pocketds.hub.nav.Screen = screen
 
     inline fun <reified T> Any.field(name: String): T = javaClass.getDeclaredField(name).apply { isAccessible = true }.get(this) as T
 
     fun all(view: View): List<View> = listOf(view) + if (view is ViewGroup) (0 until view.childCount).flatMap { all(view.getChildAt(it)) } else emptyList()
 
-    val card: DictionaryCard get() = screen.field("dictionaryCard")
-    val overlay: SidePanelView get() = screen.field("overlay")
-    private val navigator: EpubNavigatorFragment get() = screen.field<EpubNavigatorFragment?>("navigator")!!
+    val card: DictionaryCard get() = current.field("dictionaryCard")
+    val overlay: SidePanelView get() = current.field("overlay")
+    private val navigator: EpubNavigatorFragment get() = current.field<EpubNavigatorFragment?>("navigator")!!
 
     suspend fun until(what: String, limitMs: Long = 25_000, check: () -> Boolean) {
         try { withTimeout(limitMs) { while (!withContext(Dispatchers.Main) { check() }) delay(80) } }
@@ -64,6 +71,26 @@ class SelectionBook(
 
     suspend fun js(script: String): String = withContext(Dispatchers.Main) {
         navigator.evaluateJavascript(script) ?: ""
+    }
+
+    private var left = false
+
+    /** Lets the screen in front go, as leaving the reader does: it saves the place it was on. [adopt] does this itself unless it was done. */
+    suspend fun leave() = withContext(Dispatchers.Main) {
+        if (!left) { current.onHide(); current.onDestroyView(); left = true }
+    }
+
+    /** Opens a screen the reader pushed, as the app would, and lets the one it replaces go. */
+    suspend fun adopt(next: Any): View = withContext(Dispatchers.Main) {
+        val hosting = host(activity, pushed, notes)
+        val opened = next as com.pocketds.hub.nav.Screen
+        if (!left) { current.onHide(); current.onDestroyView() }
+        left = false
+        val view = opened.onCreateView(hosting, FrameLayout(activity))
+        activity.setContentView(view)
+        opened.onShow()
+        current = opened
+        view
     }
 
     /** Where the words just selected were on the screen at the moment they were selected, from the page itself. */
@@ -82,8 +109,8 @@ class SelectionBook(
         withContext(Dispatchers.Main) { navigator.view!!.getLocationOnScreen(page) }
         selected = RectF(l * d + page[0], t * d + page[1], r * d + page[0], b * d + page[1])
         withContext(Dispatchers.Main) {
-            val inspect = screen.javaClass.getDeclaredMethod("inspectSelection", kotlin.jvm.functions.Function0::class.java).apply { isAccessible = true }
-            inspect.invoke(screen, null)
+            val inspect = current.javaClass.getDeclaredMethod("inspectSelection", kotlin.jvm.functions.Function0::class.java).apply { isAccessible = true }
+            inspect.invoke(current, null)
         }
     }
 
@@ -112,7 +139,7 @@ class SelectionBook(
     /** How many elements the page has for a CSS [selector]. */
     suspend fun count(selector: String): Int = js("document.querySelectorAll(${org.json.JSONObject.quote(selector)}).length").trim('"').toIntOrNull() ?: 0
 
-    val shelf: com.pocketds.hub.reader.AnnotationShelf get() = screen.field("annotations")
+    val shelf: com.pocketds.hub.reader.AnnotationShelf get() = current.field("annotations")
 
     suspend fun selectAndWait(text: String) {
         select(text)
@@ -133,7 +160,7 @@ class SelectionBook(
     }
 
     /** What the screen anchored the card to, in the screen's own coordinates, for a failure to say. */
-    fun anchored(): RectF? = screen.field<com.pocketds.hub.reader.ReaderSelection?>("selection")?.rect?.let(::onScreen)
+    fun anchored(): RectF? = current.field<com.pocketds.hub.reader.ReaderSelection?>("selection")?.rect?.let(::onScreen)
 
     fun shell(command: String): String =
         android.os.ParcelFileDescriptor.AutoCloseInputStream(ins.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText() }
@@ -142,14 +169,28 @@ class SelectionBook(
     fun shot(name: String) { shell("screencap -p /sdcard/Download/reader62-$name.png") }
 }
 
-private fun host(activity: ReaderFixtureActivity) =
-    Proxy.newProxyInstance(ScreenHost::class.java.classLoader, arrayOf(ScreenHost::class.java)) { _, method, _ ->
-        when (method.name) { "getViewContext" -> activity; "back" -> true; else -> null }
+private fun host(activity: ReaderFixtureActivity, pushed: MutableList<Any>, notes: MutableList<String>) =
+    Proxy.newProxyInstance(ScreenHost::class.java.classLoader, arrayOf(ScreenHost::class.java)) { _, method, args ->
+        when (method.name) {
+            "getViewContext" -> activity
+            "back" -> true
+            "push" -> { pushed += args!![0]; null }
+            "notify" -> { notes += args!![0] as String; null }
+            else -> null
+        }
     } as ScreenHost
 
 /** Runs [block] on the real reader showing [epub], with a stand-in hub; everything it changed on the device is put back. */
 @OptIn(ExperimentalReadiumApi::class)
-suspend fun withSelectionBook(epub: ByteArray = ReaderFixtures.selectionEpub(), prepare: HighlightsHub.() -> Unit = {}, block: suspend SelectionBook.() -> Unit) {
+suspend fun withSelectionBook(
+    epub: ByteArray = ReaderFixtures.selectionEpub(),
+    prepare: HighlightsHub.() -> Unit = {},
+    /** The audiobook's stand-in, when the book has one: it makes the book a read-along and an audio book as well. */
+    stand: StandInHub? = null,
+    workId: String = "sel-${System.nanoTime()}",
+    sourceItemId: String = "edition",
+    block: suspend SelectionBook.() -> Unit
+) {
     val ins = InstrumentationRegistry.getInstrumentation()
     val activity = ins.startActivitySync(Intent(ins.targetContext, ReaderFixtureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ReaderFixtureActivity
     check(activity.packageName.endsWith(".uitest")) { "Only the isolated .uitest application may be driven" }
@@ -159,22 +200,30 @@ suspend fun withSelectionBook(epub: ByteArray = ReaderFixtures.selectionEpub(), 
     val oldUrl = HubSettings.baseUrl(activity)
     val oldToken = HubSettings.token(activity)
     val oldColor = HighlightSettings.color(activity)
-    val hub = HighlightsHub(epub).apply(prepare)
+    val hub = HighlightsHub(epub, stand).apply(prepare)
     HubSettings.save(activity, hub.server.url("/").toString(), "fixture")
     var screen: EpubReaderScreen? = null
+    var shown: SelectionBook? = null
     val voice = RecordingVoice()
     try {
         EpubAppearanceStore.save(activity, EpubReaderPreferences())
         ComfortSettings.save(activity, com.pocketds.hub.ui.ScreenComfort())
         PageInfoSettings.save(activity, PageInfoChoice())
         lateinit var root: View
-        val workId = "sel-${System.nanoTime()}"
+        val pushed = ArrayList<Any>()
+        val notes = ArrayList<String>()
+        val hosting = host(activity, pushed, notes)
         withContext(Dispatchers.Main) {
-            screen = EpubReaderScreen(HubClient(activity), workId, "edition", "The Lantern Keeper", { true }, bookPages = 120)
+            val editions = stand != null
+            screen = EpubReaderScreen(HubClient(activity), workId, sourceItemId, "The Lantern Keeper", { true }, bookPages = 120,
+                readAlongAvailable = editions, ebookSourceItemId = sourceItemId,
+                alignedEditions = if (editions) listOf(ReadingEdition(source = "storyteller", kind = "readaloud", sourceItemId = sourceItemId, narrator = "A generated voice")) else emptyList(),
+                audioEditions = if (editions) listOf(ReadingEdition(source = "storyteller", kind = "audiobook", sourceItemId = sourceItemId, narrator = "A generated voice")) else emptyList())
             screen!!.javaClass.getDeclaredField("voiceFactory").apply { isAccessible = true }.set(screen, { _: android.content.Context, _: (String) -> Unit -> voice })
-            root = screen!!.onCreateView(host(activity), FrameLayout(activity)); activity.setContentView(root); screen!!.onShow()
+            root = screen!!.onCreateView(hosting, FrameLayout(activity)); activity.setContentView(root); screen!!.onShow()
         }
-        val book = SelectionBook(activity, screen!!, root, hub, workId, voice)
+        val book = SelectionBook(activity, screen!!, root, hub, workId, voice, pushed, notes)
+        shown = book
         book.until("the book") { activity.supportFragmentManager.fragments.filterIsInstance<EpubNavigatorFragment>().isNotEmpty() && book.run { screen!!.field<View>("loading").visibility != View.VISIBLE } }
         delay(1_200)
         book.block()
@@ -183,7 +232,14 @@ suspend fun withSelectionBook(epub: ByteArray = ReaderFixtures.selectionEpub(), 
         android.os.ParcelFileDescriptor.AutoCloseInputStream(ins.uiAutomation.executeShellCommand("screencap -p /sdcard/Download/reader62-failure.png")).use { it.readBytes() }
         throw failure
     } finally {
-        withContext(Dispatchers.Main) { screen?.onHide(); screen?.onDestroyView(); activity.finish() }
+        withContext(Dispatchers.Main) {
+            val last = shown?.current ?: screen
+            last?.onHide(); last?.onDestroyView()
+            // The audiobook plays on without its screen (it is a service); a test that began it ends it.
+            if (com.pocketds.hub.reader.ReadingAudio.state.value.book != null) com.pocketds.hub.reader.ReadingAudio.stop()
+            activity.finish()
+        }
+        for (i in 0 until 50) { if (com.pocketds.hub.reader.ReadingAudio.state.value.book == null) break; delay(100) }
         EpubAppearanceStore.save(activity, original)
         PageInfoSettings.save(activity, oldInfo)
         ComfortSettings.save(activity, oldComfort)
