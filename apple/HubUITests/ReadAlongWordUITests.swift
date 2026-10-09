@@ -57,8 +57,15 @@ final class ReadAlongWordUITests: XCTestCase {
     }
 
     @MainActor
-    private func keep(_ name: String) -> Shot {
-        let screenshot = XCUIScreen.main.screenshot()
+    private func keep(_ name: String, until drawn: (Shot) -> Bool = { _ in true }, timeout: TimeInterval = 30) -> Shot {
+        // The page is drawn a moment after the app says what it washes, and on a busy Mac much later (an
+        // iPad's page was still loading when the washes were already known): looked at until it is drawn.
+        var screenshot = XCUIScreen.main.screenshot()
+        let deadline = Date().addingTimeInterval(timeout)
+        while !drawn(Shot(screenshot.image)) && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            screenshot = XCUIScreen.main.screenshot()
+        }
         let shot = XCTAttachment(screenshot: screenshot)
         shot.name = name
         shot.lifetime = .keepAlways
@@ -80,7 +87,7 @@ final class ReadAlongWordUITests: XCTestCase {
                           "\(theme): the word and its trail are not washed: \(debug(app))")
             RunLoop.current.run(until: Date().addingTimeInterval(2))
             let drawn = washes(app)
-            let shot = keep("readalong-word-\(theme)")
+            let shot = keep("readalong-word-\(theme)", until: { $0.find(drawn["word"]!).count > 80 && $0.find(drawn["trail"]!).count > 160 })
             let word = shot.find(drawn["word"]!)
             let trail = shot.find(drawn["trail"]!)
             XCTAssertGreaterThan(word.count, 80, "\(theme): the word's wash is not on the page")
@@ -127,8 +134,11 @@ final class ReadAlongWordUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "highlight-preview").firstMatch.exists, "no sentence to see it in")
         let before = washes(app)["word"]
 
-        app.buttons["highlight-colour-teal"].tap()
-        XCTAssertTrue(waitUntil(5) { app.buttons["highlight-colour-teal"].isSelected }, "Teal was not chosen")
+        // Once more if a busy Mac lost the tap.
+        let teal = app.buttons["highlight-colour-teal"]
+        teal.tap()
+        if !waitUntil(10, { teal.isSelected }) { teal.tap() }
+        XCTAssertTrue(waitUntil(10) { teal.isSelected }, "Teal was not chosen")
         trail.adjust(toNormalizedSliderPosition: 0.7)
         XCTAssertTrue(waitUntil(5) { (trail.value as? String) != "40%" }, "the trail did not move: \(String(describing: trail.value))")
         let chosen = trail.value as? String
@@ -174,8 +184,9 @@ final class ReadAlongWordUITests: XCTestCase {
         let close = app.buttons["Close"].firstMatch
         if close.waitForExistence(timeout: 3) { close.tap() }
         RunLoop.current.run(until: Date().addingTimeInterval(2))
-        let shot = keep("readalong-sentence-only-teal")
-        XCTAssertGreaterThan(shot.find(washes(app)["sentence"]!).count, 200, "the sentence's wash is not on the page")
+        let sentence = washes(app)["sentence"]!
+        let shot = keep("readalong-sentence-only-teal", until: { $0.find(sentence).count > 200 })
+        XCTAssertGreaterThan(shot.find(sentence).count, 200, "the sentence's wash is not on the page")
     }
 
     // MARK: Playing
