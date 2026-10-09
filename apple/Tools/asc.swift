@@ -53,9 +53,12 @@ func token() -> String {
     let path = (need("ASC_KEY_PATH") as NSString).expandingTildeInPath
     guard let pem = try? String(contentsOfFile: path, encoding: .utf8),
           let key = try? P256.Signing.PrivateKey(pemRepresentation: pem) else { fail("the API key could not be read") }
-    let now = Int(Date().timeIntervalSince1970)
+    // Dated a minute back, and good for the 20 minutes Apple allows from then: a token dated
+    // this second was refused (401) by four calls in six on 2026-10-09, the Mac's clock a
+    // second ahead of some of App Store Connect's servers; a minute back, six in six passed.
+    let issued = Int(Date().timeIntervalSince1970) - 60
     let header: [String: Any] = ["alg": "ES256", "kid": need("ASC_KEY_ID"), "typ": "JWT"]
-    let claims: [String: Any] = ["iss": need("ASC_ISSUER_ID"), "iat": now, "exp": now + 1_200, "aud": "appstoreconnect-v1"]
+    let claims: [String: Any] = ["iss": need("ASC_ISSUER_ID"), "iat": issued, "exp": issued + 1_200, "aud": "appstoreconnect-v1"]
     guard let headerData = try? JSONSerialization.data(withJSONObject: header),
           let claimsData = try? JSONSerialization.data(withJSONObject: claims) else { fail("the token could not be made") }
     let unsigned = base64url(headerData) + "." + base64url(claimsData)

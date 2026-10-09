@@ -17,13 +17,16 @@ struct BookPlaceOnPage: Equatable {
 }
 
 /// A line of the contents: a part of the book, how deep it sits, and the
-/// place it opens (a Readium locator as JSON).
+/// place it opens (a Readium locator as JSON). `anchor` is the element it
+/// points to inside its file (`chapter.xhtml#part2`), "" for a line that
+/// opens the file.
 struct BookContentsRow: Identifiable, Equatable {
     let id: Int
     let depth: Int
     let title: String
     let href: String
     let locator: String
+    var anchor = ""
 }
 
 /// The book as Readium has it (#25, phase 4): the EPUB opened from the file
@@ -80,6 +83,11 @@ final class BookNavigator: NSObject {
     /// Reading along: the accent the sentence is washed in, and the wash for the page's colours (#52).
     private var narrationTint: UInt32?
     private var narrationWash: UInt32?
+    /// The element of the sentence lit, whose words its boxes are trimmed to (#56).
+    private var narrationFragment: String?
+    /// The book's documents as Readium spells them: what a locator made from
+    /// the narration's path names (#61).
+    private(set) var hrefs = BookHrefs(readingOrder: [])
     /// The note whose card is open: where "Go to the note" goes.
     private var noteLink: ReadiumShared.Link?
 
@@ -111,8 +119,10 @@ final class BookNavigator: NSObject {
         for (index, entry) in links.enumerated() {
             guard let locator = await publication.locate(entry.link), let json = try? locator.jsonString() else { continue }
             let title = entry.link.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let fragment = entry.link.href.split(separator: "#", maxSplits: 1).dropFirst().first.map(String.init) ?? ""
             contents.append(BookContentsRow(id: index, depth: entry.depth, title: title.isEmpty ? "Section \(index + 1)" : title,
-                                            href: BookSections.path(locator.href.string), locator: json))
+                                            href: BookSections.path(locator.href.string), locator: json,
+                                            anchor: fragment.removingPercentEncoding ?? fragment))
         }
         return Loaded(publication: publication, sections: sections, contents: contents,
                       readingOrder: publication.readingOrder.map { BookSections.path($0.href) })
@@ -134,6 +144,7 @@ final class BookNavigator: NSObject {
         navigator.delegate = self
         publication = loaded.publication
         controller = navigator
+        hrefs = BookHrefs(readingOrder: loaded.readingOrder)
         narrationTint = narration
         narrationWash = Self.wash(narration, rendering)
         return navigator
@@ -174,7 +185,8 @@ final class BookNavigator: NSObject {
 
     /// The sentence spoken glows, or nothing does.
     func highlight(_ segment: ReadAlongSegment?) {
-        controller?.apply(decorations: ReadAlongHighlight.decorations(segment), in: ReadAlongHighlight.group)
+        narrationFragment = segment?.fragment
+        controller?.apply(decorations: ReadAlongHighlight.decorations(segment, hrefs: hrefs), in: ReadAlongHighlight.group)
         fitNarration()
     }
 
@@ -185,7 +197,7 @@ final class BookNavigator: NSObject {
     /// page has not had it yet.
     func fitNarration() {
         guard let controller, let wash = narrationWash else { return }
-        let script = ReadAlongPageScript.fitNarration(wash: wash)
+        let script = ReadAlongPageScript.fitNarration(wash: wash, fragment: narrationFragment)
         Task { _ = await controller.evaluateJavaScript(script) }
     }
 
@@ -202,6 +214,17 @@ final class BookNavigator: NSObject {
     // MARK: Search (#37)
 
     /// The first `limit` passages with `query` in them, in reading order, from
+    /// The HTML of the part `href` (a path, as `BookSections` has it), for
+    /// where the contents' lines into it start (#55). Nil when the book has no
+    /// such part or it cannot be read.
+    func html(of href: String) async -> String? {
+        guard let publication,
+              let link = publication.readingOrder.first(where: { BookSections.path($0.href) == href }),
+              let resource = publication.get(link),
+              case .success(let data) = await resource.read() else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     /// Readium's search of the publication's text (Android's `EpubBookSearch`),
     /// or why there are none. A cancelled search stops between Readium's pages
     /// of results. Readium names no chapter for a result: `chapters` does,

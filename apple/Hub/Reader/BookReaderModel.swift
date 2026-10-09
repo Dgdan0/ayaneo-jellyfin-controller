@@ -148,6 +148,11 @@ final class BookReaderModel {
     private(set) var footnote: String?
     private(set) var notice: String?
     private(set) var contents: [BookContentsRow] = []
+    /// The page each contents line starts on, by its id, in the corners'
+    /// count (#55). A line into the middle of a part gets its number once
+    /// that part's text has been measured, and one that cannot be worked out
+    /// has none.
+    private(set) var contentsPages: [Int: Int] = [:]
     /// The contents line of the part on the page.
     private(set) var currentContentsRow: Int?
     private(set) var bookmarks: [EpubBookmark] = []
@@ -219,6 +224,7 @@ final class BookReaderModel {
     /// The book opened, waiting for a choice of place.
     @ObservationIgnored private var pending: BookNavigator.Loaded?
     @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var pagesTask: Task<Void, Never>?
     @ObservationIgnored private var flushTask: Task<Void, Never>?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
     @ObservationIgnored private var linkOrigin: (place: String, at: Date)?
@@ -438,6 +444,37 @@ final class BookReaderModel {
                              hub: hub, force: force)
     }
 
+    /// The contents' page numbers (#55): a line that opens its part at once;
+    /// lines into the middle of a part once that part's text is measured, in
+    /// the background and each part read once. The contents never wait.
+    private func countContentsPages() {
+        pagesTask?.cancel()
+        let sections = sections, bookPages = bookPages
+        var pages: [Int: Int] = [:]
+        for row in contents where row.anchor.isEmpty {
+            pages[row.id] = ContentsPages.page(sections: sections, bookPages: bookPages, href: row.href, share: 0)
+        }
+        contentsPages = pages
+        let pointed = contents.filter { !$0.anchor.isEmpty }
+        var parts: [String] = []
+        for row in pointed where !parts.contains(row.href) { parts.append(row.href) }
+        guard !parts.isEmpty else { return }
+        pagesTask = Task { [weak self, navigator] in
+            for href in parts {
+                guard !Task.isCancelled, let html = await navigator.html(of: href) else { continue }
+                let lines = pointed.filter { $0.href == href }
+                let anchors = lines.map(\.anchor)
+                let shares = await Task.detached(priority: .utility) { ContentsPages.shares(html: html, anchors: anchors) }.value
+                guard !Task.isCancelled, let self else { return }
+                for line in lines {
+                    guard let share = shares[line.anchor] else { continue }
+                    self.contentsPages[line.id] = ContentsPages.page(sections: sections, bookPages: bookPages,
+                                                                     href: href, share: share)
+                }
+            }
+        }
+    }
+
     private func show(_ loaded: BookNavigator.Loaded, at locator: String?) {
         sections = loaded.sections
         contents = loaded.contents
@@ -457,8 +494,10 @@ final class BookReaderModel {
             return
         }
         refreshBookmarks()
+        countContentsPages()
         phase = .reading
         if let readAlong {
+            readAlong.hrefs = navigator.hrefs
             if let prepared {
                 readAlong.start(prepared, workId: workId, token: app.storedToken(), at: locator,
                                 book: NarrationModel.Book(title: title, author: author, artwork: cover))
@@ -492,6 +531,7 @@ final class BookReaderModel {
     func stop() {
         stopSearching()
         loadTask?.cancel()
+        pagesTask?.cancel()
         noticeTask?.cancel()
         flushPlace()
         readAlong?.release()

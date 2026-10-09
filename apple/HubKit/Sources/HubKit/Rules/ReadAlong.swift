@@ -83,10 +83,12 @@ public struct ReadAlongTimeline: Equatable, Sendable {
         return value.segments[high]
     }
 
-    /// Where the sentence `fragment` of `href` starts.
+    /// Where the sentence `fragment` of `href` starts. `href` as Readium or
+    /// a kept locator spells it: compared by its `BookHref.key` (#61).
     public func find(href: String, fragment: String) -> ReadAlongPosition? {
+        let key = BookHref.key(href)
         for (index, track) in tracks.enumerated() {
-            if let segment = track.segments.first(where: { $0.textHref == href && $0.fragment == fragment }) {
+            if let segment = track.segments.first(where: { $0.textHref == key && $0.fragment == fragment }) {
                 return ReadAlongPosition(track: index, offsetMs: segment.beginMs - track.startMs)
             }
         }
@@ -118,8 +120,35 @@ public struct ReadAlongTimeline: Equatable, Sendable {
     }
 
     /// Some sentence of `href`'s text is narrated: the page can be followed.
+    /// `href` as Readium spells it (#61).
     public func narrates(_ href: String) -> Bool {
-        tracks.contains { track in track.segments.contains { $0.textHref == href } }
+        let key = BookHref.key(href)
+        return tracks.contains { track in track.segments.contains { $0.textHref == key } }
+    }
+
+    /// Where Play starts on a page of a part the narration never reads (#61):
+    /// the first sentence of the next part in `readingOrder` that it does
+    /// read, else the last sentence of the nearest one before. A part it
+    /// reads gives its own first sentence; a page not in the reading order,
+    /// the narration's first. Both spelled as Readium spells them.
+    public func nearest(to href: String, readingOrder: [String]) -> ReadAlongSegment? {
+        var first: [String: ReadAlongSegment] = [:]
+        var last: [String: ReadAlongSegment] = [:]
+        for segment in tracks.flatMap(\.segments) {
+            if first[segment.textHref] == nil { first[segment.textHref] = segment }
+            last[segment.textHref] = segment
+        }
+        let page = BookHref.key(href)
+        if let own = first[page] { return own }
+        let order = readingOrder.map(BookHref.key)
+        guard let here = order.firstIndex(of: page) else { return tracks.first?.segments.first }
+        for part in order[(here + 1)...] {
+            if let segment = first[part] { return segment }
+        }
+        for part in order[..<here].reversed() {
+            if let segment = last[part] { return segment }
+        }
+        return tracks.first?.segments.first
     }
 }
 
@@ -179,8 +208,10 @@ public enum ReadAlongLocation {
     /// The page's locator moved to the sentence playing at `point`, finished
     /// when `completed`: its part and fragment, no stale selector, no text,
     /// no private offset. A point the timeline does not hold leaves it as it was.
+    /// The part keeps Readium's spelling (#61): the page's own when the
+    /// sentence is in it, else `hrefs`'.
     public static func save(_ locator: String, _ timeline: ReadAlongTimeline, point: ReadAlongPosition,
-                            completed: Bool) -> String {
+                            completed: Bool, hrefs: BookHrefs = BookHrefs(readingOrder: [])) -> String {
         guard timeline.tracks.indices.contains(point.track), var object = BookLocator.object(locator) else { return locator }
         let track = timeline.tracks[point.track]
         let segment = timeline.active(track: point.track, offsetMs: point.offsetMs)
@@ -191,7 +222,9 @@ public enum ReadAlongLocation {
         locations.removeValue(forKey: "pocketdsAudio")
         locations["fragments"] = [segment.fragment]
         if completed { locations["totalProgression"] = 1.0 }
-        object["href"] = segment.textHref
+        if (object["href"] as? String).map(BookHref.key) != segment.textHref {
+            object["href"] = hrefs.readium(segment.textHref)
+        }
         object["locations"] = locations
         object.removeValue(forKey: "text")
         return BookLocator.canonical(object) ?? locator
@@ -323,24 +356,46 @@ extension ReadAlongPageScript {
     /// Corners round only on the outside of the shape. Readium lays the boxes
     /// out again when the page reflows, and the script, which stays in the
     /// page, fits them again then.
-    public static func fitNarration(wash: UInt32) -> String {
+    ///
+    /// Each row is also trimmed across to the sentence's own words (#56):
+    /// Storyteller's element for a sentence holds the space after it (and can
+    /// hold one before it), which Readium's boxes cover. The script measures a
+    /// Range from the first to the last character of the element `fragment`
+    /// that is not a space, and a row takes the left and right of that
+    /// Range's boxes on its line, `side` points of air beyond them; a row with
+    /// none of them (a line holding only the space) gets no box. Without the
+    /// element on the page, Readium's own extents stand.
+    public static func fitNarration(wash: UInt32, fragment: String? = nil) -> String {
         let colour = ReadAlongGlow.rgb(wash)
         let side = ReadAlongGlow.side
         let corner = ReadAlongGlow.corner
         let name = ReadAlongGlow.className
         return "(function(){document.documentElement.style.setProperty('--pocket-narration-wash','\(colour)');"
+            + "window.__pocketNarrationId=\(json(fragment ?? ""));"
             + "if(window.__pocketNarration){window.__pocketNarration();return true;}"
-            + "function fit(){var items=document.querySelectorAll('div[data-style=\"\(name)\"]');"
+            + "function words(){var el=window.__pocketNarrationId?document.getElementById(window.__pocketNarrationId):null;"
+            + "if(!el)return null;var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null),n,a=null,z=null;"
+            + "while((n=w.nextNode())){var s=n.data;for(var i=0;i<s.length;i++){if(/\\S/.test(s.charAt(i))){if(!a)a=[n,i];z=[n,i+1];}}}"
+            + "if(!a)return [];var g=document.createRange();g.setStart(a[0],a[1]);g.setEnd(z[0],z[1]);"
+            + "var se=document.scrollingElement||document.documentElement,ox=se.scrollLeft,oy=se.scrollTop;"
+            + "return Array.prototype.slice.call(g.getClientRects()).filter(function(q){return q.width>0&&q.height>0;})"
+            + ".map(function(q){return{l:q.left+ox,r:q.right+ox,c:(q.top+q.bottom)/2+oy};});}"
+            + "function fit(){var items=document.querySelectorAll('div[data-style=\"\(name)\"]'),own=words();"
             + "for(var n=0;n<items.length;n++){var item=items[n];"
             + "Array.prototype.slice.call(item.querySelectorAll('[data-join]')).forEach(function(j){j.remove();});"
             + "var rows=[];Array.prototype.slice.call(item.children).forEach(function(b){"
             + "if(b.dataset.t===undefined){b.dataset.t=parseFloat(b.style.top);b.dataset.h=parseFloat(b.style.height);"
             + "b.dataset.l=parseFloat(b.style.left);b.dataset.w=parseFloat(b.style.width);}"
+            + "b.style.display='';"
             + "var t=+b.dataset.t,h=+b.dataset.h,l=+b.dataset.l,w=+b.dataset.w,c=t+h/2,row=null;"
             + "for(var k=0;k<rows.length;k++){if(Math.abs(rows[k].c-c)<Math.min(rows[k].h,h)/2){row=rows[k];break;}}"
             + "if(row){row.boxes.push(b);row.l=Math.min(row.l,l)-0;row.r=Math.max(row.r,l+w);"
             + "row.t=Math.min(row.t,t);row.b=Math.max(row.b,t+h);}"
             + "else rows.push({c:c,h:h,t:t,b:t+h,l:l,r:l+w,boxes:[b]});});"
+            + "if(own){rows=rows.filter(function(r){var on=own.filter(function(q){return Math.abs(q.c-r.c)<r.h/2;});"
+            + "if(!on.length){r.boxes.forEach(function(b){b.style.display='none';});return false;}"
+            + "r.l=Math.min.apply(null,on.map(function(q){return q.l;}));r.r=Math.max.apply(null,on.map(function(q){return q.r;}));"
+            + "return true;});}"
             + "rows.forEach(function(r){r.l-=\(side);r.r+=\(side);});"
             + "function near(a,b){return b.r>a.l&&b.l<a.r&&Math.abs(a.c-b.c)<2.2*Math.max(a.h,b.h);}"
             + "rows.forEach(function(r){r.up=null;r.down=null;});"
@@ -370,10 +425,12 @@ extension ReadAlongPageScript {
 
 extension ReadAlongTimeline {
     /// The narrated sentences of `href`, in the order they are read, each
-    /// once: what "Listen from this page" looks for on the page.
+    /// once: what "Listen from this page" looks for on the page. `href` as
+    /// Readium spells it (#61).
     public func fragments(in href: String) -> [String] {
+        let key = BookHref.key(href)
         var seen = Set<String>()
-        return tracks.flatMap(\.segments).filter { $0.textHref == href && seen.insert($0.fragment).inserted }.map(\.fragment)
+        return tracks.flatMap(\.segments).filter { $0.textHref == key && seen.insert($0.fragment).inserted }.map(\.fragment)
     }
 }
 

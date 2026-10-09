@@ -63,6 +63,41 @@ final class BookReaderTests: XCTestCase {
         XCTAssertFalse(back.exists, "the way back stayed after it was taken")
     }
 
+    /// The contents say which page each chapter starts on (#55), in the
+    /// corners' count: Five's number is the page the corner says once the
+    /// contents have gone there, and "Later", which points half way into
+    /// Eight, comes after Eight. The attachment "contents-pages".
+    @MainActor
+    func testTheContentsSayThePageEachChapterStartsOn() {
+        let app = launchReading(Self.recursion, ["HUB_BOOK_SHEET": "contents"],
+                                arguments: ["-epub.pageInfo.place", "pageInBook"])
+        let five = app.buttons["Five"]
+        XCTAssertTrue(five.waitForExistence(timeout: 15), "the contents did not open")
+        func startsOn(_ title: String) -> Int? {
+            // The row where you are says so too: "About this edition, Where you are".
+            let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
+            guard row.exists else { return nil }
+            return (row.value as? String).flatMap { Int($0.replacingOccurrences(of: "page ", with: "")) }
+        }
+        XCTAssertTrue(waitUntil(10) { startsOn("Later") != nil }, "Later has no page; the rows: "
+                      + app.buttons.allElementsBoundByIndex.map { "\($0.label) = \(String(describing: $0.value))" }.joined(separator: " | "))
+        let pages = ["About this edition", "One", "Five", "Eight", "Later"].map(startsOn)
+        XCTAssertEqual(pages.first, 1, "the book does not start on page 1: \(pages)")
+        XCTAssertTrue(pages.allSatisfy { $0 != nil } && pages.compactMap { $0 } == pages.compactMap { $0 }.sorted()
+                      && Set(pages.compactMap { $0 }).count == pages.count, "the pages are not in order: \(pages)")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "contents-pages"
+        shot.lifetime = .keepAlways
+        add(shot)
+
+        let fiveAt = startsOn("Five") ?? -1
+        five.tap()
+        let place = app.buttons["book-corner-place"]
+        if !place.waitForExistence(timeout: 5) { page(app).tap() }
+        XCTAssertTrue(waitUntil(10) { place.label.hasPrefix("Page \(fiveAt) of ") },
+                      "the contents said page \(fiveAt) for Five, the corner says \(place.label)")
+    }
+
     /// A note's number opens the note as a card over the page; Close puts
     /// the card away and the page is where it was.
     @MainActor

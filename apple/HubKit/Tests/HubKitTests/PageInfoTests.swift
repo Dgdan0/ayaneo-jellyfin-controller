@@ -150,7 +150,10 @@ struct PageInfoTests {
         #expect(EpubPagePalette.argb(EpubPagePalette.hex(0xFFDF_DFD8)) == 0xFFDF_DFD8)
         #expect(EpubPagePalette.argb("#12345") == nil && EpubPagePalette.argb("#GGGGGG") == nil)
         let compact = PageInfo.strip(compactHeight: true), regular = PageInfo.strip(compactHeight: false)
-        #expect([compact.top, compact.bottom, regular.top, regular.bottom] == [34, 34, 62, 62])
+        #expect([compact.top, compact.bottom] == [34, 34])
+        // A phone held upright keeps Kindle's strips (#58): the text starts lower and ends higher than before (62, 62).
+        #expect([regular.top, regular.bottom] == [PageInfo.phoneStrip.top, PageInfo.phoneStrip.bottom])
+        #expect(regular.top == 84 && regular.bottom > 62)
         // An iPad's page starts lower and ends higher, as Kindle's does (#47).
         let pad = PageInfo.strip(compactHeight: false, tablet: true)
         #expect([pad.top, pad.bottom] == [84, 96])
@@ -160,9 +163,23 @@ struct PageInfoTests {
         // Too short for the deep strips, an iPad's corners sit in the middle of the shallower ones.
         let short = PageInfo.baselines(tablet: true, strip: compact)
         #expect(short.top > 17 && short.top < 24 && short.top == short.bottom)
+        // A phone upright: the clock where it was, beside the island, and the bottom line 60 up, as Kindle's (#58).
         let phone = PageInfo.baselines(tablet: false, strip: regular)
-        #expect(phone.top > 31 && phone.top < 40 && phone.top == phone.bottom, "in the middle of the strip, a little below it")
+        #expect([phone.top, phone.bottom] == [35.5, 60])
+        // Sideways, in the middle of its shallow strips.
+        let sideways = PageInfo.baselines(tablet: false, strip: compact)
+        #expect(sideways.top > 17 && sideways.top < 24 && sideways.top == sideways.bottom)
         #expect(PageInfo.cornerSize == 13)
         #expect(PageInfo.title("  Light   Bringer\n") == "Light Bringer")
+    }
+
+    /// #58: the title never sits behind a Dynamic Island or a notch.
+    @Test func theTitleIsNotDrawnWhereAnIslandOrNotchWouldCoverIt() {
+        #expect(!PageInfo.showsTitle(tablet: false, topSafeArea: 62), "an iPhone 17 Pro Max's island")
+        #expect(!PageInfo.showsTitle(tablet: false, topSafeArea: 47), "a notch")
+        #expect(PageInfo.showsTitle(tablet: false, topSafeArea: 20), "a phone with only a status bar")
+        #expect(PageInfo.showsTitle(tablet: false, topSafeArea: 0), "a phone sideways: the island is at the side")
+        #expect(PageInfo.showsTitle(tablet: true, topSafeArea: 24), "an iPad")
+        #expect(PageInfo.showsTitle(tablet: true, topSafeArea: 0), "the Mac")
     }
 }

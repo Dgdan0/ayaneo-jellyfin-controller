@@ -46,8 +46,14 @@ public enum DemoReadAlong {
         let name: String
         let stretches: [Stretch]
         /// Its text's file: the demo ebook's own (`DemoEpub`), so a place kept in
-        /// the ebook opens in the read-along edition, as one book's do.
-        var file: String { String(format: "chapter-%02ld.xhtml", (DemoReadAlong.chapters.firstIndex { $0.name == name } ?? 0) + 1) }
+        /// the ebook opens in the read-along edition, as one book's do. Two's
+        /// holds spaces, brackets and an accented letter (#61).
+        var file: String { DemoEpub.chapterFile(DemoReadAlong.chapters.firstIndex { $0.name == name } ?? 0, identifier: DemoReadAlong.workId) }
+
+        /// The file as its overlay names it. Two's is percent-encoded, as some
+        /// tools write a media overlay; the package itself names it raw, as
+        /// Mistborn's does.
+        var smilFile: String { name == "two" ? BookHref.spelled(file) : file }
     }
 
     /// The chapters and where they are spoken. The audiobook's tracks are 90,
@@ -217,10 +223,17 @@ public enum DemoReadAlong {
 
     private static func page(_ chapter: Int) -> String {
         let said = sentences(chapter)
-        // Three sentences to a paragraph.
+        // Three sentences to a paragraph. As Storyteller writes them, the space
+        // between two sentences is inside one of their elements (#56): after
+        // the sentence ("The dead are dead. "), or in chapter Two before the
+        // next (" Later …"), which the highlight must leave out.
+        let before = chapter == 1
         let paragraphs = stride(from: 0, to: said.count, by: 3).map { start in
-            "<p>" + said[start..<min(start + 3, said.count)].map { #"<span id="\#($0.id)">\#($0.text)</span>"# }
-                .joined(separator: " ") + "</p>"
+            let group = Array(said[start..<min(start + 3, said.count)])
+            return "<p>" + group.enumerated().map { index, sentence in
+                let text = before ? (index > 0 ? " " : "") + sentence.text : sentence.text + (index < group.count - 1 ? " " : "")
+                return #"<span id="\#(sentence.id)">\#(text)</span>"#
+            }.joined() + "</p>"
         }
         let title = chapters[chapter].title
         return """
@@ -236,7 +249,7 @@ public enum DemoReadAlong {
 
     private static func overlay(_ chapter: Int) -> String {
         let name = chapters[chapter].name
-        let file = chapters[chapter].file
+        let file = chapters[chapter].smilFile
         let pars = sentences(chapter).map { sentence in
             let audio = files[sentence.file].href.replacingOccurrences(of: "OEBPS/", with: "../")
             return #"<par id="\#(sentence.id)-par"><text src="../\#(file)#\#(sentence.id)"/>"#
