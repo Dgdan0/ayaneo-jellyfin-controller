@@ -70,6 +70,24 @@ class AlignedBookTest {
         assertNotNull(AnnotationFinder.find(DocumentText.plain(ebook), inner.quote))
     }
 
+    /** A word edition (#66): the voice is on a word, and "Heard to here" and a switch to the ebook still name its whole sentence. */
+    @Test fun aWordOfTheNarrationIsTheAnchorOfItsSentence() {
+        val words = """<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body>
+            <p><span id="s0"><span id="s0-w0">Ash</span> <span id="s0-w1">had</span> <span id="s0-w2">fallen.</span></span>
+            <span id="s1"><span id="s1-w0">She</span> <span id="s1-w1">did</span> <span id="s1-w2">not</span> <span id="s1-w3">stop.</span></span></p></body></html>"""
+        val wordTimeline = ReadAlongTimeline(listOf(ReadAlongTrack("audio/voice.mp3", listOf(
+            ReadAlongSegment(document, "s0-w0", "audio/voice.mp3", 0, 300, "s0"), ReadAlongSegment(document, "s0-w1", "audio/voice.mp3", 300, 600, "s0"),
+            ReadAlongSegment(document, "s0-w2", "audio/voice.mp3", 600, 900, "s0"), ReadAlongSegment(document, "s1-w0", "audio/voice.mp3", 1_000, 1_200, "s1"),
+            ReadAlongSegment(document, "s1-w1", "audio/voice.mp3", 1_200, 1_400, "s1"), ReadAlongSegment(document, "s1-w2", "audio/voice.mp3", 1_400, 1_600, "s1"),
+            ReadAlongSegment(document, "s1-w3", "audio/voice.mp3", 1_600, 1_900, "s1")))))
+        val book = AlignedBook(wordTimeline, mapOf(document to words)::get)
+        val anchor = book.anchorOf(wordTimeline.tracks[0].segments[5])!!
+        assertEquals("She did not stop.", anchor.quote.highlight)
+        assertTrue(anchor.quote.before, anchor.quote.before.trim().endsWith("Ash had fallen."))
+        // And back: a passage of the ebook is the first word of the sentence that holds it, where the voice starts.
+        assertEquals("s1-w0", book.sentenceOf(document, AnnotationQuote("", "did not", ""))?.fragment)
+    }
+
     @Test fun aDocumentTheBookCannotReadIsNoSentenceAndNoAnchor() {
         val none = book()
         assertNull(none.sentenceOf(document, AnnotationQuote("", "harbor", "")))

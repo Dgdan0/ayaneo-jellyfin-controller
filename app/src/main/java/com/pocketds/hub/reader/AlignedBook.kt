@@ -37,7 +37,8 @@ class AlignedBook(private val timeline: ReadAlongTimeline, private val markup: (
     /** The words of a narrated sentence as the page of the same book reads them, with a little of what comes either side. */
     fun anchorOf(segment: ReadAlongSegment): SentenceAnchor? {
         val scan = scan(segment.textHref) ?: return null
-        val span = scan.rawSpans[segment.fragment] ?: return null
+        // A word of a word edition (#66) is heard as part of its sentence: the anchor is the sentence's words.
+        val span = scan.rawSpans[segment.sentenceFragment] ?: return null
         val sentence = scan.raw.substring(span.first, (span.last + 1).coerceAtMost(scan.raw.length)).replace(WHITESPACE, " ").trim()
         if (sentence.isEmpty()) return null
         val quote = AnnotationQuotes.of(scan.raw.substring(0, span.first), sentence, scan.raw.substring((span.last + 1).coerceAtMost(scan.raw.length)))
