@@ -38,7 +38,12 @@ class ReadingHomeViewTest {
         ReadingListsRepository.update(activity) { it.create("Comics", "comics") }
         val work = ReadingWork(id = "rw_0123456789abcdef0123456789abcdef", title = "One comic")
         val api = Proxy.newProxyInstance(HubApi::class.java.classLoader, arrayOf(HubApi::class.java)) { _, method, _ ->
-            when (method.name) { "readingWork" -> HubResult.Ok(work); "imageUrl" -> ""; else -> error("Unexpected ${method.name}") }
+            when (method.name) {
+                "readingWork" -> HubResult.Ok(work); "imageUrl" -> ""
+                // Choosing a reading status says so to the hub (#63); this one keeps nothing.
+                "updateReadingYou" -> HubResult.Ok(com.pocketds.hub.model.ReadingYouResponse(work.id, null))
+                else -> error("Unexpected ${method.name}")
+            }
         } as HubApi
         val host = Proxy.newProxyInstance(ScreenHost::class.java.classLoader, arrayOf(ScreenHost::class.java)) { _, method, _ ->
             when (method.name) { "getViewContext" -> activity; else -> null }
@@ -59,9 +64,19 @@ class ReadingHomeViewTest {
                 all(root).first { it.contentDescription?.toString()?.startsWith("Add to a list") == true }.performClick()
                 all(root).first { it.contentDescription?.toString()?.startsWith("Comics") == true }.performClick()
                 assertTrue(ReadingListsRepository.get(activity).lists.single().items.any { it.workId == work.id })
-                // Want to read is a row of the ⋯ menu on a book's page (#39).
+                // Want to read is a choice of the Reading status row of the ⋯ menu (#63): the list this device keeps.
                 all(root).first { it.contentDescription?.toString() == "More actions for ${work.title}" }.performClick()
-                all(root).first { it.contentDescription?.toString()?.startsWith("Want to read") == true }.performClick()
+                all(root).first { it.contentDescription?.toString()?.startsWith("Reading status") == true }.performClick()
+                all(root).first { it.contentDescription?.toString()?.startsWith("Want to read,") == true }.performClick()
+                assertTrue(ReadingListsRepository.get(activity).wantToRead.any { it.workId == work.id })
+                // Any other status takes it off the list again: there is one Want to read, not two.
+                all(root).first { it.contentDescription?.toString() == "More actions for ${work.title}" }.performClick()
+                all(root).first { it.contentDescription?.toString()?.startsWith("Reading status") == true }.performClick()
+                all(root).first { it.contentDescription?.toString()?.startsWith("Not reading,") == true }.performClick()
+                assertFalse(ReadingListsRepository.get(activity).wantToRead.any { it.workId == work.id })
+                all(root).first { it.contentDescription?.toString() == "More actions for ${work.title}" }.performClick()
+                all(root).first { it.contentDescription?.toString()?.startsWith("Reading status") == true }.performClick()
+                all(root).first { it.contentDescription?.toString()?.startsWith("Want to read,") == true }.performClick()
                 assertTrue(ReadingListsRepository.get(activity).wantToRead.any { it.workId == work.id })
                 HubSettings.save(activity, "https://reading-list-test.example", "token-two")
                 assertTrue(ReadingListsRepository.get(activity).lists.single().items.any { it.workId == work.id })

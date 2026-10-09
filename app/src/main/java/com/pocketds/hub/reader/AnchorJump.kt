@@ -61,6 +61,43 @@ object AnchorJump {
         return State(parts[0] == "1", parts[1] == "1", parts[2] == "1", width)
     }
 
+    /** How many more times the place is gone to when the element it names is not on the page afterwards, and how long to wait before looking. */
+    const val RETRIES = 8
+    const val LOOK_AFTER_MS = 100L
+
+    /** How many looks in a row must find the place on the page before the page is shown. */
+    const val RIGHT_LOOKS = 2
+
+    /**
+     * Asks the page in front where the element [fragment] is: "in" when it is on the page (its left edge within the window), "out"
+     * when it is in the file but on another page, "none" when there is no such element (a locator that names it by its position,
+     * not its id, or a book whose anchor is gone). A jump that left it "out" is made again: under load the first came before the
+     * page was ready for it (one in ten, with the machine busy) and left the file's top.
+     */
+    fun landedScript(fragment: String): String = """(function () {
+  var e = document.getElementById(${ReadAlongGlow.jsString(fragment)});
+  if (!e) return 'none';
+  var r = e.getBoundingClientRect();
+  return r.left >= -2 && r.left < window.innerWidth ? 'in' : 'out';
+})()"""
+
+    /** The answer to [landedScript]: true when the place is on the page, false when it is not, null when it cannot be told. */
+    fun landed(raw: String?): Boolean? = when (raw?.trim()?.removeSurrounding("\"")) {
+        "in" -> true
+        "out" -> false
+        else -> null
+    }
+
+    /**
+     * For a place given by how far through the file it is (a search result's, a bookmark's) and not by an id: whether the page is
+     * somewhere near it. It is not when the page still reports the file's top, as under load it does when the jump came before the
+     * page was ready; null when the place is at the top itself (nothing to tell it from) or the page has said nothing.
+     */
+    fun landedByProgress(wanted: Double?, now: Double?): Boolean? {
+        if (wanted == null || !wanted.isFinite() || wanted <= 0.05) return null
+        return now?.takeIf { it.isFinite() }?.let { it >= wanted * 0.5 }
+    }
+
     /** The file is laid out: it is the one asked for, loaded, its fonts in, and as wide as it was a moment ago. */
     fun settled(before: State?, now: State?): Boolean =
         before != null && now != null && now.isTarget && now.loaded && now.fontsReady && now.width > 0 && before.isTarget && before.width == now.width

@@ -77,6 +77,9 @@ type ReadingSectionItem struct {
 	// Formats is what this book can be opened as: ebook, audiobook, readaloud.
 	// An ebook and an audiobook of one book are one item with both.
 	Formats []string `json:"formats,omitempty"`
+	// Status is this profile's reading status of the book (#63): want, reading, finished or
+	// not-reading; absent when there is nothing to say.
+	Status string `json:"status,omitempty"`
 }
 
 type ReadingSection struct {
@@ -120,6 +123,9 @@ type ReadingWork struct {
 	Languages    []string           `json:"languages"`
 	Editions     []ReadingEdition   `json:"editions"`
 	Progress     *ReadingProgress   `json:"progress,omitempty"`
+	// Status is this profile's reading status of the book (#63): want, reading, finished or
+	// not-reading; absent when there is nothing to say, and on a series, whose books carry theirs.
+	Status       string             `json:"status,omitempty"`
 	Availability []string           `json:"availability"`
 	Sections     []ReadingSection   `json:"sections,omitempty"`
 	// SeriesBooks are a series item's books in order, for the library's Series view as a fan (#54): the ones
@@ -366,6 +372,8 @@ func (s *Server) handleReadingLibraryItems(w http.ResponseWriter, r *http.Reques
 			}
 			items = append(items, mapped)
 		}
+		s.stampReadingStatus(r, items)
+		w.Header().Add("Vary", jellyfinUserHeader)
 		writeJSON(w, http.StatusOK, ReadingLibraryItemsResponse{
 			LibraryID: libraryID, Page: upstream.Page, PageSize: upstream.PageSize, Total: upstream.Total,
 			TotalPages: upstream.TotalPages, HasMore: upstream.Page < upstream.TotalPages, Items: items,
@@ -400,6 +408,8 @@ func (s *Server) handleReadingLibraryItems(w http.ResponseWriter, r *http.Reques
 		totalPages := (len(items) + pageSize - 1) / pageSize
 		// The books of a series you do not have, for the Series view's fans (#54): as far as Hardcover answers in time.
 		s.addSeriesFans(ctx, items[start:end])
+		s.stampReadingStatus(r, items[start:end])
+		w.Header().Add("Vary", jellyfinUserHeader)
 		writeJSON(w, http.StatusOK, ReadingLibraryItemsResponse{
 			LibraryID: libraryID, Page: page, PageSize: pageSize, Total: len(items), TotalPages: totalPages,
 			HasMore: page < totalPages, Items: items[start:end], Partial: []Partial{}, Cache: cacheInfoFrom(meta),

@@ -125,6 +125,11 @@ func (s *Server) handleReadingStartOver(w http.ResponseWriter, r *http.Request) 
 
 	record, edit, err := s.readingYou.update(profile, workID, func(_ *youRecord, edit *youEdit) {
 		edit.Finished = &editString{Cleared: true}
+		// A status chosen as finished goes with the finish it was; one that says where the person is with the book (want,
+		// reading, not reading) stays, as it says nothing of the place (#63).
+		if edit.Status != nil && edit.Status.Value == statusFinished {
+			edit.Status = nil
+		}
 	})
 	if err != nil {
 		slog.Error("reading data not saved", "err", err)

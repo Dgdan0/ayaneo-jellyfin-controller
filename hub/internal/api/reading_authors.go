@@ -185,6 +185,9 @@ func (s *Server) handleReadingAuthors(w http.ResponseWriter, r *http.Request) {
 				}
 				group.Page = page
 				group.Items = readingAuthorPage(group.Items, page)
+				// The author's books carry this profile's status, for the cover's tick (#63).
+				s.stampReadingStatus(r, group.Items)
+				w.Header().Add("Vary", jellyfinUserHeader)
 				one := []ReadingAuthor{group}
 				s.fillAuthorPhotos(ctx, one, bookTitles)
 				out.Authors = one
@@ -203,8 +206,10 @@ func (s *Server) handleReadingAuthors(w http.ResponseWriter, r *http.Request) {
 	for _, group := range authors[start:end] {
 		group.Page = 1
 		group.Items = readingAuthorPage(group.Items, 1)
+		s.stampReadingStatus(r, group.Items)
 		out.Authors = append(out.Authors, group)
 	}
+	w.Header().Add("Vary", jellyfinUserHeader)
 	writeJSON(w, 200, out)
 }
 

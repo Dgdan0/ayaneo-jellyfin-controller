@@ -183,17 +183,27 @@ object ReadingYouEdits {
         ReadingYouPatch(rating = if (rating == null) YouEdit.Clear else YouEdit.To(rating.coerceIn(1, ReadingStars.COUNT)))
 
     /**
-     * "Mark finished" in [month]. The hub makes it read once when it was never read. A book the page
+     * "Finished" in [month]. The hub makes it read once when it was never read. A book the page
      * knows was read before and is not finished now ([finishedNow] false) is being read again, so its
-     * count goes up; one still marked finished is a date put right, and its count stays.
+     * count goes up; one still marked finished is a date put right, and its count stays. It says the
+     * status too (#63), which a hub from before it ignores and a month finished alone still means.
      */
     fun finish(you: ReadingYou?, month: YearMonth, finishedNow: Boolean): ReadingYouPatch {
         val before = you != null && (you.finished.isNotBlank() || you.readCount > 0 || you.status == "read")
         return ReadingYouPatch(
             finished = YouEdit.To(month.toString()),
-            readCount = if (before && !finishedNow) YouEdit.To((you!!.readCount.coerceAtLeast(1) + 1).coerceAtMost(MAX_READS)) else YouEdit.Keep
+            readCount = if (before && !finishedNow) YouEdit.To((you!!.readCount.coerceAtLeast(1) + 1).coerceAtMost(MAX_READS)) else YouEdit.Keep,
+            status = YouEdit.To(ReadingStatus.FINISHED)
         )
     }
+
+    /**
+     * A reading status chosen (#63). [undo] is what taking back a finish marked in this visit writes ([unfinish]): the
+     * page goes back to what it had, and the new status is said with it. Left out, the month and the count stay as the
+     * book's history.
+     */
+    fun status(next: String, undo: ReadingYouPatch? = null): ReadingYouPatch =
+        (undo ?: ReadingYouPatch()).copy(status = YouEdit.To(next))
 
     /**
      * "Mark unread" after a finish: back to what the page had before it (the [before] kept while the page
@@ -286,13 +296,19 @@ object ReadingResumeLabel {
             ?.takeIf { it.isNotEmpty() && it.length <= 60 && '/' !in it && !it.contains(".htm", ignoreCase = true) && !it.contains(".xhtml", ignoreCase = true) }
 }
 
-/** The round ⋯ menu of a book's page (#39): what it offers, in order, for the state the book is in. */
+/**
+ * The round ⋯ menu of a book's page (#39): what it offers, in order, for the state the book is in.
+ *
+ * One Reading status row (#63) holds what Finished, Mark unread and Want to read were three rows for: the same
+ * choice, where the book stands, asked three ways (and the menu said "Finished" for a book that Mark unread was
+ * also offered for). Opening it lists Want to read, Reading, Finished and Not reading with the current one
+ * checked; leaving Finished is choosing another, so there is no Mark unread. Start over stays its own item, since
+ * it erases the place.
+ */
 object ReadingMoreMenu {
-    const val FINISHED = "finished"
-    const val UNREAD = "unread"
+    const val STATUS = "status"
     const val START_OVER = "start-over"
     const val NARRATION = "narration"
-    const val WANT = "want"
     const val LISTS = "lists"
     const val OFFLINE = "offline-remove"
     const val SERVER = "server-remove"
@@ -300,20 +316,14 @@ object ReadingMoreMenu {
     data class Entry(val id: String, val label: String, val detail: String = "", val danger: Boolean = false)
 
     /**
-     * [narrations]: the book has more than one reader of its audiobook (or of its read-along), so there is a choice to make.
-     * [markedFinished]: the finish is one that was marked, which Mark unread can take away and leave the place where it was;
-     * a book finished by reading to the end has no such finish, and only Start over (#60) takes it back to the beginning.
-     * [hasPlace]: the book has a place to forget; Start over is offered with one, or once finished.
+     * [status]: the book's reading status now ([ReadingStatus.of]). [narrations]: the book has more than one reader of its
+     * audiobook (or of its read-along), so there is a choice to make. [hasPlace]: the book has a place to forget; Start over
+     * is offered with one, or once finished (it takes the finish away too, #60).
      */
-    fun entries(
-        you: ReadingYou?, finished: Boolean, wanted: Boolean, narrations: Boolean = false,
-        hasPlace: Boolean = false, markedFinished: Boolean = false
-    ): List<Entry> = buildList {
-        add(Entry(FINISHED, "Finished", ReadingBookPage.monthLabel(you?.finished.orEmpty())?.let { "Finished $it · change the date" } ?: "Say when you finished it"))
-        if (markedFinished) add(Entry(UNREAD, "Mark unread", "Take away the finish; your place stays"))
-        if (com.pocketds.hub.reader.ReadingStartOver.offered(hasPlace, finished)) add(Entry(START_OVER, "Start over", "Forget your place and start again"))
+    fun entries(status: String, you: ReadingYou?, narrations: Boolean = false, hasPlace: Boolean = false): List<Entry> = buildList {
+        add(Entry(STATUS, ReadingStatus.rowLabel(status), ReadingStatus.rowDetail(status, you)))
+        if (com.pocketds.hub.reader.ReadingStartOver.offered(hasPlace, status == ReadingStatus.FINISHED)) add(Entry(START_OVER, "Start over", "Forget your place and start again"))
         if (narrations) add(Entry(NARRATION, "Choose narration", "Another reader of this book"))
-        add(Entry(WANT, if (wanted) "Remove from Want to read" else "Want to read"))
         add(Entry(LISTS, "Add to a list"))
         add(Entry(OFFLINE, "Remove offline copy", "Only this device; keep server files and progress"))
         add(Entry(SERVER, "Delete from server…", "Review the files before confirming", danger = true))

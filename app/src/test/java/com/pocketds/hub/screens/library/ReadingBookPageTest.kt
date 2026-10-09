@@ -191,22 +191,22 @@ class ReadingBookPageTest {
         assertEquals("""{"rating":null}""", ReadingYouEdits.rate(null).toJson())
     }
 
-    @Test fun `finishing a book never read sends the month alone, and the hub counts it once`() {
-        assertEquals("""{"finished":"2026-10"}""", ReadingYouEdits.finish(null, now, finishedNow = false).toJson())
-        assertEquals("""{"finished":"2026-10"}""", ReadingYouEdits.finish(ReadingYou(shelves = listOf("cosmere"), status = "to-read"), now, false).toJson())
+    @Test fun `finishing a book never read sends the month and the status, and the hub counts it once`() {
+        assertEquals("""{"finished":"2026-10","status":"finished"}""", ReadingYouEdits.finish(null, now, finishedNow = false).toJson())
+        assertEquals("""{"finished":"2026-10","status":"finished"}""", ReadingYouEdits.finish(ReadingYou(shelves = listOf("cosmere"), status = "to-read"), now, false).toJson())
     }
 
     @Test fun `finishing a book read before, and not finished now, is reading it again`() {
         val before = ReadingYou(finished = "2025-09", readCount = 1)
-        assertEquals("""{"finished":"2026-10","readCount":2}""", ReadingYouEdits.finish(before, now, finishedNow = false).toJson())
-        assertEquals("""{"finished":"2026-10","readCount":3}""", ReadingYouEdits.finish(ReadingYou(status = "read", readCount = 2), now, false).toJson())
+        assertEquals("""{"finished":"2026-10","readCount":2,"status":"finished"}""", ReadingYouEdits.finish(before, now, finishedNow = false).toJson())
+        assertEquals("""{"finished":"2026-10","readCount":3,"status":"finished"}""", ReadingYouEdits.finish(ReadingYou(status = "read", readCount = 2), now, false).toJson())
         // The import said read and gave no count: it was read once.
-        assertEquals("""{"finished":"2026-10","readCount":2}""", ReadingYouEdits.finish(ReadingYou(status = "read"), now, false).toJson())
-        assertEquals("""{"finished":"2026-10","readCount":99}""", ReadingYouEdits.finish(ReadingYou(finished = "2020-01", readCount = 99), now, false).toJson())
+        assertEquals("""{"finished":"2026-10","readCount":2,"status":"finished"}""", ReadingYouEdits.finish(ReadingYou(status = "read"), now, false).toJson())
+        assertEquals("""{"finished":"2026-10","readCount":99,"status":"finished"}""", ReadingYouEdits.finish(ReadingYou(finished = "2020-01", readCount = 99), now, false).toJson())
     }
 
     @Test fun `a book still marked finished has its date put right, and its count stays`() {
-        assertEquals("""{"finished":"2026-09"}""",
+        assertEquals("""{"finished":"2026-09","status":"finished"}""",
             ReadingYouEdits.finish(ReadingYou(finished = "2026-10", readCount = 2), YearMonth.of(2026, 9), finishedNow = true).toJson())
     }
 
@@ -295,44 +295,45 @@ class ReadingBookPageTest {
 
     // ------------------------------------------------------------------ the ⋯ menu
 
-    @Test fun `the menu offers Finished, Want to read, a list and the offline copy, in that order`() {
-        val entries = ReadingMoreMenu.entries(null, finished = false, wanted = false)
-        assertEquals(listOf("finished", "want", "lists", "offline-remove", "server-remove"), entries.map { it.id })
-        assertEquals(listOf("Finished", "Want to read", "Add to a list", "Remove offline copy", "Delete from server…"), entries.map { it.label })
+    @Test fun `the menu offers one Reading status row, a list and the offline copy, in that order (#63)`() {
+        val entries = ReadingMoreMenu.entries("", null)
+        assertEquals(listOf("status", "lists", "offline-remove", "server-remove"), entries.map { it.id })
+        assertEquals(listOf("Reading status", "Add to a list", "Remove offline copy", "Delete from server…"), entries.map { it.label })
         assertTrue(entries.last().danger)
-        assertEquals("Say when you finished it", entries[0].detail)
+        assertEquals("Want to read, reading, finished or not reading", entries[0].detail)
     }
 
-    @Test fun `a book with several narrations offers the choice, after Finished`() {
-        val entries = ReadingMoreMenu.entries(null, finished = false, wanted = false, narrations = true)
-        assertEquals(listOf("finished", "narration", "want", "lists", "offline-remove", "server-remove"), entries.map { it.id })
+    @Test fun `the row shows the current status, and Finished, Mark unread and Want to read are not rows of their own`() {
+        for ((status, label) in listOf("want" to "Want to read", "reading" to "Reading", "finished" to "Finished", "not-reading" to "Not reading")) {
+            val ids = ReadingMoreMenu.entries(status, ReadingYou(finished = "2025-09"), hasPlace = true).map { it.id }
+            assertEquals("Reading status · $label", ReadingMoreMenu.entries(status, null)[0].label)
+            assertTrue("$status: $ids", ids.none { it == "finished" || it == "unread" || it == "want" })
+        }
+        assertEquals("Finished Sep 2025 · change the date", ReadingMoreMenu.entries("finished", ReadingYou(finished = "2025-09"))[0].detail)
+    }
+
+    @Test fun `a book with several narrations offers the choice, after Reading status`() {
+        val entries = ReadingMoreMenu.entries("", null, narrations = true)
+        assertEquals(listOf("status", "narration", "lists", "offline-remove", "server-remove"), entries.map { it.id })
         assertEquals("Choose narration", entries[1].label)
     }
 
-    @Test fun `a finish you marked can be taken away, a finished book can be started over, and a wanted one taken off the list`() {
-        val entries = ReadingMoreMenu.entries(ReadingYou(finished = "2025-09"), finished = true, wanted = true, markedFinished = true)
-        assertEquals(listOf("finished", "unread", "start-over", "want", "lists", "offline-remove", "server-remove"), entries.map { it.id })
-        assertEquals("Finished Sep 2025 · change the date", entries[0].detail)
-        assertEquals("Mark unread", entries[1].label)
-        // Honest: it takes the finish away, and says the place stays (#60).
-        assertEquals("Take away the finish; your place stays", entries[1].detail)
-        assertEquals("Start over", entries[2].label)
-        assertEquals("Forget your place and start again", entries[2].detail)
-        assertEquals("Remove from Want to read", entries[3].label)
+    @Test fun `a finished book can be started over, which takes the finish away and the place with it (#60)`() {
+        val entries = ReadingMoreMenu.entries("finished", ReadingYou(finished = "2025-09"))
+        assertEquals(listOf("status", "start-over", "lists", "offline-remove", "server-remove"), entries.map { it.id })
+        assertEquals("Start over", entries[1].label)
+        assertEquals("Forget your place and start again", entries[1].detail)
         assertNotNull(entries.firstOrNull { it.id == "lists" })
     }
 
-    @Test fun `a book finished by reading to the end cannot be marked unread, only started over (#60)`() {
-        val entries = ReadingMoreMenu.entries(null, finished = true, wanted = false)
-        assertEquals(listOf("finished", "start-over", "want", "lists", "offline-remove", "server-remove"), entries.map { it.id })
-    }
-
     @Test fun `a book with a place offers Start over, one never opened does not`() {
-        assertEquals("start-over", ReadingMoreMenu.entries(null, finished = false, wanted = false, hasPlace = true)[1].id)
-        assertFalse(ReadingMoreMenu.entries(null, finished = false, wanted = false).any { it.id == "start-over" })
+        assertEquals("start-over", ReadingMoreMenu.entries("reading", null, hasPlace = true)[1].id)
+        assertFalse(ReadingMoreMenu.entries("reading", null).any { it.id == "start-over" })
+        // Put down with a place kept: still its own item, since it erases the place.
+        assertEquals("start-over", ReadingMoreMenu.entries("not-reading", null, hasPlace = true)[1].id)
     }
 
     @Test fun `Start over is not a danger row because it asks first`() {
-        assertFalse(ReadingMoreMenu.entries(null, finished = true, wanted = false).first { it.id == "start-over" }.danger)
+        assertFalse(ReadingMoreMenu.entries("finished", null).first { it.id == "start-over" }.danger)
     }
 }
