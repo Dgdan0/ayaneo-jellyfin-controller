@@ -54,10 +54,12 @@ type youEdit struct {
 	Rating    *editInt    `json:"rating,omitempty"`
 	Finished  *editString `json:"finished,omitempty"`
 	ReadCount *editInt    `json:"readCount,omitempty"`
+	// Status is the reading status the person chose (#63): want, reading, finished or not-reading.
+	Status *editString `json:"status,omitempty"`
 }
 
 func (e *youEdit) empty() bool {
-	return e == nil || (e.Rating == nil && e.Finished == nil && e.ReadCount == nil)
+	return e == nil || (e.Rating == nil && e.Finished == nil && e.ReadCount == nil && e.Status == nil)
 }
 
 type youProfile struct {
