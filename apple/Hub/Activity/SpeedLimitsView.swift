@@ -198,7 +198,7 @@ struct LimitsEditor: View {
                         .foregroundStyle(Color.dangerText)
                 }
                 Button {
-                    applyLimits(current)
+                    applyLimits()
                 } label: {
                     Text("Apply")
                         .frame(maxWidth: .infinity)
@@ -206,7 +206,7 @@ struct LimitsEditor: View {
                 .buttonStyle(PrimaryPillStyle())
                 .keyboardShortcut(.defaultAction)
                 .accessibilityIdentifier("apply-limits")
-                .padFocusable("apply", scrolls: false) { applyLimits(current) }
+                .padFocusable("apply", scrolls: false) { applyLimits() }
                 Text("Keeps \(inUse) in use.")
                     .font(HubType.body(13, relativeTo: .footnote))
                     .foregroundStyle(.white.opacity(0.6))
@@ -220,7 +220,11 @@ struct LimitsEditor: View {
         }
     }
 
-    private func applyLimits(_ current: SpeedLimitsView.Editing) {
+    /// The caps as they are typed now, read when Apply is pressed: the body's
+    /// own copy can be a keystroke behind on a busy device, and Apply then
+    /// saved the old cap and closed (#68, the iPad Pro under load).
+    private func applyLimits() {
+        guard let current = editing else { return }
         guard let down = BandwidthPresentation.parse(current.download),
               let up = BandwidthPresentation.parse(current.upload) else {
             editing?.error = "Enter a number from 0 to 1,048,576."

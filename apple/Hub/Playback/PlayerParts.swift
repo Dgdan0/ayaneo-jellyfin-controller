@@ -163,6 +163,50 @@ struct PlayerTimeline: View {
     }
 }
 
+/// "Still watching?" (#48; Android's `StillWatchingView`): the player has
+/// paused because three episodes in a row started by themselves with nobody
+/// touching it. Keep watching is the default (Ⓐ, Return), white as Play is;
+/// Stop (Ⓑ, Escape) leaves the player.
+struct StillWatchingView: View {
+    let line: String
+    let keepWatching: () -> Void
+    let stop: () -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Text(AutoplayRun.question)
+                .font(HubType.heading(24, weight: .heavy, relativeTo: .title2))
+                .accessibilityIdentifier("still-watching")
+            Text(line)
+                .font(HubType.body(13.5, relativeTo: .subheadline))
+                .foregroundStyle(.white.opacity(0.78))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("still-watching-line")
+            HStack(spacing: 10) {
+                Button(action: stop) {
+                    Text(AutoplayRun.stop).frame(minWidth: 80)
+                }
+                .buttonStyle(GlassPillStyle())
+                .accessibilityIdentifier("still-watching-stop")
+                Button(action: keepWatching) {
+                    Label(AutoplayRun.keepWatching, systemImage: "play.fill")
+                }
+                .buttonStyle(PrimaryPillStyle())
+                .accessibilityIdentifier("still-watching-keep")
+            }
+            .lineLimit(1)
+            .padding(.top, 10)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 22)
+        .frame(maxWidth: 380)
+        .glassPanel(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
+    }
+}
+
 /// Near the end of an episode (Android `UpNextCardView`, in Glass): its
 /// still, "UP NEXT · S1E6", its name and series, a bar that fills until it
 /// starts by itself, and Play now or Watch credits.

@@ -90,7 +90,9 @@ struct PlayerView: View {
         #endif
     }
 
-    private var showsChrome: Bool { (chromeShown || pinned || !panels.isEmpty) && !locked }
+    private var showsChrome: Bool {
+        (chromeShown || pinned || !panels.isEmpty) && !locked && player.stillWatching == nil
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -147,6 +149,15 @@ struct PlayerView: View {
                     PlayerSheet(player: player, panels: $panels, layout: layout)
                         .zIndex(2)
                 }
+                if let line = player.stillWatching {
+                    // Over everything, the lock included: it is the only thing to answer (#48).
+                    StillWatchingView(line: line, keepWatching: { player.keepWatching() }, stop: { player.stopWatching() })
+                        .padding(.horizontal, layout.side)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black.opacity(0.35).ignoresSafeArea())
+                        .transition(.opacity)
+                        .zIndex(3)
+                }
                 #if os(macOS)
                 // The hidden title bar's band still moves the window.
                 Color.clear
@@ -161,6 +172,7 @@ struct PlayerView: View {
             .ignoresSafeArea()
             .animation(.easeOut(duration: 0.2), value: showsChrome)
             .animation(.easeOut(duration: 0.25), value: player.upNext == nil)
+            .animation(.easeOut(duration: 0.25), value: player.stillWatching == nil)
             .animation(.easeOut(duration: 0.25), value: player.skipSegment == nil)
             .animation(.easeOut(duration: 0.3), value: player.readyForDisplay)
         }
@@ -179,7 +191,12 @@ struct PlayerView: View {
         .focusable()
         .focused($keys)
         .focusEffectDisabled()
-        .onKeyPress(.space) { panels.isEmpty ? act { press(.playPause) } : .ignored }
+        // "Still watching?": Return or Space keeps watching, Escape stops (#48).
+        .onKeyPress(.return) { player.stillWatching != nil ? act { player.keepWatching() } : .ignored }
+        .onKeyPress(.space) {
+            if player.stillWatching != nil { return act { player.keepWatching() } }
+            return panels.isEmpty ? act { press(.playPause) } : .ignored
+        }
         .onKeyPress(.leftArrow) { panels.isEmpty ? act { press(.back) } : .ignored }
         .onKeyPress(.rightArrow) { panels.isEmpty ? act { press(.forward) } : .ignored }
         .onKeyPress(.upArrow) { panels.isEmpty ? act { press(.volumeUp) } : .ignored }
@@ -195,7 +212,9 @@ struct PlayerView: View {
                                                     subtitlesOn: (player.plan?.selectedSubtitleIndex ?? -1) >= 0,
                                                     seekSeconds: seekSeconds, press: { key in act { press(key) } }))
         .onKeyPress(.escape) {
-            if panels.isEmpty {
+            if player.stillWatching != nil {
+                player.stopWatching()
+            } else if panels.isEmpty {
                 player.close()
             } else {
                 panels.removeLast()
@@ -515,7 +534,7 @@ struct PlayerView: View {
             }
             if let card = player.upNext {
                 UpNextCardView(card: card, compact: layout.phone,
-                               playNow: { player.playNext() }, watchCredits: { player.watchCredits() })
+                               playNow: { act { player.playNext() } }, watchCredits: { act { player.watchCredits() } })
                     .frame(width: layout.upNextWidth)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
@@ -611,6 +630,7 @@ struct PlayerView: View {
     /// A tap on the picture: the chrome comes or goes; locked, the way to
     /// unlock comes for a moment.
     private func tapped() {
+        player.userActed()
         if locked {
             showUnlock()
         } else if chromeShown {
@@ -646,6 +666,7 @@ struct PlayerView: View {
     private func pictureGesture(size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: PlayerGestures.slop, coordinateSpace: .local)
             .onChanged { value in
+                if !dragDecided { player.userActed() }
                 if !dragDecided {
                     // Within a tap's wobble it waits for more movement.
                     guard let kind = PlayerGestures.drag(dx: value.translation.width, dy: value.translation.height)
@@ -819,6 +840,16 @@ struct PlayerView: View {
     /// Audio & subtitles, Ⓑ closing a panel and then the player, L1 and R1
     /// the episode before and after, Menu the controls shown or hidden.
     private func padPressed(_ action: PadAction) {
+        // "Still watching?" (#48): Ⓐ on its default, Keep watching; Ⓑ stops; nothing else answers it.
+        if player.stillWatching != nil {
+            switch action {
+            case .activate: act { player.keepWatching() }
+            case .back: player.stopWatching()
+            default: break
+            }
+            return
+        }
+        player.userActed()
         // A panel's rows are a page of the focus's own (#46): it moves the ring
         // down them, Ⓐ chooses one and Ⓑ goes back a page; what it leaves, the player has.
         if !panels.isEmpty, PadFocusCenter.shared.handle(action) { return }
@@ -871,6 +902,8 @@ struct PlayerView: View {
     }
 
     private func poke() {
+        // Somebody is there: the run of episodes that start by themselves begins again (#48).
+        player.userActed()
         guard !locked else { return }
         chromeShown = true
         scheduleHide()

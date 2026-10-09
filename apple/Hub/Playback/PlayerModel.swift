@@ -81,6 +81,8 @@ final class PlayerModel {
     /// The video played to its end.
     private(set) var atEnd = false
     private(set) var upNext: UpNextCard?
+    /// "Still watching?" is up (#48): the next episode waits, paused, for Keep watching or Stop.
+    private(set) var stillWatching: String?
     /// The picture behind the player while it opens.
     private(set) var backdrop = ""
     private(set) var closedCount = 0
@@ -177,6 +179,8 @@ final class PlayerModel {
     @ObservationIgnored private var opens = 0
     @ObservationIgnored private var poll: Task<Void, Never>?
     @ObservationIgnored private var countdown: Task<Void, Never>?
+    /// Episodes started by themselves since anybody touched the player (#48).
+    @ObservationIgnored private var autoplayRun = AutoplayRun()
     @ObservationIgnored private var startedItem: ObjectIdentifier?
     @ObservationIgnored private var failedItem: ObjectIdentifier?
     @ObservationIgnored private var fallbackTried = false
@@ -249,6 +253,14 @@ final class PlayerModel {
         guard !request.itemId.isEmpty else { return }
         if self.request != nil { close() }
         self.request = request
+        // Somebody chose this title: the run of episodes that start by themselves begins again (#48).
+        autoplayRun = AutoplayRun()
+        #if DEBUG
+        // HUB_AUTOPLAY_RUN=3: that many have already started by themselves, so the next asks.
+        if let started = ProcessInfo.processInfo.environment["HUB_AUTOPLAY_RUN"].flatMap(Int.init) {
+            autoplayRun = AutoplayRun(run: started)
+        }
+        #endif
         // Nothing Keep ready downloaded is removed while this plays (#48).
         OfflineLibrary.shared.playbackBegan()
         self.app = app
@@ -304,6 +316,7 @@ final class PlayerModel {
         }
         poll?.cancel()
         poll = nil
+        stillWatching = nil
         #if os(iOS)
         restoreBrightness()
         #endif
@@ -372,6 +385,7 @@ final class PlayerModel {
     private func startSession() {
         generation += 1
         phase = .opening
+        stillWatching = nil
         plan = nil
         reporter = PlaybackReporter()
         positionMillis = 0
@@ -856,8 +870,8 @@ final class PlayerModel {
             outbox.event(reporter.reachedEnd(durationMillis: durationMillis, muted: player.isMuted),
                          session: plan.sessionId, user: user)
         }
-        // The card counts down to the next episode, even after Watch credits.
-        if let next = plan.nextItem {
+        // The card counts down to the next episode, even after Watch credits; not under "Still watching?" (#48).
+        if let next = plan.nextItem, stillWatching == nil {
             upNextDismissed = false
             if upNext == nil { upNext = UpNextCard(item: next, fraction: 0) }
             startCountdown()
@@ -1359,6 +1373,39 @@ final class PlayerModel {
 
     // MARK: Up next
 
+    /// Any press, tap or gesture on the player: somebody is there (#48).
+    func userActed() {
+        autoplayRun.input()
+    }
+
+    /// The card's bar is full. The next episode starts by itself, unless three
+    /// have already done so with nobody touching the player: then it pauses and
+    /// asks "Still watching?" (#48). A TV's own flow is left alone.
+    private func autoplayOrAsk() {
+        if casting || autoplayRun.mayAutoplay {
+            autoplayRun.autoplayed()
+            playNext()
+            return
+        }
+        upNext = nil
+        player.pause()
+        stillWatching = AutoplayRun.line(episodes: autoplayRun.run, next: plan?.nextItem)
+    }
+
+    /// Keep watching: it is somebody, and the next episode starts.
+    func keepWatching() {
+        guard stillWatching != nil else { return }
+        autoplayRun.input()
+        stillWatching = nil
+        playNext()
+    }
+
+    /// Stop: the player closes, as Back does.
+    func stopWatching() {
+        stillWatching = nil
+        close()
+    }
+
     func watchCredits() {
         upNextDismissed = true
         countdown?.cancel()
@@ -1367,7 +1414,8 @@ final class PlayerModel {
     }
 
     private func updateUpNext() {
-        guard let plan, let next = plan.nextItem, !upNextDismissed, !atEnd else { return }
+        // Not under "Still watching?": the next episode waits for its answer (#48).
+        guard let plan, let next = plan.nextItem, !upNextDismissed, !atEnd, stillWatching == nil else { return }
         let duration = durationMillis
         let cardAt = UpNext.cardAt(nextTiming, segments: plan.segments, durationMillis: duration)
         let shows = UpNext.showsCard(positionMillis: positionMillis, cardAt: cardAt, durationMillis: duration)
@@ -1409,7 +1457,7 @@ final class PlayerModel {
                 }
                 if card.fraction >= 1 {
                     self.countdown = nil
-                    self.playNext()
+                    self.autoplayOrAsk()
                     return
                 }
             }
@@ -1606,6 +1654,12 @@ final class PlayerModel {
 
 extension PlayerModel: NowPlayingClient {
     func remote(_ command: RemoteCommand) {
+        // The lock screen or a remote is somebody there (#48); its Play answers "Still watching?".
+        if stillWatching != nil {
+            if case .play = command { keepWatching() } else if case .toggle = command { keepWatching() }
+            return
+        }
+        autoplayRun.input()
         switch command {
         case .play: if !isPlaying { togglePlay() }
         case .pause: if isPlaying || player.timeControlStatus == .waitingToPlayAtSpecifiedRate { togglePlay() }

@@ -210,6 +210,48 @@ public enum UpNext {
     }
 }
 
+/// "Still watching?" (#48; Android's `AutoplayRun`): the next episode starts
+/// by itself, but not for ever. After `limit` episodes in a row have started
+/// that way with nobody touching the player, the next waits: the player pauses
+/// and asks, Keep watching (the default, Ⓐ) or Stop (Ⓑ). An autoplay adds one;
+/// any press, tap or gesture on the player puts the count back to none.
+public struct AutoplayRun: Equatable, Sendable {
+    /// Netflix's number, and the owner's: three, then ask.
+    public static let limit = 3
+    public static let question = "Still watching?"
+    public static let keepWatching = "Keep watching"
+    public static let stop = "Stop"
+
+    public let limit: Int
+    /// Episodes that started by themselves since anybody last touched the player.
+    public private(set) var run: Int
+
+    public init(limit: Int = AutoplayRun.limit, run: Int = 0) {
+        self.limit = limit
+        self.run = max(0, run)
+    }
+
+    /// Any button, tap or gesture on the player: somebody is there.
+    public mutating func input() { run = 0 }
+
+    /// May the next episode start by itself, or is it time to ask?
+    public var mayAutoplay: Bool { run < limit }
+
+    /// The next episode has started by itself.
+    public mutating func autoplayed() { run += 1 }
+
+    /// The line under the question: "Paused after 3 episodes in a row.", then
+    /// "Next: S1E4 · Title" when there is a next.
+    public static func line(episodes: Int, next: PlaybackItem?) -> String {
+        var out = "Paused after \(episodes) episode\(episodes == 1 ? "" : "s") in a row."
+        if let next {
+            let name = EpisodeLabel.of(season: next.seasonNumber, episode: next.episodeNumber, title: next.title)
+            if !name.isEmpty { out += "\nNext: " + name }
+        }
+        return out
+    }
+}
+
 /// Seeking, the end of a video and the quality caps. A port of Android's
 /// `playback/PlaybackRules`.
 public enum PlaybackRules {
