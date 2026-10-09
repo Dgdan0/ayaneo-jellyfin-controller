@@ -24,6 +24,13 @@ final class BookCoverTests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", words)).firstMatch
     }
 
+    /// A book's card in the grid, by its title and the line under it: not a
+    /// hero's "Details for Dark Matter" that a page behind may still hold.
+    @MainActor
+    private func card(_ app: XCUIApplication, _ title: String, _ line: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", title, line)).firstMatch
+    }
+
     @MainActor
     private func buttons(_ app: XCUIApplication) -> String {
         app.buttons.allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }.joined(separator: " | ")
@@ -83,19 +90,19 @@ final class BookCoverTests: XCTestCase {
     func testACoverSaysItsFormats() {
         let app = launch()
         let views = library(app, "Books")
-        let darkMatter = button(app, containing: "Dark Matter")
+        let darkMatter = card(app, "Dark Matter", "Blake Crouch")
         XCTAssertTrue(darkMatter.waitForExistence(timeout: 10), "every book on its own did not load: \(buttons(app))")
         keep("covers-formats")
         XCTAssertTrue(darkMatter.label.contains("read along"), "Dark Matter's cover does not say read along: \(darkMatter.label)")
-        XCTAssertTrue(button(app, containing: "The Final Empire").label.contains("read along"))
-        let well = button(app, containing: "The Well of Ascension")
+        XCTAssertTrue(card(app, "The Final Empire", "Mistborn").label.contains("read along"))
+        let well = card(app, "The Well of Ascension", "Mistborn")
         XCTAssertTrue(well.waitForExistence(timeout: 5) && well.label.contains("ebook and audiobook"),
                       "The Well of Ascension's cover does not say ebook and audiobook: \(well.label)")
-        let recursion = button(app, containing: "Recursion")
+        let recursion = card(app, "Recursion", "Blake Crouch")
         XCTAssertFalse(recursion.label.contains("read along") || recursion.label.contains("audiobook"),
                        "an ebook's cover says more: \(recursion.label)")
         // A square at the foot of a tall cover's place: the card is the same height, and its foot level.
-        let alloy = button(app, containing: "The Alloy of Law")
+        let alloy = card(app, "The Alloy of Law", "Mistborn")
         XCTAssertTrue(reveal(alloy, in: app), "The Alloy of Law is not in the grid: \(buttons(app))")
         XCTAssertEqual(alloy.frame.height, recursion.frame.height, accuracy: 1,
                        "an audiobook's card is not as tall as an ebook's: \(alloy.frame) and \(recursion.frame)")
