@@ -537,8 +537,11 @@ class ReaderWordModesTest {
             assertEquals("Up into the dark.", noted.note)
             checkDrawn(made + ("stair wound up" to noted.highlightColor))
             var notes = 0
-            for (i in 0 until 50) { notes = count("[data-group=\"annotation-notes\"] .pd-note"); if (notes > 0) break; delay(100) }
-            assertEquals("the note's mark", 1, notes)
+            for (i in 0 until 50) { notes = count("[data-group=\"annotation-notes\"] [data-style]"); if (notes > 0) break; delay(100) }
+            val noteBoxes = js("""(function(){return JSON.stringify([].map.call(document.querySelectorAll('[data-group="annotation-notes"] .pd-note'),function(e){var r=e.getBoundingClientRect();return [r.left,r.top,r.width,r.height];}));})()""")
+            val (upFirst, upLast, _) = lines("stair wound up")
+            assertEquals("the note's mark, one: $noteBoxes (the passage from $upFirst to $upLast)", 1, notes)
+            assertEquals("one box, so one mark is drawn: $noteBoxes (the passage from $upFirst to $upLast)", 1, count("[data-group=\"annotation-notes\"] .pd-note"))
             shot("word-highlights-ebook")
             // The same words selected in the ebook carry the same document and quote as the highlight made in Read along.
             for (words in made.keys) {
@@ -564,6 +567,64 @@ class ReaderWordModesTest {
             assertEquals(fromEbook.document, chosen.document)
             assertEquals(fromEbook.quote, chosen.quote)
             shot("word-highlights-along-again")
+        }
+    }
+
+    /**
+     * A book opened with highlights already kept (another device's, here) draws each one once, in Read along and in the ebook: a highlight
+     * drawn twice is not seen until it is removed, and then one copy stays on the page. Removed from its menu, nothing of it is left.
+     */
+    @Test fun aBookOpenedWithItsHighlightsDrawsEachOnceAndOneRemovedLeavesNothing() = runBlocking {
+        val work = "words-${System.nanoTime()}"
+        withSelectionBook(stand = stand(work), workId = work, sourceItemId = book, prepare = {
+            elsewhere("an_" + "c".repeat(32), "yellow", "EPUB/one.xhtml", "The ", "harbor bells", " were still ringing when Maren")
+            elsewhere("an_" + "d".repeat(32), "blue", "EPUB/one.xhtml", "fallen through the night, ", "soft as flour", ", and it lay", note = "Like flour")
+            elsewhere("an_" + "e".repeat(32), "green", "EPUB/one.xhtml", "Somewhere above her, the ", "lantern was still", " burning.")
+        }) {
+            val problems = ArrayList<String>()
+            suspend fun drawnOnce(where: String, kept: Int) {
+                until("$where: the highlights arrived", 20_000) { annotationsOf(this).size == kept }
+                var items = 0
+                for (i in 0 until 60) { items = count("[data-group=\"annotations\"] [data-style]"); if (items >= kept) break; delay(150) }
+                delay(2_000)
+                items = count("[data-group=\"annotations\"] [data-style]")
+                val marks = count("[data-group=\"annotation-notes\"] [data-style]")
+                android.util.Log.i("WORDMODES", "$where: $items highlight items, $marks note items")
+                problems += listOfNotNull(
+                    "$where: each highlight drawn once, but $items items for $kept".takeIf { items != kept },
+                    "$where: the note's mark drawn once, but $marks".takeIf { marks != 1 })
+            }
+            drawnOnce("the ebook", 3)
+            // Removed from its menu in the ebook: nothing of it is left.
+            val bells = toScreen(findText("harbor bells", select = false).first)
+            tap(bells.centerX(), bells.centerY())
+            until("the highlight's menu in the ebook") { card.isOpen }
+            press("Remove the highlight")
+            until("the menu closed") { !card.isOpen }
+            delay(1_500)
+            val (bellsLine, _) = findText("harbor bells", select = false)
+            val ghost = highlightBoxes().filter { (box, _) -> box.contains(bellsLine.centerX(), bellsLine.centerY()) }
+            if (ghost.isNotEmpty()) problems += "the ebook: the removed highlight is still drawn: $ghost"
+            shot("word-ebook-highlight-removed")
+            until("two left", 20_000) { annotationsOf(this).size == 2 }
+            val along = alongScreen(work)
+            adopt(along)
+            ready(along)
+            drawnOnce("read along", 2)
+            // Removed from its menu: no box of it is left over its words.
+            val word = toScreen(findText("soft as flour", select = false).first)
+            tap(word.centerX(), word.centerY())
+            until("the highlight's menu") { card.isOpen }
+            press("Remove the highlight")
+            until("the menu closed") { !card.isOpen }
+            delay(1_500)
+            val (first, _) = findText("soft as flour", select = false)
+            val left = highlightBoxes().filter { (box, _) -> box.contains(first.centerX(), first.centerY()) }
+            if (left.isNotEmpty()) problems += "the removed highlight is still drawn: $left"
+            count("[data-group=\"annotation-notes\"] [data-style]").let { if (it != 0) problems += "its note's mark is still drawn: $it" }
+            count("[data-group=\"annotations\"] [data-style]").let { if (it != 1) problems += "read along: the other one stays, but $it items" }
+            shot("word-highlight-removed")
+            assertTrue(problems.joinToString("; "), problems.isEmpty())
         }
     }
 
