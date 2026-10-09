@@ -407,6 +407,7 @@ class EpubReaderScreen(
         if (::appearance.isInitialized && appearance.isOpen) appearance.cancel()
         if (::overlay.isInitialized) overlay.dismiss()
         saveCurrent(immediate = true)
+        cancelPlace()
         loadJob?.cancel()
     }
 
@@ -1289,7 +1290,7 @@ class EpubReaderScreen(
     private fun sendPageTo(segment: ReadAlongSegment) {
         val locator = segmentLocator(segment) ?: return
         ownMove()
-        if (navigator?.go(locator, animated = false) != true) ownMoveUntil = 0L
+        if (!goTo(locator)) ownMoveUntil = 0L
     }
 
     /** The app is back (#49): the voice went on without the page, which catches up to it. */
@@ -1310,6 +1311,7 @@ class EpubReaderScreen(
      * decides, once it shows (#49).
      */
     private fun movedByHand() {
+        cancelPlace()
         if (narration?.isOn == true) closeDictionary(resumeNarration = false) else switchToReading()
     }
 
@@ -1542,13 +1544,69 @@ class EpubReaderScreen(
         paceTracker.restart()
         bookScroll.reset()
         movedByHand()
-        if (navigator?.go(target, animated = false) != true) {
+        if (!goTo(target)) {
             host.notify("This reading position could not be opened")
             return false
         }
         if (remember && previous != null) returnLocator = previous
         overlay.dismiss(); updatePosition(); host.refreshHints()
         return true
+    }
+
+    /** A place in another file being gone to in two steps ([goTo]); cancelled by anything that moves the page after it. */
+    private var placeJob: Job? = null
+
+    /**
+     * Goes to [target], and lands exactly on it (#59). Readium's `go` is not reliable to a place in another file (a Contents
+     * entry into the middle of a chapter, a bookmark, a search result, the slider): from an earlier file it lands on the place or
+     * on the top of the file, from a later one at the end of the file. A place in another file is therefore gone to in two
+     * steps, each of which lands ([AnchorJump]): the file from its top, waited for until it has loaded and its columns have
+     * stopped moving, then the place, which is a jump within the file on screen. The page is hidden in between, so what shows
+     * is the page it arrives on. False where Readium refused the first step.
+     */
+    private fun goTo(target: Locator): Boolean {
+        val reader = navigator ?: return false
+        cancelPlace()
+        val locations = target.locations
+        val place = AnchorJump.namesPlace(locations.fragments, locations.progression, locations.otherLocations.isNotEmpty(),
+            !target.text.highlight.isNullOrBlank())
+        if (!AnchorJump.resourceFirst(latestLocator?.document, target.document, place)) return reader.go(target, animated = false)
+        if (!reader.go(target.copy(locations = Locator.Locations(progression = 0.0), text = Locator.Text()), animated = false)) return false
+        pageHost.alpha = 0f
+        val generation = ++placeGeneration
+        placeJob = uiScope.launch {
+            try {
+                awaitLaidOut(reader, target.document)
+                reader.go(target, animated = false)
+                // The place is scrolled to once Readium has been told; a moment for it to be drawn before the page is shown.
+                delay(PLACE_SETTLE_MS)
+            } finally {
+                // Not a place a newer jump has taken over.
+                if (generation == placeGeneration) pageHost.alpha = 1f
+            }
+        }
+        return true
+    }
+
+    /** Waits until [document] is the file in front, loaded, with its fonts in and its columns no longer changing; gives up after [AnchorJump.TIMEOUT_MS]. */
+    private suspend fun awaitLaidOut(reader: EpubNavigatorFragment, document: String) {
+        val script = AnchorJump.script(document)
+        var before: AnchorJump.State? = null
+        val waited = SystemClock.uptimeMillis()
+        while (SystemClock.uptimeMillis() - waited < AnchorJump.TIMEOUT_MS) {
+            val now = AnchorJump.parse(runCatching { reader.evaluateJavascript(script) }.getOrNull())
+            if (AnchorJump.settled(before, now)) return
+            before = now
+            delay(AnchorJump.POLL_MS)
+        }
+    }
+
+    private var placeGeneration = 0
+
+    private fun cancelPlace() {
+        placeGeneration++
+        placeJob?.cancel(); placeJob = null
+        if (::pageHost.isInitialized) pageHost.alpha = 1f
     }
 
     private fun seekBook() {
@@ -2049,5 +2107,7 @@ class EpubReaderScreen(
         /** How often the page asks whether the voice has moved on, and how long a page change of its own is expected. */
         const val FOLLOW_MS = 100L
         const val OWN_MOVE_MS = 1_500L
+        /** After the place in a file has been gone to, the page is drawn this long before it is shown again (#59). */
+        const val PLACE_SETTLE_MS = 120L
     }
 }
