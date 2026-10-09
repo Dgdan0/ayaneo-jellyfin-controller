@@ -1147,8 +1147,9 @@ the sentence's words already said in a light wash (the trail), the word being sa
 each new sentence, never on the space between sentences, line boxes behind the words
 (`ReadAlongWordHighlight`, `ReadAlongGlow.fitScript`, `ReadAlongHighlighter`: one Readium decoration a
 sentence, one small script a word). Reader settings > Themes > Read-along highlight sets a colour and a
-trail per page theme (`ReadAlongHighlightStore`); a book with no pack washes its sentence in the same
-colour.
+trail per page theme (`ReadAlongHighlightStore`, the eight `ReadAlongColor`s; #62's four highlight
+colours are `HighlightColor`); a book with no pack washes its sentence in the same colour. The mode
+button's "Heard to here" and a switch to the ebook take the word's sentence (`AlignedBook.anchorOf`).
 
 **The Apple contract** (HubKit, the same routes):
 
@@ -1164,7 +1165,7 @@ colour.
   no clip still has its span.
 - A word's sentence is the fragment of the nearest enclosing `<seq>` whose `epub:textref` has one, in
   the word's own document. Save and send positions as that sentence id (`locations.fragments`), never
-  the word's.
+  the word's; "Heard to here" and the anchor a switch of mode hands the ebook are that sentence too.
 - Word clips can go back a little within a sentence and overlap the next sentence: make each begin and
   end no earlier than the one before (in the order the text reads them) and start a new stretch only
   when a sentence begins more than 10 s before the stretch's end.
