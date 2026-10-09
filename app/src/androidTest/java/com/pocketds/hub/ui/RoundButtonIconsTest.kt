@@ -175,7 +175,7 @@ class RoundButtonIconsTest {
     /** The reader's top bar, as the issue lists it, and read along's dock under it. */
     @Test fun theBookReadersTopBarAndReadAlongDockCentreTheirIcons(): Unit = runBlocking {
         val problems = bookProblems(readAlong = true, name = "book-top-bar", wanted = listOf(
-            "Close reader", "Table of contents", "Search this book", "Reading and listening", "Add bookmark", "Reading appearance", "Comfort", "Keys"
+            "Close reader", "Table of contents", "Search this book", "Reading mode: Read along. Choose another", "Add bookmark", "Reading appearance", "Comfort", "Keys"
         ))
         assertTrue(problems.joinToString("\n"), problems.isEmpty())
     }

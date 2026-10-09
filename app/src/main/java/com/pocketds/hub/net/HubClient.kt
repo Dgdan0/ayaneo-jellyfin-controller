@@ -201,6 +201,18 @@ interface HubApi {
      */
     suspend fun startOverReading(workId: String): HubResult<com.pocketds.hub.model.ReadingStartOverResponse> =
         HubResult.Failed(FailureKind.UNKNOWN, "Start over is unavailable")
+    /**
+     * This profile's highlights and notes of a book (#62). With [since], the changes the hub stored after it (the greatest
+     * `syncedAt` already read), tombstones too; without, the ones that are there. A hub from before it answers 404/405.
+     */
+    suspend fun readingAnnotations(workId: String, since: Long? = null): HubResult<com.pocketds.hub.model.ReadingAnnotationsResponse> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Highlights are unavailable")
+    /** Keeps one highlight under its id: the answer is what the hub holds now, and whether this write is it. */
+    suspend fun saveReadingAnnotation(workId: String, annotation: com.pocketds.hub.reader.ReadingAnnotation): HubResult<com.pocketds.hub.model.ReadingAnnotationWritten> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Highlights are unavailable")
+    /** Removes one: a tombstone stamped [updatedAt], so another device learns of it. */
+    suspend fun deleteReadingAnnotation(workId: String, id: String, updatedAt: Long): HubResult<com.pocketds.hub.model.ReadingAnnotationWritten> =
+        HubResult.Failed(FailureKind.UNKNOWN, "Highlights are unavailable")
     suspend fun readingPublication(
         workId: String,
         sourceItemId: String
@@ -952,6 +964,22 @@ class HubClient(private val context: Context, private val connection: HubConnect
             json.decodeFromString<com.pocketds.hub.model.ReadingStartOverResponse>(it)
         }
 
+    override suspend fun readingAnnotations(workId: String, since: Long?): HubResult<com.pocketds.hub.model.ReadingAnnotationsResponse> =
+        get(HubEndpoints.readingAnnotations(base(), workId, since), noCache = true) {
+            json.decodeFromString<com.pocketds.hub.model.ReadingAnnotationsResponse>(it)
+        }
+
+    // Once: a write that timed out may have landed, and sending the same edit again answers with what the hub holds.
+    override suspend fun saveReadingAnnotation(workId: String, annotation: com.pocketds.hub.reader.ReadingAnnotation): HubResult<com.pocketds.hub.model.ReadingAnnotationWritten> =
+        postOnce(HubEndpoints.readingAnnotation(base(), workId, annotation.id, "PUT"), com.pocketds.hub.reader.AnnotationBodies.of(annotation)) {
+            json.decodeFromString<com.pocketds.hub.model.ReadingAnnotationWritten>(it)
+        }
+
+    override suspend fun deleteReadingAnnotation(workId: String, id: String, updatedAt: Long): HubResult<com.pocketds.hub.model.ReadingAnnotationWritten> =
+        postOnce(HubEndpoints.readingAnnotation(base(), workId, id, "DELETE", updatedAt), "") {
+            json.decodeFromString<com.pocketds.hub.model.ReadingAnnotationWritten>(it)
+        }
+
     override suspend fun readingPublication(
         workId: String,
         sourceItemId: String
@@ -1225,8 +1253,8 @@ class HubClient(private val context: Context, private val connection: HubConnect
                         .url(request.url)
                         .cacheControl(noStore)
                         .apply { if (userId.isNotEmpty()) header(JELLYFIN_USER_HEADER, userId) }
-                        // A PUT when the request says so (a library order), a PATCH for what a profile says of a book; a POST otherwise.
-                        .method(if (request.method == "PUT" || request.method == "PATCH") request.method else "POST", payload.toRequestBody(jsonMedia))
+                        // A PUT when the request says so (a library order, a highlight), a PATCH for what a profile says of a book, a DELETE for a highlight; a POST otherwise.
+                        .method(if (request.method == "PUT" || request.method == "PATCH" || request.method == "DELETE") request.method else "POST", payload.toRequestBody(jsonMedia))
                         .build()
                 )
                 call.await().use { response ->

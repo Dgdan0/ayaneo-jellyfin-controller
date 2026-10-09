@@ -62,6 +62,11 @@ class ReadingProgress private constructor(private val context: Context) {
     fun lastAudioPosition(key:ReadingCheckpointKey):ReadingAudioPosition? = audioPositions[key]
     private val audioPositions=java.util.concurrent.ConcurrentHashMap<ReadingCheckpointKey,ReadingAudioPosition>()
 
+    /** Who wrote the place the hub last answered for [key], and when on the hub's clock (#62): "You listened further on ...". */
+    class RemoteWriter(val device:String,val byThisDevice:Boolean,val stampMs:Long)
+    private val writers=java.util.concurrent.ConcurrentHashMap<ReadingCheckpointKey,RemoteWriter>()
+    fun writerOf(key:ReadingCheckpointKey):RemoteWriter? = writers[key]
+
     /**
      * The hub says [workId] was started over at [resetAt] (#60). When this device has not applied that, every
      * place it kept of the book goes: its checkpoints and outbox, the listening and read-along resume, what a
@@ -100,6 +105,7 @@ class ReadingProgress private constructor(private val context: Context) {
         "epub" -> when(val response=session.api.readingEpubPosition(key.workId,key.sourceItemId)) {
             is HubResult.Ok -> {
                 noticeReset(session.identity,key.workId,response.value.resetAt,listOf(key.sourceItemId))
+                writers[key]=RemoteWriter(response.value.device,response.value.byThisDevice,response.value.timestamp)
                 RemoteReadingPosition.Available(response.value.locator?.let { ReadingLocation(locator=it) },response.value.resetAt)
             }
             is HubResult.Failed -> RemoteReadingPosition.Unavailable
@@ -110,6 +116,7 @@ class ReadingProgress private constructor(private val context: Context) {
                 noticeReset(session.identity,key.workId,response.value.resetAt,listOf(key.sourceItemId))
                 val position=response.value.position
                 if (position==null) audioPositions.remove(key) else audioPositions[key]=position
+                if (position!=null) writers[key]=RemoteWriter(response.value.device,response.value.byThisDevice,position.timestamp)
                 RemoteReadingPosition.Available(position?.let(AudioPlace::fromServer)?.location(),response.value.resetAt)
             }
             is HubResult.Failed -> RemoteReadingPosition.Unavailable
@@ -153,6 +160,8 @@ class ReadingProgress private constructor(private val context: Context) {
                 if (session().identity != bound.identity) break
                 if (synchronizer.sync(checkpoint.key)==CheckpointSyncResult.RETRY) retry=true
             }
+            // Highlights and notes ride the same pass (#62): the same job, the same network rule, nothing of their own to schedule.
+            if (session().identity == bound.identity && AnnotationRepository.get(context).flush(bound)) retry=true
             retry
         }
     }

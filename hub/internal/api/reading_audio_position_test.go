@@ -525,7 +525,7 @@ func TestAudioPositionHasTheDocumentedFields(t *testing.T) {
 	if err := json.Unmarshal(env.get(env.positionPath()).Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := keys(body), []string{"position", "sourceItemId", "workId"}; !reflect.DeepEqual(got, want) {
+	if got, want := keys(body), []string{"byThisDevice", "device", "position", "sourceItemId", "workId"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("keys = %v, want %v", got, want)
 	}
 	position := body["position"].(map[string]any)

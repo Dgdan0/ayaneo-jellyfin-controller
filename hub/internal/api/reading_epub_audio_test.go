@@ -154,7 +154,7 @@ func TestEpubPositionHasTheDocumentedFields(t *testing.T) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	if want := []string{"audio", "locator", "sourceItemId", "timestamp", "updatedAt", "workId"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"audio", "byThisDevice", "device", "locator", "sourceItemId", "timestamp", "updatedAt", "workId"}; !reflect.DeepEqual(keys, want) {
 		t.Fatalf("keys = %v, want %v", keys, want)
 	}
 }

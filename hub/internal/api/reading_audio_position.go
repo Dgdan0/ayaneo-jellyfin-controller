@@ -53,6 +53,9 @@ type ReadingAudioPositionResponse struct {
 	Position     *ReadingAudioPosition `json:"position"`
 	// ResetAt is when the book was last started over (#60); absent when it never was.
 	ResetAt int64 `json:"resetAt,omitempty"`
+	// Device and ByThisDevice are the epub position's (#62).
+	Device       string `json:"device,omitempty"`
+	ByThisDevice bool   `json:"byThisDevice,omitempty"`
 }
 
 // ReadingAudioPosition is a moment of a track of the manifest. GlobalMs is the
@@ -395,8 +398,12 @@ func (s *Server) handleReadingAudioPosition(w http.ResponseWriter, r *http.Reque
 			writeUpstreamError(w, r, "storyteller", err)
 			return
 		}
-		writeJSON(w, http.StatusOK, ReadingAudioPositionResponse{WorkID: workID, SourceItemID: sourceItemID, Position: plan.position(record),
-			ResetAt: s.readingResets.source("storyteller", strconv.FormatInt(book.ID, 10))})
+		shown := ReadingAudioPositionResponse{WorkID: workID, SourceItemID: sourceItemID, Position: plan.position(record),
+			ResetAt: s.readingResets.source("storyteller", strconv.FormatInt(book.ID, 10))}
+		if shown.Position != nil {
+			shown.Device, shown.ByThisDevice = s.placeDevice(r, book.ID, shown.Position.Timestamp)
+		}
+		writeJSON(w, http.StatusOK, shown)
 		return
 	}
 
@@ -465,6 +472,7 @@ func (s *Server) handleReadingAudioPosition(w http.ResponseWriter, r *http.Reque
 		writeUpstreamError(w, r, "storyteller", err)
 		return
 	}
+	s.placeWriters.note("storyteller", strconv.FormatInt(book.ID, 10), TokenFrom(r.Context()).Label, stamp)
 	s.invalidateStorytellerPosition(sourceItemID)
 	writeJSON(w, http.StatusOK, struct {
 		OK        bool   `json:"ok"`

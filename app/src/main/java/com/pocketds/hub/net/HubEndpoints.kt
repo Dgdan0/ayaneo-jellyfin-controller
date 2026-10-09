@@ -293,6 +293,15 @@ object HubEndpoints {
                 "/publications/" + encode(sourceItemId) + "/position")
         )
 
+    /** A work's highlights (#62): the list, with `since` the greatest `syncedAt` already read. */
+    fun readingAnnotations(base: String, workId: String, since: Long? = null): HubRequest =
+        HubRequest(join(base, "/v1/reading/works/" + encode(workId) + "/annotations") + (since?.let { "?since=$it" } ?: ""))
+
+    /** One highlight: `PUT` keeps it under its id, `DELETE` leaves a tombstone stamped [updatedAt]. */
+    fun readingAnnotation(base: String, workId: String, id: String, method: String, updatedAt: Long? = null): HubRequest =
+        HubRequest(join(base, "/v1/reading/works/" + encode(workId) + "/annotations/" + encode(id)) +
+            (if (method == "DELETE" && updatedAt != null) "?updatedAt=$updatedAt" else ""), method = method)
+
     fun readingRequestOptions(base: String, key: String): HubRequest =
         HubRequest(join(base, "/v1/reading/requests/options") + "?key=" + encode(key))
 

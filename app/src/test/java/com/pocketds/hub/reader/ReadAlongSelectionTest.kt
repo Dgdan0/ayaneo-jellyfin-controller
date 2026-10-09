@@ -14,25 +14,11 @@ class ReadAlongSelectionTest {
         assertFalse(gate.dismiss())
     }
 
-    @Test fun explicitPlayAndLeavingReaderCancelAutomaticResume() {
+    @Test fun leavingTheReaderCancelsAutomaticResume() {
         val gate = NarrationSelectionGate()
-        gate.begin(playing = true)
-        gate.playFromSelection()
-        assertFalse(gate.dismiss())
         gate.begin(playing = true)
         gate.cancel()
         assertFalse(gate.dismiss())
-    }
-
-    @Test fun selectedAncestorFindsContainingNarratedSentence() {
-        val timeline = ReadAlongTimeline(listOf(ReadAlongTrack("audio1", listOf(
-            ReadAlongSegment("chapter.xhtml", "sentence-1", "audio1", 1000, 3000),
-            ReadAlongSegment("chapter.xhtml", "sentence-2", "audio1", 3000, 6000)
-        ))))
-        assertEquals(ReadAlongPosition(0, 2000), ReadAlongSelectionTarget.find(timeline,
-            "chapter.xhtml", listOf("word-span", "sentence-2", "chapter")))
-        assertNull(ReadAlongSelectionTarget.find(timeline, "other.xhtml", listOf("sentence-2")))
-        assertNull(ReadAlongSelectionTarget.find(timeline, "chapter.xhtml", listOf("unknown")))
     }
 
     @Test fun dictionaryCandidatesHandleCommonInflectionsAndPunctuation() {

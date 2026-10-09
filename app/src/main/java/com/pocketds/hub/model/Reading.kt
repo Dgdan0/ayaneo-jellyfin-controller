@@ -501,6 +501,22 @@ data class ReadingPublicationProgressBody(val pageIndex: Int, val expectedPage: 
     /** The start over of this series this device last knew of (#60); the hub refuses a page written from before one. */
     val resetSeen: Long? = null)
 
+/** A work's highlights as the hub lists them (#62). */
+@Serializable
+data class ReadingAnnotationsResponse(
+    val workId: String = "",
+    val annotations: List<com.pocketds.hub.reader.ReadingAnnotation> = emptyList(),
+    val serverTime: Long = 0
+)
+
+/** What the hub holds under a highlight's id after a write, and whether the write is what it holds (#62). */
+@Serializable
+data class ReadingAnnotationWritten(
+    val workId: String = "",
+    val annotation: com.pocketds.hub.reader.ReadingAnnotation,
+    val applied: Boolean = false
+)
+
 @Serializable
 data class EpubPositionResponse(
     val workId: String = "",
@@ -509,7 +525,10 @@ data class EpubPositionResponse(
     val timestamp: Long = 0,
     val updatedAt: String = "",
     /** When the hub last started this book over, 0 when never (#60). */
-    val resetAt: Long = 0
+    val resetAt: Long = 0,
+    /** The device that wrote this place, and whether it is the one asking (#62): "You listened further on ...". */
+    val device: String = "",
+    val byThisDevice: Boolean = false
 )
 
 @Serializable
@@ -590,7 +609,10 @@ data class ReadingAudioPositionResponse(
     val sourceItemId: String = "",
     val position: ReadingAudioPosition? = null,
     /** When the hub last started this book over, 0 when never (#60). */
-    val resetAt: Long = 0
+    val resetAt: Long = 0,
+    /** The device that wrote this place, and whether it is the one asking (#62). */
+    val device: String = "",
+    val byThisDevice: Boolean = false
 )
 
 /**
