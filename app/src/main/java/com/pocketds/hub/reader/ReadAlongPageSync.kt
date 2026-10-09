@@ -101,6 +101,24 @@ object ReadAlongPageSync {
         return timeline.after(at)?.let { timeline.positionAt(it.track, it.segment.beginMs) }
     }
 
+    /**
+     * Where Play starts from a page that shows no narrated text (#61): the nearest narrated sentence. [order] is the book's
+     * documents in reading order, [document] the page's, [progression] how far through that document the page is. A
+     * document the narration reaches but whose page shows none of it (an image, a heading it does not read) goes to the
+     * sentence the same share of the way through it; one it does not reach (a title page, the Prologue) to the first
+     * sentence of the next narrated document, else the last of the one before. All in [DocumentPath]'s spelling. Null when
+     * the page's document is not in the book, or nothing in the book is narrated.
+     */
+    fun nearest(timeline: ReadAlongTimeline, order: List<String>, document: String, progression: Double): ReadAlongPosition? {
+        val here = order.indexOf(document)
+        if (here < 0) return null
+        val located = timeline.sentenceAt(document, progression)
+            ?: order.drop(here + 1).firstNotNullOfOrNull { timeline.sentenceAt(it, 0.0) }
+            ?: order.take(here).asReversed().firstNotNullOfOrNull { timeline.sentenceAt(it, 1.0) }
+            ?: return null
+        return timeline.positionAt(located.track, located.segment.beginMs)
+    }
+
     fun span(timeline: ReadAlongTimeline, probe: PageProbe): PageSpan =
         PageSpan(probe.href, startOf(timeline, probe), endOf(timeline, probe), probe.visible.toSet())
 

@@ -1,12 +1,17 @@
 package com.pocketds.hub.reader
 
 import java.io.File
-import java.net.URI
+import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
 import org.xml.sax.InputSource
 
+/**
+ * One narrated sentence. [textHref] and [audioHref] are paths inside the package in [DocumentPath]'s one spelling
+ * (decoded, NFC, no fragment, #61): that is what every `href` this timeline is asked about must be too, so a page's
+ * href from Readium goes through [DocumentPath.of] first.
+ */
 data class ReadAlongSegment(val textHref: String, val fragment: String, val audioHref: String, val beginMs: Long, val endMs: Long)
 data class ReadAlongPosition(val track: Int, val offsetMs: Long)
 data class ReadAlongTrack(val audioHref: String, val segments: List<ReadAlongSegment>) {
@@ -90,6 +95,19 @@ data class ReadAlongTimeline(val tracks: List<ReadAlongTrack>) {
     /** Some sentence of [href]'s text is narrated: the page can be followed. */
     fun narrates(href: String): Boolean = tracks.any { track -> track.segments.any { it.textHref == href } }
 
+    /**
+     * A sentence of [href]'s narration, [share] of the way through it in the order it is read (0 the first, 1 the last);
+     * null where [href] is not narrated. Where Play goes from a page that shows none of the narration (#61).
+     */
+    fun sentenceAt(href: String, share: Double): Located? {
+        val all = tracks.flatMapIndexed { track, value ->
+            value.segments.mapIndexedNotNull { index, segment -> if (segment.textHref == href) Located(track, index, segment) else null }
+        }
+        if (all.isEmpty()) return null
+        val at = if (share.isFinite()) (share.coerceIn(0.0, 1.0) * all.size).toInt() else 0
+        return all[at.coerceIn(0, all.lastIndex)]
+    }
+
     companion object {
         /** Further into a sentence than this, back goes to its start rather than the sentence before. */
         const val RESTART_MS = 1_500L
@@ -117,10 +135,12 @@ object ReadAlongPackage {
      * in the archive.
      */
     fun read(file: File, requireAudio: Boolean = true): ReadAlongTimeline = ZipFile(file).use { zip ->
-        val container = xml(zip, "META-INF/container.xml")
+        // Every path below is in [DocumentPath]'s one spelling, and the zip is asked for it by that spelling too (#61).
+        val entries = entries(zip)
+        val container = xml(zip, entries["META-INF/container.xml"])
         val opf = container.children("rootfile").firstOrNull()?.getAttribute("full-path") ?: error("No EPUB package")
         val packagePath = resolve("", opf).first
-        val doc = xml(zip, packagePath)
+        val doc = xml(zip, entries[packagePath])
         val manifest = doc.children("item").associateBy { it.getAttribute("id") }
         val segments = mutableListOf<ReadAlongSegment>()
         for (ref in doc.children("itemref")) {
@@ -128,13 +148,13 @@ object ReadAlongPackage {
             val overlayId = chapter.getAttribute("media-overlay").takeIf { it.isNotBlank() } ?: continue
             val overlay = manifest[overlayId] ?: error("Missing media overlay")
             val smilPath = resolve(packagePath, overlay.getAttribute("href")).first
-            for (par in xml(zip, smilPath).children("par")) {
+            for (par in xml(zip, entries[smilPath]).children("par")) {
                 val text = par.directChild("text") ?: continue
                 val audio = par.directChild("audio") ?: continue
                 val (href, fragment) = resolve(smilPath, text.getAttribute("src"))
                 require(fragment.isNotBlank()) { "Narrated text needs a fragment" }
                 val audioHref = resolve(smilPath, audio.getAttribute("src")).first
-                require(zip.getEntry(href) != null && (!requireAudio || zip.getEntry(audioHref) != null)) { "Missing narration resource" }
+                require(href in entries && (!requireAudio || audioHref in entries)) { "Missing narration resource" }
                 val begin = clock(audio.getAttribute("clipBegin").ifBlank { "0s" })
                 val end = clock(audio.getAttribute("clipEnd"))
                 // Word alignment can emit a boundary of no length for a word
@@ -168,9 +188,10 @@ object ReadAlongPackage {
         directory.mkdirs()
         return ZipFile(file).use { zip ->
             val extracted = mutableMapOf<String, File>()
+            val entries = entries(zip)
             timeline.tracks.map { track -> extracted.getOrPut(track.audioHref) {
                 checkCancelled()
-                val entry = zip.getEntry(track.audioHref) ?: error("Missing audio")
+                val entry = entries[track.audioHref] ?: error("Missing audio")
                 require(entry.size in 1..AUDIO_LIMIT) { "Invalid audio size" }
                 val target = File(directory, ReadingCheckpointKey.digest(track.audioHref + ":" + entry.crc) + ".audio")
                 if (target.length() != entry.size) {
@@ -215,18 +236,26 @@ object ReadAlongPackage {
         return (seconds * 1000).toLong()
     }
 
-    private fun resolve(base: String, relative: String): Pair<String, String> {
-        require(relative.isNotBlank() && '\\' !in relative)
-        val uri = URI(relative.replace(" ", "%20"))
-        require(!uri.isAbsolute && uri.rawAuthority == null && uri.query == null && !uri.path.startsWith('/')) { "External narration resource" }
-        val resolved = URI(base.replace(" ", "%20")).resolve(uri).normalize()
-        val path = resolved.path
-        require(path.isNotBlank() && !path.startsWith('/') && path.split('/').none { it == ".." || it == "." } && '\\' !in path)
-        return path to resolved.fragment.orEmpty()
+    /**
+     * What a reference in the package points at: the path in [DocumentPath]'s one spelling and the fragment
+     * ([DocumentPath.resolve]), for any legal path (a space, a bracket or a non-ASCII letter in a file name included, which
+     * `java.net.URI` refused, #61); only a resource inside the package.
+     */
+    private fun resolve(base: String, relative: String): Pair<String, String> =
+        DocumentPath.resolve(base, relative) ?: throw IllegalArgumentException("External narration resource")
+
+    /**
+     * The archive's entries by [DocumentPath]'s spelling, so a name written as one character in the book and as two in the zip
+     * (or the reverse) is still found. The first of two entries that spell alike wins.
+     */
+    private fun entries(zip: ZipFile): Map<String, ZipEntry> {
+        val found = LinkedHashMap<String, ZipEntry>()
+        for (entry in zip.entries()) found.putIfAbsent(DocumentPath.name(entry.name), entry)
+        return found
     }
 
-    private fun xml(zip: ZipFile, path: String): Element {
-        val entry = zip.getEntry(path) ?: error("Missing EPUB document")
+    private fun xml(zip: ZipFile, entry: ZipEntry?): Element {
+        entry ?: error("Missing EPUB document")
         require(entry.size in 1..XML_LIMIT.toLong())
         val bytes = zip.getInputStream(entry).use { input ->
             val output = java.io.ByteArrayOutputStream()

@@ -265,6 +265,63 @@ object ReaderFixtures {
         return output.toByteArray()
     }
 
+    /** The documents of [namedEpub], decoded as the zip holds them: raw spaces and brackets, an accented letter (#61). */
+    const val NAMED_TITLE = "EPUB/Text/Title Page [front].xhtml"
+    const val NAMED_ONE = "EPUB/Text/Author - [Series 01] - Title_split_010.htm"
+    const val NAMED_TWO = "EPUB/Text/Café - [Séries 02]_split_011.htm"
+    const val NAMED_BACK = "EPUB/Text/Back Matter (notes).xhtml"
+
+    /**
+     * A read-along book whose file names are Mistborn's kind (#61): `Author - [Series 01] - Title_split_010.htm`, with
+     * spaces, brackets and an accented letter, written raw in the package and the overlays and percent-encoded in the
+     * contents. Four documents in reading order: a title page and a back matter with no narration, and between them two
+     * narrated chapters, [first] sentences `a0…` in the first and [second] sentences `b0…` in the second, [sentenceSeconds]
+     * each over one file of generated silence.
+     */
+    fun namedEpub(first: Int = 8, second: Int = 5, sentenceSeconds: Int = 3): ByteArray {
+        fun page(title: String, body: String) = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>$title</title></head><body><h1>$title</h1>$body</body></html>"""
+        fun sentences(prefix: String, count: Int) = (0 until count).chunked(2).joinToString("") { pair ->
+            "<p>" + pair.joinToString(" ") { "<span id=\"$prefix$it\">The pines marked the quiet path, and Mara followed the lantern toward the ridge, sentence ${it + 1} of $prefix.</span>" } + "</p>"
+        }
+        fun overlay(document: String, prefix: String, count: Int, from: Int) =
+            "<smil xmlns=\"http://www.w3.org/ns/SMIL\" xmlns:epub=\"http://www.idpf.org/2007/ops\" version=\"3.0\"><body><seq epub:textref=\"../Text/$document\">" +
+                (0 until count).joinToString("") { i ->
+                    "<par id=\"p$prefix$i\"><text src=\"../Text/$document#$prefix$i\"/><audio src=\"../Audio/voice.wav\" clipBegin=\"${(from + i) * sentenceSeconds}s\" clipEnd=\"${(from + i + 1) * sentenceSeconds}s\"/></par>"
+                } + "</seq></body></smil>"
+        val one = NAMED_ONE.substringAfterLast('/')
+        val two = NAMED_TWO.substringAfterLast('/')
+        val files = linkedMapOf(
+            "mimetype" to "application/epub+zip".toByteArray(),
+            "META-INF/container.xml" to """<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""".toByteArray(),
+            "EPUB/package.opf" to ("""<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">urn:reader-named</dc:identifier><dc:title>The Last Observatory</dc:title><dc:language>en</dc:language><meta property="dcterms:modified">2026-10-09T00:00:00Z</meta></metadata><manifest>""" +
+                """<item id="title" href="Text/${NAMED_TITLE.substringAfterLast('/')}" media-type="application/xhtml+xml"/>""" +
+                """<item id="one" href="Text/$one" media-type="application/xhtml+xml" media-overlay="mo1"/>""" +
+                """<item id="two" href="Text/$two" media-type="application/xhtml+xml" media-overlay="mo2"/>""" +
+                """<item id="back" href="Text/${NAMED_BACK.substringAfterLast('/')}" media-type="application/xhtml+xml"/>""" +
+                """<item id="mo1" href="MediaOverlays/${one.replace(".htm", ".smil")}" media-type="application/smil+xml"/>""" +
+                """<item id="mo2" href="MediaOverlays/${two.replace(".htm", ".smil")}" media-type="application/smil+xml"/>""" +
+                """<item id="voice" href="Audio/voice.wav" media-type="audio/wav"/>""" +
+                """<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest>""" +
+                """<spine><itemref idref="title"/><itemref idref="one"/><itemref idref="two"/><itemref idref="back"/></spine></package>""").toByteArray(),
+            NAMED_TITLE to page("Title page", "<p>A book with a name that has spaces and brackets in it.</p>").toByteArray(),
+            NAMED_ONE to page("Chapter one", sentences("a", first)).toByteArray(),
+            NAMED_TWO to page("Chapter two", sentences("b", second)).toByteArray(),
+            NAMED_BACK to page("Back matter", "<p>Notes at the back, which nobody narrates.</p>").toByteArray(),
+            "EPUB/MediaOverlays/${one.replace(".htm", ".smil")}" to overlay(one, "a", first, 0).toByteArray(),
+            "EPUB/MediaOverlays/${two.replace(".htm", ".smil")}" to overlay(two, "b", second, first).toByteArray(),
+            "EPUB/Audio/voice.wav" to silence(seconds = (first + second) * sentenceSeconds),
+            // The contents spell the same files percent-encoded, the way a producer that escapes them would.
+            "EPUB/nav.xhtml" to ("""<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol>""" +
+                "<li><a href=\"Text/Title%20Page%20%5Bfront%5D.xhtml\">Title page</a></li>" +
+                "<li><a href=\"Text/Author%20-%20%5BSeries%2001%5D%20-%20Title_split_010.htm\">Chapter one</a></li>" +
+                "<li><a href=\"Text/Caf%C3%A9%20-%20%5BS%C3%A9ries%2002%5D_split_011.htm\">Chapter two</a></li>" +
+                "<li><a href=\"Text/Back%20Matter%20(notes).xhtml\">Back matter</a></li></ol></nav></body></html>").toByteArray()
+        )
+        val output = ByteArrayOutputStream()
+        ZipOutputStream(output).use { zip -> files.forEach { (name, bytes) -> zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry() } }
+        return output.toByteArray()
+    }
+
     private const val HUB_COLUMN_RULE = "<style type=\"text/css\">@media screen and (min-width: 30em) { " +
         ":root[style*=\"--USER__colCount: 2\"], :root[style*=\"--USER__colCount:2\"] { --RS__colWidth: auto !important; " +
         "-webkit-column-count: 2 !important; column-count: 2 !important; -webkit-column-width: auto !important; column-width: auto !important; } }</style>"

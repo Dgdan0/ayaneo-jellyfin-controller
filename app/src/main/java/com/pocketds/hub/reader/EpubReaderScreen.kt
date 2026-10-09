@@ -160,6 +160,12 @@ class EpubReaderScreen(
     private lateinit var returnButton: TextView
     private var bookPositions: List<Locator> = emptyList()
     private var bookSections: List<Locator> = emptyList()
+    /**
+     * The book's documents in reading order, each in [DocumentPath]'s one spelling (what the narration's timeline holds, #61),
+     * and the way Readium spells each one's href, to hand back to it in a locator.
+     */
+    private var documentOrder: List<String> = emptyList()
+    private var documentSpelling: Map<String, String> = emptyMap()
     private var returnLocator: Locator? = null
     private var searchJob: Job? = null
     private var searchGeneration = 0
@@ -662,7 +668,7 @@ class EpubReaderScreen(
             val choice = if (completion.shouldStartAtBeginning(workId)) completion.ebookResume(workId, resume)
                 else chooseReadingResume(overlay, progress, checkpointKey, resume)
                 ?: run { showFailure("Choose a reading position to continue"); return@launch }
-            val saved = choice.location?.locator?.let { Locator.fromJSON(JSONObject(it.toString())) }
+            val saved = choice.location?.locator?.let { parseSavedLocator(JSONObject(it.toString())) }
             if (readAlong) narrationCheckpoint.beginOpen()
             try {
                 runCatching { attachNavigator(file, saved) }
@@ -685,6 +691,16 @@ class EpubReaderScreen(
             }
         }
     }
+
+    /**
+     * A saved place as a locator. One saved by a build that wrote the narration's decoded document name into its href
+     * (`Author - [Series 01] - Part_010.htm`, #61) is no valid href and does not parse as it is: its document is spelled
+     * as Readium spells a path ([DocumentPath.encode]) and read again, so the book opens at the place and not at its start.
+     */
+    private fun parseSavedLocator(json: JSONObject): Locator? =
+        Locator.fromJSON(json) ?: json.optString("href").takeIf(String::isNotBlank)?.let { href ->
+            Locator.fromJSON(JSONObject(json.toString()).put("href", DocumentPath.encode(DocumentPath.of(href))))
+        }
 
     /** The last download's failure, for the caller that tries another edition after a 409. */
     private var lastDownload: HubResult.Failed? = null
@@ -743,10 +759,21 @@ class EpubReaderScreen(
         bookSections = bookPositions.distinctBy { it.href }
         sectionSizes = bookSections.map { section -> bookPositions.count { it.href == section.href } }
         sectionStarts = bookSections.map { it.locations.totalProgression }
+        documentOrder = opened.readingOrder.map { DocumentPath.of(it.href.toString()) }
+        documentSpelling = HashMap<String, String>().also { spelled ->
+            // The spelling the navigator reports for a page first, then the reading order's: both are what Readium resolves.
+            bookSections.forEach { spelled.putIfAbsent(DocumentPath.of(it.href.toString()), it.href.toString()) }
+            opened.readingOrder.forEach { spelled.putIfAbsent(DocumentPath.of(it.href.toString()), it.href.toString()) }
+        }
         startContentsPages(opened)
 
+        // The place in the spelling the book itself uses, whatever it was saved in (#61).
+        val start = initialLocator?.let { saved ->
+            documentSpelling[saved.document]?.takeIf { it != saved.href.toString() }
+                ?.let { spelled -> Locator.fromJSON(JSONObject(saved.toJSON().toString()).put("href", spelled)) } ?: saved
+        }
         val factory = EpubNavigatorFactory(opened).createFragmentFactory(
-            initialLocator = initialLocator,
+            initialLocator = start,
             initialPreferences = readiumPreferences(preferences),
             listener = linkListener,
             configuration = EpubNavigatorFragment.Configuration(
@@ -868,7 +895,7 @@ class EpubReaderScreen(
             var raw = json.parseToJsonElement(document.toString()).jsonObject
             val audioPosition = narrationCheckpoint.pointForSave(narration?.takeIf { it.isPlaying }?.position)
             audioPosition?.let { audio -> narration?.timeline?.let { timeline ->
-                raw = ReadAlongLocation.save(raw, timeline, audio, narrationCompleted)
+                raw = ReadAlongLocation.save(raw, timeline, audio, narrationCompleted, ::spellDocument)
                 // The page is not being followed with the screen off (#49): how far through the book is the narration's.
                 if (backgrounded && !narrationCompleted) raw = progressWithoutPage(raw, timeline, audio)
             } }
@@ -883,8 +910,8 @@ class EpubReaderScreen(
 
     /** A place saved while the page is not being followed: how far through the book the sentence is, from the narration. */
     private fun progressWithoutPage(locator: kotlinx.serialization.json.JsonObject, timeline: ReadAlongTimeline, audio: ReadAlongPosition): kotlinx.serialization.json.JsonObject {
-        val href = (locator["href"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.substringBefore('#') ?: return locator
-        val section = bookSections.indexOfFirst { it.href.toString().substringBefore('#') == href }
+        val href = (locator["href"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.let(DocumentPath::of) ?: return locator
+        val section = bookSections.indexOfFirst { it.document == href }
         val (start, end) = PageInfo.sectionSpan(sectionStarts, section) ?: return locator
         val estimate = ReadAlongLocation.estimate(timeline, audio, start, end) ?: return locator
         return ReadAlongLocation.withProgress(locator, estimate)
@@ -1104,9 +1131,19 @@ class EpubReaderScreen(
         }
     }
 
+    /**
+     * The sentence as a locator Readium resolves: its document in the book's own spelling ([spellDocument]), not the timeline's
+     * decoded one, which is no valid href once the name has a space in it, so no highlight or jump landed (#61).
+     */
     private fun segmentLocator(segment: ReadAlongSegment): Locator? =
-        Locator.fromJSON(JSONObject().put("href", segment.textHref).put("type", "application/xhtml+xml")
+        Locator.fromJSON(JSONObject().put("href", spellDocument(segment.textHref)).put("type", "application/xhtml+xml")
             .put("locations", JSONObject().put("fragments", org.json.JSONArray().put(segment.fragment))))
+
+    /** A document in [DocumentPath]'s spelling as Readium spells it: the book's own, else the encoding of its decoded path. */
+    private fun spellDocument(document: String): String = documentSpelling[document] ?: DocumentPath.encode(document)
+
+    /** The document a locator is in, in the one spelling the narration's timeline holds ([DocumentPath.of], #61). */
+    private val Locator.document: String get() = DocumentPath.of(href.toString())
 
     private fun startDockUpdates() {
         dockJob?.cancel()
@@ -1134,7 +1171,7 @@ class EpubReaderScreen(
 
     /** "Following" while it plays, or "Alignment unavailable" on a page the narration never reaches. */
     private fun followLabel(audio: ReadAlongPlayback): String =
-        ReadAlongFollow.label(latestLocator?.href?.toString()?.let(audio.timeline::narrates) ?: true)
+        ReadAlongFollow.label(latestLocator?.document?.let(audio.timeline::narrates) ?: true)
 
     /** L3, the dock's follow and "Return to narration": the page back to the sentence being read. */
     private fun follow() {
@@ -1170,10 +1207,10 @@ class EpubReaderScreen(
             delay(afterMs)
             val audio = narration ?: return@launch
             val reader = navigator ?: return@launch
-            val href = reader.currentLocator.value.href.toString()
+            val href = reader.currentLocator.value.document
             val probe = askPage(reader, audio, href)
             // Moved on while it was asked: the next change asks again.
-            if (reader.currentLocator.value.href.toString() != href) return@launch
+            if (reader.currentLocator.value.document != href) return@launch
             if (probe == null) {
                 if (++probeFailures <= PROBE_RETRIES) scheduleProbe(PROBE_RETRY_MS)
                 return@launch
@@ -1300,7 +1337,7 @@ class EpubReaderScreen(
             if (selectionGate.begin(audio?.isPlaying == true)) audio?.pause(settle = false)
             val ancestors = readSelectionAncestors(reader)
             selectedNarrationTarget = audio?.timeline?.let {
-                ReadAlongSelectionTarget.find(it, selection.locator.href.toString(), ancestors)
+                ReadAlongSelectionTarget.find(it, selection.locator.document, ancestors)
             }
             dictionaryCard.showLoading(word, RectF(selection.rect), audio != null)
             val generation = ++selectionGeneration
@@ -1370,18 +1407,33 @@ class EpubReaderScreen(
         }
     }
 
-    /** Play from the page: the voice goes to the first word on it, which may be inside a sentence the page cuts (#49). */
+    /**
+     * Play from the page: the voice goes to the first word on it, which may be inside a sentence the page cuts (#49). A page
+     * with no narrated text on it (the Prologue, a title page, an image) is not refused (#61): the voice goes to the nearest
+     * narrated sentence, the first after the page in reading order (else the last before it), the page goes there too, and a
+     * short note says so.
+     */
     private fun seekNarrationToPage(play: Boolean) {
         uiScope.launch {
             val audio = narration ?: return@launch
             val reader = navigator ?: return@launch
-            val href = reader.currentLocator.value.href.toString()
-            val target = askPage(reader, audio, href)?.let { ReadAlongPageSync.startOf(audio.timeline, it) }
-            if (target == null) host.notify("No aligned sentence on this page. Turn to a narrated page and try again.")
-            else {
+            val here = reader.currentLocator.value
+            val target = askPage(reader, audio, here.document)?.let { ReadAlongPageSync.startOf(audio.timeline, it) }
+            if (target != null) {
                 jumpVoice(audio, target)
                 if (play && !audio.isPlaying) audio.toggle()
+                return@launch
             }
+            val nearest = ReadAlongPageSync.nearest(audio.timeline, documentOrder, here.document, here.locations.progression ?: 0.0)
+            if (nearest == null) {
+                host.notify("This book has no aligned narration to start from.")
+                return@launch
+            }
+            host.notify("This page has no narration. Starting from the nearest narrated sentence.")
+            jumpVoice(audio, nearest)
+            // The voice is not on this page: the page goes to it.
+            audio.timeline.active(nearest.track, nearest.offsetMs)?.let { sentence -> lastSent = sentence; sendPageTo(sentence) }
+            if (play && !audio.isPlaying) audio.toggle()
         }
     }
 

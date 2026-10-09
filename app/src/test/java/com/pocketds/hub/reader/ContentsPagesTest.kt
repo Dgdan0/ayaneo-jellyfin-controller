@@ -82,6 +82,17 @@ class ContentsPagesTest {
         assertNotEquals(first, book.page("OEBPS/ch2.xhtml#a"))
     }
 
+    /** #61: a Contents link and the reading order may spell a file with a space or a bracket in its name two ways. */
+    @Test fun `an entry is found whichever way the file's name is spelled`() {
+        val spaced = ContentsPages(400, listOf("OEBPS/Text/Author%20-%20%5BSeries%2001%5D_split_000.htm", "OEBPS/Text/Caf%C3%A9.htm"), listOf(10, 20), listOf(0.0, 0.5))
+        assertEquals(1, spaced.page("OEBPS/Text/Author - [Series 01]_split_000.htm"))
+        assertEquals(1, spaced.page("OEBPS/Text/Author%20-%20%5BSeries%2001%5D_split_000.htm"))
+        assertEquals(200, spaced.page("OEBPS/Text/Café.htm"))
+        assertEquals(mapOf(1 to setOf("c1")), spaced.wanted(listOf("OEBPS/Text/Caf%C3%A9.htm#c1", "OEBPS/Text/Author - [Series 01]_split_000.htm")))
+        spaced.learn(mapOf(1 to mapOf("c1" to 0.5)))
+        assertEquals(300, spaced.page("OEBPS/Text/Caf%C3%A9.htm#c1"))
+    }
+
     @Test fun `a book with no positions yet has no numbers`() {
         val book = ContentsPages(0, emptyList(), emptyList(), emptyList())
         assertNull(book.page("OEBPS/ch1.xhtml"))
