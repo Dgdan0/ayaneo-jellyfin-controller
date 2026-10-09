@@ -175,26 +175,65 @@ func TestADeleteLeavesATombstoneAnOlderWriteCannotUndo(t *testing.T) {
 	}
 }
 
-func TestChangesSinceAStampAreOnlyWhatMovedAfterIt(t *testing.T) {
+func TestChangesSinceAreWhatTheHubStoredAfterItAndNotWhatWasWrittenAfterIt(t *testing.T) {
 	env := newBookPageEnv(t, bookPageOptions{})
 	work := env.work("Red Rising")
 	base := "/v1/reading/works/" + work + "/annotations"
-	for i, at := range []int64{1000, 2000, 3000} {
-		env.annotate(http.MethodPost, base, annotationBody(fmt.Sprintf("an_%032x", i+1), "yellow", "", annotationsTestTime+at))
+	now := annotationsTestTime
+	env.server.now = func() time.Time { return time.UnixMilli(now) }
+	var stored []ReadingAnnotation
+	for i := 0; i < 3; i++ {
+		now += 10_000
+		_, answer := env.annotate(http.MethodPost, base, annotationBody(fmt.Sprintf("an_%032x", i+1), "yellow", "", now))
+		stored = append(stored, answer.Annotation)
 	}
-	_, since := env.annotations(work, fmt.Sprintf("?since=%d", annotationsTestTime+2000))
-	if len(since.Annotations) != 1 || since.Annotations[0].ID != fmt.Sprintf("an_%032x", 3) {
+	if stored[0].SyncedAt != annotationsTestTime+10_000 || stored[1].SyncedAt <= stored[0].SyncedAt || stored[2].SyncedAt <= stored[1].SyncedAt {
+		t.Fatalf("each version is stored at a later moment than the one before: %+v", stored)
+	}
+	_, since := env.annotations(work, fmt.Sprintf("?since=%d", stored[1].SyncedAt))
+	if len(since.Annotations) != 1 || since.Annotations[0].ID != stored[2].ID {
 		t.Fatalf("since the second = %+v", since.Annotations)
+	}
+	// A phone that was offline wrote this an hour before the others: its stamp is old, and the news is as new as the moment it arrives.
+	now += 10_000
+	_, late := env.annotate(http.MethodPost, base, annotationBody(fmt.Sprintf("an_%032x", 4), "pink", "", annotationsTestTime-3_600_000))
+	if !late.Applied {
+		t.Fatalf("an old stamp on a new highlight is still kept: %+v", late)
+	}
+	_, news := env.annotations(work, fmt.Sprintf("?since=%d", stored[2].SyncedAt))
+	if len(news.Annotations) != 1 || news.Annotations[0].ID != late.Annotation.ID {
+		t.Fatalf("an edit made offline reaches a device that last asked after it was made: %+v", news.Annotations)
+	}
+	// Two writes in the same millisecond are never given the same moment.
+	_, one := env.annotate(http.MethodPost, base, annotationBody(fmt.Sprintf("an_%032x", 5), "blue", "", now))
+	_, two := env.annotate(http.MethodPost, base, annotationBody(fmt.Sprintf("an_%032x", 6), "blue", "", now))
+	if one.Annotation.SyncedAt >= two.Annotation.SyncedAt {
+		t.Fatalf("same millisecond: %d then %d", one.Annotation.SyncedAt, two.Annotation.SyncedAt)
 	}
 	if got := env.do(http.MethodGet, base+"?since=soon", ""); got.Code != http.StatusBadRequest {
 		t.Fatalf("a bad since = %d", got.Code)
 	}
-	// Listed in the order they sit in the book's first document, then by when they were made.
+	// Listed in the order they were made.
 	_, all := env.annotations(work, "")
 	for i := 1; i < len(all.Annotations); i++ {
 		if all.Annotations[i-1].CreatedAt > all.Annotations[i].CreatedAt {
 			t.Errorf("not in order: %+v", all.Annotations)
 		}
+	}
+}
+
+func TestTheMomentsAreKeptAcrossARestartSoNoneIsGivenTwice(t *testing.T) {
+	env := newBookPageEnv(t, bookPageOptions{})
+	work := env.work("Red Rising")
+	base := "/v1/reading/works/" + work + "/annotations"
+	env.server.now = func() time.Time { return time.UnixMilli(annotationsTestTime) }
+	_, first := env.annotate(http.MethodPost, base, annotationBody("an_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "yellow", "", annotationsTestTime))
+	env.start()
+	// The hub's clock is behind what it last handed out, as after a restart on a machine whose clock was set back.
+	env.server.now = func() time.Time { return time.UnixMilli(annotationsTestTime - 5_000) }
+	_, second := env.annotate(http.MethodPost, base, annotationBody("an_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "blue", "", annotationsTestTime))
+	if second.Annotation.SyncedAt <= first.Annotation.SyncedAt {
+		t.Fatalf("a later write was stored at %d, not after %d", second.Annotation.SyncedAt, first.Annotation.SyncedAt)
 	}
 }
 

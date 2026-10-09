@@ -11,6 +11,10 @@ package api
 // made an hour ago an hour late); a writer's clock cannot win for ever, since a stamp ahead of the hub's own by more than
 // a few minutes is taken as the hub's now.
 //
+// A device asks "what changed since" by [ReadingAnnotation.SyncedAt], the hub's own clock when it stored that version, never by
+// updatedAt: an edit made offline an hour ago and sent now carries an old updatedAt and is still news to a device that last
+// asked ten minutes ago.
+//
 // The file is private (mode 0600, beside the hub's other registries) and, like reading-you.json, is never written
 // over when it cannot be read: it holds what cannot be fetched again.
 
@@ -51,6 +55,8 @@ type ReadingAnnotation struct {
 	CreatedAt int64                  `json:"createdAt"`
 	UpdatedAt int64                  `json:"updatedAt"`
 	Deleted   bool                   `json:"deleted,omitempty"`
+	// SyncedAt is when the hub stored this version, on its own clock and never twice the same: what "since" counts.
+	SyncedAt int64 `json:"syncedAt"`
 }
 
 type annotationsFile struct {
@@ -62,6 +68,8 @@ type readingAnnotationStore struct {
 	mu       sync.Mutex
 	path     string
 	profiles map[string]map[string]map[string]ReadingAnnotation
+	// clock is the latest SyncedAt handed out.
+	clock int64
 	// loadErr keeps a file that cannot be read from being written over.
 	loadErr error
 }
@@ -95,6 +103,13 @@ func newReadingAnnotationStore(path string) *readingAnnotationStore {
 		return store
 	}
 	store.profiles = saved.Profiles
+	for _, works := range saved.Profiles {
+		for _, book := range works {
+			for _, annotation := range book {
+				store.clock = max(store.clock, annotation.SyncedAt)
+			}
+		}
+	}
 	return store
 }
 
@@ -103,15 +118,15 @@ var errAnnotationsUnavailable = errors.New("the reading annotations file cannot 
 // errAnnotationLimit is a profile's highlights of one work being at the limit.
 var errAnnotationLimit = errors.New("this book already has the most highlights it can keep")
 
-// list is a profile's annotations of a work. With [since] (>= 0) it is what changed after it, tombstones too, for a device
-// that keeps its own copy; without, the ones that are there, oldest first.
+// list is a profile's annotations of a work. With [since] (>= 0) it is what the hub stored after that moment on its own
+// clock, tombstones too, for a device that keeps its own copy; without, the ones that are there, oldest first.
 func (s *readingAnnotationStore) list(profile, workID string, since *int64) []ReadingAnnotation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []ReadingAnnotation{}
 	for _, annotation := range s.profiles[profile][workID] {
 		switch {
-		case since != nil && annotation.UpdatedAt > *since:
+		case since != nil && annotation.SyncedAt > *since:
 			out = append(out, annotation)
 		case since == nil && !annotation.Deleted:
 			out = append(out, annotation)
@@ -150,6 +165,9 @@ func (s *readingAnnotationStore) put(profile, workID string, incoming ReadingAnn
 	if incoming.CreatedAt == 0 {
 		incoming.CreatedAt = incoming.UpdatedAt
 	}
+	previousClock := s.clock
+	incoming.SyncedAt = max(now, s.clock+1)
+	s.clock = incoming.SyncedAt
 	works := s.profiles[profile]
 	if works == nil {
 		works = map[string]map[string]ReadingAnnotation{}
@@ -172,6 +190,7 @@ func (s *readingAnnotationStore) put(profile, workID string, incoming ReadingAnn
 		for id, gone := range pruned {
 			book[id] = gone
 		}
+		s.clock = previousClock
 		return ReadingAnnotation{}, false, err
 	}
 	return incoming, true, nil
@@ -191,7 +210,7 @@ func (s *readingAnnotationStore) liveLocked(profile, workID string) int {
 func (s *readingAnnotationStore) pruneLocked(book map[string]ReadingAnnotation, now int64) map[string]ReadingAnnotation {
 	gone := map[string]ReadingAnnotation{}
 	for id, annotation := range book {
-		if annotation.Deleted && now > 0 && annotation.UpdatedAt < now-readingTombstoneKeep {
+		if annotation.Deleted && now > 0 && annotation.SyncedAt < now-readingTombstoneKeep {
 			gone[id] = annotation
 			delete(book, id)
 		}

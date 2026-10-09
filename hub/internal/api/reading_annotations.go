@@ -3,7 +3,7 @@ package api
 // Highlights and notes (#62): GET, POST, PUT and DELETE under /v1/reading/works/{workId}/annotations, for the profile
 // the request is for (X-Jellyfin-User, else the hub's default), kept by reading_annotations_store.go.
 //
-//	GET    …/annotations[?since=ms]   what is there, oldest first; with since (even 0), what changed after it, tombstones too
+//	GET    …/annotations[?since=n]    what is there, oldest first; with since (even 0), what the hub stored after that syncedAt, tombstones too
 //	POST   …/annotations              keep one (an id of the app's own, or the hub's)
 //	PUT    …/annotations/{id}         keep one under this id (an update; one the hub has not seen is made)
 //	DELETE …/annotations/{id}[?updatedAt=ms]   a tombstone
@@ -41,7 +41,7 @@ var (
 	annotationColors    = map[string]bool{"yellow": true, "blue": true, "pink": true, "green": true}
 )
 
-// ReadingAnnotationsResponse answers a list: [ServerTime] is the hub's clock, which an app asks "what changed since" from next time.
+// ReadingAnnotationsResponse answers a list: an app asks "what changed since" from the greatest syncedAt it has seen ([ServerTime] is the hub's clock, for information).
 type ReadingAnnotationsResponse struct {
 	WorkID      string              `json:"workId"`
 	Annotations []ReadingAnnotation `json:"annotations"`
@@ -118,7 +118,7 @@ func (s *Server) handleReadingAnnotationsList(w http.ResponseWriter, r *http.Req
 	if raw := r.URL.Query().Get("since"); raw != "" {
 		parsed, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || parsed < 0 {
-			writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "since is a time in milliseconds"})
+			writeError(w, r, http.StatusBadRequest, Error{Code: CodeInvalidRequest, Message: "since is a syncedAt, a number"})
 			return
 		}
 		since = &parsed
