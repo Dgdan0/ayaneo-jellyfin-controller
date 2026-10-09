@@ -56,7 +56,8 @@ class StandInHub(
      * Start over (#60), as the hub does it: `POST …/start-over` forgets the place (the listening place here, the page's
      * progress), takes away this profile's finish and answers a stamp, which the work's page and both position reads
      * repeat as `resetAt`; a place written with a `resetSeen` older than it is refused as `reading_position_reset`.
-     * Nothing else of "you" changes.
+     * Nothing else of "you" changes. The reading status (#63) is `you.chosen`, a word the patch's `status` sets, and the work's page and the
+     * patch's answer carry the effective one (the choice, else finished, else a place begun) as `status`.
      */
     @Volatile var resetAt = 0L
     val startOvers = CopyOnWriteArrayList<Long>()
@@ -98,7 +99,10 @@ class StandInHub(
         val path = url.encodedPath
         return when {
             path == "/v1/reading/works/$work" && request.method == "GET" ->
-                page?.let { json(JSONObject(it.toString()).put("you", JSONObject(you.toString())).apply { if (resetAt > 0) put("resetAt", resetAt) }) } ?: error(404, "not_found")
+                page?.let { json(JSONObject(it.toString()).put("you", JSONObject(you.toString())).apply {
+                    if (resetAt > 0) put("resetAt", resetAt)
+                    effective(optJSONObject("progress")).takeIf { word -> word.isNotEmpty() }?.let { word -> put("status", word) }
+                }) } ?: error(404, "not_found")
             path == "/v1/reading/works/$work/start-over" && request.method == "POST" -> startOver()
             path == "/v1/reading/works/$work/you" && request.method == "PATCH" -> patchYou(request.body.readUtf8())
             path == "/v1/img/fixture/cover" -> cover?.let { MockResponse().setHeader("Content-Type", "image/jpeg").setBody(Buffer().write(it)) }
@@ -139,6 +143,8 @@ class StandInHub(
         held = null
         page?.remove("progress")
         you.remove("finished"); you.put("status", "")
+        // A status chosen as finished goes with the finish; the others say nothing of the place (#63).
+        if (you.optString("chosen") == "finished") you.remove("chosen")
         return json(JSONObject().put("ok", true).put("action", "start_over").put("workId", work).put("resetAt", resetAt)
             .put("you", JSONObject(you.toString())))
     }
@@ -149,21 +155,49 @@ class StandInHub(
         youWrites += body
         youRefused?.let { (status, code) -> return error(status, code) }
         val keys = body.keys().asSequence().toList()
-        if (keys.isEmpty() || keys.any { it !in setOf("rating", "finished", "readCount") }) return error(400, "invalid_request")
+        if (keys.isEmpty() || keys.any { it !in setOf("rating", "finished", "readCount", "status") }) return error(400, "invalid_request")
         for (key in keys) {
             val value = body.get(key)
             if (value == JSONObject.NULL) continue
             val valid = when (key) {
                 "rating" -> value is Int && value in 1..5
                 "readCount" -> value is Int && value in 1..99
+                "status" -> value is String && value in setOf("want", "reading", "finished", "not-reading")
                 else -> value is String && Regex("""\d{4}-(0[1-9]|1[0-2])""").matches(value)
             }
             if (!valid) return error(400, "invalid_request")
         }
-        keys.forEach { key -> if (body.isNull(key)) you.remove(key) else you.put(key, body.get(key)) }
+        // The change as the hub applies it: finished by status is this month, unless the book has a month (#63).
+        val change = JSONObject(body.toString())
+        if (change.optString("status") == "finished" && !change.has("finished") && !you.has("finished"))
+            change.put("finished", java.time.YearMonth.now().toString())
+        val chosen = you.optString("chosen")
+        val said = change.keys().asSequence().toList()
+        said.filter { it != "status" }.forEach { key -> if (change.isNull(key)) you.remove(key) else you.put(key, change.get(key)) }
+        // A month finished, said without a status, is a finish where a status was chosen; one taken away takes a finished status with it.
+        if (!change.has("status") && change.has("finished")) {
+            if (!change.isNull("finished") && chosen.isNotEmpty()) you.put("chosen", "finished")
+            if (change.isNull("finished") && chosen == "finished") you.remove("chosen")
+        }
+        if (change.has("status")) { if (change.isNull("status")) you.remove("chosen") else you.put("chosen", change.getString("status")) }
         if (you.has("finished") && !you.has("readCount")) you.put("readCount", 1)
         you.put("status", if (you.has("finished")) "read" else "")
-        return json(JSONObject().put("workId", work).put("you", JSONObject(you.toString())))
+        return json(JSONObject().put("workId", work).put("you", JSONObject(you.toString()))
+            .apply { effective(null).takeIf { word -> word.isNotEmpty() }?.let { word -> put("status", word) } })
+    }
+
+    /** The work's reading status for this profile, as the hub works it out (#63): the choice, else finished, else a place begun. */
+    private fun effective(progress: JSONObject?): String {
+        val chosen = you.optString("chosen")
+        val percentage = progress?.optDouble("percentage", 0.0) ?: 0.0
+        val completed = progress?.optBoolean("completed") == true
+        return when {
+            chosen == "want" && percentage > 0 && !completed -> "reading"
+            chosen.isNotEmpty() -> chosen
+            you.has("finished") || you.optString("status") == "read" || completed -> "finished"
+            percentage > 0 -> "reading"
+            else -> ""
+        }
     }
 
     private fun manifest(): MockResponse = json(JSONObject()

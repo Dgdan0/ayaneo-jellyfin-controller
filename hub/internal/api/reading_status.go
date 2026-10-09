@@ -47,6 +47,11 @@ func validReadingStatus(value string) bool {
 // unknown). Empty when there is nothing to say.
 func effectiveReadingStatus(you *ReadingYou, progress *ReadingProgress) string {
 	if you != nil && validReadingStatus(you.Chosen) {
+		// A book wanted and then opened is being read: a place begun in a book not yet finished takes it off Want to read,
+		// as the Pocket's own list always did. (Not reading is the one choice a place does not move: it is the person's to undo.)
+		if you.Chosen == statusWant && progress != nil && progress.Percentage > 0 && !progress.Completed {
+			return statusReading
+		}
 		return you.Chosen
 	}
 	if you != nil && (you.Finished != "" || you.Status == "read") {

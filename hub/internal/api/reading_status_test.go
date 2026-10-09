@@ -39,6 +39,10 @@ func TestTheEffectiveStatusIsTheChoiceElseTheStrongestSign(t *testing.T) {
 		{"chosen reading beats a month finished", &ReadingYou{Chosen: "reading", Finished: "2026-09"}, nil, "reading"},
 		{"chosen want beats an import that says read", &ReadingYou{Chosen: "want", Status: "read"}, nil, "want"},
 		{"chosen finished with no month", &ReadingYou{Chosen: "finished"}, nil, "finished"},
+		// Wanted and then opened is being read; wanted again after finishing is still wanted.
+		{"chosen want and a place begun is reading", &ReadingYou{Chosen: "want"}, &ReadingProgress{Percentage: 20}, "reading"},
+		{"chosen want and read to the end is still want", &ReadingYou{Chosen: "want"}, &ReadingProgress{Percentage: 100, Completed: true}, "want"},
+		{"chosen not reading stays with a place begun", &ReadingYou{Chosen: "not-reading"}, &ReadingProgress{Percentage: 20}, "not-reading"},
 		{"a word nobody can choose is no choice", &ReadingYou{Chosen: "abandoned", Status: "to-read"}, nil, "want"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -324,5 +328,26 @@ func TestAnAuthorsBooksCarryTheirStatusToo(t *testing.T) {
 	}
 	if !found {
 		t.Error("Red Rising is not among its author's books")
+	}
+}
+
+func TestStartOverTakesAFinishedStatusWithTheFinishAndKeepsTheOthers(t *testing.T) {
+	env := newBookPageEnv(t, bookPageOptions{})
+	finished, putDown := env.work("Piranesi"), env.work("Skyward")
+	env.chooseStatus(finished, `{"status":"finished"}`)
+	env.chooseStatus(putDown, `{"status":"not-reading"}`)
+
+	for _, id := range []string{finished, putDown} {
+		if got := env.do(http.MethodPost, "/v1/reading/works/"+id+"/start-over", ""); got.Code != http.StatusOK {
+			t.Fatalf("start over = %d: %s", got.Code, got.Body.String())
+		}
+	}
+	// The finish is gone, and the status that was only the finish with it.
+	if got := env.statusOf(finished, ""); got != "" {
+		t.Errorf("a finished book started over says %q", got)
+	}
+	// Not reading says nothing of the place, so it stays.
+	if got := env.statusOf(putDown, ""); got != "not-reading" {
+		t.Errorf("a book put down and started over says %q", got)
 	}
 }

@@ -196,7 +196,7 @@ class ReadingStartOverViewTest {
 
             // Nothing is left to start over from.
             withContext(Dispatchers.Main) { openMore() }
-            until("the menu once more") { shown(root, "Finished") }
+            until("the menu once more") { shown(root, "Add to a list") }
             withContext(Dispatchers.Main) { assertFalse("no place, nothing to start over", shown(root, "Start over")) }
             shot(activity, "3-after")
         } finally {
