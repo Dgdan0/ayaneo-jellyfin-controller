@@ -106,6 +106,19 @@ enum DemoBookPage {
                                     type: "application/json")
     }
 
+    /// Start over (#60): the finished month goes, and nothing else of you. What is left, nil for nothing.
+    static func unfinish(workId: String) -> [String: Any]? {
+        let kept = yours.withLock { all -> You? in
+            guard var you = all[workId] else { return nil }
+            you.finished = nil
+            if you.status == "read" { you.status = nil }
+            all[workId] = you
+            return you
+        }
+        guard let kept, !kept.isEmpty else { return nil }
+        return answer(kept)
+    }
+
     private static func answer(_ you: You) -> [String: Any] {
         var out: [String: Any] = ["shelves": you.shelves, "source": you.source]
         if let rating = you.rating { out["rating"] = rating }

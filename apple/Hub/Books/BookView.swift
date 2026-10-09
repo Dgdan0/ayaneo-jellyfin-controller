@@ -40,6 +40,8 @@ struct BookView: View {
     @State private var notice = ""
     /// Remove offline copy, asked about: the book and how much this device keeps of it.
     @State private var removing: (work: ReadingWork, bytes: Int64)?
+    /// Start over asked about (#60): its question is open.
+    @State private var startingOver: ReadingWork?
     @State private var reloads = 0
     @State private var lit: String?
     /// Shown before: coming back to the page (from the audiobook's) reads it again.
@@ -111,6 +113,16 @@ struct BookView: View {
             Button("Remove from this device", role: .destructive) { removeOffline() }
         } message: {
             if let removing { Text(Self.removalMessage(removing.work, bytes: removing.bytes)) }
+        }
+        // Start over (#60): the harmless answer first; Ⓑ is it (#46).
+        .padCloses(startingOver != nil) { startingOver = nil }
+        .alert(startingOver.map(ReadingStartOver.confirmTitle) ?? "",
+               isPresented: Binding(get: { startingOver != nil }, set: { if !$0 { startingOver = nil } }),
+               presenting: startingOver) { work in
+            Button(ReadingStartOver.keep, role: .cancel) {}
+            Button(ReadingStartOver.action, role: .destructive) { startOver(work) }
+        } message: { work in
+            Text(ReadingStartOver.confirmDetail(work))
         }
     }
 
@@ -441,6 +453,13 @@ struct BookView: View {
                   prefix: false)
     }
 
+    /// A place the hub says, or one this device kept, even unsent.
+    private func hasPlace(_ work: ReadingWork) -> Bool {
+        let scope = ReadingCheckpointKey.scope(address: model.address, userId: model.userId)
+        return ReadingStartOver.hasPlace(work, kept: ListeningStore.shared.hasPlace(scope: scope, workId: work.id)
+                                         || ComicReaderSettings.place(workId: work.id) != nil)
+    }
+
     /// A book's row (#39): Resume with where you are, and ⋯. The formats
     /// above it change the way it opens; Change format is theirs now.
     private func bookRow(_ work: ReadingWork, menu: ReadingFormatMenu, remembered: ReadingEntryPreference?) -> some View {
@@ -487,14 +506,18 @@ struct BookView: View {
             } else {
                 choices.append(PadChoice(id: "finished", title: "Finished", systemImage: "checkmark.circle") { finishing = true })
             }
-            if work.progress?.completed == true && finishUndo == nil {
-                // #37's unread: the next read starts at the beginning.
-                choices.append(PadChoice(id: "unread", title: "Mark unread", systemImage: "circle") { toggleRead(work) })
+            if books.completion.isRead(work.id) && finishUndo == nil {
+                // Only the undo of a finish marked here (#60): the place stays.
+                choices.append(PadChoice(id: "unread", title: ReadingStartOver.unmark, detail: ReadingStartOver.unmarkDetail,
+                                         systemImage: "circle") { toggleRead(work) })
             }
+            choices += startOverChoice(work)
             let wanted = books.isWanted(work.id)
             choices.append(PadChoice(id: "want", title: "Want to read", systemImage: wanted ? nil : "bookmark", checked: wanted) {
                 notice = books.toggleWanted(work) ? "Added to Want to Read" : "Removed from Want to Read"
             })
+        } else {
+            choices += startOverChoice(work)
         }
         choices.append(ReadingListChoices.addToList(work, books: books) {
             listName = ""
@@ -508,6 +531,23 @@ struct BookView: View {
             openRoute(.removal(RemovalRoute(kind: "reading", id: work.id, title: work.title)))
         })
         return choices
+    }
+
+    /// Start over in a ⋯ (#60), while the book has a place to forget or a finish to take away.
+    private func startOverChoice(_ work: ReadingWork) -> [PadChoice] {
+        guard ReadingStartOver.offered(hasPlace: hasPlace(work), finished: work.progress?.completed == true) else { return [] }
+        return [PadChoice(id: "start-over", title: ReadingStartOver.action, detail: ReadingStartOver.menuDetail,
+                          systemImage: "arrow.counterclockwise") { askStartOver(work) }]
+    }
+
+    /// Start over asks first, the harmless answer first: as the panel while the
+    /// ring is in use (a controller cannot answer an alert, #46), else the alert.
+    private func askStartOver(_ work: ReadingWork) {
+        let asked = PadFocusCenter.shared.confirm(PadMenu(
+            title: ReadingStartOver.confirmTitle(work), message: ReadingStartOver.confirmDetail(work),
+            choices: [PadChoice(id: "keep", title: ReadingStartOver.keep),
+                      PadChoice(id: "start-over", title: ReadingStartOver.action, role: .destructive) { startOver(work) }]))
+        if !asked { startingOver = work }
     }
 
     private func presentMore(_ work: ReadingWork) {
@@ -639,8 +679,10 @@ struct BookView: View {
         if work == nil { status = StatusText.loading("details", refreshing: false) }
         do {
             let fetched = try await model.hub.fetch(HubEndpoints.readingWork(route.workId), as: ReadingWork.self)
-            // The places this device kept and the hub has not had yet (#30).
             let scope = ReadingCheckpointKey.scope(address: model.address, userId: model.userId)
+            // Started over on any device (#60): what this one kept of the book goes first.
+            ReadingResetCenter.notice(scope: scope, workId: fetched.id, resetAt: fetched.resetAt)
+            // The places this device kept and the hub has not had yet (#30).
             let response = ReadingProgressPresentation.project(fetched, pending: ListeningStore.shared.pending(scope: scope))
             if response != loaded { loaded = response }
             chapter = Self.chapter(response, scope: scope, address: model.address, userId: model.userId)
@@ -708,14 +750,46 @@ struct BookView: View {
         }
     }
 
+    /// Marks the book read on this device, or takes a finish marked here away
+    /// again, its place left where it was (#60). A finish reached by reading
+    /// is taken back by Start over alone.
     private func toggleRead(_ work: ReadingWork) {
+        let unmarking = books.completion.isRead(work.id)
+        if !unmarking && work.progress?.completed == true {
+            notice = ReadingStartOver.finishedByReading
+            return
+        }
         var session = completionSession
         books.updateCompletion { current in
-            work.progress?.completed == true ? session.unmark(current, work.id) : session.markRead(current, work.id)
+            unmarking ? session.unmark(current, work.id) : session.markRead(current, work.id)
         }
         completionSession = session
         books.updateLists { $0.recordProgress(work.id, percentage: books.project(loaded ?? work).progress?.percentage ?? 0) }
-        notice = books.completion.notice(work.id)
+        notice = unmarking ? ReadingStartOver.unmarked : books.completion.notice(work.id)
+    }
+
+    /// Start over (#60): the hub forgets the book's place in every format and
+    /// this profile's finish; then this device forgets what it kept, and the
+    /// page reads the book again.
+    private func startOver(_ work: ReadingWork) {
+        startingOver = nil
+        let scope = ReadingCheckpointKey.scope(address: model.address, userId: model.userId)
+        let request = HubEndpoints.readingStartOver(work.id)
+        Task {
+            do throws(HubFailure) {
+                let answer = try await model.hub.fetch(request, as: ReadingStartOverResponse.self)
+                ReadingResetCenter.notice(scope: scope, workId: work.id, resetAt: answer.resetAt)
+                // What this visit marked is no longer there to undo.
+                finishUndo = nil
+                completionSession.leave()
+                if loaded?.id == work.id { loaded?.you = answer.you }
+                notice = ReadingStartOver.done()
+                reloads += 1
+            } catch {
+                guard error.kind != .cancelled else { return }
+                notice = ReadingStartOver.failed(error.message)
+            }
+        }
     }
 
     /// Resume reading from Home: the main button's own choice, once.

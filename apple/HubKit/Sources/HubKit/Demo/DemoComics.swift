@@ -118,6 +118,12 @@ enum DemoComics {
         return page == pages / 2 ? (width * 2, height) : (width, height)
     }
 
+    /// Start over (#60): every issue of the run back at its first page, the Books demo's place too.
+    static func forget(workId: String) {
+        guard let run = runs.first(where: { $0.workId == workId }) else { return }
+        places.withLock { places in for issue in run.issues { places[issueId(run, issue.number)] = 0 } }
+    }
+
     /// The page the issue is on: the one saved this run, else the Books demo's.
     static func place(_ run: Run, number: Int) -> Int {
         places.withLock { $0[issueId(run, number)] } ?? (run.reading?.number == number ? run.reading?.page ?? 0 : 0)
@@ -137,6 +143,7 @@ enum DemoComics {
             "pageCount": issue.pages, "currentPage": place(run, number: issue.number),
             "direction": run.kind == "manga" ? "rtl" : "ltr", "pages": pages, "doublePairs": [String: Int](),
         ]
+        if DemoStartOver.stamp(run.workId) > 0 { fields["resetAt"] = DemoStartOver.stamp(run.workId) }
         if index > 0 { fields["previousSourceItemId"] = issueId(run, run.issues[index - 1].number) }
         if index + 1 < run.issues.count { fields["nextSourceItemId"] = issueId(run, run.issues[index + 1].number) }
         return json(fields)
@@ -147,10 +154,11 @@ enum DemoComics {
     private static func progress(_ run: Run, index: Int, body: Data?) -> DemoTransport.Answer {
         let issue = run.issues[index]
         guard let body, let fields = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              Set(fields.keys).isSubset(of: ["pageIndex", "expectedPage"]),
+              Set(fields.keys).isSubset(of: ["pageIndex", "expectedPage", "resetSeen"]),
               let pageIndex = fields["pageIndex"] as? Int, pageIndex >= 0 else {
             return failure(400, "invalid_request", "invalid reading progress")
         }
+        if DemoStartOver.refuses(run.workId, fields) { return DemoStartOver.refusal() }
         let expected = fields["expectedPage"] as? Int
         let current = place(run, number: issue.number)
         if let expected, expected != current {

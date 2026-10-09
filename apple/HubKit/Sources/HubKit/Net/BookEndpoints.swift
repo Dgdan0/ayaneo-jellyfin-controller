@@ -41,11 +41,14 @@ public struct EpubPosition: Equatable, Sendable {
     public let locator: String?
     public let timestamp: Int64
     public let updatedAt: String
+    /// When the book was last started over (#60); 0 when it never was.
+    public let resetAt: Int64
 
-    public init(locator: String?, timestamp: Int64 = 0, updatedAt: String = "") {
+    public init(locator: String?, timestamp: Int64 = 0, updatedAt: String = "", resetAt: Int64 = 0) {
         self.locator = locator
         self.timestamp = timestamp
         self.updatedAt = updatedAt
+        self.resetAt = resetAt
     }
 
     /// Read as the hub writes it; the locator kept as it came, in one line.
@@ -53,7 +56,8 @@ public struct EpubPosition: Equatable, Sendable {
         guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
         let locator = (object["locator"] as? [String: Any]).flatMap(BookLocator.canonical)
         return EpubPosition(locator: locator, timestamp: (object["timestamp"] as? NSNumber)?.int64Value ?? 0,
-                            updatedAt: object["updatedAt"] as? String ?? "")
+                            updatedAt: object["updatedAt"] as? String ?? "",
+                            resetAt: (object["resetAt"] as? NSNumber)?.int64Value ?? 0)
     }
 }
 
@@ -65,12 +69,15 @@ public struct EpubPositionBody: Equatable, Sendable {
     public let timestamp: Int64
     public let checkBase: Bool
     public let expectedLocator: String?
+    /// The start over this device last applied (#60); nil sends nothing.
+    public let resetSeen: Int64?
 
-    public init(locator: String, timestamp: Int64, checkBase: Bool = true, expectedLocator: String?) {
+    public init(locator: String, timestamp: Int64, checkBase: Bool = true, expectedLocator: String?, resetSeen: Int64? = nil) {
         self.locator = locator
         self.timestamp = timestamp
         self.checkBase = checkBase
         self.expectedLocator = expectedLocator
+        self.resetSeen = resetSeen
     }
 
     /// The hub refuses fields it does not know, and takes the locators as objects.
@@ -78,6 +85,7 @@ public struct EpubPositionBody: Equatable, Sendable {
         var fields: [String: Any] = ["locator": BookLocator.object(locator) ?? [:], "checkBase": checkBase]
         if timestamp > 0 { fields["timestamp"] = timestamp }
         if checkBase { fields["expectedLocator"] = expectedLocator.flatMap(BookLocator.object) ?? NSNull() }
+        if let resetSeen { fields["resetSeen"] = NSNumber(value: resetSeen) }
         return (try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys, .withoutEscapingSlashes]))
             ?? Data("{}".utf8)
     }

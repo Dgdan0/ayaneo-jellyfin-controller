@@ -28,18 +28,20 @@ struct ReadingCompletionTests {
         #expect(session.unmark(session.markRead(original, book.id), book.id) == original)
     }
 
-    @Test func unmarkingAfterLeavingThePageStartsTheBookAgain() {
+    /// #60: Mark unread after leaving the page takes the finish away and
+    /// leaves the place where it was; only Start over starts a book again.
+    @Test func unmarkingAfterLeavingThePageTakesTheFinishAwayAndKeepsThePlace() {
         var session = ReadingCompletionSession()
         let read = session.markRead(ReadingCompletionState(), book.id)
         session.leave()
-        let reset = session.unmark(read, book.id)
-        #expect(reset.project(book).progress?.percentage == 0)
-        #expect(reset.project(book).continueAt == nil)
-        #expect(reset.startsAtBeginning(book.id))
-        #expect(reset.ebookResume(book.id, ReadingResume(ReadingLocation(pageIndex: 8))).location == nil)
-        #expect(reset.pageResume(book.id, 8) == 0)
-        #expect(ReadingCompletionState.decode(reset.encoded()) == reset)
-        #expect(reset.notice(book.id) == "Marked unread · next read starts at the beginning")
+        let unmarked = session.unmark(read, book.id)
+        #expect(unmarked.project(book) == book, "the hub's place speaks again")
+        #expect(!unmarked.startsAtBeginning(book.id))
+        #expect(unmarked.ebookResume(book.id, ReadingResume(ReadingLocation(pageIndex: 8))).location?.pageIndex == 8)
+        // A reset kept by an older build still starts the book at its beginning.
+        let older = ReadingCompletionState().reset(book.id)
+        #expect(older.startsAtBeginning(book.id) && older.pageResume(book.id, 8) == 0)
+        #expect(older.notice(book.id) == "Marked unread · next read starts at the beginning")
     }
 
     @Test func aSeriesMarksOnlyTheBookChosenNeverItsOthers() {

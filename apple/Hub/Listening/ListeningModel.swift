@@ -214,6 +214,8 @@ final class ListeningModel {
                         artwork: work.artwork, manifest: manifest, parts: parts, key: key)
         let answered = try? await hub.fetch(HubEndpoints.readingAudioPosition(workId: work.id, sourceItemId: sourceItemId),
                                             as: ReadingAudioPositionResponse.self)
+        // Started over on any device (#60): what this one kept of the book goes before its place is weighed.
+        if let answered { ReadingResetCenter.notice(scope: key.scope, workId: work.id, resetAt: answered.resetAt) }
         let remote: RemoteReadingPosition = answered.map { .available($0.position.flatMap(AudioPlace.fromServer)?.location()) }
             ?? .unavailable
         let resume: ReadingResume
@@ -755,22 +757,28 @@ final class ListeningModel {
     /// than overwrite when it moved, send based on the place last read.
     private func sync(_ key: ReadingCheckpointKey) async -> CheckpointSyncResult? {
         guard let hub else { return nil }
-        let sync = ReadingCheckpointSync(store: store, fetch: { key in
+        @Sendable func fetch(_ key: ReadingCheckpointKey) async -> RemoteReadingPosition {
             do {
                 let answer = try await hub.fetch(HubEndpoints.readingAudioPosition(workId: key.workId, sourceItemId: key.sourceItemId),
                                                  as: ReadingAudioPositionResponse.self)
+                // Started over on any device (#60): this device's place goes first.
+                ReadingResetCenter.notice(scope: key.scope, workId: key.workId, resetAt: answer.resetAt)
                 return .available(answer.position.flatMap(AudioPlace.fromServer)?.location())
             } catch {
                 return .unavailable
             }
-        }, send: { checkpoint in
-            guard let body = AudioPlace.body(checkpoint) else { return false }
-            do {
+        }
+        let sync = ReadingCheckpointSync(store: store, fetch: fetch, send: { checkpoint in
+            let seen = ReadingResetCenter.seen(scope: checkpoint.key.scope, workId: checkpoint.key.workId)
+            guard let body = AudioPlace.body(checkpoint, resetSeen: seen) else { return false }
+            do throws(HubFailure) {
                 try await hub.send(HubEndpoints.saveReadingAudioPosition(workId: checkpoint.key.workId,
                                                                          sourceItemId: checkpoint.key.sourceItemId,
                                                                          body: body.encoded()))
                 return true
             } catch {
+                // Made from a place since started over (#60): reading it again drops it; it is not sent again.
+                if error.code == ReadingResets.code { _ = await fetch(checkpoint.key) }
                 return false
             }
         })

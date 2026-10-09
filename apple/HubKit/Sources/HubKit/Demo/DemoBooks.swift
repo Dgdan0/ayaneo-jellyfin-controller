@@ -48,6 +48,7 @@ public enum DemoBooks {
                                          "locator": place.locator.flatMap(BookLocator.object) ?? NSNull()]
             if place.timestamp > 0 { fields["timestamp"] = place.timestamp }
             if !place.updatedAt.isEmpty { fields["updatedAt"] = place.updatedAt }
+            if DemoStartOver.stamp(book.workId) > 0 { fields["resetAt"] = DemoStartOver.stamp(book.workId) }
             return json(fields)
         case ("POST", "position"):
             return save(book, sourceItemId, body: body)
@@ -63,6 +64,14 @@ public enum DemoBooks {
         places.withLock { $0[key] = Place(locator: locator, timestamp: 1_790_000_000_000, updatedAt: "2026-10-06 09:00:00") }
     }
 
+    /// Start over (#60): the book has no place in any of its editions.
+    static func forget(workId: String) {
+        guard let book = book(workId) else { return }
+        places.withLock { places in
+            for sourceItemId in book.sourceItemIds { places[workId + "/" + sourceItemId] = Place(locator: nil, timestamp: 0, updatedAt: "") }
+        }
+    }
+
     /// The place the demo hub keeps for a book, as JSON, for the tests.
     public static func place(workId: String, sourceItemId: String) -> String? {
         guard let book = book(workId) else { return nil }
@@ -72,7 +81,7 @@ public enum DemoBooks {
     // MARK: Plumbing
 
     private static func save(_ book: Book, _ sourceItemId: String, body: Data?) -> DemoTransport.Answer {
-        let known: Set<String> = ["locator", "timestamp", "checkBase", "expectedLocator"]
+        let known: Set<String> = ["locator", "timestamp", "checkBase", "expectedLocator", "resetSeen"]
         guard let body, let fields = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
               Set(fields.keys).isSubset(of: known), let object = fields["locator"] as? [String: Any],
               let locator = BookLocator.canonical(object), BookLocator.valid(locator) else {
@@ -80,6 +89,7 @@ public enum DemoBooks {
         }
         let key = book.workId + "/" + sourceItemId
         let current = place(book, sourceItemId)
+        if DemoStartOver.refuses(book.workId, fields) { return DemoStartOver.refusal() }
         if fields["checkBase"] as? Bool == true {
             let expected = (fields["expectedLocator"] as? [String: Any]).flatMap(BookLocator.canonical)
             guard BookLocator.same(expected, current.locator) else {

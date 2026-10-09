@@ -22,9 +22,25 @@ final class BooksModel {
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var identity = ""
+    /// The hub and profile as the reading outbox names them, for a start over heard (#60).
+    @ObservationIgnored private var scope = ""
+    @ObservationIgnored private var startedOverObserver: NSObjectProtocol?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        // A book this device has just applied a start over to (#60): a finish
+        // marked here goes, and the lists hear it is not started.
+        startedOverObserver = NotificationCenter.default.addObserver(forName: .readingStartedOver, object: nil, queue: .main) { [weak self] note in
+            let scope = note.userInfo?[ReadingResetCenter.scopeKey] as? String
+            guard let workId = note.userInfo?[ReadingResetCenter.workKey] as? String else { return }
+            MainActor.assumeIsolated { self?.startedOver(workId, scope: scope) }
+        }
+    }
+
+    private func startedOver(_ workId: String, scope: String?) {
+        guard scope == nil || scope == self.scope else { return }
+        updateCompletion { $0.clear(workId) }
+        updateLists { $0.recordProgress(workId, percentage: 0) }
     }
 
     /// The hub and profile the person reads as; called whenever either changes.
@@ -32,6 +48,7 @@ final class BooksModel {
         let next = Self.digest(Self.trimmed(address) + "\u{0}" + userId)
         guard next != identity else { return }
         identity = next
+        scope = ReadingCheckpointKey.scope(address: address, userId: userId)
         lists = ReadingListsState.decode(defaults.data(forKey: listsKey))
         listsRevision += 1
         // The demo hub forgets its places each launch, and so its marks too.
