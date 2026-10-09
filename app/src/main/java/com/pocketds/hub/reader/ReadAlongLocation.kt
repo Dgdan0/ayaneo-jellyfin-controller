@@ -62,6 +62,8 @@ object ReadAlongLocation {
      * The page's locator moved to the sentence playing at [point], finished when [completed]. The sentence's document is
      * written as [spell] says (the book's own spelling of it, which Readium resolves; the reader supplies it from the
      * publication): the timeline holds [DocumentPath]'s decoded one, which is not a valid href when it has a space in it (#61).
+     * Read along by the word (#66), the place is still the sentence the word is in, so Storyteller, the hub, the Apple app
+     * and an older build of this one go on understanding it.
      */
     fun save(locator: JsonObject, timeline: ReadAlongTimeline, point: ReadAlongPosition, completed: Boolean,
              spell: (String) -> String = DocumentPath::encode): JsonObject {
@@ -72,7 +74,7 @@ object ReadAlongLocation {
         val locations = (locator["locations"] as? JsonObject).orEmpty().toMutableMap()
         locations.remove("cssSelector")
         locations.remove("pocketdsAudio")
-        locations["fragments"] = JsonArray(listOf(JsonPrimitive(segment.fragment)))
+        locations["fragments"] = JsonArray(listOf(JsonPrimitive(segment.sentenceFragment)))
         if (completed) locations["totalProgression"] = JsonPrimitive(1.0)
         return JsonObject(locator.toMutableMap().apply {
             put("href", JsonPrimitive(spell(segment.textHref))); put("locations", JsonObject(locations)); remove("text")

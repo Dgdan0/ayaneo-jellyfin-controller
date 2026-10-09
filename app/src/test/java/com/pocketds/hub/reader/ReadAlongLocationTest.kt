@@ -24,6 +24,24 @@ class ReadAlongLocationTest {
         assertEquals(ReadAlongPosition(0, 2000), ReadAlongLocation.resume(saved, timeline))
     }
 
+    /** #66: read along by the word, the place is still the sentence the word is in. */
+    @Test fun aWordPositionSavesItsSentence() {
+        val words = ReadAlongTimeline(listOf(ReadAlongTrack("voice.mp3", listOf(
+            ReadAlongSegment("book/ch1.xhtml", "s1-w0", "voice.mp3", 1000, 1500, "s1"),
+            ReadAlongSegment("book/ch1.xhtml", "s1-w1", "voice.mp3", 1600, 3000, "s1"),
+            ReadAlongSegment("book/ch1.xhtml", "s2-w0", "voice.mp3", 3000, 4000, "s2"),
+            ReadAlongSegment("book/ch1.xhtml", "s2-w2", "voice.mp3", 4200, 5000, "s2")
+        ))))
+        for ((at, sentence) in listOf(200L to "s1", 550L to "s1", 1_000L to "s1", 2_100L to "s2", 3_500L to "s2")) {
+            val saved = ReadAlongLocation.save(locator, words, ReadAlongPosition(0, at), false)
+            assertEquals("$at", sentence, saved["locations"]!!.jsonObject["fragments"]!!.jsonArray.single().jsonPrimitive.content)
+        }
+        // And a saved sentence resumes at its first word, in a word edition as in a sentence one.
+        val saved = ReadAlongLocation.save(locator, words, ReadAlongPosition(0, 3_500), false)
+        assertEquals(ReadAlongPosition(0, 2000), ReadAlongLocation.resume(saved, words))
+        assertEquals(ReadAlongPosition(0, 2000), ReadAlongLocation.resume(saved, timeline))
+    }
+
     @Test fun anOldPrivateOffsetIsDroppedAndNotTrusted() {
         val old = Json.parseToJsonElement("""{"href":"book/ch1.xhtml","locations":{"fragments":["s2"],"pocketdsAudio":{"track":0,"offsetMs":3900}}}""").jsonObject
         assertEquals("The sentence decides", ReadAlongPosition(0, 2000), ReadAlongLocation.resume(old, timeline))

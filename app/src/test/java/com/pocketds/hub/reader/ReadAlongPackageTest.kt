@@ -23,24 +23,143 @@ class ReadAlongPackageTest {
         assertNull(timeline.active(0, 170_001))
     }
 
-    @Test fun nestedWordOverlaysRemainIndividuallySeekable() {
+    /** The word edition our packs make (#66): a `<seq epub:textref="…#sentence">` round each sentence's words. */
+    private fun wordBook(smil: String, text: String = "<html><body><p><span id='s1'><span id='s1-w0'>Hello</span> <span id='s1-w1'>world</span></span></p></body></html>"): File {
         val file = File.createTempFile("word-readalong-", ".epub").apply { deleteOnExit() }
         ZipOutputStream(file.outputStream()).use { zip ->
             val entries = mapOf(
                 "META-INF/container.xml" to "<container><rootfiles><rootfile full-path='EPUB/package.opf'/></rootfiles></container>",
                 "EPUB/package.opf" to "<package><manifest><item id='c' href='chapter.xhtml' media-overlay='s'/><item id='s' href='overlays/one.smil'/></manifest><spine><itemref idref='c'/></spine></package>",
-                "EPUB/chapter.xhtml" to "<html><body><p><span id='s1'><span id='s1-w0'>Hello</span> <span id='s1-w1'>world</span></span></p></body></html>",
-                "EPUB/overlays/one.smil" to "<smil><body><seq><seq id='s1'><par><text src='../chapter.xhtml#s1-w0'/><audio src='../audio/voice.mp3' clipBegin='0.1s' clipEnd='0.4s'/></par><par><text src='../chapter.xhtml#s1-w1'/><audio src='../audio/voice.mp3' clipBegin='0.5s' clipEnd='0.9s'/></par></seq></seq></body></smil>",
+                "EPUB/chapter.xhtml" to text,
+                "EPUB/overlays/one.smil" to smil,
                 "EPUB/audio/voice.mp3" to "test audio"
             )
             entries.forEach { (path, body) -> zip.putNextEntry(ZipEntry(path)); zip.write(body.toByteArray()); zip.closeEntry() }
         }
+        return file
+    }
+
+    private fun wordPar(id: String, begin: String, end: String) =
+        "<par id='$id'><text src='../chapter.xhtml#$id'/><audio src='../audio/voice.mp3' clipBegin='$begin' clipEnd='$end'/></par>"
+
+    @Test fun nestedWordOverlaysRemainIndividuallySeekable() {
+        val file = wordBook("<smil xmlns:epub='http://www.idpf.org/2007/ops'><body><seq epub:textref='../chapter.xhtml'><seq id='s1-seq' epub:textref='../chapter.xhtml#s1'>" +
+            wordPar("s1-w0", "0.1s", "0.4s") + wordPar("s1-w1", "0.5s", "0.9s") + "</seq></seq></body></smil>")
         val timeline = ReadAlongPackage.read(file)
         assertEquals(2, timeline.tracks.single().segments.size)
+        assertTrue(timeline.wordLevel)
         assertEquals("s1-w0", timeline.active(0, 0)?.fragment)
-        assertNull(timeline.active(0, 350))
+        // Between two words of one sentence the word before is still the one being read (#66).
+        assertEquals("s1-w0", timeline.active(0, 350)?.fragment)
         assertEquals("s1-w1", timeline.active(0, 450)?.fragment)
+        // After the sentence's last word nothing is.
+        assertNull(timeline.active(0, 900))
         assertEquals(ReadAlongPosition(0, 400), timeline.find("EPUB/chapter.xhtml", "s1-w1"))
+        // Each word is a word of its sentence; a place by the sentence finds its first word.
+        assertEquals(listOf("s1", "s1"), timeline.tracks.single().segments.map { it.sentenceFragment })
+        assertEquals(ReadAlongPosition(0, 0), timeline.find("EPUB/chapter.xhtml", "s1"))
+        assertEquals(listOf("s1"), timeline.fragments("EPUB/chapter.xhtml"))
+    }
+
+    @Test fun aSeqWithoutAPlaceInTheTextOrInAnotherDocumentMakesNoWords() {
+        // A seq with an id and no textref (an older word experiment), and one naming another document's place: sentences of their own.
+        val bare = ReadAlongPackage.read(wordBook("<smil><body><seq><seq id='s1'>" + wordPar("s1-w0", "0.1s", "0.4s") + "</seq></seq></body></smil>"))
+        assertFalse(bare.wordLevel)
+        assertEquals("s1-w0", bare.tracks.single().segments.single().sentenceFragment)
+        val elsewhere = ReadAlongPackage.read(wordBook("<smil xmlns:epub='http://www.idpf.org/2007/ops'><body><seq epub:textref='../other.xhtml#s1'>" +
+            wordPar("s1-w0", "0.1s", "0.4s") + "</seq></body></smil>"))
+        assertFalse(elsewhere.wordLevel)
+    }
+
+    /** The aligner can place a word a moment before the word ahead of it (0.5% of The Final Empire's): the highlight only goes forward. */
+    @Test fun aSentencesWordsAreMadeToRunForwardWithoutSplittingTheNarration() {
+        val file = wordBook("<smil xmlns:epub='http://www.idpf.org/2007/ops'><body><seq epub:textref='../chapter.xhtml'>" +
+            "<seq epub:textref='../chapter.xhtml#s1'>" + wordPar("s1-w0", "1s", "1.5s") + wordPar("s1-w1", "2s", "2.8s") +
+            wordPar("s1-w2", "1.6s", "1.9s") + wordPar("s1-w3", "3s", "3.5s") + "</seq>" +
+            "<seq epub:textref='../chapter.xhtml#s2'>" + wordPar("s2-w0", "4s", "4.5s") + "</seq></seq></body></smil>",
+            "<html><body><p><span id='s1'><span id='s1-w0'>a</span> <span id='s1-w1'>b</span> <span id='s1-w2'>c</span> <span id='s1-w3'>d</span></span> <span id='s2'><span id='s2-w0'>e</span></span></p></body></html>")
+        val timeline = ReadAlongPackage.read(file)
+        // One stretch: the player plays it straight through and nothing is heard twice.
+        val segments = timeline.tracks.single().segments
+        assertEquals(listOf("s1-w0", "s1-w1", "s1-w2", "s1-w3", "s2-w0"), segments.map { it.fragment })
+        // The word placed early begins and ends with the word ahead of it, and every clip runs forward.
+        assertEquals(2_000L to 2_800L, segments[2].beginMs to segments[2].endMs)
+        assertTrue(segments.zipWithNext().all { (a, b) -> b.beginMs >= a.beginMs && b.endMs >= a.endMs && b.endMs > b.beginMs })
+        assertEquals("s1-w2", timeline.active(0, 1_500)?.fragment)
+        assertEquals("s1-w0", timeline.active(0, 800)?.fragment)
+    }
+
+    @Test fun aSentenceThatGoesBackInTheAudioStillStartsAStretchInAWordEdition() {
+        val file = wordBook("<smil xmlns:epub='http://www.idpf.org/2007/ops'><body><seq epub:textref='../chapter.xhtml'>" +
+            "<seq epub:textref='../chapter.xhtml#s1'>" + wordPar("s1-w0", "30s", "31s") + wordPar("s1-w1", "31s", "32s") + "</seq>" +
+            "<seq epub:textref='../chapter.xhtml#s2'>" + wordPar("s2-w0", "2s", "3s") + "</seq></seq></body></smil>",
+            "<html><body><p><span id='s1'><span id='s1-w0'>a</span> <span id='s1-w1'>b</span></span> <span id='s2'><span id='s2-w0'>e</span></span></p></body></html>")
+        val timeline = ReadAlongPackage.read(file)
+        assertEquals(listOf(listOf("s1-w0", "s1-w1"), listOf("s2-w0")), timeline.tracks.map { track -> track.segments.map { it.fragment } })
+        // L1/R1 still go a sentence at a time.
+        assertEquals(ReadAlongPosition(1, 0), timeline.step(ReadAlongPosition(0, 500), 1))
+    }
+
+    /** Voices that overlap (a dramatization), or a word end that runs on: the same stretch, so nothing is heard twice. */
+    @Test fun aWordEditionsSentenceThatOverlapsTheOneBeforeStaysInItsStretch() {
+        val file = wordBook("<smil xmlns:epub='http://www.idpf.org/2007/ops'><body><seq epub:textref='../chapter.xhtml'>" +
+            "<seq epub:textref='../chapter.xhtml#s1'>" + wordPar("s1-w0", "10s", "11s") + wordPar("s1-w1", "11s", "12.5s") + "</seq>" +
+            "<seq epub:textref='../chapter.xhtml#s2'>" + wordPar("s2-w0", "12.2s", "13s") + wordPar("s2-w1", "13s", "14s") + "</seq></seq></body></smil>",
+            "<html><body><p><span id='s1'><span id='s1-w0'>a</span> <span id='s1-w1'>b</span></span> <span id='s2'><span id='s2-w0'>e</span> <span id='s2-w1'>f</span></span></p></body></html>")
+        val timeline = ReadAlongPackage.read(file)
+        val segments = timeline.tracks.single().segments
+        assertEquals(listOf("s1-w0", "s1-w1", "s2-w0", "s2-w1"), segments.map { it.fragment })
+        assertTrue(segments.zipWithNext().all { (a, b) -> b.beginMs >= a.beginMs && b.endMs >= a.endMs })
+        assertEquals("s2-w0", timeline.active(0, 2_300)?.fragment)
+    }
+
+    /** [chapters] overlays of [sentences] sentences of ten words each, a word a millisecond: words or sentences of their own. */
+    private fun manyBook(chapters: Int, sentences: Int, words: Boolean): File {
+        val file = File.createTempFile("word-many-", ".epub").apply { deleteOnExit() }
+        ZipOutputStream(file.outputStream()).use { zip ->
+            fun put(name: String, body: String) { zip.putNextEntry(ZipEntry(name)); zip.write(body.toByteArray()); zip.closeEntry() }
+            val manifest = (0 until chapters).joinToString("") { "<item id='c$it' href='c$it.xhtml' media-overlay='o$it'/><item id='o$it' href='o$it.smil'/>" }
+            put("META-INF/container.xml", "<container><rootfiles><rootfile full-path='EPUB/package.opf'/></rootfiles></container>")
+            put("EPUB/package.opf", "<package><manifest>$manifest</manifest><spine>${(0 until chapters).joinToString("") { "<itemref idref='c$it'/>" }}</spine></package>")
+            put("EPUB/voice.mp3", "test audio")
+            var ms = 0L
+            for (c in 0 until chapters) {
+                put("EPUB/c$c.xhtml", "<html/>")
+                val body = StringBuilder("<smil xmlns:epub='http://www.idpf.org/2007/ops'><body><seq epub:textref='c$c.xhtml'>")
+                for (s in 0 until sentences) {
+                    if (words) body.append("<seq epub:textref='c$c.xhtml#s$s'>")
+                    for (w in 0 until 10) {
+                        val id = if (words) "s$s-w$w" else "s$s-$w"
+                        body.append("<par><text src='c$c.xhtml#$id'/><audio src='voice.mp3' clipBegin='${ms}ms' clipEnd='${ms + 1}ms'/></par>")
+                        ms++
+                    }
+                    if (words) body.append("</seq>")
+                }
+                put("EPUB/o$c.smil", body.append("</seq></body></smil>").toString())
+            }
+        }
+        return file
+    }
+
+    @Test fun aWordEditionMayHoldFarMoreThanTheSentenceCapAndASentenceEditionMayNot() {
+        // 210,000 words in 21 overlays of 1,000 sentences: past the 200,000 a sentence edition (and the hub's sentence set) is held to.
+        val words = ReadAlongPackage.read(manyBook(chapters = 21, sentences = 1_000, words = true), requireAudio = false)
+        assertEquals(210_000, words.tracks.sumOf { it.segments.size })
+        assertTrue(words.wordLevel)
+        val sentences = runCatching { ReadAlongPackage.read(manyBook(chapters = 21, sentences = 1_000, words = false), requireAudio = false) }
+        assertEquals("Narration timeline is too large", sentences.exceptionOrNull()?.message)
+        assertEquals(200_000, ReadAlongPackage.SENTENCE_LIMIT)
+        assertEquals(1_000_000, ReadAlongPackage.WORD_LIMIT)
+    }
+
+    @Test fun aSentenceEditionKeepsItsStretchesAsBefore() {
+        val forward = ReadAlongPackage.stretches((0 until 10).map { ReadAlongSegment("c.xhtml", "s$it", "a.mp3", it * 10L, it * 10L + 5) })
+        assertEquals(1, forward.size)
+        // A sentence that begins before the one ahead of it ends, or another file: a new stretch, as always.
+        val back = ReadAlongPackage.stretches(listOf(
+            ReadAlongSegment("c.xhtml", "s0", "a.mp3", 0, 10), ReadAlongSegment("c.xhtml", "s1", "a.mp3", 5, 20),
+            ReadAlongSegment("c.xhtml", "s2", "b.mp3", 0, 10)))
+        assertEquals(listOf(listOf("s0"), listOf("s1"), listOf("s2")), back.map { track -> track.segments.map { it.fragment } })
     }
 
     @Test fun zeroDurationWordFromAlignerDoesNotDiscardTheWholeBook() {

@@ -183,6 +183,10 @@ class ConsolidationGuardTest {
         Rule(Regex("""Style\.Highlight\(colors\.accent"""),
             "ReadAlongGlow.wash: the sentence's tint is the accent let into the page, opaque and behind the words; the bare accent, " +
                 "translucent and over them, washed the words out and spilled on the sentences round it (#52)"),
+        Rule(Regex("""ReadAlongGlow\.wash\([^\n]*accent|getElementsByTagNameNS\("""),
+            "ReadAlongWordHighlight.tints / ReadAlongSmil: read along's colours are the page theme's read-along highlight, as the " +
+                "owner's demo works them out, not the app's accent (#66); and an overlay is read in one pass, never through a live " +
+                "NodeList, which took 20 s to open a word edition"),
     )
 
     @Test

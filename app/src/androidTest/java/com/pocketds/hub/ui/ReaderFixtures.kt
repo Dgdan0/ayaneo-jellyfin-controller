@@ -210,22 +210,38 @@ object ReaderFixtures {
      * generated silence, in paragraphs of three, so that it runs to many pages and the page breaks fall inside
      * sentences at all sorts of places. Sentence n is the element `s{n}`, and its text begins "Sentence {n+1} ".
      */
-    fun longEpub(sentences: Int = 120, sentenceSeconds: Int = 3, twoColumns: Boolean = false, longSentenceChars: Int = 0, longSentenceIndex: Int = 0): ByteArray {
-        val words = listOf("lantern", "ridge", "pines", "observatory", "quiet", "path", "Mara", "followed", "toward", "night",
+    fun longEpub(sentences: Int = 120, sentenceSeconds: Int = 3, twoColumns: Boolean = false, longSentenceChars: Int = 0, longSentenceIndex: Int = 0,
+                 words: Boolean = false): ByteArray {
+        val vocabulary = listOf("lantern", "ridge", "pines", "observatory", "quiet", "path", "Mara", "followed", "toward", "night",
             "light", "kept", "through", "morning", "valley", "river", "stone", "bridge", "slowly", "carried")
         val texts = (0 until sentences).map { i ->
             // [longSentenceChars] makes sentence [longSentenceIndex] as long as that, so it runs over three lines or more
             // with other sentences before and after it, in the same paragraph and the one above (#52).
             val count = if (i == longSentenceIndex && longSentenceChars > 0) longSentenceChars / 7 else 12 + (i * 7) % 24
             "Sentence ${i + 1} began beyond the old ridge and " +
-                (0 until count).joinToString(" ") { words[(i * 3 + it) % words.size] } + "."
+                (0 until count).joinToString(" ") { vocabulary[(i * 3 + it) % vocabulary.size] } + "."
         }
+        // [words]: the word edition a wordsync pack makes (#66), each word its own span in its sentence's and a <par> of
+        // its own in a <seq> naming the sentence, the sentence's time shared out among its words with a short pause after each.
+        val wordPattern = Regex("[A-Za-z0-9]+")
+        fun sentenceSpan(i: Int, text: String): String =
+            if (!words) "<span id=\"s$i\">$text</span>"
+            else { var n = 0; "<span id=\"s$i\">" + wordPattern.replace(text) { "<span id=\"s$i-w${n++}\">${it.value}</span>" } + "</span>" }
         val body = texts.withIndex().chunked(3).joinToString("") { group ->
-            "<p>" + group.joinToString(" ") { (i, text) -> "<span id=\"s$i\">$text</span>" } + "</p>"
+            "<p>" + group.joinToString(" ") { (i, text) -> sentenceSpan(i, text) } + "</p>"
         }
         val columnRule = if (twoColumns) HUB_COLUMN_RULE else ""
-        val pars = texts.indices.joinToString("") {
-            "<par id=\"p$it\"><text src=\"one.xhtml#s$it\"/><audio src=\"voice.wav\" clipBegin=\"${it * sentenceSeconds}s\" clipEnd=\"${(it + 1) * sentenceSeconds}s\"/></par>"
+        val pars = texts.indices.joinToString("") { i ->
+            if (!words) "<par id=\"p$i\"><text src=\"one.xhtml#s$i\"/><audio src=\"voice.wav\" clipBegin=\"${i * sentenceSeconds}s\" clipEnd=\"${(i + 1) * sentenceSeconds}s\"/></par>"
+            else {
+                val count = wordPattern.findAll(texts[i]).count()
+                val slot = sentenceSeconds * 1000.0 / count
+                "<seq id=\"s$i-seq\" epub:textref=\"one.xhtml#s$i\">" + (0 until count).joinToString("") { w ->
+                    val begin = i * sentenceSeconds * 1000 + (w * slot).toLong()
+                    val end = if (w == count - 1) (i + 1) * sentenceSeconds * 1000L else begin + (slot * 0.8).toLong()
+                    "<par id=\"s$i-w$w\"><text src=\"one.xhtml#s$i-w$w\"/><audio src=\"voice.wav\" clipBegin=\"${begin}ms\" clipEnd=\"${end}ms\"/></par>"
+                } + "</seq>"
+            }
         }
         val files = linkedMapOf(
             "mimetype" to "application/epub+zip".toByteArray(),
@@ -278,15 +294,28 @@ object ReaderFixtures {
      * narrated chapters, [first] sentences `a0…` in the first and [second] sentences `b0…` in the second, [sentenceSeconds]
      * each over one file of generated silence.
      */
-    fun namedEpub(first: Int = 8, second: Int = 5, sentenceSeconds: Int = 3): ByteArray {
+    fun namedEpub(first: Int = 8, second: Int = 5, sentenceSeconds: Int = 3, words: Boolean = false): ByteArray {
         fun page(title: String, body: String) = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>$title</title></head><body><h1>$title</h1>$body</body></html>"""
+        val wordPattern = Regex("[A-Za-z0-9]+")
+        fun text(prefix: String, i: Int) = "The pines marked the quiet path, and Mara followed the lantern toward the ridge, sentence ${i + 1} of $prefix."
+        // [words]: a wordsync pack's word edition of it (#66), each word a span and a <par> in a <seq> naming its sentence.
+        fun wrapped(id: String, sentence: String) = if (!words) sentence else { var n = 0; wordPattern.replace(sentence) { "<span id=\"$id-w${n++}\">${it.value}</span>" } }
         fun sentences(prefix: String, count: Int) = (0 until count).chunked(2).joinToString("") { pair ->
-            "<p>" + pair.joinToString(" ") { "<span id=\"$prefix$it\">The pines marked the quiet path, and Mara followed the lantern toward the ridge, sentence ${it + 1} of $prefix.</span>" } + "</p>"
+            "<p>" + pair.joinToString(" ") { "<span id=\"$prefix$it\">${wrapped("$prefix$it", text(prefix, it))}</span>" } + "</p>"
         }
         fun overlay(document: String, prefix: String, count: Int, from: Int) =
             "<smil xmlns=\"http://www.w3.org/ns/SMIL\" xmlns:epub=\"http://www.idpf.org/2007/ops\" version=\"3.0\"><body><seq epub:textref=\"../Text/$document\">" +
                 (0 until count).joinToString("") { i ->
-                    "<par id=\"p$prefix$i\"><text src=\"../Text/$document#$prefix$i\"/><audio src=\"../Audio/voice.wav\" clipBegin=\"${(from + i) * sentenceSeconds}s\" clipEnd=\"${(from + i + 1) * sentenceSeconds}s\"/></par>"
+                    val begin = (from + i) * sentenceSeconds * 1000L
+                    if (!words) "<par id=\"p$prefix$i\"><text src=\"../Text/$document#$prefix$i\"/><audio src=\"../Audio/voice.wav\" clipBegin=\"${(from + i) * sentenceSeconds}s\" clipEnd=\"${(from + i + 1) * sentenceSeconds}s\"/></par>"
+                    else {
+                        val count = wordPattern.findAll(text(prefix, i)).count()
+                        val slot = sentenceSeconds * 1000L / count
+                        "<seq epub:textref=\"../Text/$document#$prefix$i\">" + (0 until count).joinToString("") { w ->
+                            val end = if (w == count - 1) begin + sentenceSeconds * 1000L else begin + w * slot + slot * 4 / 5
+                            "<par><text src=\"../Text/$document#$prefix$i-w$w\"/><audio src=\"../Audio/voice.wav\" clipBegin=\"${begin + w * slot}ms\" clipEnd=\"${end}ms\"/></par>"
+                        } + "</seq>"
+                    }
                 } + "</seq></body></smil>"
         val one = NAMED_ONE.substringAfterLast('/')
         val two = NAMED_TWO.substringAfterLast('/')

@@ -231,6 +231,7 @@ interface HubApi {
      * [omitAudio]: the read-along edition without its audio (#19), whose narration streams from the tracks.
      * [check]: the book is already kept here (#41), and the hub is asked whether it has another edition;
      * an Ok with [ReadingEpubDownload.keptCopy] says it has not, and nothing was written to [destination].
+     * [wordLevel]: the read-along edition with the words of the book's pack in it (#66), which the audio manifest offers.
      */
     suspend fun downloadReadingEpub(
         workId: String,
@@ -238,7 +239,8 @@ interface HubApi {
         destination: File,
         readAlong: Boolean = false,
         omitAudio: Boolean = false,
-        check: EpubRevalidation? = null
+        check: EpubRevalidation? = null,
+        wordLevel: Boolean = false
     ): HubResult<ReadingEpubDownload> =
         HubResult.Failed(FailureKind.UNKNOWN, "EPUB downloading is unavailable")
     suspend fun downloadReadingAudiobook(
@@ -1005,14 +1007,15 @@ class HubClient(private val context: Context, private val connection: HubConnect
         destination: File,
         readAlong: Boolean,
         omitAudio: Boolean,
-        check: EpubRevalidation?
+        check: EpubRevalidation?,
+        wordLevel: Boolean
     ): HubResult<ReadingEpubDownload> {
         connectionFailure()?.let { return it }
         return try {
             withContext(Dispatchers.IO) {
                 destination.parentFile?.mkdirs()
                 val request = Request.Builder()
-                    .url(HubEndpoints.readingEpubFile(base(), workId, sourceItemId, readAlong, omitAudio))
+                    .url(HubEndpoints.readingEpubFile(base(), workId, sourceItemId, readAlong, omitAudio, wordLevel))
                     .cacheControl(noStore)
                     .build()
                 HubResult.Ok(ResumableEpubTransfer.downloadWithRetry(offlineHttp, request, destination, revalidation = check))

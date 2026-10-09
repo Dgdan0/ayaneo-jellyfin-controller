@@ -225,6 +225,56 @@ class ReadAlongPageSyncTest {
         assertNull(ReadAlongPageSync.keptFor(span.copy(end = null), ReadAlongPosition(0, 12_000)).end)
     }
 
+    // ------------------------------------------------------------------ the word edition (#66)
+
+    /** "Alpha delta gamma betas" as four timed words, then "Epsilon zeta eta theta." with "zeta" cut by the dramatization. */
+    private val words = ReadAlongTimeline(listOf(ReadAlongTrack("one.mp4", listOf(
+        ReadAlongSegment("one.xhtml", "s0-w0", "one.mp4", 0, 1_000, "s0"),
+        ReadAlongSegment("one.xhtml", "s0-w1", "one.mp4", 1_200, 2_000, "s0"),
+        ReadAlongSegment("one.xhtml", "s0-w2", "one.mp4", 2_100, 3_000, "s0"),
+        ReadAlongSegment("one.xhtml", "s0-w3", "one.mp4", 3_100, 4_000, "s0"),
+        ReadAlongSegment("one.xhtml", "s1-w0", "one.mp4", 5_000, 6_000, "s1"),
+        ReadAlongSegment("one.xhtml", "s1-w2", "one.mp4", 6_500, 7_000, "s1"),
+        ReadAlongSegment("one.xhtml", "s1-w3", "one.mp4", 7_100, 8_000, "s1")
+    ))))
+
+    @Test fun `in a word edition the page's first word is that word's own time, not a share of the sentence`() {
+        val start = ReadAlongPageSync.startOf(words, page(PageEdge("s0", alpha, 12, "s0-w2"), null, "s0"))
+        assertEquals(ReadAlongPosition(0, 2_100), start)
+        // A word the voice does not say (zeta has no clip): the next one it does.
+        assertEquals(ReadAlongPosition(0, 6_500), ReadAlongPageSync.startOf(words, page(PageEdge("s1", second, 8, "s1-w1"), null, "s1")))
+        // No word of the sentence begins on the page: the next sentence's first word.
+        assertEquals(ReadAlongPosition(0, 5_000), ReadAlongPageSync.startOf(words, page(PageEdge("s0", alpha, 20, null), null, "s0")))
+    }
+
+    @Test fun `in a word edition the next page begins at its first word`() {
+        val span = ReadAlongPageSync.span(words, page(PageEdge("s0", alpha, 0, "s0-w0"), PageEdge("s0", alpha, 11, "s0-w2"), "s0"))
+        assertEquals(ReadAlongPosition(0, 0), span.start)
+        assertEquals(ReadAlongPosition(0, 2_100), span.end)
+        // The voice turns the page when it reaches that word, not before.
+        assertEquals(ReadAlongPageSync.Step.Stay, ReadAlongPageSync.follow(words, ReadAlongPosition(0, 2_050), span))
+        assertEquals(ReadAlongPageSync.Step.TurnPage, ReadAlongPageSync.follow(words, ReadAlongPosition(0, 2_100), span))
+        // A sentence that ends on the page hands over to the next.
+        val whole = ReadAlongPageSync.span(words, page(PageEdge("s0", alpha, 0, "s0-w0"), PageEdge("s0", alpha, alpha.length, null), "s0"))
+        assertEquals(ReadAlongPosition(0, 5_000), whole.end)
+    }
+
+    @Test fun `a word is on the page with its sentence`() {
+        val span = ReadAlongPageSync.span(words, page(PageEdge("s0", alpha, 0, "s0-w0"), PageEdge("s1", second, second.length, null), "s0", "s1"))
+        assertEquals(ReadAlongPageSync.Step.Stay, ReadAlongPageSync.follow(words, ReadAlongPosition(0, 6_600), span))
+        assertEquals(ReadAlongPageSync.Manual.Keep, ReadAlongPageSync.afterManualTurn(words, ReadAlongPosition(0, 1_500), span))
+        val other = ReadAlongPageSync.span(words, page(PageEdge("s1", second, 0, "s1-w0"), null, "s1"))
+        // The word being said is off this page: go to the word itself.
+        assertEquals(ReadAlongPageSync.Step.GoTo(words.tracks[0].segments[1]), ReadAlongPageSync.follow(words, ReadAlongPosition(0, 1_500), other))
+        // L1/R1 go a sentence at a time, from a word in the middle.
+        assertEquals(ReadAlongPosition(0, 5_000), words.step(ReadAlongPosition(0, 1_500), 1))
+        assertEquals(ReadAlongPosition(0, 0), words.step(ReadAlongPosition(0, 3_500), -1))
+        // Play from a page that shows none of the narration starts a sentence, not a word in the middle of one.
+        assertEquals(ReadAlongPosition(0, 5_000), ReadAlongPageSync.nearest(words, listOf("one.xhtml"), "one.xhtml", 0.9))
+        // The probe asks for sentences, not words.
+        assertEquals(listOf("s0", "s1"), words.fragments("one.xhtml"))
+    }
+
     @Test fun `positions compare by file, then by time`() {
         assertTrue(ReadAlongPageSync.compare(ReadAlongPosition(0, 99_000), ReadAlongPosition(1, 0)) < 0)
         assertTrue(ReadAlongPageSync.compare(ReadAlongPosition(1, 5), ReadAlongPosition(1, 4)) > 0)
