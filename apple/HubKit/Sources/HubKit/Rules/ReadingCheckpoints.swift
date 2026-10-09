@@ -177,6 +177,31 @@ public final class ReadingCheckpointStore: @unchecked Sendable {
             .sorted { $0.updatedAt < $1.updatedAt }
     }
 
+    /// Whether this device keeps a place in the book, sent or not, of any kind (#60).
+    public func hasPlace(scope: String, workId: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let files = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        return files.contains { file in
+            guard file.pathExtension == "json",
+                  let record = try? Self.decoder.decode(ReadingCheckpoint.self, from: Data(contentsOf: file)) else { return false }
+            return record.key.scope == scope && record.key.workId == workId && record.local != nil
+        }
+    }
+
+    /// Every record of one book for one hub and profile, of every kind (#60's
+    /// Start over): the place and the outbox with it.
+    public func dropWork(scope: String, workId: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        let files = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.pathExtension == "json" {
+            guard let record = try? Self.decoder.decode(ReadingCheckpoint.self, from: Data(contentsOf: file)),
+                  record.key.scope == scope, record.key.workId == workId else { continue }
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
     /// A place reached here. The same place again writes nothing.
     @discardableResult
     public func save(_ key: ReadingCheckpointKey, _ location: ReadingLocation, now: Int64) throws -> ReadingCheckpoint {

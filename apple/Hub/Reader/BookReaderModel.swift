@@ -251,9 +251,11 @@ final class BookReaderModel {
         bookPages = PageInfo.bookPages(work, sourceItemId: sourceItemId)
         // The place goes through the reading outbox, as the listening place
         // does: the demo's in a folder of its own (`ListeningStore`).
-        places = CheckpointBookPlaces(hub: app.hub, store: ListeningStore.shared,
-                                      key: CheckpointBookPlaces.key(address: app.address, userId: app.userId,
-                                                                    workId: work.id, sourceItemId: sourceItemId))
+        let placeKey = CheckpointBookPlaces.key(address: app.address, userId: app.userId, workId: work.id, sourceItemId: sourceItemId)
+        // A book started over on any device (#60): what this one kept of it goes as the place is read.
+        places = CheckpointBookPlaces(hub: app.hub, store: ListeningStore.shared, key: placeKey,
+                                      resets: ReadingResetCenter.resets,
+                                      alsoDrop: { [scope = placeKey.scope] workId in ReadingResetCenter.alsoDrop(scope: scope, workId: workId) })
         cache = ReadingOffline.ebooks(app: app)
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("epub-bookmarks", isDirectory: true)

@@ -120,8 +120,12 @@ public struct ReadingCompletionSession: Sendable {
         return state.markRead(id)
     }
 
+    /// Mark unread: back to what was there before this visit marked the book
+    /// read, else the finish is simply gone. It is not a reset any more (#60):
+    /// the place stays, and only Start over, which the hub does for every
+    /// device, takes a place away.
     public mutating func unmark(_ state: ReadingCompletionState, _ id: String) -> ReadingCompletionState {
-        guard let (prior, time) = previous.removeValue(forKey: id) else { return state.reset(id) }
+        guard let (prior, time) = previous.removeValue(forKey: id) else { return state.clear(id) }
         guard let prior else { return state.clear(id) }
         var next = state
         next.states[id] = prior

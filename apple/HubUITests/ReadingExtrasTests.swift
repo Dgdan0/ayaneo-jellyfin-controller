@@ -47,7 +47,8 @@ final class ReadingExtrasTests: XCTestCase {
 
     /// Light Bringer is half read: marked finished it is read, and undone
     /// straight after its place comes back; finished again and the page
-    /// left, Mark unread starts it again (#37, through #39's ⋯ › Finished).
+    /// left, Mark unread takes the finish away and its place is back too
+    /// (#37, through #39's ⋯ › Finished; #60: only Start over starts it again).
     @MainActor
     func testABookMarkedReadAndUnreadKeepsOrStartsAgain() {
         let app = launch(open: "book:rw_demo_rr6")
@@ -97,8 +98,105 @@ final class ReadingExtrasTests: XCTestCase {
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
         XCTAssertFalse(entry.label.contains("49%"), "the mark did not last: \(entry.label)")
         more("Mark unread")
-        XCTAssertTrue(text(app, containing: "Marked unread").waitForExistence(timeout: 5), "unread after leaving did not start it again")
-        XCTAssertFalse(entry.label.contains("49%"), "a book marked unread still shows its place")
+        XCTAssertTrue(text(app, containing: "Finish taken away").waitForExistence(timeout: 5), "unread after leaving said nothing")
+        XCTAssertTrue(waitUntil(5) { entry.label.contains("49%") }, "taking the finish away lost the place: \(entry.label)")
+    }
+
+    // MARK: Start over (#60)
+
+    /// Light Bringer, half read and opened at its place, is started over from
+    /// its ⋯: the question offers Keep my place first and keeps it, Start over
+    /// then takes the book back to not started, ⋯ no longer offers it, and the
+    /// reader opens at the first page, its place on this device gone too.
+    @MainActor
+    func testStartOverTakesABookBackToNotStartedOnEveryFormatAndThisDevice() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo", "-epub.pageInfo.place", "pageInBook"]
+        app.launchEnvironment = ["HUB_SECTION": "home", "HUB_SIDE": "books", "HUB_OPEN": "book:rw_demo_rr6", "HUB_BOOK_SCROLL": "0"]
+        app.launch()
+        let entry = app.buttons["book-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 15), "the book's page did not open: \(buttons(app))")
+        XCTAssertTrue(waitUntil(10) { entry.label.contains("49%") }, "Light Bringer is not half read: \(entry.label)")
+
+        // Read here first: the reader opens at the place, which this device keeps.
+        let place = app.buttons["book-corner-place"]
+        func read(_ expected: (String) -> Bool, _ why: String) {
+            entry.tap()
+            XCTAssertTrue(place.waitForExistence(timeout: 30), "the reader did not open: \(buttons(app))")
+            XCTAssertTrue(waitUntil(15) { expected(place.label) }, "\(why): \(place.label)")
+            app.descendants(matching: .any).matching(identifier: "book-page").firstMatch
+                .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            let close = app.buttons["book-close"]
+            XCTAssertTrue(close.waitForExistence(timeout: 5), "the menu did not come")
+            close.tap()
+            XCTAssertTrue(entry.waitForExistence(timeout: 10), "the book's page did not come back")
+        }
+        read({ $0.hasPrefix("Page ") && !$0.hasPrefix("Page 1 of") }, "the reader did not open at the place")
+
+        let more = app.buttons["More actions for Light Bringer"]
+        func startOver() -> XCUIElement {
+            more.tap()
+            let item = app.buttons["book-start-over"]
+            XCTAssertTrue(item.waitForExistence(timeout: 5), "⋯ has no Start over: \(buttons(app))")
+            // Once the menu has opened: a tap while it still unfolds is lost.
+            XCTAssertTrue(waitUntil(5) { item.isHittable }, "Start over cannot be tapped")
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            item.tap()
+            let question = app.alerts.firstMatch
+            if !question.waitForExistence(timeout: 3), item.exists, item.isHittable { item.tap() }
+            XCTAssertTrue(question.waitForExistence(timeout: 5), "Start over did not ask first")
+            XCTAssertTrue(question.label.contains("Start Light Bringer over?"), "it asks \(question.label)")
+            XCTAssertTrue(question.staticTexts.matching(NSPredicate(format: "label CONTAINS 'forgotten on every device'")).firstMatch.exists,
+                          "it does not say what is forgotten")
+            return question
+        }
+        // The harmless answer first, and it keeps the place.
+        let first = startOver()
+        keep(app, "start-over-question")
+        let keepPlace = first.buttons["Keep my place"]
+        XCTAssertTrue(keepPlace.exists, "no harmless answer: \(first.buttons.allElementsBoundByIndex.map(\.label))")
+        XCTAssertEqual(first.buttons.allElementsBoundByIndex.first?.label, "Keep my place", "the harmless answer is not first")
+        keepPlace.tap()
+        XCTAssertTrue(waitForGone(first), "the question stayed")
+        XCTAssertTrue(entry.label.contains("49%"), "Keep my place lost the place: \(entry.label)")
+
+        let second = startOver()
+        second.buttons["Start over"].tap()
+        XCTAssertTrue(text(app, containing: "Started over").waitForExistence(timeout: 10), "Start over said nothing: \(buttons(app))")
+        XCTAssertTrue(waitUntil(10) { !entry.label.contains("49%") }, "the book still resumes at its place: \(entry.label)")
+        keep(app, "start-over-done")
+        // Nothing left to start over.
+        more.tap()
+        XCTAssertTrue(app.buttons["Want to read"].waitForExistence(timeout: 5), "⋯ did not open: \(buttons(app))")
+        XCTAssertFalse(app.buttons["book-start-over"].exists, "Start over is offered for a book not started")
+        app.buttons["Want to read"].tap()
+        // The reader opens at the first page: neither the hub's place nor this device's is left.
+        read({ $0.hasPrefix("Page 1 of") }, "the reader did not open at the beginning")
+    }
+
+    /// Fantastic Four, being read at issue 51, is started over from its ⋯:
+    /// it is no longer being read, and nothing in it is.
+    @MainActor
+    func testStartOverTakesAComicRunBackToNotStarted() {
+        let app = launch(open: "book:rw_demo_ff")
+        // Issue 51's card: "Issue 51, 24 pages · 4% read" while it is being read.
+        let issue = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Issue 51'")).firstMatch
+        XCTAssertTrue(issue.waitForExistence(timeout: 15), "the run's page did not open: \(buttons(app))")
+        XCTAssertTrue(waitUntil(10) { issue.label.contains("% read") }, "Fantastic Four is not being read at 51: \(issue.label)")
+        app.buttons["More actions for Fantastic Four"].tap()
+        let item = app.buttons["book-start-over"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "the run's ⋯ has no Start over: \(buttons(app))")
+        XCTAssertTrue(waitUntil(5) { item.isHittable }, "Start over cannot be tapped")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        item.tap()
+        let question = app.alerts.firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 5), "Start over did not ask first")
+        XCTAssertTrue(question.staticTexts.matching(NSPredicate(format: "label CONTAINS 'every issue is unread again'")).firstMatch.exists,
+                      "a comic's question is not a comic's")
+        question.buttons["Start over"].tap()
+        XCTAssertTrue(text(app, containing: "Started over").waitForExistence(timeout: 10), "Start over said nothing")
+        XCTAssertTrue(waitUntil(10) { issue.label.contains("Not started") }, "issue 51 is still being read: \(issue.label)")
+        keep(app, "start-over-comic")
     }
 
     // MARK: Comfort

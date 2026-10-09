@@ -22,7 +22,13 @@ enum ReadingOffline {
 
     /// The comics' page lists, kept to reopen an issue in an outage; by account inside (`ReadingCheckpointKey`).
     static func manifests(app: AppModel) -> ReadingManifestCache {
-        ReadingManifestCache(root: caches.appendingPathComponent("reading-manifests", isDirectory: true))
+        ReadingManifestCache(root: manifestsRoot)
+    }
+
+    /// Where they are, for Start over (#60), which forgets their pages from any thread.
+    nonisolated static var manifestsRoot: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("reading-manifests", isDirectory: true)
     }
 
     /// Whose page lists these are.

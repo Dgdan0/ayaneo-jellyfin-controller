@@ -42,14 +42,20 @@ public actor CheckpointBookPlaces: BookPlaceKeeper {
     private let store: ReadingCheckpointStore
     private let key: ReadingCheckpointKey
     private let now: @Sendable () -> Int64
+    /// Start over (#60): the stamps this device applied, and what else it forgets of a book started over.
+    private let resets: ReadingResets?
+    private let alsoDrop: @Sendable (String) -> Void
     private var refused = false
 
     public init(hub: HubClient, store: ReadingCheckpointStore, key: ReadingCheckpointKey,
-                now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) }) {
+                now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) },
+                resets: ReadingResets? = nil, alsoDrop: @escaping @Sendable (String) -> Void = { _ in }) {
         self.hub = hub
         self.store = store
         self.key = key
         self.now = now
+        self.resets = resets
+        self.alsoDrop = alsoDrop
     }
 
     /// The key for a book's EPUB place, for one hub and profile.
@@ -59,7 +65,7 @@ public actor CheckpointBookPlaces: BookPlaceKeeper {
     }
 
     public func opening() async -> BookOpening {
-        let remote = await Self.remote(hub, key)
+        let remote = await Self.remote(hub, key, resets: resets, alsoDrop: alsoDrop)
         let resume: ReadingResume
         do {
             resume = try store.reconcile(key, remote)
@@ -95,15 +101,23 @@ public actor CheckpointBookPlaces: BookPlaceKeeper {
     public func flush() async {
         guard !refused else { return }
         let hub = hub
-        let sync = ReadingCheckpointSync(store: store, fetch: { key in await Self.remote(hub, key) }, send: { checkpoint in
+        let resets = resets
+        let alsoDrop = alsoDrop
+        let sync = ReadingCheckpointSync(store: store, fetch: { key in
+            await Self.remote(hub, key, resets: resets, alsoDrop: alsoDrop)
+        }, send: { checkpoint in
             guard let locator = Self.json(checkpoint.local?.locator) else { return false }
             let body = EpubPositionBody(locator: locator, timestamp: Int64(Date().timeIntervalSince1970 * 1_000),
-                                        checkBase: checkpoint.baseKnown, expectedLocator: Self.json(checkpoint.base?.locator))
+                                        checkBase: checkpoint.baseKnown, expectedLocator: Self.json(checkpoint.base?.locator),
+                                        resetSeen: resets?.seen(scope: checkpoint.key.scope, workId: checkpoint.key.workId))
             do throws(HubFailure) {
                 try await hub.send(HubEndpoints.saveReadingEpubPosition(workId: checkpoint.key.workId,
                                                                         sourceItemId: checkpoint.key.sourceItemId, body))
                 return true
             } catch {
+                // Started over since this place was made (#60): reading the book again
+                // applies that and drops the place, which is not sent again.
+                if error.code == ReadingResets.code { _ = await Self.remote(hub, checkpoint.key, resets: resets, alsoDrop: alsoDrop) }
                 return false
             }
         })
@@ -114,11 +128,14 @@ public actor CheckpointBookPlaces: BookPlaceKeeper {
 
     // MARK: Plumbing
 
-    /// The hub's place for the book, or that it could not be asked.
-    static func remote(_ hub: HubClient, _ key: ReadingCheckpointKey) async -> RemoteReadingPosition {
+    /// The hub's place for the book, or that it could not be asked. A start
+    /// over the hub names and this device has not applied is applied first (#60).
+    static func remote(_ hub: HubClient, _ key: ReadingCheckpointKey, resets: ReadingResets? = nil,
+                       alsoDrop: @escaping @Sendable (String) -> Void = { _ in }) async -> RemoteReadingPosition {
         do throws(HubFailure) {
             let data = try await hub.data(HubEndpoints.readingEpubPosition(workId: key.workId, sourceItemId: key.sourceItemId))
             guard let position = EpubPosition.decode(data) else { return .unavailable }
+            resets?.apply(scope: key.scope, workId: key.workId, resetAt: position.resetAt) { alsoDrop(key.workId) }
             return .available(position.locator.flatMap(location))
         } catch {
             return .unavailable
