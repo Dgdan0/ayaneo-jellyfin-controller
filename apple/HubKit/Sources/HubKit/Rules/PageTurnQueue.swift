@@ -1,16 +1,19 @@
 import Foundation
 
-/// Every page turn asked for is made, one at a time, however fast they come
-/// (#64).
+/// The turns that are not a finger's, made one at a time in the order they
+/// were asked for (#64), and the rule that says what a swipe is.
 ///
-/// Readium's pages are a paging scroll view, and a swipe that lands while the
-/// last turn still slides is measured from wherever the page has got to, so
-/// quick swipes lost turns: ten swipes on and back again (seven on, three
-/// back) went one or two pages instead of four. The reader therefore leaves a
-/// swipe to the scroll view only while nothing is moving. One that comes
-/// during a turn is queued here, with every turn from the keys, the margins
-/// and the voice, and the queue makes them in order: animated when nothing
-/// waits behind, at once while more do, so a burst keeps up with the hand.
+/// A key, a tap in the margin and the read-along voice each ask the reader for
+/// "the next page". However fast they come, every one is made: they wait here
+/// and go through Readium's own turns in order, animated when nothing waits
+/// behind and at once while more do, so a burst keeps up with the hand.
+///
+/// A finger is not queued. The page view follows it and is never switched
+/// off; `PageIntent` keeps the account of where its swipes are heading, and
+/// this type's `swipe` is the one rule for whether a drag was a turn
+/// (a flick, or a drag of enough of the page's width). A swipe that goes past
+/// an end of a part is the only finger's turn that reaches the queue, because
+/// Readium's outer paging view makes that one.
 public struct PageTurnQueue: Equatable, Sendable {
     /// A turn: on or back in the book (the keys, the margins, the voice), or
     /// the page to the left or right on screen (a swipe), whichever way the book reads.

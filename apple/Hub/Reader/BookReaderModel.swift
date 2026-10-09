@@ -1283,7 +1283,7 @@ final class BookReaderModel {
     /// Where the page is, what the voice and the page last did to each other, and who has the lock screen.
     var debugReadAlong: String {
         "\(positionLine) · \(readAlong?.debugLine ?? "none") · washes \(navigator.debugWashes) · \(navigator.debugFits) · "
-            + "\(FrameMonitor.shared.summary) · \(NowPlaying.shared.summary)"
+            + "\(FrameMonitor.shared.summary) · \(NowPlaying.shared.summary) · \(navigator.debugTurns)"
     }
     #endif
 

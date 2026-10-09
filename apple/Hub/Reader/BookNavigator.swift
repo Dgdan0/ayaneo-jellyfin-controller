@@ -98,6 +98,8 @@ final class BookNavigator: NSObject {
     private(set) var debugWordChanges = 0
     private(set) var debugFitTotal: Double = 0
     private(set) var debugFitWorst: Double = 0
+    /// The page turner's counters, for UI tests: locks seen, a grabbed page's follow, the last swipe's frames.
+    var debugTurns: String { turner?.debugLine ?? "no turner" }
     var debugFits: String {
         let average = debugWordChanges > 0 ? debugFitTotal / Double(debugWordChanges) : 0
         return String(format: "words %d fit avg %.1fms worst %.1fms", debugWordChanges, average * 1_000, debugFitWorst * 1_000)
@@ -106,7 +108,7 @@ final class BookNavigator: NSObject {
     /// The book's documents as Readium spells them: what a locator made from
     /// the narration's path names (#61).
     private(set) var hrefs = BookHrefs(readingOrder: [])
-    /// Makes the turns, one at a time (#64).
+    /// Makes the turns (#64): a finger's follow it, the rest one at a time.
     private var turner: PageTurner?
     /// The note whose card is open: where "Go to the note" goes.
     private var noteLink: ReadiumShared.Link?
@@ -166,6 +168,7 @@ final class BookNavigator: NSObject {
         controller = navigator
         // Every turn asked for is made, however fast they come (#64).
         turner = PageTurner(host: navigator.view, scrolls: { [weak navigator] in navigator?.settings.scroll ?? false },
+                            readsRightToLeft: { [weak navigator] in navigator?.settings.readingProgression == .rtl },
                             scrollViews: { [weak self] in self?.scrollViews() ?? [] }) { [weak navigator] turn, animated in
             guard let navigator else { return false }
             let options = NavigatorGoOptions(animated: animated)
