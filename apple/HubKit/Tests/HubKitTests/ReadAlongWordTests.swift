@@ -38,6 +38,33 @@ struct ReadAlongWordTests {
         }
     }
 
+    /// The hub's contract (#66, `claude/readalong-words`): the audio manifest
+    /// says `wordLevel` when the book's pack has a word set (absent from an
+    /// older hub, and false then), and only then is the edition asked for with
+    /// `granularity=word`. The demo hub answers as the hub does.
+    @Test func theWordSetIsAskedForWhereTheManifestSaysWordLevel() async throws {
+        let older = try JSONDecoder().decode(ReadingAudioManifest.self, from: Data(#"{"workId":"w","aligned":true}"#.utf8))
+        let words = try JSONDecoder().decode(ReadingAudioManifest.self,
+                                             from: Data(#"{"workId":"w","aligned":true,"wordLevel":true}"#.utf8))
+        #expect(!older.wordLevel && words.wordLevel)
+        let slim = "/file?format=readaloud&audio=omit"
+        #expect(HubEndpoints.readingEpubFile(workId: "w", sourceItemId: "s", format: "readaloud", omitAudio: true).path.hasSuffix(slim))
+        #expect(HubEndpoints.readingEpubFile(workId: "w", sourceItemId: "s", format: "readaloud", omitAudio: true, granularity: "word")
+            .path.hasSuffix(slim + "&granularity=word"))
+        let hub = HubClient(credentials: HubCredentials(baseURL: DemoTransport.address, token: DemoTransport.token),
+                            screens: DemoTransport(), sleep: { _ in })
+        let (work, source) = (DemoReadAlong.workId, DemoReadAlong.sourceItemId)
+        let manifest = try await hub.fetch(HubEndpoints.readingAudioManifest(workId: work, sourceItemId: source),
+                                           as: ReadingAudioManifest.self)
+        #expect(manifest.aligned && manifest.wordLevel)
+        let wordEdition = try await hub.data(HubEndpoints.readingEpubFile(workId: work, sourceItemId: source, format: "readaloud",
+                                                                          omitAudio: true, granularity: "word"))
+        let sentenceEdition = try await hub.data(HubEndpoints.readingEpubFile(workId: work, sourceItemId: source, format: "readaloud",
+                                                                              omitAudio: true))
+        #expect(try ReadAlongPackage.read(wordEdition, requireAudio: false).timesWords)
+        #expect(try !ReadAlongPackage.read(sentenceEdition, requireAudio: false).timesWords)
+    }
+
     @Test func aSentenceThatCouldNotBeCutIntoWordsStaysOneSentence() throws {
         let smil = """
             <?xml version="1.0" encoding="UTF-8"?>

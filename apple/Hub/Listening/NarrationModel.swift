@@ -443,8 +443,11 @@ final class NarrationModel {
             return Opening(edition: cache.completeFile(workId: workId, sourceItemId: sourceItemId), narration: nil,
                            note: "The narration needs the hub. You can read this book meanwhile.")
         }
+        // Word by word where the hub says the book's pack has its words (#66).
+        var words = false
+        if case .stream(let manifest) = plan { words = manifest.wordLevel }
         let edition = try await ReadAlongEdition.file(app: app, cache: cache, workId: workId, sourceItemId: sourceItemId,
-                                                      force: force)
+                                                      words: words, force: force)
         guard case .stream(let manifest) = plan else {
             return Opening(edition: edition, narration: nil,
                            note: "The hub cannot stream this book's narration yet. You can read it meanwhile.")
@@ -506,14 +509,17 @@ enum ReadAlongEdition {
     }
 
     /// The edition, from the cache, checked with the hub as the ebook is
-    /// (#41), or from the hub; `force` downloads it again.
+    /// (#41), or from the hub; `force` downloads it again. `words`: with its
+    /// word set (`granularity=word`, #66), when the audio manifest says
+    /// `wordLevel`; the hub's tag differs by set, so a kept copy of the other is
+    /// sent again.
     static func file(app: AppModel, cache: EpubPackageCache, workId: String, sourceItemId: String,
-                     force: Bool = false) async throws(ReadAlongError) -> URL {
+                     words: Bool = false, force: Bool = false) async throws(ReadAlongError) -> URL {
         do {
             return try await cache.open(workId: workId, sourceItemId: sourceItemId,
                                         request: HubEndpoints.readingEpubFile(workId: workId, sourceItemId: sourceItemId,
                                                                               format: "readaloud", omitAudio: true,
-                                                                              granularity: "word"),
+                                                                              granularity: words ? "word" : ""),
                                         hub: app.hub, force: force)
         } catch let failure as HubFailure {
             throw ReadAlongError(failure.message)

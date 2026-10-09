@@ -20,6 +20,11 @@ public enum DemoReadAlong {
     public static let workId = "rw_demo_darkmatter"
     public static let sourceItemId = "demo-dm"
 
+    /// Dark Matter's pack has a word set (#66): its manifest says `wordLevel`
+    /// and `granularity=word` is the word edition. HUB_DEMO_SENTENCES=1 makes
+    /// it a book without one, which the hub answers with its sentences.
+    public static var servesWords: Bool { ProcessInfo.processInfo.environment["HUB_DEMO_SENTENCES"] != "1" }
+
     /// One of the edition's audio files, and where in which track it begins.
     struct AudioFile {
         let href: String
@@ -128,9 +133,7 @@ public enum DemoReadAlong {
             return DemoTransport.Answer(404, #"{"error":{"code":"not_found","message":"The whole edition is not in the demo hub"}}"#)
         }
         // Word by word when asked (#66), as the hub serves our word overlay; an older app asks for sentences.
-        // HUB_DEMO_SENTENCES=1: a book without a word pack, whatever the app asks for.
-        let sentencesOnly = ProcessInfo.processInfo.environment["HUB_DEMO_SENTENCES"] == "1"
-        let edition = value("granularity", in: query) == "word" && !sentencesOnly ? slimWordEdition() : slimEdition()
+        let edition = value("granularity", in: query) == "word" && servesWords ? slimWordEdition() : slimEdition()
         var answer = DemoTransport.Answer(200, data: edition, type: "application/epub+zip")
         answer.headers = ["ETag": DemoTransport.etag(edition)]
         return answer
