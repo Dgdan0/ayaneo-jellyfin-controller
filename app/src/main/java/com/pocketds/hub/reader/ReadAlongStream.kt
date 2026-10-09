@@ -55,7 +55,7 @@ object ReadAlongStream {
     fun fitted(timeline: ReadAlongTimeline, manifest: ReadingAudioManifest): ReadAlongTimeline? {
         val files = manifest.alignment?.audio.orEmpty()
         fun length(href: String): Long? {
-            val file = files.firstOrNull { it.href.trimStart('/') == href.trimStart('/') } ?: return null
+            val file = files.firstOrNull { DocumentPath.name(it.href) == DocumentPath.name(href) } ?: return null
             val track = manifest.tracks.getOrNull(file.track) ?: return null
             val start = file.startMs.coerceAtLeast(0)
             files.filter { it.track == file.track && it.startMs > file.startMs }.minOfOrNull { it.startMs }?.let { return it - start }
@@ -77,9 +77,10 @@ object ReadAlongStream {
      * heard from the wrong place is worse than no narration.
      */
     fun sources(timeline: ReadAlongTimeline, manifest: ReadingAudioManifest, sourceItemId: String, url: (index: Int) -> String): List<NarrationSource> {
-        val mapped = manifest.alignment?.audio.orEmpty().associateBy { it.href.trimStart('/') }
+        // The hub names a file as the archive does, decoded; the timeline's is DocumentPath's spelling of the same name (#61).
+        val mapped = manifest.alignment?.audio.orEmpty().associateBy { DocumentPath.name(it.href) }
         return timeline.tracks.map { stretch ->
-            val aligned = mapped[stretch.audioHref.trimStart('/')] ?: error("The hub did not map ${stretch.audioHref}")
+            val aligned = mapped[DocumentPath.name(stretch.audioHref)] ?: error("The hub did not map ${stretch.audioHref}")
             val track = manifest.tracks.getOrNull(aligned.track) ?: error("The hub mapped ${stretch.audioHref} to no track")
             NarrationSource(url(track.index), aligned.startMs.coerceAtLeast(0), AudiobookStream.cacheKey(sourceItemId, track))
         }

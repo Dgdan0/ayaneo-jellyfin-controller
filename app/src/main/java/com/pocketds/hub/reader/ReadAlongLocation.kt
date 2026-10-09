@@ -10,10 +10,13 @@ import kotlinx.serialization.json.*
  * `pocketdsAudio` offset this app once added is neither written nor read.
  */
 object ReadAlongLocation {
-    /** Where the narration resumes: the start of the sentence the locator names. */
+    /**
+     * Where the narration resumes: the start of the sentence the locator names. The locator's href is in whatever spelling it
+     * was saved in (Readium's, percent-encoded, or an older build's decoded one), so it is made [DocumentPath]'s first (#61).
+     */
     fun resume(locator: JsonObject, timeline: ReadAlongTimeline): ReadAlongPosition? {
         val locations = locator["locations"] as? JsonObject ?: return null
-        val href = (locator["href"] as? JsonPrimitive)?.contentOrNull ?: return null
+        val href = (locator["href"] as? JsonPrimitive)?.contentOrNull?.let(DocumentPath::of) ?: return null
         val fragments = (locations["fragments"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
         return fragments.firstNotNullOfOrNull { timeline.find(href, it) }
     }
@@ -55,8 +58,13 @@ object ReadAlongLocation {
         return JsonObject(locator.toMutableMap().apply { put("locations", JsonObject(locations)) })
     }
 
-    /** The page's locator moved to the sentence playing at [point], finished when [completed]. */
-    fun save(locator: JsonObject, timeline: ReadAlongTimeline, point: ReadAlongPosition, completed: Boolean): JsonObject {
+    /**
+     * The page's locator moved to the sentence playing at [point], finished when [completed]. The sentence's document is
+     * written as [spell] says (the book's own spelling of it, which Readium resolves; the reader supplies it from the
+     * publication): the timeline holds [DocumentPath]'s decoded one, which is not a valid href when it has a space in it (#61).
+     */
+    fun save(locator: JsonObject, timeline: ReadAlongTimeline, point: ReadAlongPosition, completed: Boolean,
+             spell: (String) -> String = DocumentPath::encode): JsonObject {
         val track = timeline.tracks.getOrNull(point.track) ?: return locator
         val segment = timeline.active(point.track, point.offsetMs)
             ?: track.segments.lastOrNull { it.endMs <= track.startMs + point.offsetMs }
@@ -67,7 +75,7 @@ object ReadAlongLocation {
         locations["fragments"] = JsonArray(listOf(JsonPrimitive(segment.fragment)))
         if (completed) locations["totalProgression"] = JsonPrimitive(1.0)
         return JsonObject(locator.toMutableMap().apply {
-            put("href", JsonPrimitive(segment.textHref)); put("locations", JsonObject(locations)); remove("text")
+            put("href", JsonPrimitive(spell(segment.textHref))); put("locations", JsonObject(locations)); remove("text")
         })
     }
 }

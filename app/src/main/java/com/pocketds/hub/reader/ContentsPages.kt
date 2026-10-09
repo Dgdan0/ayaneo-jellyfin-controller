@@ -20,7 +20,8 @@ class ContentsPages(
     private val sectionStarts: List<Double?>
 ) {
     private val sectionByHref: Map<String, Int> = HashMap<String, Int>().also { map ->
-        sectionHrefs.forEachIndexed { index, href -> map.putIfAbsent(href, index) }
+        // A Contents link and the reading order may spell one file two ways (a space as %20 or as a space, #61).
+        sectionHrefs.forEachIndexed { index, href -> map.putIfAbsent(DocumentPath.of(href), index) }
     }
 
     /** Each anchor's share of its part: "section#anchor" to how far into the file it starts. Replaced whole, never edited. */
@@ -34,7 +35,7 @@ class ContentsPages(
         val wanted = LinkedHashMap<Int, MutableSet<String>>()
         for (href in hrefs) {
             val anchor = AnchorShares.fragmentOf(href) ?: continue
-            val section = sectionByHref[href.substringBefore('#')] ?: continue
+            val section = sectionByHref[DocumentPath.of(href)] ?: continue
             wanted.getOrPut(section) { LinkedHashSet() }.add(anchor)
         }
         return wanted
@@ -49,7 +50,7 @@ class ContentsPages(
 
     /** The page the entry [href] starts on; null when it cannot be worked out yet (or at all), never a guess. */
     fun page(href: String): Int? {
-        val section = sectionByHref[href.substringBefore('#')] ?: return null
+        val section = sectionByHref[DocumentPath.of(href)] ?: return null
         val anchor = AnchorShares.fragmentOf(href)
         val share = if (anchor == null) 0.0 else shares[key(section, anchor)]
         return PageInfo.entryPage(bookPages, sectionSizes, sectionStarts, section, share)

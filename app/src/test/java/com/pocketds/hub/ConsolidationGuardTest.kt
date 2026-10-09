@@ -169,6 +169,14 @@ class ConsolidationGuardTest {
             setOf("screens/library/SeriesFan.kt")),
         Rule(Regex("""ThemeGradientDrawable\.oval\([^\n]*accent\)[^\n]*(?:CHECK|check)"""),
             "ui/FinishedTick: the accent's circle with its check on a cover, for a book in a series' row and a finished series' fan (#54)"),
+        Rule(Regex("""\b(narrates|fragments|locate|find|sentenceAt)\([^\n]*\.href\??\.toString\(\)|\.href\??\.toString\(\)\??\.let\(\s*[\w.]+::(narrates|fragments|locate|find)"""),
+            "Locator.document in EpubReaderScreen / DocumentPath.of(href): a page's file and the narration's are compared in one " +
+                "spelling (decoded, NFC, no fragment); Readium's href is percent-encoded and the SMIL's is not, and a book with a " +
+                "space or a bracket in a file name (Mistborn's) found no narration on any page (#61)"),
+        Rule(Regex("""(?<![\w.])(java\.net\.)?URI\("""),
+            "DocumentPath.resolve: a path inside a book is any string a zip entry can be named; java.net.URI refuses a space, " +
+                "[ and ], and a book with such names (Mistborn's) could not be read along (#61)",
+            setOf("playback/CastTransferPolicy.kt", "screens/downloads/ActivityDashboard.kt", "settings/AppearancePolicy.kt")),
         Rule(Regex("""Style\.Highlight\(colors\.accent"""),
             "ReadAlongGlow.wash: the sentence's tint is the accent let into the page, opaque and behind the words; the bare accent, " +
                 "translucent and over them, washed the words out and spilled on the sentences round it (#52)"),
