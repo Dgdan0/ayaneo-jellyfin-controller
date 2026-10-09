@@ -43,12 +43,20 @@ public struct EpubPosition: Equatable, Sendable {
     public let updatedAt: String
     /// When the book was last started over (#60); 0 when it never was.
     public let resetAt: Int64
+    /// The device that wrote this place (its token's label), and whether it
+    /// is the one asking (#62): what "You listened further on …" names. Only
+    /// while the place is one the hub itself wrote.
+    public let device: String
+    public let byThisDevice: Bool
 
-    public init(locator: String?, timestamp: Int64 = 0, updatedAt: String = "", resetAt: Int64 = 0) {
+    public init(locator: String?, timestamp: Int64 = 0, updatedAt: String = "", resetAt: Int64 = 0, device: String = "",
+                byThisDevice: Bool = false) {
         self.locator = locator
         self.timestamp = timestamp
         self.updatedAt = updatedAt
         self.resetAt = resetAt
+        self.device = device
+        self.byThisDevice = byThisDevice
     }
 
     /// Read as the hub writes it; the locator kept as it came, in one line.
@@ -57,7 +65,8 @@ public struct EpubPosition: Equatable, Sendable {
         let locator = (object["locator"] as? [String: Any]).flatMap(BookLocator.canonical)
         return EpubPosition(locator: locator, timestamp: (object["timestamp"] as? NSNumber)?.int64Value ?? 0,
                             updatedAt: object["updatedAt"] as? String ?? "",
-                            resetAt: (object["resetAt"] as? NSNumber)?.int64Value ?? 0)
+                            resetAt: (object["resetAt"] as? NSNumber)?.int64Value ?? 0,
+                            device: object["device"] as? String ?? "", byThisDevice: object["byThisDevice"] as? Bool ?? false)
     }
 }
 

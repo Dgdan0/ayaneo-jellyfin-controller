@@ -132,7 +132,8 @@ struct LicencesTests {
 
     @Test func theFontsAreAskedForFirstAndEachEntryIsComplete() {
         #expect(Licences.fonts.map(\.name) == ["Figtree", "Bricolage Grotesque", "Literata", "Atkinson Hyperlegible Next"])
-        #expect(Licences.software.count == Licences.all.count - 4)
+        #expect(Licences.data.map(\.name) == ["Open English WordNet 2025"])
+        #expect(Licences.software.count == Licences.all.count - 5)
         #expect(Set(Licences.all.map(\.id)).count == Licences.all.count)
         for entry in Licences.all {
             #expect(!entry.name.isEmpty && !entry.role.isEmpty && !entry.terms.isEmpty)

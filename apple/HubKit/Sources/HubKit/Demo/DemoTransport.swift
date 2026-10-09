@@ -53,6 +53,7 @@ public struct DemoTransport: HubTransport {
             ?? DemoReadAlong.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoBooks.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoStartOver.answer(method: method, path: path, body: request.httpBody)
+            ?? DemoAnnotations.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? DemoReading.answer(method: method, path: path, query: query, body: request.httpBody)
             ?? Self.fixture(method: method, path: path)
         if method == "GET", answer.status == 200, path.contains("/publications/"), path.contains("/pages/") {

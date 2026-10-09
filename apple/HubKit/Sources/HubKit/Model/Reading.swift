@@ -1442,20 +1442,26 @@ public struct ReadingAudioPositionResponse: Decodable, Equatable, Sendable {
     public var position: ReadingAudioPosition?
     /// When the book was last started over (#60); 0 when it never was.
     public var resetAt: Int64
+    /// The device that wrote this place, and whether it is the one asking (#62).
+    public var device: String
+    public var byThisDevice: Bool
 
-    public init(workId: String = "", sourceItemId: String = "", position: ReadingAudioPosition? = nil, resetAt: Int64 = 0) {
+    public init(workId: String = "", sourceItemId: String = "", position: ReadingAudioPosition? = nil, resetAt: Int64 = 0,
+                device: String = "", byThisDevice: Bool = false) {
         self.workId = workId
         self.sourceItemId = sourceItemId
         self.position = position
         self.resetAt = resetAt
+        self.device = device
+        self.byThisDevice = byThisDevice
     }
 
-    enum CodingKeys: String, CodingKey { case workId, sourceItemId, position, resetAt }
+    enum CodingKeys: String, CodingKey { case workId, sourceItemId, position, resetAt, device, byThisDevice }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(workId: c.value(.workId, ""), sourceItemId: c.value(.sourceItemId, ""), position: c.optional(.position),
-                  resetAt: c.value(.resetAt, 0))
+                  resetAt: c.value(.resetAt, 0), device: c.value(.device, ""), byThisDevice: c.value(.byThisDevice, false))
     }
 }
 

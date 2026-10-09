@@ -6,7 +6,7 @@ import Foundation
 /// is for. A test holds this list and that folder to each other, so a licence
 /// added to the app cannot be left out of the page.
 public struct LicenceEntry: Equatable, Sendable, Identifiable {
-    public enum Kind: Sendable { case font, software }
+    public enum Kind: Sendable { case font, software, data }
 
     public let id: String
     public let name: String
@@ -52,10 +52,15 @@ public enum Licences {
                      terms: "© Google LLC · Google's Cast SDK terms", file: "GoogleCast-SDK-Terms", kind: .software),
         LicenceEntry(id: "gtmsessionfetcher", name: "GTMSessionFetcher", role: "Google Cast: its network requests",
                      terms: "© Google LLC · Apache License 2.0", file: "GTMSessionFetcher-Apache-2.0", kind: .software),
+        // The reader's dictionary (#62): the Pocket's own WordNet file, bundled as it is.
+        LicenceEntry(id: "wordnet", name: "Open English WordNet 2025", role: "The reader's dictionary, offline",
+                     terms: "© The Open English WordNet Community and contributors · CC BY 4.0",
+                     file: "OpenEnglishWordNet-CC-BY-4.0", kind: .data),
     ]
 
     public static var fonts: [LicenceEntry] { all.filter { $0.kind == .font } }
     public static var software: [LicenceEntry] { all.filter { $0.kind == .software } }
+    public static var data: [LicenceEntry] { all.filter { $0.kind == .data } }
 
     /// What the page says above the list.
     public static let note = "Their full texts ship inside the app."

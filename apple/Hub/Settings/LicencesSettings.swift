@@ -22,6 +22,7 @@ struct LicencesSettings: View {
                 .padding(.horizontal, 4)
             group("Fonts", Licences.fonts)
             group("Software", Licences.software)
+            group("Data", Licences.data)
         }
         #if DEBUG
         // scripts/mac.sh opens one for a screenshot: HUB_SHEET=licence:figtree.

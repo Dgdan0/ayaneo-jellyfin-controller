@@ -55,6 +55,23 @@ sync() {
   fi
   mv "$current" "$MANIFEST"
   echo "synced $(wc -l < "$MANIFEST" | tr -d ' ') files to $HOST:~/$REMOTE_DIR"
+  sync_shared
+}
+
+# The Pocket's files the Apple app bundles from where they are (#62): the
+# WordNet dictionary, 20 MB, which apple/project.yml copies into the app. Sent
+# only when its SHA-256 there differs, so a sync does not carry 20 MB every
+# time; the manifest never lists it, so the deletion above leaves it alone.
+SHARED=(app/src/main/assets/dictionary/en-wordnet-2025.db)
+sync_shared() {
+  local there here
+  # Only the hashes: Git Bash marks a binary file's name with "*", the Mac does not.
+  there="$(remote "cd ~/$REMOTE_DIR 2>/dev/null && shasum -a 256 ${SHARED[*]} 2>/dev/null" | awk '{print $1}' || true)"
+  here="$(cd "$ROOT" && sha256sum "${SHARED[@]}" | awk '{print $1}')"
+  if [[ "$there" != "$here" ]]; then
+    (cd "$ROOT" && tar -cf - "${SHARED[@]}") | remote "mkdir -p ~/$REMOTE_DIR && tar -xf - -C ~/$REMOTE_DIR"
+    echo "copied the dictionary (${#SHARED[@]} shared file)"
+  fi
 }
 
 # Only the pictures this run made (newer than the marker `run` leaves): the

@@ -1,0 +1,11 @@
+Offline English dictionary data: Open English WordNet 2025
+Copyright the Open English WordNet Community and contributors.
+Source: https://en-word.net/downloads/
+License: Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+
+JellyHub bundles a derived SQLite index containing headwords, parts of
+speech, and definitions from the 2025 JSON release (the same file as the
+Pocket DS app). This changes the data format and omits relation graphs,
+examples, and other source metadata. The Open English WordNet Community does
+not endorse this application.

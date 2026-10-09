@@ -48,3 +48,11 @@ the Google Fonts repository (Literata 3.103, with its italic; Atkinson Hyperlegi
 | [Atkinson Hyperlegible Next](https://github.com/googlefonts/atkinson-hyperlegible-next) 2.001 | A typeface for the reader, made for easy reading | SIL OFL 1.1, Copyright 2020-2024 The Atkinson Hyperlegible Next Project Authors | `AtkinsonHyperlegibleNext-OFL-1.1.txt` |
 
 Charter, Georgia and Iowan Old Style, also offered, are the device's own fonts and are not shipped.
+
+The reader's dictionary (#62) is the Pocket DS app's own offline index, bundled unchanged: Xcode copies
+`app/src/main/assets/dictionary/en-wordnet-2025.db` into the app from where it is (`apple/project.yml`),
+so the repository holds one copy. The Apple app's text of its licence names JellyHub.
+
+| Data | Use | Licence | File |
+|---|---|---|---|
+| [Open English WordNet](https://en-word.net/) 2025, as a derived SQLite index (headwords, parts of speech, definitions) | The dictionary card in the reader, offline | CC BY 4.0, the Open English WordNet Community and contributors | `OpenEnglishWordNet-CC-BY-4.0.txt` |
