@@ -23,23 +23,28 @@ import kotlin.math.roundToInt
  *    overlap whatever the line spacing (a gap at 1.8 was the "bands" of #52), and none reaches into the line
  *    above or below the sentence: a line box never cuts the ink of its neighbours, which Readium's own boxes (the
  *    font's content area, taller than the line at 1.3) do.
- *  - **Strong enough to read, not so strong the words do not.** [wash] is as much of the accent as keeps the page's
- *    ink at 4.5:1 on it, up to 45%: Paper and Sepia take all of it, the dark pages a little under a third.
+ *  - **Strong enough to read, not so strong the words do not.** [wash] is as much of the colour as keeps the page's
+ *    ink at 4.5:1 on it, from the strength asked for down by 0.02 at a time ([ReadAlongWordHighlight] asks for it).
  *  - **Nothing between sentences (#56).** Storyteller puts the space after a sentence inside its element
  *    (`<span id="…">The dead are dead. </span>`), and Readium draws its boxes over the whole element, so the wash ran on
  *    past the full stop and the next sentence's began at its first letter. [fitScript] also clips each row's box to
  *    the sentence's words: from the first to the last character that is not white space, with only [SIDE_PX] of air
  *    round them. The EPUB is left as it is.
+ *
+ * Read along by the word (#66), the same boxes are the trail: [fitScript] cuts them back to the end of the word being
+ * said (none at all when the trail is off), and draws that word in its own boxes ([WORD_CLASS]) over them, each its line's
+ * line box and round at every corner, in the same container so they lie in the same place and go with it.
  */
 object ReadAlongGlow {
     const val CLASS = "pocket-narration"
+    /** The word being said, drawn by [fitScript] over the trail (#66). */
+    const val WORD_CLASS = "pocket-narration-word"
     /** The decoration group Readium is given the sentence in; its container carries this as `data-group`. */
     const val GROUP = "readalong"
 
-    /** How much of the accent a page takes at most, and the least it is ever given. */
-    const val STRONGEST = 0.45
-    const val WEAKEST = 0.12
-    private const val STEP = 0.02
+    /** The least of the colour the hold for the ink goes down to, and the step it goes down by: the demo's numbers (#66). */
+    const val WEAKEST = 0.06
+    const val STEP = 0.02
     /** WCAG's AA for text: the page's ink on the wash. */
     const val MIN_CONTRAST = 4.5
 
@@ -50,17 +55,15 @@ object ReadAlongGlow {
     private const val SEAM_PX = 0.75
 
     /**
-     * The accent let into [page], opaque: as much as keeps [ink] at [MIN_CONTRAST] on it, between [WEAKEST] and
-     * [STRONGEST] of the way. All three are ARGB, only their colour channels are used.
+     * [color] let into [page], opaque: [strength] of the way, or less, by [STEP] at a time, until [ink] reads at
+     * [MIN_CONTRAST] on it; never below [WEAKEST] (a strength asked for below that is taken as it is). All three are ARGB,
+     * only their colour channels are used. The same loop as the owner's demo, number for number, so the Pocket and Apple
+     * draw the same colours.
      */
-    fun wash(accent: Int, page: Int, ink: Int): Int {
-        var strength = STRONGEST
-        while (strength > WEAKEST + 1e-9) {
-            val mixed = mix(page, accent, strength)
-            if (contrast(ink, mixed) >= MIN_CONTRAST) return mixed
-            strength -= STEP
-        }
-        return mix(page, accent, WEAKEST)
+    fun wash(color: Int, page: Int, ink: Int, strength: Double): Int {
+        var t = strength
+        while (t > WEAKEST && contrast(ink, mix(page, color, t)) < MIN_CONTRAST) t -= STEP
+        return mix(page, color, t)
     }
 
     /** [page] moved [strength] of the way to [accent], as an opaque colour. */
@@ -102,7 +105,7 @@ object ReadAlongGlow {
      * are absolutely placed by Readium, with nothing between them and the page that makes a stacking context (an
      * opacity or a filter on the group would): so they are painted under the page's text, over only its background.
      */
-    const val STYLESHEET = ".$CLASS { z-index: -1 !important; margin-left: -${SIDE_PX}px; padding: 0 ${SIDE_PX}px; " +
+    const val STYLESHEET = ".$CLASS, .$WORD_CLASS { z-index: -1 !important; margin-left: -${SIDE_PX}px; padding: 0 ${SIDE_PX}px; " +
         "box-sizing: content-box; border-radius: ${CORNER_PX}px; }"
 
     /** A string as a JavaScript string literal, single-quoted: what [fitScript] is given for the sentence's element id. */
@@ -134,15 +137,42 @@ object ReadAlongGlow {
      * round where it is the edge of the shape. With no line-height in pixels (`normal`) the boxes stay Readium's own.
      * Run through the navigator after the decoration is applied; it installs its own observer on the page the first
      * time, so a reflow keeps the boxes fitted.
+     *
+     * With a [word] (#66, the element of that id inside the sentence) the boxes are the trail: the Range ends at the word's
+     * last character instead, so the trail grows a word at a time from the sentence's first letter, and a row the voice has
+     * not reached has no box; [trail] false hides them all (a trail of 0%). The word itself is drawn over them in
+     * [wordTint], a [WORD_CLASS] box on each row of it (a hyphenated word has two), its line's line box with [SIDE_PX] of air
+     * and round corners, in the same container as the trail so it lies where the trail does and goes when Readium takes the
+     * decoration away. Each box keeps Readium's own extent (in a WeakMap, off the page) the first time it is seen, so a later word
+     * cuts it back from there, not from the last word's cut. The same script is run for every word: it is the state.
      */
-    fun fitScript(fragment: String): String = """(function () {
-  var GROUP = '$GROUP', BOX = '$CLASS', CORNER = $CORNER_PX, SEAM = $SEAM_PX;
+    fun fitScript(fragment: String, word: String? = null, wordTint: Int? = null, trail: Boolean = true): String = """(function () {
+  var GROUP = '$GROUP', BOX = '$CLASS', WORD = '$WORD_CLASS', CORNER = $CORNER_PX, SEAM = $SEAM_PX, SIDE = $SIDE_PX;
   window.__pocketNarrationFragment = ${jsString(fragment)};
+  window.__pocketNarrationWord = ${word?.let(::jsString) ?: "null"};
+  window.__pocketNarrationWordTint = ${wordTint?.let { jsString(rgb(it)) } ?: "null"};
+  window.__pocketNarrationTrail = ${if (trail) "true" else "false"};
   function px(value) { return parseFloat(value) || 0; }
+  // The first and the last character of an element's text that are not white space, as text nodes and offsets.
+  function ends(element) {
+    var walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    var first = null, last = null, node;
+    while ((node = walker.nextNode())) {
+      var text = node.nodeValue, from = text.search(/\S/), to = text.length;
+      if (from < 0) continue;
+      while (to > from && /\s/.test(text.charAt(to - 1))) to--;
+      if (!first) first = { node: node, at: from };
+      last = { node: node, at: to };
+    }
+    return first ? { first: first, last: last } : null;
+  }
   function fit() {
     var group = document.querySelector('[data-group="' + GROUP + '"]');
     if (!group) return;
     var target = document.getElementById(window.__pocketNarrationFragment);
+    var word = window.__pocketNarrationWord ? document.getElementById(window.__pocketNarrationWord) : null;
+    if (word && !(target && target.contains(word))) word = null;
+    var trail = !word || window.__pocketNarrationTrail !== false;
     var line = target ? parseFloat(getComputedStyle(target).lineHeight) : NaN;
     // Where each row of the sentence's text is, from the text itself: Readium trims its boxes where two lines' rectangles
     // overlap (they do, at 1.3), which moves their centres off the line's.
@@ -162,74 +192,109 @@ object ReadAlongGlow {
       rows.forEach(function (row) { if (Math.abs(row - centre) < away) { away = Math.abs(row - centre); best = row; } });
       return best;
     }
-    // Where the sentence's words are on each row, sideways, in the page's own coordinates (what Readium's boxes are in): from the
-    // first character of its text that is not white space to the last, so the space inside the element after or before the
-    // words (Storyteller's) is not in it.
-    var words = [];
-    if (line > 0) {
-      var walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
-      var first = null, last = null, node;
-      while ((node = walker.nextNode())) {
-        var text = node.nodeValue, from = text.search(/\S/), to = text.length;
-        if (from < 0) continue;
-        while (to > from && /\s/.test(text.charAt(to - 1))) to--;
-        if (!first) first = { node: node, at: from };
-        last = { node: node, at: to };
-      }
-      if (first) {
-        var spoken = document.createRange();
-        spoken.setStart(first.node, first.at);
-        spoken.setEnd(last.node, last.at);
-        Array.prototype.forEach.call(spoken.getClientRects(), function (r) {
-          if (r.width <= 0 || r.height <= 0) return;
-          var row = rowNear(r.top + r.height / 2 + offset);
-          var here = words.filter(function (w) { return w.row === row; })[0];
-          if (here) { here.l = Math.min(here.l, r.left + across); here.r = Math.max(here.r, r.right + across); }
-          else words.push({ row: row, l: r.left + across, r: r.right + across });
-        });
-      }
+    // Rows of a stretch of text, sideways, in the page's own coordinates (what Readium's boxes are in).
+    function spans(start, end) {
+      var out = [];
+      var stretch = document.createRange();
+      stretch.setStart(start.node, start.at);
+      stretch.setEnd(end.node, end.at);
+      Array.prototype.forEach.call(stretch.getClientRects(), function (r) {
+        if (r.width <= 0 || r.height <= 0) return;
+        var row = line > 0 ? rowNear(r.top + r.height / 2 + offset) : r.top + r.height / 2 + offset;
+        var here = out.filter(function (w) { return w.row === row; })[0];
+        if (here) { here.l = Math.min(here.l, r.left + across); here.r = Math.max(here.r, r.right + across); }
+        else out.push({ row: row, l: r.left + across, r: r.right + across, h: r.height });
+      });
+      return out;
     }
-    Array.prototype.forEach.call(group.querySelectorAll('[data-style]'), function (item) {
+    // Where the sentence's words are on each row: from the first character of its text that is not white space to the last,
+    // so the space inside the element after or before the words (Storyteller's) is not in it; with a word being said, to
+    // that word's last character, which is the trail.
+    var sentence = target ? ends(target) : null;
+    var said = word ? ends(word) : null;
+    var words = sentence ? spans(sentence.first, said ? said.last : sentence.last) : [];
+    var strong = said && window.__pocketNarrationWordTint ? spans(said.first, said.last) : [];
+    // Readium's own extent of each box, kept the first time the box is seen (a later word cuts it back from there, not from
+    // the last word's cut), and kept off the page: every read here comes before the first write, so a word costs the page
+    // one layout, not one a box.
+    var kept = window.__pocketNarrationKept || (window.__pocketNarrationKept = new WeakMap());
+    var items = Array.prototype.map.call(group.querySelectorAll('[data-style]'), function (item) {
       var all = Array.prototype.filter.call(item.children, function (c) { return c.classList.contains(BOX); });
-      if (line > 0) all.forEach(function (el) {
-        var s = getComputedStyle(el);
-        var centre = rowNear(px(s.top) + px(s.height) / 2);
-        el.style.setProperty('top', (centre - line / 2 - SEAM) + 'px');
-        el.style.setProperty('height', (line + 2 * SEAM) + 'px');
-        // Only the words: the box's own extent cut back to theirs on its row, none where the row has nothing but white space.
+      return { item: item, old: item.querySelectorAll('.' + WORD), all: all, own: all.map(function (el) {
+        var own = kept.get(el);
+        if (!own) { var s = getComputedStyle(el); own = { l: px(s.left), w: px(s.width), t: px(s.top), h: px(s.height) }; kept.set(el, own); }
+        return own;
+      }) };
+    });
+    items.forEach(function (entry) {
+      // Where each box goes: its line's line box, cut back to the words on its row; hidden where there are none, or no trail.
+      var placed = entry.all.map(function (el, i) {
+        var own = entry.own[i];
+        if (!trail) return null;
+        if (!(line > 0)) return { el: el, keep: true, l: own.l - SIDE, t: own.t, w: own.w + 2 * SIDE, h: own.h };
+        var centre = rowNear(own.t + own.h / 2);
         var here = words.filter(function (w) { return w.row === centre; })[0];
-        var l = px(s.left), r = l + px(s.width);
-        var from = here ? Math.max(l, here.l) : 0, to = here ? Math.min(r, here.r) : 0;
-        if (to > from) {
-          el.style.removeProperty('display');
-          el.style.setProperty('left', from + 'px');
-          el.style.setProperty('width', (to - from) + 'px');
-        } else el.style.setProperty('display', 'none');
+        var from = here ? Math.max(own.l, here.l) : 0, to = here ? Math.min(own.l + own.w, here.r) : 0;
+        if (!(to > from)) return null;
+        return { el: el, left: from, width: to - from, top: centre - line / 2 - SEAM, height: line + 2 * SEAM,
+          l: from - SIDE, t: centre - line / 2 - SEAM, w: to - from + 2 * SIDE, h: line + 2 * SEAM };
       });
-      var els = all.filter(function (el) { return el.style.display !== 'none'; });
-      var boxes = els.map(function (el) {
-        var s = getComputedStyle(el);
-        return { l: px(s.left) + px(s.marginLeft), t: px(s.top), w: px(s.width) + px(s.paddingLeft) + px(s.paddingRight), h: px(s.height) };
-      });
+      var shown = placed.filter(function (p) { return p; });
       function covered(x, y, own) {
-        return boxes.some(function (c, i) { return i !== own && x >= c.l && x <= c.l + c.w && y >= c.t && y <= c.t + c.h; });
+        return shown.some(function (c) { return c !== own && x >= c.l && x <= c.l + c.w && y >= c.t && y <= c.t + c.h; });
       }
-      els.forEach(function (el, i) {
-        var b = boxes[i];
-        function round(x, y) { return covered(x, y, i) ? '0' : CORNER + 'px'; }
-        el.style.setProperty('border-radius', [
-          round(b.l + 1, b.t - 1), round(b.l + b.w - 1, b.t - 1), round(b.l + b.w - 1, b.t + b.h + 1), round(b.l + 1, b.t + b.h + 1)
+      // Only what changed is written: a word repaints the row the trail grows on and the word's own box, not the sentence.
+      // What was last written is kept on the element itself: the style reads back a value rounded, which would never match.
+      function set(el, name, value, important) {
+        var last = el.__pocketLast || (el.__pocketLast = {});
+        if (last[name] === value) return;
+        last[name] = value;
+        el.style.setProperty(name, value, important || '');
+      }
+      entry.all.forEach(function (el, i) {
+        var p = placed[i];
+        if (!p) { set(el, 'display', 'none'); return; }
+        if ((el.__pocketLast || {}).display) { el.__pocketLast.display = ''; el.style.removeProperty('display'); }
+        if (!p.keep) {
+          set(el, 'top', p.top + 'px');
+          set(el, 'height', p.height + 'px');
+          set(el, 'left', p.left + 'px');
+          set(el, 'width', p.width + 'px');
+        }
+        // Square where another box of the sentence is directly beside it vertically (two lines' join), round at the shape's edge.
+        function round(x, y) { return covered(x, y, p) ? '0px' : CORNER + 'px'; }
+        set(el, 'border-radius', [
+          round(p.l + 1, p.t - 1), round(p.l + p.w - 1, p.t - 1), round(p.l + p.w - 1, p.t + p.h + 1), round(p.l + 1, p.t + p.h + 1)
         ].join(' '));
       });
+      // The word being said, strong, over the trail: a box on each row of it, its line's line box, round at every corner.
+      // The boxes of the word before are moved, not made again; one the new word does not need goes.
+      strong.forEach(function (w, k) {
+        var box = entry.old[k];
+        if (!box) {
+          box = document.createElement('div');
+          box.className = WORD;
+          box.style.setProperty('position', 'absolute');
+          box.style.setProperty('pointer-events', 'none');
+          entry.item.appendChild(box);
+        }
+        var height = line > 0 ? line : w.h;
+        set(box, 'left', w.l + 'px');
+        set(box, 'width', (w.r - w.l) + 'px');
+        set(box, 'top', (w.row - height / 2 - SEAM) + 'px');
+        set(box, 'height', (height + 2 * SEAM) + 'px');
+        set(box, 'background-color', window.__pocketNarrationWordTint, 'important');
+      });
+      for (var extra = strong.length; extra < entry.old.length; extra++) entry.old[extra].remove();
     });
   }
   if (!window.__pocketNarrationFit) {
-    window.__pocketNarrationFit = fit;
-    var watcher = new MutationObserver(function () {
+    var watcher = new MutationObserver(function () { window.__pocketNarrationFit(); });
+    // The script's own boxes are a change to the page too: it is not watched while it makes them.
+    window.__pocketNarrationFit = function () {
       watcher.disconnect();
       try { fit(); } finally { watcher.observe(document.body, { childList: true, subtree: true }); }
-    });
-    watcher.observe(document.body, { childList: true, subtree: true });
+    };
   }
   window.__pocketNarrationFit();
 })()"""

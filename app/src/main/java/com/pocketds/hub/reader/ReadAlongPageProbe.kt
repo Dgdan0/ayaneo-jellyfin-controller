@@ -18,6 +18,9 @@ import kotlinx.serialization.json.intOrNull
  * of the page is the first one in the book's order that is on it, the last one the last. Only a sentence
  * the page edge cuts through is searched letter by letter; one that begins or ends on the page is decided by its
  * first or last line alone.
+ *
+ * In a word edition (#66) each edge also names the first word of its sentence to begin at or after it (the page's first
+ * word, the next page's first word), by the id the edition wraps it in, so the voice and the page meet at a word.
  */
 object ReadAlongPageProbe {
     /** The script for the narrated elements [ids] of the part of the book being shown. */
@@ -39,10 +42,14 @@ function map(el){var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT),nodes=
 while((n=w.nextNode())){nodes.push([n,text.length]);text+=n.data;}return {nodes:nodes,text:text};}
 function charOn(m,i){for(var k=0;k<m.nodes.length;k++){var n=m.nodes[k][0],s=m.nodes[k][1];
 if(i<s+n.data.length){var r=document.createRange();r.setStart(n,i-s);r.setEnd(n,i-s+1);return anyOn(r.getClientRects());}}return false;}
+function wordAt(el,m,at){var ws=el.querySelectorAll('[id^="'+CSS.escape(el.id)+'-w"]');if(!ws.length)return null;
+var pos=new Map();for(var q=0;q<m.nodes.length;q++)pos.set(m.nodes[q][0],m.nodes[q][1]);
+for(var k=0;k<ws.length;k++){var t=document.createTreeWalker(ws[k],NodeFilter.SHOW_TEXT).nextNode();
+if(t&&pos.has(t)&&pos.get(t)>=at)return ws[k].id;}return null;}
 function edge(el,head){var m=map(el),rs=el.getClientRects(),len=m.text.length,at;
 if(head){at=0;if(!on(rs[0])){for(var i2=0;i2<len;i2++){if(charOn(m,i2)){at=i2;break;}}}}
 else{at=len;if(!on(rs[rs.length-1])){for(var i3=len-1;i3>=0;i3--){if(charOn(m,i3)){at=i3+1;break;}}}}
-return {id:el.id,text:m.text,offset:at};}
+return {id:el.id,text:m.text,offset:at,word:wordAt(el,m,at)};}
 return {first:edge(a,true),last:edge(z,false),visible:visible};
 }"""
 
@@ -62,7 +69,8 @@ return {first:edge(a,true),last:edge(z,false),visible:visible};
         val id = (item["id"] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotEmpty) ?: return null
         val text = (item["text"] as? JsonPrimitive)?.contentOrNull ?: return null
         val offset = (item["offset"] as? JsonPrimitive)?.intOrNull ?: return null
-        return PageEdge(id, text, offset.coerceIn(0, text.length))
+        val word = (item["word"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.takeIf(String::isNotEmpty)
+        return PageEdge(id, text, offset.coerceIn(0, text.length), word)
     }
 
 }

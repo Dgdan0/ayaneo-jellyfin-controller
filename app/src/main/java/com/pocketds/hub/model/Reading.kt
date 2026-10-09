@@ -560,6 +560,8 @@ data class ReadingAudioManifest(
     val chapters: List<ReadingAudioChapter> = emptyList(),
     val alignment: ReadingAudioAlignment? = null,
     val alignmentReason: String = "",
+    /** The hub has a word pack for this book (#66): read along asks for the edition with `granularity=word`. */
+    val wordLevel: Boolean = false,
     val cache: CacheInfo = CacheInfo()
 )
 

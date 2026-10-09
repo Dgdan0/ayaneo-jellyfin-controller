@@ -153,6 +153,12 @@ class HubEndpointsTest {
         // The whole edition, as before; omitting the audio means nothing without read-along.
         assertEquals("$publication/file?format=readaloud", HubEndpoints.readingEpubFile(base, work, "3726292328809367", readAlong = true))
         assertEquals("$publication/file", HubEndpoints.readingEpubFile(base, work, "3726292328809367", omitAudio = true))
+        // The word set of the book's pack (#66), when the manifest offers it; never for the ebook.
+        assertEquals("$publication/file?format=readaloud&audio=omit&granularity=word",
+            HubEndpoints.readingEpubFile(base, work, "3726292328809367", readAlong = true, omitAudio = true, wordLevel = true))
+        assertEquals("$publication/file?format=readaloud&granularity=word",
+            HubEndpoints.readingEpubFile(base, work, "3726292328809367", readAlong = true, wordLevel = true))
+        assertEquals("$publication/file", HubEndpoints.readingEpubFile(base, work, "3726292328809367", wordLevel = true))
     }
 
     @Test

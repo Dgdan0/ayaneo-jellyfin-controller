@@ -17,21 +17,38 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
     private var brightness = 1f
     private var brightnessChanged: (Float) -> Unit = {}
     private var section = "font"
+    private var highlights = ReadAlongHighlights()
+    private var highlightsChanged: (ReadAlongHighlights) -> Unit = {}
+    /** The page theme whose read-along highlight is being set (#66): the page's own when the page opens it. */
+    private var highlightTheme = EpubTheme.LIGHT
+    private var pageTheme = EpubTheme.LIGHT
 
     /**
      * [pageInfo]: Kindle's corners (#42), changed from the "Page info" tab and handed to [onPageInfoChanged]. [brightness] is
      * the slider fixed at the foot of every tab (#47), where the page is seen as it is set; it moved here from Comfort.
+     * [highlights]: the read-along highlight of each page theme (#66), set on the Themes tab and handed to [onHighlights]
+     * at each change; [pageTheme] is the theme the page is drawn in now (System resolved), which it opens on.
      */
     fun show(
         initial: EpubReaderPreferences, onChanged: (EpubReaderPreferences) -> Unit, onClose: () -> Unit,
         pageInfo: PageInfoChoice = PageInfoChoice(), onPageInfoChanged: (PageInfoChoice) -> Unit = {},
-        brightness: Float? = null, onBrightness: (Float) -> Unit = {}
+        brightness: Float? = null, onBrightness: (Float) -> Unit = {},
+        highlights: ReadAlongHighlights = ReadAlongHighlights(), pageTheme: EpubTheme = EpubTheme.LIGHT,
+        onHighlights: (ReadAlongHighlights) -> Unit = {}
     ) {
         value = initial; changed = onChanged
         this.pageInfo = pageInfo; pageInfoChanged = onPageInfoChanged
         this.brightness = brightness ?: 1f; brightnessChanged = onBrightness; hasBrightness = brightness != null
-        section = if (section == "spacing") "font" else section
+        this.highlights = highlights; highlightsChanged = onHighlights; this.pageTheme = pageTheme
+        section = when (section) { "spacing" -> "font"; "highlight" -> "themes"; else -> section }
         open("Reading appearance", "All books · changes save automatically", onDismiss = onClose); render()
+    }
+
+    /** The highlight of [theme] set to [look], at once, for the page behind the sheet too. */
+    private fun updateHighlight(theme: EpubTheme, look: HighlightLook?, rebuild: Boolean = true) {
+        highlights = if (look == null) highlights.reset(theme) else highlights.with(theme, look)
+        highlightsChanged(highlights)
+        if (rebuild) render()
     }
     private fun update(next: EpubReaderPreferences, rebuild: Boolean = true) {
         value = next; changed(value); if (rebuild) render()
@@ -41,9 +58,10 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
         pageInfo = next; pageInfoChanged(next); render()
     }
 
-    /** B on the Spacing page goes back to the Font tab it was opened from, not out of the sheet. */
+    /** B on the Spacing page goes back to the Font tab it was opened from, not out of the sheet; on the highlight's, to Themes. */
     override fun onPad(action: com.pocketds.hub.input.PadAction): Boolean {
         if (isOpen && section == "spacing" && action == com.pocketds.hub.input.PadAction.Back) { section = "font"; render(); return true }
+        if (isOpen && section == "highlight" && action == com.pocketds.hub.input.PadAction.Back) { section = "themes"; render(); return true }
         return super.onPad(action)
     }
     private fun heading(label: String) { body.addView(TextView(context).apply {
@@ -76,7 +94,10 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
     private fun render() {
         val focusKey = findFocus()?.tag
         resetBody()
-        tabs(listOf("font" to "Font", "layout" to "Layout", "themes" to "Themes", "info" to "Page info"), if (section == "spacing") "font" else section, dividers = true) { section = it; render() }
+        val tab = when (section) { "spacing" -> "font"; "highlight" -> "themes"; else -> section }
+        // The highlight's page is a menu of its own: the Themes row it was opened from is not one of its rows.
+        tabs(listOf("font" to "Font", "layout" to "Layout", "themes" to "Themes", "info" to "Page info"), tab, dividers = true,
+            page = if (section == "highlight") section else tab) { section = it; render() }
         // Kindle's brightness, fixed at the foot of every tab (#47).
         if (hasBrightness) footer.addView(ValueAdjusterView(context, colors, "Brightness", ScreenComfort.BRIGHTNESS_RANGE, brightness, ScreenComfort::brightnessLabel, AdjusterStyle.FOOT) {
             brightness = it; brightnessChanged(it)
@@ -106,7 +127,13 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
                 }
                 row(tiles[0], tiles[1], tiles[2]); row(tiles[3], tiles[4], View(context))
                 choice("Use system colours", "Paper by day, Dark at night", selected = value.theme == EpubTheme.SYSTEM) { update(value.copy(theme = EpubTheme.SYSTEM)) }.tag = "system"
+                // Read along's highlight (#66): a colour and a trail for each page theme, its own page.
+                heading("Read along")
+                choice("Read-along highlight", ReadAlongWordHighlight.summary(highlights.of(pageTheme))) {
+                    highlightTheme = pageTheme; section = "highlight"; render()
+                }.tag = "highlight"
             }
+            "highlight" -> renderHighlight()
             "font" -> {
                 // A typeface of the reader's own needs the reader's typography; the book's own face does not
                 // take the book's whole look with it: "Publisher styling" is that switch (#42, Part 3).
@@ -160,8 +187,118 @@ class EpubAppearancePanel(context: Context, colors: PocketColors, private val ri
                 choice("Reset text style", EpubLayoutPolicy.textStyleSummary()) { update(EpubLayoutPolicy.resetTextStyle(value)) }.tag = "reset-text-style"
             }
         }
-        focusBody(getFocusables(FOCUS_FORWARD).firstOrNull { focusKey != null && it.tag == focusKey })
+        // The highlight's page opens on the theme being set, at its top.
+        focusBody(getFocusables(FOCUS_FORWARD).firstOrNull { focusKey != null && it.tag == focusKey }
+            ?: if (section == "highlight") findViewWithTag<View>("highlight-theme:$highlightTheme") else null)
     }
+
+    /** The preview sentence, redrawn as the trail moves without the page being built again (its slider keeps focus). */
+    private var highlightPreview: TextView? = null
+
+    /**
+     * The read-along highlight (#66), as the owner's demo lays it out: the page themes as tabs, each showing its colour; a
+     * sentence in style A on that theme's page; the eight colours, the default marked; the trail; and the default back.
+     */
+    private fun renderHighlight() {
+        choice("‹ Themes", "Back · B") { section = "themes"; render() }.tag = "highlight-back"
+        note("Each page colour keeps its own highlight colour and trail.")
+        val theme = highlightTheme
+        val look = highlights.of(theme)
+        row(*EpubPagePalette.CHOICES.map { choice ->
+            val (page, ink) = EpubPagePalette.of(choice)
+            val word = ReadAlongWordHighlight.tints(highlights, choice).word
+            sample(EpubPagePalette.label(choice), "highlight-theme:$choice", choice == theme, View(context).apply {
+                background = HighlightTabDrawable(page, ink, word); importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, previewDp = 30) { highlightTheme = choice; render() }
+        }.toTypedArray())
+        val (page, ink) = EpubPagePalette.of(theme)
+        body.addView(TextView(context).apply {
+            textSize = 15.5f; typeface = Typeface.SERIF; setLineSpacing(0f, 1.35f)
+            setTextColor(ink); setBackgroundColor(page); setPadding(dp(14), dp(12), dp(14), dp(12)); tag = "highlight-preview"
+            contentDescription = "Preview of the highlight on ${EpubPagePalette.label(theme)}"
+            highlightPreview = this
+            text = previewText(ReadAlongWordHighlight.tints(look, page, ink, ReadAlongWordHighlight.isDark(theme)))
+        }, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(3), dp(6), dp(3), dp(8)) })
+        heading("Colour")
+        val swatches = ReadAlongColor.entries.map { color ->
+            val wash = ReadAlongGlow.wash(color.argb, page, ink, ReadAlongWordHighlight.wordStrength(ReadAlongWordHighlight.isDark(theme)))
+            val isDefault = color == ReadAlongWordHighlight.defaultColor(theme)
+            sample(if (isDefault) "${color.label}\ndefault" else color.label, "highlight-color:${color.id}", color == look.color, View(context).apply {
+                background = SwatchDrawable(page, wash); importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, previewDp = 34) { updateHighlight(theme, look.copy(color = color)) }
+        }
+        swatches.chunked(4).forEach { row(*it.toTypedArray()) }
+        // How strong the trail is, as a share of the word's: None to as strong as the word.
+        body.addView(ValueAdjusterView(context, colors, "Trail", ValueRange(0f, 100f, ReadAlongWordHighlight.TRAIL_STEP.toFloat()),
+            look.trailPercent.toFloat(), { ReadAlongWordHighlight.trailLabel(it.toInt()) }, AdjusterStyle.STEPS) { percent ->
+            val next = highlights.of(theme).copy(trailPercent = ReadAlongWordHighlight.stepped(percent.toInt()))
+            updateHighlight(theme, next, rebuild = false)
+            highlightPreview?.text = previewText(ReadAlongWordHighlight.tints(next, page, ink, ReadAlongWordHighlight.isDark(theme)))
+        }.apply { tag = "highlight-trail" })
+        body.addView(LinearLayout(context).apply {
+            setPadding(dp(8), 0, dp(8), dp(6))
+            listOf("None" to Gravity.START, "As strong as the word" to Gravity.END).forEach { (words, side) ->
+                addView(TextView(context).apply { text = words; textSize = 11f; gravity = side; setTextColor(colors.mutedText) }, LinearLayout.LayoutParams(0, -2, 1f))
+            }
+        })
+        val default = ReadAlongWordHighlight.defaultLook(theme)
+        choice("Use the default", "Default on ${EpubPagePalette.label(theme)}: ${default.color.label}, trail ${default.trailPercent}%",
+            selected = ReadAlongWordHighlight.isDefault(theme, look)) { updateHighlight(theme, null) }.tag = "highlight-default"
+    }
+
+    /** The demo's sentence in style A: the eighth word being said, the seven before it lit by the trail, spaces between them too. */
+    private fun previewText(tints: HighlightTints): CharSequence {
+        val words = PREVIEW.split(' ')
+        val out = android.text.SpannableStringBuilder()
+        words.forEachIndexed { index, word ->
+            val start = out.length
+            out.append(word)
+            when {
+                index == PREVIEW_WORD -> out.setSpan(android.text.style.BackgroundColorSpan(tints.word), start, out.length, 0)
+                index < PREVIEW_WORD && tints.trail != null -> out.setSpan(android.text.style.BackgroundColorSpan(tints.trail), start, out.length, 0)
+            }
+            if (index < words.lastIndex) {
+                val space = out.length
+                out.append(' ')
+                if (index < PREVIEW_WORD && tints.trail != null) out.setSpan(android.text.style.BackgroundColorSpan(tints.trail), space, out.length, 0)
+            }
+        }
+        return out
+    }
+
+    private companion object {
+        const val PREVIEW = "In spite of the cold, she pulled off her gloves and set her palm against the door."
+        const val PREVIEW_WORD = 7
+    }
+}
+
+/** A page theme's tab (#66): its page, two lines of its ink, and a bar of its highlight's word colour. */
+private class HighlightTabDrawable(private val page: Int, private val ink: Int, private val word: Int) : Drawable() {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    override fun draw(canvas: Canvas) {
+        val b = bounds
+        paint.color = page; canvas.drawRect(b, paint)
+        val w = b.width().toFloat(); val h = b.height().toFloat()
+        paint.color = word
+        canvas.drawRoundRect(b.left + w * .28f, b.top + h * .38f, b.left + w * .72f, b.top + h * .62f, h * .12f, h * .12f, paint)
+    }
+    override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+    override fun setColorFilter(filter: ColorFilter?) { paint.colorFilter = filter }
+    @Deprecated("Deprecated in Java") override fun getOpacity() = PixelFormat.OPAQUE
+}
+
+/** One colour's swatch (#66): its word wash, round, on the page it is for. */
+private class SwatchDrawable(private val page: Int, private val wash: Int) : Drawable() {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    override fun draw(canvas: Canvas) {
+        val b = bounds
+        paint.color = page; canvas.drawRect(b, paint)
+        paint.color = wash
+        canvas.drawCircle(b.exactCenterX(), b.exactCenterY(), minOf(b.width(), b.height()) * .36f, paint)
+    }
+    override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+    override fun setColorFilter(filter: ColorFilter?) { paint.colorFilter = filter }
+    @Deprecated("Deprecated in Java") override fun getOpacity() = PixelFormat.OPAQUE
 }
 
 private class PageSampleDrawable(private val ink: Int, private val paper: Int, private val columns: Int, private val margin: Float, private val spacing: Int) : Drawable() {

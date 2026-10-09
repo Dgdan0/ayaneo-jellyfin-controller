@@ -146,19 +146,36 @@ type packageItem struct{ href, overlay, mediaType, properties string }
 // never a condition: contents that are missing, unreadable or over a cap leave the
 // narration as it is and the edition without chapters.
 func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
-	archive, err := zip.NewReader(file, size)
+	return ReadOverlaidAlignment(file, size, nil)
+}
+
+// ReadOverlaidAlignment is ReadAlignment of the edition as a read-along pack's set rewrites it
+// (#66): each document the overlay holds is read from it in place of the edition's, everything else
+// from the edition. A word set narrates a <par> per word, so it may hold up to maxWordPars of them.
+// An overlay that names a file the edition does not hold is refused (ErrOverlayMismatch).
+func ReadOverlaidAlignment(file io.ReaderAt, size int64, overlay *Overlay) (*Alignment, error) {
+	zipped, err := zip.NewReader(file, size)
 	if err != nil {
 		return nil, badf("the file is not a readable archive")
 	}
-	if len(archive.File) > maxEntries {
+	if len(zipped.File) > maxEntries {
 		return nil, badf("the archive holds too many entries")
 	}
-	entries := make(map[string]*zip.File, len(archive.File))
-	for _, entry := range archive.File {
-		entries[entry.Name] = entry
+	entries := archive{files: make(map[string]*zip.File, len(zipped.File)), overlay: overlay}
+	for _, entry := range zipped.File {
+		entries.files[entry.Name] = entry
+	}
+	limit := maxPars
+	if overlay != nil {
+		if err := overlay.fits(entries.has); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrBadAlignment, err)
+		}
+		if overlay.Granularity == GranularityWord {
+			limit = maxWordPars
+		}
 	}
 
-	container, err := readXMLEntry(entries, "META-INF/container.xml")
+	container, err := entries.xml("META-INF/container.xml")
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +191,7 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 	if !ok {
 		return nil, badf("the archive names no package")
 	}
-	document, err := readXMLEntry(entries, packagePath)
+	document, err := entries.xml(packagePath)
 	if err != nil {
 		return nil, err
 	}
@@ -232,13 +249,28 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 			continue
 		}
 		seenOverlay[smilPath] = true
-		smil, err := readXMLEntry(entries, smilPath)
+		smil, err := entries.xml(smilPath)
 		if err != nil {
 			return nil, err
 		}
 		sentences, err := readSMIL(smil, smilPath, entries)
 		if err != nil {
 			return nil, err
+		}
+		if entries.overlay.Has(smilPath) {
+			// Where an audio file ends is a fact of the audio, which Storyteller's own SMIL records (a sentence that
+			// ends before it begins, endAudioAt) and a pack's, copied from its last clipEnd, may not (#66: The Dungeon
+			// Anarchist's Cookbook's piece 18 is 2011.824 s long and both say its last sentence ends at 2017.630). The
+			// edition's ends hold for the pack's narration too, so its pieces are measured as the edition's are.
+			if original, err := readXMLEntry(entries.files, smilPath); err == nil {
+				if theirs, err := readSMIL(original, smilPath, archive{files: entries.files}); err == nil {
+					for _, sentence := range theirs {
+						if end, seen := audioEnds[sentence.audio]; sentence.end < sentence.begin && (!seen || sentence.end < end) {
+							audioEnds[sentence.audio] = sentence.end
+						}
+					}
+				}
+			}
 		}
 		for _, sentence := range sentences {
 			if sentence.end < sentence.begin {
@@ -250,7 +282,7 @@ func ReadAlignment(file io.ReaderAt, size int64) (*Alignment, error) {
 				continue
 			}
 			pars++
-			if pars > maxPars {
+			if pars > limit {
 				return nil, badf("the narration holds too many sentences")
 			}
 			index, known := fileIndex[sentence.audio]
@@ -353,7 +385,7 @@ type sentence struct {
 
 // readSMIL takes the sentences of one overlay. A <par> is a sentence when it has
 // a <text> and an <audio> among its own children.
-func readSMIL(data []byte, smilPath string, entries map[string]*zip.File) ([]sentence, error) {
+func readSMIL(data []byte, smilPath string, entries archive) ([]sentence, error) {
 	type par struct {
 		depth       int
 		text, audio *xml.StartElement
@@ -375,7 +407,7 @@ func readSMIL(data []byte, smilPath string, entries map[string]*zip.File) ([]sen
 			failure = badf("a sentence names no place in its text")
 			return
 		}
-		if entries[textPath] == nil || entries[audioPath] == nil {
+		if !entries.has(textPath) || !entries.has(audioPath) {
 			failure = badf("a sentence names a resource the archive does not hold")
 			return
 		}
@@ -439,6 +471,34 @@ func attribute(element xml.StartElement, name string) string {
 		}
 	}
 	return ""
+}
+
+// archive is an edition's entries by name, with what a read-along pack's set puts in place of some
+// of them (#66): the one view of the edition everything that reads its narration goes through.
+type archive struct {
+	files   map[string]*zip.File
+	overlay *Overlay
+}
+
+func (a archive) has(name string) bool { return a.files[name] != nil }
+
+// size is what the entry holds unpacked, the overlay's when it replaces it.
+func (a archive) size(name string) int64 {
+	if a.overlay.Has(name) {
+		return a.overlay.size(name)
+	}
+	if file := a.files[name]; file != nil {
+		return int64(file.UncompressedSize64)
+	}
+	return 0
+}
+
+// xml reads one document, from the overlay when it replaces it, within the cap.
+func (a archive) xml(name string) ([]byte, error) {
+	if a.overlay.Has(name) && a.has(name) {
+		return a.overlay.read(name)
+	}
+	return readXMLEntry(a.files, name)
 }
 
 // readXMLEntry reads one document of the archive, within the cap.
@@ -562,6 +622,46 @@ func parseClock(raw string) (int64, error) {
 		return 0, errors.New("not a time")
 	}
 	return int64(math.Round(seconds * 1000)), nil
+}
+
+// SamePieces says whether b narrates the same audio pieces as a, each ending (its last clipEnd,
+// which is what the hub measures a piece by) at the same moment: what lets a read-along pack's set
+// stand on the mapping of the edition's pieces onto the tracks (#66).
+func (a *Alignment) SamePieces(b *Alignment) bool {
+	if a == nil || b == nil || len(a.Files) != len(b.Files) {
+		return false
+	}
+	lengths := make(map[string]int64, len(a.Files))
+	for _, file := range a.Files {
+		lengths[file.Entry] = file.LengthMs
+	}
+	for _, file := range b.Files {
+		if length, found := lengths[file.Entry]; !found || length != file.LengthMs {
+			return false
+		}
+	}
+	return true
+}
+
+// NarratesWithin says whether a narrates the pieces b does, every one of them, and none past where b
+// ends it: what a word set must do to play from the mapping b was given (#66). A word set's piece may
+// end a little earlier than the sentence set's, where the aligner ran past the end of the audio and the
+// sentence that runs over is cut at the end (endAudioAt) while the word that would have run over is
+// left out (A Parade of Horribles' piece 69): the words then stop just short of the end, which is harmless.
+func (a *Alignment) NarratesWithin(b *Alignment) bool {
+	if a == nil || b == nil || len(a.Files) != len(b.Files) {
+		return false
+	}
+	lengths := make(map[string]int64, len(b.Files))
+	for _, file := range b.Files {
+		lengths[file.Entry] = file.LengthMs
+	}
+	for _, file := range a.Files {
+		if length, found := lengths[file.Entry]; !found || file.LengthMs > length {
+			return false
+		}
+	}
+	return true
 }
 
 // index prepares the lookups from a place in the text.

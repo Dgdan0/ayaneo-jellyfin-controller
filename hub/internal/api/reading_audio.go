@@ -77,7 +77,11 @@ type ReadingAudioManifest struct {
 	Chapters        []ReadingAudioChapter  `json:"chapters"`
 	Alignment       *ReadingAudioAlignment `json:"alignment,omitempty"`
 	AlignmentReason string                 `json:"alignmentReason,omitempty"`
-	Cache           CacheInfo              `json:"cache"`
+	// WordLevel says the book's read-along pack has a word set the hub serves (#66): an app that
+	// reads along word by word asks for the edition with `granularity=word`. Absent otherwise,
+	// and then the edition is read by its sentences, as it always was.
+	WordLevel bool      `json:"wordLevel,omitempty"`
+	Cache     CacheInfo `json:"cache"`
 }
 
 type ReadingAudioTrack struct {
@@ -133,6 +137,8 @@ type audioPlan struct {
 	// there is none).
 	alignment       *audioAlignment
 	alignmentReason string
+	// wordLevel: the book's read-along pack has a word set that can be served (#66).
+	wordLevel bool
 }
 
 // manifestEntry is one link of Storyteller's audiobook manifest and where it
@@ -178,6 +184,7 @@ func (p *audioPlan) manifest(workID, sourceItemID string, info CacheInfo) Readin
 	}
 	if p.alignment != nil {
 		manifest.Aligned, manifest.Alignment = true, p.alignment.manifest()
+		manifest.WordLevel = p.wordLevel
 	}
 	return manifest
 }

@@ -250,9 +250,12 @@ object HubEndpoints {
     /**
      * A book's EPUB; [readAlong] the read-along edition, and [omitAudio] that
      * edition without its audio (#19): its words and SMIL, about a megabyte,
-     * while the narration streams from the audiobook's tracks.
+     * while the narration streams from the audiobook's tracks. [wordLevel] asks
+     * for the read-along edition with the word set of the book's pack (#66,
+     * `granularity=word`), which the audio manifest's `wordLevel` offers; the
+     * hub answers the sentence edition when it has none it can serve.
      */
-    fun readingEpubFile(base: String, workId: String, sourceItemId: String, readAlong: Boolean = false, omitAudio: Boolean = false): String =
+    fun readingEpubFile(base: String, workId: String, sourceItemId: String, readAlong: Boolean = false, omitAudio: Boolean = false, wordLevel: Boolean = false): String =
         join(
             base,
             "/v1/reading/works/" + encode(workId) + "/publications/" +
@@ -261,7 +264,7 @@ object HubEndpoints {
             readAlong && omitAudio -> "?format=readaloud&audio=omit"
             readAlong -> "?format=readaloud"
             else -> ""
-        }
+        } + if (readAlong && wordLevel) "&granularity=word" else ""
 
     fun readingAudiobookFile(base: String, workId: String, sourceItemId: String): String =
         join(base, "/v1/reading/works/" + encode(workId) +

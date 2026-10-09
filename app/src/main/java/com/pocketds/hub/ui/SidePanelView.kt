@@ -181,16 +181,20 @@ open class SidePanelView(context:Context, protected val colors:PocketColors, pri
         val remembered=lastChosen[menuKey]?.let(choiceRows::getOrNull)
         post {if(isOpen)(back ?: preferred ?: remembered ?: body.getFocusables(FOCUS_FORWARD).firstOrNull() ?: close).requestFocus()}
     }
-    fun tabs(values:List<Pair<String,String>>,selected:String,onPick:(String)->Unit) = tabs(values, selected, false, onPick)
+    fun tabs(values:List<Pair<String,String>>,selected:String,onPick:(String)->Unit) { tabs(values, selected, false, onPick = onPick) }
 
     /**
      * Two to four views of one menu, as the app's pick-one pill; a fourth tightens each label's padding so the pill
      * stays inside the panel. [dividers] is no longer drawn; the pill separates them.
      */
+    /**
+     * [page] names a page of its own under the [selected] tab (the reader's Read-along highlight under Themes): its rows are
+     * not the tab's, so the row the tab last chose, or the one it was opened from, must not pick its cursor (#66).
+     */
     @Suppress("UNUSED_PARAMETER")
-    fun tabs(values:List<Pair<String,String>>,selected:String,dividers:Boolean,onPick:(String)->Unit) {
+    fun tabs(values:List<Pair<String,String>>,selected:String,dividers:Boolean,page:String=selected,onPick:(String)->Unit) {
         tabRow.removeAllViews()
-        menuKey="${titleView.text}/$selected"
+        menuKey="${titleView.text}/$page"
         val current=selected;val pick=onPick
         tabRow.addView(BlobSegmentedView(context,colors,ringVisible).apply {
             heightDp=36f;textSp=13f;padXDp=if(values.size>3)9f else 14f

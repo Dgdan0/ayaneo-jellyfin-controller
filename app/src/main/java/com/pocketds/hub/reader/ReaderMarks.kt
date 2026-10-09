@@ -29,7 +29,13 @@ object ReaderMarks {
     }
 
     /** The tint of a highlight on a page of [page] with [ink] text: as much of the colour as keeps the ink readable. */
-    fun tint(color: HighlightColor, page: Int, ink: Int): Int = ReadAlongGlow.wash(base(color), page, ink)
+    fun tint(color: HighlightColor, page: Int, ink: Int): Int = ReadAlongGlow.wash(base(color), page, ink, STRENGTH)
+
+    /**
+     * The most of a highlight's colour let into the page, stepped down from there until the ink reads at 4.5:1: the 0.45 the
+     * narration's sentence wash had when the highlights were made, so they look as they did (#66 gave the wash its strength).
+     */
+    const val STRENGTH = 0.45
 
     /**
      * The element Readium lays over each line of a decoration of [kind], [tint] being the colour its style carries. The page is XHTML, so

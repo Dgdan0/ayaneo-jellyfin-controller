@@ -13,8 +13,12 @@ import kotlin.math.roundToLong
  * length, moved on to the start of a word, because the voice does not begin between two letters.
  */
 
-/** The first or last character the page shows, in the narrated element holding it: its text, and where in the text. */
-data class PageEdge(val fragment: String, val text: String, val offset: Int)
+/**
+ * The first or last character the page shows, in the narrated element holding it: its text, and where in the text. In a
+ * word edition (#66) [word] is the first word of that sentence to begin at or after [offset] (the page's first word, or the
+ * next page's), by the id the edition gives it; null where none does, or the sentence has no words of its own.
+ */
+data class PageEdge(val fragment: String, val text: String, val offset: Int, val word: String? = null)
 
 /**
  * What the page shows of the narration. [first] is the first character on the page (its [PageEdge.offset] the index
@@ -68,23 +72,40 @@ object ReadAlongPageSync {
      * sentence's begin plus the share of its letters before that word times its length (the file's own
      * milliseconds). Null when no word begins there, as with the tail of the last word.
      */
-    fun timeAt(segment: ReadAlongSegment, text: String, offset: Int): Long? {
+    fun timeAt(segment: ReadAlongSegment, text: String, offset: Int): Long? = timeAt(segment.beginMs, segment.endMs, text, offset)
+
+    /** [timeAt] for a sentence that runs from [beginMs] to [endMs]. */
+    fun timeAt(beginMs: Long, endMs: Long, text: String, offset: Int): Long? {
         val start = wordStart(text, offset) ?: return null
         // A word begins at [start], so the text has letters and the total is not zero.
         val share = spokenCount(text, 0, start).toDouble() / spokenCount(text)
-        return segment.beginMs + (share * (segment.endMs - segment.beginMs)).roundToLong()
+        return beginMs + (share * (endMs - beginMs)).roundToLong()
     }
 
     fun compare(a: ReadAlongPosition, b: ReadAlongPosition): Int =
         if (a.track != b.track) a.track.compareTo(b.track) else a.offsetMs.compareTo(b.offsetMs)
 
+    /**
+     * Where the voice is when it reaches [edge]'s word: in a word edition (#66), exactly that word's begin (or, for a word
+     * the narration does not say, the next one it does in the sentence); in a sentence edition, the sentence's begin plus
+     * the share of its letters before the edge ([timeAt]). Null where nothing of the sentence is said from there on.
+     */
+    private fun timeOf(timeline: ReadAlongTimeline, href: String, edge: PageEdge, sentence: ReadAlongTimeline.Sentence): ReadAlongPosition? {
+        if (sentence.first.segment.isWord) {
+            val word = edge.word ?: return null
+            val at = timeline.wordAtOrAfter(href, sentence, word) ?: return null
+            return timeline.positionAt(at.track, at.segment.beginMs)
+        }
+        val ms = timeAt(sentence.beginMs, sentence.endMs, edge.text, edge.offset) ?: return null
+        return timeline.positionAt(sentence.first.track, ms)
+    }
+
     /** When the voice reaches the first word of the page: from the probe's first character, else the next sentence. */
     fun startOf(timeline: ReadAlongTimeline, probe: PageProbe): ReadAlongPosition? {
         val edge = probe.first ?: return null
-        val at = timeline.locate(probe.href, edge.fragment) ?: return null
-        val ms = timeAt(at.segment, edge.text, edge.offset)
-        if (ms != null) return timeline.positionAt(at.track, ms)
-        return timeline.after(at)?.let { timeline.positionAt(it.track, it.segment.beginMs) }
+        val sentence = timeline.sentence(probe.href, edge.fragment) ?: return null
+        timeOf(timeline, probe.href, edge, sentence)?.let { return it }
+        return timeline.nextSentence(sentence.first)?.let { timeline.positionAt(it.track, it.segment.beginMs) }
     }
 
     /**
@@ -94,11 +115,9 @@ object ReadAlongPageSync {
      */
     fun endOf(timeline: ReadAlongTimeline, probe: PageProbe): ReadAlongPosition? {
         val edge = probe.last ?: return null
-        val at = timeline.locate(probe.href, edge.fragment) ?: return null
-        val rest = spokenCount(edge.text, edge.offset)
-        val ms = if (rest > 0) timeAt(at.segment, edge.text, edge.offset) else null
-        if (ms != null) return timeline.positionAt(at.track, ms)
-        return timeline.after(at)?.let { timeline.positionAt(it.track, it.segment.beginMs) }
+        val sentence = timeline.sentence(probe.href, edge.fragment) ?: return null
+        if (spokenCount(edge.text, edge.offset) > 0) timeOf(timeline, probe.href, edge, sentence)?.let { return it }
+        return timeline.nextSentence(sentence.first)?.let { timeline.positionAt(it.track, it.segment.beginMs) }
     }
 
     /**
@@ -138,7 +157,8 @@ object ReadAlongPageSync {
      */
     fun follow(timeline: ReadAlongTimeline, position: ReadAlongPosition, span: PageSpan): Step {
         val active = timeline.active(position.track, position.offsetMs) ?: return Step.Stay
-        if (active.textHref != span.href || active.fragment !in span.visible) return Step.GoTo(active)
+        // The page knows its sentences; a word is on the page with its sentence (#66).
+        if (active.textHref != span.href || active.sentenceFragment !in span.visible) return Step.GoTo(active)
         val end = span.end ?: return Step.Stay
         return if (compare(position, end) >= 0) Step.TurnPage else Step.Stay
     }
@@ -155,7 +175,7 @@ object ReadAlongPageSync {
 
     fun afterManualTurn(timeline: ReadAlongTimeline, position: ReadAlongPosition, span: PageSpan): Manual {
         val active = timeline.active(position.track, position.offsetMs)
-        if (active != null && active.textHref == span.href && active.fragment in span.visible) return Manual.Keep
+        if (active != null && active.textHref == span.href && active.sentenceFragment in span.visible) return Manual.Keep
         val start = span.start ?: return Manual.Nothing
         return Manual.Jump(start)
     }

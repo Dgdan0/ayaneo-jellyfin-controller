@@ -340,8 +340,10 @@ class ReaderGlassTest {
             val accent = withContext(Dispatchers.Main) { Theme.colors(activity).accent }
             val night = (android.content.res.Resources.getSystem().configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
                 android.content.res.Configuration.UI_MODE_NIGHT_YES
-            val (page, ink) = EpubPagePalette.of(EpubReaderPreferences().theme, night)
-            val rgb = ReadAlongGlow.rgb(ReadAlongGlow.wash(accent, page, ink))
+            // The sentence edition's wash, in the page theme's read-along colour (#66): the default theme's own default.
+            val theme = com.pocketds.hub.reader.EpubPagePalette.resolve(EpubReaderPreferences().theme, night)
+            val rgb = ReadAlongGlow.rgb(com.pocketds.hub.reader.ReadAlongWordHighlight.tints(com.pocketds.hub.reader.ReadAlongHighlightStore.load(activity), theme).sentence)
+            check(accent != 0)
             var glow = ""
             try {
                 withTimeout(15_000) {

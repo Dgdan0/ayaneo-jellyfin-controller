@@ -205,7 +205,6 @@ class EpubReaderScreen(
     private var narration: ReadAlongPlayback? = null
     private val narrationCheckpoint = ReadAlongSession()
     private var narrationCompleted = false
-    private var highlightJob: Job? = null
     private lateinit var narrationDock: ReadAlongDock
     private lateinit var dictionaryCard: DictionaryCard
     private lateinit var dictionary: OfflineEnglishDictionary
@@ -446,6 +445,7 @@ class EpubReaderScreen(
         root.addView(modeCaption, FrameLayout.LayoutParams(WRAP, WRAP))
         buildNarrationDock()
         preferences = loadPreferences()
+        highlights = ReadAlongHighlightStore.load(host.viewContext)
         preferenceState = EpubPreferenceState(preferences)
         overlay = ChoiceOverlay(host.viewContext, colors, ringVisible, sidePanel = true)
         root.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -813,7 +813,9 @@ class EpubReaderScreen(
             }
             val streamed = plan is NarrationPlan.Stream
             var file = editionFile(if (!readAlong) editionCache("") else if (streamed || plan is NarrationPlan.Unreachable) slimCache else wholeCache,
-                forceDownload, omitAudio = streamed, revalidate = !readAlong || streamed)
+                forceDownload, omitAudio = streamed, revalidate = !readAlong || streamed,
+                // The hub has a word pack for this book (#66): its edition with the words in it.
+                wordLevel = (plan as? NarrationPlan.Stream)?.manifest?.wordLevel == true)
             if (file == null && streamed && lastDownload?.code == AudiobookStream.NOT_STREAMABLE) {
                 // The hub cannot cut this edition's audio out: the whole edition, as before.
                 plan = NarrationPlan.Whole
@@ -881,11 +883,11 @@ class EpubReaderScreen(
      * the hub a stream of hundreds of megabytes for nothing, and a change would be as much again to fetch.
      * Nor is an edition kept for a hub that could not be reached a moment ago.
      */
-    private suspend fun editionFile(cache: EpubPackageCache, forceDownload: Boolean, omitAudio: Boolean, revalidate: Boolean): File? {
+    private suspend fun editionFile(cache: EpubPackageCache, forceDownload: Boolean, omitAudio: Boolean, revalidate: Boolean, wordLevel: Boolean = false): File? {
         lastDownload = null
         val opened = EpubEdition(cache, workId, sourceItemId).open(
             forceDownload, revalidate,
-            fetch = { destination, check -> readingSession.api.downloadReadingEpub(workId, sourceItemId, destination, readAlong, omitAudio, check) },
+            fetch = { destination, check -> readingSession.api.downloadReadingEpub(workId, sourceItemId, destination, readAlong, omitAudio, check, wordLevel) },
             // From the transfer's thread when a newer edition begins to arrive.
             onStage = { stage ->
                 val text = when {
@@ -1341,23 +1343,36 @@ class EpubReaderScreen(
     private var highlightedSegment: ReadAlongSegment? = null
 
     /**
-     * The wash on the sentence being read, behind its words (#52). Where the page goes is [followVoice]'s. The tint
-     * is the accent let into this page's colour ([ReadAlongGlow.wash]), so it is drawn again when the theme changes.
+     * The wash on the sentence being read, behind its words (#52), or by the word with its trail (#66): drawn by
+     * [ReadAlongHighlighter] in this page theme's highlight ([ReadAlongWordHighlight]). Where the page goes is [followVoice]'s.
      */
     private fun highlightNarration(segment: ReadAlongSegment?) {
-        highlightJob?.cancel()
         highlightedSegment = segment
         if (backgrounded) return
-        highlightJob = uiScope.launch {
-            val reader = navigator ?: return@launch
-            if (segment == null) { reader.applyDecorations(emptyList(), ReadAlongGlow.GROUP); return@launch }
-            val locator = segmentLocator(segment) ?: return@launch
-            val (page, ink) = pageColors()
-            val tint = ReadAlongGlow.wash(colors.accent, page, ink)
-            reader.applyDecorations(listOf(Decoration("narration", locator, Decoration.Style.Highlight(tint, isActive = true))), ReadAlongGlow.GROUP)
-            // Each box made its line's line box, once the boxes are on the page (and again when it reflows): no gaps, nothing over the lines round it.
-            runCatching { reader.evaluateJavascript(ReadAlongGlow.fitScript(segment.fragment)) }
-        }
+        highlighter.show(segment)
+    }
+
+    /** The read-along highlight set in the appearance sheet (#66): kept on the device, and the page behind redrawn at once. */
+    private fun setHighlights(value: ReadAlongHighlights) {
+        highlights = value
+        ReadAlongHighlightStore.save(host.viewContext, value)
+        redrawNarration()
+    }
+
+    /** The page's look changed (a theme, the highlight's setting): what is being read is drawn again in it. */
+    private fun redrawNarration() {
+        if (backgrounded || narration == null) return
+        highlighter.redraw(highlightedSegment)
+    }
+
+    /** This device's read-along highlight for each page theme (#66). */
+    private var highlights = ReadAlongHighlights()
+
+    private val highlighter by lazy {
+        ReadAlongHighlighter(uiScope, { navigator }, { href, fragment ->
+            Locator.fromJSON(JSONObject().put("href", spellDocument(href)).put("type", "application/xhtml+xml")
+                .put("locations", JSONObject().put("fragments", org.json.JSONArray().put(fragment))))
+        }) { ReadAlongWordHighlight.tints(highlights, EpubPagePalette.resolve(preferences.theme, isNight())) }
     }
 
     /**
@@ -1411,7 +1426,7 @@ class EpubReaderScreen(
         matchNarrationToPage = false
         narrationCheckpoint.record(audio.position)
         val span = pageSpan
-        if (segment != null && (span == null || span.href != segment.textHref || segment.fragment !in span.visible)) {
+        if (segment != null && (span == null || span.href != segment.textHref || segment.sentenceFragment !in span.visible)) {
             lastSent = segment
             sendPageTo(segment)
         }
@@ -1528,7 +1543,9 @@ class EpubReaderScreen(
         val moved = audio.position != voiceAtBackground
         voiceAtBackground = null
         val segment = audio.timeline.active(audio.position.track, audio.position.offsetMs)
-        highlightNarration(segment)
+        // Drawn in full: the page may have been laid out anew while it waited.
+        highlightedSegment = segment
+        redrawNarration()
         if (moved && segment != null) { lastSent = segment; sendPageTo(segment) }
         scheduleProbe()
     }
@@ -2574,7 +2591,8 @@ class EpubReaderScreen(
         }, onClose = {
             host.refreshHints()
         }, pageInfo = pageChoice, onPageInfoChanged = ::setPageInfo,
-            brightness = comfort.brightness, onBrightness = ::setBrightness)
+            brightness = comfort.brightness, onBrightness = ::setBrightness,
+            highlights = highlights, pageTheme = EpubPagePalette.resolve(preferences.theme, isNight()), onHighlights = ::setHighlights)
         host.refreshHints()
     }
 
@@ -2583,7 +2601,7 @@ class EpubReaderScreen(
         // A reflow moves every page break: the page is looked at again once it has settled.
         if (narration != null) { pageSpan = null; scheduleProbe(REFLOW_PROBE_MS) }
         // The wash is mixed with the page's colour: a new theme draws the sentence again.
-        if (narration != null) highlightedSegment?.let(::highlightNarration)
+        redrawNarration()
         // The corners' ink and the strips' colour follow the page.
         if (::pageInfo.isInitialized) applyPageInfo()
         // The highlights are mixed with the page's colour too (#62).
