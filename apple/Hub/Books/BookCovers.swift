@@ -204,11 +204,15 @@ struct SeriesFanCard: View {
     let cover: CGFloat
     /// The card's width, which the fan opens no further than.
     let width: CGFloat
+    /// The height of a book's cover in the same grid: the fan stands at its
+    /// foot, so the names of a row line up whether a card is a fan or a cover.
+    var coverHeight: CGFloat?
 
     var body: some View {
         let rest = SeriesFanView.box(cover: cover, slots: SeriesFan.slots).width
         VStack(spacing: 0) {
             SeriesFanView(plan: plan, cover: cover, room: width / 2 + SeriesFan.spreadMargin)
+                .frame(height: coverHeight, alignment: .bottom)
             Text(series.title)
                 .font(HubType.body(14, weight: .bold, relativeTo: .subheadline))
                 .foregroundStyle(.white)

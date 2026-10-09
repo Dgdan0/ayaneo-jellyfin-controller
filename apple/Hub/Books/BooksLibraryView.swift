@@ -387,8 +387,15 @@ struct ReadingWorksGrid: View {
     private var fans: Bool { !works && items.contains(where: SeriesFan.hasFan) }
 
     /// A fan's cell: five slots of `fanCover` and the room they lean into.
-    static func fanCell(_ metrics: GlassMetrics) -> CGFloat { metrics.small ? 168 : 196 }
-    static func fanCover(_ metrics: GlassMetrics) -> CGFloat { metrics.small ? 44 : 52 }
+    static func fanCell(_ metrics: GlassMetrics) -> CGFloat { metrics.small ? 168 : 228 }
+    static func fanCover(_ metrics: GlassMetrics) -> CGFloat { metrics.small ? 44 : 60 }
+    /// A book on its own among the fans: a cover this wide, its foot level with theirs.
+    static func loneCover(_ metrics: GlassMetrics) -> CGFloat { fanCover(metrics) * 2.3 }
+
+    /// Where a book stands on its own among the fans, the fans stand at the foot of its cover's place.
+    private var fanFoot: CGFloat? {
+        items.contains { !SeriesFan.hasFan($0) } ? CGFloat(ReadingBookFacts.tallHeight(Double(Self.loneCover(metrics)))) : nil
+    }
 
     @ViewBuilder private func card(_ work: ReadingWork) -> some View {
         let route = AppRoute.book(BookRoute(workId: work.id, title: work.title))
@@ -396,7 +403,8 @@ struct ReadingWorksGrid: View {
             // A tap opens the series at the book you are on, or asks for a front book you do not have.
             let target = fanRoute(work, plan.target)
             NavigationLink(value: target) {
-                SeriesFanCard(series: work, plan: plan, cover: Self.fanCover(metrics), width: Self.fanCell(metrics))
+                SeriesFanCard(series: work, plan: plan, cover: Self.fanCover(metrics), width: Self.fanCell(metrics),
+                              coverHeight: fanFoot)
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(GlassCardStyle())
@@ -405,7 +413,7 @@ struct ReadingWorksGrid: View {
         } else {
             NavigationLink(value: route) {
                 BookCard(work: books.project(work))
-                    .frame(maxWidth: fans ? Self.fanCover(metrics) * 2.3 : .infinity)
+                    .frame(maxWidth: fans ? Self.loneCover(metrics) : .infinity)
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(GlassCardStyle())
