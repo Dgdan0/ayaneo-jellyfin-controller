@@ -16,6 +16,9 @@ class DecorationsOnceTest {
         assertTrue(script.contains("item.container.remove()"))
         // The newest copy of an id is the one kept: the list is read from its end.
         assertTrue(script.contains("for (var i = g.items.length - 1; i >= 0; i--)"))
+        // And the group's add replaces an id it has from then on, once a page.
+        assertTrue(script.contains("g.__pocketOnce = true"))
+        assertTrue(script.contains("remove(d.id)"))
     }
 
     @Test fun anIdIsQuotedSoItCannotEndTheScript() {

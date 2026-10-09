@@ -12,8 +12,9 @@ import android.webkit.WebView
  * highlight stayed on the page. Measured: three highlights from another device, six items on the page; one removed, still drawn.
  *
  * [script] leaves one item for each id the reader holds in a group of [groups] (the newest), takes away any other, and in a group of
- * `duplicatesOnly` only the extra copies of an id. It is run over every page Readium has loaded ([run]) after the reader draws and
- * when a page settles, by when Readium's own adds on the page have been made.
+ * `duplicatesOnly` only the extra copies of an id; and from then on in that page an add of an id the group already has replaces it.
+ * It is run over every page Readium has loaded ([run]) after the reader draws and when a page settles, by when Readium's own adds on
+ * the page have been made. A sweep alone was not enough: a page could still be given its decorations again after the last one.
  */
 object DecorationsOnce {
     /** After a draw or a page change, the passes: at once, and again once a page that was still loading has had its decorations put back. */
@@ -30,6 +31,15 @@ object DecorationsOnce {
   function sweep(name, ids) {
     var g = readium.getDecorations(name), seen = {};
     if (!g || !g.items) return;
+    // From now on in this page, an add of an id the group has replaces it (Readium's own add appends another).
+    if (!g.__pocketOnce && g.add && g.remove) {
+      var add = g.add, remove = g.remove;
+      g.add = function (d) {
+        while (g.items.some(function (i) { return i.decoration && i.decoration.id === d.id; })) remove(d.id);
+        return add(d);
+      };
+      g.__pocketOnce = true;
+    }
     for (var i = g.items.length - 1; i >= 0; i--) {
       var item = g.items[i], id = item.decoration && item.decoration.id;
       if ((ids && !ids[id]) || seen[id]) {
