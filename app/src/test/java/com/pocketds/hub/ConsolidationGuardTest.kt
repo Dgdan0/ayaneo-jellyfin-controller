@@ -173,6 +173,9 @@ class ConsolidationGuardTest {
             "Locator.document in EpubReaderScreen / DocumentPath.of(href): a page's file and the narration's are compared in one " +
                 "spelling (decoded, NFC, no fragment); Readium's href is percent-encoded and the SMIL's is not, and a book with a " +
                 "space or a bracket in a file name (Mistborn's) found no narration on any page (#61)"),
+        Rule(Regex("""\bnavigator\??\.go\("""),
+            "EpubReaderScreen.goTo (with AnchorJump): Readium's go(locator) to a place in another file lands on the file's top or its " +
+                "end, not the place; a jump to one is made in two steps, the file and then the place (#59)"),
         Rule(Regex("""(?<![\w.])(java\.net\.)?URI\("""),
             "DocumentPath.resolve: a path inside a book is any string a zip entry can be named; java.net.URI refuses a space, " +
                 "[ and ], and a book with such names (Mistborn's) could not be read along (#61)",
