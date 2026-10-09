@@ -50,6 +50,9 @@ class HighlightsHub(private val epub: ByteArray, private val delegate: StandInHu
     /** When the text place was written, on the hub's clock. */
     @Volatile var placeStamp = 0L
 
+    /** The reading place the hub holds now, as the reader last wrote it: its locator's JSON, or "null". */
+    @Synchronized fun heldTextPlace(): String = place
+
     /** A text place another device wrote, as the hub would answer it. */
     @Synchronized fun textPlaceFrom(locator: String, who: String, at: Long) { place = locator; device = who; byThisDevice = false; placeStamp = at }
 

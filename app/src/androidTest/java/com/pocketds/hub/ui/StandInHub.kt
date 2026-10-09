@@ -30,7 +30,12 @@ class StandInHub(
     private val whole: ByteArray? = null,
     private val slim: ByteArray? = null,
     /** Where the chapters come from, as the hub says it (#31): "book" or "marks"; none, as an older hub sends them. */
-    private val chapterSource: String? = null
+    private val chapterSource: String? = null,
+    /**
+     * The read-along edition with a word pack's words in it (#66), as the hub serves it for `granularity=word` (with or without
+     * `audio=omit`); with it the manifest says `wordLevel: true`, and without the parameter the sentence edition ([slim], [whole]) is served.
+     */
+    private val words: ByteArray? = null
 ) {
     data class Track(val index: Int, val id: String, val bytes: ByteArray, val durationMs: Long)
     data class Place(val trackId: String, val offsetMs: Long, val completed: Boolean = false, val exact: Boolean = true)
@@ -114,6 +119,8 @@ class StandInHub(
                 ?: MockResponse().setResponseCode(404)
             path == "$publication/audio" -> refuse?.let { (status, code) -> error(status, code, "unmapped_root") } ?: manifest()
             path.startsWith("$publication/audio/tracks/") -> track(path.substringAfterLast('/').toInt(), url.queryParameter("rev"), request.getHeader("Range"))
+            path == "$publication/file" && url.queryParameter("granularity") == "word" ->
+                words?.let { MockResponse().setHeader("Content-Type", "application/epub+zip").setBody(Buffer().write(it)) } ?: error(400, "invalid_request")
             path == "$publication/audio/position" && request.method == "GET" -> position()
             path == "$publication/audio/position" && request.method == "POST" -> write(JSONObject(request.body.readUtf8()))
             path == "$publication/file" && url.queryParameter("audio") == "omit" ->
@@ -208,6 +215,7 @@ class StandInHub(
     private fun manifest(): MockResponse = json(JSONObject()
         .put("workId", work).put("sourceItemId", book).put("revision", revision).put("narrator", "A generated voice")
         .put("totalMs", tracks.sumOf { it.durationMs }).put("aligned", alignment.isNotEmpty())
+        .apply { if (words != null) put("wordLevel", true) }
         .apply { if (alignment.isNotEmpty()) put("alignment", JSONObject().put("audio", JSONArray(alignment.map { (href, track, start) ->
             JSONObject().put("href", href).put("track", track).put("startMs", start) }))) }
         .put("tracks", JSONArray(tracks.map { track ->

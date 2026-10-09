@@ -107,14 +107,17 @@ class ReadAlongNamedFilesTest {
     private fun Open.positionOf(segment: ReadAlongSegment) = voice().timeline.find(segment.textHref, segment.fragment)!!
 
     /** Chooses an entry of Contents as a finger would, and waits for the page it names to be in front, looked at. */
-    private suspend fun Open.openChapter(title: String, document: String) {
+    private suspend fun Open.openChapter(title: String, document: String): PageSpan {
         withContext(Dispatchers.Main) { all(root).first { it.contentDescription == "Table of contents" }.performClick() }
         val overlay: SidePanelView = screen.field("overlay")
         until("Contents") { overlay.isOpen && overlay.rows.size == 4 }
         withContext(Dispatchers.Main) {
             overlay.rows.first { row -> all(row).filterIsInstance<TextView>().first().text.toString().trim() == title }.performClick()
         }
-        until("$title in front, looked at") { document() == document && span()?.href == document }
+        // The page as it was when it was seen: the reader forgets it at the next page change (the voice may turn one at once).
+        var seen: PageSpan? = null
+        until("$title in front, looked at") { document() == document && span()?.takeIf { it.href == document }?.also { seen = it } != null }
+        return seen!!
     }
 
     /** What the reader says on Play, as the dock's button does. */
@@ -136,8 +139,7 @@ class ReadAlongNamedFilesTest {
             until("the page at the start of the narration") { document() == chapterOne && span()?.href == chapterOne }
 
             // 1. A narrated chapter is a narrated page, found by its sentences, though its name has spaces and brackets in it.
-            openChapter("Chapter one", chapterOne)
-            val first = withContext(Dispatchers.Main) { span()!! }
+            val first = openChapter("Chapter one", chapterOne)
             assertTrue("the page's sentences are the narration's: $first", first.narrated && "a0" in first.visible)
             assertTrue("it has a first word to wait for: $first", first.start != null)
             assertEquals(chapterOne, first.href)
@@ -163,13 +165,13 @@ class ReadAlongNamedFilesTest {
             }
             pressPlay()
             until("the page to follow the voice into the next chapter", 30_000) { document() == chapterTwo }
-            until("the new page looked at") { span()?.href == chapterTwo && span()!!.narrated }
-            assertTrue("b0 is on the page: ${span()}", withContext(Dispatchers.Main) { "b0" in span()!!.visible })
+            var second: PageSpan? = null
+            until("the new page looked at") { span()?.takeIf { it.href == chapterTwo && it.narrated }?.also { second = it } != null }
+            assertTrue("b0 is on the page: $second", "b0" in second!!.visible)
             pausedFor("in the second chapter")
 
             // 4. Play on a page with no narration (the title page) starts at the nearest narrated sentence, after it, and the page goes there.
-            openChapter("Title page", ReaderFixtures.NAMED_TITLE)
-            assertFalse(withContext(Dispatchers.Main) { span()!!.narrated })
+            assertFalse(openChapter("Title page", ReaderFixtures.NAMED_TITLE).narrated)
             withContext(Dispatchers.Main) { notes.clear() }
             pressPlay()
             until("the voice to start at the first narrated sentence", 30_000) { voice().isOn && document() == chapterOne }

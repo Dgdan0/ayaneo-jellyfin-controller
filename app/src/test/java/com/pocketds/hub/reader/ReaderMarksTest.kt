@@ -32,8 +32,26 @@ class ReaderMarksTest {
         assertTrue(ReaderMarks.element(ReaderMarks.HEARD, tint).contains("--heard"))
         // Nothing else is a highlight: a decoration made without a kind is the box.
         assertTrue(ReaderMarks.element(null, tint).contains("pd-hl"))
-        assertTrue(ReaderMarks.STYLESHEET.contains(".pd-hl { z-index: -1 !important;"))
+        assertTrue(ReaderMarks.STYLESHEET.contains(".pd-hl { z-index: -2 !important;"))
         assertTrue(ReaderMarks.STYLESHEET.contains(".pd-note { z-index: 6"))
+    }
+
+    /**
+     * A highlight on words the voice is saying (#66 with #62): the word and the trail are drawn over it, whichever was put on the page first.
+     * Both are behind the words (a negative z-index) in the page's one stacking context, so the order is the z-index's, not the order Readium
+     * made their groups in: measured on a word edition, a highlight made after the word was lit covered the word and the trail.
+     */
+    @Test fun theVoicesWordAndTrailAreDrawnOverAHighlightAndAllOfThemBehindTheWords() {
+        fun zIndex(stylesheet: String, selector: String): Int =
+            Regex("""${Regex.escape(selector)}[^{]*\{[^}]*z-index:\s*(-?\d+)""").find(stylesheet)?.groupValues?.get(1)?.toInt()
+                ?: error("no z-index for $selector in $stylesheet")
+        val highlight = zIndex(ReaderMarks.STYLESHEET, ".pd-hl")
+        val sentence = zIndex(ReadAlongGlow.STYLESHEET, "." + ReadAlongGlow.CLASS)
+        val word = zIndex(ReadAlongGlow.STYLESHEET, "." + ReadAlongGlow.WORD_CLASS)
+        assertTrue("behind the words: highlight $highlight, sentence $sentence, word $word", highlight < 0 && sentence < 0 && word < 0)
+        assertTrue("the voice over the highlight: highlight $highlight, sentence $sentence, word $word", sentence > highlight && word > highlight)
+        // The marks stay over the words.
+        assertTrue(zIndex(ReaderMarks.STYLESHEET, ".pd-note") > 0 && zIndex(ReaderMarks.STYLESHEET, ".pd-heard") > 0)
     }
 
     @Test fun heardToHereIsAnUnderlineAndATabInTheMarginAndNeverAWordsOnThePage() {

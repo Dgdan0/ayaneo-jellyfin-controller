@@ -395,18 +395,24 @@ object ReaderFixtures {
      * ("Maren"), and enough passages after them to run to several pages. With [aligned] every sentence is its own element, narrated
      * [sentenceSeconds] long over generated silence (without the audio when [withAudio] is false, as the hub's slim edition).
      */
-    fun selectionEpub(aligned: Boolean = false, sentenceSeconds: Int = 1, withAudio: Boolean = true): ByteArray {
+    fun selectionEpub(aligned: Boolean = false, sentenceSeconds: Int = 1, withAudio: Boolean = true, words: Boolean = false, split: Int = 0): ByteArray {
         val output = ByteArrayOutputStream()
         val flat = SELECTION_PARAGRAPHS.flatten()
         var n = 0
+        // [words]: a wordsync pack's word edition of it (#66), each word a span `s{n}-w{k}` in its sentence's and a <par> of its own in a
+        // <seq> naming the sentence, the sentence's time shared out among its words with a short pause after each. [split]: the sentences
+        // from that one on are narrated from a second audio file, voice2.wav, from its own start (a second stretch of the narration).
+        val wordPattern = Regex("[A-Za-z0-9]+")
+        fun wrapped(id: Int, sentence: String) = if (!words) sentence else { var k = 0; wordPattern.replace(sentence) { "<span id=\"s$id-w${k++}\">${it.value}</span>" } }
         val text = SELECTION_PARAGRAPHS.joinToString("") { paragraph ->
             "<p>" + paragraph.joinToString(" ") { sentence ->
                 val id = n++
-                if (aligned) "<span id=\"s$id\">$sentence</span>" else sentence
+                if (aligned) "<span id=\"s$id\">${wrapped(id, sentence)}</span>" else sentence
             } + "</p>"
         } + (1..40).joinToString("") { "<p>The observatory kept its light on through the night. This is passage $it.</p>" }
         val overlay = if (aligned) " media-overlay=\"mo1\"" else ""
-        val extra = if (aligned) """<item id="mo1" href="one.smil" media-type="application/smil+xml"/><item id="voice" href="voice.wav" media-type="audio/wav"/>""" else ""
+        val second = if (split > 0) """<item id="voice2" href="voice2.wav" media-type="audio/wav"/>""" else ""
+        val extra = if (aligned) """<item id="mo1" href="one.smil" media-type="application/smil+xml"/><item id="voice" href="voice.wav" media-type="audio/wav"/>$second""" else ""
         ZipOutputStream(output).use { zip ->
             val files = mutableMapOf(
                 "mimetype" to "application/epub+zip".toByteArray(),
@@ -416,11 +422,26 @@ object ReaderFixtures {
                 "EPUB/nav.xhtml" to """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol><li><a href="one.xhtml">Chapter One</a></li></ol></nav></body></html>""".toByteArray()
             )
             if (aligned) {
-                val pars = flat.indices.joinToString("") {
-                    "<par id=\"p$it\"><text src=\"one.xhtml#s$it\"/><audio src=\"voice.wav\" clipBegin=\"${it * sentenceSeconds}s\" clipEnd=\"${(it + 1) * sentenceSeconds}s\"/></par>"
+                fun audio(i: Int) = if (split in 1..i) "voice2.wav" else "voice.wav"
+                fun at(i: Int) = if (split in 1..i) i - split else i
+                val pars = flat.indices.joinToString("") { i ->
+                    if (!words) "<par id=\"p$i\"><text src=\"one.xhtml#s$i\"/><audio src=\"${audio(i)}\" clipBegin=\"${at(i) * sentenceSeconds}s\" clipEnd=\"${(at(i) + 1) * sentenceSeconds}s\"/></par>"
+                    else {
+                        val count = wordPattern.findAll(flat[i]).count()
+                        val slot = sentenceSeconds * 1000L / count
+                        val start = at(i) * sentenceSeconds * 1000L
+                        "<seq id=\"s$i-seq\" epub:textref=\"one.xhtml#s$i\">" + (0 until count).joinToString("") { w ->
+                            val end = if (w == count - 1) start + sentenceSeconds * 1000L else start + w * slot + slot * 4 / 5
+                            "<par id=\"s$i-w$w\"><text src=\"one.xhtml#s$i-w$w\"/><audio src=\"${audio(i)}\" clipBegin=\"${start + w * slot}ms\" clipEnd=\"${end}ms\"/></par>"
+                        } + "</seq>"
+                    }
                 }
                 files["EPUB/one.smil"] = """<smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><seq epub:textref="one.xhtml">$pars</seq></body></smil>""".toByteArray()
-                if (withAudio) files["EPUB/voice.wav"] = silence(seconds = flat.size * sentenceSeconds)
+                if (withAudio) {
+                    val first = if (split > 0) split else flat.size
+                    files["EPUB/voice.wav"] = silence(seconds = first * sentenceSeconds)
+                    if (split > 0) files["EPUB/voice2.wav"] = silence(seconds = (flat.size - split) * sentenceSeconds)
+                }
             }
             files.forEach { (name, bytes) -> zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry() }
         }

@@ -958,6 +958,7 @@ class EpubReaderScreen(
                     updatePosition()
                     scheduleSave()
                     pageMoved()
+                    keepDecorationsOnce()
                 }
             }
         )
@@ -1918,6 +1919,23 @@ class EpubReaderScreen(
         uiScope.launch {
             reader.applyDecorations(highlights, ReaderMarks.GROUP)
             reader.applyDecorations(marks, ReaderMarks.NOTES_GROUP)
+            keepDecorationsOnce()
+        }
+    }
+
+    private var decorationsOnceJob: Job? = null
+
+    /** Each decoration once on the page: one drawn while its page was loading is drawn twice by Readium ([DecorationsOnce]). */
+    private fun keepDecorationsOnce() {
+        decorationsOnceJob?.cancel()
+        decorationsOnceJob = uiScope.launch {
+            for (wait in DecorationsOnce.PASSES_MS) {
+                delay(wait)
+                val drawn = drawnAnnotations
+                DecorationsOnce.run(navigator?.view, DecorationsOnce.script(
+                    mapOf(ReaderMarks.GROUP to drawn.map { it.id }, ReaderMarks.NOTES_GROUP to drawn.filter { it.hasNote }.map { "note:" + it.id }),
+                    duplicatesOnly = listOf(ReaderMarks.HEARD_GROUP, ReadAlongGlow.GROUP)))
+            }
         }
     }
 
@@ -2101,6 +2119,7 @@ class EpubReaderScreen(
                 Decoration("heard", at, Decoration.Style.Underline(colors.accent), mapOf(ReaderMarks.KIND to ReaderMarks.HEARD)),
                 Decoration("heard-tab", at, MarginTab(colors.accent))
             ), ReaderMarks.HEARD_GROUP)
+            keepDecorationsOnce()
         }
     }
 

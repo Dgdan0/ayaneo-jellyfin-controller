@@ -67,9 +67,13 @@ object ReaderMarks {
     /**
      * The highlight behind the words with soft corners; the note mark up at the end of the last line, over the text and out of the
      * way of it; and the underline of "Heard to here" in the accent under all of the sentence. Its tab is [TAB_STYLESHEET]'s.
+     *
+     * The highlight is one step further back than the narration's boxes ([ReadAlongGlow.STYLESHEET], -1): both are behind the words, and
+     * the word being said and its trail are drawn over a highlight on the same words. At the same z-index the later of Readium's groups
+     * was on top, so a highlight made while a word was lit covered the word (#66).
      */
     val STYLESHEET: String = """
-        .$HL { z-index: -1 !important; margin-left: -2px; padding: 0 2px; box-sizing: content-box; border-radius: 3px; }
+        .$HL { z-index: -2 !important; margin-left: -2px; padding: 0 2px; box-sizing: content-box; border-radius: 3px; }
         .pd-note { z-index: 6 !important; background: transparent !important; }
         .pd-note::after { content: ""; position: absolute; left: 100%; top: -8px; width: 16px; height: 16px; margin-left: -4px;
             background-color: var(--mark); -webkit-mask: url("$NOTE_MASK") center / contain no-repeat; filter: brightness(.55) saturate(1.4); }
