@@ -119,7 +119,17 @@ class ReaderAnchorJumpsTest {
                 delay(10)
             }
             until("Contents to close") { !overlay.isOpen }
-            return settled()
+            val page = settled()
+            // What the page itself shows, for the log of a failure: is the entry's element in the window, and what does the navigator say.
+            val id = mapOf("1. First light" to "c1", "2. The ridge" to "c2", "3. The lens" to "c3", "The keeper's log" to "c3b")[title]
+            if (id != null) {
+                val shown = withContext(Dispatchers.Main) {
+                    val navigator = activity.supportFragmentManager.fragments.filterIsInstance<EpubNavigatorFragment>().first()
+                    runCatching { navigator.evaluateJavascript("(function(){var e=document.getElementById('$id');return e?Math.round(e.getBoundingClientRect().left)+' of '+window.innerWidth:'no element'})()") }.getOrNull()
+                }
+                log += "$title: corner says page $page, the element is at $shown, locator ${locator()?.locations?.progression}"
+            }
+            return page
         }
 
         suspend fun goTo(title: String): Int { contents(); return choose(title) }
