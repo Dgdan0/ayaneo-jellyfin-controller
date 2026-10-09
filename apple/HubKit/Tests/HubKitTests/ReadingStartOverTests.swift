@@ -146,7 +146,8 @@ struct ReadingStartOverTests {
     // MARK: The demo hub
 
     @Test func theDemoHubStartsABookOverAndRefusesAWriteFromBefore() throws {
-        let workId = "rw_demo_rr6"
+        // Red Rising, which no other test reads: the demo hub is one for every test of the run.
+        let workId = "rw_demo_rr1"
         func call(_ method: String, _ path: String, _ body: [String: Any]? = nil) -> (Int, [String: Any]) {
             let data = body.flatMap { try? JSONSerialization.data(withJSONObject: $0) }
             let answer = DemoStartOver.answer(method: method, path: path, body: data)
