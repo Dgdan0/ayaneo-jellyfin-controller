@@ -20,9 +20,12 @@ import WebKit
 ///    the page glides there from the offset and speed it was let go at, a
 ///    critically damped spring (no linear stop, no restart), whatever
 ///    Readium's own deceleration was about to do;
-///  - the finger lifts and the page is a part's last or first: Readium's outer
-///    paging view makes that turn (it already has, when its own pan took the
-///    finger; else it is asked through the queue).
+///  - the finger lifts and the page is a part's last or first: the swipe goes
+///    into the next part. The outer paging view glides to the next part's slot
+///    from wherever the finger left it (its own pan may have taken the finger),
+///    the part left glides to its end, the next part is entered on its first
+///    (or last) page, and the account follows it. Readium is told as its paging
+///    ends. Only a part not laid out yet is left to Readium's own turn (queued).
 ///
 /// Turns that are not a finger (the keys, the margins, the voice) are queued
 /// (`PageTurnQueue`) and made through Readium's own turns, one at a time, and
@@ -49,16 +52,28 @@ final class PageTurner: NSObject, UIGestureRecognizerDelegate {
     private var intent = PageIntent()
     /// The finger on the page now.
     private var finger: Finger?
-    /// A page gliding to where its swipe was going.
-    private var glide: Glide?
+    /// Pages gliding to where their swipe was going: the part's own, and Readium's outer paging view when the swipe left the part.
+    private var glides: [Glide] = []
+    /// The offset the outer paging view is heading to, while it is.
+    private var outerGoal: CGFloat?
     private var link: CADisplayLink?
     private var linkTarget: LinkTarget?
     /// Lets a release that waits a turn of the run loop find out a finger came down meanwhile.
     private var generation = 0
+    /// A release's plan, made on the next turn of the run loop, or at once as the next finger lands:
+    /// quick swipes land 3 ms after the last one lifts (seen), and a plan dropped then loses a part change.
+    private var pending: (() -> Void)?
+    /// The part just entered, held on its page for a moment: Readium, told it is the part on screen, goes to
+    /// its start asynchronously, and would take back pages a quick swipe has already turned in it.
+    private var hold: (view: UIScrollView, until: CFTimeInterval)?
 
     /// A finger on the page and what the account says of it.
     private struct Finger {
+        /// The part's page view the swipe is counted in.
         let view: UIScrollView
+        /// Readium's paging between parts, and the offset of the part's slot in it.
+        let outer: UIScrollView?
+        let outerBase: CGFloat
         /// The page it counts from (`PageIntent.base`).
         let base: Int
         /// The pages of this part, as offsets.
@@ -66,30 +81,32 @@ final class PageTurner: NSObject, UIGestureRecognizerDelegate {
         /// The glide it took in its hand, and the speed that glide had, in points a second.
         let caught: Bool
         let carried: CGFloat
-        /// The offset it took the page at.
-        let caughtAt: CGFloat
     }
 
     /// The offset easing to `target`: a critically damped spring from `from`
     /// at `velocity` points a second. It never overshoots: a speed that would
     /// carry it past is held to the one that just reaches it.
+    @MainActor
     private final class Glide {
         static let omega: CGFloat = 22
         let view: UIScrollView
+        let isOuter: Bool
         let target: CGFloat
         let from: CGFloat
         let velocity: CGFloat
         let start: CFTimeInterval
 
-        init(view: UIScrollView, target: CGFloat, velocity: CGFloat, start: CFTimeInterval) {
+        init(view: UIScrollView, target: CGFloat, velocity: CGFloat, start: CFTimeInterval, isOuter: Bool) {
+            let at = view.contentOffset.x
             self.view = view
+            self.isOuter = isOuter
             self.target = target
-            self.from = view.contentOffset.x
+            self.from = at
             self.start = start
-            let toward: CGFloat = target >= from ? 1 : -1
+            let toward: CGFloat = target >= at ? 1 : -1
             let along = velocity * toward
             // Away from the target, or none: it starts from rest. Faster than a spring that just reaches it: held to that.
-            self.velocity = along <= 0 ? 0 : toward * min(along, Glide.omega * abs(target - view.contentOffset.x))
+            self.velocity = along <= 0 ? 0 : toward * min(along, Glide.omega * abs(target - at))
         }
 
         /// Offset and speed `t` seconds in.
@@ -147,31 +164,50 @@ final class PageTurner: NSObject, UIGestureRecognizerDelegate {
 
     // MARK: A finger
 
-    /// A finger came down: a glide in progress is taken in the hand where it
-    /// is (nothing else is touched, so Readium's own pans take the finger and
-    /// the page follows it), and the page its swipe counts from is chosen.
+    /// A finger came down: glides in progress are taken in the hand where they
+    /// are (nothing else is touched, so Readium's own pans take the finger and
+    /// the page follows it), and the page its swipe counts from is chosen: in
+    /// the part the account says, which is the next one while a swipe is still
+    /// carrying the outer paging view there.
     private func landed() {
         guard !scrolls else { return }
+        flush()
         generation &+= 1
-        let caught = stopGlide()
-        let view = caught?.view ?? page()?.view
-        guard let view, view.window != nil, view.bounds.width > 0 else { finger = nil; return }
+        let caught = stopGlides()
+        var seed = caught.flatMap { $0.view.superview is WKWebView ? $0.view : nil } ?? page()?.view
+        let outer = seed.flatMap(outerOf)
+        var outerBase: CGFloat = 0
+        if let outer, outer.bounds.width > 0 {
+            outerBase = outerGoal ?? (outer.contentOffset.x / outer.bounds.width).rounded() * outer.bounds.width
+            if let there = innerAt(outerBase, in: outer) { seed = there }
+        }
+        guard let view = seed, view.window != nil, view.bounds.width > 0 else {
+            #if DEBUG
+            record.ev("L-none")
+            #endif
+            finger = nil
+            return
+        }
         let width = view.bounds.width
         let pages = pageRange(view)
         let shown = min(max(Int((view.contentOffset.x / width).rounded()), pages.lowerBound), pages.upperBound)
-        // Moving: a glide was taken, a turn of the queue is under way, or Readium's own slide goes on.
+        // Moving: a glide was taken, a part change is under way, a turn of the queue is under way, or Readium's own slide goes on.
         let outerBusy = outerViews().contains { $0.isDragging || $0.isDecelerating }
-        let moving = caught != nil || working || view.isDecelerating || outerBusy
+        let moving = caught != nil || outerGoal != nil || working || view.isDecelerating || outerBusy
         let base = intent.base(part: key(view), shown: shown, moving: moving)
-        finger = Finger(view: view, base: base, pages: pages, caught: caught != nil, carried: caught?.speed ?? 0,
-                        caughtAt: view.contentOffset.x)
+        finger = Finger(view: view, outer: outer, outerBase: outerBase, base: base, pages: pages,
+                        caught: caught != nil, carried: caught?.speed ?? 0)
         #if DEBUG
         record.landed(moving: moving, caught: caught != nil, at: view.contentOffset.x, now: CACurrentMediaTime())
+        record.ev("L b\(base) m\(moving ? 1 : 0) c\(caught != nil ? 1 : 0)")
         #endif
         runLink()
     }
 
     @objc private func panned(_ recognizer: UIPanGestureRecognizer) {
+        #if DEBUG
+        if recognizer.state == .began || recognizer.state == .ended { record.ev("P\(recognizer.state.rawValue)\(finger == nil ? "-nofinger" : "")") }
+        #endif
         guard !scrolls, let finger, let view = recognizer.view else { return }
         switch recognizer.state {
         case .began:
@@ -180,7 +216,7 @@ final class PageTurner: NSObject, UIGestureRecognizerDelegate {
             #endif
         case .changed:
             #if DEBUG
-            record.moved(offset: finger.view.contentOffset.x, translation: recognizer.translation(in: view).x)
+            record.moved(offset: finger.view.contentOffset.x, translation: recognizer.translation(in: view).x, outer: finger.outer?.contentOffset.x)
             #endif
         case .ended:
             // From the touches themselves: a quick flick can end with the pan's own translation still at zero (seen: dx 0 at 1776 pt/s).
@@ -197,6 +233,9 @@ final class PageTurner: NSObject, UIGestureRecognizerDelegate {
     /// one that never became a pan (a tap, a nudge) ends the page on its base.
     private func lifted() {
         let mark = generation
+        #if DEBUG
+        record.ev("U")
+        #endif
         Task { [weak self] in
             guard let self, mark == generation, let finger else { return }
             release(finger, dx: 0, dy: 0, vx: 0, width: finger.view.bounds.width)
@@ -204,72 +243,135 @@ final class PageTurner: NSObject, UIGestureRecognizerDelegate {
     }
 
     /// Decides where the page goes and sends it there, one turn of the run loop
-    /// on, when the scroll view has begun its own deceleration (which the glide replaces).
+    /// on, when the scroll views have begun their own deceleration (which the glides replace).
     private func release(_ finger: Finger, dx: CGFloat, dy: CGFloat, vx: CGFloat, width: CGFloat) {
         self.finger = nil
         #if DEBUG
         record.released(view: finger.view)
         #endif
-        // The queue is making turns (one that crossed into the next part, say): this swipe is made after them,
-        // by Readium, or it would be counted from a page that is about to change under it.
-        if working, let swipe = PageTurnQueue.swipe(dx: Double(dx), dy: Double(dy), vx: Double(vx), width: Double(width)) {
-            intent.forget()
-            #if DEBUG
-            record.note(release: "queued \(swipe)", now: CACurrentMediaTime())
-            #endif
-            enqueue(swipe, answer: nil)
-            return
-        }
         let outcome = intent.release(part: key(finger.view), base: finger.base, pages: finger.pages,
                                      dx: Double(dx), dy: Double(dy), vx: Double(vx), width: Double(width))
-        #if DEBUG
-        record.note(release: String(format: "dx %.0f dy %.0f vx %.0f base %d -> %@", dx, dy, vx, finger.base, "\(outcome)"), now: CACurrentMediaTime())
-        #endif
-        let mark = generation
         // The finger's velocity, in the offset's direction.
         let carried = finger.caught && dx == 0 && vx == 0 ? finger.carried : -vx
-        Task { [weak self] in
-            guard let self, mark == generation else { return }
-            switch outcome {
-            case .page(let page):
-                glideTo(page: page, in: finger.view, speed: carried)
-            case .leaves(let turn):
-                leave(turn, from: finger)
-            }
-        }
+        let note = String(format: "dx %.0f dy %.0f vx %.0f base %d -> %@", dx, dy, vx, finger.base, "\(outcome)")
+        pending = { [weak self] in self?.plan(outcome, from: finger, speed: carried, note: note) }
+        Task { [weak self] in self?.flush() }
     }
 
-    /// A swipe from a part's last page on, or first page back. Readium's outer
-    /// paging view took the finger when the part could not, and is already on
-    /// its way; else the turn is made for it.
-    private func leave(_ turn: PageTurnQueue.Turn, from finger: Finger) {
-        if outerViews().contains(where: { $0.isDragging || $0.isDecelerating }) { return }
-        // The page may have been let go short of its end: it finishes first.
-        glideTo(page: turn == .right ? finger.pages.upperBound : finger.pages.lowerBound, in: finger.view, speed: 0)
-        enqueue(turn, answer: nil)
+    private func flush() {
+        guard let run = pending else { return }
+        pending = nil
+        #if DEBUG
+        record.ev("plan")
+        #endif
+        run()
+    }
+
+    /// Sends the part's page and the outer paging view to where the swipe goes:
+    /// the page the account says, and, for a swipe past the part's end, the
+    /// next part's slot in the outer view with the next part standing on the
+    /// page it is entered at. Every time, from wherever the finger left them.
+    private func plan(_ outcome: PageIntent.Outcome, from finger: Finger, speed: CGFloat, note: String) {
+        let view = finger.view
+        stopNative(view)
+        if let outer = finger.outer {
+            stopNative(outer)
+            // Readium switches its paging view off as a drag of it ends; a glide of ours ends it.
+            if !outer.isScrollEnabled { outer.isScrollEnabled = true }
+        }
+        let page: Int
+        var goal = finger.outerBase
+        var how = "in part"
+        switch outcome {
+        case .page(let target):
+            page = target
+        case .leaves(let turn):
+            page = turn == .right ? finger.pages.upperBound : finger.pages.lowerBound
+            how = "book end"
+            if let outer = finger.outer, outer.bounds.width > 0 {
+                let width = outer.bounds.width
+                let next = finger.outerBase + (turn == .right ? width : -width)
+                if next >= -0.5 && next <= outer.contentSize.width - width + 0.5 {
+                    if let neighbour = innerAt(next, in: outer), enter(neighbour, turn: turn) {
+                        goal = next
+                        how = "crosses"
+                    } else {
+                        // Not laid out yet: Readium makes this one.
+                        how = "queued"
+                        enqueue(turn, answer: nil)
+                    }
+                }
+            } else {
+                how = "queued"
+                enqueue(turn, answer: nil)
+            }
+        }
+        #if DEBUG
+        record.note(release: note + " " + how, now: CACurrentMediaTime())
+        #endif
+        glide(view, toPage: page, speed: speed)
+        if let outer = finger.outer { glideOuter(outer, to: goal, speed: speed) }
+        #if DEBUG
+        // A part change is the outer view's glide to judge.
+        if how == "crosses", let outer = finger.outer { record.released(view: outer); record.glides(to: goal) }
+        #endif
+    }
+
+    /// The next part is ready to be entered from `turn`'s side (laid out, shown, on the page it is entered at): the account follows it.
+    private func enter(_ neighbour: UIScrollView, turn: PageTurnQueue.Turn) -> Bool {
+        guard neighbour.alpha > 0.99, neighbour.bounds.width > 0, neighbour.contentSize.width >= neighbour.bounds.width - 1 else { return false }
+        let range = pageRange(neighbour)
+        let entry = turn == .right ? range.lowerBound : range.upperBound
+        let offset = CGFloat(entry) * neighbour.bounds.width
+        if abs(neighbour.contentOffset.x - offset) > 0.5 { neighbour.contentOffset.x = offset }
+        intent.rest(part: key(neighbour), page: entry)
+        return true
     }
 
     // MARK: Gliding
 
-    private func glideTo(page: Int, in view: UIScrollView, speed: CGFloat) {
+    private func stopNative(_ view: UIScrollView) {
+        // One offset write stops the deceleration Readium's scroll view began; a scroll view takes it as the end of its momentum.
+        if view.isDecelerating || view.isDragging { view.setContentOffset(view.contentOffset, animated: false) }
+    }
+
+    private func glide(_ view: UIScrollView, toPage page: Int, speed: CGFloat) {
         guard view.window != nil, view.bounds.width > 0 else { return }
         let target = CGFloat(page) * view.bounds.width
-        // Stops the deceleration Readium's scroll view began: one offset write, which a scroll view takes as the end of its momentum.
-        if view.isDecelerating || view.isDragging { view.setContentOffset(view.contentOffset, animated: false) }
-        guard abs(view.contentOffset.x - target) > 0.25 || abs(speed) > 1 else { settleIntent(view: view, page: page); return }
-        glide = Glide(view: view, target: target, velocity: speed, start: CACurrentMediaTime())
+        guard abs(view.contentOffset.x - target) > 0.25 || abs(speed) > 1 else { return }
+        glides.append(Glide(view: view, target: target, velocity: speed, start: CACurrentMediaTime(), isOuter: false))
         #if DEBUG
         record.glides(to: target)
         #endif
         runLink()
     }
 
-    /// The glide in the hand: where it is, and how fast it was going.
-    private func stopGlide() -> (view: UIScrollView, speed: CGFloat)? {
-        guard let glide else { return nil }
-        self.glide = nil
-        let state = glide.state(at: CACurrentMediaTime() - glide.start)
-        return (glide.view, state.v)
+    private func glideOuter(_ outer: UIScrollView, to goal: CGFloat, speed: CGFloat) {
+        guard outer.window != nil, abs(outer.contentOffset.x - goal) > 0.25 else {
+            outerGoal = nil
+            return
+        }
+        outerGoal = goal
+        glides.append(Glide(view: outer, target: goal, velocity: speed, start: CACurrentMediaTime(), isOuter: true))
+        runLink()
+    }
+
+    /// The glides in the hand: where they are, and how fast the part's page was going.
+    private func stopGlides() -> (view: UIScrollView, speed: CGFloat)? {
+        guard !glides.isEmpty else { return nil }
+        let now = CACurrentMediaTime()
+        var inner: (view: UIScrollView, speed: CGFloat)?
+        var outer: (view: UIScrollView, speed: CGFloat)?
+        for glide in glides {
+            let speed = glide.state(at: now - glide.start).v
+            if glide.isOuter {
+                outer = (glide.view, speed)
+            } else if abs(speed) >= abs(inner?.speed ?? 0) {
+                inner = (glide.view, speed)
+            }
+        }
+        glides = []
+        return inner ?? outer
     }
 
     private func runLink() {
@@ -285,27 +387,44 @@ final class PageTurner: NSObject, UIGestureRecognizerDelegate {
     private func tick(_ link: CADisplayLink) {
         let now = link.targetTimestamp
         var arrived = false
-        if let current = glide {
-            if current.view.window == nil {
-                glide = nil
-            } else {
-                let t = max(0, now - current.start)
-                let state = current.state(at: t)
-                if abs(state.x - current.target) < 0.3 && abs(state.v) < 4 || t > 1.5 {
-                    glide = nil
-                    current.view.contentOffset.x = current.target
-                    arrived = true
-                    settleIntent(view: current.view, page: Int((current.target / max(current.view.bounds.width, 1)).rounded()))
-                } else {
-                    current.view.contentOffset.x = state.x
+        for current in glides {
+            guard current.view.window != nil else {
+                glides.removeAll { $0 === current }
+                if current.isOuter { outerGoal = nil }
+                continue
+            }
+            let t = max(0, now - current.start)
+            let state = current.state(at: t)
+            if abs(state.x - current.target) < 0.3 && abs(state.v) < 4 || t > 1.5 {
+                glides.removeAll { $0 === current }
+                #if DEBUG
+                if current.view === record.traceView { arrived = true }
+                #endif
+                current.view.contentOffset.x = current.target
+                if current.isOuter {
+                    outerGoal = nil
+                    // Readium learns which part it is on as its own paging ends.
+                    current.view.delegate?.scrollViewDidEndDecelerating?(current.view)
+                    if let entered = innerAt(current.target, in: current.view) { hold = (entered, now + 0.6) }
                 }
+            } else {
+                current.view.contentOffset.x = state.x
             }
         }
         #if DEBUG
-        record.frame(views: scrollViews(), busy: glide != nil || finger != nil, now: now)
+        record.frame(views: scrollViews(), busy: !glides.isEmpty || finger != nil, now: now)
         if arrived { record.arrived() }
         #endif
-        let idle = glide == nil && finger == nil && !working
+        if let held = hold {
+            if now >= held.until {
+                hold = nil
+            } else if finger == nil, intent.part == key(held.view), held.view.bounds.width > 0,
+                      !glides.contains(where: { $0.view === held.view }), !held.view.isDragging, !held.view.isDecelerating {
+                let want = CGFloat(intent.page) * held.view.bounds.width
+                if abs(held.view.contentOffset.x - want) > 0.5 { held.view.contentOffset.x = want }
+            }
+        }
+        let idle = glides.isEmpty && finger == nil && !working && hold == nil
         #if DEBUG
         if idle && now - record.lastBusy < 0.5 { return }
         #endif
@@ -358,7 +477,7 @@ final class PageTurner: NSObject, UIGestureRecognizerDelegate {
             try? await Task.sleep(for: .milliseconds(16))
             let now = offsets()
             let moving = scrollViews().contains { $0.isDragging || $0.isDecelerating || $0.isTracking }
-                || glide != nil || finger != nil
+                || !glides.isEmpty || finger != nil
             still = !moving && now == last ? still + 1 : 0
             last = now
             if still >= 2 { return }
@@ -381,6 +500,26 @@ final class PageTurner: NSObject, UIGestureRecognizerDelegate {
         let shown = views.max { visible($0, in: host) < visible($1, in: host) }
         guard let shown else { return nil }
         return (shown, Int((shown.contentOffset.x / shown.bounds.width).rounded()))
+    }
+
+    /// Readium's paging between parts: the scroll view the part's page view sits in.
+    private func outerOf(_ view: UIScrollView) -> UIScrollView? {
+        var up = view.superview
+        while let current = up {
+            if let scroll = current as? UIScrollView { return scroll }
+            up = current.superview
+        }
+        return nil
+    }
+
+    /// The part's page view whose slot in `outer` starts at `offset`, if it is loaded.
+    private func innerAt(_ offset: CGFloat, in outer: UIScrollView) -> UIScrollView? {
+        scrollViews().first { inner in
+            guard inner.superview is WKWebView, outerOf(inner) === outer else { return false }
+            var slot: UIView = inner
+            while let up = slot.superview, up !== outer { slot = up }
+            return abs(slot.frame.minX - offset) < 1
+        }
     }
 
     private func pageRange(_ view: UIScrollView) -> ClosedRange<Int> {
@@ -453,6 +592,8 @@ private struct Record {
     var firstSample: (translation: CGFloat, offset: CGFloat)?
     var lastSample: (translation: CGFloat, offset: CGFloat)?
     var samples = 0
+    var outerFirst: (translation: CGFloat, offset: CGFloat)?
+    var outerLast: (translation: CGFloat, offset: CGFloat)?
     var caughtAt: CGFloat = 0
     var grabbed = false
 
@@ -461,6 +602,11 @@ private struct Record {
     var traceView: UIScrollView?
     var target: CGFloat?
     var lastRelease = ""
+    var events: [String] = []
+    mutating func ev(_ text: String) {
+        events.append(String(format: "%d:%@", Int(CACurrentMediaTime() * 1000) % 100_000, text))
+        if events.count > 18 { events.removeFirst() }
+    }
     var releasedAt: CFTimeInterval = 0
     var sinceRelease: Int = -1
 
@@ -479,6 +625,7 @@ private struct Record {
         grabbed = caught
         caughtAt = offset
         firstSample = nil; lastSample = nil; samples = 0
+        outerFirst = nil; outerLast = nil
         if caught { grabs += 1 }
         traceView = nil
     }
@@ -490,7 +637,11 @@ private struct Record {
         samples = 0
     }
 
-    mutating func moved(offset: CGFloat, translation: CGFloat) {
+    mutating func moved(offset: CGFloat, translation: CGFloat, outer: CGFloat?) {
+        if let outer {
+            if outerFirst == nil { outerFirst = (translation, outer) }
+            outerLast = (translation, outer)
+        }
         let sample = (translation, offset)
         if firstSample == nil { firstSample = sample }
         lastSample = sample
@@ -524,7 +675,7 @@ private struct Record {
     /// stood still short of its target (a stop), frames where it went the
     /// wrong way (a restart), and how far from the target it ended.
     var swipe: String {
-        guard let target, trace.count > 2 else { return "swipe none" }
+        guard let target, trace.count > 2 else { return "swipe none n=\(trace.count) target=\(target.map { "\($0)" } ?? "nil")" }
         var stalls = 0, backs = 0
         for index in 1 ..< trace.count {
             let step = trace[index] - trace[index - 1]
@@ -545,8 +696,12 @@ private struct Record {
             }
             parts.append(String(format: "grabs %d jump %.1f follow %@ over %d", grabs, lastGrabJump, follow, samples))
         }
+        if let first = outerFirst, let last = outerLast, abs(last.translation - first.translation) > 8 {
+            parts.append(String(format: "outer follow %.2f over %d", (last.offset - first.offset) / (last.translation - first.translation), samples))
+        }
         parts.append(swipe)
         parts.append("last release \(lastRelease), landed +\(sinceRelease)ms after")
+        parts.append("ev " + events.joined(separator: ", "))
         return parts.joined(separator: " · ")
     }
 }

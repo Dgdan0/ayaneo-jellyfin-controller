@@ -126,7 +126,7 @@ final class PageTurnTests: XCTestCase {
     /// second, so it is read after one has passed.
     private struct Turns: CustomStringConvertible {
         var lockedInner = -1, lockedOuter = -1
-        var grabs = 0, jump = 0.0, follow = Double.nan, followed = 0
+        var grabs = 0, jump = 0.0, follow = Double.nan, followed = 0, outerFollow = Double.nan
         var swipeFrames = 0, stalls = -1, backs = -1, end = Double.nan, target = Double.nan
         var text = ""
         var description: String { text }
@@ -148,6 +148,7 @@ final class PageTurnTests: XCTestCase {
         } else if let n = numbers(#"grabs \d+ jump -?[\d.]+"#), n.count == 2 {
             turns.grabs = Int(n[0]); turns.jump = n[1]
         }
+        if let n = numbers(#"outer follow -?[\d.]+ over \d+"#), n.count == 2 { turns.outerFollow = n[0] }
         if let n = numbers(#"swipe frames \d+ stalls \d+ backs \d+ from -?\d+ to -?\d+ end -?[\d.]+"#), n.count == 6 {
             turns.swipeFrames = Int(n[0]); turns.stalls = Int(n[1]); turns.backs = Int(n[2]); turns.target = n[4]; turns.end = n[5]
         }
@@ -177,6 +178,26 @@ final class PageTurnTests: XCTestCase {
             last = now
         }
         return last
+    }
+
+    /// To `target` in the book (the first chapter's pages, then the next one's counted on from them): a burst
+    /// of sweeps while far, a swipe at a time near. Nil when it cannot.
+    @MainActor
+    private func goTo(_ app: XCUIApplication, _ target: Int, first: String, count: Int) throws -> Int? {
+        for _ in 0..<14 {
+            guard let here = settledPlace(app) else { return nil }
+            let at = here.title == first ? here.page : count + here.page
+            if at == target { return at }
+            let gap = target - at
+            if abs(gap) > 2 {
+                try burst(app, Array(repeating: gap > 0, count: min(abs(gap) - 1, 10)), swipes[0])
+            } else if gap > 0 {
+                page(app).swipeLeft()
+            } else {
+                page(app).swipeRight()
+            }
+        }
+        return nil
     }
 
     /// Ten quick swipes forward, ten back, and ten mixed (seven on, three
@@ -227,22 +248,7 @@ final class PageTurnTests: XCTestCase {
         func absolute(_ place: (title: String, page: Int, count: Int)) -> Int { place.title == first ? place.page : count + place.page }
         var results: [String] = ["chapter \(first): \(count) pages"]
         for swipe in swipes {
-            // To three pages short of the end of the chapter, a swipe at a time.
-            for _ in 0..<12 {
-                guard let here = settledPlace(app) else { break }
-                let at = absolute(here)
-                results.append("positioning, \(swipe.name): at \(at) (\(here.title) \(here.page) of \(here.count))")
-                if at == count - 3 { break }
-                let gap = count - 3 - at
-                if abs(gap) > 2 {
-                    // Far away: a burst of sweeps, which land exactly, gets there in a few seconds.
-                    try burst(app, Array(repeating: gap > 0, count: min(abs(gap) - 1, 10)), swipes[0])
-                } else if gap > 0 {
-                    page(app).swipeLeft()
-                } else {
-                    page(app).swipeRight()
-                }
-            }
+            _ = try goTo(app, count - 3, first: first, count: count)
             guard let start = settledPlace(app) else { XCTFail("no place"); return }
             let from = absolute(start)
             XCTAssertEqual(from, count - 3, "could not get to three pages short of the end: " + results.suffix(6).joined(separator: " | "))
@@ -264,6 +270,63 @@ final class PageTurnTests: XCTestCase {
         note.lifetime = .keepAlways
         add(note)
         print("page turns across parts: " + results.joined(separator: " | "))
+    }
+
+    /// Back from the first pages of the next chapter into the last of the one before: five back from page 3.
+    @MainActor
+    func testQuickSwipesBackAcrossTheStartOfAPartLandExactly() throws {
+        let app = launchReading()
+        guard let opened = settledPlace(app) else { XCTFail("the corner does not say the page"); return }
+        let first = opened.title
+        let count = opened.count
+        func absolute(_ place: (title: String, page: Int, count: Int)) -> Int { place.title == first ? place.page : count + place.page }
+        var results: [String] = ["chapter \(first): \(count) pages"]
+        for swipe in swipes {
+            guard try goTo(app, count + 3, first: first, count: count) != nil else { XCTFail("could not get to page 3 of the next chapter"); return }
+            try burst(app, Array(repeating: false, count: 5), swipe)
+            let there = settledPlace(app)
+            let at = there.map(absolute) ?? 0
+            let turns = turnsLine(app)
+            results.append("back, \(swipe.name): asked 5 back from \(count + 3), now \(at) (\(there?.title ?? "?") \(there?.page ?? 0)); \(turns)")
+            XCTAssertEqual(at, count - 2, "5 swipes back from page 3 of the next chapter, \(swipe.name): " + results.suffix(2).joined(separator: " | "))
+            try burst(app, Array(repeating: true, count: 5), swipe)
+            let again = settledPlace(app)
+            let on = again.map(absolute) ?? 0
+            results.append("on, \(swipe.name): now \(on) (\(again?.title ?? "?") \(again?.page ?? 0)); \(turnsLine(app))")
+            XCTAssertEqual(on, count + 3, "5 swipes on again, \(swipe.name): " + results.suffix(2).joined(separator: " | "))
+        }
+        let note = XCTAttachment(string: results.joined(separator: "\n"))
+        note.name = "page-turns-back-across-parts"
+        note.lifetime = .keepAlways
+        add(note)
+        print("page turns back across parts: " + results.joined(separator: " | "))
+    }
+
+    /// One slow swipe from a chapter's last page: the outer paging view takes the finger and follows it (offset
+    /// against the finger at -1), and at lift goes on from where it is to the next chapter, with no stop and no snap.
+    @MainActor
+    func testASlowSwipeAcrossTheEndOfAPartFollowsTheFinger() throws {
+        let app = launchReading()
+        guard let opened = settledPlace(app) else { XCTFail("the corner does not say the page"); return }
+        let first = opened.title
+        let count = opened.count
+        guard try goTo(app, count, first: first, count: count) != nil else { XCTFail("could not get to the last page"); return }
+        let frame = page(app).frame
+        let y = frame.midY
+        try SwipeBurst.send(paths: [SwipeBurst.Path(from: CGPoint(x: frame.midX + frame.width * 0.3, y: y),
+                                                    to: CGPoint(x: frame.midX - frame.width * 0.25, y: y), start: 0, length: 0.9)])
+        let there = settledPlace(app)
+        let turns = turnsLine(app)
+        print("slow swipe across: \(there?.title ?? "?") \(there?.page ?? 0); \(turns)")
+        let note = XCTAttachment(string: "\(there?.title ?? "?") \(there?.page ?? 0); \(turns)")
+        note.name = "page-slow-across"
+        note.lifetime = .keepAlways
+        add(note)
+        XCTAssertNotEqual(there?.title, first, "the swipe did not go into the next chapter: \(turns)")
+        XCTAssertEqual(there?.page, 1, "the next chapter was not entered on its first page: \(turns)")
+        XCTAssertEqual(turns.outerFollow, -1, accuracy: 0.2, "the paging view did not follow the finger: \(turns)")
+        XCTAssertEqual(turns.stalls, 0, "the paging view stopped before it arrived: \(turns)")
+        XCTAssertEqual(turns.backs, 0, "the paging view snapped back on its way: \(turns)")
     }
 
     /// A finger that comes down on a page that is still sliding takes it
